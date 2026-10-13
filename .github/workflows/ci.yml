@@ -46,6 +46,9 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Seed runner tests (no database credentials)
+        run: node --test scripts/seed/run.test.mjs
+
       - name: End-to-end tests
         run: npm run test:e2e
 

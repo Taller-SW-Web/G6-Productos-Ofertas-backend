@@ -1,40 +1,40 @@
-La base compartida tenía los ocho schemas, pero no un mecanismo de seeds con permisos separados del runtime. Este cambio añade un ejecutor declarativo que valida schema, entorno, tablas, columnas e identidades; shared solo admite verificación transaccional con ROLLBACK. Refs #1; no cierra el issue mientras falten accesos individuales y revisiones.
+Se habilitan seis cuentas PostgreSQL individuales para que los integrantes carguen datos únicamente en sus schemas, y las pruebas del ejecutor de seeds pasan a ejecutarse en cada PR. Refs #1. No hacer merge hasta completar entrega privada y revisiones.
 
-## Checklist de Gobernanza Obligatoria
+## Cambios
 
-- [x] Leí AGENTS.md completo antes de editar.
-- [x] Trabajo en la rama personal cueva. El fast-forward a master local fue autorizado expresamente.
-- [x] Cambios transversales limitados a scripts/seed y .env.example, autorizados por el issue; ningún microservicio ajeno modificado.
-- [x] Consulté fuentes físicas/arquitectura/DEC-F; no inventé endpoints, DTOs ni eventos.
-- [x] Ejecuté las cuatro validaciones obligatorias.
-- [x] Sin credenciales reales ni mocks silenciosos de producción.
-- [x] Alcance limitado a INFRA-001.
-- [x] Declaro las pruebas y dependencias pendientes.
+- GitHub Actions ejecuta `node --test scripts/seed/run.test.mjs`: las ocho pruebas originales más seis regresiones, sin credenciales ni conexión a Supabase.
+- `parseArgs` rechaza cualquier opción repetida, incluido `--mode`.
+- Una cuenta por integrante; Vera puede seleccionar pricing/price_audit y Castilla combos/bulk. El guard permite solo las membresías declaradas, sin ADMIN/INHERIT, y cada ejecución usa SET LOCAL ROLE del schema seleccionado.
+- `--check-access` verifica autenticación, SSL cliente y permisos con ROLLBACK sin inventar seeds ni insertar datos.
+- Procedimiento incremental de logins/grants y helper administrativo de contraseñas por psql \\password. Contraseñas diferentes, stdin privado, archivo protegido fuera de Git y ningún secreto en argumentos, SQL versionado, evidencias o logs.
+- Evidencias actualizadas: el PR #5 existe; seis accesos individuales reales, ocho schemas y Session pooler verificados.
 
-## Alcance y archivos
+## Accesos operativos
 
-- scripts/seed/run.mjs y run.test.mjs: selección de destino, SSL verify-full, login/grupo restringidos, rechazo de demos en producción, una transacción y validación de contenido; un ID reutilizado con contenido distinto falla y revierte la carga.
-- registry.json, dataset.json y required/demo por schema. Un único fixture reversible de Promociones; cargas de los demás contextos reservadas a sus owners.
-- access/: auditoría, SQL original aplicado y corrección incremental de grants. .env.example y README/evidence documentan conexión, permisos, comandos y pruebas.
+| Integrante | Login | Schemas | psql / SSL / permisos |
+| --- | --- | --- | --- |
+| Axel | seed_cueva | promotions | PASS |
+| López | seed_lopez | taxonomy | PASS |
+| Poma | seed_poma | catalog | PASS |
+| Taco | seed_taco | inventory | PASS |
+| Vera | seed_vera | pricing, price_audit | PASS en ambos |
+| Castilla | seed_castilla | combos, bulk | PASS en ambos |
 
-## Pruebas y evidencia
+Usuarios del pooler con sufijo del proyecto slzglmtiyrzygpkiuthf. Seis passwords iniciales ya asignados; Axel confirmó ser administrador y realizará la entrega por WhatsApp privado individual, solicitando cambio al recibirlos. Entrega/recepción todavía no acreditadas.
 
-- node --test scripts/seed/run.test.mjs: PASS, 8 tests.
-- npm test: PASS, 9 tests; npm run test:e2e: PASS, 9 tests.
-- npm run typecheck, npm run lint, npm run build:all: PASS.
-- oxlint scripts/seed, node --check y git diff --cached --check: PASS.
-- Supabase PostgreSQL 17.11, proyecto slzglmtiyrzygpkiuthf: 84 tablas auditadas, owners conservados, cero FK cross-schema. Roles/grants aplicados con aprobación humana en dos entradas MCP: 20261013160902 y 20261013161315.
-- SQL generado ejecutado dos veces bajo po_promotions_seed: una fila. Tras ROLLBACK: cero filas y mismo hash de datos/estructura. Ocho roles seed con USAGE propio, cero CREATE/acceso cruzado/membresías privilegiadas.
-- Evidencia reproducible: scripts/seed/evidence.md y access/audit.sql.
+Grupos sin CREATE, UPDATE, DELETE ni TRUNCATE. SELECT/INSERT en 60 tablas existentes propias, excluyendo ledger/inbox/outbox/recibos; cinco helpers invoker para CHECK/triggers. Cero membresías ajenas y cero accesos efectivos entre schemas de grupos. No se comparten owners/runtime ni credenciales administrativas.
 
-## Pruebas no realizadas y dependencias
+## Validación
 
-No se ejecutó el cliente psql con login individual: faltan instalación/credenciales privadas/CA del responsable. Los grupos NOLOGIN aplicados no equivalen a credenciales entregadas. El administrador debe provisionar esos accesos según la guía; los owners deben revisar el manifiesto y registrar sus cargas.
+- `node --test scripts/seed/run.test.mjs`: PASS, 14 tests.
+- `npm test`: PASS, 9 tests; `npm run test:e2e`: PASS, 9 tests.
+- Typecheck, lint, format:check, build:all, oxlint del ejecutor y revisión de diff: PASS.
+- psql PostgreSQL 17.11: seis conexiones individuales con SSL verify-full; ocho transacciones check-access con ROLLBACK. Promociones ejecutó el seed aprobado dos veces con ROLLBACK.
+- Postcheck Supabase: cero filas fixture y mismo hash de datos/estructura. Ninguna escritura de prueba fuera del contexto propio.
+- Migración de accesos aplicada: `20261013171410 infra_001_individual_seed_logins`. Los dos SQL previos se conservan sin editar. No se cambian tablas/owners ni migraciones de negocio.
 
-Los 23 avisos preexistentes de search_path de Supabase se mantienen y se documentan por owner. npm audit informa 5 dependencias dev preexistentes con avisos (2 high); no se actualizó el lockfile ni se ejecutó audit fix --force. El runner usa únicamente módulos nativos.
+## Gobernanza y pendientes
 
-## Compatibilidad y revisión
+AGENTS.md leído; rama permanente cueva; issue actualizado autoriza .github y scripts transversales. No se modificó ningún microservicio, dependencia global ni contrato HTTP/eventos. No se generaron seeds de negocio de otros owners.
 
-No cambia OpenAPI/AsyncAPI, schemas de negocio ni owners; no se reescriben migraciones históricas. Los permisos nuevos se limitan a grupos seed y seis columnas de promotions.stock_projection. No hubo seed persistente ni despliegue de servicios.
-
-PR en borrador: revisión técnica de Leonardo López e integración de Marco Castilla pendientes. Implementación interna y pruebas locales se informan separadas de psql individual, revisión de dataset y despliegue.
+La ejecución remota de Actions se verificará con el commit publicado; PASS local no se presenta como PASS remoto. Pendientes: entrega WhatsApp por Axel, cambio de contraseña por los destinatarios, revisión del dataset por owners y revisión técnica de Leonardo López/integración de Marco Castilla. Los 23 avisos de search_path y 5 dependencias dev con avisos son preexistentes y quedan documentados aparte. No se realizó merge.

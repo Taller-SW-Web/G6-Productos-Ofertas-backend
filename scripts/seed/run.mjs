@@ -35,19 +35,21 @@ function literal(value) {
 
 export function parseArgs(args) {
   const result = { mode: 'verify', render: false };
+  const seen = new Set();
   for (let i = 0; i < args.length; i++) {
     const option = args[i];
+    if (seen.has(option)) fail('DUPLICATE_OPTION');
+    seen.add(option);
     if (option === '--render-sql') {
-      if (result.render) fail('DUPLICATE_OPTION');
       result.render = true;
+    } else if (option === '--check-access') {
+      result.checkAccess = true;
     } else if (
       ['--schema', '--environment', '--kind', '--mode', '--psql'].includes(
         option,
       )
     ) {
       const key = option.slice(2);
-      if (Object.hasOwn(result, key) && key !== 'mode')
-        fail('DUPLICATE_OPTION');
       if (!args[i + 1] || args[i + 1].startsWith('--'))
         fail('MISSING_OPTION_VALUE');
       result[key] = args[++i];
@@ -66,6 +68,8 @@ export function validateSelection(registry, options) {
   if (!Object.hasOwn(registry.environments, options.environment))
     fail('UNAUTHORIZED_ENVIRONMENT');
   if (!['required', 'demo'].includes(options.kind)) fail('INVALID_KIND');
+  if (options.checkAccess && options.mode !== 'verify')
+    fail('ACCESS_CHECK_REQUIRES_VERIFY');
   const target = registry.environments[options.environment];
   if (target.production && options.kind === 'demo') fail('DEMO_IN_PRODUCTION');
   if (target.verify_only && options.mode === 'apply')
@@ -89,6 +93,11 @@ export function validateConnection(registry, options, env) {
   if (env.PGSSLMODE !== 'verify-full' || !env.PGSSLROOTCERT)
     fail('SSL_VERIFY_FULL_REQUIRED');
   if (
+    env.PGHOST.endsWith('.pooler.supabase.com') &&
+    !env.PGUSER?.endsWith(`.${registry.project_ref}`)
+  )
+    fail('POOLER_PROJECT_USER_REQUIRED');
+  if (
     !env.PGUSER ||
     env.PGUSER.startsWith('postgres') ||
     env.PGUSER.includes('runtime') ||
@@ -96,6 +105,34 @@ export function validateConnection(registry, options, env) {
   )
     fail('DEDICATED_LOGIN_REQUIRED');
   if (!env.PGPASSWORD && !env.PGPASSFILE) fail('MISSING_CREDENTIAL');
+  resolveAccount(registry, options, env.PGUSER);
+}
+
+export function resolveAccount(registry, options, username) {
+  const suffix = `.${registry.project_ref}`;
+  const login = username?.endsWith(suffix)
+    ? username.slice(0, -suffix.length)
+    : username;
+  if (!Object.hasOwn(registry.accounts, login)) fail('UNAUTHORIZED_LOGIN');
+  const account = registry.accounts[login];
+  if (!account.schemas.includes(options.schema))
+    fail('UNAUTHORIZED_ACCOUNT_SCHEMA');
+  return { login, roles: account.schemas.map((schema) => `po_${schema}_seed`) };
+}
+
+export function renderLoginCheck(registry, options, username) {
+  const account = resolveAccount(registry, options, username);
+  return `DO $login$ BEGIN
+    IF session_user <> ${literal(account.login)}
+       OR EXISTS (SELECT 1 FROM pg_roles WHERE rolname=session_user AND (rolinherit OR rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls))
+       OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner=(SELECT oid FROM pg_roles WHERE rolname=session_user))
+       OR EXISTS (SELECT 1 FROM pg_database WHERE datdba=(SELECT oid FROM pg_roles WHERE rolname=session_user))
+       OR EXISTS (SELECT 1 FROM pg_roles WHERE rolname <> session_user AND rolname <> ALL(ARRAY[${account.roles.map(literal).join(',')}]) AND pg_has_role(session_user,oid,'MEMBER'))
+       OR EXISTS (SELECT 1 FROM pg_auth_members WHERE member=(SELECT oid FROM pg_roles WHERE rolname=session_user) AND (admin_option OR inherit_option OR NOT set_option))
+       OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspname IN (${Object.keys(registry.schemas).map(literal).join(',')}) AND (has_schema_privilege(session_user,oid,'USAGE') OR has_schema_privilege(session_user,oid,'CREATE'))) THEN
+      RAISE EXCEPTION 'DEDICATED_UNPRIVILEGED_LOGIN_REQUIRED';
+    END IF;
+  END $login$;`;
 }
 
 export function loadSeeds(options, base = root) {
@@ -121,10 +158,50 @@ export function loadSeeds(options, base = root) {
   return seeds;
 }
 
-export function renderTransaction(registry, options, seeds) {
+function transactionPrelude(registry, options) {
   validateSelection(registry, options);
   const schema = options.schema;
   const role = `po_${schema}_seed`;
+  return `BEGIN;
+SET LOCAL statement_timeout = '30s';
+SET LOCAL lock_timeout = '5s';
+SET LOCAL standard_conforming_strings = on;
+SET LOCAL search_path = pg_catalog;
+DO $access$ BEGIN
+  IF NOT pg_has_role(current_user, '${role}', 'SET') THEN RAISE EXCEPTION 'SEED_ROLE_REQUIRED'; END IF;
+END $access$;
+SET LOCAL ROLE ${quote(role)};
+DO $isolation$ DECLARE s text; BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=current_user AND (rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls))
+     OR has_schema_privilege(current_user, '${schema}', 'CREATE') THEN RAISE EXCEPTION 'EXCESSIVE_SEED_PRIVILEGES'; END IF;
+  FOREACH s IN ARRAY ARRAY[${Object.keys(registry.schemas).map(literal).join(',')}] LOOP
+    IF s <> '${schema}' AND (has_schema_privilege(current_user,s,'USAGE') OR has_schema_privilege(current_user,s,'CREATE')) THEN RAISE EXCEPTION 'CROSS_SCHEMA_PRIVILEGES'; END IF;
+  END LOOP;
+END $isolation$;`;
+}
+
+export function renderAccessCheck(registry, options) {
+  validateSelection(registry, options);
+  if (options.mode !== 'verify') fail('ACCESS_CHECK_REQUIRES_VERIFY');
+  const schema = options.schema;
+  return `${transactionPrelude(registry, options)}
+DO $permissions$ BEGIN
+  IF NOT has_schema_privilege(current_user, '${schema}', 'USAGE') THEN RAISE EXCEPTION 'SEED_USAGE_REQUIRED'; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='${schema}' AND c.relkind='r' AND has_any_column_privilege(current_user,c.oid,'INSERT')) THEN
+    RAISE EXCEPTION 'NO_LOAD_PRIVILEGES';
+  END IF;
+END $permissions$;
+SELECT 'SEED_VALIDATED' AS result, current_database() AS database,
+       session_user AS login, current_user AS seed_role,
+       EXISTS (SELECT 1 FROM pg_stat_ssl WHERE pid=pg_backend_pid() AND ssl) AS backend_ssl;
+ROLLBACK;
+`;
+}
+
+export function renderTransaction(registry, options, seeds) {
+  validateSelection(registry, options);
+  const schema = options.schema;
   const body = [];
   for (const seed of seeds) {
     const data = seed.data;
@@ -168,22 +245,7 @@ export function renderTransaction(registry, options, seeds) {
   }
   const statements = body.join('\n');
   if (!statements) fail('EMPTY_SEED');
-  return `BEGIN;
-SET LOCAL statement_timeout = '30s';
-SET LOCAL lock_timeout = '5s';
-SET LOCAL standard_conforming_strings = on;
-SET LOCAL search_path = pg_catalog;
-DO $access$ BEGIN
-  IF NOT pg_has_role(current_user, '${role}', 'SET') THEN RAISE EXCEPTION 'SEED_ROLE_REQUIRED'; END IF;
-END $access$;
-SET LOCAL ROLE ${quote(role)};
-DO $isolation$ DECLARE s text; BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=current_user AND (rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls))
-     OR has_schema_privilege(current_user, '${schema}', 'CREATE') THEN RAISE EXCEPTION 'EXCESSIVE_SEED_PRIVILEGES'; END IF;
-  FOREACH s IN ARRAY ARRAY[${Object.keys(registry.schemas).map(literal).join(',')}] LOOP
-    IF s <> '${schema}' AND (has_schema_privilege(current_user,s,'USAGE') OR has_schema_privilege(current_user,s,'CREATE')) THEN RAISE EXCEPTION 'CROSS_SCHEMA_PRIVILEGES'; END IF;
-  END LOOP;
-END $isolation$;
+  return `${transactionPrelude(registry, options)}
 SELECT pg_advisory_xact_lock(hashtextextended('g6-seed:${schema}', 0));
 ${statements}
 ${options.mode === 'verify' ? statements : ''}
@@ -193,16 +255,7 @@ ${options.mode === 'verify' ? 'ROLLBACK' : 'COMMIT'};
 `;
 }
 
-export function execute(sql, options, env, spawn = spawnSync) {
-  const role = `po_${options.schema}_seed`;
-  const loginCheck = `DO $login$ BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=session_user AND (rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls))
-       OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner=(SELECT oid FROM pg_roles WHERE rolname=session_user))
-       OR EXISTS (SELECT 1 FROM pg_roles WHERE rolname <> session_user AND rolname <> '${role}' AND pg_has_role(session_user,oid,'MEMBER')) THEN
-      RAISE EXCEPTION 'DEDICATED_UNPRIVILEGED_LOGIN_REQUIRED';
-    END IF;
-  END $login$;`;
-  const guardedSql = sql.replace('BEGIN;', `BEGIN;\n${loginCheck}`);
+export function connectionEnvironment(env) {
   // Pass only libpq's explicit allowlist; PGOPTIONS/PGSERVICE and URL credentials cannot override the destination.
   const allowed = [
     'PATH',
@@ -231,6 +284,20 @@ export function execute(sql, options, env, spawn = spawnSync) {
   childEnv.PGCONNECT_TIMEOUT = '10';
   childEnv.PGAPPNAME = 'g6-seed-infra-001';
   childEnv.PGCLIENTENCODING = 'UTF8';
+  childEnv.LC_ALL = 'C';
+  return childEnv;
+}
+
+export function execute(
+  sql,
+  options,
+  env,
+  spawn = spawnSync,
+  registry = readJson(join(root, 'registry.json')),
+) {
+  const loginCheck = renderLoginCheck(registry, options, env.PGUSER);
+  const guardedSql = `\\conninfo\n${sql.replace('BEGIN;', `BEGIN;\n${loginCheck}`)}`;
+  const childEnv = connectionEnvironment(env);
   const result = spawn(
     options.psql ?? 'psql',
     [
@@ -258,11 +325,14 @@ export function execute(sql, options, env, spawn = spawnSync) {
     fail('PSQL_FAILED_CHECK_CLIENT_CONNECTION_AND_SQL');
   if (!result.stdout.includes('SEED_VALIDATED'))
     fail('MISSING_DATABASE_ASSERTION');
+  if (!/^SSL connection \(/m.test(result.stdout))
+    fail('MISSING_CLIENT_SSL_ASSERTION');
   return {
     status: 'PASS',
     schema: options.schema,
     environment: options.environment,
     mode: options.mode,
+    check_access_only: options.checkAccess ?? false,
     persistent_data: options.mode === 'apply',
   };
 }
@@ -271,8 +341,10 @@ export function main(args, env = process.env) {
   const options = parseArgs(args);
   const registry = readJson(join(root, 'registry.json'));
   validateSelection(registry, options);
-  const seeds = loadSeeds(options);
-  const sql = renderTransaction(registry, options, seeds);
+  const seeds = options.checkAccess ? [] : loadSeeds(options);
+  const sql = options.checkAccess
+    ? renderAccessCheck(registry, options)
+    : renderTransaction(registry, options, seeds);
   if (options.render) {
     process.stdout.write(sql);
     return;
