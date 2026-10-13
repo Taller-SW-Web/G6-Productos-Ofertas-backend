@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   validate:
-    name: Lint, Typecheck, Test & Build
+    name: Lint, Typecheck, Test, Build & Smoke Test
     runs-on: ubuntu-latest
 
     steps:
@@ -49,6 +49,9 @@ jobs:
       - name: End-to-end tests
         run: npm run test:e2e
 
+      - name: Build individual representative application (catalog-svc)
+        run: npm run build:catalog-svc
+
       - name: Build all applications
         run: npm run build:all
 
@@ -61,3 +64,21 @@ jobs:
             fi
           done
           echo "All 9 applications have valid executable artifacts."
+
+      - name: Smoke test compiled executable
+        run: |
+          node dist/apps/catalog-svc/main.js &
+          PID=$!
+          trap "kill $PID 2>/dev/null || true" EXIT
+          sleep 3
+          RESPONSE=$(curl -s http://localhost:3001/health)
+          echo "Health response: $RESPONSE"
+          node -e "
+            const res = JSON.parse(process.argv[1]);
+            if (res.status !== 'ok' || res.service !== 'catalog-svc') {
+              console.error('Smoke test failed invalid payload:', res);
+              process.exit(1);
+            }
+            console.log('Smoke test passed successfully.');
+          " "$RESPONSE"
+          kill $PID 2>/dev/null || true

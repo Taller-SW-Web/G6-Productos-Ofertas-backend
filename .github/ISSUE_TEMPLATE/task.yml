@@ -1,12 +1,12 @@
 name: "Tarea de Desarrollo / Feature"
 description: "Plantilla oficial para reportar y asignar tareas de desarrollo en el backend"
 title: "[TASK]: "
-labels: ["task"]
+labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        > **LEER ANTES DE CREAR:** Toda tarea en este monorepo se rige por las reglas obligatorias en [AGENTS.md](../blob/master/AGENTS.md).
+        > **LEER ANTES DE CREAR:** Toda tarea en este monorepo se rige por las reglas obligatorias en [AGENTS.md](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/master/AGENTS.md).
 
   - type: checkboxes
     id: terms
@@ -20,7 +20,7 @@ body:
     id: task_id
     attributes:
       label: "Identificador y Objetivo"
-      description: "Código de la tarea (ej. CATALOG-001) y objetivo conciso."
+      description: "Código de la tarea (ej. CATALOG-001, INFRA-002) y objetivo conciso."
       placeholder: "CATALOG-001: Implementar consulta de variantes por SKU"
     validations:
       required: true
@@ -43,8 +43,8 @@ body:
   - type: dropdown
     id: microservice
     attributes:
-      label: "Microservicio"
-      description: "Microservicio sobre el cual se realizarán los cambios."
+      label: "Microservicio o Alcance"
+      description: "Microservicio asignado o alcance transversal/infraestructura."
       options:
         - "catalog-svc"
         - "pricing-svc"
@@ -55,6 +55,7 @@ body:
         - "combos-svc"
         - "bulk-svc"
         - "api-gateway (requiere coordinación transversal)"
+        - "infraestructura-transversal (requiere coordinación transversal)"
     validations:
       required: true
 
@@ -62,7 +63,7 @@ body:
     id: functional_owner
     attributes:
       label: "Owner Funcional"
-      description: "Desarrollador responsable del microservicio."
+      description: "Desarrollador responsable del microservicio o de la tarea transversal."
       placeholder: "poma"
     validations:
       required: true
@@ -71,7 +72,7 @@ body:
     id: allowed_paths
     attributes:
       label: "Archivos o Directorios Permitidos"
-      description: "Delimita estrictamente las rutas a modificar dentro de apps/<microservicio>."
+      description: "Delimita estrictamente las rutas a modificar (ej. apps/<microservicio>/... o infra/scripts/...)."
       placeholder: "apps/catalog-svc/src/..."
     validations:
       required: true

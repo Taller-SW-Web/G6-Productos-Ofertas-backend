@@ -4,6 +4,7 @@
   "sourceRoot": "apps/catalog-svc/src",
   "compilerOptions": {
     "deleteOutDir": true,
+    "builder": "tsc",
     "tsConfigPath": "apps/catalog-svc/tsconfig.app.json"
   },
   "monorepo": true,

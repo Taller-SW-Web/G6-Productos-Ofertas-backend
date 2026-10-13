@@ -7,7 +7,7 @@ Esta guía establece el flujo de trabajo para desarrolladores y agentes de IA en
 ## 1. Lectura Obligatoria
 
 Antes de comenzar cualquier desarrollo, es imperativo leer:
-- [AGENTS.md](./AGENTS.md): Normas operativas, matriz de ownership, prohibiciones y protocolo para agentes.
+- [AGENTS.md](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/master/AGENTS.md): Normas operativas, matriz de ownership, prohibiciones y protocolo para agentes.
 
 ---
 

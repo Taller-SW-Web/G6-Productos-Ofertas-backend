@@ -1,6 +1,6 @@
 # ANTES DE ABRIR ESTE PR: LEER AGENTS.md
 
-> Es obligatorio haber consultado y respetado todas las reglas normativas de [AGENTS.md](./AGENTS.md).
+> Es obligatorio haber consultado y respetado todas las reglas normativas de [AGENTS.md](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/master/AGENTS.md).
 
 ---
 

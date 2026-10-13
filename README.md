@@ -3,7 +3,7 @@
 Monorepo NestJS oficial con TypeScript y npm para el backend de **Productos y Ofertas (G6)**.
 
 > **IMPORTANTE PARA DESARROLLADORES Y AGENTES:**
-> Es obligatorio leer [AGENTS.md](./AGENTS.md) completo antes de abordar cualquier Issue o editar cualquier archivo.
+> Es obligatorio leer [AGENTS.md](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/master/AGENTS.md) completo antes de abordar cualquier Issue o editar cualquier archivo.
 
 Repositorio de documentación normativa: [G6-Productos-Ofertas-docs](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs)
 
@@ -22,13 +22,13 @@ El repositorio utiliza **seis ramas personales permanentes**, una por integrante
 | `vera` | Vera | `apps/pricing-svc`, `apps/price-audit-svc` |
 | `taco` | Taco | `apps/inventory-svc` |
 
-*Nota:* `apps/api-gateway` es transversal y requiere Issue explícito y coordinación. La rama `infra/foundation` (PR #2) es una excepción temporal de inicialización y no forma parte del flujo de desarrollo regular. Consulta la matriz detallada y reglas de gobernanza en [AGENTS.md](./AGENTS.md#3-matriz-de-ownership-de-aplicaciones).
+*Nota:* `apps/api-gateway` es transversal y requiere Issue explícito y coordinación. La rama `infra/foundation` (PR #2) es una excepción temporal de inicialización y no forma parte del flujo de desarrollo regular. Consulta la matriz detallada y reglas de gobernanza en [AGENTS.md](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/master/AGENTS.md#3-matriz-de-ownership-de-aplicaciones).
 
 ---
 
 ## 2. Requisitos de Entorno
 
-- **Node.js:** `>= 22.0.0` (recomendado Node 22 LTS o 24)
+- **Node.js:** `^22.22.3 || >= 24.15.0` (fijado en `.nvmrc` y `.node-version` a `v24.15.0`)
 - **npm:** `>= 10.0.0`
 - **TypeScript:** `6.x`
 
@@ -62,21 +62,44 @@ npm ci
 
 ---
 
-## 5. Scripts de Ejecución y Pruebas
+## 5. Scripts de Ejecución y Desarrollo
+
+### Iniciar microservicios
+
+Se distinguen claramente dos modos de ejecución:
+
+1. **Modo Desarrollo con hot-reload / watch:**
+   ```bash
+   npm run start:dev:catalog-svc
+   npm run start:dev:inventory-svc
+   # O cualquier otro servicio: npm run start:dev:<servicio>
+   ```
+
+2. **Ejecutar JavaScript previamente compilado (producción / runtime):**
+   ```bash
+   npm run build:all               # O compilación individual: npm run build:catalog-svc
+   npm run start:catalog-svc       # Ejecuta node dist/apps/catalog-svc/main.js
+   npm run start:inventory-svc     # Ejecuta node dist/apps/inventory-svc/main.js
+   ```
+
+### Calidad de Código y Pruebas
 
 ```bash
-# Iniciar servicio en modo watch (ejemplos)
-npm run start:catalog-svc
-npm run start:inventory-svc
+# Verificación de tipos TypeScript estricto
+npm run typecheck
 
-# Compilación
-npm run build:all
+# Linter rápido (oxlint)
+npm run lint
 
-# Calidad y pruebas
-npm run typecheck      # Verificación de tipos estricta
-npm run lint           # Linter (oxlint)
-npm test               # Pruebas unitarias (vitest)
-npm run test:e2e       # Pruebas e2e / health endpoints (vitest)
+# Formato y verificación Prettier
+npm run format
+npm run format:check
+
+# Pruebas unitarias (vitest)
+npm test
+
+# Pruebas e2e / health endpoints (vitest)
+npm run test:e2e
 ```
 
 ---
@@ -93,4 +116,4 @@ cp .env.example .env
 
 ## 7. Flujo de Trabajo
 
-Para colaborar en este repositorio, revisa la guía de contribución en [CONTRIBUTING.md](./CONTRIBUTING.md) y las normas en [AGENTS.md](./AGENTS.md).
+Para colaborar en este repositorio, revisa la guía de contribución en [CONTRIBUTING.md](./CONTRIBUTING.md) y las normas en [AGENTS.md](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/master/AGENTS.md).
