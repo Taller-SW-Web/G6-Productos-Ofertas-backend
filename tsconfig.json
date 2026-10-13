@@ -1,0 +1,55 @@
+{
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "resolvePackageJsonExports": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2023",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "strictPropertyInitialization": false,
+    "types": [
+      "vitest/globals",
+      "node"
+    ]
+  },
+  "files": [],
+  "references": [
+    {
+      "path": "./apps/catalog-svc/tsconfig.app.json"
+    },
+    {
+      "path": "./apps/pricing-svc/tsconfig.app.json"
+    },
+    {
+      "path": "./apps/price-audit-svc/tsconfig.app.json"
+    },
+    {
+      "path": "./apps/promotions-svc/tsconfig.app.json"
+    },
+    {
+      "path": "./apps/inventory-svc/tsconfig.app.json"
+    },
+    {
+      "path": "./apps/taxonomy-svc/tsconfig.app.json"
+    },
+    {
+      "path": "./apps/combos-svc/tsconfig.app.json"
+    },
+    {
+      "path": "./apps/bulk-svc/tsconfig.app.json"
+    },
+    {
+      "path": "./apps/api-gateway/tsconfig.app.json"
+    }
+  ]
+}

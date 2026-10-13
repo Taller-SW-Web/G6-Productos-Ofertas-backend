@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "apps/catalog-svc/src",
+  "compilerOptions": {
+    "deleteOutDir": true,
+    "builder": "tsc",
+    "tsConfigPath": "apps/catalog-svc/tsconfig.app.json"
+  },
+  "monorepo": true,
+  "root": "apps/catalog-svc",
+  "projects": {
+    "api-gateway": {
+      "type": "application",
+      "root": "apps/api-gateway",
+      "entryFile": "main",
+      "sourceRoot": "apps/api-gateway/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/api-gateway/tsconfig.app.json"
+      }
+    },
+    "bulk-svc": {
+      "type": "application",
+      "root": "apps/bulk-svc",
+      "entryFile": "main",
+      "sourceRoot": "apps/bulk-svc/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/bulk-svc/tsconfig.app.json"
+      }
+    },
+    "catalog-svc": {
+      "type": "application",
+      "root": "apps/catalog-svc",
+      "entryFile": "main",
+      "sourceRoot": "apps/catalog-svc/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/catalog-svc/tsconfig.app.json"
+      }
+    },
+    "combos-svc": {
+      "type": "application",
+      "root": "apps/combos-svc",
+      "entryFile": "main",
+      "sourceRoot": "apps/combos-svc/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/combos-svc/tsconfig.app.json"
+      }
+    },
+    "inventory-svc": {
+      "type": "application",
+      "root": "apps/inventory-svc",
+      "entryFile": "main",
+      "sourceRoot": "apps/inventory-svc/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/inventory-svc/tsconfig.app.json"
+      }
+    },
+    "price-audit-svc": {
+      "type": "application",
+      "root": "apps/price-audit-svc",
+      "entryFile": "main",
+      "sourceRoot": "apps/price-audit-svc/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/price-audit-svc/tsconfig.app.json"
+      }
+    },
+    "pricing-svc": {
+      "type": "application",
+      "root": "apps/pricing-svc",
+      "entryFile": "main",
+      "sourceRoot": "apps/pricing-svc/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/pricing-svc/tsconfig.app.json"
+      }
+    },
+    "promotions-svc": {
+      "type": "application",
+      "root": "apps/promotions-svc",
+      "entryFile": "main",
+      "sourceRoot": "apps/promotions-svc/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/promotions-svc/tsconfig.app.json"
+      }
+    },
+    "taxonomy-svc": {
+      "type": "application",
+      "root": "apps/taxonomy-svc",
+      "entryFile": "main",
+      "sourceRoot": "apps/taxonomy-svc/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/taxonomy-svc/tsconfig.app.json"
+      }
+    }
+  }
+}

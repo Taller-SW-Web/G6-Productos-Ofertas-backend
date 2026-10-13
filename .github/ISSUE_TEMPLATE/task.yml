@@ -1,0 +1,123 @@
+name: "Tarea de Desarrollo / Feature"
+description: "Plantilla oficial para reportar y asignar tareas de desarrollo en el backend"
+title: "[TASK]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > **LEER ANTES DE CREAR:** Toda tarea en este monorepo se rige por las reglas obligatorias en [AGENTS.md](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/master/AGENTS.md).
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: "Compromiso de Gobernanza"
+      options:
+        - label: "Confirmo que he leído AGENTS.md y cumpliré sus reglas de ramas, ownership, contratos y validación."
+          required: true
+
+  - type: input
+    id: task_id
+    attributes:
+      label: "Identificador y Objetivo"
+      description: "Código de la tarea (ej. CATALOG-001, INFRA-002) y objetivo conciso."
+      placeholder: "CATALOG-001: Implementar consulta de variantes por SKU"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: personal_branch
+    attributes:
+      label: "Rama Personal Asignada"
+      description: "Selecciona tu rama permanente de trabajo."
+      options:
+        - "castilla"
+        - "poma"
+        - "cueva"
+        - "lopez"
+        - "vera"
+        - "taco"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: microservice
+    attributes:
+      label: "Microservicio o Alcance"
+      description: "Microservicio asignado o alcance transversal/infraestructura."
+      options:
+        - "catalog-svc"
+        - "pricing-svc"
+        - "price-audit-svc"
+        - "promotions-svc"
+        - "inventory-svc"
+        - "taxonomy-svc"
+        - "combos-svc"
+        - "bulk-svc"
+        - "api-gateway (requiere coordinación transversal)"
+        - "infraestructura-transversal (requiere coordinación transversal)"
+    validations:
+      required: true
+
+  - type: input
+    id: functional_owner
+    attributes:
+      label: "Owner Funcional"
+      description: "Desarrollador responsable del microservicio o de la tarea transversal."
+      placeholder: "poma"
+    validations:
+      required: true
+
+  - type: textarea
+    id: allowed_paths
+    attributes:
+      label: "Archivos o Directorios Permitidos"
+      description: "Delimita estrictamente las rutas a modificar (ej. apps/<microservicio>/... o infra/scripts/...)."
+      placeholder: "apps/catalog-svc/src/..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: contracts_docs
+    attributes:
+      label: "Fuentes Documentales y Contratos"
+      description: "Referencias canónicas en G6-Productos-Ofertas-docs (OpenAPI, AsyncAPI, SPEC)."
+      placeholder: "contratos/http/openapi.yaml#/paths/~1productos"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: "Comportamiento Esperado"
+      description: "Descripción concisa de la funcionalidad solicitada."
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: "Criterios de Aceptación"
+      description: "Condiciones comprobables para dar por completada la tarea."
+      placeholder: "- [ ] Endpoint responde HTTP 200 con payload según OpenAPI\n- [ ] Pruebas unitarias cubren casos de éxito y error"
+    validations:
+      required: true
+
+  - type: textarea
+    id: mandatory_tests
+    attributes:
+      label: "Pruebas Obligatorias"
+      description: "Comandos específicos de validación (npm test, npm run test:e2e, etc.)."
+      value: |
+        - `npm test`
+        - `npm run test:e2e`
+        - `npm run typecheck`
+        - `npm run lint`
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies_exclusions
+    attributes:
+      label: "Dependencias y Exclusiones"
+      description: "Lo que explícitamente queda fuera del alcance de este Issue."
