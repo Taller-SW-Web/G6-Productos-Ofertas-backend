@@ -97,3 +97,5 @@ Antes: comprobar owners/estructuras y obtener baseline de la tabla fixture y led
 | PSQL_FAILED_CHECK_CLIENT_CONNECTION_AND_SQL | Confirmar instalación/conexión/permisos y revisar SQL generado en un canal privado; no copiar errores con secretos al PR. |
 
 Las pruebas locales no acreditan integración autenticada, homologación ni despliegue de los microservicios. Las observaciones preexistentes fuera de ownership quedan registradas como dependencias específicas en evidencia.
+
+La descripción preparada para revisión está en [pull-request.md](pull-request.md). Si la conexión GitHub no permite crear PRs, usar [master...cueva](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/compare/master...cueva?expand=1), pegar esa descripción y crear como borrador. No cerrar el issue hasta comprobar los accesos individuales y obtener las revisiones requeridas.
