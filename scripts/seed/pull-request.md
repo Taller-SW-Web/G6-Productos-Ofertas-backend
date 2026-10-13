@@ -6,7 +6,7 @@ Se habilitan seis cuentas PostgreSQL individuales para que los integrantes cargu
 - `parseArgs` rechaza cualquier opción repetida, incluido `--mode`.
 - Una cuenta por integrante; Vera puede seleccionar pricing/price_audit y Castilla combos/bulk. El guard permite solo las membresías declaradas, sin ADMIN/INHERIT, y cada ejecución usa SET LOCAL ROLE del schema seleccionado.
 - `--check-access` verifica autenticación, SSL cliente y permisos con ROLLBACK sin inventar seeds ni insertar datos.
-- Procedimiento incremental de logins/grants y helper administrativo de contraseñas por psql \\password. Contraseñas diferentes, stdin privado, archivo protegido fuera de Git y ningún secreto en argumentos, SQL versionado, evidencias o logs.
+- Procedimiento incremental de logins/grants y helper administrativo de contraseñas por psql `\password`. Contraseñas diferentes, stdin privado, archivo protegido fuera de Git y ningún secreto en argumentos, SQL versionado, evidencias o logs.
 - Evidencias actualizadas: el PR #5 existe; seis accesos individuales reales, ocho schemas y Session pooler verificados.
 
 ## Accesos operativos
@@ -32,9 +32,10 @@ Grupos sin CREATE, UPDATE, DELETE ni TRUNCATE. SELECT/INSERT en 60 tablas existe
 - psql PostgreSQL 17.11: seis conexiones individuales con SSL verify-full; ocho transacciones check-access con ROLLBACK. Promociones ejecutó el seed aprobado dos veces con ROLLBACK.
 - Postcheck Supabase: cero filas fixture y mismo hash de datos/estructura. Ninguna escritura de prueba fuera del contexto propio.
 - Migración de accesos aplicada: `20261013171410 infra_001_individual_seed_logins`. Los dos SQL previos se conservan sin editar. No se cambian tablas/owners ni migraciones de negocio.
+- [CI #8](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/38440430067) para `a1dbb03292438b065bada60b4c087e0838605854`: PASS remoto, 14 tests de seeds / 0 fallos y todos los pasos del workflow, incluido smoke test. La actualización posterior de evidencias solo modifica documentación.
 
 ## Gobernanza y pendientes
 
 AGENTS.md leído; rama permanente cueva; issue actualizado autoriza .github y scripts transversales. No se modificó ningún microservicio, dependencia global ni contrato HTTP/eventos. No se generaron seeds de negocio de otros owners.
 
-La ejecución remota de Actions se verificará con el commit publicado; PASS local no se presenta como PASS remoto. Pendientes: entrega WhatsApp por Axel, cambio de contraseña por los destinatarios, revisión del dataset por owners y revisión técnica de Leonardo López/integración de Marco Castilla. Los 23 avisos de search_path y 5 dependencias dev con avisos son preexistentes y quedan documentados aparte. No se realizó merge.
+Pendientes: entrega WhatsApp por Axel, cambio de contraseña por los destinatarios, revisión del dataset por owners y revisión técnica de Leonardo López/integración de Marco Castilla. Los 23 avisos de search_path y 5 dependencias dev con avisos son preexistentes y quedan documentados aparte. No se realizó merge.

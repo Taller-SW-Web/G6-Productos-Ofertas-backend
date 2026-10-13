@@ -113,7 +113,9 @@ Comando administrativo ejecutado: `node --env-file=.env.local scripts/seed/acces
 
 Postcheck real tras psql: **0 filas fixture**, misma huella de datos d41d8cd98f00b204e9800998ecf8427e y estructura 8ffd8c47617a179f9f832757a0d2d1e5. Auditoría de privilegios: **0 membresías ajenas** de integrantes y **0 UPDATE/DELETE/TRUNCATE o INSERT en tablas técnicas excluidas**. Cada grupo tiene un USAGE propio, cero accesos a otro schema y cero CREATE. No se ejecutaron intentos de escritura fuera del ownership.
 
-CI: .github/workflows/ci.yml incorpora `node --test scripts/seed/run.test.mjs` en cada PR a master, sin credenciales ni dependencia de Supabase. Las ocho pruebas originales siguen presentes y las nuevas suman **14 PASS**. La ejecución remota de Actions se comprueba tras publicar el commit; no se infiere de la prueba local.
+CI: .github/workflows/ci.yml incorpora `node --test scripts/seed/run.test.mjs` en cada PR a master, sin credenciales ni dependencia de Supabase. Las ocho pruebas originales siguen presentes y las nuevas suman **14 PASS**.
+
+Ejecución remota comprobada: [CI #8](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/38440430067), disparada por el PR #5 para el commit `a1dbb03292438b065bada60b4c087e0838605854`. Job `115445282781` completado con success; el paso Seed runner tests ejecutó **14 tests, 14 pass, 0 fail** según sus logs. También pasaron typecheck, lint, formato, unitarias, E2E, build individual, build de las nueve apps, verificación de artefactos y smoke test. Este resultado acredita el commit de código; la actualización posterior de esta evidencia solo modifica documentación.
 
 ## Advisors y dependencias específicas
 
