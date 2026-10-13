@@ -70,6 +70,19 @@ Prohibido escribir código antes de completar los pasos 1 a 5:
 - **Lógica de negocio:** no introducir lógica de negocio en `api-gateway` ni en librerías técnicas comunes.
 - Si no puedes acceder al contrato normativo requerido, marca la tarea como `BLOCKED_CONTRACT` y repórtala; no inventes interfaces.
 
+### DEC-F adoptadas y desbloqueo selectivo
+
+- Las DEC-F-001 a DEC-F-015 adoptadas por G6 son obligatorias para la implementación interna en el bounded context al que corresponda cada regla o invariante. Consulta el [registro DEC-F](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/942bf7322eb388fe5b0fcc9c5a565152e1099139/arquitectura/decisiones/REGISTRO_DEC_F.md), su [matriz de trazabilidad](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/942bf7322eb388fe5b0fcc9c5a565152e1099139/arquitectura/decisiones/MATRIZ_TRAZABILIDAD_DEC_F.md) y la [matriz intermodular de backend](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/942bf7322eb388fe5b0fcc9c5a565152e1099139/integraciones/MATRIZ_INTERMODULAR_BACKEND.md). Antes de cambiar código, identifica las decisiones aplicables y sus fuentes normativas; no amplíes su contenido por inferencia ni crees DEC-F-016 o posteriores sin aprobación expresa de Marco.
+- Clasifica cada alcance de trabajo con un estado operativo:
+  - **`IMPLEMENTAR_AHORA`:** lógica, invariantes, persistencia y pruebas internas de G6 están definidas y pueden desarrollarse dentro del ownership autorizado.
+  - **`IMPLEMENTAR_PARCIAL`:** implementa lo interno ya definido y mantén aislada la frontera de integración que depende de una resolución externa.
+  - **`BLOQUEADO_ESPECÍFICO`:** detén solo la operación, autorización, contrato compartido o secuencia que depende de la respuesta externa. Registra el owner que debe responder, la operación afectada y la condición exacta que permitirá desbloquearla.
+- Una discrepancia intermodular que afecte una integración no paraliza el microservicio completo. Continúa el trabajo autónomo de G6 y no atribuyas ownership, aceptación externa, permisos ni homologación a otro módulo.
+- Comunica a los consumidores externos afectados los cambios previstos, la regla DEC-F aplicable, el impacto contractual, la versión y la adaptación requerida. Esa comunicación no requiere autorización externa para desarrollar lógica e invariantes internas propias de G6.
+- Antes de publicar como definitivo un cambio incompatible en un contrato compartido, exige homologación verificable de los módulos concernidos. Hasta entonces, conserva aislada la frontera pendiente; no cambies unilateralmente el contrato ni declares aceptación por silencio.
+- Registra por separado el estado de implementación interna, pruebas locales, integración autenticada, homologación externa y despliegue. Ninguno se infiere de otro: documentación o YAML no prueban implementación; pruebas locales no prueban integración autenticada; una integración autenticada no prueba homologación ni despliegue.
+- Toda dependencia externa pendiente debe identificar como mínimo: owner responsable de responder, operación o comportamiento afectado y condición concreta y verificable de desbloqueo. No uses un bloqueo general del microservicio si la dependencia solo afecta esa operación o frontera.
+
 ---
 
 ## 5. Protocolo para agentes de menor capacidad
@@ -104,6 +117,7 @@ ARCHIVOS MODIFICADOS: <lista de rutas>
 CAMBIOS REALIZADOS: <resumen conciso de cambios>
 COMANDOS EJECUTADOS: <comando y resultado real: PASS/FAIL/NO EJECUTADO>
 ERRORES PENDIENTES: <ninguno o detalle exacto>
+DEPENDENCIAS EXTERNAS: <owner | operación afectada | condición exacta de desbloqueo, o ninguna>
 CAMBIOS FUERA DEL ALCANCE: <ninguno o justificación expresa>
 ESTADO FINAL: PASS / PARTIAL / BLOCKED
 ```
