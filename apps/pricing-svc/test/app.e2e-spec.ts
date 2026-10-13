@@ -17,13 +17,10 @@ describe('PricingSvcController (e2e)', () => {
   });
 
   it('/health (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/health')
-      .expect(200)
-      .expect({
-        status: 'ok',
-        service: 'pricing-svc',
-      });
+    return request(app.getHttpServer()).get('/health').expect(200).expect({
+      status: 'ok',
+      service: 'pricing-svc',
+    });
   });
 
   afterEach(async () => {

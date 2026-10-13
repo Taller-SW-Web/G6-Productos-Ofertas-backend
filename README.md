@@ -2,11 +2,31 @@
 
 Monorepo NestJS oficial con TypeScript y npm para el backend de **Productos y Ofertas (G6)**.
 
+> **IMPORTANTE PARA DESARROLLADORES Y AGENTES:**
+> Es obligatorio leer [AGENTS.md](./AGENTS.md) completo antes de abordar cualquier Issue o editar cualquier archivo.
+
 Repositorio de documentación normativa: [G6-Productos-Ofertas-docs](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs)
 
 ---
 
-## 1. Requisitos de Entorno
+## 1. Ramas de Trabajo y Ownership
+
+El repositorio utiliza **seis ramas personales permanentes**, una por integrante del equipo. No se crean ramas por tarea (`feat/...`, `fix/...`). Cada desarrollador implementa sus Issues y abre Pull Requests hacia `master` exclusivamente desde su rama asignada:
+
+| Rama | Desarrollador | Aplicaciones Propias Autorizadas |
+|---|---|---|
+| `castilla` | Castilla | `apps/bulk-svc`, `apps/combos-svc` |
+| `poma` | Poma | `apps/catalog-svc` |
+| `cueva` | Cueva | `apps/promotions-svc` |
+| `lopez` | Lopez | `apps/taxonomy-svc` |
+| `vera` | Vera | `apps/pricing-svc`, `apps/price-audit-svc` |
+| `taco` | Taco | `apps/inventory-svc` |
+
+*Nota:* `apps/api-gateway` es transversal y requiere Issue explícito y coordinación. La rama `infra/foundation` (PR #2) es una excepción temporal de inicialización y no forma parte del flujo de desarrollo regular. Consulta la matriz detallada y reglas de gobernanza en [AGENTS.md](./AGENTS.md#3-matriz-de-ownership-de-aplicaciones).
+
+---
+
+## 2. Requisitos de Entorno
 
 - **Node.js:** `>= 22.0.0` (recomendado Node 22 LTS o 24)
 - **npm:** `>= 10.0.0`
@@ -14,7 +34,7 @@ Repositorio de documentación normativa: [G6-Productos-Ofertas-docs](https://git
 
 ---
 
-## 2. Instalación
+## 3. Instalación
 
 Instalación limpia y reproducible desde `package-lock.json`:
 
@@ -24,9 +44,7 @@ npm ci
 
 ---
 
-## 3. Microservicios del Monorepo
-
-El monorepo organiza las aplicaciones bajo el directorio `apps/`, correspondiendo a los bounded contexts aprobados en la arquitectura oficial:
+## 4. Microservicios del Monorepo
 
 | Aplicación | Puerto por defecto | Variable de Entorno | Responsabilidad |
 |---|---|---|---|
@@ -40,78 +58,32 @@ El monorepo organiza las aplicaciones bajo el directorio `apps/`, correspondiend
 | `combos-svc` | `3007` | `COMBOS_SVC_PORT` | Definición, composición y proyección de combos |
 | `bulk-svc` | `3008` | `BULK_SVC_PORT` | Importación y exportación masiva, validación por fila |
 
----
-
-## 4. Endpoints de Salud (`/health`)
-
-Cada microservicio expone un endpoint HTTP de verificación de arranque:
-
-```http
-GET /health
-```
-
-Respuesta JSON estándar:
-```json
-{
-  "status": "ok",
-  "service": "<app-name>"
-}
-```
+*Estado actual:* La Foundation (PR #2) provee arranque independiente y endpoints de salud (`GET /health`). No contiene endpoints de negocio simulados ni conexiones externas activas.
 
 ---
 
-## 5. Scripts de Ejecución y Desarrollo
-
-### Iniciar microservicios localmente
+## 5. Scripts de Ejecución y Pruebas
 
 ```bash
-# Iniciar microservicio específico en modo watch
-npm run start:api-gateway
+# Iniciar servicio en modo watch (ejemplos)
 npm run start:catalog-svc
-npm run start:pricing-svc
-npm run start:price-audit-svc
-npm run start:promotions-svc
 npm run start:inventory-svc
-npm run start:taxonomy-svc
-npm run start:combos-svc
-npm run start:bulk-svc
-```
 
-### Compilación
-
-```bash
-# Compilación general de todo el monorepo
+# Compilación
 npm run build:all
 
-# O compilar un microservicio individual
-npm run build:catalog-svc
-npm run build:api-gateway
-```
-
-### Calidad de Código y Pruebas
-
-```bash
-# Verificación de tipos TypeScript estricto
-npm run typecheck
-
-# Linter rápido (oxlint)
-npm run lint
-
-# Formato con Prettier
-npm run format
-
-# Pruebas unitarias (Vitest)
-npm test
-
-# Pruebas e2e / health endpoints (Vitest)
-npm run test:e2e
+# Calidad y pruebas
+npm run typecheck      # Verificación de tipos estricta
+npm run lint           # Linter (oxlint)
+npm test               # Pruebas unitarias (vitest)
+npm run test:e2e       # Pruebas e2e / health endpoints (vitest)
 ```
 
 ---
 
 ## 6. Variables de Entorno
 
-Copiar `.env.example` a `.env` para personalizar puertos y configuraciones locales:
+Copiar `.env.example` a `.env` para personalizar puertos locales:
 
 ```bash
 cp .env.example .env
@@ -119,9 +91,6 @@ cp .env.example .env
 
 ---
 
-## 7. Flujo de Trabajo y Contribución
+## 7. Flujo de Trabajo
 
-1. **Ramas:** No trabajar sobre `master`. Crear ramas descriptivas (`feat/...`, `fix/...`, `infra/...`).
-2. **Validación previa:** Asegurar que `npm ci`, `npm run typecheck`, `npm run lint` y `npm test` pasen exitosamente.
-3. **Pull Requests:** Todos los cambios a `master` deben pasar por PR y revisión técnica.
-4. **Instrucciones para agentes:** Consultar [AGENTS.md](./AGENTS.md) antes de realizar ediciones automáticas.
+Para colaborar en este repositorio, revisa la guía de contribución en [CONTRIBUTING.md](./CONTRIBUTING.md) y las normas en [AGENTS.md](./AGENTS.md).
