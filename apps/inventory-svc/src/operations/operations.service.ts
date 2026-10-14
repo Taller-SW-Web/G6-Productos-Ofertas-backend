@@ -29,7 +29,7 @@ export class OperationsService {
     }
 
     const sql = `
-      SELECT 
+      SELECT
         o.operation_id,
         o.order_id,
         o.operation_type,

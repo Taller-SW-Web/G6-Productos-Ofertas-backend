@@ -156,7 +156,7 @@ export class DisponibilidadService {
 
     if (dto.fulfillment?.mode && dto.fulfillment?.fulfillment_ref) {
       const routeRes = await this.databaseService.query(
-        `SELECT location_id FROM inventory.commercial_fulfillment_routes 
+        `SELECT location_id FROM inventory.commercial_fulfillment_routes
          WHERE channel_id = $1 AND mode = $2 AND fulfillment_ref = $3 AND active = true`,
         [dto.channel_id, dto.fulfillment.mode, dto.fulfillment.fulfillment_ref],
       );
@@ -166,7 +166,7 @@ export class DisponibilidadService {
     } else {
       // Intento de fallback de canal
       const routeRes = await this.databaseService.query(
-        `SELECT location_id FROM inventory.commercial_fulfillment_routes 
+        `SELECT location_id FROM inventory.commercial_fulfillment_routes
          WHERE channel_id = $1 AND active = true`,
         [dto.channel_id],
       );
@@ -197,8 +197,8 @@ export class DisponibilidadService {
 
     for (const line of dto.lines) {
       const balRes = await this.databaseService.query(
-        `SELECT on_hand, reserved, blocked 
-         FROM inventory.stock_balance 
+        `SELECT on_hand, reserved, blocked
+         FROM inventory.stock_balance
          WHERE sku_id = $1 AND location_id = $2`,
         [line.sku, targetLocationId],
       );

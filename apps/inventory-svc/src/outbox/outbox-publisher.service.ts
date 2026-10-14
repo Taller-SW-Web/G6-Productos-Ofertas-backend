@@ -50,10 +50,10 @@ export class OutboxPublisherService {
 
     try {
       const res = await this.databaseService.query(
-        `SELECT id, event_id, event_type, correlation_id, payload 
-         FROM inventory.outbox 
-         WHERE status = 'PENDING' 
-         ORDER BY created_at ASC 
+        `SELECT id, event_id, event_type, correlation_id, payload
+         FROM inventory.outbox
+         WHERE status = 'PENDING'
+         ORDER BY created_at ASC
          LIMIT $1`,
         [limit],
       );

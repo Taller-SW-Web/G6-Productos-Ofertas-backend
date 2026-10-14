@@ -51,8 +51,8 @@ export class ReservationsService {
 
     // 3. Comprobación de idempotencia previa
     const existingOp = await this.databaseService.query(
-      `SELECT id, operation_id, idempotency_key, request_fingerprint, status, result_payload, reservation_id 
-       FROM inventory.inventory_operations 
+      `SELECT id, operation_id, idempotency_key, request_fingerprint, status, result_payload, reservation_id
+       FROM inventory.inventory_operations
        WHERE operation_id = $1 OR idempotency_key = $2`,
       [dto.operation_id, idempotencyKey],
     );
@@ -386,8 +386,8 @@ export class ReservationsService {
       async (client) => {
         // Comprobar idempotencia previa para operation_id
         const existingOp = await client.query(
-          `SELECT id, operation_id, request_fingerprint, status, result_payload 
-         FROM inventory.inventory_operations 
+          `SELECT id, operation_id, request_fingerprint, status, result_payload
+         FROM inventory.inventory_operations
          WHERE operation_id = $1`,
           [dto.operation_id],
         );
@@ -417,9 +417,9 @@ export class ReservationsService {
 
         // Bloquear reserva
         const resReserva = await client.query(
-          `SELECT id, reservation_id, status, expires_at, order_id 
-         FROM inventory.reservations 
-         WHERE reservation_id = $1 
+          `SELECT id, reservation_id, status, expires_at, order_id
+         FROM inventory.reservations
+         WHERE reservation_id = $1
          FOR UPDATE`,
           [reservaId],
         );
@@ -473,16 +473,16 @@ export class ReservationsService {
 
         // Transición a CONSUMIDA
         await client.query(
-          `UPDATE inventory.reservations 
-         SET status = 'CONSUMIDA', consumed_at = now() 
+          `UPDATE inventory.reservations
+         SET status = 'CONSUMIDA', consumed_at = now()
          WHERE id = $1`,
           [reserva.id],
         );
 
         // Cargar líneas de reserva
         const linesRes = await client.query(
-          `SELECT sku_id, location_id, quantity 
-         FROM inventory.reservation_lines 
+          `SELECT sku_id, location_id, quantity
+         FROM inventory.reservation_lines
          WHERE reservation_id = $1`,
           [reserva.id],
         );
@@ -491,9 +491,9 @@ export class ReservationsService {
           const qty = Number(line.quantity);
 
           const balRes = await client.query(
-            `SELECT on_hand, reserved, blocked, stock_version 
-           FROM inventory.stock_balance 
-           WHERE sku_id = $1 AND location_id = $2 
+            `SELECT on_hand, reserved, blocked, stock_version
+           FROM inventory.stock_balance
+           WHERE sku_id = $1 AND location_id = $2
            FOR UPDATE`,
             [line.sku_id, line.location_id],
           );
@@ -508,8 +508,8 @@ export class ReservationsService {
             const newVersion = Number(bal.stock_version) + 1;
 
             await client.query(
-              `UPDATE inventory.stock_balance 
-             SET on_hand = $1, reserved = $2, stock_version = $3 
+              `UPDATE inventory.stock_balance
+             SET on_hand = $1, reserved = $2, stock_version = $3
              WHERE sku_id = $4 AND location_id = $5`,
               [
                 newOnHand,
@@ -680,8 +680,8 @@ export class ReservationsService {
       async (client) => {
         // Idempotencia
         const existingOp = await client.query(
-          `SELECT id, operation_id, request_fingerprint, status, result_payload 
-         FROM inventory.inventory_operations 
+          `SELECT id, operation_id, request_fingerprint, status, result_payload
+         FROM inventory.inventory_operations
          WHERE operation_id = $1`,
           [dto.operation_id],
         );
@@ -711,9 +711,9 @@ export class ReservationsService {
 
         // Bloquear reserva
         const resReserva = await client.query(
-          `SELECT id, reservation_id, status, expires_at, order_id 
-         FROM inventory.reservations 
-         WHERE reservation_id = $1 
+          `SELECT id, reservation_id, status, expires_at, order_id
+         FROM inventory.reservations
+         WHERE reservation_id = $1
          FOR UPDATE`,
           [reservaId],
         );
@@ -742,16 +742,16 @@ export class ReservationsService {
 
         // Transición a LIBERADA
         await client.query(
-          `UPDATE inventory.reservations 
-         SET status = 'LIBERADA', released_at = now() 
+          `UPDATE inventory.reservations
+         SET status = 'LIBERADA', released_at = now()
          WHERE id = $1`,
           [reserva.id],
         );
 
         // Cargar líneas y revertir reserved en stock_balance
         const linesRes = await client.query(
-          `SELECT sku_id, location_id, quantity 
-         FROM inventory.reservation_lines 
+          `SELECT sku_id, location_id, quantity
+         FROM inventory.reservation_lines
          WHERE reservation_id = $1`,
           [reserva.id],
         );
@@ -760,9 +760,9 @@ export class ReservationsService {
           const qty = Number(line.quantity);
 
           const balRes = await client.query(
-            `SELECT on_hand, reserved, blocked, stock_version 
-           FROM inventory.stock_balance 
-           WHERE sku_id = $1 AND location_id = $2 
+            `SELECT on_hand, reserved, blocked, stock_version
+           FROM inventory.stock_balance
+           WHERE sku_id = $1 AND location_id = $2
            FOR UPDATE`,
             [line.sku_id, line.location_id],
           );
@@ -776,8 +776,8 @@ export class ReservationsService {
             const newVersion = Number(bal.stock_version) + 1;
 
             await client.query(
-              `UPDATE inventory.stock_balance 
-             SET reserved = $1, stock_version = $2 
+              `UPDATE inventory.stock_balance
+             SET reserved = $1, stock_version = $2
              WHERE sku_id = $3 AND location_id = $4`,
               [newReserved, newVersion, line.sku_id, line.location_id],
             );
@@ -869,15 +869,15 @@ export class ReservationsService {
     correlationId: string,
   ): Promise<void> {
     await client.query(
-      `UPDATE inventory.reservations 
-       SET status = 'EXPIRADA', expired_at = now() 
+      `UPDATE inventory.reservations
+       SET status = 'EXPIRADA', expired_at = now()
        WHERE id = $1`,
       [reservationPk],
     );
 
     const linesRes = await client.query(
-      `SELECT sku_id, location_id, quantity 
-       FROM inventory.reservation_lines 
+      `SELECT sku_id, location_id, quantity
+       FROM inventory.reservation_lines
        WHERE reservation_id = $1`,
       [reservationPk],
     );
@@ -885,9 +885,9 @@ export class ReservationsService {
     for (const line of linesRes.rows) {
       const qty = Number(line.quantity);
       const balRes = await client.query(
-        `SELECT on_hand, reserved, blocked, stock_version 
-         FROM inventory.stock_balance 
-         WHERE sku_id = $1 AND location_id = $2 
+        `SELECT on_hand, reserved, blocked, stock_version
+         FROM inventory.stock_balance
+         WHERE sku_id = $1 AND location_id = $2
          FOR UPDATE`,
         [line.sku_id, line.location_id],
       );
@@ -898,8 +898,8 @@ export class ReservationsService {
         const newVersion = Number(bal.stock_version) + 1;
 
         await client.query(
-          `UPDATE inventory.stock_balance 
-           SET reserved = $1, stock_version = $2 
+          `UPDATE inventory.stock_balance
+           SET reserved = $1, stock_version = $2
            WHERE sku_id = $3 AND location_id = $4`,
           [newReserved, newVersion, line.sku_id, line.location_id],
         );
@@ -1031,7 +1031,7 @@ export class ReservationsService {
       } else {
         // location_id no proporcionado: consultar ruta de cumplimiento comercial
         const routeRes = await this.databaseService.query(
-          `SELECT location_id FROM inventory.commercial_fulfillment_routes 
+          `SELECT location_id FROM inventory.commercial_fulfillment_routes
            WHERE channel_id = $1 AND active = true`,
           [dto.channel_id],
         );
