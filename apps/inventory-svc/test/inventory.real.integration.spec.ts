@@ -1,7 +1,8 @@
-import { randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import amqp from 'amqplib';
+import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DatabaseService } from '../src/database/database.service.js';
 import { IdempotencyService } from '../src/idempotency/idempotency.service.js';
@@ -21,7 +22,8 @@ import { DrizzleStockBalanceRepository } from '../src/repositories/drizzle/drizz
 
 const enabled = Boolean(process.env.INVENTORY_REAL_INTEGRATION === '1');
 const suite = enabled ? describe : describe.skip;
-const docker = promisify(execFile);
+const previousDatabaseUrl = process.env.DATABASE_URL;
+const previousRabbitMqUrl = process.env.RABBITMQ_URL;
 
 suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
   const database = new DatabaseService();
@@ -52,37 +54,188 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
   const exchangeEvents = 'po.events.x';
   const exchangeResults = 'po.results.x';
   const queue = `inventory-it-${randomUUID()}`;
-  const pgUrl = process.env.INVENTORY_TEST_DATABASE_URL;
-  const rabbitUrl = process.env.INVENTORY_TEST_RABBITMQ_URL;
-  const rabbitContainer = process.env.INVENTORY_TEST_RABBIT_CONTAINER;
+  const runId = randomUUID().replaceAll('-', '').slice(0, 12);
+  const dockerLabel = `inventory.integration.run=${runId}`;
+  const networkName = `inventory-it-net-${runId}`;
+  const pgContainer = `inventory-it-pg-${runId}`;
+  const rabbitContainer = `inventory-it-rabbit-${runId}`;
+  let pgUrl: string;
+  let rabbitUrl: string;
 
-  beforeAll(async () => {
-    if (!pgUrl || !rabbitUrl || !rabbitContainer) {
-      throw new Error(
-        'La integración requiere INVENTORY_TEST_DATABASE_URL, INVENTORY_TEST_RABBITMQ_URL e INVENTORY_TEST_RABBIT_CONTAINER explícitos.',
-      );
-    }
-    for (const [name, value] of [
-      ['INVENTORY_TEST_DATABASE_URL', pgUrl],
-      ['INVENTORY_TEST_RABBITMQ_URL', rabbitUrl],
-    ]) {
-      const parsed = new URL(value);
-      if (!['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) {
-        throw new Error(`${name} debe apuntar a loopback aislado.`);
+  function docker(args: string[], input?: string): string {
+    return execFileSync('docker', args, {
+      encoding: 'utf8',
+      input,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 120_000,
+    }).trim();
+  }
+
+  function cleanupOwnedResources(): void {
+    for (const container of [pgContainer, rabbitContainer]) {
+      try {
+        const labels = JSON.parse(
+          docker(['inspect', '--format', '{{json .Config.Labels}}', container]),
+        ) as Record<string, string>;
+        if (labels['inventory.integration.run'] === runId) {
+          docker(['rm', '-f', '-v', container]);
+        }
+      } catch {
+        // El recurso no llegó a crearse o ya fue retirado.
       }
     }
-    if (!rabbitContainer.startsWith('inventory-it-')) {
-      throw new Error(
-        'INVENTORY_TEST_RABBIT_CONTAINER debe usar el prefijo inventory-it-.',
-      );
+    try {
+      const labels = JSON.parse(
+        docker([
+          'network',
+          'inspect',
+          '--format',
+          '{{json .Labels}}',
+          networkName,
+        ]),
+      ) as Record<string, string>;
+      if (labels['inventory.integration.run'] === runId) {
+        docker(['network', 'rm', networkName]);
+      }
+    } catch {
+      // La red no llegó a crearse o Docker ya la retiró.
     }
-    // DatabaseService consumes runtime keys; populate them only from the
-    // explicitly isolated, loopback-only integration inputs above.
-    process.env.DATABASE_URL = pgUrl;
-    process.env.RABBITMQ_URL = rabbitUrl;
-    await database.onModuleInit();
-    broker = await amqp.connect(rabbitUrl);
-    brokerChannel = await broker.createChannel();
+  }
+
+  beforeAll(async () => {
+    const password = randomBytes(24).toString('hex');
+    const rabbitPassword = randomBytes(24).toString('hex');
+    try {
+      docker(['network', 'create', '--label', dockerLabel, networkName]);
+      docker([
+        'run',
+        '-d',
+        '--name',
+        pgContainer,
+        '--label',
+        dockerLabel,
+        '--network',
+        networkName,
+        '-p',
+        '127.0.0.1::5432',
+        '-e',
+        'POSTGRES_USER=inventory_test',
+        '-e',
+        `POSTGRES_PASSWORD=${password}`,
+        '-e',
+        'POSTGRES_DB=inventory_it',
+        'postgres:17-alpine',
+      ]);
+      docker([
+        'run',
+        '-d',
+        '--name',
+        rabbitContainer,
+        '--label',
+        dockerLabel,
+        '--network',
+        networkName,
+        '-p',
+        '127.0.0.1::5672',
+        '-e',
+        'RABBITMQ_DEFAULT_USER=inventory_test',
+        '-e',
+        `RABBITMQ_DEFAULT_PASS=${rabbitPassword}`,
+        'rabbitmq:3.13-management-alpine',
+      ]);
+      const pgPort = docker(['port', pgContainer, '5432/tcp'])
+        .split(':')
+        .at(-1);
+      const rabbitPort = docker(['port', rabbitContainer, '5672/tcp'])
+        .split(':')
+        .at(-1);
+      if (!pgPort || !rabbitPort)
+        throw new Error('Docker no asignó puertos loopback.');
+      pgUrl = `postgresql://inventory_test:${password}@127.0.0.1:${pgPort}/inventory_it?sslmode=disable`;
+      rabbitUrl = `amqp://inventory_test:${rabbitPassword}@127.0.0.1:${rabbitPort}/`;
+
+      await waitForContainer(
+        pgContainer,
+        'pg_isready -U inventory_test -d inventory_it',
+      );
+      await waitForContainer(
+        rabbitContainer,
+        'rabbitmq-diagnostics -q check_running',
+      );
+      const docsRoot = new URL(
+        '../../../../docs/datos/inventory-svc/',
+        import.meta.url,
+      );
+      const initial = await readFile(
+        new URL('migration.sql', docsRoot),
+        'utf8',
+      );
+      const incremental = await readFile(
+        new URL(
+          'migrations/0002_order_id_operaciones_disponibilidad.sql',
+          docsRoot,
+        ),
+        'utf8',
+      );
+      docker(
+        [
+          'exec',
+          '-i',
+          pgContainer,
+          'psql',
+          '-v',
+          'ON_ERROR_STOP=1',
+          '-U',
+          'inventory_test',
+          '-d',
+          'inventory_it',
+        ],
+        initial,
+      );
+      docker(
+        [
+          'exec',
+          '-i',
+          pgContainer,
+          'psql',
+          '-v',
+          'ON_ERROR_STOP=1',
+          '-U',
+          'inventory_test',
+          '-d',
+          'inventory_it',
+        ],
+        `BEGIN;\n${incremental}\nCOMMIT;`,
+      );
+      docker([
+        'exec',
+        rabbitContainer,
+        'rabbitmqctl',
+        'add_vhost',
+        '/inventory-it',
+      ]);
+      docker([
+        'exec',
+        rabbitContainer,
+        'rabbitmqctl',
+        'set_permissions',
+        '-p',
+        '/inventory-it',
+        'inventory_test',
+        '.*',
+        '.*',
+        '.*',
+      ]);
+      rabbitUrl = `amqp://inventory_test:${rabbitPassword}@127.0.0.1:${rabbitPort}/%2Finventory-it`;
+      process.env.DATABASE_URL = pgUrl;
+      process.env.RABBITMQ_URL = rabbitUrl;
+      await database.onModuleInit();
+      broker = await amqp.connect(rabbitUrl);
+      brokerChannel = await broker.createChannel();
+    } catch (error) {
+      cleanupOwnedResources();
+      throw error;
+    }
     await brokerChannel.assertExchange(exchangeEvents, 'topic', {
       durable: true,
     });
@@ -104,15 +257,18 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
     process.env.INVENTORY_WORKER_INTERVAL_MS = '250';
     process.env.INVENTORY_WORKER_BATCH_SIZE = '10';
     process.env.RESERVATION_TTL_SECONDS = '30';
-  }, 30_000);
+  }, 120_000);
 
   afterAll(async () => {
     await brokerChannel?.close().catch(() => undefined);
     await broker?.close().catch(() => undefined);
     await database.onModuleDestroy();
-    delete process.env.DATABASE_URL;
-    delete process.env.RABBITMQ_URL;
-  });
+    if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previousDatabaseUrl;
+    if (previousRabbitMqUrl === undefined) delete process.env.RABBITMQ_URL;
+    else process.env.RABBITMQ_URL = previousRabbitMqUrl;
+    cleanupOwnedResources();
+  }, 30_000);
 
   async function seedStock(sku = `sku-${randomUUID()}`, qty = 20) {
     await database.query(
@@ -393,11 +549,94 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
       idemDto.operation_id,
       idemDto.operation_id,
     ]);
+    expect(replay[1]).toEqual(replay[0]);
+    expect(
+      await reservations.solicitarReserva(
+        idemDto,
+        undefined,
+        key,
+        'modulo-ventas',
+      ),
+    ).toEqual(replay[0]);
     const ops = await database.query(
       `SELECT id FROM inventory.inventory_operations WHERE operation_id=$1`,
       [idemDto.operation_id],
     );
     expect(ops.rowCount).toBe(1);
+
+    const rejectedSku = await seedStock(`rejected-stock-${randomUUID()}`, 1);
+    const rejectedDto = {
+      order_id: `PED-${randomUUID()}`,
+      operation_id: randomUUID(),
+      channel_id: 'VENTAS' as const,
+      lines: [{ sku: rejectedSku, quantity: 2, location_id: locationId }],
+    };
+    const rejectedKey = `idem-${randomUUID()}`;
+    const acceptedCommand = await reservations.solicitarReserva(
+      rejectedDto,
+      undefined,
+      rejectedKey,
+      'modulo-ventas',
+    );
+    expect(acceptedCommand.status).toBe('ACCEPTED');
+    expect(
+      await reservations.solicitarReserva(
+        rejectedDto,
+        undefined,
+        rejectedKey,
+        'modulo-ventas',
+      ),
+    ).toEqual(acceptedCommand);
+    const rejectedOperation = await database.query<{
+      status: string;
+      result_code: string;
+      result_payload: unknown;
+    }>(
+      `SELECT status,result_code,result_payload FROM inventory.inventory_operations WHERE operation_id=$1`,
+      [rejectedDto.operation_id],
+    );
+    expect(rejectedOperation.rows[0]).toMatchObject({
+      status: 'RECHAZADO',
+      result_code: 'STOCK_INSUFICIENTE',
+      result_payload: acceptedCommand,
+    });
+  });
+
+  it('reproduce exactamente el replay concurrente durable al confirmar y liberar', async () => {
+    for (const action of ['confirm', 'release'] as const) {
+      const sku = await seedStock();
+      const { reservationId, order } = await reserve(sku, 2);
+      const request = {
+        order_id: order,
+        operation_id: randomUUID(),
+        ...(action === 'release' ? { reason: 'ANULACION' as const } : {}),
+      };
+      const key = `idem-${randomUUID()}`;
+      const invoke = () =>
+        action === 'confirm'
+          ? reservations.confirmarReserva(
+              reservationId,
+              request,
+              undefined,
+              key,
+              'modulo-ventas',
+            )
+          : reservations.liberarReserva(
+              reservationId,
+              request,
+              undefined,
+              key,
+              'modulo-ventas',
+            );
+      const [first, replay] = await Promise.all([invoke(), invoke()]);
+      expect(replay).toEqual(first);
+      expect(await invoke()).toEqual(first);
+      const persisted = await database.query<{ count: string }>(
+        `SELECT count(*)::text AS count FROM inventory.inventory_operations WHERE operation_id=$1`,
+        [request.operation_id],
+      );
+      expect(persisted.rows[0].count).toBe('1');
+    }
   });
 
   it('expira automáticamente desde el worker Nest sin endpoint ni llamada manual', async () => {
@@ -441,13 +680,17 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
   it('serializa liberación y expiración concurrentes con un único efecto de negocio', async () => {
     const sku = await seedStock();
     const { reservationId, order } = await reserve(sku, 3);
-    await database.query(
-      `UPDATE inventory.reservations SET expires_at=now()-interval '1 second' WHERE reservation_id=$1`,
-      [reservationId],
-    );
-
-    const [release, expirationResult] = await Promise.allSettled([
-      reservations.liberarReserva(
+    const lockHolder = new pg.Client({
+      connectionString: process.env.DATABASE_URL,
+    });
+    await lockHolder.connect();
+    try {
+      await lockHolder.query('BEGIN');
+      await lockHolder.query(
+        `SELECT id FROM inventory.reservations WHERE reservation_id=$1 FOR UPDATE`,
+        [reservationId],
+      );
+      const release = reservations.liberarReserva(
         reservationId,
         {
           order_id: order,
@@ -457,11 +700,27 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
         undefined,
         `idem-${randomUUID()}`,
         'modulo-ventas',
-      ),
-      expiration.expirarReservasVencidas(10),
-    ]);
-    expect(release.status).toBe('rejected');
-    expect(expirationResult.status).toBe('fulfilled');
+      );
+      await viWaitFor(async () => {
+        const waiting = await database.query<{ count: string }>(
+          `SELECT count(*)::text AS count FROM pg_stat_activity WHERE wait_event_type='Lock' AND query ILIKE '%FROM inventory.reservations%' AND query ILIKE '%FOR UPDATE%'`,
+        );
+        expect(Number(waiting.rows[0].count)).toBeGreaterThan(0);
+      }, 5000);
+      await lockHolder.query(
+        `UPDATE inventory.reservations SET expires_at=now()-interval '1 second' WHERE reservation_id=$1`,
+        [reservationId],
+      );
+      // El worker concurrente omite la fila mientras el otro tx mantiene su
+      // lock; al liberarlo, el flujo de release debe revalidar expires_at.
+      await lockHolder.query('COMMIT');
+      const expirationRun = expiration.expirarReservasVencidas(10);
+      await expect(release).rejects.toThrow();
+      await expirationRun;
+    } finally {
+      await lockHolder.query('ROLLBACK').catch(() => undefined);
+      await lockHolder.end();
+    }
     const state = await database.query<{
       status: string;
       on_hand: number;
@@ -483,9 +742,11 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
       Number(state.rows[0].released_events) +
         Number(state.rows[0].expired_events),
     ).toBe(1);
+    expect(state.rows[0].status).toBe('EXPIRADA');
   });
 
   it('usa publisher confirm, marca solo mensaje enrutado y deja basic.return como PENDING', async () => {
+    await database.query('DELETE FROM inventory.outbox');
     const publisher = new OutboxPublisherService(database, outboxRepo);
     const routed = await publishRecord('inventory.integration.routed');
     const unrouted = await publishRecord(
@@ -512,6 +773,7 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
   });
 
   it('coordina dos dispatchers y conserva evento al detener/reiniciar RabbitMQ', async () => {
+    await database.query('DELETE FROM inventory.outbox');
     const a = await publishRecord('inventory.integration.concurrent.a');
     const b = await publishRecord('inventory.integration.concurrent.b');
     const one = new OutboxPublisherService(database, outboxRepo);
@@ -532,9 +794,18 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
     expect(ra.dispatched + rb.dispatched).toBe(2);
 
     const pending = await publishRecord('inventory.integration.recovery');
-    await docker('docker', ['stop', rabbitContainer!], {
-      timeout: 15_000,
-    });
+    const ownedLabels = docker([
+      'inspect',
+      '--format',
+      '{{json .Config.Labels}}',
+      rabbitContainer,
+    ]);
+    expect(JSON.parse(ownedLabels)['inventory.integration.run']).toBe(runId);
+    // Pausa únicamente el broker efímero mientras el dispatcher intenta
+    // conectarse; el proceso/volumen de RabbitMQ permanece bajo este test.
+    await brokerChannel.close();
+    await broker.close();
+    docker(['pause', rabbitContainer]);
     try {
       const downResult = await new OutboxPublisherService(
         database,
@@ -550,27 +821,20 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
         ).rows[0].status,
       ).toBe('PENDING');
     } finally {
-      await docker('docker', ['start', rabbitContainer!], {
-        timeout: 15_000,
-      });
+      docker(['unpause', rabbitContainer]);
     }
 
-    let recoveredBroker: amqp.ChannelModel | undefined;
-    await viWaitFor(async () => {
-      recoveredBroker = await amqp.connect(rabbitUrl);
-    }, 20_000);
-    broker = recoveredBroker!;
-    const recoveredChannel = await broker.createChannel();
-    brokerChannel = recoveredChannel;
-    await recoveredChannel.assertExchange(exchangeEvents, 'topic', {
-      durable: true,
-    });
-    await recoveredChannel.assertQueue(queue, {
+    // El dispatcher de aplicación se recrea y retoma la fila durable tras
+    // recuperarse el broker; RabbitMQ sigue siendo el recurso efímero propio.
+    broker = await amqp.connect(rabbitUrl);
+    brokerChannel = await broker.createChannel();
+    await brokerChannel.assertQueue(queue, {
       durable: false,
       exclusive: true,
       autoDelete: true,
     });
-    await recoveredChannel.bindQueue(queue, exchangeEvents, 'inventory.#');
+    await brokerChannel.bindQueue(queue, exchangeEvents, 'inventory.#');
+    await brokerChannel.bindQueue(queue, exchangeResults, 'inventory.#');
     const recovered = await new OutboxPublisherService(
       database,
       outboxRepo,
@@ -586,25 +850,30 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
     ).toBe('PUBLISHED');
     let recoveredMessageId: string | undefined;
     for (;;) {
-      const message = await recoveredChannel.get(queue);
+      const message = await brokerChannel.get(queue);
       if (!message) break;
       if (message.properties.messageId === pending.messageId) {
         recoveredMessageId = message.properties.messageId;
       }
-      recoveredChannel.ack(message);
+      brokerChannel.ack(message);
     }
     expect(recoveredMessageId).toBe(pending.messageId);
     expect([a.id, b.id]).toHaveLength(2);
   }, 30_000);
 
   it('simula caída tras confirmación antes de UPDATE y reintenta con el mismo message_id', async () => {
+    await database.query('DELETE FROM inventory.outbox');
     const pending = await publishRecord('inventory.integration.crash');
     const crashingRepo = Object.create(outboxRepo) as DrizzleOutboxRepository;
-    crashingRepo.markAsPublished = async (_id, client) => {
-      await client!.query(
-        'INSERT INTO inventory.table_does_not_exist(id) VALUES ($1)',
-        [randomUUID()],
-      );
+    crashingRepo.markAsPublished = async (id, client) => {
+      if (id === pending.id) {
+        await client!.query(
+          'INSERT INTO inventory.table_does_not_exist(id) VALUES ($1)',
+          [randomUUID()],
+        );
+        return;
+      }
+      await outboxRepo.markAsPublished(id, client);
     };
     const failed = await new OutboxPublisherService(
       database,
@@ -664,4 +933,25 @@ async function viWaitFor(
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw lastError ?? new Error('Timeout esperando condición de integración');
+}
+
+async function waitForContainer(
+  container: string,
+  command: string,
+): Promise<void> {
+  const started = Date.now();
+  let lastError: unknown;
+  while (Date.now() - started < 60_000) {
+    try {
+      execFileSync('docker', ['exec', container, ...command.split(' ')], {
+        stdio: 'ignore',
+        timeout: 5000,
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+  throw new Error(`Timeout esperando ${container}: ${String(lastError)}`);
 }

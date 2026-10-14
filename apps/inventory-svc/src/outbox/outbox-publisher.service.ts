@@ -17,6 +17,10 @@ export interface IMessageBrokerPublisher {
   ): Promise<boolean>;
 }
 
+const MAX_DISPATCH_BATCH_SIZE = 10;
+const BROKER_CONNECT_TIMEOUT_MS = 5000;
+const PUBLISH_CONFIRM_TIMEOUT_MS = 3000;
+
 @Injectable()
 export class OutboxPublisherService {
   private readonly logger = new Logger(OutboxPublisherService.name);
@@ -42,6 +46,10 @@ export class OutboxPublisherService {
     limit = 50,
   ): Promise<{ dispatched: number; failed: number; skipped: boolean }> {
     const config = loadInventoryConfig();
+    const batchSize = Math.min(
+      MAX_DISPATCH_BATCH_SIZE,
+      Math.max(1, Math.floor(Number.isFinite(limit) ? limit : 1)),
+    );
 
     if (!config.rabbitMqUrl && !this.customPublisher) {
       this.logger.debug(
@@ -56,7 +64,9 @@ export class OutboxPublisherService {
 
     try {
       if (!this.customPublisher && config.rabbitMqUrl) {
-        amqpConn = await amqp.connect(config.rabbitMqUrl, { timeout: 10000 });
+        amqpConn = await amqp.connect(config.rabbitMqUrl, {
+          timeout: BROKER_CONNECT_TIMEOUT_MS,
+        });
         confirmChannel = await amqpConn.createConfirmChannel();
 
         // Escuchar devoluciones cuando un mensaje obligatorio no encuentra cola en el exchange
@@ -79,7 +89,7 @@ export class OutboxPublisherService {
           pendingRows =
             await this.outboxRepository.findPendingForUpdateSkipLocked(
               txClient,
-              limit,
+              batchSize,
             );
         } catch (dbErr) {
           this.logger.warn(
@@ -138,42 +148,57 @@ export class OutboxPublisherService {
               }
             } else if (confirmChannel) {
               await new Promise<void>((resolve, reject) => {
-                const timeout = setTimeout(
-                  () =>
-                    reject(
-                      new Error(
-                        `Timeout esperando publisher confirm (${messageId})`,
-                      ),
+                let settled = false;
+                const timeout = setTimeout(() => {
+                  settled = true;
+                  void (confirmChannel as amqp.ConfirmChannel)
+                    .close()
+                    .catch(() => undefined);
+                  reject(
+                    new Error(
+                      `Timeout esperando publisher confirm (${messageId})`,
                     ),
-                  15000,
-                );
-                (confirmChannel as amqp.ConfirmChannel).publish(
-                  exchange,
-                  routingKey,
-                  content,
-                  {
-                    messageId,
-                    correlationId:
-                      payload.correlation_id || row.correlation_id || undefined,
-                    contentType: 'application/json',
-                    mandatory: true,
-                    persistent: true,
-                  },
-                  (err) => {
+                  );
+                }, PUBLISH_CONFIRM_TIMEOUT_MS);
+                try {
+                  (confirmChannel as amqp.ConfirmChannel).publish(
+                    exchange,
+                    routingKey,
+                    content,
+                    {
+                      messageId,
+                      correlationId:
+                        payload.correlation_id ||
+                        row.correlation_id ||
+                        undefined,
+                      contentType: 'application/json',
+                      mandatory: true,
+                      persistent: true,
+                    },
+                    (err) => {
+                      if (settled) return;
+                      settled = true;
+                      clearTimeout(timeout);
+                      if (err) {
+                        reject(err);
+                      } else if (returnedMessageIds.has(messageId)) {
+                        reject(
+                          new Error(
+                            `Mensaje ${messageId} devuelto por el broker: sin cola enlazada (basic.return)`,
+                          ),
+                        );
+                      } else {
+                        resolve();
+                      }
+                    },
+                  );
+                } catch (publishError) {
+                  if (!settled) {
+                    settled = true;
                     clearTimeout(timeout);
-                    if (err) {
-                      reject(err);
-                    } else if (returnedMessageIds.has(messageId)) {
-                      reject(
-                        new Error(
-                          `Mensaje ${messageId} devuelto por el broker: sin cola enlazada (basic.return)`,
-                        ),
-                      );
-                    } else {
-                      resolve();
-                    }
-                  },
-                );
+                    reject(publishError);
+                  }
+                }
               });
             }
             outcomes.push({ row, messageId });

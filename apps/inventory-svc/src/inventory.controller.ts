@@ -150,7 +150,7 @@ export class InventoryController {
 
   @Get('disponibilidad')
   @RequireScope(INVENTORY_SCOPES.DISPONIBILIDAD_LEER)
-  @AllowedClients([KNOWN_CLIENTS.VENTAS, KNOWN_CLIENTS.POSTVENTA])
+  @AllowedClients([KNOWN_CLIENTS.VENTAS])
   async consultarDisponibilidad(
     @Query('skus') skusQuery?: string | string[],
     @Query('location_id') locationId?: string,

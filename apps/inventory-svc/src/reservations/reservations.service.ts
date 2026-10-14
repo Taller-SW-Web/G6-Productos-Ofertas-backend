@@ -29,6 +29,47 @@ import type { ICommercialRoutesRepository } from '../repositories/interfaces/com
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function durableAcceptedReplay(
+  op: { result_payload?: unknown },
+  expected: {
+    operation_id: string;
+    order_id: string;
+    operation_type: OperacionInventarioAceptada['operation_type'];
+  },
+  correlationId: string,
+): OperacionInventarioAceptada {
+  let payload = op.result_payload;
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      throw ProblemDetailsException.idempotencyConflict(
+        'El resultado durable de la operación es inconsistente',
+        correlationId,
+      );
+    }
+  }
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    (payload as OperacionInventarioAceptada).status !== 'ACCEPTED' ||
+    (payload as OperacionInventarioAceptada).operation_id !==
+      expected.operation_id ||
+    (payload as OperacionInventarioAceptada).order_id !== expected.order_id ||
+    (payload as OperacionInventarioAceptada).operation_type !==
+      expected.operation_type ||
+    ((payload as OperacionInventarioAceptada).correlation_id !== null &&
+      typeof (payload as OperacionInventarioAceptada).correlation_id !==
+        'string')
+  ) {
+    throw ProblemDetailsException.idempotencyConflict(
+      'El resultado durable de la operación es inconsistente',
+      correlationId,
+    );
+  }
+  return payload as OperacionInventarioAceptada;
+}
+
 @Injectable()
 export class ReservationsService {
   private readonly logger = new Logger(ReservationsService.name);
@@ -120,13 +161,15 @@ export class ReservationsService {
         )
       ) {
         // Caso A (APLICADO) y Caso E (RECHAZADO): Replay durable idéntico sin nuevos efectos
-        return {
-          operation_id: dto.operation_id,
-          order_id: dto.order_id,
-          operation_type: 'RESERVAR',
-          status: 'ACCEPTED',
-          correlation_id: correlationId,
-        };
+        return durableAcceptedReplay(
+          op,
+          {
+            operation_id: dto.operation_id,
+            order_id: dto.order_id,
+            operation_type: 'RESERVAR',
+          },
+          correlationId,
+        );
       } else {
         // Caso C: Misma identidad con contenido distinto -> conflicto
         throw ProblemDetailsException.idempotencyConflict(
@@ -170,13 +213,15 @@ export class ReservationsService {
                 fingerprint,
               )
             ) {
-              return {
-                operation_id: dto.operation_id,
-                order_id: dto.order_id,
-                operation_type: 'RESERVAR',
-                status: 'ACCEPTED',
-                correlation_id: correlationId,
-              };
+              return durableAcceptedReplay(
+                concurrentReplay,
+                {
+                  operation_id: dto.operation_id,
+                  order_id: dto.order_id,
+                  operation_type: 'RESERVAR',
+                },
+                correlationId,
+              );
             }
             throw ProblemDetailsException.idempotencyConflict(
               'La operación o Idempotency-Key ya fue utilizada con otra intención o contenido.',
@@ -452,13 +497,15 @@ export class ReservationsService {
               fingerprint,
             )
           ) {
-            return {
-              operation_id: dto.operation_id,
-              order_id: dto.order_id,
-              operation_type: 'RESERVAR',
-              status: 'ACCEPTED',
-              correlation_id: correlationId,
-            };
+            return durableAcceptedReplay(
+              concurrentOp,
+              {
+                operation_id: dto.operation_id,
+                order_id: dto.order_id,
+                operation_type: 'RESERVAR',
+              },
+              correlationId,
+            );
           }
           throw ProblemDetailsException.idempotencyConflict(
             'Conflicto de concurrencia o idempotencia detectado',
@@ -564,13 +611,15 @@ export class ReservationsService {
           fingerprint,
         )
       ) {
-        return {
-          operation_id: dto.operation_id,
-          order_id: dto.order_id,
-          operation_type: 'CONFIRMAR_CONSUMO',
-          status: 'ACCEPTED',
-          correlation_id: correlationId,
-        };
+        return durableAcceptedReplay(
+          existingOp,
+          {
+            operation_id: dto.operation_id,
+            order_id: dto.order_id,
+            operation_type: 'CONFIRMAR_CONSUMO',
+          },
+          correlationId,
+        );
       } else {
         throw ProblemDetailsException.idempotencyConflict(
           'operation_id o Idempotency-Key ya fue utilizado con otra intención o contenido',
@@ -609,228 +658,291 @@ export class ReservationsService {
         correlationId,
       );
     }
-    if (
-      reservaPrevia.status === 'EXPIRADA' ||
-      new Date(reservaPrevia.expires_at) <= new Date()
-    ) {
-      if (reservaPrevia.status === 'ACTIVA') {
-        await this.expirarReservaDurable(
-          reservaPrevia.reservation_id,
-          dto.order_id,
-          correlationId,
-        );
-      }
+    if (reservaPrevia.status === 'EXPIRADA') {
       throw ProblemDetailsException.reservaExpirada(
         'La reserva está expirada',
         correlationId,
       );
     }
 
+    let expiredAfterLock = false;
     try {
-      return await this.databaseService.transaction<OperacionInventarioAceptada>(
-        async (client) => {
-          // Bloquear reserva
-          const reserva =
-            await this.reservationsRepo.findByReservationIdForUpdate(
+      const response =
+        await this.databaseService.transaction<OperacionInventarioAceptada>(
+          async (client) => {
+            await this.operationsRepo.lockIdempotencyKey(
               client,
-              reservaId,
+              idempotencyKey,
             );
+            const concurrentReplay =
+              await this.operationsRepo.findByOperationIdOrIdempotencyKey(
+                dto.operation_id,
+                idempotencyKey,
+                client,
+              );
+            if (concurrentReplay) {
+              if (
+                concurrentReplay.operation_id === dto.operation_id &&
+                concurrentReplay.idempotency_key === idempotencyKey &&
+                concurrentReplay.intention === 'confirmar_consumo' &&
+                concurrentReplay.client_id === verifiedClientId &&
+                this.idempotencyService.isMatchingFingerprint(
+                  concurrentReplay.request_fingerprint,
+                  fingerprint,
+                )
+              ) {
+                return durableAcceptedReplay(
+                  concurrentReplay,
+                  {
+                    operation_id: dto.operation_id,
+                    order_id: dto.order_id,
+                    operation_type: 'CONFIRMAR_CONSUMO',
+                  },
+                  correlationId,
+                );
+              }
+              throw ProblemDetailsException.idempotencyConflict(
+                'operation_id o Idempotency-Key ya fue utilizado con otra intención o contenido',
+                correlationId,
+              );
+            }
+            // Bloquear reserva
+            const reserva =
+              await this.reservationsRepo.findByReservationIdForUpdate(
+                client,
+                reservaId,
+              );
 
-          if (!reserva) {
-            throw ProblemDetailsException.reservaNoEncontrada(
-              'Reserva no encontrada',
-              correlationId,
-            );
-          }
+            if (!reserva) {
+              throw ProblemDetailsException.reservaNoEncontrada(
+                'Reserva no encontrada',
+                correlationId,
+              );
+            }
 
-          if (reserva.status !== 'ACTIVA') {
-            throw ProblemDetailsException.reservaNoActiva(
-              `La reserva no está activa (estado actual: ${reserva.status})`,
-              correlationId,
-            );
-          }
+            if (reserva.status !== 'ACTIVA') {
+              throw ProblemDetailsException.reservaNoActiva(
+                `La reserva no está activa (estado actual: ${reserva.status})`,
+                correlationId,
+              );
+            }
 
-          if (reserva.order_id !== dto.order_id) {
-            throw ProblemDetailsException.validation(
-              'order_id no coincide con la reserva',
-              correlationId,
-            );
-          }
+            if (reserva.order_id !== dto.order_id) {
+              throw ProblemDetailsException.validation(
+                'order_id no coincide con la reserva',
+                correlationId,
+              );
+            }
 
-          // Re-comprobar expires_at dentro de la transacción tras adquirir el bloqueo
-          const now = new Date();
-          const expiresAt = new Date(reserva.expires_at);
-          if (now.getTime() >= expiresAt.getTime()) {
-            throw ProblemDetailsException.reservaExpirada(
-              'La reserva ha expirado',
-              correlationId,
-            );
-          }
+            if (new Date(reserva.expires_at).getTime() <= Date.now()) {
+              await this.expirarReservaInterna(
+                client,
+                reserva.id,
+                reserva.reservation_id,
+                reserva.order_id || '',
+                reserva.correlation_id || correlationId,
+              );
+              const expired = await this.reservationsRepo.updateStatus(
+                client,
+                reserva.id,
+                'EXPIRADA',
+              );
+              if (expired !== 1) {
+                throw new Error(
+                  `Inconsistencia: transición a EXPIRADA afectó ${expired} filas`,
+                );
+              }
+              expiredAfterLock = true;
+              return {
+                operation_id: dto.operation_id,
+                order_id: reserva.order_id || dto.order_id,
+                operation_type: 'CONFIRMAR_CONSUMO',
+                status: 'ACCEPTED',
+                correlation_id: correlationId,
+              };
+            }
 
-          // Transición a CONSUMIDA
-          const statusUpdated = await this.reservationsRepo.updateStatus(
-            client,
-            reserva.id,
-            'CONSUMIDA',
-          );
-          if (statusUpdated !== 1) {
-            throw new Error(
-              `Inconsistencia: actualización de reserva afectó ${statusUpdated} filas`,
-            );
-          }
+            // Re-comprobar expires_at dentro de la transacción tras adquirir el bloqueo
+            const now = new Date();
+            const expiresAt = new Date(reserva.expires_at);
+            if (now.getTime() >= expiresAt.getTime()) {
+              throw ProblemDetailsException.reservaExpirada(
+                'La reserva ha expirado',
+                correlationId,
+              );
+            }
 
-          // Cargar líneas de reserva
-          const lines = (
-            await this.reservationsRepo.findLinesByReservationPk(
+            // Transición a CONSUMIDA
+            const statusUpdated = await this.reservationsRepo.updateStatus(
               client,
               reserva.id,
-            )
-          ).sort(
-            (a, b) =>
-              a.sku_id.localeCompare(b.sku_id) ||
-              a.location_id.localeCompare(b.location_id),
-          );
+              'CONSUMIDA',
+            );
+            if (statusUpdated !== 1) {
+              throw new Error(
+                `Inconsistencia: actualización de reserva afectó ${statusUpdated} filas`,
+              );
+            }
 
-          for (const line of lines) {
-            const qty = Number(line.quantity);
+            // Cargar líneas de reserva
+            const lines = (
+              await this.reservationsRepo.findLinesByReservationPk(
+                client,
+                reserva.id,
+              )
+            ).sort(
+              (a, b) =>
+                a.sku_id.localeCompare(b.sku_id) ||
+                a.location_id.localeCompare(b.location_id),
+            );
 
-            const bal =
-              await this.stockBalanceRepo.findBySkuAndLocationForUpdate(
+            for (const line of lines) {
+              const qty = Number(line.quantity);
+
+              const bal =
+                await this.stockBalanceRepo.findBySkuAndLocationForUpdate(
+                  client,
+                  line.sku_id,
+                  line.location_id,
+                );
+
+              if (!bal) {
+                throw ProblemDetailsException.reservaNoActiva(
+                  `Saldo de stock no encontrado para SKU ${line.sku_id}`,
+                  correlationId,
+                );
+              }
+
+              const onHand = Number(bal.on_hand);
+              const reserved = Number(bal.reserved);
+              const blocked = Number(bal.blocked);
+
+              if (onHand < qty || reserved < qty) {
+                throw ProblemDetailsException.reservaNoActiva(
+                  `Inconsistencia en stock: unidades insuficientes para confirmar SKU ${line.sku_id}`,
+                  correlationId,
+                );
+              }
+
+              const newOnHand = onHand - qty;
+              const newReserved = reserved - qty;
+              const newVersion = Number(bal.stock_version) + 1;
+
+              const updatedCount = await this.stockBalanceRepo.updateStock(
                 client,
                 line.sku_id,
                 line.location_id,
+                {
+                  on_hand: newOnHand,
+                  reserved: newReserved,
+                  stock_version: newVersion,
+                },
               );
 
-            if (!bal) {
-              throw ProblemDetailsException.reservaNoActiva(
-                `Saldo de stock no encontrado para SKU ${line.sku_id}`,
-                correlationId,
-              );
-            }
+              if (updatedCount !== 1) {
+                throw new Error(
+                  `Fallo al actualizar saldo para SKU ${line.sku_id}`,
+                );
+              }
 
-            const onHand = Number(bal.on_hand);
-            const reserved = Number(bal.reserved);
-            const blocked = Number(bal.blocked);
-
-            if (onHand < qty || reserved < qty) {
-              throw ProblemDetailsException.reservaNoActiva(
-                `Inconsistencia en stock: unidades insuficientes para confirmar SKU ${line.sku_id}`,
-                correlationId,
-              );
-            }
-
-            const newOnHand = onHand - qty;
-            const newReserved = reserved - qty;
-            const newVersion = Number(bal.stock_version) + 1;
-
-            const updatedCount = await this.stockBalanceRepo.updateStock(
-              client,
-              line.sku_id,
-              line.location_id,
-              {
-                on_hand: newOnHand,
-                reserved: newReserved,
+              // Kardex de consumo definitivo
+              await this.kardexService.recordMovement(client, {
+                sku_id: line.sku_id,
+                location_id: line.location_id,
+                operation_type: 'CONSUMO',
+                operation_id: dto.operation_id,
+                reservation_id: reservaId,
+                quantity: -qty,
+                on_hand_before: onHand,
+                on_hand_after: newOnHand,
+                reserved_before: reserved,
+                reserved_after: newReserved,
+                blocked_before: blocked,
+                blocked_after: blocked,
                 stock_version: newVersion,
-              },
-            );
-
-            if (updatedCount !== 1) {
-              throw new Error(
-                `Fallo al actualizar saldo para SKU ${line.sku_id}`,
-              );
+                correlation_id: correlationId,
+              });
             }
 
-            // Kardex de consumo definitivo
-            await this.kardexService.recordMovement(client, {
-              sku_id: line.sku_id,
-              location_id: line.location_id,
-              operation_type: 'CONSUMO',
+            const acceptedResponse: OperacionInventarioAceptada = {
               operation_id: dto.operation_id,
+              order_id: dto.order_id,
+              operation_type: 'CONFIRMAR_CONSUMO',
+              status: 'ACCEPTED',
+              correlation_id: correlationId,
+            };
+
+            // Registro durable de operación
+            await this.operationsRepo.create(client, {
+              operation_type: 'CONSUMO',
+              idempotency_key: idempotencyKey,
+              intention: 'confirmar_consumo',
+              status: 'APLICADO',
+              order_id: dto.order_id,
               reservation_id: reservaId,
-              quantity: -qty,
-              on_hand_before: onHand,
-              on_hand_after: newOnHand,
-              reserved_before: reserved,
-              reserved_after: newReserved,
-              blocked_before: blocked,
-              blocked_after: blocked,
-              stock_version: newVersion,
+              operation_id: dto.operation_id,
+              client_id: verifiedClientId,
+              request_fingerprint: fingerprint,
+              request_payload: JSON.stringify(dto),
+              result_payload: JSON.stringify(acceptedResponse),
               correlation_id: correlationId,
             });
-          }
 
-          const acceptedResponse: OperacionInventarioAceptada = {
-            operation_id: dto.operation_id,
-            order_id: dto.order_id,
-            operation_type: 'CONFIRMAR_CONSUMO',
-            status: 'ACCEPTED',
-            correlation_id: correlationId,
-          };
+            // Outbox: inventory.reservation.consumed & inventory.consumption.completed
+            const consumedEvent = this.outboxService.createMessageEnvelope({
+              eventName: 'inventory.reservation.consumed',
+              kind: 'event',
+              operationId: dto.operation_id,
+              correlationId,
+              data: {
+                order_id: dto.order_id,
+                reservation_id: reservaId,
+                decided_at: new Date().toISOString(),
+                reason_code: null,
+              },
+            });
 
-          // Registro durable de operación
-          await this.operationsRepo.create(client, {
-            operation_type: 'CONSUMO',
-            idempotency_key: idempotencyKey,
-            intention: 'confirmar_consumo',
-            status: 'APLICADO',
-            order_id: dto.order_id,
-            reservation_id: reservaId,
-            operation_id: dto.operation_id,
-            client_id: verifiedClientId,
-            request_fingerprint: fingerprint,
-            request_payload: JSON.stringify(dto),
-            result_payload: JSON.stringify(acceptedResponse),
-            correlation_id: correlationId,
-          });
+            await this.outboxService.enqueue(client, {
+              event_id: randomUUID(),
+              event_type: 'inventory.reservation.consumed',
+              aggregate_type: 'reservation',
+              aggregate_id: reservaId,
+              correlation_id: correlationId,
+              payload: consumedEvent,
+            });
 
-          // Outbox: inventory.reservation.consumed & inventory.consumption.completed
-          const consumedEvent = this.outboxService.createMessageEnvelope({
-            eventName: 'inventory.reservation.consumed',
-            kind: 'event',
-            operationId: dto.operation_id,
-            correlationId,
-            data: {
-              order_id: dto.order_id,
-              reservation_id: reservaId,
-              decided_at: new Date().toISOString(),
-              reason_code: null,
-            },
-          });
+            const completedResult = this.outboxService.createMessageEnvelope({
+              eventName: 'inventory.consumption.completed',
+              kind: 'result',
+              operationId: dto.operation_id,
+              correlationId,
+              data: {
+                order_id: dto.order_id,
+                reservation_id: reservaId,
+                decided_at: new Date().toISOString(),
+                result_code: null,
+              },
+            });
 
-          await this.outboxService.enqueue(client, {
-            event_id: randomUUID(),
-            event_type: 'inventory.reservation.consumed',
-            aggregate_type: 'reservation',
-            aggregate_id: reservaId,
-            correlation_id: correlationId,
-            payload: consumedEvent,
-          });
+            await this.outboxService.enqueue(client, {
+              event_id: randomUUID(),
+              event_type: 'inventory.consumption.completed',
+              aggregate_type: 'reservation',
+              aggregate_id: reservaId,
+              correlation_id: correlationId,
+              payload: completedResult,
+            });
 
-          const completedResult = this.outboxService.createMessageEnvelope({
-            eventName: 'inventory.consumption.completed',
-            kind: 'result',
-            operationId: dto.operation_id,
-            correlationId,
-            data: {
-              order_id: dto.order_id,
-              reservation_id: reservaId,
-              decided_at: new Date().toISOString(),
-              result_code: null,
-            },
-          });
-
-          await this.outboxService.enqueue(client, {
-            event_id: randomUUID(),
-            event_type: 'inventory.consumption.completed',
-            aggregate_type: 'reservation',
-            aggregate_id: reservaId,
-            correlation_id: correlationId,
-            payload: completedResult,
-          });
-
-          return acceptedResponse;
-        },
-      );
+            return acceptedResponse;
+          },
+        );
+      if (expiredAfterLock) {
+        throw ProblemDetailsException.reservaExpirada(
+          'La reserva está expirada',
+          correlationId,
+        );
+      }
+      return response;
     } catch (err: any) {
       if (
         err?.code === '23505' ||
@@ -854,13 +966,15 @@ export class ReservationsService {
               fingerprint,
             )
           ) {
-            return {
-              operation_id: dto.operation_id,
-              order_id: dto.order_id,
-              operation_type: 'CONFIRMAR_CONSUMO',
-              status: 'ACCEPTED',
-              correlation_id: correlationId,
-            };
+            return durableAcceptedReplay(
+              concurrentOp,
+              {
+                operation_id: dto.operation_id,
+                order_id: dto.order_id,
+                operation_type: 'CONFIRMAR_CONSUMO',
+              },
+              correlationId,
+            );
           }
           throw ProblemDetailsException.idempotencyConflict(
             'Conflicto de concurrencia o idempotencia detectado',
@@ -979,13 +1093,15 @@ export class ReservationsService {
           fingerprint,
         )
       ) {
-        return {
-          operation_id: dto.operation_id,
-          order_id: dto.order_id,
-          operation_type: 'LIBERAR',
-          status: 'ACCEPTED',
-          correlation_id: correlationId,
-        };
+        return durableAcceptedReplay(
+          existingOp,
+          {
+            operation_id: dto.operation_id,
+            order_id: dto.order_id,
+            operation_type: 'LIBERAR',
+          },
+          correlationId,
+        );
       } else {
         throw ProblemDetailsException.idempotencyConflict(
           'operation_id o Idempotency-Key ya fue utilizado con otra intención o contenido',
@@ -1042,177 +1158,250 @@ export class ReservationsService {
       );
     }
 
+    let expiredAfterLockRelease = false;
     try {
-      return await this.databaseService.transaction<OperacionInventarioAceptada>(
-        async (client) => {
-          // Bloquear reserva
-          const reserva =
-            await this.reservationsRepo.findByReservationIdForUpdate(
+      const response =
+        await this.databaseService.transaction<OperacionInventarioAceptada>(
+          async (client) => {
+            await this.operationsRepo.lockIdempotencyKey(
               client,
-              reservaId,
+              idempotencyKey,
             );
+            const concurrentReplay =
+              await this.operationsRepo.findByOperationIdOrIdempotencyKey(
+                dto.operation_id,
+                idempotencyKey,
+                client,
+              );
+            if (concurrentReplay) {
+              if (
+                concurrentReplay.operation_id === dto.operation_id &&
+                concurrentReplay.idempotency_key === idempotencyKey &&
+                concurrentReplay.intention === 'liberar_reserva' &&
+                concurrentReplay.client_id === verifiedClientId &&
+                this.idempotencyService.isMatchingFingerprint(
+                  concurrentReplay.request_fingerprint,
+                  fingerprint,
+                )
+              ) {
+                return durableAcceptedReplay(
+                  concurrentReplay,
+                  {
+                    operation_id: dto.operation_id,
+                    order_id: dto.order_id,
+                    operation_type: 'LIBERAR',
+                  },
+                  correlationId,
+                );
+              }
+              throw ProblemDetailsException.idempotencyConflict(
+                'operation_id o Idempotency-Key ya fue utilizado con otra intención o contenido',
+                correlationId,
+              );
+            }
+            // Bloquear reserva
+            const reserva =
+              await this.reservationsRepo.findByReservationIdForUpdate(
+                client,
+                reservaId,
+              );
 
-          if (!reserva) {
-            throw ProblemDetailsException.reservaNoEncontrada(
-              'Reserva no encontrada',
-              correlationId,
-            );
-          }
+            if (!reserva) {
+              throw ProblemDetailsException.reservaNoEncontrada(
+                'Reserva no encontrada',
+                correlationId,
+              );
+            }
 
-          if (reserva.status !== 'ACTIVA') {
-            throw ProblemDetailsException.reservaNoActiva(
-              `No es posible liberar una reserva en estado ${reserva.status}`,
-              correlationId,
-            );
-          }
+            if (reserva.status !== 'ACTIVA') {
+              throw ProblemDetailsException.reservaNoActiva(
+                `No es posible liberar una reserva en estado ${reserva.status}`,
+                correlationId,
+              );
+            }
 
-          if (reserva.order_id !== dto.order_id) {
-            throw ProblemDetailsException.validation(
-              'order_id no coincide con la reserva',
-              correlationId,
-            );
-          }
+            if (reserva.order_id !== dto.order_id) {
+              throw ProblemDetailsException.validation(
+                'order_id no coincide con la reserva',
+                correlationId,
+              );
+            }
 
-          // Transición a LIBERADA
-          const statusUpdated = await this.reservationsRepo.updateStatus(
-            client,
-            reserva.id,
-            'LIBERADA',
-          );
-          if (statusUpdated !== 1) {
-            throw new Error(
-              `Inconsistencia: actualización de reserva afectó ${statusUpdated} filas`,
-            );
-          }
+            if (new Date(reserva.expires_at).getTime() <= Date.now()) {
+              await this.expirarReservaInterna(
+                client,
+                reserva.id,
+                reserva.reservation_id,
+                reserva.order_id || '',
+                reserva.correlation_id || correlationId,
+              );
+              const expired = await this.reservationsRepo.updateStatus(
+                client,
+                reserva.id,
+                'EXPIRADA',
+              );
+              if (expired !== 1) {
+                throw new Error(
+                  `Inconsistencia: transición a EXPIRADA afectó ${expired} filas`,
+                );
+              }
+              expiredAfterLockRelease = true;
+              return {
+                operation_id: dto.operation_id,
+                order_id: reserva.order_id || dto.order_id,
+                operation_type: 'LIBERAR',
+                status: 'ACCEPTED',
+                correlation_id: correlationId,
+              };
+            }
 
-          // Cargar líneas y revertir reserved en stock_balance
-          const lines = (
-            await this.reservationsRepo.findLinesByReservationPk(
+            // Transición a LIBERADA
+            const statusUpdated = await this.reservationsRepo.updateStatus(
               client,
               reserva.id,
-            )
-          ).sort(
-            (a, b) =>
-              a.sku_id.localeCompare(b.sku_id) ||
-              a.location_id.localeCompare(b.location_id),
-          );
+              'LIBERADA',
+            );
+            if (statusUpdated !== 1) {
+              throw new Error(
+                `Inconsistencia: actualización de reserva afectó ${statusUpdated} filas`,
+              );
+            }
 
-          for (const line of lines) {
-            const qty = Number(line.quantity);
+            // Cargar líneas y revertir reserved en stock_balance
+            const lines = (
+              await this.reservationsRepo.findLinesByReservationPk(
+                client,
+                reserva.id,
+              )
+            ).sort(
+              (a, b) =>
+                a.sku_id.localeCompare(b.sku_id) ||
+                a.location_id.localeCompare(b.location_id),
+            );
 
-            const bal =
-              await this.stockBalanceRepo.findBySkuAndLocationForUpdate(
+            for (const line of lines) {
+              const qty = Number(line.quantity);
+
+              const bal =
+                await this.stockBalanceRepo.findBySkuAndLocationForUpdate(
+                  client,
+                  line.sku_id,
+                  line.location_id,
+                );
+
+              if (!bal) {
+                throw ProblemDetailsException.reservaNoActiva(
+                  `Saldo de stock no encontrado para SKU ${line.sku_id}`,
+                  correlationId,
+                );
+              }
+
+              const onHand = Number(bal.on_hand);
+              const reserved = Number(bal.reserved);
+              const blocked = Number(bal.blocked);
+
+              if (reserved < qty) {
+                throw ProblemDetailsException.reservaNoActiva(
+                  `Saldo reservado insuficiente para liberar SKU ${line.sku_id}`,
+                  correlationId,
+                );
+              }
+
+              const newReserved = reserved - qty;
+              const newVersion = Number(bal.stock_version) + 1;
+
+              const updatedCount = await this.stockBalanceRepo.updateStock(
                 client,
                 line.sku_id,
                 line.location_id,
+                {
+                  reserved: newReserved,
+                  stock_version: newVersion,
+                },
               );
 
-            if (!bal) {
-              throw ProblemDetailsException.reservaNoActiva(
-                `Saldo de stock no encontrado para SKU ${line.sku_id}`,
-                correlationId,
-              );
-            }
+              if (updatedCount !== 1) {
+                throw new Error(
+                  `Fallo al actualizar saldo para SKU ${line.sku_id}`,
+                );
+              }
 
-            const onHand = Number(bal.on_hand);
-            const reserved = Number(bal.reserved);
-            const blocked = Number(bal.blocked);
-
-            if (reserved < qty) {
-              throw ProblemDetailsException.reservaNoActiva(
-                `Saldo reservado insuficiente para liberar SKU ${line.sku_id}`,
-                correlationId,
-              );
-            }
-
-            const newReserved = reserved - qty;
-            const newVersion = Number(bal.stock_version) + 1;
-
-            const updatedCount = await this.stockBalanceRepo.updateStock(
-              client,
-              line.sku_id,
-              line.location_id,
-              {
-                reserved: newReserved,
+              // Kardex de liberación
+              await this.kardexService.recordMovement(client, {
+                sku_id: line.sku_id,
+                location_id: line.location_id,
+                operation_type: 'LIBERACION',
+                operation_id: dto.operation_id,
+                reservation_id: reservaId,
+                quantity: -qty,
+                on_hand_before: onHand,
+                on_hand_after: onHand,
+                reserved_before: reserved,
+                reserved_after: newReserved,
+                blocked_before: blocked,
+                blocked_after: blocked,
                 stock_version: newVersion,
-              },
-            );
-
-            if (updatedCount !== 1) {
-              throw new Error(
-                `Fallo al actualizar saldo para SKU ${line.sku_id}`,
-              );
+                correlation_id: correlationId,
+              });
             }
 
-            // Kardex de liberación
-            await this.kardexService.recordMovement(client, {
-              sku_id: line.sku_id,
-              location_id: line.location_id,
-              operation_type: 'LIBERACION',
+            const acceptedResponse: OperacionInventarioAceptada = {
               operation_id: dto.operation_id,
-              reservation_id: reservaId,
-              quantity: -qty,
-              on_hand_before: onHand,
-              on_hand_after: onHand,
-              reserved_before: reserved,
-              reserved_after: newReserved,
-              blocked_before: blocked,
-              blocked_after: blocked,
-              stock_version: newVersion,
+              order_id: dto.order_id,
+              operation_type: 'LIBERAR',
+              status: 'ACCEPTED',
               correlation_id: correlationId,
-            });
-          }
+            };
 
-          const acceptedResponse: OperacionInventarioAceptada = {
-            operation_id: dto.operation_id,
-            order_id: dto.order_id,
-            operation_type: 'LIBERAR',
-            status: 'ACCEPTED',
-            correlation_id: correlationId,
-          };
-
-          // Registro durable de operación
-          await this.operationsRepo.create(client, {
-            operation_type: 'LIBERACION',
-            idempotency_key: idempotencyKey,
-            intention: 'liberar_reserva',
-            status: 'APLICADO',
-            order_id: dto.order_id,
-            reservation_id: reservaId,
-            operation_id: dto.operation_id,
-            client_id: verifiedClientId,
-            request_fingerprint: fingerprint,
-            request_payload: JSON.stringify(dto),
-            result_payload: JSON.stringify(acceptedResponse),
-            correlation_id: correlationId,
-          });
-
-          // Outbox: inventory.reservation.released
-          const releasedEvent = this.outboxService.createMessageEnvelope({
-            eventName: 'inventory.reservation.released',
-            kind: 'event',
-            operationId: dto.operation_id,
-            correlationId,
-            data: {
+            // Registro durable de operación
+            await this.operationsRepo.create(client, {
+              operation_type: 'LIBERACION',
+              idempotency_key: idempotencyKey,
+              intention: 'liberar_reserva',
+              status: 'APLICADO',
               order_id: dto.order_id,
               reservation_id: reservaId,
-              decided_at: new Date().toISOString(),
-              reason_code: dto.reason,
-            },
-          });
+              operation_id: dto.operation_id,
+              client_id: verifiedClientId,
+              request_fingerprint: fingerprint,
+              request_payload: JSON.stringify(dto),
+              result_payload: JSON.stringify(acceptedResponse),
+              correlation_id: correlationId,
+            });
 
-          await this.outboxService.enqueue(client, {
-            event_id: randomUUID(),
-            event_type: 'inventory.reservation.released',
-            aggregate_type: 'reservation',
-            aggregate_id: reservaId,
-            correlation_id: correlationId,
-            payload: releasedEvent,
-          });
+            // Outbox: inventory.reservation.released
+            const releasedEvent = this.outboxService.createMessageEnvelope({
+              eventName: 'inventory.reservation.released',
+              kind: 'event',
+              operationId: dto.operation_id,
+              correlationId,
+              data: {
+                order_id: dto.order_id,
+                reservation_id: reservaId,
+                decided_at: new Date().toISOString(),
+                reason_code: dto.reason,
+              },
+            });
 
-          return acceptedResponse;
-        },
-      );
+            await this.outboxService.enqueue(client, {
+              event_id: randomUUID(),
+              event_type: 'inventory.reservation.released',
+              aggregate_type: 'reservation',
+              aggregate_id: reservaId,
+              correlation_id: correlationId,
+              payload: releasedEvent,
+            });
+
+            return acceptedResponse;
+          },
+        );
+      if (expiredAfterLockRelease) {
+        throw ProblemDetailsException.reservaExpirada(
+          'La reserva está expirada',
+          correlationId,
+        );
+      }
+      return response;
     } catch (err: any) {
       if (
         err?.code === '23505' ||
@@ -1236,13 +1425,15 @@ export class ReservationsService {
               fingerprint,
             )
           ) {
-            return {
-              operation_id: dto.operation_id,
-              order_id: dto.order_id,
-              operation_type: 'LIBERAR',
-              status: 'ACCEPTED',
-              correlation_id: correlationId,
-            };
+            return durableAcceptedReplay(
+              concurrentOp,
+              {
+                operation_id: dto.operation_id,
+                order_id: dto.order_id,
+                operation_type: 'LIBERAR',
+              },
+              correlationId,
+            );
           }
           throw ProblemDetailsException.idempotencyConflict(
             'Conflicto de concurrencia o idempotencia detectado',
@@ -1417,9 +1608,12 @@ export class ReservationsService {
     resultCode: string,
     clientId?: string,
   ): Promise<OperacionInventarioAceptada> {
-    const rejectedPayload = {
-      status: 'REJECTED',
-      result_code: resultCode,
+    const acceptedResponse: OperacionInventarioAceptada = {
+      status: 'ACCEPTED',
+      operation_id: dto.operation_id,
+      order_id: dto.order_id,
+      operation_type: 'RESERVAR',
+      correlation_id: correlationId,
     };
 
     await this.operationsRepo.create(client, {
@@ -1433,7 +1627,9 @@ export class ReservationsService {
       client_id: clientId,
       request_fingerprint: fingerprint,
       request_payload: JSON.stringify(dto),
-      result_payload: JSON.stringify(rejectedPayload),
+      // El comando HTTP queda aceptado (202); el rechazo de negocio durable
+      // se expresa en status/result_code y en el evento de resultado.
+      result_payload: JSON.stringify(acceptedResponse),
       correlation_id: correlationId,
     });
 
@@ -1460,13 +1656,7 @@ export class ReservationsService {
 
     // Se responde 202 Accepted indicando que el comando fue recibido
     // (el rechazo definitivo de negocio queda en inventory_operations y AsyncAPI)
-    return {
-      operation_id: dto.operation_id,
-      order_id: dto.order_id,
-      operation_type: 'RESERVAR',
-      status: 'ACCEPTED',
-      correlation_id: correlationId,
-    };
+    return acceptedResponse;
   }
 
   private async resolverUbicaciones(

@@ -446,7 +446,7 @@ describe('ReservationsService — Concurrencia, Idempotencia y Saldos', () => {
       }
     });
 
-    it('Caso E: reintento idéntico de operación rechazada reproduce el rechazo durable sin reevaluar stock ni Outbox nuevo', async () => {
+    it('Caso E: reintento idéntico reproduce el ACK durable del comando rechazado sin reevaluar stock ni crear Outbox nuevo', async () => {
       const sku = 'PUM-LIMIT-01'; // Solo tiene 2
       const opId = randomUUID();
       const payload = {
@@ -477,6 +477,7 @@ describe('ReservationsService — Concurrencia, Idempotencia y Saldos', () => {
       );
       expect(res2.status).toBe('ACCEPTED');
       expect(res2.operation_id).toBe(opId);
+      expect(res2).toEqual(res1);
 
       const rejectedOutboxCount2 = mockDb.outbox.filter(
         (o) => o.event_type === 'inventory.reservation.rejected',
