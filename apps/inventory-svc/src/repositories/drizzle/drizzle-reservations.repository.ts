@@ -256,11 +256,12 @@ export class DrizzleReservationsRepository implements IReservationsRepository {
       if (status === 'LIBERADA') setObj.released_at = new Date();
       if (status === 'EXPIRADA') setObj.expired_at = new Date();
 
-      await db
+      const updated = await db
         .update(schema.reservations)
         .set(setObj)
-        .where(eq(schema.reservations.id, reservationPk));
-      return 1;
+        .where(eq(schema.reservations.id, reservationPk))
+        .returning({ id: schema.reservations.id });
+      return updated.length;
     }
 
     let dateField = 'consumed_at';

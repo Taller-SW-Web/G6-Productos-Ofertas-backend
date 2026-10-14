@@ -25,6 +25,11 @@ export interface OperationEntity {
 }
 
 export interface IOperationsRepository {
+  lockIdempotencyKey(
+    client: IDatabaseClient,
+    idempotencyKey: string,
+  ): Promise<void>;
+
   findByOperationIdOrIdempotencyKey(
     operationId: string,
     idempotencyKey: string,

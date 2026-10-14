@@ -12,6 +12,16 @@ import {
 export class DrizzleOperationsRepository implements IOperationsRepository {
   constructor(private readonly databaseService: DatabaseService) {}
 
+  async lockIdempotencyKey(
+    client: IDatabaseClient,
+    idempotencyKey: string,
+  ): Promise<void> {
+    await client.query(
+      'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+      [idempotencyKey],
+    );
+  }
+
   async findByOperationIdOrIdempotencyKey(
     operationId: string,
     idempotencyKey: string,

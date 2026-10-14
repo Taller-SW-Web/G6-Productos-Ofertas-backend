@@ -62,7 +62,7 @@ export class DrizzleStockBalanceRepository implements IStockBalanceRepository {
       if (values.blocked !== undefined) setObj.blocked = values.blocked;
 
       // Columna 'available' es GENERATED ALWAYS AS en la base física, NO se incluye en set
-      await db
+      const updated = await db
         .update(schema.stockBalance)
         .set(setObj)
         .where(
@@ -70,8 +70,9 @@ export class DrizzleStockBalanceRepository implements IStockBalanceRepository {
             eq(schema.stockBalance.sku_id, sku),
             eq(schema.stockBalance.location_id, locationId),
           ),
-        );
-      return 1;
+        )
+        .returning({ sku_id: schema.stockBalance.sku_id });
+      return updated.length;
     }
 
     if (values.on_hand !== undefined && values.reserved !== undefined) {

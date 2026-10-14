@@ -57,6 +57,42 @@ describe('ReservationsService — Ciclo Completo G5 (Confirmación y Liberación
   });
 
   describe('Confirmación de reserva (POST /api/v1/inventario/reservas/{reservaId}/confirmar)', () => {
+    it('rechaza un order_id distinto antes de cambiar saldo, estado, Kardex u Outbox', async () => {
+      const orderId = 'PED-CONFIRM-IDENTITY';
+      const operationId = randomUUID();
+      await reservationsService.solicitarReserva(
+        {
+          order_id: orderId,
+          operation_id: operationId,
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 2, location_id: locLurin }],
+        },
+        undefined,
+        operationId,
+      );
+      const reservation = mockDb.reservations[0];
+      const before = mockDb.stockBalance.find(
+        (row) => row.sku_id === sku && row.location_id === locLurin,
+      )!;
+      const stockBefore = { ...before };
+      const kardexCount = mockDb.kardex.length;
+      const outboxCount = mockDb.outbox.length;
+
+      await expect(
+        reservationsService.confirmarReserva(
+          reservation.reservation_id,
+          { order_id: 'PED-OTRO', operation_id: randomUUID() },
+          undefined,
+          randomUUID(),
+        ),
+      ).rejects.toBeInstanceOf(ProblemDetailsException);
+
+      expect(reservation.status).toBe('ACTIVA');
+      expect(before).toEqual(stockBefore);
+      expect(mockDb.kardex).toHaveLength(kardexCount);
+      expect(mockDb.outbox).toHaveLength(outboxCount);
+    });
+
     it('debe confirmar consumo definitivo, descontar on_hand y reserved, y generar kardex/outbox', async () => {
       // 1. Crear reserva
       const orderId = 'PED-CONFIRM-01';
@@ -265,6 +301,46 @@ describe('ReservationsService — Ciclo Completo G5 (Confirmación y Liberación
   });
 
   describe('Liberación de reserva (POST /api/v1/inventario/reservas/{reservaId}/liberar)', () => {
+    it('rechaza un order_id distinto antes de cambiar saldo, estado, Kardex u Outbox', async () => {
+      const orderId = 'PED-RELEASE-IDENTITY';
+      const operationId = randomUUID();
+      await reservationsService.solicitarReserva(
+        {
+          order_id: orderId,
+          operation_id: operationId,
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 2, location_id: locLurin }],
+        },
+        undefined,
+        operationId,
+      );
+      const reservation = mockDb.reservations[0];
+      const before = mockDb.stockBalance.find(
+        (row) => row.sku_id === sku && row.location_id === locLurin,
+      )!;
+      const stockBefore = { ...before };
+      const kardexCount = mockDb.kardex.length;
+      const outboxCount = mockDb.outbox.length;
+
+      await expect(
+        reservationsService.liberarReserva(
+          reservation.reservation_id,
+          {
+            order_id: 'PED-OTRO',
+            operation_id: randomUUID(),
+            reason: 'ANULACION',
+          },
+          undefined,
+          randomUUID(),
+        ),
+      ).rejects.toBeInstanceOf(ProblemDetailsException);
+
+      expect(reservation.status).toBe('ACTIVA');
+      expect(before).toEqual(stockBefore);
+      expect(mockDb.kardex).toHaveLength(kardexCount);
+      expect(mockDb.outbox).toHaveLength(outboxCount);
+    });
+
     it('debe liberar reserva activa, restaurar stock reservado sin mutar on_hand, y emitir eventos', async () => {
       // 1. Crear reserva
       const orderId = 'PED-RELEASE-01';
