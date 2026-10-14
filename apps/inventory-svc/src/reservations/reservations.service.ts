@@ -110,7 +110,10 @@ export class ReservationsService {
       }
 
       if (
-        (verifiedClientId === undefined || op.client_id === verifiedClientId) &&
+        op.intention === 'reservar' &&
+        ((verifiedClientId !== undefined &&
+          op.client_id === verifiedClientId) ||
+          (verifiedClientId === undefined && !op.client_id)) &&
         this.idempotencyService.isMatchingFingerprint(
           op.request_fingerprint,
           fingerprint,
@@ -157,7 +160,11 @@ export class ReservationsService {
             if (
               concurrentReplay.operation_id === dto.operation_id &&
               concurrentReplay.idempotency_key === idempotencyKey &&
-              concurrentReplay.client_id === verifiedClientId &&
+              concurrentReplay.intention === 'reservar' &&
+              ((verifiedClientId !== undefined &&
+                concurrentReplay.client_id === verifiedClientId) ||
+                (verifiedClientId === undefined &&
+                  !concurrentReplay.client_id)) &&
               this.idempotencyService.isMatchingFingerprint(
                 concurrentReplay.request_fingerprint,
                 fingerprint,
@@ -438,6 +445,8 @@ export class ReservationsService {
           if (
             concurrentOp.operation_id === dto.operation_id &&
             concurrentOp.idempotency_key === idempotencyKey &&
+            concurrentOp.intention === 'reservar' &&
+            concurrentOp.client_id === verifiedClientId &&
             this.idempotencyService.isMatchingFingerprint(
               concurrentOp.request_fingerprint,
               fingerprint,
@@ -546,8 +555,10 @@ export class ReservationsService {
         );
       }
       if (
-        (verifiedClientId === undefined ||
-          existingOp.client_id === verifiedClientId) &&
+        existingOp.intention === 'confirmar_consumo' &&
+        ((verifiedClientId !== undefined &&
+          existingOp.client_id === verifiedClientId) ||
+          (verifiedClientId === undefined && !existingOp.client_id)) &&
         this.idempotencyService.isMatchingFingerprint(
           existingOp.request_fingerprint,
           fingerprint,
@@ -836,6 +847,8 @@ export class ReservationsService {
           if (
             concurrentOp.operation_id === dto.operation_id &&
             concurrentOp.idempotency_key === idempotencyKey &&
+            concurrentOp.intention === 'confirmar_consumo' &&
+            concurrentOp.client_id === verifiedClientId &&
             this.idempotencyService.isMatchingFingerprint(
               concurrentOp.request_fingerprint,
               fingerprint,
@@ -957,8 +970,10 @@ export class ReservationsService {
         );
       }
       if (
-        (verifiedClientId === undefined ||
-          existingOp.client_id === verifiedClientId) &&
+        existingOp.intention === 'liberar_reserva' &&
+        ((verifiedClientId !== undefined &&
+          existingOp.client_id === verifiedClientId) ||
+          (verifiedClientId === undefined && !existingOp.client_id)) &&
         this.idempotencyService.isMatchingFingerprint(
           existingOp.request_fingerprint,
           fingerprint,
@@ -1214,6 +1229,8 @@ export class ReservationsService {
           if (
             concurrentOp.operation_id === dto.operation_id &&
             concurrentOp.idempotency_key === idempotencyKey &&
+            concurrentOp.intention === 'liberar_reserva' &&
+            concurrentOp.client_id === verifiedClientId &&
             this.idempotencyService.isMatchingFingerprint(
               concurrentOp.request_fingerprint,
               fingerprint,

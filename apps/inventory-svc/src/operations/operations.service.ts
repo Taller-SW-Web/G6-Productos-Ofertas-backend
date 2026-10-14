@@ -73,22 +73,30 @@ export class OperationsService {
       REQUIRES_REVIEW: 'REQUIRES_REVIEW',
     };
 
-    const operationType: OperacionInventarioTipo =
-      opTypeMap[op.operation_type] ?? 'RESERVAR';
-    const status: OperacionInventarioEstado =
-      statusMap[op.status] ?? 'COMPLETED';
+    const operationType = opTypeMap[op.operation_type];
+    const status = statusMap[op.status];
+    if (
+      !operationType ||
+      !status ||
+      !op.operation_id ||
+      !op.order_id ||
+      !op.accepted_at
+    ) {
+      throw ProblemDetailsException.operacionNoEncontrada(
+        'La operación histórica no contiene un resultado durable suficiente para reproducirse',
+        correlationId,
+      );
+    }
 
     const result: ConsultaOperacionInventario = {
-      operation_id: op.operation_id || operationId,
-      order_id: op.order_id || '',
+      operation_id: op.operation_id,
+      order_id: op.order_id,
       operation_type: operationType,
       status,
       reservation_id: op.reservation_id || null,
       expires_at: expiresAt,
       result_code: op.result_code || null,
-      accepted_at: op.accepted_at
-        ? new Date(op.accepted_at).toISOString()
-        : new Date().toISOString(),
+      accepted_at: new Date(op.accepted_at).toISOString(),
       completed_at: op.applied_at
         ? new Date(op.applied_at).toISOString()
         : null,

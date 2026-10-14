@@ -177,6 +177,19 @@ describe('InventoryAuthGuard — Verificación Criptográfica JWT RS256 de G7', 
     }
   });
 
+  it('permite Postventa en disponibilidad detallada conforme al alcance contractual', () => {
+    const token = createCryptographicJwt({
+      clientId: KNOWN_CLIENTS.POSTVENTA,
+      scope: INVENTORY_SCOPES.DISPONIBILIDAD_LEER,
+    });
+    const context = createMockContext(`Bearer ${token}`, {
+      allowedClients: [KNOWN_CLIENTS.VENTAS, KNOWN_CLIENTS.POSTVENTA],
+      scope: INVENTORY_SCOPES.DISPONIBILIDAD_LEER,
+    });
+
+    expect(guard.canActivate(context)).toBe(true);
+  });
+
   it('9. Caso obligatorio: token criptográficamente válido debe activar la ruta e inyectar contexto', () => {
     const token = createCryptographicJwt({
       clientId: KNOWN_CLIENTS.VENTAS,

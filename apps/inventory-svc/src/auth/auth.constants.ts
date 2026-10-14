@@ -20,6 +20,7 @@ export const INVENTORY_SCOPES = {
 
 export const KNOWN_CLIENTS = {
   VENTAS: 'modulo-ventas',
+  POSTVENTA: 'modulo-postventa',
   MARKETPLACE: 'modulo-marketplace',
   CHATBOT: 'modulo-chatbot',
   RETAIL: 'modulo-retail',
