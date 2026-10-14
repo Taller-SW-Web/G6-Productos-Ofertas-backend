@@ -56,7 +56,7 @@ export class OutboxPublisherService {
 
     try {
       if (!this.customPublisher && config.rabbitMqUrl) {
-        amqpConn = await amqp.connect(config.rabbitMqUrl);
+        amqpConn = await amqp.connect(config.rabbitMqUrl, { timeout: 10000 });
         confirmChannel = await amqpConn.createConfirmChannel();
 
         // Escuchar devoluciones cuando un mensaje obligatorio no encuentra cola en el exchange
@@ -95,40 +95,27 @@ export class OutboxPublisherService {
         let dispatched = 0;
         let failed = 0;
 
-        for (const row of pendingRows) {
-          const payload =
-            typeof row.payload === 'string'
-              ? JSON.parse(row.payload)
-              : row.payload;
-          const exchange =
-            payload.kind === 'result' ? 'po.results.x' : 'po.events.x';
-          const routingKey = row.event_type;
-          const content = Buffer.from(JSON.stringify(payload));
-          // Preservar exactamente el message_id de negocio sin regenerarlo en reintentos
-          const messageId = payload.message_id || row.event_id;
+        // Publicar el lote concurrentemente: el transaction lock coordina
+        // instancias mientras se esperan confirms, pero el tiempo de red queda
+        // acotado por un único timeout del lote, no por N timeouts secuenciales.
+        const outcomes = await Promise.all(
+          pendingRows.map(async (row) => {
+            let messageId = row.event_id;
+            try {
+              const payload =
+                typeof row.payload === 'string'
+                  ? JSON.parse(row.payload)
+                  : row.payload;
+              const exchange =
+                payload.kind === 'result' ? 'po.results.x' : 'po.events.x';
+              const routingKey = row.event_type;
+              const content = Buffer.from(JSON.stringify(payload));
+              // Preservar exactamente el message_id de negocio en cada reintento.
+              messageId = payload.message_id || row.event_id;
+              returnedMessageIds.delete(messageId);
 
-          try {
-            if (this.customPublisher) {
-              const publishedOk = await this.customPublisher.publish(
-                exchange,
-                routingKey,
-                content,
-                {
-                  messageId,
-                  correlationId:
-                    payload.correlation_id || row.correlation_id || undefined,
-                  contentType: 'application/json',
-                  mandatory: true,
-                },
-              );
-              if (!publishedOk) {
-                throw new Error(
-                  `El publicador devolvió false (no confirmado) para mensaje ${messageId}`,
-                );
-              }
-            } else if (confirmChannel) {
-              await new Promise<void>((resolve, reject) => {
-                (confirmChannel as amqp.ConfirmChannel).publish(
+              if (this.customPublisher) {
+                const publishedOk = await this.customPublisher.publish(
                   exchange,
                   routingKey,
                   content,
@@ -138,32 +125,81 @@ export class OutboxPublisherService {
                       payload.correlation_id || row.correlation_id || undefined,
                     contentType: 'application/json',
                     mandatory: true,
-                    persistent: true,
-                  },
-                  (err) => {
-                    if (err) {
-                      reject(err);
-                    } else if (returnedMessageIds.has(messageId)) {
-                      reject(
-                        new Error(
-                          `Mensaje ${messageId} devuelto por el broker: sin cola enlazada (basic.return)`,
-                        ),
-                      );
-                    } else {
-                      resolve();
-                    }
                   },
                 );
-              });
+                if (!publishedOk) {
+                  throw new Error(
+                    `El publicador devolvió false (no confirmado) para mensaje ${messageId}`,
+                  );
+                }
+              } else if (confirmChannel) {
+                await new Promise<void>((resolve, reject) => {
+                  const timeout = setTimeout(
+                    () =>
+                      reject(
+                        new Error(
+                          `Timeout esperando publisher confirm (${messageId})`,
+                        ),
+                      ),
+                    15000,
+                  );
+                  (confirmChannel as amqp.ConfirmChannel).publish(
+                    exchange,
+                    routingKey,
+                    content,
+                    {
+                      messageId,
+                      correlationId:
+                        payload.correlation_id ||
+                        row.correlation_id ||
+                        undefined,
+                      contentType: 'application/json',
+                      mandatory: true,
+                      persistent: true,
+                    },
+                    (err) => {
+                      clearTimeout(timeout);
+                      if (err) {
+                        reject(err);
+                      } else if (returnedMessageIds.has(messageId)) {
+                        reject(
+                          new Error(
+                            `Mensaje ${messageId} devuelto por el broker: sin cola enlazada (basic.return)`,
+                          ),
+                        );
+                      } else {
+                        resolve();
+                      }
+                    },
+                  );
+                });
+              }
+              return { row, messageId };
+            } catch (pubErr) {
+              return { row, messageId, error: pubErr as Error };
             }
+          }),
+        );
 
-            // Marcar como publicado durablemente tras confirmación exitosa del broker
-            await this.outboxRepository.markAsPublished(row.id, txClient);
-            dispatched++;
-          } catch (pubErr) {
+        for (const outcome of outcomes) {
+          if (outcome.error) {
             failed++;
             this.logger.error(
-              `Fallo al publicar evento outbox ${row.id} (${row.event_type}): ${(pubErr as Error).message}. Se conserva PENDING.`,
+              `Fallo al publicar evento outbox ${outcome.row.id} (${outcome.row.event_type}): ${outcome.error.message}. Se conserva PENDING.`,
+            );
+            continue;
+          }
+          try {
+            // Marcar PUBLISHED sólo después de confirm y ausencia de basic.return.
+            await this.outboxRepository.markAsPublished(
+              outcome.row.id,
+              txClient,
+            );
+            dispatched++;
+          } catch (markErr) {
+            failed++;
+            this.logger.error(
+              `Fallo al persistir PUBLISHED para evento outbox ${outcome.row.id}: ${(markErr as Error).message}. Se conserva PENDING.`,
             );
           }
         }

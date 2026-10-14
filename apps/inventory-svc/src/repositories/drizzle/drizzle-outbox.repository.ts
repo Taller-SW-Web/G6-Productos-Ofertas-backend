@@ -86,13 +86,19 @@ export class DrizzleOutboxRepository implements IOutboxRepository {
   async markAsPublished(id: string, client?: IDatabaseClient): Promise<void> {
     const db = client?.drizzle ?? this.databaseService.getDrizzle();
     if (db) {
-      await db
+      const updated = await db
         .update(schema.outbox)
         .set({
           status: 'PUBLISHED',
           published_at: new Date(),
         })
-        .where(eq(schema.outbox.id, id));
+        .where(eq(schema.outbox.id, id))
+        .returning({ id: schema.outbox.id });
+      if (updated.length !== 1) {
+        throw new Error(
+          `Integridad Outbox: actualización PUBLISHED afectó ${updated.length} filas para ${id}`,
+        );
+      }
       return;
     }
 
@@ -101,10 +107,13 @@ export class DrizzleOutboxRepository implements IOutboxRepository {
       SET status = 'PUBLISHED', published_at = now()
       WHERE id = $1
     `;
-    if (client) {
-      await client.query(querySql, [id]);
-    } else {
-      await this.databaseService.query(querySql, [id]);
+    const result = client
+      ? await client.query(querySql, [id])
+      : await this.databaseService.query(querySql, [id]);
+    if (result.rowCount !== 1) {
+      throw new Error(
+        `Integridad Outbox: actualización PUBLISHED afectó ${result.rowCount ?? 0} filas para ${id}`,
+      );
     }
   }
 

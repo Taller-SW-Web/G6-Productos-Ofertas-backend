@@ -26,7 +26,7 @@ export class ReservationExpirationService {
     const querySql = `
       SELECT id, reservation_id, order_id, correlation_id, expires_at
       FROM inventory.reservations
-      WHERE status = 'ACTIVA' AND expires_at < now()
+      WHERE status = 'ACTIVA' AND expires_at <= now()
       ORDER BY expires_at ASC
       LIMIT $1
     `;

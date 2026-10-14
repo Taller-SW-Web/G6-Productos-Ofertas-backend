@@ -31,6 +31,7 @@ import {
 } from './repositories/interfaces/repository.tokens.js';
 
 import { InventoryAuthGuard } from './auth/inventory-auth.guard.js';
+import { InventoryWorkersService } from './workers/inventory-workers.service.js';
 
 @Module({
   imports: [],
@@ -47,6 +48,7 @@ import { InventoryAuthGuard } from './auth/inventory-auth.guard.js';
     OperationsService,
     DisponibilidadService,
     InventoryAuthGuard,
+    InventoryWorkersService,
     // Repositorios Drizzle vinculados a sus tokens de interfaz
     {
       provide: LOCATIONS_REPOSITORY,

@@ -11,6 +11,8 @@ export interface InventoryConfig {
   port: number;
   reservationTtlSeconds: number;
   defaultLowStockThreshold: number;
+  workerIntervalMs: number;
+  workerBatchSize: number;
 }
 
 export function loadInventoryConfig(): InventoryConfig {
@@ -40,6 +42,25 @@ export function loadInventoryConfig(): InventoryConfig {
   const defaultLowStockThreshold =
     Number.isInteger(thresholdNum) && thresholdNum >= 0 ? thresholdNum : 5;
 
+  const rawWorkerInterval = process.env.INVENTORY_WORKER_INTERVAL_MS ?? '5000';
+  const workerIntervalMs = Number(rawWorkerInterval);
+  if (!Number.isInteger(workerIntervalMs) || workerIntervalMs < 250) {
+    throw new Error(
+      `[inventory-svc] INVENTORY_WORKER_INTERVAL_MS inválido: "${rawWorkerInterval}". Debe ser un entero >= 250.`,
+    );
+  }
+  const rawWorkerBatchSize = process.env.INVENTORY_WORKER_BATCH_SIZE ?? '50';
+  const workerBatchSize = Number(rawWorkerBatchSize);
+  if (
+    !Number.isInteger(workerBatchSize) ||
+    workerBatchSize < 1 ||
+    workerBatchSize > 500
+  ) {
+    throw new Error(
+      `[inventory-svc] INVENTORY_WORKER_BATCH_SIZE inválido: "${rawWorkerBatchSize}". Debe ser un entero entre 1 y 500.`,
+    );
+  }
+
   return {
     databaseUrl: process.env.DATABASE_URL,
     pgHost: process.env.PGHOST,
@@ -53,5 +74,7 @@ export function loadInventoryConfig(): InventoryConfig {
     port,
     reservationTtlSeconds,
     defaultLowStockThreshold,
+    workerIntervalMs,
+    workerBatchSize,
   };
 }

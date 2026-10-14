@@ -30,6 +30,7 @@ async function bootstrap() {
   loadEnv();
   const port = resolvePort();
   const app = await NestFactory.create(InventorySvcModule);
+  app.enableShutdownHooks();
   app.useGlobalFilters(new ProblemDetailsFilter());
   await app.listen(port);
 }
