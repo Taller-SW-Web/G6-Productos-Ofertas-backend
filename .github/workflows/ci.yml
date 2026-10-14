@@ -77,7 +77,7 @@ jobs:
       - name: Simulate generic Oracle deployment, isolation and rollback
         run: bash ops/oracle/tests/deploy-g6-service.test.sh
 
-      - name: Test conservative CD recovery selection
+      - name: Test GitHub Deployment selection and recovery
         run: bash ops/oracle/tests/select-cd-services.test.sh
 
       - name: Test publication failure isolation

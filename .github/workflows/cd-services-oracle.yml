@@ -38,6 +38,10 @@ jobs:
        github.event.workflow_run.conclusion == 'success') ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      deployments: read
     outputs:
       sha: ${{ steps.selection.outputs.sha }}
       repository: ${{ steps.selection.outputs.repository }}
@@ -70,26 +74,27 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "repository=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout selected master commit
+      - name: Checkout selected master commit and deployment history
         if: steps.selection.outputs.sha != ''
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.selection.outputs.sha }}
-          fetch-depth: 1
+          fetch-depth: 0
 
-      - name: Select all enabled services or validate manual selection
+      - name: Select services with pending changes or validate manual selection
         id: targets
         if: steps.selection.outputs.sha != ''
         env:
+          GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
           REQUESTED_SERVICE: ${{ inputs.service }}
+          SELECTED_SHA: ${{ steps.selection.outputs.sha }}
         run: |
           set -euo pipefail
           if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
             services="$(bash ops/oracle/select-cd-services.sh manual "$REQUESTED_SERVICE")"
           else
-            echo 'No hay un cursor verificable de despliegue exitoso por servicio en Oracle; se seleccionan todos los habilitados.'
-            services="$(bash ops/oracle/select-cd-services.sh automatic)"
+            services="$(bash ops/oracle/select-cd-services.sh automatic "$GITHUB_REPOSITORY" "$SELECTED_SHA")"
           fi
           echo "Servicios seleccionados: $services"
           echo "services=$services" >> "$GITHUB_OUTPUT"
@@ -109,6 +114,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      deployments: write
     steps:
       - name: Checkout validated SHA
         uses: actions/checkout@v4
@@ -208,6 +214,30 @@ jobs:
             exit 1
           fi
 
+      - name: Register deployment attempt
+        id: deployment
+        if: steps.freshness.outputs.deploy == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SERVICE_NAME: ${{ matrix.service }}
+          IMAGE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$SERVICE_NAME" =~ ^[a-z][a-z0-9-]{0,31}$ ]]
+          [[ "$IMAGE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          environment="g6-oracle-${SERVICE_NAME}"
+          payload="$(mktemp)"
+          trap 'rm -f "$payload"' EXIT
+          jq -cn --arg ref "$IMAGE_SHA" --arg environment "$environment" \
+            '{ref:$ref, task:"deploy", environment:$environment, auto_merge:false, required_contexts:[], production_environment:true}' \
+            > "$payload"
+          deployment_id="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/deployments" --input "$payload" --jq .id)"
+          [[ "$deployment_id" =~ ^[0-9]+$ ]]
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/deployments/${deployment_id}/statuses" \
+            -f state=in_progress -f description='Despliegue Oracle en curso; aún no es una versión exitosa.' >/dev/null
+          echo "deployment_id=$deployment_id" >> "$GITHUB_OUTPUT"
+
       - name: Deploy image, check health and roll back on failure
         if: steps.freshness.outputs.deploy == 'true'
         env:
@@ -232,3 +262,27 @@ jobs:
           printf '%s\n%s\n' "$ORACLE_GHCR_USERNAME" "$ORACLE_GHCR_TOKEN" |
             ssh -i ~/.ssh/oracle_g6 -o BatchMode=yes -o IdentitiesOnly=yes \
               "$ORACLE_USER@$ORACLE_HOST" "$remote_command"
+
+      - name: Record successful deployment after remote health checks
+        if: success() && steps.deployment.outputs.deployment_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOYMENT_ID" =~ ^[0-9]+$ ]]
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/deployments/${DEPLOYMENT_ID}/statuses" \
+            -f state=success -f description='SSH completó el despliegue y sus verificaciones de salud.' >/dev/null
+
+      - name: Mark failed deployment attempt
+        if: failure() && steps.deployment.outputs.deployment_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOYMENT_ID" =~ ^[0-9]+$ ]]
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/deployments/${DEPLOYMENT_ID}/statuses" \
+            -f state=failure -f description='El despliegue remoto no terminó correctamente; no se avanza el SHA exitoso.' >/dev/null
