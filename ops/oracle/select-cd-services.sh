@@ -11,20 +11,29 @@ usage() {
 
 g6_last_successful_deployment_sha() {
   local service="$1" repository="$2" deployments deployment_id deployment_sha deployment_date
-  local statuses latest_status status state status_date environment
+  local statuses latest_status status_id state status_date environment
   environment="g6-oracle-${service}"
   deployments="$(gh api --paginate --jq '.[] | [.id, .sha, .created_at] | @tsv' \
     "repos/${repository}/deployments?environment=${environment}&task=deploy&per_page=100")" || return 1
   [[ -n "$deployments" ]] || return 1
 
+  if ! printf '%s\n' "$deployments" | awk -F '\t' 'NF != 3 || seen[$1]++ { invalid=1 } END { exit invalid }'; then
+    return 1
+  fi
   while IFS=$'\t' read -r deployment_id deployment_sha deployment_date; do
     [[ "$deployment_id" =~ ^[0-9]+$ && "$deployment_sha" =~ ^[0-9a-f]{40}$ &&
       "$deployment_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T.*Z$ ]] || return 1
-    statuses="$(gh api --paginate --jq '.[] | [.state, .created_at] | @tsv' \
+    statuses="$(gh api --paginate --jq '.[] | [.id, .state, .created_at] | @tsv' \
       "repos/${repository}/deployments/${deployment_id}/statuses?per_page=100")" || return 1
     [[ -n "$statuses" ]] || return 1
-    latest_status="$(printf '%s\n' "$statuses" | LC_ALL=C sort -t $'\t' -k2,2r | sed -n '1p')"
-    IFS=$'\t' read -r state status_date <<< "$latest_status"
+    if ! printf '%s\n' "$statuses" | awk -F '\t' 'NF != 3 || seen[$1]++ { invalid=1 } END { exit invalid }'; then
+      return 1
+    fi
+    # Equal timestamps are ordered by the numeric API ID, never by state text
+    # or response order. Duplicate/malformed IDs above make the history unsafe.
+    latest_status="$(printf '%s\n' "$statuses" | LC_ALL=C sort -t $'\t' -k3,3r -k1,1nr | sed -n '1p')"
+    IFS=$'\t' read -r status_id state status_date <<< "$latest_status"
+    [[ "$status_id" =~ ^[0-9]+$ ]] || return 1
     [[ "$status_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T.*Z$ ]] || return 1
     case "$state" in
       success)
@@ -38,7 +47,7 @@ g6_last_successful_deployment_sha() {
         return 1
         ;;
     esac
-  done < <(printf '%s\n' "$deployments" | LC_ALL=C sort -t $'\t' -k3,3r)
+  done < <(printf '%s\n' "$deployments" | LC_ALL=C sort -t $'\t' -k3,3r -k1,1nr)
   return 1
 }
 

@@ -51,7 +51,14 @@ chmod +x "$MOCK_BIN/gh"
 record_deployment() {
   local service="$1" id="$2" sha="$3" state="$4" created="$5"
   printf '%s\t%s\t%s\n' "$id" "$sha" "$created" >> "$MOCK_STATE/${service}.deployments.tsv"
-  printf '%s\t%s\n' "$state" "$created" > "$MOCK_STATE/${id}.statuses.tsv"
+  record_status "$id" "$state" "$created"
+}
+
+record_status() {
+  local id="$1" state="$2" created="$3" status_id
+  status_id="$(($(cat "$MOCK_STATE/next-status-id" 2>/dev/null || printf '999') + 1))"
+  printf '%s\n' "$status_id" > "$MOCK_STATE/next-status-id"
+  printf '%s\t%s\t%s\n' "$status_id" "$state" "$created" >> "$MOCK_STATE/${id}.statuses.tsv"
 }
 
 select_auto() {
@@ -96,7 +103,7 @@ git -C "$GIT_ROOT" add .
 git -C "$GIT_ROOT" commit --quiet -m 'dependencias compartidas'
 SHARED_SHA="$(git -C "$GIT_ROOT" rev-parse HEAD)"
 expect_selection '["catalog-svc","inventory-svc"]'
-record_deployment inventory-svc 7 "$SHARED_SHA" success '2026-01-03T01:00:00Z'
+record_deployment inventory-svc 8 "$SHARED_SHA" success '2026-01-03T01:00:00Z'
 record_deployment catalog-svc 15 "$SHARED_SHA" success '2026-01-03T01:00:00Z'
 
 # Un intento fallido no avanza el baseline; los cambios posteriores siguen
@@ -108,7 +115,7 @@ INVENTORY_PENDING_SHA="$(git -C "$GIT_ROOT" rev-parse HEAD)"
 expect_selection '["inventory-svc"]' # CI fail/cancel creates no success record; prior SHA stays the baseline.
 record_deployment inventory-svc 3 "$INVENTORY_PENDING_SHA" failure '2026-01-04T00:00:00Z'
 record_deployment catalog-svc 13 "$SHARED_SHA" success '2026-01-04T00:00:00Z'
-record_deployment inventory-svc 7 "$SHARED_SHA" success '2026-01-03T01:00:00Z'
+record_deployment inventory-svc 9 "$SHARED_SHA" success '2026-01-03T01:00:00Z'
 expect_selection '["inventory-svc"]'
 
 # Un intento cancelado que quedó in_progress no se toma como éxito verificable.
@@ -116,7 +123,7 @@ record_deployment inventory-svc 4 "$INVENTORY_PENDING_SHA" in_progress '2026-01-
 expect_selection '["inventory-svc"]'
 
 # Un estado sin historial de status completo tampoco se acepta como éxito.
-printf '%s\t%s\t%s\n' 8 "$INVENTORY_PENDING_SHA" '2026-01-05T12:00:00Z' >> "$MOCK_STATE/inventory-svc.deployments.tsv"
+printf '%s\t%s\t%s\n' 16 "$INVENTORY_PENDING_SHA" '2026-01-05T12:00:00Z' >> "$MOCK_STATE/inventory-svc.deployments.tsv"
 expect_selection '["inventory-svc"]'
 
 # Ausencia de historial y error de consulta incluyen el servicio afectado aunque
@@ -155,10 +162,50 @@ grep -Fq 'github.event.workflow_run.conclusion == '\''success'\''' "$WORKFLOW"
 grep -Fq 'github.event.workflow_run.head_branch == '\''master'\''' "$WORKFLOW"
 grep -Fq 'deployments: read' "$WORKFLOW"
 grep -Fq 'deployments: write' "$WORKFLOW"
-grep -Fq 'state=in_progress' "$WORKFLOW"
-grep -Fq 'state=success' "$WORKFLOW"
-grep -Fq 'state=failure' "$WORKFLOW"
+grep -Fq 'github-deployment-api.sh create' "$WORKFLOW"
+grep -Fq 'github-deployment-api.sh status "$GITHUB_REPOSITORY" "$DEPLOYMENT_ID" success' "$WORKFLOW"
+grep -Fq 'github-deployment-api.sh status "$GITHUB_REPOSITORY" "$DEPLOYMENT_ID" failure' "$WORKFLOW"
 deploy_line="$(grep -n 'name: Deploy image, check health and roll back on failure' "$WORKFLOW" | cut -d: -f1)"
 success_line="$(grep -n 'name: Record successful deployment after remote health checks' "$WORKFLOW" | cut -d: -f1)"
 ((success_line > deploy_line)) || { echo 'FAIL: se registraría éxito antes de terminar el despliegue remoto.' >&2; exit 1; }
 printf 'PASS: Deployments solo registra éxito tras SSH y mantiene permisos separados\n'
+
+# Desempates reproducibles con IDs numéricos de longitudes diferentes y API
+# deliberadamente desordenada.
+reset_inventory_history() {
+  rm -f "$MOCK_STATE/inventory-svc.deployments.tsv" "$MOCK_STATE/99.statuses.tsv" "$MOCK_STATE/100.statuses.tsv"
+}
+sed -i 's/^combos-svc|true|/combos-svc|false|/' "$TEMP_ROOT/ops/oracle/services.psv"
+record_deployment catalog-svc 88 "$(git -C "$GIT_ROOT" rev-parse HEAD)" success '2026-02-01T00:00:00Z'
+CURRENT_SHA="$(git -C "$GIT_ROOT" rev-parse HEAD)"
+reset_inventory_history
+record_deployment inventory-svc 99 "$BASE_SHA" success '2026-02-01T00:00:00Z'
+record_deployment inventory-svc 100 "$CURRENT_SHA" failure '2026-02-01T00:00:00Z'
+{ tail -n 1 "$MOCK_STATE/inventory-svc.deployments.tsv"; head -n 1 "$MOCK_STATE/inventory-svc.deployments.tsv"; } > "$MOCK_STATE/shuffled.tsv"
+mv "$MOCK_STATE/shuffled.tsv" "$MOCK_STATE/inventory-svc.deployments.tsv"
+expect_selection '["inventory-svc"]'
+
+reset_inventory_history
+record_deployment inventory-svc 99 "$BASE_SHA" success '2026-02-01T00:00:00Z'
+record_deployment inventory-svc 100 "$CURRENT_SHA" in_progress '2026-02-01T00:00:00Z'
+expect_selection '["inventory-svc"]'
+
+reset_inventory_history
+record_deployment inventory-svc 100 "$CURRENT_SHA" success '2026-02-02T00:00:00Z'
+printf '%s\t%s\t%s\n%s\t%s\t%s\n' 999 success '2026-02-02T00:00:01Z' \
+  1000 failure '2026-02-02T00:00:01Z' > "$MOCK_STATE/100.statuses.tsv"
+expect_selection '["inventory-svc"]'
+printf '%s\t%s\t%s\n%s\t%s\t%s\n' 999 failure '2026-02-02T00:00:01Z' \
+  1000 success '2026-02-02T00:00:01Z' > "$MOCK_STATE/100.statuses.tsv"
+expect_selection '[]'
+
+# IDs repetidos impiden establecer un orden confiable y fuerzan selección segura.
+reset_inventory_history
+record_deployment inventory-svc 99 "$CURRENT_SHA" success '2026-02-02T00:00:00Z'
+printf '%s\t%s\t%s\n' 99 "$BASE_SHA" '2026-02-02T00:00:00Z' >> "$MOCK_STATE/inventory-svc.deployments.tsv"
+expect_selection '["inventory-svc"]'
+
+reset_inventory_history
+record_deployment inventory-svc 100 "$CURRENT_SHA" success '2026-02-03T00:00:00Z'
+record_deployment inventory-svc 99 "$BASE_SHA" success '2026-02-02T00:00:00Z'
+expect_selection '[]'

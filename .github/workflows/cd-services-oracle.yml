@@ -223,19 +223,7 @@ jobs:
           IMAGE_SHA: ${{ needs.prepare.outputs.sha }}
         run: |
           set -euo pipefail
-          [[ "$SERVICE_NAME" =~ ^[a-z][a-z0-9-]{0,31}$ ]]
-          [[ "$IMAGE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          environment="g6-oracle-${SERVICE_NAME}"
-          payload="$(mktemp)"
-          trap 'rm -f "$payload"' EXIT
-          jq -cn --arg ref "$IMAGE_SHA" --arg environment "$environment" \
-            '{ref:$ref, task:"deploy", environment:$environment, auto_merge:false, required_contexts:[], production_environment:true}' \
-            > "$payload"
-          deployment_id="$(gh api --method POST "repos/${GITHUB_REPOSITORY}/deployments" --input "$payload" --jq .id)"
-          [[ "$deployment_id" =~ ^[0-9]+$ ]]
-          gh api --method POST \
-            "repos/${GITHUB_REPOSITORY}/deployments/${deployment_id}/statuses" \
-            -f state=in_progress -f description='Despliegue Oracle en curso; aún no es una versión exitosa.' >/dev/null
+          deployment_id="$(bash ops/oracle/github-deployment-api.sh create "$GITHUB_REPOSITORY" "$SERVICE_NAME" "$IMAGE_SHA")"
           echo "deployment_id=$deployment_id" >> "$GITHUB_OUTPUT"
 
       - name: Deploy image, check health and roll back on failure
@@ -270,10 +258,7 @@ jobs:
           DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
         run: |
           set -euo pipefail
-          [[ "$DEPLOYMENT_ID" =~ ^[0-9]+$ ]]
-          gh api --method POST \
-            "repos/${GITHUB_REPOSITORY}/deployments/${DEPLOYMENT_ID}/statuses" \
-            -f state=success -f description='SSH completó el despliegue y sus verificaciones de salud.' >/dev/null
+          bash ops/oracle/github-deployment-api.sh status "$GITHUB_REPOSITORY" "$DEPLOYMENT_ID" success
 
       - name: Mark failed deployment attempt
         if: failure() && steps.deployment.outputs.deployment_id != ''
@@ -282,7 +267,4 @@ jobs:
           DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
         run: |
           set -euo pipefail
-          [[ "$DEPLOYMENT_ID" =~ ^[0-9]+$ ]]
-          gh api --method POST \
-            "repos/${GITHUB_REPOSITORY}/deployments/${DEPLOYMENT_ID}/statuses" \
-            -f state=failure -f description='El despliegue remoto no terminó correctamente; no se avanza el SHA exitoso.' >/dev/null
+          bash ops/oracle/github-deployment-api.sh status "$GITHUB_REPOSITORY" "$DEPLOYMENT_ID" failure
