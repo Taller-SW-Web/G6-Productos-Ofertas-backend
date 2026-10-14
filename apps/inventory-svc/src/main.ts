@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import { InventorySvcModule } from './inventory-svc.module.js';
+import { ProblemDetailsFilter } from './errors/problem-details.filter.js';
 
 function loadEnv(): void {
   const envPath = resolve(process.cwd(), '.env');
@@ -29,6 +30,7 @@ async function bootstrap() {
   loadEnv();
   const port = resolvePort();
   const app = await NestFactory.create(InventorySvcModule);
+  app.useGlobalFilters(new ProblemDetailsFilter());
   await app.listen(port);
 }
 await bootstrap();

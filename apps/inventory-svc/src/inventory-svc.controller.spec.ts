@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { InventorySvcController } from './inventory-svc.controller.js';
 import { InventorySvcService } from './inventory-svc.service.js';
+import { DatabaseService } from './database/database.service.js';
 
 describe('InventorySvcController', () => {
   let controller: InventorySvcController;
@@ -8,7 +9,15 @@ describe('InventorySvcController', () => {
   beforeEach(async () => {
     const app: TestingModule = await Test.createTestingModule({
       controllers: [InventorySvcController],
-      providers: [InventorySvcService],
+      providers: [
+        InventorySvcService,
+        {
+          provide: DatabaseService,
+          useValue: {
+            isHealthy: async () => ({ healthy: true, latencyMs: 5 }),
+          },
+        },
+      ],
     }).compile();
 
     controller = app.get<InventorySvcController>(InventorySvcController);

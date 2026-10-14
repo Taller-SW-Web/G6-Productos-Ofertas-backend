@@ -3,10 +3,10 @@ import { InventorySvcService } from './inventory-svc.service.js';
 
 @Controller()
 export class InventorySvcController {
-  constructor(private readonly Service: InventorySvcService) {}
+  constructor(private readonly service: InventorySvcService) {}
 
   @Get('health')
   getHealth() {
-    return this.Service.getHealth();
+    return this.service.getHealth();
   }
 }
