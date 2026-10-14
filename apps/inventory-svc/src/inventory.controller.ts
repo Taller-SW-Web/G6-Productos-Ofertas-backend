@@ -54,7 +54,13 @@ export class InventoryController {
         correlationId,
       );
     }
-    const clientId = req?.clientId || req?.user?.client_id || req?.user?.sub;
+    const clientId = req?.clientId;
+    if (typeof clientId !== 'string' || clientId.trim().length === 0) {
+      throw ProblemDetailsException.tokenInvalido(
+        'El token verificado no contiene una identidad de cliente',
+        correlationId,
+      );
+    }
     return this.reservationsService.solicitarReserva(
       dto,
       correlationId,
@@ -80,7 +86,13 @@ export class InventoryController {
         correlationId,
       );
     }
-    const clientId = req?.clientId || req?.user?.client_id || req?.user?.sub;
+    const clientId = req?.clientId;
+    if (typeof clientId !== 'string' || clientId.trim().length === 0) {
+      throw ProblemDetailsException.tokenInvalido(
+        'El token verificado no contiene una identidad de cliente',
+        correlationId,
+      );
+    }
     return this.reservationsService.confirmarReserva(
       reservaId,
       dto,
@@ -107,7 +119,13 @@ export class InventoryController {
         correlationId,
       );
     }
-    const clientId = req?.clientId || req?.user?.client_id || req?.user?.sub;
+    const clientId = req?.clientId;
+    if (typeof clientId !== 'string' || clientId.trim().length === 0) {
+      throw ProblemDetailsException.tokenInvalido(
+        'El token verificado no contiene una identidad de cliente',
+        correlationId,
+      );
+    }
     return this.reservationsService.liberarReserva(
       reservaId,
       dto,

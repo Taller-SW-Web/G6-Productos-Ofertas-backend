@@ -87,7 +87,7 @@ export const stockBalance = inventorySchema.table(
       .default(0)
       .notNull(),
     available: integer('available').generatedAlwaysAs(
-      sql`(on_hand - reserved - blocked)`,
+      sql`GREATEST(0, on_hand - reserved - blocked)`,
     ),
     created_at: timestamp('created_at', { withTimezone: true })
       .defaultNow()

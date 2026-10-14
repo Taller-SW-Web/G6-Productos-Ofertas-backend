@@ -110,7 +110,7 @@ export class InventoryAuthGuard implements CanActivate {
     }
 
     // 3. Verificación de tipo de token (tipo: 'servicio')
-    if (payload.tipo && payload.tipo !== EXPECTED_TOKEN_TYPE) {
+    if (payload.tipo !== EXPECTED_TOKEN_TYPE) {
       throw ProblemDetailsException.tokenInvalido(
         `Tipo de token inválido. Se requiere '${EXPECTED_TOKEN_TYPE}'`,
         correlationId,
