@@ -4,6 +4,8 @@ import { OperationsService } from './operations.service.js';
 import { DatabaseService } from '../database/database.service.js';
 import { InMemoryDatabaseMock } from '../../test/in-memory-database.mock.js';
 import { ProblemDetailsException } from '../errors/inventory.errors.js';
+import { DrizzleOperationsRepository } from '../repositories/drizzle/drizzle-operations.repository.js';
+import { DrizzleReservationsRepository } from '../repositories/drizzle/drizzle-reservations.repository.js';
 
 describe('OperationsService — Consulta Durable de Operaciones G5', () => {
   let operationsService: OperationsService;
@@ -14,7 +16,10 @@ describe('OperationsService — Consulta Durable de Operaciones G5', () => {
     mockDb = new InMemoryDatabaseMock();
     dbService = new DatabaseService();
     dbService.setCustomService(mockDb);
-    operationsService = new OperationsService(dbService);
+
+    const operationsRepo = new DrizzleOperationsRepository(dbService);
+    const reservationsRepo = new DrizzleReservationsRepository(dbService);
+    operationsService = new OperationsService(operationsRepo, reservationsRepo);
   });
 
   it('debe recuperar el estado persistido de una operación completada', async () => {

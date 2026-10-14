@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { IDatabaseClient } from '../database/database.interface.js';
+import { DrizzleKardexRepository } from '../repositories/drizzle/drizzle-kardex.repository.js';
 
 export interface KardexEntry {
   sku_id: string;
@@ -31,6 +32,8 @@ export interface KardexEntry {
 
 @Injectable()
 export class KardexService {
+  constructor(private readonly kardexRepository: DrizzleKardexRepository) {}
+
   async recordMovement(
     client: IDatabaseClient,
     entry: KardexEntry,
@@ -39,29 +42,21 @@ export class KardexService {
       return;
     }
 
-    const sql = `
-      INSERT INTO inventory.kardex (
-        sku_id, location_id, operation_type, operation_id, reservation_id,
-        quantity, on_hand_before, on_hand_after, reserved_before, reserved_after,
-        blocked_before, blocked_after, stock_version, correlation_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-    `;
-
-    await client.query(sql, [
-      entry.sku_id,
-      entry.location_id,
-      entry.operation_type,
-      entry.operation_id ?? null,
-      entry.reservation_id ?? null,
-      entry.quantity,
-      entry.on_hand_before,
-      entry.on_hand_after,
-      entry.reserved_before,
-      entry.reserved_after,
-      entry.blocked_before,
-      entry.blocked_after,
-      entry.stock_version,
-      entry.correlation_id ?? null,
-    ]);
+    await this.kardexRepository.createMovement(client, {
+      sku_id: entry.sku_id,
+      location_id: entry.location_id,
+      operation_type: entry.operation_type,
+      operation_id: entry.operation_id ?? null,
+      reservation_id: entry.reservation_id ?? null,
+      quantity: entry.quantity,
+      on_hand_before: entry.on_hand_before,
+      on_hand_after: entry.on_hand_after,
+      reserved_before: entry.reserved_before,
+      reserved_after: entry.reserved_after,
+      blocked_before: entry.blocked_before,
+      blocked_after: entry.blocked_after,
+      stock_version: Number(entry.stock_version),
+      correlation_id: entry.correlation_id ?? null,
+    });
   }
 }

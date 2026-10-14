@@ -1,0 +1,41 @@
+import { IDatabaseClient } from '../../database/database.interface.js';
+
+export interface StockBalanceEntity {
+  sku_id: string;
+  location_id: string;
+  on_hand: number;
+  reserved: number;
+  blocked: number;
+  available: number;
+  stock_version: number;
+}
+
+export interface IStockBalanceRepository {
+  findBySkuAndLocationForUpdate(
+    client: IDatabaseClient,
+    sku: string,
+    locationId: string,
+  ): Promise<StockBalanceEntity | null>;
+
+  updateStock(
+    client: IDatabaseClient,
+    sku: string,
+    locationId: string,
+    values: {
+      on_hand?: number;
+      reserved?: number;
+      blocked?: number;
+      stock_version: number;
+    },
+  ): Promise<number>;
+
+  findBySkus(
+    skus: string[],
+    locationId?: string,
+    client?: IDatabaseClient,
+  ): Promise<StockBalanceEntity[]>;
+
+  findThresholdOverrides(
+    client?: IDatabaseClient,
+  ): Promise<Array<{ sku_id: string | null; umbral_efectivo: number }>>;
+}

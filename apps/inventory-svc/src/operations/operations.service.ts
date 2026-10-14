@@ -1,18 +1,22 @@
 import { Injectable } from '@nestjs/common';
-import { DatabaseService } from '../database/database.service.js';
 import {
   ConsultaOperacionInventario,
   OperacionInventarioTipo,
   OperacionInventarioEstado,
 } from '../types/inventory.dto.js';
 import { ProblemDetailsException } from '../errors/inventory.errors.js';
+import { DrizzleOperationsRepository } from '../repositories/drizzle/drizzle-operations.repository.js';
+import { DrizzleReservationsRepository } from '../repositories/drizzle/drizzle-reservations.repository.js';
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 @Injectable()
 export class OperationsService {
-  constructor(private readonly databaseService: DatabaseService) {}
+  constructor(
+    private readonly operationsRepository: DrizzleOperationsRepository,
+    private readonly reservationsRepository: DrizzleReservationsRepository,
+  ) {}
 
   /**
    * Consulta el resultado durable persistido de una operación de inventario (GET /api/v1/inventario/operaciones/{operationId})
@@ -28,33 +32,24 @@ export class OperationsService {
       );
     }
 
-    const sql = `
-      SELECT
-        o.operation_id,
-        o.order_id,
-        o.operation_type,
-        o.status,
-        o.result_code,
-        o.reservation_id,
-        o.accepted_at,
-        o.applied_at,
-        r.expires_at
-      FROM inventory.inventory_operations o
-      LEFT JOIN inventory.reservations r ON r.reservation_id = o.reservation_id
-      WHERE o.operation_id = $1
-      LIMIT 1
-    `;
+    const op = await this.operationsRepository.findByOperationId(operationId);
 
-    const res = await this.databaseService.query(sql, [operationId]);
-
-    if (res.rows.length === 0) {
+    if (!op) {
       throw ProblemDetailsException.operacionNoEncontrada(
         'Operación de inventario no encontrada',
         correlationId,
       );
     }
 
-    const row = res.rows[0];
+    let expiresAt: string | null = null;
+    if (op.reservation_id) {
+      const res = await this.reservationsRepository.findByReservationId(
+        op.reservation_id,
+      );
+      if (res?.expires_at) {
+        expiresAt = new Date(res.expires_at).toISOString();
+      }
+    }
 
     // Mapear tipos y estados al contrato OpenAPI
     const opTypeMap: Record<string, OperacionInventarioTipo> = {
@@ -73,25 +68,23 @@ export class OperationsService {
     };
 
     const operationType: OperacionInventarioTipo =
-      opTypeMap[row.operation_type] ?? 'RESERVAR';
+      opTypeMap[op.operation_type] ?? 'RESERVAR';
     const status: OperacionInventarioEstado =
-      statusMap[row.status] ?? 'COMPLETED';
+      statusMap[op.status] ?? 'COMPLETED';
 
     const result: ConsultaOperacionInventario = {
-      operation_id: row.operation_id,
-      order_id: row.order_id || '',
+      operation_id: op.operation_id || operationId,
+      order_id: op.order_id || '',
       operation_type: operationType,
       status,
-      reservation_id: row.reservation_id || null,
-      expires_at: row.expires_at
-        ? new Date(row.expires_at).toISOString()
-        : null,
-      result_code: row.result_code || null,
-      accepted_at: row.accepted_at
-        ? new Date(row.accepted_at).toISOString()
+      reservation_id: op.reservation_id || null,
+      expires_at: expiresAt,
+      result_code: op.result_code || null,
+      accepted_at: op.accepted_at
+        ? new Date(op.accepted_at).toISOString()
         : new Date().toISOString(),
-      completed_at: row.applied_at
-        ? new Date(row.applied_at).toISOString()
+      completed_at: op.applied_at
+        ? new Date(op.applied_at).toISOString()
         : null,
     };
 

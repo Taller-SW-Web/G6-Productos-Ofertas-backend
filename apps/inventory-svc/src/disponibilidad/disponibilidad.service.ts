@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { DatabaseService } from '../database/database.service.js';
 import { loadInventoryConfig } from '../config/inventory.config.js';
 import {
   ConsultaDisponibilidadResponse,
@@ -10,13 +9,18 @@ import {
   VerificarCantidadComercialItem,
 } from '../types/inventory.dto.js';
 import { ProblemDetailsException } from '../errors/inventory.errors.js';
+import { DrizzleStockBalanceRepository } from '../repositories/drizzle/drizzle-stock-balance.repository.js';
+import { DrizzleCommercialRoutesRepository } from '../repositories/drizzle/drizzle-commercial-routes.repository.js';
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 @Injectable()
 export class DisponibilidadService {
-  constructor(private readonly databaseService: DatabaseService) {}
+  constructor(
+    private readonly stockBalanceRepository: DrizzleStockBalanceRepository,
+    private readonly commercialRoutesRepository: DrizzleCommercialRoutesRepository,
+  ) {}
 
   /**
    * Consulta la disponibilidad autoritativa detallada por SKU y ubicación (GET /api/v1/inventario/disponibilidad)
@@ -49,14 +53,13 @@ export class DisponibilidadService {
     const defaultThreshold = config.defaultLowStockThreshold;
 
     // Obtener overrides de umbral
-    const thresholdRes = await this.databaseService.query(
-      `SELECT sku_id, umbral_efectivo FROM inventory.stock_threshold_override`,
-    );
+    const thresholdOverrides =
+      await this.stockBalanceRepository.findThresholdOverrides();
 
     let globalThreshold = defaultThreshold;
     const skuThresholdMap = new Map<string, number>();
 
-    for (const row of thresholdRes.rows) {
+    for (const row of thresholdOverrides) {
       if (row.sku_id === null) {
         globalThreshold = Number(row.umbral_efectivo);
       } else {
@@ -64,24 +67,13 @@ export class DisponibilidadService {
       }
     }
 
-    // Consultar saldos
-    let sql = `
-      SELECT sku_id, location_id, on_hand, reserved, blocked, available, stock_version
-      FROM inventory.stock_balance
-      WHERE sku_id = ANY($1)
-    `;
-    const params: any[] = [skus];
+    // Consultar saldos a través del repositorio
+    const balances = await this.stockBalanceRepository.findBySkus(
+      skus,
+      locationId,
+    );
 
-    if (locationId) {
-      sql += ` AND location_id = $2`;
-      params.push(locationId);
-    }
-
-    sql += ` ORDER BY sku_id ASC, location_id ASC`;
-
-    const res = await this.databaseService.query(sql, params);
-
-    const items: DisponibilidadStock[] = res.rows.map((row: any) => {
+    const items: DisponibilidadStock[] = balances.map((row) => {
       const onHand = Number(row.on_hand);
       const reserved = Number(row.reserved);
       const blocked = Number(row.blocked);
@@ -162,24 +154,17 @@ export class DisponibilidadService {
     let targetLocationId: string | null = null;
 
     if (dto.fulfillment?.mode && dto.fulfillment?.fulfillment_ref) {
-      const routeRes = await this.databaseService.query(
-        `SELECT location_id FROM inventory.commercial_fulfillment_routes
-         WHERE channel_id = $1 AND mode = $2 AND fulfillment_ref = $3 AND active = true`,
-        [dto.channel_id, dto.fulfillment.mode, dto.fulfillment.fulfillment_ref],
-      );
-      if (routeRes.rows.length === 1) {
-        targetLocationId = routeRes.rows[0].location_id;
-      }
+      targetLocationId =
+        await this.commercialRoutesRepository.findActiveByChannelAndFulfillment(
+          dto.channel_id,
+          dto.fulfillment.mode,
+          dto.fulfillment.fulfillment_ref,
+        );
     } else {
-      // Intento de fallback de canal
-      const routeRes = await this.databaseService.query(
-        `SELECT location_id FROM inventory.commercial_fulfillment_routes
-         WHERE channel_id = $1 AND active = true`,
-        [dto.channel_id],
-      );
-      if (routeRes.rows.length === 1) {
-        targetLocationId = routeRes.rows[0].location_id;
-      }
+      targetLocationId =
+        await this.commercialRoutesRepository.findActiveByChannel(
+          dto.channel_id,
+        );
     }
 
     // Si falta la correspondencia o es ambigua: devolver INDETERMINADO sin mutar ni inventar almacén
@@ -203,14 +188,12 @@ export class DisponibilidadService {
     const items: VerificarCantidadComercialItem[] = [];
 
     for (const line of dto.lines) {
-      const balRes = await this.databaseService.query(
-        `SELECT on_hand, reserved, blocked
-         FROM inventory.stock_balance
-         WHERE sku_id = $1 AND location_id = $2`,
-        [line.sku, targetLocationId],
+      const balances = await this.stockBalanceRepository.findBySkus(
+        [line.sku],
+        targetLocationId,
       );
 
-      if (balRes.rows.length === 0) {
+      if (balances.length === 0) {
         items.push({
           sku: line.sku,
           requested_quantity: line.quantity,
@@ -220,7 +203,7 @@ export class DisponibilidadService {
         continue;
       }
 
-      const bal = balRes.rows[0];
+      const bal = balances[0];
       const available = Math.max(
         0,
         Number(bal.on_hand) - Number(bal.reserved) - Number(bal.blocked),

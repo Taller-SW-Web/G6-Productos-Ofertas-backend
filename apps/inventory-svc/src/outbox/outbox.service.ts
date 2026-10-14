@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { IDatabaseClient } from '../database/database.interface.js';
+import { DrizzleOutboxRepository } from '../repositories/drizzle/drizzle-outbox.repository.js';
 
 export interface OutboxRecord {
   event_id: string;
@@ -22,6 +23,8 @@ export interface AsyncApiEnvelopeParams {
 
 @Injectable()
 export class OutboxService {
+  constructor(private readonly outboxRepository: DrizzleOutboxRepository) {}
+
   /**
    * Constructs an AsyncAPI 0.6.0-rc.1 compliant envelope
    */
@@ -50,19 +53,6 @@ export class OutboxService {
    * Enqueues an event into inventory.outbox within the active database transaction
    */
   async enqueue(client: IDatabaseClient, record: OutboxRecord): Promise<void> {
-    const sql = `
-      INSERT INTO inventory.outbox (
-        event_id, event_type, aggregate_type, aggregate_id, correlation_id, payload, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, 'PENDING')
-    `;
-
-    await client.query(sql, [
-      record.event_id,
-      record.event_type,
-      record.aggregate_type,
-      record.aggregate_id,
-      record.correlation_id ?? null,
-      JSON.stringify(record.payload),
-    ]);
+    await this.outboxRepository.enqueue(client, record);
   }
 }

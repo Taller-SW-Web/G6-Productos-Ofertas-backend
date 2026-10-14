@@ -426,19 +426,44 @@ export class InMemoryDatabaseMock implements IDatabaseService {
     // INSERT INTO reservations
     if (s.startsWith('INSERT INTO INVENTORY.RESERVATIONS')) {
       const id = 'res-pk-' + Math.random().toString(36).substring(2);
-      const row: ReservationRow = {
-        id,
-        reservation_id: params?.[0],
-        status: 'ACTIVA',
-        expires_at: params?.[1],
-        idempotency_key: params?.[2],
-        intention: 'reservar',
-        correlation_id: params?.[3],
-        order_id: params?.[4],
-        operation_id: params?.[5],
-        request_fingerprint: params?.[6],
-        accepted_payload: params?.[7] ? JSON.parse(params[7]) : undefined,
-      };
+      let row: ReservationRow;
+      if (params && params.length === 10) {
+        row = {
+          id,
+          reservation_id: params[0],
+          status: params[1],
+          expires_at: params[2],
+          idempotency_key: params[3],
+          intention: params[4],
+          correlation_id: params[5],
+          order_id: params[6],
+          operation_id: params[7],
+          request_fingerprint: params[8],
+          accepted_payload: params[9]
+            ? typeof params[9] === 'string'
+              ? JSON.parse(params[9])
+              : params[9]
+            : undefined,
+        };
+      } else {
+        row = {
+          id,
+          reservation_id: params?.[0],
+          status: 'ACTIVA',
+          expires_at: params?.[1],
+          idempotency_key: params?.[2],
+          intention: 'reservar',
+          correlation_id: params?.[3],
+          order_id: params?.[4],
+          operation_id: params?.[5],
+          request_fingerprint: params?.[6],
+          accepted_payload: params?.[7]
+            ? typeof params?.[7] === 'string'
+              ? JSON.parse(params[7])
+              : params[7]
+            : undefined,
+        };
+      }
       this.reservations.push(row);
       return { rows: [{ id }] as any, rowCount: 1 };
     }
@@ -500,8 +525,11 @@ export class InMemoryDatabaseMock implements IDatabaseService {
 
     // UPDATE reservations
     if (s.startsWith('UPDATE INVENTORY.RESERVATIONS')) {
-      if (s.includes("SET STATUS = 'CONSUMIDA'")) {
-        const pk = params?.[0];
+      if (
+        s.includes("SET STATUS = 'CONSUMIDA'") ||
+        (s.includes('SET STATUS = $1') && params?.[0] === 'CONSUMIDA')
+      ) {
+        const pk = params?.[params.length - 1];
         const target = this.reservations.find((r) => r.id === pk);
         if (target) {
           target.status = 'CONSUMIDA';
@@ -509,8 +537,11 @@ export class InMemoryDatabaseMock implements IDatabaseService {
         }
         return { rows: [], rowCount: 1 };
       }
-      if (s.includes("SET STATUS = 'LIBERADA'")) {
-        const pk = params?.[0];
+      if (
+        s.includes("SET STATUS = 'LIBERADA'") ||
+        (s.includes('SET STATUS = $1') && params?.[0] === 'LIBERADA')
+      ) {
+        const pk = params?.[params.length - 1];
         const target = this.reservations.find((r) => r.id === pk);
         if (target) {
           target.status = 'LIBERADA';
@@ -518,8 +549,11 @@ export class InMemoryDatabaseMock implements IDatabaseService {
         }
         return { rows: [], rowCount: 1 };
       }
-      if (s.includes("SET STATUS = 'EXPIRADA'")) {
-        const pk = params?.[0];
+      if (
+        s.includes("SET STATUS = 'EXPIRADA'") ||
+        (s.includes('SET STATUS = $1') && params?.[0] === 'EXPIRADA')
+      ) {
+        const pk = params?.[params.length - 1];
         const target = this.reservations.find((r) => r.id === pk);
         if (target) {
           target.status = 'EXPIRADA';
@@ -555,7 +589,33 @@ export class InMemoryDatabaseMock implements IDatabaseService {
     // INSERT INTO inventory_operations
     if (s.startsWith('INSERT INTO INVENTORY.INVENTORY_OPERATIONS')) {
       let row: OperationRow;
-      if (s.includes("'RECHAZADO'")) {
+      if (params && params.length === 12) {
+        row = {
+          id: 'op-' + Math.random().toString(36).substring(2),
+          operation_type: params[0],
+          idempotency_key: params[1],
+          intention: params[2],
+          status: params[3],
+          result_code: params[4] ?? undefined,
+          order_id: params[5],
+          reservation_id: params[6] ?? undefined,
+          operation_id: params[7],
+          request_fingerprint: params[8],
+          request_payload: params[9]
+            ? typeof params[9] === 'string'
+              ? JSON.parse(params[9])
+              : params[9]
+            : undefined,
+          result_payload: params[10]
+            ? typeof params[10] === 'string'
+              ? JSON.parse(params[10])
+              : params[10]
+            : undefined,
+          correlation_id: params[11],
+          accepted_at: new Date().toISOString(),
+          applied_at: new Date().toISOString(),
+        };
+      } else if (s.includes("'RECHAZADO'")) {
         row = {
           id: 'op-' + Math.random().toString(36).substring(2),
           operation_type: 'RESERVA',

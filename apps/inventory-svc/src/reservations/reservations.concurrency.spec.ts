@@ -8,6 +8,14 @@ import { DatabaseService } from '../database/database.service.js';
 import { InMemoryDatabaseMock } from '../../test/in-memory-database.mock.js';
 import { ProblemDetailsException } from '../errors/inventory.errors.js';
 
+import { DrizzleReservationsRepository } from '../repositories/drizzle/drizzle-reservations.repository.js';
+import { DrizzleStockBalanceRepository } from '../repositories/drizzle/drizzle-stock-balance.repository.js';
+import { DrizzleOperationsRepository } from '../repositories/drizzle/drizzle-operations.repository.js';
+import { DrizzleLocationsRepository } from '../repositories/drizzle/drizzle-locations.repository.js';
+import { DrizzleCommercialRoutesRepository } from '../repositories/drizzle/drizzle-commercial-routes.repository.js';
+import { DrizzleKardexRepository } from '../repositories/drizzle/drizzle-kardex.repository.js';
+import { DrizzleOutboxRepository } from '../repositories/drizzle/drizzle-outbox.repository.js';
+
 describe('ReservationsService — Concurrencia, Idempotencia y Saldos', () => {
   let reservationsService: ReservationsService;
   let mockDb: InMemoryDatabaseMock;
@@ -21,14 +29,29 @@ describe('ReservationsService — Concurrencia, Idempotencia y Saldos', () => {
     dbService.setCustomService(mockDb);
 
     const idempotencyService = new IdempotencyService();
-    const kardexService = new KardexService();
-    const outboxService = new OutboxService();
+    const kardexRepo = new DrizzleKardexRepository(dbService);
+    const kardexService = new KardexService(kardexRepo);
+    const outboxRepo = new DrizzleOutboxRepository(dbService);
+    const outboxService = new OutboxService(outboxRepo);
+
+    const reservationsRepo = new DrizzleReservationsRepository(dbService);
+    const stockBalanceRepo = new DrizzleStockBalanceRepository(dbService);
+    const operationsRepo = new DrizzleOperationsRepository(dbService);
+    const locationsRepo = new DrizzleLocationsRepository(dbService);
+    const commercialRoutesRepo = new DrizzleCommercialRoutesRepository(
+      dbService,
+    );
 
     reservationsService = new ReservationsService(
       dbService,
       idempotencyService,
       kardexService,
       outboxService,
+      reservationsRepo,
+      stockBalanceRepo,
+      operationsRepo,
+      locationsRepo,
+      commercialRoutesRepo,
     );
   });
 

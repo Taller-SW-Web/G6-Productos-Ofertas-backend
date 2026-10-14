@@ -11,6 +11,14 @@ import { ReservationsService } from './reservations/reservations.service.js';
 import { OperationsService } from './operations/operations.service.js';
 import { DisponibilidadService } from './disponibilidad/disponibilidad.service.js';
 
+import { DrizzleLocationsRepository } from './repositories/drizzle/drizzle-locations.repository.js';
+import { DrizzleCommercialRoutesRepository } from './repositories/drizzle/drizzle-commercial-routes.repository.js';
+import { DrizzleStockBalanceRepository } from './repositories/drizzle/drizzle-stock-balance.repository.js';
+import { DrizzleReservationsRepository } from './repositories/drizzle/drizzle-reservations.repository.js';
+import { DrizzleOperationsRepository } from './repositories/drizzle/drizzle-operations.repository.js';
+import { DrizzleKardexRepository } from './repositories/drizzle/drizzle-kardex.repository.js';
+import { DrizzleOutboxRepository } from './repositories/drizzle/drizzle-outbox.repository.js';
+
 @Module({
   imports: [],
   controllers: [InventorySvcController, InventoryController],
@@ -24,6 +32,14 @@ import { DisponibilidadService } from './disponibilidad/disponibilidad.service.j
     ReservationsService,
     OperationsService,
     DisponibilidadService,
+    // Repositorios Drizzle
+    DrizzleLocationsRepository,
+    DrizzleCommercialRoutesRepository,
+    DrizzleStockBalanceRepository,
+    DrizzleReservationsRepository,
+    DrizzleOperationsRepository,
+    DrizzleKardexRepository,
+    DrizzleOutboxRepository,
   ],
   exports: [
     DatabaseService,
@@ -34,6 +50,14 @@ import { DisponibilidadService } from './disponibilidad/disponibilidad.service.j
     ReservationsService,
     OperationsService,
     DisponibilidadService,
+    // Repositorios Drizzle
+    DrizzleLocationsRepository,
+    DrizzleCommercialRoutesRepository,
+    DrizzleStockBalanceRepository,
+    DrizzleReservationsRepository,
+    DrizzleOperationsRepository,
+    DrizzleKardexRepository,
+    DrizzleOutboxRepository,
   ],
 })
 export class InventorySvcModule {}

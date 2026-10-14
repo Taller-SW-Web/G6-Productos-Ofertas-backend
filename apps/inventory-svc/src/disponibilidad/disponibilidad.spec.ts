@@ -3,6 +3,9 @@ import { DisponibilidadService } from './disponibilidad.service.js';
 import { DatabaseService } from '../database/database.service.js';
 import { InMemoryDatabaseMock } from '../../test/in-memory-database.mock.js';
 
+import { DrizzleStockBalanceRepository } from '../repositories/drizzle/drizzle-stock-balance.repository.js';
+import { DrizzleCommercialRoutesRepository } from '../repositories/drizzle/drizzle-commercial-routes.repository.js';
+
 describe('DisponibilidadService — Consultas de Stock y D-INV-01', () => {
   let disponibilidadService: DisponibilidadService;
   let mockDb: InMemoryDatabaseMock;
@@ -15,7 +18,15 @@ describe('DisponibilidadService — Consultas de Stock y D-INV-01', () => {
     mockDb = new InMemoryDatabaseMock();
     dbService = new DatabaseService();
     dbService.setCustomService(mockDb);
-    disponibilidadService = new DisponibilidadService(dbService);
+
+    const stockBalanceRepo = new DrizzleStockBalanceRepository(dbService);
+    const commercialRoutesRepo = new DrizzleCommercialRoutesRepository(
+      dbService,
+    );
+    disponibilidadService = new DisponibilidadService(
+      stockBalanceRepo,
+      commercialRoutesRepo,
+    );
   });
 
   describe('Consulta autoritativa detallada (GET /api/v1/inventario/disponibilidad)', () => {

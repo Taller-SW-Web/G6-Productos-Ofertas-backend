@@ -13,6 +13,11 @@ import {
   OperacionInventarioAceptada,
 } from '../types/inventory.dto.js';
 import { ProblemDetailsException } from '../errors/inventory.errors.js';
+import { DrizzleReservationsRepository } from '../repositories/drizzle/drizzle-reservations.repository.js';
+import { DrizzleStockBalanceRepository } from '../repositories/drizzle/drizzle-stock-balance.repository.js';
+import { DrizzleOperationsRepository } from '../repositories/drizzle/drizzle-operations.repository.js';
+import { DrizzleLocationsRepository } from '../repositories/drizzle/drizzle-locations.repository.js';
+import { DrizzleCommercialRoutesRepository } from '../repositories/drizzle/drizzle-commercial-routes.repository.js';
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -26,6 +31,11 @@ export class ReservationsService {
     private readonly idempotencyService: IdempotencyService,
     private readonly kardexService: KardexService,
     private readonly outboxService: OutboxService,
+    private readonly reservationsRepo: DrizzleReservationsRepository,
+    private readonly stockBalanceRepo: DrizzleStockBalanceRepository,
+    private readonly operationsRepo: DrizzleOperationsRepository,
+    private readonly locationsRepo: DrizzleLocationsRepository,
+    private readonly commercialRoutesRepo: DrizzleCommercialRoutesRepository,
   ) {}
 
   /**
@@ -54,15 +64,12 @@ export class ReservationsService {
     });
 
     // 3. Comprobación de idempotencia previa
-    const existingOp = await this.databaseService.query(
-      `SELECT id, operation_id, idempotency_key, request_fingerprint, status, result_payload, reservation_id
-       FROM inventory.inventory_operations
-       WHERE operation_id = $1 OR idempotency_key = $2`,
-      [dto.operation_id, idempotencyKey],
+    const op = await this.operationsRepo.findByOperationIdOrIdempotencyKey(
+      dto.operation_id,
+      idempotencyKey,
     );
 
-    if (existingOp.rows.length > 0) {
-      const op = existingOp.rows[0];
+    if (op) {
       // Caso B: Misma Idempotency-Key pero distinto operation_id -> 409
       if (
         op.idempotency_key === idempotencyKey &&
@@ -154,20 +161,19 @@ export class ReservationsService {
               reserved: number;
               blocked: number;
               available: number;
-              stock_version: bigint | number;
+              stock_version: number;
             }
           >();
 
           for (const item of groupedLines) {
-            const balanceRes = await client.query(
-              `SELECT sku_id, location_id, on_hand, reserved, blocked, available, stock_version
-           FROM inventory.stock_balance
-           WHERE sku_id = $1 AND location_id = $2
-           FOR UPDATE`,
-              [item.sku, item.location_id],
-            );
+            const bal =
+              await this.stockBalanceRepo.findBySkuAndLocationForUpdate(
+                client,
+                item.sku,
+                item.location_id,
+              );
 
-            if (balanceRes.rows.length === 0) {
+            if (!bal) {
               // No existe registro para el SKU en esa ubicación
               return this.registrarRechazo(
                 client,
@@ -179,15 +185,14 @@ export class ReservationsService {
               );
             }
 
-            const row = balanceRes.rows[0];
             balanceMap.set(`${item.sku}:::${item.location_id}`, {
-              sku_id: row.sku_id,
-              location_id: row.location_id,
-              on_hand: Number(row.on_hand),
-              reserved: Number(row.reserved),
-              blocked: Number(row.blocked),
-              available: Number(row.available),
-              stock_version: Number(row.stock_version),
+              sku_id: bal.sku_id,
+              location_id: bal.location_id,
+              on_hand: bal.on_hand,
+              reserved: bal.reserved,
+              blocked: bal.blocked,
+              available: bal.available,
+              stock_version: bal.stock_version,
             });
           }
 
@@ -198,6 +203,7 @@ export class ReservationsService {
               0,
               bal.on_hand - bal.reserved - bal.blocked,
             );
+
             if (currentAvailable < item.quantity) {
               // Saldo insuficiente: registrar rechazo durable y outbox
               return this.registrarRechazo(
@@ -224,45 +230,41 @@ export class ReservationsService {
           };
 
           // 5.1. Insertar en inventory.reservations
-          const resReservation = await client.query(
-            `INSERT INTO inventory.reservations (
-          reservation_id, status, expires_at, idempotency_key, intention,
-          correlation_id, order_id, operation_id, request_fingerprint, accepted_payload
-        ) VALUES ($1, 'ACTIVA', $2, $3, 'reservar', $4, $5, $6, $7, $8)
-        RETURNING id`,
-            [
-              reservationId,
-              expiresAt.toISOString(),
-              idempotencyKey,
-              correlationId,
-              dto.order_id,
-              dto.operation_id,
-              fingerprint,
-              JSON.stringify(acceptedResponse),
-            ],
-          );
-
-          const reservationPk = resReservation.rows[0].id;
+          const reservationPk = await this.reservationsRepo.create(client, {
+            reservation_id: reservationId,
+            status: 'ACTIVA',
+            expires_at: expiresAt.toISOString(),
+            idempotency_key: idempotencyKey,
+            intention: 'reservar',
+            correlation_id: correlationId,
+            order_id: dto.order_id,
+            operation_id: dto.operation_id,
+            request_fingerprint: fingerprint,
+            accepted_payload: JSON.stringify(acceptedResponse),
+          });
 
           // 5.2. Insertar líneas y actualizar stock_balance y Kardex
+          const linesToInsert = groupedLines.map((item) => ({
+            reservation_id: reservationPk,
+            sku_id: item.sku,
+            location_id: item.location_id,
+            quantity: item.quantity,
+          }));
+          await this.reservationsRepo.createLines(client, linesToInsert);
+
           for (const item of groupedLines) {
             const bal = balanceMap.get(`${item.sku}:::${item.location_id}`)!;
-
-            await client.query(
-              `INSERT INTO inventory.reservation_lines (
-            reservation_id, sku_id, location_id, quantity
-          ) VALUES ($1, $2, $3, $4)`,
-              [reservationPk, item.sku, item.location_id, item.quantity],
-            );
-
             const newReserved = bal.reserved + item.quantity;
-            const newStockVersion = Number(bal.stock_version) + 1;
+            const newStockVersion = bal.stock_version + 1;
 
-            await client.query(
-              `UPDATE inventory.stock_balance
-           SET reserved = $1, stock_version = $2
-           WHERE sku_id = $3 AND location_id = $4`,
-              [newReserved, newStockVersion, item.sku, item.location_id],
+            await this.stockBalanceRepo.updateStock(
+              client,
+              item.sku,
+              item.location_id,
+              {
+                reserved: newReserved,
+                stock_version: newStockVersion,
+              },
             );
 
             // Movimiento en Kardex
@@ -285,27 +287,19 @@ export class ReservationsService {
           }
 
           // 5.3. Registrar la operación en inventory.inventory_operations
-          await client.query(
-            `INSERT INTO inventory.inventory_operations (
-          operation_type, idempotency_key, intention, status,
-          order_id, reservation_id, accepted_at, applied_at,
-          operation_id, request_fingerprint, request_payload, result_payload, correlation_id
-        ) VALUES (
-          'RESERVA', $1, 'reservar', 'APLICADO',
-          $2, $3, now(), now(),
-          $4, $5, $6, $7, $8
-        )`,
-            [
-              idempotencyKey,
-              dto.order_id,
-              reservationId,
-              dto.operation_id,
-              fingerprint,
-              JSON.stringify(dto),
-              JSON.stringify(acceptedResponse),
-              correlationId,
-            ],
-          );
+          await this.operationsRepo.create(client, {
+            operation_type: 'RESERVA',
+            idempotency_key: idempotencyKey,
+            intention: 'reservar',
+            status: 'APLICADO',
+            order_id: dto.order_id,
+            reservation_id: reservationId,
+            operation_id: dto.operation_id,
+            request_fingerprint: fingerprint,
+            request_payload: JSON.stringify(dto),
+            result_payload: JSON.stringify(acceptedResponse),
+            correlation_id: correlationId,
+          });
 
           // 5.4. Registro en Outbox: inventory.reservation.created
           const createdEventPayload = this.outboxService.createMessageEnvelope({
@@ -375,19 +369,17 @@ export class ReservationsService {
         err?.message?.includes('uq_') ||
         err?.message?.includes('uk_')
       ) {
-        const concurrentOp = await this.databaseService.query(
-          `SELECT id, operation_id, idempotency_key, request_fingerprint, status, result_payload
-           FROM inventory.inventory_operations
-           WHERE operation_id = $1 OR idempotency_key = $2`,
-          [dto.operation_id, idempotencyKey],
-        );
-        if (concurrentOp.rows.length > 0) {
-          const op = concurrentOp.rows[0];
+        const concurrentOp =
+          await this.operationsRepo.findByOperationIdOrIdempotencyKey(
+            dto.operation_id,
+            idempotencyKey,
+          );
+        if (concurrentOp) {
           if (
-            op.operation_id === dto.operation_id &&
-            op.idempotency_key === idempotencyKey &&
+            concurrentOp.operation_id === dto.operation_id &&
+            concurrentOp.idempotency_key === idempotencyKey &&
             this.idempotencyService.isMatchingFingerprint(
-              op.request_fingerprint,
+              concurrentOp.request_fingerprint,
               fingerprint,
             )
           ) {
@@ -456,18 +448,16 @@ export class ReservationsService {
     });
 
     // Comprobación de idempotencia previa
-    const existingOp = await this.databaseService.query(
-      `SELECT id, operation_id, idempotency_key, request_fingerprint, status, result_payload
-       FROM inventory.inventory_operations
-       WHERE operation_id = $1 OR idempotency_key = $2`,
-      [dto.operation_id, idempotencyKey],
-    );
+    const existingOp =
+      await this.operationsRepo.findByOperationIdOrIdempotencyKey(
+        dto.operation_id,
+        idempotencyKey,
+      );
 
-    if (existingOp.rows.length > 0) {
-      const op = existingOp.rows[0];
+    if (existingOp) {
       if (
-        op.idempotency_key === idempotencyKey &&
-        op.operation_id !== dto.operation_id
+        existingOp.idempotency_key === idempotencyKey &&
+        existingOp.operation_id !== dto.operation_id
       ) {
         throw ProblemDetailsException.idempotencyConflict(
           'La clave Idempotency-Key ya fue utilizada para otra operación',
@@ -475,8 +465,8 @@ export class ReservationsService {
         );
       }
       if (
-        op.operation_id === dto.operation_id &&
-        op.idempotency_key !== idempotencyKey
+        existingOp.operation_id === dto.operation_id &&
+        existingOp.idempotency_key !== idempotencyKey
       ) {
         throw ProblemDetailsException.idempotencyConflict(
           'El operation_id ya fue utilizado con otra Idempotency-Key',
@@ -485,7 +475,7 @@ export class ReservationsService {
       }
       if (
         this.idempotencyService.isMatchingFingerprint(
-          op.request_fingerprint,
+          existingOp.request_fingerprint,
           fingerprint,
         )
       ) {
@@ -505,21 +495,15 @@ export class ReservationsService {
     }
 
     // Comprobación de reserva previa y verificación de expiración durable
-    const resReservaPrevia = await this.databaseService.query(
-      `SELECT id, reservation_id, status, expires_at, order_id
-       FROM inventory.reservations
-       WHERE reservation_id = $1`,
-      [reservaId],
-    );
+    const reservaPrevia =
+      await this.reservationsRepo.findByReservationId(reservaId);
 
-    if (resReservaPrevia.rows.length === 0) {
+    if (!reservaPrevia) {
       throw ProblemDetailsException.reservaNoEncontrada(
         'Reserva no encontrada',
         correlationId,
       );
     }
-
-    const reservaPrevia = resReservaPrevia.rows[0];
 
     if (reservaPrevia.order_id && reservaPrevia.order_id !== dto.order_id) {
       throw ProblemDetailsException.validation(
@@ -562,22 +546,18 @@ export class ReservationsService {
       return await this.databaseService.transaction<OperacionInventarioAceptada>(
         async (client) => {
           // Bloquear reserva
-          const resReserva = await client.query(
-            `SELECT id, reservation_id, status, expires_at, order_id
-           FROM inventory.reservations
-           WHERE reservation_id = $1
-           FOR UPDATE`,
-            [reservaId],
-          );
+          const reserva =
+            await this.reservationsRepo.findByReservationIdForUpdate(
+              client,
+              reservaId,
+            );
 
-          if (resReserva.rows.length === 0) {
+          if (!reserva) {
             throw ProblemDetailsException.reservaNoEncontrada(
               'Reserva no encontrada',
               correlationId,
             );
           }
-
-          const reserva = resReserva.rows[0];
 
           if (reserva.status !== 'ACTIVA') {
             throw ProblemDetailsException.reservaNoActiva(
@@ -587,40 +567,35 @@ export class ReservationsService {
           }
 
           // Transición a CONSUMIDA
-          await client.query(
-            `UPDATE inventory.reservations
-           SET status = 'CONSUMIDA', consumed_at = now()
-           WHERE id = $1`,
-            [reserva.id],
+          await this.reservationsRepo.updateStatus(
+            client,
+            reserva.id,
+            'CONSUMIDA',
           );
 
           // Cargar líneas de reserva
-          const linesRes = await client.query(
-            `SELECT sku_id, location_id, quantity
-           FROM inventory.reservation_lines
-           WHERE reservation_id = $1`,
-            [reserva.id],
+          const lines = await this.reservationsRepo.findLinesByReservationPk(
+            client,
+            reserva.id,
           );
 
-          for (const line of linesRes.rows) {
+          for (const line of lines) {
             const qty = Number(line.quantity);
 
-            const balRes = await client.query(
-              `SELECT on_hand, reserved, blocked, stock_version
-             FROM inventory.stock_balance
-             WHERE sku_id = $1 AND location_id = $2
-             FOR UPDATE`,
-              [line.sku_id, line.location_id],
-            );
+            const bal =
+              await this.stockBalanceRepo.findBySkuAndLocationForUpdate(
+                client,
+                line.sku_id,
+                line.location_id,
+              );
 
-            if (balRes.rows.length === 0) {
+            if (!bal) {
               throw ProblemDetailsException.reservaNoActiva(
                 `Saldo de stock no encontrado para SKU ${line.sku_id}`,
                 correlationId,
               );
             }
 
-            const bal = balRes.rows[0];
             const onHand = Number(bal.on_hand);
             const reserved = Number(bal.reserved);
             const blocked = Number(bal.blocked);
@@ -636,20 +611,18 @@ export class ReservationsService {
             const newReserved = reserved - qty;
             const newVersion = Number(bal.stock_version) + 1;
 
-            const updateRes = await client.query(
-              `UPDATE inventory.stock_balance
-             SET on_hand = $1, reserved = $2, stock_version = $3
-             WHERE sku_id = $4 AND location_id = $5`,
-              [
-                newOnHand,
-                newReserved,
-                newVersion,
-                line.sku_id,
-                line.location_id,
-              ],
+            const updatedCount = await this.stockBalanceRepo.updateStock(
+              client,
+              line.sku_id,
+              line.location_id,
+              {
+                on_hand: newOnHand,
+                reserved: newReserved,
+                stock_version: newVersion,
+              },
             );
 
-            if (updateRes.rowCount !== 1) {
+            if (updatedCount !== 1) {
               throw new Error(
                 `Fallo al actualizar saldo para SKU ${line.sku_id}`,
               );
@@ -683,27 +656,19 @@ export class ReservationsService {
           };
 
           // Registro durable de operación
-          await client.query(
-            `INSERT INTO inventory.inventory_operations (
-            operation_type, idempotency_key, intention, status,
-            order_id, reservation_id, accepted_at, applied_at,
-            operation_id, request_fingerprint, request_payload, result_payload, correlation_id
-          ) VALUES (
-            'CONSUMO', $1, 'confirmar_consumo', 'APLICADO',
-            $2, $3, now(), now(),
-            $4, $5, $6, $7, $8
-          )`,
-            [
-              idempotencyKey,
-              dto.order_id,
-              reservaId,
-              dto.operation_id,
-              fingerprint,
-              JSON.stringify(dto),
-              JSON.stringify(acceptedResponse),
-              correlationId,
-            ],
-          );
+          await this.operationsRepo.create(client, {
+            operation_type: 'CONSUMO',
+            idempotency_key: idempotencyKey,
+            intention: 'confirmar_consumo',
+            status: 'APLICADO',
+            order_id: dto.order_id,
+            reservation_id: reservaId,
+            operation_id: dto.operation_id,
+            request_fingerprint: fingerprint,
+            request_payload: JSON.stringify(dto),
+            result_payload: JSON.stringify(acceptedResponse),
+            correlation_id: correlationId,
+          });
 
           // Outbox: inventory.reservation.consumed & inventory.consumption.completed
           const consumedEvent = this.outboxService.createMessageEnvelope({
@@ -760,19 +725,17 @@ export class ReservationsService {
         err?.message?.includes('uq_') ||
         err?.message?.includes('uk_')
       ) {
-        const concurrentOp = await this.databaseService.query(
-          `SELECT id, operation_id, idempotency_key, request_fingerprint, status, result_payload
-           FROM inventory.inventory_operations
-           WHERE operation_id = $1 OR idempotency_key = $2`,
-          [dto.operation_id, idempotencyKey],
-        );
-        if (concurrentOp.rows.length > 0) {
-          const op = concurrentOp.rows[0];
+        const concurrentOp =
+          await this.operationsRepo.findByOperationIdOrIdempotencyKey(
+            dto.operation_id,
+            idempotencyKey,
+          );
+        if (concurrentOp) {
           if (
-            op.operation_id === dto.operation_id &&
-            op.idempotency_key === idempotencyKey &&
+            concurrentOp.operation_id === dto.operation_id &&
+            concurrentOp.idempotency_key === idempotencyKey &&
             this.idempotencyService.isMatchingFingerprint(
-              op.request_fingerprint,
+              concurrentOp.request_fingerprint,
               fingerprint,
             )
           ) {
@@ -854,18 +817,16 @@ export class ReservationsService {
     });
 
     // Comprobación de idempotencia previa
-    const existingOp = await this.databaseService.query(
-      `SELECT id, operation_id, idempotency_key, request_fingerprint, status, result_payload
-       FROM inventory.inventory_operations
-       WHERE operation_id = $1 OR idempotency_key = $2`,
-      [dto.operation_id, idempotencyKey],
-    );
+    const existingOp =
+      await this.operationsRepo.findByOperationIdOrIdempotencyKey(
+        dto.operation_id,
+        idempotencyKey,
+      );
 
-    if (existingOp.rows.length > 0) {
-      const op = existingOp.rows[0];
+    if (existingOp) {
       if (
-        op.idempotency_key === idempotencyKey &&
-        op.operation_id !== dto.operation_id
+        existingOp.idempotency_key === idempotencyKey &&
+        existingOp.operation_id !== dto.operation_id
       ) {
         throw ProblemDetailsException.idempotencyConflict(
           'La clave Idempotency-Key ya fue utilizada para otra operación',
@@ -873,8 +834,8 @@ export class ReservationsService {
         );
       }
       if (
-        op.operation_id === dto.operation_id &&
-        op.idempotency_key !== idempotencyKey
+        existingOp.operation_id === dto.operation_id &&
+        existingOp.idempotency_key !== idempotencyKey
       ) {
         throw ProblemDetailsException.idempotencyConflict(
           'El operation_id ya fue utilizado con otra Idempotency-Key',
@@ -883,7 +844,7 @@ export class ReservationsService {
       }
       if (
         this.idempotencyService.isMatchingFingerprint(
-          op.request_fingerprint,
+          existingOp.request_fingerprint,
           fingerprint,
         )
       ) {
@@ -903,21 +864,15 @@ export class ReservationsService {
     }
 
     // Comprobación de reserva previa y verificación de expiración durable
-    const resReservaPrevia = await this.databaseService.query(
-      `SELECT id, reservation_id, status, expires_at, order_id
-       FROM inventory.reservations
-       WHERE reservation_id = $1`,
-      [reservaId],
-    );
+    const reservaPrevia =
+      await this.reservationsRepo.findByReservationId(reservaId);
 
-    if (resReservaPrevia.rows.length === 0) {
+    if (!reservaPrevia) {
       throw ProblemDetailsException.reservaNoEncontrada(
         'Reserva no encontrada',
         correlationId,
       );
     }
-
-    const reservaPrevia = resReservaPrevia.rows[0];
 
     if (
       reservaPrevia.status === 'EXPIRADA' ||
@@ -954,22 +909,18 @@ export class ReservationsService {
       return await this.databaseService.transaction<OperacionInventarioAceptada>(
         async (client) => {
           // Bloquear reserva
-          const resReserva = await client.query(
-            `SELECT id, reservation_id, status, expires_at, order_id
-           FROM inventory.reservations
-           WHERE reservation_id = $1
-           FOR UPDATE`,
-            [reservaId],
-          );
+          const reserva =
+            await this.reservationsRepo.findByReservationIdForUpdate(
+              client,
+              reservaId,
+            );
 
-          if (resReserva.rows.length === 0) {
+          if (!reserva) {
             throw ProblemDetailsException.reservaNoEncontrada(
               'Reserva no encontrada',
               correlationId,
             );
           }
-
-          const reserva = resReserva.rows[0];
 
           if (reserva.status !== 'ACTIVA') {
             throw ProblemDetailsException.reservaNoActiva(
@@ -979,40 +930,35 @@ export class ReservationsService {
           }
 
           // Transición a LIBERADA
-          await client.query(
-            `UPDATE inventory.reservations
-           SET status = 'LIBERADA', released_at = now()
-           WHERE id = $1`,
-            [reserva.id],
+          await this.reservationsRepo.updateStatus(
+            client,
+            reserva.id,
+            'LIBERADA',
           );
 
           // Cargar líneas y revertir reserved en stock_balance
-          const linesRes = await client.query(
-            `SELECT sku_id, location_id, quantity
-           FROM inventory.reservation_lines
-           WHERE reservation_id = $1`,
-            [reserva.id],
+          const lines = await this.reservationsRepo.findLinesByReservationPk(
+            client,
+            reserva.id,
           );
 
-          for (const line of linesRes.rows) {
+          for (const line of lines) {
             const qty = Number(line.quantity);
 
-            const balRes = await client.query(
-              `SELECT on_hand, reserved, blocked, stock_version
-             FROM inventory.stock_balance
-             WHERE sku_id = $1 AND location_id = $2
-             FOR UPDATE`,
-              [line.sku_id, line.location_id],
-            );
+            const bal =
+              await this.stockBalanceRepo.findBySkuAndLocationForUpdate(
+                client,
+                line.sku_id,
+                line.location_id,
+              );
 
-            if (balRes.rows.length === 0) {
+            if (!bal) {
               throw ProblemDetailsException.reservaNoActiva(
                 `Saldo de stock no encontrado para SKU ${line.sku_id}`,
                 correlationId,
               );
             }
 
-            const bal = balRes.rows[0];
             const onHand = Number(bal.on_hand);
             const reserved = Number(bal.reserved);
             const blocked = Number(bal.blocked);
@@ -1027,14 +973,17 @@ export class ReservationsService {
             const newReserved = reserved - qty;
             const newVersion = Number(bal.stock_version) + 1;
 
-            const updateRes = await client.query(
-              `UPDATE inventory.stock_balance
-             SET reserved = $1, stock_version = $2
-             WHERE sku_id = $3 AND location_id = $4`,
-              [newReserved, newVersion, line.sku_id, line.location_id],
+            const updatedCount = await this.stockBalanceRepo.updateStock(
+              client,
+              line.sku_id,
+              line.location_id,
+              {
+                reserved: newReserved,
+                stock_version: newVersion,
+              },
             );
 
-            if (updateRes.rowCount !== 1) {
+            if (updatedCount !== 1) {
               throw new Error(
                 `Fallo al actualizar saldo para SKU ${line.sku_id}`,
               );
@@ -1068,27 +1017,19 @@ export class ReservationsService {
           };
 
           // Registro durable de operación
-          await client.query(
-            `INSERT INTO inventory.inventory_operations (
-            operation_type, idempotency_key, intention, status,
-            order_id, reservation_id, accepted_at, applied_at,
-            operation_id, request_fingerprint, request_payload, result_payload, correlation_id
-          ) VALUES (
-            'LIBERACION', $1, 'liberar_reserva', 'APLICADO',
-            $2, $3, now(), now(),
-            $4, $5, $6, $7, $8
-          )`,
-            [
-              idempotencyKey,
-              dto.order_id,
-              reservaId,
-              dto.operation_id,
-              fingerprint,
-              JSON.stringify(dto),
-              JSON.stringify(acceptedResponse),
-              correlationId,
-            ],
-          );
+          await this.operationsRepo.create(client, {
+            operation_type: 'LIBERACION',
+            idempotency_key: idempotencyKey,
+            intention: 'liberar_reserva',
+            status: 'APLICADO',
+            order_id: dto.order_id,
+            reservation_id: reservaId,
+            operation_id: dto.operation_id,
+            request_fingerprint: fingerprint,
+            request_payload: JSON.stringify(dto),
+            result_payload: JSON.stringify(acceptedResponse),
+            correlation_id: correlationId,
+          });
 
           // Outbox: inventory.reservation.released
           const releasedEvent = this.outboxService.createMessageEnvelope({
@@ -1123,19 +1064,17 @@ export class ReservationsService {
         err?.message?.includes('uq_') ||
         err?.message?.includes('uk_')
       ) {
-        const concurrentOp = await this.databaseService.query(
-          `SELECT id, operation_id, idempotency_key, request_fingerprint, status, result_payload
-           FROM inventory.inventory_operations
-           WHERE operation_id = $1 OR idempotency_key = $2`,
-          [dto.operation_id, idempotencyKey],
-        );
-        if (concurrentOp.rows.length > 0) {
-          const op = concurrentOp.rows[0];
+        const concurrentOp =
+          await this.operationsRepo.findByOperationIdOrIdempotencyKey(
+            dto.operation_id,
+            idempotencyKey,
+          );
+        if (concurrentOp) {
           if (
-            op.operation_id === dto.operation_id &&
-            op.idempotency_key === idempotencyKey &&
+            concurrentOp.operation_id === dto.operation_id &&
+            concurrentOp.idempotency_key === idempotencyKey &&
             this.idempotencyService.isMatchingFingerprint(
-              op.request_fingerprint,
+              concurrentOp.request_fingerprint,
               fingerprint,
             )
           ) {
@@ -1168,14 +1107,13 @@ export class ReservationsService {
     correlationId: string,
   ): Promise<boolean> {
     return await this.databaseService.transaction<boolean>(async (txClient) => {
-      const resReserva = await txClient.query(
-        `SELECT id, status, expires_at FROM inventory.reservations WHERE id = $1 FOR UPDATE`,
-        [reservationPk],
+      const reserva = await this.reservationsRepo.findByIdForUpdate(
+        txClient,
+        reservationPk,
       );
-      if (resReserva.rows.length === 0) {
+      if (!reserva) {
         return false;
       }
-      const reserva = resReserva.rows[0];
       if (reserva.status !== 'ACTIVA') {
         return false;
       }
@@ -1199,41 +1137,34 @@ export class ReservationsService {
     orderId: string,
     correlationId: string,
   ): Promise<void> {
-    await client.query(
-      `UPDATE inventory.reservations
-       SET status = 'EXPIRADA', expired_at = now()
-       WHERE id = $1`,
-      [reservationPk],
+    await this.reservationsRepo.updateStatus(client, reservationPk, 'EXPIRADA');
+
+    const lines = await this.reservationsRepo.findLinesByReservationPk(
+      client,
+      reservationPk,
     );
 
-    const linesRes = await client.query(
-      `SELECT sku_id, location_id, quantity
-       FROM inventory.reservation_lines
-       WHERE reservation_id = $1`,
-      [reservationPk],
-    );
-
-    for (const line of linesRes.rows) {
+    for (const line of lines) {
       const qty = Number(line.quantity);
-      const balRes = await client.query(
-        `SELECT on_hand, reserved, blocked, stock_version
-         FROM inventory.stock_balance
-         WHERE sku_id = $1 AND location_id = $2
-         FOR UPDATE`,
-        [line.sku_id, line.location_id],
+      const bal = await this.stockBalanceRepo.findBySkuAndLocationForUpdate(
+        client,
+        line.sku_id,
+        line.location_id,
       );
 
-      if (balRes.rows.length > 0) {
-        const bal = balRes.rows[0];
+      if (bal) {
         const reserved = Number(bal.reserved);
         const newReserved = reserved >= qty ? reserved - qty : 0;
         const newVersion = Number(bal.stock_version) + 1;
 
-        await client.query(
-          `UPDATE inventory.stock_balance
-           SET reserved = $1, stock_version = $2
-           WHERE sku_id = $3 AND location_id = $4`,
-          [newReserved, newVersion, line.sku_id, line.location_id],
+        await this.stockBalanceRepo.updateStock(
+          client,
+          line.sku_id,
+          line.location_id,
+          {
+            reserved: newReserved,
+            stock_version: newVersion,
+          },
         );
 
         await this.kardexService.recordMovement(client, {
@@ -1291,27 +1222,19 @@ export class ReservationsService {
       result_code: resultCode,
     };
 
-    await client.query(
-      `INSERT INTO inventory.inventory_operations (
-        operation_type, idempotency_key, intention, status, result_code,
-        order_id, accepted_at, applied_at,
-        operation_id, request_fingerprint, request_payload, result_payload, correlation_id
-      ) VALUES (
-        'RESERVA', $1, 'reservar', 'RECHAZADO', $2,
-        $3, now(), now(),
-        $4, $5, $6, $7, $8
-      )`,
-      [
-        idempotencyKey,
-        resultCode,
-        dto.order_id,
-        dto.operation_id,
-        fingerprint,
-        JSON.stringify(dto),
-        JSON.stringify(rejectedPayload),
-        correlationId,
-      ],
-    );
+    await this.operationsRepo.create(client, {
+      operation_type: 'RESERVA',
+      idempotency_key: idempotencyKey,
+      intention: 'reservar',
+      status: 'RECHAZADO',
+      result_code: resultCode,
+      order_id: dto.order_id,
+      operation_id: dto.operation_id,
+      request_fingerprint: fingerprint,
+      request_payload: JSON.stringify(dto),
+      result_payload: JSON.stringify(rejectedPayload),
+      correlation_id: correlationId,
+    });
 
     const rejectedEvent = this.outboxService.createMessageEnvelope({
       eventName: 'inventory.reservation.rejected',
@@ -1356,10 +1279,7 @@ export class ReservationsService {
     }> = [];
 
     // Cargar ubicaciones activas
-    const locRes = await this.databaseService.query(
-      `SELECT id, code, active FROM inventory.locations WHERE active = true`,
-    );
-    const activeLocations = locRes.rows;
+    const activeLocations = await this.locationsRepo.findActive();
 
     for (const line of dto.lines) {
       if (line.location_id) {
@@ -1385,17 +1305,14 @@ export class ReservationsService {
         });
       } else {
         // location_id no proporcionado: consultar ruta de cumplimiento comercial
-        const routeRes = await this.databaseService.query(
-          `SELECT location_id FROM inventory.commercial_fulfillment_routes
-           WHERE channel_id = $1 AND active = true`,
-          [dto.channel_id],
-        );
+        const routeLocationId =
+          await this.commercialRoutesRepo.findActiveByChannel(dto.channel_id);
 
-        if (routeRes.rows.length === 1) {
+        if (routeLocationId) {
           result.push({
             sku: line.sku,
             quantity: line.quantity,
-            location_id: routeRes.rows[0].location_id,
+            location_id: routeLocationId,
           });
         } else if (activeLocations.length === 1) {
           // Única ubicación inequívoca permitida por SPEC-015 §7.2
