@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { IDatabaseClient } from '../database/database.interface.js';
-import { DrizzleOutboxRepository } from '../repositories/drizzle/drizzle-outbox.repository.js';
+import { OUTBOX_REPOSITORY } from '../repositories/interfaces/repository.tokens.js';
+import type { IOutboxRepository } from '../repositories/interfaces/outbox.repository.interface.js';
 
 export interface OutboxRecord {
   event_id: string;
@@ -23,7 +24,10 @@ export interface AsyncApiEnvelopeParams {
 
 @Injectable()
 export class OutboxService {
-  constructor(private readonly outboxRepository: DrizzleOutboxRepository) {}
+  constructor(
+    @Inject(OUTBOX_REPOSITORY)
+    private readonly outboxRepository: IOutboxRepository,
+  ) {}
 
   /**
    * Constructs an AsyncAPI 0.6.0-rc.1 compliant envelope

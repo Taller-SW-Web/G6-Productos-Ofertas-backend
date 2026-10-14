@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { loadInventoryConfig } from '../config/inventory.config.js';
 import {
   ConsultaDisponibilidadResponse,
@@ -9,17 +9,29 @@ import {
   VerificarCantidadComercialItem,
 } from '../types/inventory.dto.js';
 import { ProblemDetailsException } from '../errors/inventory.errors.js';
-import { DrizzleStockBalanceRepository } from '../repositories/drizzle/drizzle-stock-balance.repository.js';
-import { DrizzleCommercialRoutesRepository } from '../repositories/drizzle/drizzle-commercial-routes.repository.js';
+import {
+  STOCK_BALANCE_REPOSITORY,
+  COMMERCIAL_ROUTES_REPOSITORY,
+} from '../repositories/interfaces/repository.tokens.js';
+import type { IStockBalanceRepository } from '../repositories/interfaces/stock-balance.repository.interface.js';
+import type { ICommercialRoutesRepository } from '../repositories/interfaces/commercial-routes.repository.interface.js';
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const VALID_FULFILLMENT_MODES = [
+  'ENVIO_DOMICILIO',
+  'RETIRO_TIENDA',
+  'VENTA_TIENDA',
+];
+
 @Injectable()
 export class DisponibilidadService {
   constructor(
-    private readonly stockBalanceRepository: DrizzleStockBalanceRepository,
-    private readonly commercialRoutesRepository: DrizzleCommercialRoutesRepository,
+    @Inject(STOCK_BALANCE_REPOSITORY)
+    private readonly stockBalanceRepository: IStockBalanceRepository,
+    @Inject(COMMERCIAL_ROUTES_REPOSITORY)
+    private readonly commercialRoutesRepository: ICommercialRoutesRepository,
   ) {}
 
   /**
@@ -118,6 +130,33 @@ export class DisponibilidadService {
     ) {
       throw ProblemDetailsException.validation(
         'Solicitud inválida para verificación comercial',
+        correlationId,
+      );
+    }
+
+    // Validar objeto fulfillment
+    if (!dto.fulfillment || !dto.fulfillment.mode) {
+      throw ProblemDetailsException.contextoAbastecimientoInvalido(
+        'El objeto fulfillment con su modo es obligatorio en la verificación comercial',
+        correlationId,
+      );
+    }
+
+    if (!VALID_FULFILLMENT_MODES.includes(dto.fulfillment.mode)) {
+      throw ProblemDetailsException.contextoAbastecimientoInvalido(
+        `Modo de fulfillment inválido '${dto.fulfillment.mode}'. Valores permitidos: ${VALID_FULFILLMENT_MODES.join(', ')}`,
+        correlationId,
+      );
+    }
+
+    if (
+      dto.fulfillment.fulfillment_ref !== undefined &&
+      dto.fulfillment.fulfillment_ref !== null &&
+      (typeof dto.fulfillment.fulfillment_ref !== 'string' ||
+        dto.fulfillment.fulfillment_ref.trim().length === 0)
+    ) {
+      throw ProblemDetailsException.contextoAbastecimientoInvalido(
+        'fulfillment_ref debe ser una cadena no vacía cuando se proporcione',
         correlationId,
       );
     }

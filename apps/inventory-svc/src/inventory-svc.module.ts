@@ -8,6 +8,7 @@ import { KardexService } from './kardex/kardex.service.js';
 import { OutboxService } from './outbox/outbox.service.js';
 import { OutboxPublisherService } from './outbox/outbox-publisher.service.js';
 import { ReservationsService } from './reservations/reservations.service.js';
+import { ReservationExpirationService } from './reservations/reservation-expiration.service.js';
 import { OperationsService } from './operations/operations.service.js';
 import { DisponibilidadService } from './disponibilidad/disponibilidad.service.js';
 
@@ -18,6 +19,16 @@ import { DrizzleReservationsRepository } from './repositories/drizzle/drizzle-re
 import { DrizzleOperationsRepository } from './repositories/drizzle/drizzle-operations.repository.js';
 import { DrizzleKardexRepository } from './repositories/drizzle/drizzle-kardex.repository.js';
 import { DrizzleOutboxRepository } from './repositories/drizzle/drizzle-outbox.repository.js';
+
+import {
+  LOCATIONS_REPOSITORY,
+  COMMERCIAL_ROUTES_REPOSITORY,
+  STOCK_BALANCE_REPOSITORY,
+  RESERVATIONS_REPOSITORY,
+  OPERATIONS_REPOSITORY,
+  KARDEX_REPOSITORY,
+  OUTBOX_REPOSITORY,
+} from './repositories/interfaces/repository.tokens.js';
 
 import { InventoryAuthGuard } from './auth/inventory-auth.guard.js';
 
@@ -32,10 +43,40 @@ import { InventoryAuthGuard } from './auth/inventory-auth.guard.js';
     OutboxService,
     OutboxPublisherService,
     ReservationsService,
+    ReservationExpirationService,
     OperationsService,
     DisponibilidadService,
     InventoryAuthGuard,
-    // Repositorios Drizzle
+    // Repositorios Drizzle vinculados a sus tokens de interfaz
+    {
+      provide: LOCATIONS_REPOSITORY,
+      useClass: DrizzleLocationsRepository,
+    },
+    {
+      provide: COMMERCIAL_ROUTES_REPOSITORY,
+      useClass: DrizzleCommercialRoutesRepository,
+    },
+    {
+      provide: STOCK_BALANCE_REPOSITORY,
+      useClass: DrizzleStockBalanceRepository,
+    },
+    {
+      provide: RESERVATIONS_REPOSITORY,
+      useClass: DrizzleReservationsRepository,
+    },
+    {
+      provide: OPERATIONS_REPOSITORY,
+      useClass: DrizzleOperationsRepository,
+    },
+    {
+      provide: KARDEX_REPOSITORY,
+      useClass: DrizzleKardexRepository,
+    },
+    {
+      provide: OUTBOX_REPOSITORY,
+      useClass: DrizzleOutboxRepository,
+    },
+    // Compatibilidad directa de clases
     DrizzleLocationsRepository,
     DrizzleCommercialRoutesRepository,
     DrizzleStockBalanceRepository,
@@ -51,10 +92,17 @@ import { InventoryAuthGuard } from './auth/inventory-auth.guard.js';
     OutboxService,
     OutboxPublisherService,
     ReservationsService,
+    ReservationExpirationService,
     OperationsService,
     DisponibilidadService,
     InventoryAuthGuard,
-    // Repositorios Drizzle
+    LOCATIONS_REPOSITORY,
+    COMMERCIAL_ROUTES_REPOSITORY,
+    STOCK_BALANCE_REPOSITORY,
+    RESERVATIONS_REPOSITORY,
+    OPERATIONS_REPOSITORY,
+    KARDEX_REPOSITORY,
+    OUTBOX_REPOSITORY,
     DrizzleLocationsRepository,
     DrizzleCommercialRoutesRepository,
     DrizzleStockBalanceRepository,

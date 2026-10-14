@@ -51,6 +51,7 @@ export interface IOperationsRepository {
       result_payload?: string | null;
       correlation_id?: string | null;
       result_code?: string | null;
+      client_id?: string | null;
     },
   ): Promise<void>;
 }

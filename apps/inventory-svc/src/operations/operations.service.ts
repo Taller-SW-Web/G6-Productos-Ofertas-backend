@@ -1,12 +1,16 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import {
   ConsultaOperacionInventario,
   OperacionInventarioTipo,
   OperacionInventarioEstado,
 } from '../types/inventory.dto.js';
 import { ProblemDetailsException } from '../errors/inventory.errors.js';
-import { DrizzleOperationsRepository } from '../repositories/drizzle/drizzle-operations.repository.js';
-import { DrizzleReservationsRepository } from '../repositories/drizzle/drizzle-reservations.repository.js';
+import {
+  OPERATIONS_REPOSITORY,
+  RESERVATIONS_REPOSITORY,
+} from '../repositories/interfaces/repository.tokens.js';
+import type { IOperationsRepository } from '../repositories/interfaces/operations.repository.interface.js';
+import type { IReservationsRepository } from '../repositories/interfaces/reservations.repository.interface.js';
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -14,8 +18,10 @@ const UUID_REGEX =
 @Injectable()
 export class OperationsService {
   constructor(
-    private readonly operationsRepository: DrizzleOperationsRepository,
-    private readonly reservationsRepository: DrizzleReservationsRepository,
+    @Inject(OPERATIONS_REPOSITORY)
+    private readonly operationsRepository: IOperationsRepository,
+    @Inject(RESERVATIONS_REPOSITORY)
+    private readonly reservationsRepository: IReservationsRepository,
   ) {}
 
   /**

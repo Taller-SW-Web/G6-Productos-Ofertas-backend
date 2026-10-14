@@ -6,10 +6,13 @@ import {
 } from '@nestjs/common';
 import * as fs from 'node:fs';
 import pg from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import * as schema from '../drizzle/schema.js';
 import {
   IDatabaseClient,
   IDatabaseService,
   QueryResult,
+  DrizzleDatabase,
 } from './database.interface.js';
 import {
   loadInventoryConfig,
@@ -24,6 +27,7 @@ export class DatabaseService
 {
   private readonly logger = new Logger(DatabaseService.name);
   private pool: pg.Pool | null = null;
+  private drizzleDb: DrizzleDatabase | null = null;
   private isConnected = false;
   private customService: IDatabaseService | null = null;
 
@@ -34,6 +38,13 @@ export class DatabaseService
    */
   setCustomService(custom: IDatabaseService | null): void {
     this.customService = custom;
+  }
+
+  getDrizzle(): DrizzleDatabase | null {
+    if (this.customService && (this.customService as any).getDrizzle) {
+      return (this.customService as any).getDrizzle();
+    }
+    return this.drizzleDb;
   }
 
   async onModuleInit(): Promise<void> {
@@ -49,6 +60,7 @@ export class DatabaseService
     if (this.pool) {
       await this.pool.end();
       this.pool = null;
+      this.drizzleDb = null;
       this.isConnected = false;
     }
   }
@@ -108,6 +120,9 @@ export class DatabaseService
         return;
       }
 
+      // Conectar Drizzle ORM a la instancia del pool PostgreSQL
+      this.drizzleDb = drizzle(this.pool, { schema });
+
       // Configure default search_path to inventory on each new client
       this.pool.on('connect', (client) => {
         client.query('SET search_path TO inventory, public').catch((err) => {
@@ -124,7 +139,7 @@ export class DatabaseService
         await client.query('SELECT 1');
         this.isConnected = true;
         this.logger.log(
-          'Conexión PostgreSQL hacia schema inventory inicializada y validada con éxito.',
+          'Conexión PostgreSQL hacia schema inventory inicializada y validada con éxito (Drizzle ORM activo).',
         );
       } finally {
         client.release();
@@ -167,6 +182,7 @@ export class DatabaseService
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+      const txDrizzle = drizzle(client, { schema });
       const wrappedClient: IDatabaseClient = {
         query: async <R = any>(
           sql: string,
@@ -178,6 +194,7 @@ export class DatabaseService
             rowCount: res.rowCount ?? res.rows.length,
           };
         },
+        drizzle: txDrizzle,
       };
 
       const result = await fn(wrappedClient);

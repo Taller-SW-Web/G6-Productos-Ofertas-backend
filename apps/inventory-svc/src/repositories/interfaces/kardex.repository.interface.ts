@@ -23,3 +23,5 @@ export interface IKardexRepository {
     movement: NewKardexMovement,
   ): Promise<void>;
 }
+
+export type KardexMovementEntity = NewKardexMovement;

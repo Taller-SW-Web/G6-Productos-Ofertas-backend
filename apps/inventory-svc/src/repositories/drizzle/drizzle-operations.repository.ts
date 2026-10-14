@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import { eq, or } from 'drizzle-orm';
 import { DatabaseService } from '../../database/database.service.js';
 import { IDatabaseClient } from '../../database/database.interface.js';
+import * as schema from '../../drizzle/schema.js';
 import {
   IOperationsRepository,
   OperationEntity,
@@ -15,9 +17,24 @@ export class DrizzleOperationsRepository implements IOperationsRepository {
     idempotencyKey: string,
     client?: IDatabaseClient,
   ): Promise<OperationEntity | null> {
+    const db = client?.drizzle ?? this.databaseService.getDrizzle();
+    if (db) {
+      const rows = await db
+        .select()
+        .from(schema.inventoryOperations)
+        .where(
+          or(
+            eq(schema.inventoryOperations.operation_id, operationId),
+            eq(schema.inventoryOperations.idempotency_key, idempotencyKey),
+          ),
+        );
+      if (rows.length === 0) return null;
+      return this.mapRow(rows[0]);
+    }
+
     const sql = `
       SELECT id, operation_type, idempotency_key, intention, status,
-             order_id, reservation_id, result_code, operation_id,
+             order_id, reservation_id, result_code, operation_id, client_id,
              request_fingerprint, request_payload, result_payload,
              accepted_at, applied_at, correlation_id
       FROM inventory.inventory_operations
@@ -35,9 +52,19 @@ export class DrizzleOperationsRepository implements IOperationsRepository {
     operationId: string,
     client?: IDatabaseClient,
   ): Promise<OperationEntity | null> {
+    const db = client?.drizzle ?? this.databaseService.getDrizzle();
+    if (db) {
+      const rows = await db
+        .select()
+        .from(schema.inventoryOperations)
+        .where(eq(schema.inventoryOperations.operation_id, operationId));
+      if (rows.length === 0) return null;
+      return this.mapRow(rows[0]);
+    }
+
     const sql = `
       SELECT id, operation_type, idempotency_key, intention, status,
-             order_id, reservation_id, result_code, operation_id,
+             order_id, reservation_id, result_code, operation_id, client_id,
              request_fingerprint, request_payload, result_payload,
              accepted_at, applied_at, correlation_id
       FROM inventory.inventory_operations
@@ -66,17 +93,48 @@ export class DrizzleOperationsRepository implements IOperationsRepository {
       result_payload?: string | null;
       correlation_id?: string | null;
       result_code?: string | null;
+      client_id?: string | null;
     },
   ): Promise<void> {
+    const db = client?.drizzle ?? this.databaseService.getDrizzle();
+    if (db) {
+      await db.insert(schema.inventoryOperations).values({
+        operation_type: op.operation_type as any,
+        idempotency_key: op.idempotency_key,
+        intention: op.intention,
+        status: op.status as any,
+        result_code: op.result_code ?? undefined,
+        order_id: op.order_id ?? undefined,
+        reservation_id: op.reservation_id ?? undefined,
+        operation_id: op.operation_id ?? undefined,
+        client_id: op.client_id ?? undefined,
+        request_fingerprint: op.request_fingerprint ?? undefined,
+        request_payload: op.request_payload
+          ? typeof op.request_payload === 'string'
+            ? JSON.parse(op.request_payload)
+            : op.request_payload
+          : undefined,
+        result_payload: op.result_payload
+          ? typeof op.result_payload === 'string'
+            ? JSON.parse(op.result_payload)
+            : op.result_payload
+          : undefined,
+        correlation_id: op.correlation_id ?? undefined,
+        accepted_at: new Date(),
+        applied_at: new Date(),
+      });
+      return;
+    }
+
     const sql = `
       INSERT INTO inventory.inventory_operations (
         operation_type, idempotency_key, intention, status, result_code,
         order_id, reservation_id, accepted_at, applied_at,
-        operation_id, request_fingerprint, request_payload, result_payload, correlation_id
+        operation_id, request_fingerprint, request_payload, result_payload, correlation_id, client_id
       ) VALUES (
         $1, $2, $3, $4, $5,
         $6, $7, now(), now(),
-        $8, $9, $10, $11, $12
+        $8, $9, $10, $11, $12, $13
       )
     `;
     await client.query(sql, [
@@ -92,6 +150,7 @@ export class DrizzleOperationsRepository implements IOperationsRepository {
       op.request_payload ?? null,
       op.result_payload ?? null,
       op.correlation_id ?? null,
+      op.client_id ?? null,
     ]);
   }
 
@@ -106,6 +165,7 @@ export class DrizzleOperationsRepository implements IOperationsRepository {
       reservation_id: row.reservation_id,
       result_code: row.result_code,
       operation_id: row.operation_id,
+      client_id: row.client_id,
       request_fingerprint: row.request_fingerprint,
       request_payload: row.request_payload,
       result_payload: row.result_payload,

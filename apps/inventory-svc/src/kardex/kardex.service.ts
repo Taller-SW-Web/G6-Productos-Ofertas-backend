@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { IDatabaseClient } from '../database/database.interface.js';
-import { DrizzleKardexRepository } from '../repositories/drizzle/drizzle-kardex.repository.js';
+import { KARDEX_REPOSITORY } from '../repositories/interfaces/repository.tokens.js';
+import type { IKardexRepository } from '../repositories/interfaces/kardex.repository.interface.js';
 
 export interface KardexEntry {
   sku_id: string;
@@ -32,7 +33,10 @@ export interface KardexEntry {
 
 @Injectable()
 export class KardexService {
-  constructor(private readonly kardexRepository: DrizzleKardexRepository) {}
+  constructor(
+    @Inject(KARDEX_REPOSITORY)
+    private readonly kardexRepository: IKardexRepository,
+  ) {}
 
   async recordMovement(
     client: IDatabaseClient,
