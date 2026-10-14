@@ -71,8 +71,54 @@ jobs:
       - name: Build inventory-svc container image
         run: docker build --file Dockerfile.inventory-svc --tag inventory-svc:ci .
 
-      - name: Simulate inventory Oracle deployment and rollback
-        run: bash ops/oracle/tests/deploy-inventory-svc.test.sh
+      - name: Simulate generic Oracle deployment, isolation and rollback
+        run: bash ops/oracle/tests/deploy-g6-service.test.sh
+
+      - name: Validate closed Oracle service registry
+        run: |
+          set -euo pipefail
+          for file in ops/oracle/service-registry.sh ops/oracle/deploy-g6-service.sh ops/oracle/deploy-inventory-svc.sh ops/oracle/build-service.sh ops/oracle/tests/deploy-g6-service.test.sh ops/oracle/tests/deploy-inventory-svc.test.sh; do
+            bash -n "$file"
+          done
+          enabled="$(bash -c 'source ops/oracle/service-registry.sh; g6_enabled_services_json')"
+          test "$enabled" = '["inventory-svc"]'
+          test "$(awk -F'|' '$1 !~ /^#/ && NF { count++ } END { print count+0 }' ops/oracle/services.psv)" = 9
+
+      - name: Validate generic Oracle Compose template
+        run: |
+          set -euo pipefail
+          runtime_env="$(mktemp)"
+          trap 'rm -f "$runtime_env"' EXIT
+          export G6_SERVICE_IMAGE=ghcr.io/taller-sw-web/g6-productos-ofertas-backend/catalog-svc:0123456789012345678901234567890123456789
+          export G6_SERVICE_CONTAINER=g6-catalog-svc
+          export G6_SERVICE_PORT=3001
+          export G6_SERVICE_ENV_FILE="$runtime_env"
+          docker compose --file ops/oracle/docker-compose.service.yml config --quiet
+
+      - name: Build generic inventory service image
+        run: docker build --file Dockerfile.service --build-arg SERVICE_NAME=inventory-svc --tag g6-service:ci .
+
+      - name: Smoke test generic inventory service image
+        run: |
+          set -euo pipefail
+          trap 'docker rm --force inventory-svc-generic-ci >/dev/null 2>&1 || true' EXIT
+          docker run --detach --name inventory-svc-generic-ci --publish 127.0.0.1::3005 --env PORT=3005 g6-service:ci
+          port="$(docker port inventory-svc-generic-ci 3005/tcp | awk -F: '{print $NF}')"
+          response=''
+          for attempt in {1..30}; do
+            if response="$(curl --fail --silent "http://127.0.0.1:${port}/health")"; then
+              break
+            fi
+            sleep 2
+          done
+          node -e '
+            const payload = JSON.parse(process.argv[1]);
+            if (payload.status !== "ok" || payload.service !== "inventory-svc") {
+              console.error("Unexpected generic inventory health payload:", payload);
+              process.exit(1);
+            }
+            console.log("Generic image process health passed; no Oracle deployment was performed.");
+          ' "$response"
 
       - name: Smoke test inventory-svc container health
         run: |
