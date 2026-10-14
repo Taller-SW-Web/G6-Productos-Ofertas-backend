@@ -742,16 +742,6 @@ export class ReservationsService {
                 reserva.order_id || '',
                 reserva.correlation_id || correlationId,
               );
-              const expired = await this.reservationsRepo.updateStatus(
-                client,
-                reserva.id,
-                'EXPIRADA',
-              );
-              if (expired !== 1) {
-                throw new Error(
-                  `Inconsistencia: transición a EXPIRADA afectó ${expired} filas`,
-                );
-              }
               expiredAfterLock = true;
               return {
                 operation_id: dto.operation_id,
@@ -1235,16 +1225,6 @@ export class ReservationsService {
                 reserva.order_id || '',
                 reserva.correlation_id || correlationId,
               );
-              const expired = await this.reservationsRepo.updateStatus(
-                client,
-                reserva.id,
-                'EXPIRADA',
-              );
-              if (expired !== 1) {
-                throw new Error(
-                  `Inconsistencia: transición a EXPIRADA afectó ${expired} filas`,
-                );
-              }
               expiredAfterLockRelease = true;
               return {
                 operation_id: dto.operation_id,

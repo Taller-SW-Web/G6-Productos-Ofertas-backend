@@ -677,72 +677,91 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
     });
   });
 
-  it('serializa liberación y expiración concurrentes con un único efecto de negocio', async () => {
-    const sku = await seedStock();
-    const { reservationId, order } = await reserve(sku, 3);
-    const lockHolder = new pg.Client({
-      connectionString: process.env.DATABASE_URL,
-    });
-    await lockHolder.connect();
-    try {
-      await lockHolder.query('BEGIN');
-      await lockHolder.query(
-        `SELECT id FROM inventory.reservations WHERE reservation_id=$1 FOR UPDATE`,
-        [reservationId],
-      );
-      const release = reservations.liberarReserva(
-        reservationId,
-        {
-          order_id: order,
-          operation_id: randomUUID(),
-          reason: 'PAGO_NO_COMPLETADO',
-        },
-        undefined,
-        `idem-${randomUUID()}`,
-        'modulo-ventas',
-      );
-      await viWaitFor(async () => {
-        const waiting = await database.query<{ count: string }>(
-          `SELECT count(*)::text AS count FROM pg_stat_activity WHERE wait_event_type='Lock' AND query ILIKE '%FROM inventory.reservations%' AND query ILIKE '%FOR UPDATE%'`,
+  it('serializa confirmar/liberar y expiración con una sola transición y efectos', async () => {
+    for (const action of ['confirm', 'release'] as const) {
+      const sku = await seedStock();
+      const { reservationId, order } = await reserve(sku, 3);
+      const lockHolder = new pg.Client({
+        connectionString: process.env.DATABASE_URL,
+      });
+      const originalUpdateStatus =
+        reservationsRepo.updateStatus.bind(reservationsRepo);
+      let expiredTransitions = 0;
+      reservationsRepo.updateStatus = async (client, reservationPk, status) => {
+        if (status === 'EXPIRADA') expiredTransitions++;
+        return originalUpdateStatus(client, reservationPk, status);
+      };
+      await lockHolder.connect();
+      try {
+        await lockHolder.query('BEGIN');
+        await lockHolder.query(
+          `SELECT id FROM inventory.reservations WHERE reservation_id=$1 FOR UPDATE`,
+          [reservationId],
         );
-        expect(Number(waiting.rows[0].count)).toBeGreaterThan(0);
-      }, 5000);
-      await lockHolder.query(
-        `UPDATE inventory.reservations SET expires_at=now()-interval '1 second' WHERE reservation_id=$1`,
+        const operation =
+          action === 'confirm'
+            ? reservations.confirmarReserva(
+                reservationId,
+                { order_id: order, operation_id: randomUUID() },
+                undefined,
+                `idem-${randomUUID()}`,
+                'modulo-ventas',
+              )
+            : reservations.liberarReserva(
+                reservationId,
+                {
+                  order_id: order,
+                  operation_id: randomUUID(),
+                  reason: 'PAGO_NO_COMPLETADO',
+                },
+                undefined,
+                `idem-${randomUUID()}`,
+                'modulo-ventas',
+              );
+        await viWaitFor(async () => {
+          const waiting = await database.query<{ count: string }>(
+            `SELECT count(*)::text AS count FROM pg_stat_activity WHERE wait_event_type='Lock' AND query ILIKE '%FROM inventory.reservations%' AND query ILIKE '%FOR UPDATE%'`,
+          );
+          expect(Number(waiting.rows[0].count)).toBeGreaterThan(0);
+        }, 5000);
+        await lockHolder.query(
+          `UPDATE inventory.reservations SET expires_at=now()-interval '1 second' WHERE reservation_id=$1`,
+          [reservationId],
+        );
+        // Al vencer durante la espera del lock, el flujo de negocio debe
+        // expirar dentro de su transacción antes de devolver el error.
+        await lockHolder.query('COMMIT');
+        const expirationRun = expiration.expirarReservasVencidas(10);
+        await expect(operation).rejects.toThrow();
+        await expirationRun;
+      } finally {
+        await lockHolder.query('ROLLBACK').catch(() => undefined);
+        await lockHolder.end();
+        reservationsRepo.updateStatus = originalUpdateStatus;
+      }
+      const state = await database.query<{
+        status: string;
+        on_hand: number;
+        reserved: number;
+        expired_movements: string;
+        released_movements: string;
+        released_events: string;
+        expired_events: string;
+      }>(
+        `SELECT r.status,b.on_hand,b.reserved,(SELECT count(*)::text FROM inventory.kardex WHERE reservation_id=r.reservation_id AND operation_type='EXPIRACION') AS expired_movements,(SELECT count(*)::text FROM inventory.kardex WHERE reservation_id=r.reservation_id AND operation_type='LIBERACION') AS released_movements,(SELECT count(*)::text FROM inventory.outbox WHERE aggregate_id=r.reservation_id::text AND event_type='inventory.reservation.released') AS released_events,(SELECT count(*)::text FROM inventory.outbox WHERE aggregate_id=r.reservation_id::text AND event_type='inventory.reservation.expired') AS expired_events FROM inventory.reservations r JOIN inventory.reservation_lines l ON l.reservation_id=r.id JOIN inventory.stock_balance b ON b.sku_id=l.sku_id AND b.location_id=l.location_id WHERE r.reservation_id=$1`,
         [reservationId],
       );
-      // El worker concurrente omite la fila mientras el otro tx mantiene su
-      // lock; al liberarlo, el flujo de release debe revalidar expires_at.
-      await lockHolder.query('COMMIT');
-      const expirationRun = expiration.expirarReservasVencidas(10);
-      await expect(release).rejects.toThrow();
-      await expirationRun;
-    } finally {
-      await lockHolder.query('ROLLBACK').catch(() => undefined);
-      await lockHolder.end();
+      expect(state.rows[0]).toMatchObject({
+        status: 'EXPIRADA',
+        on_hand: 20,
+        reserved: 0,
+        expired_movements: '1',
+        released_movements: '0',
+        released_events: '0',
+        expired_events: '1',
+      });
+      expect(expiredTransitions).toBe(1);
     }
-    const state = await database.query<{
-      status: string;
-      on_hand: number;
-      reserved: number;
-      movements: string;
-      released_events: string;
-      expired_events: string;
-    }>(
-      `SELECT r.status,b.on_hand,b.reserved,(SELECT count(*)::text FROM inventory.kardex WHERE reservation_id=r.reservation_id AND operation_type IN ('LIBERACION','EXPIRACION')) AS movements,(SELECT count(*)::text FROM inventory.outbox WHERE aggregate_id=r.reservation_id::text AND event_type='inventory.reservation.released') AS released_events,(SELECT count(*)::text FROM inventory.outbox WHERE aggregate_id=r.reservation_id::text AND event_type='inventory.reservation.expired') AS expired_events FROM inventory.reservations r JOIN inventory.reservation_lines l ON l.reservation_id=r.id JOIN inventory.stock_balance b ON b.sku_id=l.sku_id AND b.location_id=l.location_id WHERE r.reservation_id=$1`,
-      [reservationId],
-    );
-    expect(state.rows[0].status).toMatch(/^(LIBERADA|EXPIRADA)$/);
-    expect(state.rows[0]).toMatchObject({
-      on_hand: 20,
-      reserved: 0,
-      movements: '1',
-    });
-    expect(
-      Number(state.rows[0].released_events) +
-        Number(state.rows[0].expired_events),
-    ).toBe(1);
-    expect(state.rows[0].status).toBe('EXPIRADA');
   });
 
   it('usa publisher confirm, marca solo mensaje enrutado y deja basic.return como PENDING', async () => {
