@@ -65,6 +65,34 @@ jobs:
           done
           echo "All 9 applications have valid executable artifacts."
 
+      - name: Build inventory-svc container image
+        run: docker build --file Dockerfile.inventory-svc --tag inventory-svc:ci .
+
+      - name: Simulate inventory Oracle deployment and rollback
+        run: bash ops/oracle/tests/deploy-inventory-svc.test.sh
+
+      - name: Smoke test inventory-svc container health
+        run: |
+          set -euo pipefail
+          trap 'docker rm --force inventory-svc-ci >/dev/null 2>&1 || true' EXIT
+          docker run --detach --name inventory-svc-ci --publish 127.0.0.1::3005 inventory-svc:ci
+          port="$(docker port inventory-svc-ci 3005/tcp | awk -F: '{print $NF}')"
+          response=''
+          for attempt in {1..30}; do
+            if response="$(curl --fail --silent "http://127.0.0.1:${port}/health")"; then
+              break
+            fi
+            sleep 2
+          done
+          node -e '
+            const payload = JSON.parse(process.argv[1]);
+            if (payload.status !== "ok" || payload.service !== "inventory-svc") {
+              console.error("Unexpected inventory-svc health payload:", payload);
+              process.exit(1);
+            }
+            console.log("inventory-svc process health passed; this does not verify Supabase readiness.");
+          ' "$response"
+
       - name: Smoke test compiled executable
         run: |
           node dist/apps/catalog-svc/main.js &
