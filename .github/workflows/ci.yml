@@ -65,6 +65,9 @@ jobs:
           done
           echo "All 9 applications have valid executable artifacts."
 
+      - name: Build inventory-svc container image
+        run: docker build --file Dockerfile.inventory-svc --tag inventory-svc:ci .
+
       - name: Smoke test compiled executable
         run: |
           node dist/apps/catalog-svc/main.js &
