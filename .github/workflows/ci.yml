@@ -25,6 +25,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Validate GitHub Actions workflows with actionlint
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -74,8 +77,8 @@ jobs:
       - name: Simulate generic Oracle deployment, isolation and rollback
         run: bash ops/oracle/tests/deploy-g6-service.test.sh
 
-      - name: Test affected-service selection fallback and isolation
-        run: bash ops/oracle/tests/select-affected-services.test.sh
+      - name: Test conservative CD recovery selection
+        run: bash ops/oracle/tests/select-cd-services.test.sh
 
       - name: Test publication failure isolation
         run: bash ops/oracle/tests/publish-isolation.test.sh
@@ -83,7 +86,7 @@ jobs:
       - name: Validate closed Oracle service registry
         run: |
           set -euo pipefail
-          for file in ops/oracle/service-registry.sh ops/oracle/deploy-g6-service.sh ops/oracle/deploy-inventory-svc.sh ops/oracle/build-service.sh ops/oracle/select-affected-services.sh ops/oracle/tests/deploy-g6-service.test.sh ops/oracle/tests/deploy-inventory-svc.test.sh ops/oracle/tests/select-affected-services.test.sh ops/oracle/tests/publish-isolation.test.sh; do
+          for file in ops/oracle/service-registry.sh ops/oracle/deploy-g6-service.sh ops/oracle/deploy-inventory-svc.sh ops/oracle/build-service.sh ops/oracle/select-cd-services.sh ops/oracle/tests/deploy-g6-service.test.sh ops/oracle/tests/deploy-inventory-svc.test.sh ops/oracle/tests/select-cd-services.test.sh ops/oracle/tests/publish-isolation.test.sh; do
             bash -n "$file"
           done
           enabled="$(bash -c 'source ops/oracle/service-registry.sh; g6_enabled_services_json')"

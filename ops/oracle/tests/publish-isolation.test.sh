@@ -9,6 +9,8 @@ trap 'rm -f "$LOG"' EXIT
 grep -Eq '^  release:$' "$WORKFLOW"
 grep -Eq '^      fail-fast: false$' "$WORKFLOW"
 grep -Fq '        service: ${{ fromJSON(needs.prepare.outputs.services) }}' "$WORKFLOW"
+grep -Fq '      group: deploy-g6-services-oracle-${{ github.repository }}-${{ matrix.service }}' "$WORKFLOW"
+grep -Fq '      cancel-in-progress: false' "$WORKFLOW"
 grep -Eq '^        type: choice$' "$WORKFLOW"
 if grep -Eq '^  publish:$|needs\.publish\.result' "$WORKFLOW"; then
   echo 'FAIL: la publicación todavía es una barrera agregada para otras filas.' >&2

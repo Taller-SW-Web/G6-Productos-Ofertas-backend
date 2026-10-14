@@ -61,7 +61,7 @@ sed -i "s|/usr/local/lib/g6-productos-ofertas/deploy-g6-service|${STAGED_OPS}/de
 chmod +x "$STAGED_OPS/deploy-g6-service.sh"
 
 version_output="$(env -u SSH_ORIGINAL_COMMAND bash "$STAGED_OPS/deploy-g6-service.sh" --version)"
-[[ "$version_output" == 'ejecutor=2 registro=2' ]] || fail "versiones instaladas inesperadas: $version_output"
+[[ "$version_output" == 'ejecutor=3 registro=2' ]] || fail "versiones instaladas inesperadas: $version_output"
 cp "$STAGED_OPS/services.psv" "${TEMP_ROOT}/services.psv.version-backup"
 sed -i 's/^#registry-version=2$/#registry-version=9/' "$STAGED_OPS/services.psv"
 if env -u SSH_ORIGINAL_COMMAND bash "$STAGED_OPS/deploy-g6-service.sh" --version >"${TEMP_ROOT}/result.log" 2>&1; then
@@ -130,11 +130,28 @@ if [[ "$container" == g6-inventory-svc ]]; then image="${INVENTORY_IMAGE:-}"; el
 printf '%s %s %s\n' "$project" "$operation" "$image" >> "${ROOT}/docker.log"
 printf '%s\n' "$container" > "${ROOT}/target-container"
 
+wait_for_release() {
+  local marker="$1"
+  touch "${ROOT}/${marker}-started"
+  for attempt in {1..500}; do
+    [[ ! -e "${ROOT}/${marker}-release" ]] || return 0
+    /bin/sleep 0.01
+  done
+  echo "mock operation timed out waiting for ${marker}-release" >&2
+  exit 97
+}
+
 case "$operation" in
   pull)
+    if [[ -f "${ROOT}/block-pull" && "$(<"${ROOT}/block-pull")" == "$image" ]]; then
+      wait_for_release pull
+    fi
     if [[ -f "${ROOT}/fail-pull" && "$(<"${ROOT}/fail-pull")" == "$image" ]]; then exit 1; fi
     ;;
   up)
+    if [[ -f "${ROOT}/block-up" && "$(<"${ROOT}/block-up")" == "$image" ]]; then
+      wait_for_release rollback
+    fi
     if [[ -f "${ROOT}/fail-up" && "$(<"${ROOT}/fail-up")" == "$image" ]]; then exit 1; fi
     printf '%s\n' "$image" > "${ACTIVE_DIR}/${container}"
     ;;
@@ -165,7 +182,10 @@ reset_simulation() {
   mkdir -p "${TEMP_ROOT}/var/lib/containers"
   rm -f "${TEMP_ROOT}/docker.log" "${TEMP_ROOT}/target-container" \
     "${TEMP_ROOT}/fail-pull" "${TEMP_ROOT}/fail-up" \
-    "${TEMP_ROOT}/unhealthy-docker-image" "${TEMP_ROOT}/unhealthy-http-image"
+    "${TEMP_ROOT}/unhealthy-docker-image" "${TEMP_ROOT}/unhealthy-http-image" \
+    "${TEMP_ROOT}/block-pull" "${TEMP_ROOT}/block-up" \
+    "${TEMP_ROOT}/pull-started" "${TEMP_ROOT}/pull-release" \
+    "${TEMP_ROOT}/rollback-started" "${TEMP_ROOT}/rollback-release"
 }
 
 run_deploy() {
@@ -185,6 +205,29 @@ assert_value() {
   local actual=''
   [[ ! -f "$path" ]] || actual="$(<"$path")"
   [[ -f "$path" && "$actual" == "$expected" ]] || fail "valor inesperado en ${path}: '${actual}', esperado '${expected}'"
+}
+
+start_deploy() {
+  local command="$1" port="$2" output="$3" executable="${4:-${STAGED_OPS}/deploy-g6-service.sh}"
+  printf '%s\n%s\n' 'simulation-only-user' 'simulation-only-token' |
+    env PATH="${MOCK_BIN}:${PATH}" SSH_ORIGINAL_COMMAND="$command" MOCK_EXPECTED_PORT="$port" \
+      bash "$executable" > "$output" 2>&1 &
+  STARTED_PID=$!
+}
+
+wait_for_marker() {
+  local marker="$1"
+  for attempt in {1..500}; do
+    [[ ! -e "${TEMP_ROOT}/${marker}" ]] || return 0
+    /bin/sleep 0.01
+  done
+  fail "no apareció el marcador ${marker}"
+}
+
+assert_only_blocked_operation_logged() {
+  local expected="$1"
+  [[ "$(<"${TEMP_ROOT}/docker.log")" == "$expected" ]] ||
+    fail "hubo operaciones simultáneas antes de liberar flock: $(<"${TEMP_ROOT}/docker.log")"
 }
 
 reset_simulation
@@ -238,5 +281,66 @@ for invalid_command in \
   [[ ! -s "${TEMP_ROOT}/docker.log" ]] || fail "entrada rechazada ejecutó operaciones Docker: ${invalid_command}"
 done
 printf 'PASS: nombres no registrados, servicios deshabilitados y entradas inválidas rechazadas\n'
+
+# Dos despliegues del mismo servicio se serializan en el host y el estado final
+# conserva active-image/previous-image como pares coherentes.
+reset_simulation
+printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
+printf '%s\n' "$CATALOG_NEXT_IMAGE" > "${TEMP_ROOT}/block-pull"
+start_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 "${TEMP_ROOT}/first-deploy.log"
+first_pid="$STARTED_PID"
+wait_for_marker pull-started
+start_deploy "service-deploy catalog-svc ${IMAGE_SHA}" 3001 "${TEMP_ROOT}/second-deploy.log"
+second_pid="$STARTED_PID"
+/bin/sleep 0.15
+assert_only_blocked_operation_logged "g6-catalog-svc pull ${CATALOG_NEXT_IMAGE}"
+touch "${TEMP_ROOT}/pull-release"
+wait "$first_pid" || fail 'el primer despliegue concurrente falló'
+wait "$second_pid" || fail 'el segundo despliegue concurrente falló'
+assert_value "${STATE_ROOT}/g6-productos-ofertas/catalog-svc/active-image" "$CATALOG_IMAGE"
+assert_value "${STATE_ROOT}/g6-productos-ofertas/catalog-svc/previous-image" "$CATALOG_NEXT_IMAGE"
+expected_log="$(printf '%s\n' "g6-catalog-svc pull ${CATALOG_NEXT_IMAGE}" "g6-catalog-svc up ${CATALOG_NEXT_IMAGE}" "g6-catalog-svc pull ${CATALOG_IMAGE}" "g6-catalog-svc up ${CATALOG_IMAGE}")"
+[[ "$(<"${TEMP_ROOT}/docker.log")" == "$expected_log" ]] || fail 'el orden de despliegues concurrentes se corrompió'
+printf 'PASS: despliegues concurrentes serializados y estado activo/anterior coherente\n'
+
+# El bloqueo también cubre la fase de rollback; otro despliegue espera hasta
+# que la restauración y la escritura de estado terminen.
+reset_simulation
+printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
+printf '%s\n' "$CATALOG_NEXT_IMAGE" > "${TEMP_ROOT}/unhealthy-http-image"
+printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/block-up"
+start_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 "${TEMP_ROOT}/rollback-deploy.log"
+rollback_pid="$STARTED_PID"
+wait_for_marker rollback-started
+start_deploy "service-deploy catalog-svc ${IMAGE_SHA}" 3001 "${TEMP_ROOT}/after-rollback.log"
+after_rollback_pid="$STARTED_PID"
+/bin/sleep 0.15
+expected_log="$(printf '%s\n' "g6-catalog-svc pull ${CATALOG_NEXT_IMAGE}" "g6-catalog-svc up ${CATALOG_NEXT_IMAGE}" "g6-catalog-svc up ${OLD_CATALOG_IMAGE}")"
+assert_only_blocked_operation_logged "$expected_log"
+touch "${TEMP_ROOT}/rollback-release"
+if wait "$rollback_pid"; then fail 'el despliegue no saludable debió informar rollback'; fi
+wait "$after_rollback_pid" || fail 'el despliegue posterior al rollback falló'
+assert_value "${STATE_ROOT}/g6-productos-ofertas/catalog-svc/active-image" "$CATALOG_IMAGE"
+assert_value "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc" "$CATALOG_IMAGE"
+printf 'PASS: rollback concurrente protegido del siguiente despliegue\n'
+
+# El wrapper legado usado por Inventory y el comando genérico terminan en el
+# mismo lock local, por lo que manual/automático no pueden pisar su estado.
+reset_simulation
+printf '%s\n' "$OLD_INVENTORY_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-inventory-svc"
+printf '%s\n' "$INVENTORY_NEXT_IMAGE" > "${TEMP_ROOT}/block-pull"
+start_deploy "inventory-deploy ${NEXT_SHA}" 3005 "${TEMP_ROOT}/manual-inventory.log" "${STAGED_OPS}/deploy-inventory-svc.sh"
+manual_pid="$STARTED_PID"
+wait_for_marker pull-started
+start_deploy "service-deploy inventory-svc ${IMAGE_SHA}" 3005 "${TEMP_ROOT}/automatic-inventory.log"
+automatic_pid="$STARTED_PID"
+/bin/sleep 0.15
+assert_only_blocked_operation_logged "g6-inventory pull ${INVENTORY_NEXT_IMAGE}"
+touch "${TEMP_ROOT}/pull-release"
+wait "$manual_pid" || fail 'el comando SSH compatible de Inventario falló'
+wait "$automatic_pid" || fail 'el segundo deploy de Inventario falló'
+assert_value "${STATE_ROOT}/g6-inventory/active-image" "$INVENTORY_IMAGE"
+assert_value "${STATE_ROOT}/g6-inventory/previous-image" "$INVENTORY_NEXT_IMAGE"
+printf 'PASS: wrapper manual y comando genérico automático comparten exclusión de Inventario\n'
 
 printf 'Todas las simulaciones de despliegue genérico pasaron.\n'

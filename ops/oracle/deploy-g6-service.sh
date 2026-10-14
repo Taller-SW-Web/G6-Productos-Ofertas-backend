@@ -5,7 +5,8 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=service-registry.sh
 source "${SCRIPT_DIR}/service-registry.sh"
 
-readonly G6_DEPLOY_EXECUTOR_VERSION=2
+readonly G6_DEPLOY_EXECUTOR_VERSION=3
+readonly G6_SUPPORTED_SERVICE_REGISTRY_VERSION=2
 
 fail() {
   printf 'G6 deployment: %s\n' "$1" >&2
@@ -15,13 +16,13 @@ G6_SERVICE_REGISTRY_VERSION="$(g6_service_registry_version)" || fail 'versión d
 readonly G6_SERVICE_REGISTRY_VERSION
 
 if [[ "${1:-}" == --version && $# == 1 && -z "${SSH_ORIGINAL_COMMAND:-}" ]]; then
-  [[ "$G6_SERVICE_REGISTRY_VERSION" == "$G6_DEPLOY_EXECUTOR_VERSION" ]] ||
+  [[ "$G6_SERVICE_REGISTRY_VERSION" == "$G6_SUPPORTED_SERVICE_REGISTRY_VERSION" ]] ||
     fail 'versiones incompatibles de ejecutor y registro'
   printf 'ejecutor=%s registro=%s\n' "$G6_DEPLOY_EXECUTOR_VERSION" "$G6_SERVICE_REGISTRY_VERSION"
   exit 0
 fi
 [[ $# == 0 ]] || fail 'argumentos locales no autorizados'
-[[ "$G6_SERVICE_REGISTRY_VERSION" == "$G6_DEPLOY_EXECUTOR_VERSION" ]] ||
+[[ "$G6_SERVICE_REGISTRY_VERSION" == "$G6_SUPPORTED_SERVICE_REGISTRY_VERSION" ]] ||
   fail 'versiones incompatibles de ejecutor y registro'
 
 readonly LEGACY_INVENTORY_RE='^inventory-deploy ([0-9a-f]{40})$'
@@ -61,6 +62,10 @@ fi
 
 mkdir -p "$G6_SERVICE_STATE_DIR"
 chmod 700 "$G6_SERVICE_STATE_DIR"
+command -v flock >/dev/null 2>&1 || fail 'flock no está disponible; no se puede garantizar exclusión por servicio'
+exec {SERVICE_LOCK_FD}>"${G6_SERVICE_STATE_DIR}/deploy.lock" ||
+  fail 'no se pudo abrir el bloqueo del servicio'
+flock -w 600 "$SERVICE_LOCK_FD" || fail 'tiempo de espera agotado para el bloqueo del servicio'
 readonly ACTIVE_FILE="${G6_SERVICE_STATE_DIR}/active-image"
 readonly PREVIOUS_FILE="${G6_SERVICE_STATE_DIR}/previous-image"
 readonly REGISTRY_IMAGE="ghcr.io/taller-sw-web/g6-productos-ofertas-backend/${G6_SERVICE_IMAGE_NAME}"

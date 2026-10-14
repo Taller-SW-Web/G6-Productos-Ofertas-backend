@@ -22,10 +22,6 @@ on:
           - taxonomy-svc
         default: inventory-svc
 
-concurrency:
-  group: deploy-g6-services-oracle-${{ github.event.inputs.service || 'automatic' }}
-  cancel-in-progress: false
-
 permissions:
   actions: read
   contents: read
@@ -74,57 +70,28 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "repository=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout selected master commit and history
+      - name: Checkout selected master commit
         if: steps.selection.outputs.sha != ''
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.selection.outputs.sha }}
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Select affected enabled services or validate manual selection
+      - name: Select all enabled services or validate manual selection
         id: targets
         if: steps.selection.outputs.sha != ''
         env:
-          GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
           REQUESTED_SERVICE: ${{ inputs.service }}
-          CI_RUN_ID: ${{ github.event.workflow_run.id }}
-          SELECTED_SHA: ${{ steps.selection.outputs.sha }}
         run: |
           set -euo pipefail
-          source ops/oracle/service-registry.sh
-          enabled="$(g6_enabled_services_json)"
           if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
-            g6_service_config "$REQUESTED_SERVICE" || {
-              echo 'El servicio solicitado no está en el registro cerrado.' >&2
-              exit 1
-            }
-            if [[ "$G6_SERVICE_ENABLED" != true ]]; then
-              echo "El servicio $REQUESTED_SERVICE está registrado, pero no habilitado para despliegue." >&2
-              exit 1
-            fi
-            services="[\"$REQUESTED_SERVICE\"]"
+            services="$(bash ops/oracle/select-cd-services.sh manual "$REQUESTED_SERVICE")"
           else
-            runs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=master&event=push&status=completed&per_page=100")"
-            current_run="$(jq -c --argjson id "$CI_RUN_ID" --arg sha "$SELECTED_SHA" --arg repo "$GITHUB_REPOSITORY" '[.workflow_runs[] | select(.id == $id and .head_sha == $sha and .head_branch == "master" and .event == "push" and .head_repository.full_name == $repo and .conclusion == "success")][0] // empty' <<< "$runs")"
-            previous_sha=''
-            if [[ -n "$current_run" ]]; then
-              current_number="$(jq -r .run_number <<< "$current_run")"
-              previous_sha="$(jq -r --argjson number "$current_number" --arg repo "$GITHUB_REPOSITORY" '[.workflow_runs[] | select(.run_number < $number and .head_branch == "master" and .event == "push" and .head_repository.full_name == $repo and .status == "completed" and (.head_sha | test("^[0-9a-f]{40}$")))] | sort_by(.run_number) | last | .head_sha // empty' <<< "$runs")"
-            fi
-            services=''
-            if [[ -n "$previous_sha" ]] && git merge-base --is-ancestor "$previous_sha" "$SELECTED_SHA"; then
-              if services="$(git diff --name-only -z "$previous_sha" "$SELECTED_SHA" | bash ops/oracle/select-affected-services.sh)"; then
-                :
-              else
-                services="$enabled"
-              fi
-            else
-              echo 'No se pudo establecer un rango completo de CI anterior; se seleccionan todos los servicios habilitados.'
-              services="$enabled"
-            fi
+            echo 'No hay un cursor verificable de despliegue exitoso por servicio en Oracle; se seleccionan todos los habilitados.'
+            services="$(bash ops/oracle/select-cd-services.sh automatic)"
           fi
-          echo "Servicios habilitados afectados: $services"
+          echo "Servicios seleccionados: $services"
           echo "services=$services" >> "$GITHUB_OUTPUT"
 
   release:
@@ -136,6 +103,9 @@ jobs:
       matrix:
         service: ${{ fromJSON(needs.prepare.outputs.services) }}
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-g6-services-oracle-${{ github.repository }}-${{ matrix.service }}
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
