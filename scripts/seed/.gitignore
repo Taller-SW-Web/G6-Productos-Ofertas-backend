@@ -1,0 +1,8 @@
+# Credenciales locales, nunca los fixtures JSON ni la plantilla.
+.env
+.env.*
+!.env.example
+*.pgpass
+*.pem
+*.key
+*.crt

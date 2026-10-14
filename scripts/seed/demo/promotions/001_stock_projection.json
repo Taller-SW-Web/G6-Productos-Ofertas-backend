@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "schema": "promotions",
+  "kind": "demo",
+  "description": "Fixture reversible de proyección local; no representa stock autoritativo ni un evento recibido.",
+  "inserts": [
+    {
+      "table": "stock_projection",
+      "rows": [
+        {
+          "sku": "G6-DEMO-SIMPLE-001",
+          "availability": "AGOTADO",
+          "snapshot": { "fixture": "INFRA-001", "authoritative": false },
+          "source_version": 1,
+          "source_occurred_at": "2026-10-13T00:00:00Z",
+          "source_message_id": "g6-infra-001-demo-stock-projection"
+        }
+      ]
+    }
+  ]
+}

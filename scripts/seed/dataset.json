@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "purpose": "Identidades reservadas para demostración; no acreditan datos cargados ni integración.",
+  "status": "PENDING_OWNER_REVIEW",
+  "taxonomy": {
+    "category_id": "d60674d1-05fd-47f2-955b-5c2b6e504ec0",
+    "brand_id": "d60674d1-05fd-47f2-955b-5c2b6e504ec1",
+    "product_type_id": "d60674d1-05fd-47f2-955b-5c2b6e504ec2"
+  },
+  "catalog": {
+    "simple_product_id": "d60674d1-05fd-47f2-955b-5c2b6e504ec3",
+    "simple_sku": "G6-DEMO-SIMPLE-001",
+    "variant_product_id": "d60674d1-05fd-47f2-955b-5c2b6e504ec4",
+    "variant_id": "d60674d1-05fd-47f2-955b-5c2b6e504ec5",
+    "variant_sku": "G6-DEMO-VARIANT-001"
+  },
+  "pricing": { "currency": "PEN", "channel_id": null },
+  "inventory": { "location_id": "d60674d1-05fd-47f2-955b-5c2b6e504ec6" },
+  "load_order": ["taxonomy", "catalog", "pricing", "inventory"],
+  "dependencies": [
+    {
+      "owner": "taxonomy",
+      "consumer": "catalog",
+      "references": ["category_id", "brand_id", "product_type_id"]
+    },
+    {
+      "owner": "catalog",
+      "consumer": "pricing",
+      "references": [
+        "simple_product_id",
+        "variant_id",
+        "simple_sku",
+        "variant_sku"
+      ]
+    },
+    {
+      "owner": "catalog",
+      "consumer": "inventory",
+      "references": ["simple_sku", "variant_sku"]
+    }
+  ]
+}

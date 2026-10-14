@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "project_ref": "slzglmtiyrzygpkiuthf",
+  "database": "postgres",
+  "accounts": {
+    "seed_cueva": { "owner": "Axel Cueva", "schemas": ["promotions"] },
+    "seed_lopez": { "owner": "Leonardo López", "schemas": ["taxonomy"] },
+    "seed_poma": { "owner": "Gabriel Poma", "schemas": ["catalog"] },
+    "seed_taco": { "owner": "Miguel Taco", "schemas": ["inventory"] },
+    "seed_vera": {
+      "owner": "Leonardo Vera",
+      "schemas": ["pricing", "price_audit"]
+    },
+    "seed_castilla": {
+      "owner": "Marco Castilla",
+      "schemas": ["combos", "bulk"]
+    }
+  },
+  "environments": {
+    "shared": {
+      "hosts": [
+        "db.slzglmtiyrzygpkiuthf.supabase.co",
+        "aws-0-sa-east-1.pooler.supabase.com"
+      ],
+      "ports": [5432],
+      "verify_only": true,
+      "production": false
+    }
+  },
+  "schemas": {
+    "taxonomy": { "owner": "Leonardo López", "branch": "lopez", "tables": {} },
+    "catalog": { "owner": "Gabriel Poma", "branch": "poma", "tables": {} },
+    "pricing": { "owner": "Leonardo Vera", "branch": "vera", "tables": {} },
+    "price_audit": { "owner": "Leonardo Vera", "branch": "vera", "tables": {} },
+    "promotions": {
+      "owner": "Axel Cueva",
+      "branch": "cueva",
+      "tables": {
+        "stock_projection": {
+          "columns": [
+            "sku",
+            "availability",
+            "snapshot",
+            "source_version",
+            "source_occurred_at",
+            "source_message_id"
+          ],
+          "key": ["sku"]
+        }
+      }
+    },
+    "combos": { "owner": "Marco Castilla", "branch": "castilla", "tables": {} },
+    "inventory": { "owner": "Miguel Taco", "branch": "taco", "tables": {} },
+    "bulk": { "owner": "Marco Castilla", "branch": "castilla", "tables": {} }
+  }
+}
