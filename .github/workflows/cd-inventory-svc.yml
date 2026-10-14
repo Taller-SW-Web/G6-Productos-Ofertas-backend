@@ -13,13 +13,19 @@ concurrency:
 permissions:
   actions: read
   contents: read
-  packages: write
 
 jobs:
   publish:
     name: Build and publish inventory-svc image
+    permissions:
+      actions: read
+      contents: read
+      packages: write
     if: >-
       (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.repository.full_name == github.repository &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
        github.event.workflow_run.head_branch == 'master' &&
        github.event.workflow_run.conclusion == 'success') ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
@@ -38,7 +44,7 @@ jobs:
             sha="${{ github.event.workflow_run.head_sha }}"
           else
             sha="$GITHUB_SHA"
-            ci_success="$(gh run list --workflow ci.yml --branch master --commit "$sha" --json conclusion --jq 'any(.[]; .conclusion == "success")')"
+            ci_success="$(gh run list --workflow ci.yml --branch master --commit "$sha" --json conclusion,event,headBranch --jq 'any(.[]; .conclusion == "success" and .event == "push" and .headBranch == "master")')"
             if [[ "$ci_success" != true ]]; then
               echo "No successful CI run was found for master commit $sha." >&2
               exit 1
@@ -89,6 +95,8 @@ jobs:
     name: Deploy and verify on Oracle
     needs: publish
     if: needs.publish.result == 'success' && needs.publish.outputs.sha != ''
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Validate deployment secrets

@@ -3,6 +3,8 @@ services:
     image: ${INVENTORY_IMAGE:?INVENTORY_IMAGE debe indicar la imagen con SHA}
     container_name: g6-inventory-svc
     restart: unless-stopped
+    env_file:
+      - /etc/g6-inventory/runtime.env
     environment:
       NODE_ENV: production
       INVENTORY_SVC_PORT: 3005

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly DEPLOY_DIR="/opt/g6/inventory"
+readonly DEPLOY_DIR="/opt/g6-productos-ofertas/inventory"
 readonly COMPOSE_FILE="${DEPLOY_DIR}/docker-compose.inventory.yml"
+readonly RUNTIME_ENV_FILE="/etc/g6-inventory/runtime.env"
 readonly STATE_DIR="/var/lib/g6-inventory"
 readonly ACTIVE_FILE="${STATE_DIR}/active-image"
 readonly PREVIOUS_FILE="${STATE_DIR}/previous-image"
@@ -20,6 +21,9 @@ IFS= read -r GHCR_TOKEN || fail 'falta token GHCR en stdin'
 [[ -n "$GHCR_USERNAME" && -n "$GHCR_TOKEN" ]] || fail 'credenciales GHCR vacías'
 
 [[ -f "$COMPOSE_FILE" ]] || fail "no existe ${COMPOSE_FILE}"
+[[ -r "$RUNTIME_ENV_FILE" ]] || fail "no se puede leer ${RUNTIME_ENV_FILE}"
+grep -Eq "^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*('[^']+'|\"[^\"]+\"|[^[:space:]#'\"]+)" "$RUNTIME_ENV_FILE" ||
+  fail "DATABASE_URL no está definido en ${RUNTIME_ENV_FILE}"
 mkdir -p "$STATE_DIR"
 chmod 700 "$STATE_DIR"
 
