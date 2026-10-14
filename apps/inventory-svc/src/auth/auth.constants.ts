@@ -2,6 +2,9 @@ export const REQUIRED_SCOPE_KEY = 'required_scope';
 export const ALLOWED_CLIENTS_KEY = 'allowed_clients';
 
 export const EXPECTED_AUDIENCE = 'api-productos';
+export const EXPECTED_ISSUER = 'seguridad-y-usuarios';
+export const EXPECTED_ALGORITHM = 'RS256';
+export const EXPECTED_TOKEN_TYPE = 'servicio';
 
 export const INVENTORY_SCOPES = {
   RESERVAR: 'inventario:reservar',

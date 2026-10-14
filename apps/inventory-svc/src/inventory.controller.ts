@@ -6,6 +6,7 @@ import {
   Param,
   Query,
   Headers,
+  Req,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -40,72 +41,85 @@ export class InventoryController {
   @Post('reservas')
   @HttpCode(HttpStatus.ACCEPTED)
   @RequireScope(INVENTORY_SCOPES.RESERVAR)
-  @AllowedClients([
-    KNOWN_CLIENTS.VENTAS,
-    KNOWN_CLIENTS.MARKETPLACE,
-    KNOWN_CLIENTS.CHATBOT,
-    KNOWN_CLIENTS.RETAIL,
-  ])
+  @AllowedClients([KNOWN_CLIENTS.VENTAS])
   async solicitarReserva(
     @Body() dto: CrearReservaRequest,
+    @Req() req: any,
     @Headers('x-correlation-id') correlationId?: string,
     @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<OperacionInventarioAceptada> {
+    if (!idempotencyKey) {
+      throw ProblemDetailsException.validation(
+        'El encabezado Idempotency-Key es obligatorio para solicitar una reserva',
+        correlationId,
+      );
+    }
+    const clientId = req?.clientId || req?.user?.client_id || req?.user?.sub;
     return this.reservationsService.solicitarReserva(
       dto,
       correlationId,
       idempotencyKey,
+      clientId,
     );
   }
 
   @Post('reservas/:reservaId/confirmar')
   @HttpCode(HttpStatus.ACCEPTED)
   @RequireScope(INVENTORY_SCOPES.CONSUMIR)
-  @AllowedClients([
-    KNOWN_CLIENTS.VENTAS,
-    KNOWN_CLIENTS.MARKETPLACE,
-    KNOWN_CLIENTS.CHATBOT,
-    KNOWN_CLIENTS.RETAIL,
-  ])
+  @AllowedClients([KNOWN_CLIENTS.VENTAS])
   async confirmarReserva(
     @Param('reservaId') reservaId: string,
     @Body() dto: OperacionReservaRequest,
+    @Req() req: any,
     @Headers('x-correlation-id') correlationId?: string,
     @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<OperacionInventarioAceptada> {
+    if (!idempotencyKey) {
+      throw ProblemDetailsException.validation(
+        'El encabezado Idempotency-Key es obligatorio para confirmar una reserva',
+        correlationId,
+      );
+    }
+    const clientId = req?.clientId || req?.user?.client_id || req?.user?.sub;
     return this.reservationsService.confirmarReserva(
       reservaId,
       dto,
       correlationId,
       idempotencyKey,
+      clientId,
     );
   }
 
   @Post('reservas/:reservaId/liberar')
   @HttpCode(HttpStatus.ACCEPTED)
   @RequireScope(INVENTORY_SCOPES.LIBERAR)
-  @AllowedClients([
-    KNOWN_CLIENTS.VENTAS,
-    KNOWN_CLIENTS.MARKETPLACE,
-    KNOWN_CLIENTS.CHATBOT,
-    KNOWN_CLIENTS.RETAIL,
-  ])
+  @AllowedClients([KNOWN_CLIENTS.VENTAS])
   async liberarReserva(
     @Param('reservaId') reservaId: string,
     @Body() dto: LiberarReservaRequest,
+    @Req() req: any,
     @Headers('x-correlation-id') correlationId?: string,
     @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<OperacionInventarioAceptada> {
+    if (!idempotencyKey) {
+      throw ProblemDetailsException.validation(
+        'El encabezado Idempotency-Key es obligatorio para liberar una reserva',
+        correlationId,
+      );
+    }
+    const clientId = req?.clientId || req?.user?.client_id || req?.user?.sub;
     return this.reservationsService.liberarReserva(
       reservaId,
       dto,
       correlationId,
       idempotencyKey,
+      clientId,
     );
   }
 
   @Get('operaciones/:operationId')
   @RequireScope(INVENTORY_SCOPES.OPERACIONES_LEER)
+  @AllowedClients([KNOWN_CLIENTS.VENTAS])
   async consultarOperacion(
     @Param('operationId') operationId: string,
     @Headers('x-correlation-id') correlationId?: string,
@@ -118,6 +132,7 @@ export class InventoryController {
 
   @Get('disponibilidad')
   @RequireScope(INVENTORY_SCOPES.DISPONIBILIDAD_LEER)
+  @AllowedClients([KNOWN_CLIENTS.VENTAS])
   async consultarDisponibilidad(
     @Query('skus') skusQuery?: string | string[],
     @Query('location_id') locationId?: string,
@@ -152,10 +167,31 @@ export class InventoryController {
 
   @Post('disponibilidad/comercial/verificar')
   @RequireScope(INVENTORY_SCOPES.DISPONIBILIDAD_LEER)
+  @AllowedClients([
+    KNOWN_CLIENTS.MARKETPLACE,
+    KNOWN_CLIENTS.CHATBOT,
+    KNOWN_CLIENTS.RETAIL,
+  ])
   async verificarCantidadComercial(
     @Body() dto: VerificarCantidadComercialRequest,
+    @Req() req: any,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<VerificarCantidadComercialResponse> {
+    const clientId = req?.clientId || req?.user?.client_id || req?.user?.sub;
+
+    const channelClientMap: Record<string, string> = {
+      MARKETPLACE: KNOWN_CLIENTS.MARKETPLACE,
+      CHATBOT: KNOWN_CLIENTS.CHATBOT,
+      RETAIL: KNOWN_CLIENTS.RETAIL,
+    };
+
+    if (!dto?.channel_id || channelClientMap[dto.channel_id] !== clientId) {
+      throw ProblemDetailsException.scopeInsuficiente(
+        `El canal '${dto?.channel_id ?? 'desconocido'}' no corresponde al cliente autenticado '${clientId}'`,
+        correlationId,
+      );
+    }
+
     return this.disponibilidadService.verificarCantidadComercial(
       dto,
       correlationId,

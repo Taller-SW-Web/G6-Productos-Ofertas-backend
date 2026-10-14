@@ -1,9 +1,13 @@
 import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { createVerify } from 'node:crypto';
 import {
   REQUIRED_SCOPE_KEY,
   ALLOWED_CLIENTS_KEY,
   EXPECTED_AUDIENCE,
+  EXPECTED_ISSUER,
+  EXPECTED_ALGORITHM,
+  EXPECTED_TOKEN_TYPE,
 } from './auth.constants.js';
 import { ProblemDetailsException } from '../errors/inventory.errors.js';
 
@@ -16,12 +20,31 @@ export interface DecodedTokenPayload {
   exp?: number;
   iat?: number;
   iss?: string;
+  tipo?: string;
   [key: string]: unknown;
 }
 
 @Injectable()
 export class InventoryAuthGuard implements CanActivate {
+  private static trustedPublicKey: string | null = null;
+
   constructor(private readonly reflector: Reflector) {}
+
+  /**
+   * Permite configurar o sobrescribir el material de confianza público para verificación criptográfica (ej. tests o configuración)
+   */
+  static setTrustedPublicKey(key: string | null): void {
+    InventoryAuthGuard.trustedPublicKey = key;
+  }
+
+  static getTrustedPublicKey(): string | null {
+    return (
+      InventoryAuthGuard.trustedPublicKey ||
+      process.env.G7_JWT_PUBLIC_KEY ||
+      process.env.JWT_PUBLIC_KEY ||
+      null
+    );
+  }
 
   canActivate(context: ExecutionContext): boolean {
     const requiredScope = this.reflector.getAllAndOverride<string | undefined>(
@@ -60,20 +83,41 @@ export class InventoryAuthGuard implements CanActivate {
       );
     }
 
-    const payload = this.decodeToken(rawToken, correlationId);
+    // Verificación criptográfica con material de confianza de G7
+    const payload = this.verifyAndDecodeToken(rawToken, correlationId);
 
     // 1. Verificación de expiración (exp)
-    if (typeof payload.exp === 'number') {
-      const nowSec = Math.floor(Date.now() / 1000);
-      if (nowSec > payload.exp) {
-        throw ProblemDetailsException.tokenInvalido(
-          'Token JWT expirado',
-          correlationId,
-        );
-      }
+    if (typeof payload.exp !== 'number') {
+      throw ProblemDetailsException.tokenInvalido(
+        'Token JWT no contiene claim exp válido',
+        correlationId,
+      );
+    }
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (nowSec > payload.exp) {
+      throw ProblemDetailsException.tokenInvalido(
+        'Token JWT expirado',
+        correlationId,
+      );
     }
 
-    // 2. Verificación de audiencia (aud: 'api-productos')
+    // 2. Verificación de issuer (iss: 'seguridad-y-usuarios')
+    if (payload.iss !== EXPECTED_ISSUER) {
+      throw ProblemDetailsException.tokenInvalido(
+        `Issuer de token inválido. Se requiere '${EXPECTED_ISSUER}'`,
+        correlationId,
+      );
+    }
+
+    // 3. Verificación de tipo de token (tipo: 'servicio')
+    if (payload.tipo && payload.tipo !== EXPECTED_TOKEN_TYPE) {
+      throw ProblemDetailsException.tokenInvalido(
+        `Tipo de token inválido. Se requiere '${EXPECTED_TOKEN_TYPE}'`,
+        correlationId,
+      );
+    }
+
+    // 4. Verificación de audiencia (aud: 'api-productos')
     const audMatches =
       payload.aud === EXPECTED_AUDIENCE ||
       (Array.isArray(payload.aud) && payload.aud.includes(EXPECTED_AUDIENCE));
@@ -85,7 +129,7 @@ export class InventoryAuthGuard implements CanActivate {
       );
     }
 
-    // 3. Verificación de clientes permitidos (client_id / sub)
+    // 5. Verificación de clientes permitidos (client_id / sub)
     const clientId = payload.client_id || payload.sub;
     if (allowedClients && allowedClients.length > 0) {
       if (!clientId || !allowedClients.includes(clientId)) {
@@ -96,7 +140,7 @@ export class InventoryAuthGuard implements CanActivate {
       }
     }
 
-    // 4. Verificación de scope
+    // 6. Verificación de scope
     if (requiredScope) {
       const scopes = new Set<string>();
       if (typeof payload.scope === 'string') {
@@ -125,25 +169,79 @@ export class InventoryAuthGuard implements CanActivate {
     return true;
   }
 
-  private decodeToken(
+  private verifyAndDecodeToken(
     rawToken: string,
     correlationId?: string,
   ): DecodedTokenPayload {
     const parts = rawToken.split('.');
-    if (parts.length < 2) {
+    if (parts.length !== 3) {
       throw ProblemDetailsException.tokenInvalido(
-        'Formato de token JWT malformado (debe contener al menos header y payload)',
+        'Formato de token JWT malformado (debe contener header, payload y firma)',
         correlationId,
       );
     }
 
+    const [headerB64, payloadB64, signatureB64] = parts;
+
+    if (!signatureB64 || signatureB64.trim().length === 0) {
+      throw ProblemDetailsException.tokenInvalido(
+        'Firma de token JWT ausente',
+        correlationId,
+      );
+    }
+
+    // Decodificar header
+    let header: { alg?: string; typ?: string };
     try {
-      const payloadPart = parts[1];
-      const base64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
-      const padLen = (4 - (base64.length % 4)) % 4;
-      const paddedBase64 = base64 + '='.repeat(padLen);
-      const jsonStr = Buffer.from(paddedBase64, 'base64').toString('utf8');
-      return JSON.parse(jsonStr);
+      header = JSON.parse(Buffer.from(headerB64, 'base64url').toString('utf8'));
+    } catch {
+      throw ProblemDetailsException.tokenInvalido(
+        'Header de token JWT inválido',
+        correlationId,
+      );
+    }
+
+    if (header.alg !== EXPECTED_ALGORITHM) {
+      throw ProblemDetailsException.tokenInvalido(
+        `Algoritmo de token no permitido (${header.alg ?? 'desconocido'}). Se requiere '${EXPECTED_ALGORITHM}'`,
+        correlationId,
+      );
+    }
+
+    // Obtener clave pública de confianza
+    const publicKey = InventoryAuthGuard.getTrustedPublicKey();
+    if (!publicKey) {
+      throw ProblemDetailsException.tokenInvalido(
+        'Material de confianza de G7 no disponible para verificación criptográfica',
+        correlationId,
+      );
+    }
+
+    // Verificar firma criptográfica RSA-SHA256
+    try {
+      const verifier = createVerify('RSA-SHA256');
+      verifier.update(`${headerB64}.${payloadB64}`);
+      const signatureBuffer = Buffer.from(signatureB64, 'base64url');
+      const isValid = verifier.verify(publicKey, signatureBuffer);
+      if (!isValid) {
+        throw ProblemDetailsException.tokenInvalido(
+          'Firma criptográfica de token JWT inválida o alterada',
+          correlationId,
+        );
+      }
+    } catch (verifyErr) {
+      if (verifyErr instanceof ProblemDetailsException) {
+        throw verifyErr;
+      }
+      throw ProblemDetailsException.tokenInvalido(
+        'Error durante la verificación criptográfica del token',
+        correlationId,
+      );
+    }
+
+    // Decodificar payload
+    try {
+      return JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
     } catch {
       throw ProblemDetailsException.tokenInvalido(
         'No se pudo decodificar el payload del token JWT',
