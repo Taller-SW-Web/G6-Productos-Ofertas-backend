@@ -3,20 +3,33 @@
 # Lee el registro de datos sin ejecutarlo como código.
 readonly G6_SERVICE_REGISTRY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/services.psv"
 readonly -a G6_EXPECTED_SERVICES=(api-gateway bulk-svc catalog-svc combos-svc inventory-svc price-audit-svc pricing-svc promotions-svc taxonomy-svc)
+readonly G6_SERVICE_REGISTRY_FORMAT_VERSION=2
+
+g6_service_registry_version() {
+  local header
+  IFS= read -r header < "$G6_SERVICE_REGISTRY" || return 65
+  [[ "$header" =~ ^#registry-version=([0-9]+)$ ]] || return 65
+  printf '%s\n' "${BASH_REMATCH[1]}"
+}
 
 g6_service_config() {
   local requested="${1:-}"
-  local service enabled port build_script main_module image_name compose_file project compose_unit container state_dir runtime_env_file expected_service
+  local service enabled port port_env build_script main_module image_name compose_file project compose_unit container state_dir runtime_env_file expected_service expected_port_env registry_version
+  registry_version="$(g6_service_registry_version)" || return
+  [[ "$registry_version" == "$G6_SERVICE_REGISTRY_FORMAT_VERSION" ]] || return 65
   [[ "$requested" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || return 64
   for expected_service in "${G6_EXPECTED_SERVICES[@]}"; do
     [[ "$requested" == "$expected_service" ]] && break
   done
   [[ "${expected_service:-}" == "$requested" ]] || return 64
 
-  while IFS='|' read -r service enabled port build_script main_module image_name compose_file project compose_unit container state_dir runtime_env_file; do
+  while IFS='|' read -r service enabled port port_env build_script main_module image_name compose_file project compose_unit container state_dir runtime_env_file; do
     [[ -n "$service" && "$service" != \#* ]] || continue
     [[ "$service" =~ ^[a-z][a-z0-9-]{0,31}$ && "$enabled" =~ ^(true|false)$ ]] || return 65
     [[ "$port" =~ ^[0-9]{4,5}$ ]] || return 65
+    expected_port_env="${service^^}"
+    expected_port_env="${expected_port_env//-/_}_PORT"
+    [[ "$port_env" == "$expected_port_env" ]] || return 65
     [[ "$build_script" == "build:${service}" && "$main_module" == "dist/apps/${service}/main.js" ]] || return 65
     [[ "$image_name" == "$service" ]] || return 65
     if [[ "$service" == inventory-svc ]]; then
@@ -36,6 +49,7 @@ g6_service_config() {
       G6_SERVICE_NAME="$service"
       G6_SERVICE_ENABLED="$enabled"
       G6_SERVICE_PORT="$port"
+      G6_SERVICE_PORT_ENV="$port_env"
       G6_SERVICE_BUILD_SCRIPT="$build_script"
       G6_SERVICE_MAIN="$main_module"
       G6_SERVICE_IMAGE_NAME="$image_name"
@@ -55,7 +69,7 @@ g6_enabled_services_json() {
   local service first=true count=0
   local -A seen=() seen_ports=()
   printf '['
-  while IFS='|' read -r service enabled port _; do
+  while IFS='|' read -r service enabled port port_env _; do
     [[ -n "$service" && "$service" != \#* ]] || continue
     [[ ! -v "seen[$service]" ]] || return 65
     [[ ! -v "seen_ports[$port]" ]] || return 65

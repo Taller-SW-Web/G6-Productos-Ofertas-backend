@@ -5,10 +5,24 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=service-registry.sh
 source "${SCRIPT_DIR}/service-registry.sh"
 
+readonly G6_DEPLOY_EXECUTOR_VERSION=2
+
 fail() {
   printf 'G6 deployment: %s\n' "$1" >&2
   exit 1
 }
+G6_SERVICE_REGISTRY_VERSION="$(g6_service_registry_version)" || fail 'versión del registro ausente o inválida'
+readonly G6_SERVICE_REGISTRY_VERSION
+
+if [[ "${1:-}" == --version && $# == 1 && -z "${SSH_ORIGINAL_COMMAND:-}" ]]; then
+  [[ "$G6_SERVICE_REGISTRY_VERSION" == "$G6_DEPLOY_EXECUTOR_VERSION" ]] ||
+    fail 'versiones incompatibles de ejecutor y registro'
+  printf 'ejecutor=%s registro=%s\n' "$G6_DEPLOY_EXECUTOR_VERSION" "$G6_SERVICE_REGISTRY_VERSION"
+  exit 0
+fi
+[[ $# == 0 ]] || fail 'argumentos locales no autorizados'
+[[ "$G6_SERVICE_REGISTRY_VERSION" == "$G6_DEPLOY_EXECUTOR_VERSION" ]] ||
+  fail 'versiones incompatibles de ejecutor y registro'
 
 readonly LEGACY_INVENTORY_RE='^inventory-deploy ([0-9a-f]{40})$'
 readonly GENERIC_DEPLOY_RE='^service-deploy ([a-z][a-z0-9-]{0,31}) ([0-9a-f]{40})$'
@@ -77,7 +91,8 @@ compose() {
   else
     env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
       DOCKER_CONFIG="$DOCKER_CONFIG" G6_SERVICE_IMAGE="$image" \
-      G6_SERVICE_PORT="$G6_SERVICE_PORT" G6_SERVICE_CONTAINER="$G6_SERVICE_CONTAINER" \
+      G6_SERVICE_PORT="$G6_SERVICE_PORT" G6_SERVICE_PORT_ENV="$G6_SERVICE_PORT_ENV" \
+      G6_SERVICE_CONTAINER="$G6_SERVICE_CONTAINER" \
       G6_SERVICE_ENV_FILE="$G6_SERVICE_ENV_FILE" \
       docker compose --file "$G6_SERVICE_COMPOSE_FILE" --project-name "$G6_SERVICE_COMPOSE_PROJECT" "$@" "$G6_SERVICE_COMPOSE_UNIT"
   fi

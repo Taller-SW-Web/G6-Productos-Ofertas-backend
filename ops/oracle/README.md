@@ -1,24 +1,27 @@
 # CD de servicios G6 en Oracle Cloud
 
-El CD publica imágenes inmutables por SHA en GHCR y despliega mediante SSH restringido. El manifiesto declarativo `ops/oracle/services.psv`, leído sin ejecutarlo por `ops/oracle/service-registry.sh`, contiene exactamente los nueve componentes del monorepo, sus puertos, rutas, imágenes, contenedores, estados y archivos privados de runtime; **`inventory-svc` es el único habilitado**. Los ocho servicios restantes se rechazan tanto en la ejecución manual como en el host Oracle hasta que se preparen y autoricen expresamente.
+El CD publica imágenes inmutables por SHA en GHCR y despliega mediante SSH restringido. El manifiesto declarativo `ops/oracle/services.psv`, leído sin ejecutarlo por `ops/oracle/service-registry.sh`, contiene exactamente los nueve componentes del monorepo, sus puertos, variables específicas de puerto, rutas, imágenes, contenedores, estados y archivos privados de runtime; **`inventory-svc` es el único habilitado**. Los ocho servicios restantes se rechazan tanto en la ejecución manual como en el host Oracle hasta que se preparen y autoricen expresamente.
 
 ## Estado y límites
 
 - El PR #7 dejó instalado el comando SSH `/usr/local/sbin/deploy-inventory-svc` y el Compose `/opt/g6-productos-ofertas/inventory/docker-compose.inventory.yml`. La ruta de comando antigua `inventory-deploy <SHA de 40 caracteres>` continúa siendo aceptada.
 - El ejecutor común solo recibe un identificador del registro y un SHA hexadecimal de 40 caracteres. Rutas, imagen, proyecto Compose, contenedor, puerto y directorio de estado salen de valores constantes del registro. No acepta shell, rutas, nombre de contenedor ni destino como argumentos.
+- `deploy-g6-service --version` informa `ejecutor=2 registro=2`; el ejecutor rechaza un registro cuya versión no sea la que implementa. Esa salida verifica las versiones declaradas de los archivos instalados, no sustituye comparar sus checksums con el commit revisado del PR.
 - Cada servicio tiene un proyecto Compose, contenedor y directorio de estado propios. Las operaciones apuntan a un único servicio; no usan `down`, `--remove-orphans` ni cambian la configuración de RabbitMQ.
 - El healthcheck confirma el proceso HTTP en `/health`. No acredita conectividad, credenciales o preparación de Supabase.
 - No se ha desplegado en la VM ni configurado ningún secreto real como parte de este cambio.
 
 ## Controles de GitHub Actions
 
-El workflow `CD servicios Oracle` solo procesa un `push` de `master` con CI exitoso del mismo repositorio. Descarta SHAs que ya no son la punta de `master`, vuelve a comprobar la vigencia antes de SSH y publica cada imagen con su SHA. La ejecución manual está limitada a `master`, exige un CI exitoso de `push` para ese mismo SHA y rechaza servicios deshabilitados.
+El workflow `CD servicios Oracle` solo procesa un `push` de `master` con CI exitoso del mismo repositorio. Descarta SHAs que ya no son la punta de `master`, vuelve a comprobar la vigencia antes de SSH y publica cada imagen con su SHA. Para pushes automáticos, calcula los archivos modificados desde la ejecución previa completada de CI `push` en `master`: cambios exclusivamente bajo `apps/<servicio>/` seleccionan ese servicio; archivos compartidos, rutas desconocidas, rango ausente o rango no verificable seleccionan todos los habilitados. La selección se intersecta con el registro. Dispatch manual ofrece los nueve servicios, pero CI verifica el SHA y el registro rechaza los ocho deshabilitados.
 
-El job de publicación cuenta con `packages: write`; los demás conservan solo lectura de contenidos y acciones. Antes de enviar el token de GHCR, Actions valida presencia de secretos, host SSH mediante `known_hosts` y autenticación con la clave restringida. El host valida el servicio, el SHA, la imagen actual, el healthcheck de Docker y HTTP; si la versión nueva falla, restaura solo el servicio elegido.
+Cada fila de la matriz es independiente y publica y despliega solo su servicio; un fallo de publicación no cancela las otras filas. Las filas usan `fail-fast: false`. El job por servicio tiene `packages: write` y `contents: read`; el preparatorio conserva `actions: read` y `contents: read`. Antes de enviar el token de GHCR, Actions valida presencia de secretos, host SSH mediante `known_hosts` y autenticación con la clave restringida. El host valida el servicio, el SHA, la imagen actual, el healthcheck de Docker y HTTP; si la versión nueva falla, restaura solo el servicio elegido.
+
+La plantilla genérica fija `PORT` y la variable específica (`*_PORT`) al mismo puerto del registro; ambas variables explícitas de Compose prevalecen sobre `runtime.env`. El healthcheck de Compose y la publicación loopback usan el mismo puerto. Inventario mantiene `INVENTORY_SVC_PORT=3005` y añade `PORT=3005` a su Compose versionado; la ruta, el contenedor y el healthcheck existente siguen en 3005.
 
 ## Transición segura del wrapper de Inventario
 
-El despliegue anterior debe permanecer disponible hasta completar todas las comprobaciones. Ejecuta estos pasos manualmente en Oracle como administrador. **No ejecutes `docker compose up`, `pull`, reinicios ni el comando de despliegue durante la instalación o verificación.**
+El despliegue anterior debe permanecer disponible hasta completar todas las comprobaciones. Los comandos `sudo install` siguientes requieren aprobación operativa explícita para cambiar archivos privilegiados en Oracle; este PR y el CD no sincronizan ni instalan esos archivos. Ejecuta el procedimiento manual como administrador solo después de esa autorización. **No ejecutes `docker compose up`, `pull`, reinicios ni el comando de despliegue durante la instalación o verificación.**
 
 ### 1. Guardar una copia recuperable del mecanismo instalado
 
@@ -32,7 +35,9 @@ sudo cp --preserve=mode,ownership,timestamps /usr/local/sbin/deploy-inventory-sv
 sudo sha256sum /usr/local/sbin/deploy-inventory-svc /var/backups/g6-productos-ofertas/deploy-inventory-svc.pr7
 ```
 
-Confirma que ambos checksums coincidan antes de seguir. No reemplaces ni muevas el Compose ni los archivos de `/etc/g6-inventory` o `/var/lib/g6-inventory`.
+Confirma que ambos checksums coincidan antes de seguir. No muevas ni reemplaces el Compose o los archivos de `/etc/g6-inventory` y `/var/lib/g6-inventory` sin aprobación operativa. El Compose versionado ahora iguala `PORT` con `INVENTORY_SVC_PORT=3005`; para instalarlo en `/opt/g6-productos-ofertas/inventory/docker-compose.inventory.yml`, respáldalo, compara el checksum, valida el archivo candidato con `docker compose config --quiet` y sustitúyelo atómicamente. Esa actualización no ejecuta `up`, `pull` ni reinicios y debe estar aprobada antes del próximo despliegue genérico de Inventario.
+
+Antes de instalar, anota el SHA del checkout revisado del PR y sus checksums de `service-registry.sh`, `services.psv`, `deploy-g6-service.sh` y `docker-compose.service.yml`. Conserva esa evidencia junto con la aprobación operativa.
 
 ### 2. Instalar el registro y el ejecutor genérico en rutas nuevas
 
@@ -45,7 +50,11 @@ sudo install --owner root --group root --mode 0644 ops/oracle/services.psv /usr/
 sudo install --owner root --group root --mode 0755 ops/oracle/deploy-g6-service.sh /usr/local/lib/g6-productos-ofertas/deploy-g6-service
 sudo install --directory --owner root --group root --mode 0755 /opt/g6-productos-ofertas/shared
 sudo install --owner root --group root --mode 0644 ops/oracle/docker-compose.service.yml /opt/g6-productos-ofertas/shared/docker-compose.service.yml
+sudo sha256sum /usr/local/lib/g6-productos-ofertas/service-registry.sh /usr/local/lib/g6-productos-ofertas/services.psv /usr/local/lib/g6-productos-ofertas/deploy-g6-service /opt/g6-productos-ofertas/shared/docker-compose.service.yml
+sudo -u inventory-deploy env -u SSH_ORIGINAL_COMMAND /usr/local/lib/g6-productos-ofertas/deploy-g6-service --version
 ```
+
+Compara checksums contra el checkout revisado y exige la salida exacta `ejecutor=2 registro=2`. No continúes ante diferencias o versiones incompatibles.
 
 Antes de cambiar el wrapper, inspecciona que solo Inventario está habilitado y valida el Compose actual sin imprimir secretos ni cambiar contenedores:
 
@@ -58,7 +67,18 @@ sudo -u inventory-deploy test -r /etc/g6-inventory/runtime.env
 sudo -u inventory-deploy env INVENTORY_IMAGE=ghcr.io/taller-sw-web/g6-productos-ofertas-backend/inventory-svc:SHA_DE_40_CARACTERES docker compose --file /opt/g6-productos-ofertas/inventory/docker-compose.inventory.yml --project-name g6-inventory config --quiet
 ```
 
-La salida del registro debe ser exactamente `["inventory-svc"]`. Sustituye el marcador por un SHA real de imagen únicamente para validar la sintaxis de Compose; no uses `up` ni `pull`.
+La salida del registro debe ser exactamente `["inventory-svc"]`. Sustituye el marcador por un SHA real de imagen únicamente para validar la sintaxis de Compose; no uses `up` ni `pull`. El archivo Compose versionado fija `PORT` y `INVENTORY_SVC_PORT` a `3005`, con puerto loopback y healthcheck `/health` en 3005, igual que el registro y `inventory-svc`.
+
+Con aprobación operativa independiente, actualiza el Compose instalado antes de desplegar una imagen genérica de Inventario; conserva el archivo anterior para restaurarlo. La candidata se valida sin resolver ni imprimir el contenido privado y sin iniciar contenedores:
+
+```bash
+sudo cp --preserve=mode,ownership,timestamps /opt/g6-productos-ofertas/inventory/docker-compose.inventory.yml /var/backups/g6-productos-ofertas/docker-compose.inventory.yml.pr7
+sudo install --owner root --group root --mode 0644 docker-compose.inventory.yml /opt/g6-productos-ofertas/inventory/docker-compose.inventory.yml.new
+sudo env INVENTORY_IMAGE=ghcr.io/taller-sw-web/g6-productos-ofertas-backend/inventory-svc:SHA_DE_40_CARACTERES docker compose --file /opt/g6-productos-ofertas/inventory/docker-compose.inventory.yml.new config --quiet
+sudo mv --no-target-directory /opt/g6-productos-ofertas/inventory/docker-compose.inventory.yml.new /opt/g6-productos-ofertas/inventory/docker-compose.inventory.yml
+```
+
+Si la validación falla, elimina solo el candidato `.new`; si el cambio ya se sustituyó y la operación lo requiere, instala el respaldo como `.restore` y usa `mv --no-target-directory` para volver a la versión anterior. Verifica checksum y permisos. No ejecutes el despliegue como parte de esta actualización.
 
 ### 3. Cambiar el wrapper de forma reversible
 
@@ -92,7 +112,33 @@ Los checksums deben coincidir con los anotados antes del cambio. Conserva la cop
 
 `api-gateway`, `bulk-svc`, `catalog-svc`, `combos-svc`, `price-audit-svc`, `pricing-svc`, `promotions-svc` y `taxonomy-svc` tienen valores cerrados de imagen, puerto, Compose, contenedor, proyecto y estado, pero `G6_SERVICE_ENABLED=false`. El workflow y el host los rechazan.
 
-Habilitar uno requiere un cambio revisado al registro y preparación manual independiente de Oracle: directorio y Compose del servicio, archivo privado `/etc/g6-<servicio>/runtime.env` con permisos propios, permisos de solo lectura necesarios, healthcheck y red. El ejecutor se detiene si falta ese archivo. La plantilla genérica liga el puerto a `127.0.0.1`; no debe compartirse estado o archivo de secretos. No basta con cambiar `false` a `true` sin completar y comprobar ese entorno. Este lote no activa otros componentes.
+Habilitar uno requiere un cambio revisado al registro y preparación manual independiente de Oracle: directorio y Compose del servicio, archivo privado `/etc/g6-<servicio>/runtime.env` con permisos propios, permisos de solo lectura necesarios, healthcheck y red. El ejecutor se detiene si falta ese archivo. La plantilla genérica liga `PORT` y su variable específica a un mismo puerto `127.0.0.1`; no debe compartirse estado o archivo de secretos. No basta con cambiar `false` a `true` sin completar y comprobar ese entorno.
+
+Transición reversible, solo tras aprobación operativa para esa activación:
+
+1. Prepara manualmente el Compose, ruta, entorno privado, permisos y healthcheck del servicio; valida el Compose con `config --quiet` y sin `up`/`pull`.
+2. Revisa un PR que solo cambie el `enabled` del servicio requerido a `true`; conserva los demás en `false`. Comprueba CI, que la versión del ejecutor siga compatible con el registro y que el filtro y dispatch manual aún validen el nombre cerrado.
+3. En Oracle, crea un directorio candidato root-only dentro de `/usr/local/lib/g6-productos-ofertas`, copia allí el `service-registry.sh` y `services.psv` revisados, y ejecuta `source <candidato>/service-registry.sh; g6_enabled_services_json`. Verifica la versión del ejecutor instalado con `env -u SSH_ORIGINAL_COMMAND /usr/local/lib/g6-productos-ofertas/deploy-g6-service --version`; compara checksum del candidato con el checkout aprobado.
+4. Respalda el `services.psv` instalado en `/var/backups/g6-productos-ofertas`, instala el candidato como `/usr/local/lib/g6-productos-ofertas/services.psv.new` y usa `mv --no-target-directory` dentro del mismo directorio para sustituirlo atómicamente. Verifica `g6_enabled_services_json` como administrador y exige exactamente `inventory-svc` más el servicio autorizado.
+5. Si la verificación falla, instala el respaldo como `services.psv.restore` y restáuralo con `mv --no-target-directory`; compara el checksum restaurado. El wrapper y su comando SSH no cambian; no se despliega ni reinicia el servicio durante esta transición.
+6. La primera publicación/despliegue requiere una operación aprobada y separada. La instalación de archivos privilegiados no se automatiza en GitHub Actions.
+
+Secuencia atómica de activación tras revisar el PR y obtener aprobación operativa (sustituye `<ticket>` por un identificador real; no ejecutes este ejemplo en este lote):
+
+```bash
+sudo install --directory --owner root --group root --mode 0700 /usr/local/lib/g6-productos-ofertas/candidato
+sudo install --owner root --group root --mode 0644 ops/oracle/service-registry.sh /usr/local/lib/g6-productos-ofertas/candidato/service-registry.sh
+sudo install --owner root --group root --mode 0644 ops/oracle/services.psv /usr/local/lib/g6-productos-ofertas/candidato/services.psv
+sudo bash -c 'source /usr/local/lib/g6-productos-ofertas/candidato/service-registry.sh; g6_enabled_services_json'
+sudo cp --preserve=mode,ownership,timestamps /usr/local/lib/g6-productos-ofertas/services.psv /var/backups/g6-productos-ofertas/services.psv.before-<ticket>
+sudo install --owner root --group root --mode 0644 /usr/local/lib/g6-productos-ofertas/candidato/services.psv /usr/local/lib/g6-productos-ofertas/services.psv.new
+sudo mv --no-target-directory /usr/local/lib/g6-productos-ofertas/services.psv.new /usr/local/lib/g6-productos-ofertas/services.psv
+sudo bash -c 'source /usr/local/lib/g6-productos-ofertas/service-registry.sh; g6_enabled_services_json'
+```
+
+Comprueba el checksum del candidato contra el commit aprobado antes del `mv`; después, la lista debe contener Inventario y únicamente el servicio autorizado. Si falla la validación posterior, restaura atómicamente el respaldo mediante `install` a `services.psv.restore` y `mv --no-target-directory`. Conserva el wrapper actual y no ejecutes un despliegue como prueba.
+
+Este lote mantiene los ocho componentes deshabilitados.
 
 ## Secretos y operación del CD
 
@@ -119,4 +165,4 @@ Para cada servicio futuro, crea su directorio `/etc/g6-<servicio>` como `root:g6
 
 ## Pruebas locales
 
-La prueba `ops/oracle/tests/deploy-g6-service.test.sh` usa Docker/curl simulados y un registro temporal donde `catalog-svc` se habilita solo dentro de la simulación. Comprueba la compatibilidad del comando SSH previo, publicación y estado separados para dos servicios, rollback del segundo sin alterar Inventario, y rechazo de nombres, SHA, comandos y servicios deshabilitados. No despliega en Oracle.
+Las pruebas `ops/oracle/tests/deploy-g6-service.test.sh`, `select-affected-services.test.sh` y `publish-isolation.test.sh` usan registros temporales o simulación local. Comprueban compatibilidad del comando SSH previo, versión y rechazo de incompatibilidad, rollback y aislamiento de dos servicios, fallback de selección compartida/no verificable y continuidad de otra fila después de un fallo de publicación. El CI además construye y ejecuta `Dockerfile.service` para Inventario y Catálogo, valida ambos Compose y sus puertos/env/healthchecks. Nada de esto despliega en Oracle.

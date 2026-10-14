@@ -6,8 +6,9 @@ services:
     env_file:
       - ${G6_SERVICE_ENV_FILE:?G6_SERVICE_ENV_FILE es obligatorio}
     environment:
-      NODE_ENV: production
-      PORT: ${G6_SERVICE_PORT:?G6_SERVICE_PORT es obligatorio}
+      - NODE_ENV=production
+      - PORT=${G6_SERVICE_PORT:?G6_SERVICE_PORT es obligatorio}
+      - ${G6_SERVICE_PORT_ENV:?G6_SERVICE_PORT_ENV es obligatorio}=${G6_SERVICE_PORT:?G6_SERVICE_PORT es obligatorio}
     ports:
       - '127.0.0.1:${G6_SERVICE_PORT}:${G6_SERVICE_PORT}'
     healthcheck:

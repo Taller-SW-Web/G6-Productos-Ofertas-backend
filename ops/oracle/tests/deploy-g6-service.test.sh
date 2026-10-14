@@ -59,6 +59,16 @@ sed -i "s|/etc/g6-inventory/runtime.env|${TEMP_ROOT}/etc/g6-inventory/runtime.en
 sed -i "s|PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin|PATH=${MOCK_BIN}:/usr/bin:/bin|g" "$STAGED_OPS/deploy-g6-service.sh"
 sed -i "s|/usr/local/lib/g6-productos-ofertas/deploy-g6-service|${STAGED_OPS}/deploy-g6-service.sh|g" "$STAGED_OPS/deploy-inventory-svc.sh"
 chmod +x "$STAGED_OPS/deploy-g6-service.sh"
+
+version_output="$(env -u SSH_ORIGINAL_COMMAND bash "$STAGED_OPS/deploy-g6-service.sh" --version)"
+[[ "$version_output" == 'ejecutor=2 registro=2' ]] || fail "versiones instaladas inesperadas: $version_output"
+cp "$STAGED_OPS/services.psv" "${TEMP_ROOT}/services.psv.version-backup"
+sed -i 's/^#registry-version=2$/#registry-version=9/' "$STAGED_OPS/services.psv"
+if env -u SSH_ORIGINAL_COMMAND bash "$STAGED_OPS/deploy-g6-service.sh" --version >"${TEMP_ROOT}/result.log" 2>&1; then
+  fail 'la versión incompatible del registro no fue rechazada'
+fi
+mv "${TEMP_ROOT}/services.psv.version-backup" "$STAGED_OPS/services.psv"
+printf 'PASS: versión del registro y ejecutor informada y compatibilidad obligatoria\n'
 touch "${TEMP_ROOT}/opt/g6-productos-ofertas/inventory/docker-compose.inventory.yml"
 touch "${TEMP_ROOT}/opt/g6-productos-ofertas/shared/docker-compose.service.yml"
 printf '%s\n' 'DATABASE_URL=test-only' > "${TEMP_ROOT}/etc/g6-inventory/runtime.env"

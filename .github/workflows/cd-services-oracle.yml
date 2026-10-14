@@ -7,13 +7,23 @@ on:
   workflow_dispatch:
     inputs:
       service:
-        description: Servicio del registro cerrado (solo los habilitados pueden desplegarse)
+        description: Servicio registrado (solo los habilitados pueden desplegarse)
         required: true
-        type: string
+        type: choice
+        options:
+          - api-gateway
+          - bulk-svc
+          - catalog-svc
+          - combos-svc
+          - inventory-svc
+          - price-audit-svc
+          - pricing-svc
+          - promotions-svc
+          - taxonomy-svc
         default: inventory-svc
 
 concurrency:
-  group: deploy-g6-services-oracle
+  group: deploy-g6-services-oracle-${{ github.event.inputs.service || 'automatic' }}
   cancel-in-progress: false
 
 permissions:
@@ -22,7 +32,7 @@ permissions:
 
 jobs:
   prepare:
-    name: Validar CI, servicio y SHA de master
+    name: Validar CI, selección y SHA de master
     if: >-
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.event == 'push' &&
@@ -35,7 +45,7 @@ jobs:
     outputs:
       sha: ${{ steps.selection.outputs.sha }}
       repository: ${{ steps.selection.outputs.repository }}
-      services: ${{ steps.targets.outputs.services || '["inventory-svc"]' }}
+      services: ${{ steps.targets.outputs.services || '[]' }}
     steps:
       - name: Select successful master commit
         id: selection
@@ -44,7 +54,7 @@ jobs:
           WORKFLOW_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == "workflow_run" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == workflow_run ]]; then
             sha="$WORKFLOW_HEAD_SHA"
           else
             sha="$GITHUB_SHA"
@@ -64,18 +74,22 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "repository=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout selected master commit
+      - name: Checkout selected master commit and history
         if: steps.selection.outputs.sha != ''
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.selection.outputs.sha }}
+          fetch-depth: 0
 
-      - name: Read enabled services or validate manual selection
+      - name: Select affected enabled services or validate manual selection
         id: targets
         if: steps.selection.outputs.sha != ''
         env:
-          REQUESTED_SERVICE: ${{ inputs.service }}
+          GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_SERVICE: ${{ inputs.service }}
+          CI_RUN_ID: ${{ github.event.workflow_run.id }}
+          SELECTED_SHA: ${{ steps.selection.outputs.sha }}
         run: |
           set -euo pipefail
           source ops/oracle/service-registry.sh
@@ -89,14 +103,34 @@ jobs:
               echo "El servicio $REQUESTED_SERVICE está registrado, pero no habilitado para despliegue." >&2
               exit 1
             fi
-            enabled="[\"$REQUESTED_SERVICE\"]"
+            services="[\"$REQUESTED_SERVICE\"]"
+          else
+            runs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=master&event=push&status=completed&per_page=100")"
+            current_run="$(jq -c --argjson id "$CI_RUN_ID" --arg sha "$SELECTED_SHA" --arg repo "$GITHUB_REPOSITORY" '[.workflow_runs[] | select(.id == $id and .head_sha == $sha and .head_branch == "master" and .event == "push" and .head_repository.full_name == $repo and .conclusion == "success")][0] // empty' <<< "$runs")"
+            previous_sha=''
+            if [[ -n "$current_run" ]]; then
+              current_number="$(jq -r .run_number <<< "$current_run")"
+              previous_sha="$(jq -r --argjson number "$current_number" --arg repo "$GITHUB_REPOSITORY" '[.workflow_runs[] | select(.run_number < $number and .head_branch == "master" and .event == "push" and .head_repository.full_name == $repo and .status == "completed" and (.head_sha | test("^[0-9a-f]{40}$")))] | sort_by(.run_number) | last | .head_sha // empty' <<< "$runs")"
+            fi
+            services=''
+            if [[ -n "$previous_sha" ]] && git merge-base --is-ancestor "$previous_sha" "$SELECTED_SHA"; then
+              if services="$(git diff --name-only -z "$previous_sha" "$SELECTED_SHA" | bash ops/oracle/select-affected-services.sh)"; then
+                :
+              else
+                services="$enabled"
+              fi
+            else
+              echo 'No se pudo establecer un rango completo de CI anterior; se seleccionan todos los servicios habilitados.'
+              services="$enabled"
+            fi
           fi
-          echo "services=$enabled" >> "$GITHUB_OUTPUT"
+          echo "Servicios habilitados afectados: $services"
+          echo "services=$services" >> "$GITHUB_OUTPUT"
 
-  publish:
-    name: Publicar ${{ matrix.service }} en GHCR
+  release:
+    name: Publicar y desplegar ${{ matrix.service }}
     needs: prepare
-    if: needs.prepare.outputs.sha != ''
+    if: needs.prepare.outputs.sha != '' && needs.prepare.outputs.services != '[]'
     strategy:
       fail-fast: false
       matrix:
@@ -135,19 +169,23 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
-  deploy:
-    name: Desplegar ${{ matrix.service }} en Oracle
-    needs: [prepare, publish]
-    if: needs.prepare.outputs.sha != '' && needs.publish.result == 'success'
-    strategy:
-      fail-fast: false
-      matrix:
-        service: ${{ fromJSON(needs.prepare.outputs.services) }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
+      - name: Confirm commit is still the master head
+        id: freshness
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/${GITHUB_REPOSITORY}/commits/master" --jq .sha)"
+          if [[ "$IMAGE_SHA" != "$current" ]]; then
+            echo "Skipping obsolete commit $IMAGE_SHA; master is now $current."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Validate deployment secrets
+        if: steps.freshness.outputs.deploy == 'true'
         env:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
           ORACLE_USER: ${{ secrets.ORACLE_USER }}
@@ -163,21 +201,6 @@ jobs:
               exit 1
             fi
           done
-
-      - name: Confirm commit is still the master head
-        id: freshness
-        env:
-          GH_TOKEN: ${{ github.token }}
-          IMAGE_SHA: ${{ needs.prepare.outputs.sha }}
-        run: |
-          set -euo pipefail
-          current="$(gh api "repos/${GITHUB_REPOSITORY}/commits/master" --jq .sha)"
-          if [[ "$IMAGE_SHA" != "$current" ]]; then
-            echo "Skipping obsolete commit $IMAGE_SHA; master is now $current."
-            echo "deploy=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "deploy=true" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Configure verified SSH access
         if: steps.freshness.outputs.deploy == 'true'
