@@ -94,7 +94,8 @@ jobs:
         run: |
           set -euo pipefail
           runtime_env="$(mktemp)"
-          trap 'rm -f "$runtime_env"' EXIT
+          inventory_compose="$(mktemp --suffix=.yml)"
+          trap 'rm -f "$runtime_env" "$inventory_compose"' EXIT
           while IFS='|' read -r service enabled port port_env build_script main_module image_name compose_file project compose_unit container state_dir runtime_env_file; do
             [[ -n "$service" && "$service" != \#* ]] || continue
             export G6_SERVICE_IMAGE="ghcr.io/taller-sw-web/g6-productos-ofertas-backend/${service}:0123456789012345678901234567890123456789"
@@ -116,7 +117,8 @@ jobs:
           grep -Fq "process.env.${G6_SERVICE_PORT_ENV} ?? process.env.PORT ?? '${G6_SERVICE_PORT}'" apps/inventory-svc/src/main.ts
           grep -Fq "127.0.0.1:${G6_SERVICE_PORT}/health" Dockerfile.inventory-svc
           export INVENTORY_IMAGE="ghcr.io/taller-sw-web/g6-productos-ofertas-backend/inventory-svc:0123456789012345678901234567890123456789"
-          inventory_config="$(docker compose --file docker-compose.inventory.yml config --format json --no-env-resolution)"
+          sed "s|/etc/g6-inventory/runtime.env|${runtime_env}|" docker-compose.inventory.yml > "$inventory_compose"
+          inventory_config="$(docker compose --file "$inventory_compose" config --format json --no-env-resolution)"
           jq -e --arg port "$G6_SERVICE_PORT" --arg port_env "$G6_SERVICE_PORT_ENV" \
             '.services["inventory-svc"].environment.PORT == $port and
              .services["inventory-svc"].environment[$port_env] == $port and
