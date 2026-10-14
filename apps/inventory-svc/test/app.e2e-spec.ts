@@ -9,6 +9,7 @@ import { ProblemDetailsFilter } from '../src/errors/problem-details.filter.js';
 import { InMemoryDatabaseMock } from './in-memory-database.mock.js';
 import {
   createCryptographicJwt,
+  TEST_ISSUER,
   TEST_PUBLIC_KEY,
 } from './crypto-test-token.helper.js';
 import { InventoryAuthGuard } from '../src/auth/inventory-auth.guard.js';
@@ -18,6 +19,7 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
   let mockDb: InMemoryDatabaseMock;
   const locLurin = '9129b578-631e-1735-8427-b683fb524380';
   const sku = 'NIK-REV7-NEG-41';
+  let previousIssuer: string | undefined;
 
   const validToken = createCryptographicJwt({
     clientId: 'modulo-ventas',
@@ -26,11 +28,15 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
   });
 
   beforeAll(() => {
+    previousIssuer = process.env.G7_JWT_ISSUER;
+    process.env.G7_JWT_ISSUER = TEST_ISSUER;
     InventoryAuthGuard.setTrustedPublicKey(TEST_PUBLIC_KEY);
   });
 
   afterAll(() => {
     InventoryAuthGuard.setTrustedPublicKey(null);
+    if (previousIssuer === undefined) delete process.env.G7_JWT_ISSUER;
+    else process.env.G7_JWT_ISSUER = previousIssuer;
   });
 
   beforeEach(async () => {

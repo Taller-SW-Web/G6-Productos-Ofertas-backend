@@ -6,14 +6,18 @@ import { INVENTORY_SCOPES, KNOWN_CLIENTS } from './auth.constants.js';
 import { ProblemDetailsException } from '../errors/inventory.errors.js';
 import {
   createCryptographicJwt,
+  TEST_ISSUER,
   TEST_PUBLIC_KEY,
 } from '../../test/crypto-test-token.helper.js';
 
 describe('InventoryAuthGuard — Verificación Criptográfica JWT RS256 de G7', () => {
   let guard: InventoryAuthGuard;
   let reflector: Reflector;
+  let previousIssuer: string | undefined;
 
   beforeEach(() => {
+    previousIssuer = process.env.G7_JWT_ISSUER;
+    process.env.G7_JWT_ISSUER = TEST_ISSUER;
     reflector = new Reflector();
     guard = new InventoryAuthGuard(reflector);
     InventoryAuthGuard.setTrustedPublicKey(TEST_PUBLIC_KEY);
@@ -21,6 +25,8 @@ describe('InventoryAuthGuard — Verificación Criptográfica JWT RS256 de G7', 
 
   afterEach(() => {
     InventoryAuthGuard.setTrustedPublicKey(null);
+    if (previousIssuer === undefined) delete process.env.G7_JWT_ISSUER;
+    else process.env.G7_JWT_ISSUER = previousIssuer;
   });
 
   function createMockContext(
@@ -187,7 +193,7 @@ describe('InventoryAuthGuard — Verificación Criptográfica JWT RS256 de G7', 
     const req = context.switchToHttp().getRequest() as any;
     expect(req.user).toBeDefined();
     expect(req.clientId).toBe(KNOWN_CLIENTS.VENTAS);
-    expect(req.user.iss).toBe('seguridad-y-usuarios');
+    expect(req.user.iss).toBe(TEST_ISSUER);
     expect(req.user.aud).toBe('api-productos');
   });
 
@@ -213,6 +219,21 @@ describe('InventoryAuthGuard — Verificación Criptográfica JWT RS256 de G7', 
       }
     } finally {
       if (savedEnv) process.env.G7_JWT_PUBLIC_KEY = savedEnv;
+    }
+  });
+
+  it('rechaza con 401 si el issuer oficial de G7 no está configurado', () => {
+    delete process.env.G7_JWT_ISSUER;
+    const token = createCryptographicJwt();
+    const context = createMockContext(`Bearer ${token}`);
+
+    expect(() => guard.canActivate(context)).toThrow(ProblemDetailsException);
+    try {
+      guard.canActivate(context);
+    } catch (err: any) {
+      expect(err.problem.status).toBe(401);
+      expect(err.problem.code).toBe('TOKEN_INVALIDO');
+      expect(err.problem.detail).toMatch(/issuer de g7 no configurado/i);
     }
   });
 });

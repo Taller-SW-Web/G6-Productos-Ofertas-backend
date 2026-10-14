@@ -5,7 +5,7 @@ import {
   REQUIRED_SCOPE_KEY,
   ALLOWED_CLIENTS_KEY,
   EXPECTED_AUDIENCE,
-  EXPECTED_ISSUER,
+  getConfiguredIssuer,
   EXPECTED_ALGORITHM,
   EXPECTED_TOKEN_TYPE,
 } from './auth.constants.js';
@@ -101,10 +101,17 @@ export class InventoryAuthGuard implements CanActivate {
       );
     }
 
-    // 2. Verificación de issuer (iss: 'seguridad-y-usuarios')
-    if (payload.iss !== EXPECTED_ISSUER) {
+    // 2. Comparar el issuer exacto publicado por el discovery de G7.
+    const expectedIssuer = getConfiguredIssuer();
+    if (!expectedIssuer) {
       throw ProblemDetailsException.tokenInvalido(
-        `Issuer de token inválido. Se requiere '${EXPECTED_ISSUER}'`,
+        'Issuer de G7 no configurado; se rechazan tokens hasta provisionar el discovery oficial',
+        correlationId,
+      );
+    }
+    if (payload.iss !== expectedIssuer) {
+      throw ProblemDetailsException.tokenInvalido(
+        `Issuer de token inválido. Se requiere el issuer configurado de G7`,
         correlationId,
       );
     }

@@ -1,10 +1,11 @@
 import crypto from 'node:crypto';
 import {
   EXPECTED_AUDIENCE,
-  EXPECTED_ISSUER,
   EXPECTED_TOKEN_TYPE,
   EXPECTED_ALGORITHM,
 } from '../src/auth/auth.constants.js';
+
+export const TEST_ISSUER = 'https://g7.integration.test/api/v1/auth';
 
 // Generar par de claves RSA 2048-bit para pruebas criptográficas
 const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
@@ -45,7 +46,7 @@ export function createCryptographicJwt(
   const exp = options.exp !== undefined ? options.exp : nowSec + 3600;
 
   const payload: Record<string, unknown> = {
-    iss: options.iss ?? EXPECTED_ISSUER,
+    iss: options.iss ?? TEST_ISSUER,
     aud: options.aud !== undefined ? options.aud : EXPECTED_AUDIENCE,
     tipo: options.tipo ?? EXPECTED_TOKEN_TYPE,
     sub: options.sub ?? options.clientId ?? 'modulo-ventas',
