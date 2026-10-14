@@ -8,7 +8,7 @@ El CD queda preparado, pero no operativo, hasta completar todos los pasos manual
 
 ## Preparación manual de Oracle
 
-Los siguientes comandos suponen Ubuntu con Docker Engine y Compose v2 instalados. Ejecútalos en la VM con una cuenta administrativa. Verifica `docker compose version` y `curl --version` antes de continuar.
+Los siguientes comandos suponen Ubuntu con Docker Engine, Compose v2 y ACL (`acl`/`setfacl`) instalados. Los bloques de las secciones 1, 2 y 4 se ejecutan en la VM Oracle mediante una cuenta administrativa con `sudo`; la sección 3 y la carga de GitHub Secrets se realizan en el equipo administrativo. La prueba de conectividad de Actions se ejecutará en un futuro job CD de GitHub Actions, después de configurar los Secrets. Verifica en Oracle `docker compose version`, `curl --version` y `setfacl --version` antes de continuar.
 
 ### 1. Crear el usuario y los directorios
 
@@ -20,11 +20,12 @@ sudo useradd --system --create-home --home-dir /home/inventory-deploy --shell /b
 sudo passwd --lock inventory-deploy
 sudo usermod --append --groups docker inventory-deploy
 sudo install --directory --owner root --group g6-inventory-deploy --mode 0750 /opt/g6-productos-ofertas/inventory
+sudo setfacl -m u:inventory-deploy:--x /opt/g6-productos-ofertas
 sudo install --directory --owner root --group g6-inventory-deploy --mode 0750 /etc/g6-inventory
 sudo install --directory --owner inventory-deploy --group g6-inventory-deploy --mode 0700 /var/lib/g6-inventory
 ```
 
-Si el usuario o grupo ya existe, inspecciónalo y confirma propietario, grupo y permisos en lugar de recrearlo. Mantén `/var/lib/g6-inventory` privado para la cuenta de despliegue; allí se guardan `active-image` y `previous-image`.
+Si el usuario o grupo ya existe, inspecciónalo y confirma propietario, grupo y permisos en lugar de recrearlo. La ACL concede a `inventory-deploy` solo búsqueda/travesía (`--x`) en el directorio padre existente: no cambia su propietario `ubuntu:ubuntu` ni sus bits `750`, y no concede lectura/listado del padre. No cambies ni leas el `.env` de RabbitMQ. Mantén `/var/lib/g6-inventory` privado para la cuenta de despliegue; allí se guardan `active-image` y `previous-image`.
 
 ### 2. Instalar Compose, script y archivo privado de entorno
 
@@ -43,14 +44,19 @@ Comprueba propietarios y modos sin imprimir el secreto:
 
 ```bash
 sudo stat --format='%U:%G %a %n' /opt/g6-productos-ofertas/inventory /opt/g6-productos-ofertas/inventory/docker-compose.inventory.yml /etc/g6-inventory /etc/g6-inventory/runtime.env /var/lib/g6-inventory /usr/local/sbin/deploy-inventory-svc
-INVENTORY_IMAGE="ghcr.io/taller-sw-web/g6-productos-ofertas-backend/inventory-svc:$(git rev-parse HEAD)" docker compose --file /opt/g6-productos-ofertas/inventory/docker-compose.inventory.yml --project-name g6-inventory config --quiet
+sudo getfacl -p /opt/g6-productos-ofertas
+namei -l /opt/g6-productos-ofertas/inventory/docker-compose.inventory.yml
+namei -l /etc/g6-inventory/runtime.env
+sudo -u inventory-deploy test -r /opt/g6-productos-ofertas/inventory/docker-compose.inventory.yml && echo 'Compose legible por inventory-deploy'
+sudo -u inventory-deploy test -r /etc/g6-inventory/runtime.env && echo 'runtime.env legible por inventory-deploy'
+sudo -u inventory-deploy env INVENTORY_IMAGE=ghcr.io/taller-sw-web/g6-productos-ofertas-backend/inventory-svc:SHA_DE_40_CARACTERES docker compose --file /opt/g6-productos-ofertas/inventory/docker-compose.inventory.yml --project-name g6-inventory config --quiet
 ```
 
-El comando Compose valida el archivo sin imprimir su contenido. El script aborta antes de descargar o reemplazar el contenedor si el archivo no es legible o falta una asignación no vacía de `DATABASE_URL`. Compose inyecta la variable al contenedor al arrancarlo. El archivo permanece en Oracle y nunca viaja en la imagen ni en GitHub Actions.
+Sustituye `SHA_DE_40_CARACTERES` por el SHA de la imagen que se quiere validar. El `test -r` confirma el acceso efectivo del usuario de despliegue. El comando Compose también se ejecuta como `inventory-deploy` y valida el archivo sin imprimir valores de entorno. El Compose inyecta `DATABASE_URL` desde `/etc/g6-inventory/runtime.env`; el script aborta antes de descargar o reemplazar el contenedor si el archivo no es legible o falta una asignación no vacía. El archivo permanece en Oracle y nunca viaja en la imagen ni en GitHub Actions.
 
 ### 3. Restringir SSH a la acción de despliegue
 
-Genera una clave Ed25519 dedicada en un equipo administrativo protegido; guarda la privada directamente como GitHub Secret y copia solo la pública a Oracle. No reutilices claves personales.
+En el equipo administrativo protegido, genera una clave Ed25519 dedicada; guarda la privada directamente como GitHub Secret y copia solo la pública a Oracle. No reutilices claves personales.
 
 ```bash
 ssh-keygen -t ed25519 -a 64 -N '' -f g6-inventory-oracle -C g6-inventory-deploy
@@ -67,6 +73,8 @@ command="/usr/local/sbin/deploy-inventory-svc",no-port-forwarding,no-agent-forwa
 ```
 
 El comando forzado acepta únicamente `inventory-deploy <SHA de 40 caracteres hexadecimales>`. No permite shell, túneles, agente ni PTY. La clave sin frase de paso se limita con las opciones anteriores y se guarda solo como GitHub Secret. Verifica la huella de la clave pública SSH del host por un canal confiable y guarda la línea `known_hosts` verificada para GitHub. Para acceso de red, restringe el puerto 22 a un runner self-hosted con salida fija o a rangos de GitHub Actions vigentes y mantenidos; nunca uses `0.0.0.0/0`. Permite salida HTTPS desde Oracle para GHCR. El puerto 3005 no necesita regla de entrada.
+
+Prueba la autenticación desde el equipo administrativo sin realizar despliegue: `ssh -vv -i g6-inventory-oracle -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes inventory-deploy@ORACLE_HOST connectivity-probe`. Configura antes `known_hosts` local con la huella verificada. La prueba debe mostrar autenticación con clave pública y el rechazo `comando remoto no autorizado`; ese rechazo es esperado porque la clave solo acepta el comando de despliegue. No uses `ssh-keyscan` como fuente de confianza.
 
 ### 4. Dar acceso de solo lectura a GHCR
 
@@ -92,10 +100,11 @@ No añadas valores de secrets a archivos versionados. El job de despliegue falla
 1. Instala inicialmente el Compose y el script en las rutas indicadas, configura `runtime.env`, GHCR, red, clave y los seis Secrets.
 2. Fusiona el PR #7 cuando haya sido revisado y aprobado por sus responsables. Esta tarea no lo fusiona.
 3. Comprueba en GitHub Actions que un evento `push` a `master` ejecuta `CI` con resultado exitoso y que después se inicia `CD inventory-svc Oracle`. Un `workflow_dispatch` solo se permite desde `master` y también exige un CI exitoso originado por `push` para el mismo SHA. Los CI de pull requests, incluidos los externos, no cumplen estas condiciones.
+   Antes de enviar credenciales GHCR al host, el job CD ejecuta la misma prueba restringida desde el runner: debe autenticarse (no recibir error SSH 255) y recibir el rechazo de comando forzado esperado. Esto demuestra conectividad desde GitHub Actions y que la clave llega al wrapper configurado en Oracle. Si falla, revisa Secrets, `authorized_keys`, `known_hosts` y las reglas de red del puerto 22.
 4. Considera el CD configurado únicamente cuando el workflow publique la etiqueta SHA en GHCR y el job de despliegue termine con éxito. Si falta preparación o un Secret, el job lo reporta como error; no lo interpretes como despliegue.
 5. Tras una ejecución exitosa, verifica desde Oracle `docker compose --file /opt/g6-productos-ofertas/inventory/docker-compose.inventory.yml --project-name g6-inventory ps` y `curl --fail http://127.0.0.1:3005/health`. Esta última comprobación confirma salud del proceso HTTP solamente; la preparación real para consumir Supabase requiere una validación de conectividad y operaciones de base de datos definida y ejecutada por separado.
 
-El host registra la imagen en `/var/lib/g6-inventory/active-image` y conserva la anterior en `/var/lib/g6-inventory/previous-image`. Las simulaciones automatizadas cubren arranque exitoso, fallo de descarga, fallo de arranque con restauración, fallo de salud con restauración y primer despliegue no saludable sin versión previa.
+El host registra la imagen en `/var/lib/g6-inventory/active-image` y conserva la anterior en `/var/lib/g6-inventory/previous-image`. La validación exige que `g6-inventory-svc` use exactamente la imagen solicitada, que Docker reporte `healthy` y que `/health` responda HTTP exitosamente. Esto comprueba la salud del proceso HTTP; no demuestra que el servicio pueda conectarse, autenticarse o consultar Supabase. Las simulaciones automatizadas cubren arranque exitoso, fallo de descarga, fallo de arranque con restauración, fallo HTTP de salud con restauración, imagen desplegada incorrecta, estado Docker no saludable y primer despliegue no saludable sin versión previa.
 
 ## Actualizaciones de artefactos
 

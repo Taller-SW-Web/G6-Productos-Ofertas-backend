@@ -38,8 +38,29 @@ if [[ "$1" == login ]]; then
   exit 0
 fi
 if [[ "$1" == inspect ]]; then
-  [[ -n "${MOCK_CURRENT_IMAGE:-}" ]] || exit 1
-  printf '%s\n' "$MOCK_CURRENT_IMAGE"
+  format="${3:-}"
+  if [[ "$format" == '{{.Config.Image}}' ]]; then
+    if [[ ! -f "$MOCK_INSPECT_INITIAL_FILE" ]]; then
+      : > "$MOCK_INSPECT_INITIAL_FILE"
+      [[ -n "${MOCK_CURRENT_IMAGE:-}" ]] || exit 1
+      printf '%s\n' "$MOCK_CURRENT_IMAGE"
+    else
+      [[ -f "$MOCK_ACTIVE_FILE" ]] || exit 1
+      image="$(<"$MOCK_ACTIVE_FILE")"
+      if [[ "$image" == "${MOCK_IMAGE_MISMATCH_FOR:-}" ]]; then image="mismatched-image"; fi
+      printf '%s\n' "$image"
+    fi
+  elif [[ "$format" == '{{.State.Health.Status}}' ]]; then
+    [[ -f "$MOCK_ACTIVE_FILE" ]] || exit 1
+    image="$(<"$MOCK_ACTIVE_FILE")"
+    if [[ "$image" == "${MOCK_UNHEALTHY_DOCKER_IMAGE:-}" ]]; then
+      printf 'unhealthy\n'
+    else
+      printf 'healthy\n'
+    fi
+  else
+    exit 94
+  fi
   exit 0
 fi
 [[ "$1" == compose ]] || exit 92
@@ -96,11 +117,16 @@ run_case() {
   local expected_active="$7"
   local expected_previous="$8"
   local expected_log="$9"
+  shift 9
+  local image_mismatch_for="${1:-}"
+  local unhealthy_docker_image="${2:-}"
+  local expected_message="${3:-}"
   local result
 
   rm -rf "${TEMP_ROOT}/state"
   mkdir -p "${TEMP_ROOT}/state"
   : > "${TEMP_ROOT}/docker.log"
+  rm -f "${TEMP_ROOT}/inspect-initial"
   if [[ -n "$current_image" ]]; then
     printf '%s\n' "$current_image" > "${TEMP_ROOT}/state/active-image"
   else
@@ -116,6 +142,9 @@ run_case() {
       MOCK_UNHEALTHY_IMAGE="$unhealthy_image" \
       MOCK_ACTIVE_FILE="${TEMP_ROOT}/state/active-image" \
       MOCK_DOCKER_LOG="${TEMP_ROOT}/docker.log" \
+      MOCK_INSPECT_INITIAL_FILE="${TEMP_ROOT}/inspect-initial" \
+      MOCK_IMAGE_MISMATCH_FOR="$image_mismatch_for" \
+      MOCK_UNHEALTHY_DOCKER_IMAGE="$unhealthy_docker_image" \
       bash "${TEMP_ROOT}/deploy-script.sh" > "${TEMP_ROOT}/${case_name}.log" 2>&1; then
     result=0
   else
@@ -134,6 +163,9 @@ run_case() {
     [[ ! -f "${TEMP_ROOT}/state/previous-image" ]] || fail "${case_name}: previous-image debía faltar"
   fi
   [[ "$(<"${TEMP_ROOT}/docker.log")" == "$expected_log" ]] || fail "${case_name}: secuencia Docker inesperada"
+  if [[ -n "$expected_message" ]]; then
+    grep -q "$expected_message" "${TEMP_ROOT}/${case_name}.log" || fail "${case_name}: mensaje de error inesperado"
+  fi
   printf 'PASS: %s\n' "$case_name"
 }
 
@@ -152,6 +184,22 @@ run_case \
 run_case \
   'fallo de salud restaura versión anterior' "$OLD_IMAGE" false '' "$NEW_IMAGE" 1 "$OLD_IMAGE" "$OLD_IMAGE" \
   "pull ${NEW_IMAGE}"$'\n'"up ${NEW_IMAGE}"$'\n'"up ${OLD_IMAGE}"
+
+run_case \
+  'imagen desplegada distinta restaura versión anterior' "$OLD_IMAGE" false '' '' 1 "$OLD_IMAGE" "$OLD_IMAGE" \
+  "pull ${NEW_IMAGE}"$'\n'"up ${NEW_IMAGE}"$'\n'"up ${OLD_IMAGE}" "$NEW_IMAGE" ''
+
+run_case \
+  'Docker no confirma salud y restaura versión anterior' "$OLD_IMAGE" false '' '' 1 "$OLD_IMAGE" "$OLD_IMAGE" \
+  "pull ${NEW_IMAGE}"$'\n'"up ${NEW_IMAGE}"$'\n'"up ${OLD_IMAGE}" '' "$NEW_IMAGE"
+
+run_case \
+  'rollback con imagen incorrecta no se considera exitoso' "$OLD_IMAGE" false '' "$NEW_IMAGE" 1 "$OLD_IMAGE" "$OLD_IMAGE" \
+  "pull ${NEW_IMAGE}"$'\n'"up ${NEW_IMAGE}"$'\n'"up ${OLD_IMAGE}" "$OLD_IMAGE" '' 'rollback.*no se pudo verificar'
+
+run_case \
+  'rollback sin estado saludable de Docker no se considera exitoso' "$OLD_IMAGE" false '' "$NEW_IMAGE" 1 "$OLD_IMAGE" "$OLD_IMAGE" \
+  "pull ${NEW_IMAGE}"$'\n'"up ${NEW_IMAGE}"$'\n'"up ${OLD_IMAGE}" '' "$OLD_IMAGE" 'rollback.*no se pudo verificar'
 
 run_case \
   'primer despliegue no saludable sin versión anterior' '' false '' "$NEW_IMAGE" 1 '' '' \

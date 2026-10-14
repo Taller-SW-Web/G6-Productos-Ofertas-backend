@@ -144,6 +144,29 @@ jobs:
           printf '%s\n' "$ORACLE_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
+      - name: Verify restricted SSH authentication from GitHub Actions
+        if: steps.freshness.outputs.deploy == 'true'
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+        run: |
+          set -euo pipefail
+          set +e
+          ssh -vv -i ~/.ssh/oracle_inventory -o BatchMode=yes -o IdentitiesOnly=yes \
+            "$ORACLE_USER@$ORACLE_HOST" "connectivity-probe" > /tmp/oracle-ssh.out 2> /tmp/oracle-ssh.err
+          ssh_status=$?
+          set -e
+          cat /tmp/oracle-ssh.err >&2
+          cat /tmp/oracle-ssh.out
+          if [[ "$ssh_status" == 255 ]] || ! grep -q 'Authenticated to ' /tmp/oracle-ssh.err; then
+            echo 'No se pudo autenticar por SSH desde GitHub Actions.' >&2
+            exit 1
+          fi
+          if ! grep -q 'comando remoto no autorizado' /tmp/oracle-ssh.err /tmp/oracle-ssh.out; then
+            echo 'La clave no llegó al comando forzado esperado; se detiene el despliegue.' >&2
+            exit 1
+          fi
+
       - name: Deploy image and verify health with rollback
         if: steps.freshness.outputs.deploy == 'true'
         env:

@@ -47,6 +47,21 @@ compose() {
   INVENTORY_IMAGE="$image" docker compose --file "$COMPOSE_FILE" --project-name g6-inventory "$@"
 }
 
+container_matches_image_and_is_healthy() {
+  local expected_image="$1"
+  local actual_image health_status
+  actual_image="$(docker inspect --format '{{.Config.Image}}' g6-inventory-svc 2>/dev/null)" || return 1
+  [[ "$actual_image" == "$expected_image" ]] || return 1
+  health_status="$(docker inspect --format '{{.State.Health.Status}}' g6-inventory-svc 2>/dev/null)" || return 1
+  [[ "$health_status" == healthy ]]
+}
+
+service_is_healthy() {
+  local expected_image="$1"
+  container_matches_image_and_is_healthy "$expected_image" &&
+    curl --fail --silent http://127.0.0.1:3005/health >/dev/null
+}
+
 if ! compose "$NEW_IMAGE" pull; then
   fail 'pull de la nueva imagen falló; la instancia actual sigue activa'
 fi
@@ -54,7 +69,7 @@ fi
 if ! compose "$NEW_IMAGE" up --detach --remove-orphans; then
   if [[ -n "$CURRENT_IMAGE" ]] && compose "$CURRENT_IMAGE" up --detach --remove-orphans; then
     for attempt in {1..30}; do
-      if curl --fail --silent http://127.0.0.1:3005/health >/dev/null; then
+      if service_is_healthy "$CURRENT_IMAGE"; then
         printf '%s\n' "$CURRENT_IMAGE" > "${ACTIVE_FILE}.tmp"
         mv "${ACTIVE_FILE}.tmp" "$ACTIVE_FILE"
         fail "arranque de nueva imagen falló; restaurada ${CURRENT_IMAGE}"
@@ -70,7 +85,7 @@ fi
 
 healthy=false
 for attempt in {1..30}; do
-  if curl --fail --silent --show-error http://127.0.0.1:3005/health >/dev/null; then
+  if service_is_healthy "$NEW_IMAGE"; then
     healthy=true
     break
   fi
@@ -82,7 +97,7 @@ if [[ "$healthy" != true ]]; then
   if [[ -n "$CURRENT_IMAGE" ]]; then
     if compose "$CURRENT_IMAGE" up --detach --remove-orphans inventory-svc; then
       for attempt in {1..30}; do
-        if curl --fail --silent http://127.0.0.1:3005/health >/dev/null; then
+        if service_is_healthy "$CURRENT_IMAGE"; then
           printf '%s\n' "$CURRENT_IMAGE" > "${ACTIVE_FILE}.tmp"
           mv "${ACTIVE_FILE}.tmp" "$ACTIVE_FILE"
           fail "nueva imagen no saludable; restaurada ${CURRENT_IMAGE}"
