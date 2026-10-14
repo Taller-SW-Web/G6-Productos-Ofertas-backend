@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { DatabaseService } from '../database/database.service.js';
 import { IDatabaseClient } from '../database/database.interface.js';
@@ -13,11 +13,18 @@ import {
   OperacionInventarioAceptada,
 } from '../types/inventory.dto.js';
 import { ProblemDetailsException } from '../errors/inventory.errors.js';
-import { DrizzleReservationsRepository } from '../repositories/drizzle/drizzle-reservations.repository.js';
-import { DrizzleStockBalanceRepository } from '../repositories/drizzle/drizzle-stock-balance.repository.js';
-import { DrizzleOperationsRepository } from '../repositories/drizzle/drizzle-operations.repository.js';
-import { DrizzleLocationsRepository } from '../repositories/drizzle/drizzle-locations.repository.js';
-import { DrizzleCommercialRoutesRepository } from '../repositories/drizzle/drizzle-commercial-routes.repository.js';
+import {
+  RESERVATIONS_REPOSITORY,
+  STOCK_BALANCE_REPOSITORY,
+  OPERATIONS_REPOSITORY,
+  LOCATIONS_REPOSITORY,
+  COMMERCIAL_ROUTES_REPOSITORY,
+} from '../repositories/interfaces/repository.tokens.js';
+import type { IReservationsRepository } from '../repositories/interfaces/reservations.repository.interface.js';
+import type { IStockBalanceRepository } from '../repositories/interfaces/stock-balance.repository.interface.js';
+import type { IOperationsRepository } from '../repositories/interfaces/operations.repository.interface.js';
+import type { ILocationsRepository } from '../repositories/interfaces/locations.repository.interface.js';
+import type { ICommercialRoutesRepository } from '../repositories/interfaces/commercial-routes.repository.interface.js';
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -31,11 +38,16 @@ export class ReservationsService {
     private readonly idempotencyService: IdempotencyService,
     private readonly kardexService: KardexService,
     private readonly outboxService: OutboxService,
-    private readonly reservationsRepo: DrizzleReservationsRepository,
-    private readonly stockBalanceRepo: DrizzleStockBalanceRepository,
-    private readonly operationsRepo: DrizzleOperationsRepository,
-    private readonly locationsRepo: DrizzleLocationsRepository,
-    private readonly commercialRoutesRepo: DrizzleCommercialRoutesRepository,
+    @Inject(RESERVATIONS_REPOSITORY)
+    private readonly reservationsRepo: IReservationsRepository,
+    @Inject(STOCK_BALANCE_REPOSITORY)
+    private readonly stockBalanceRepo: IStockBalanceRepository,
+    @Inject(OPERATIONS_REPOSITORY)
+    private readonly operationsRepo: IOperationsRepository,
+    @Inject(LOCATIONS_REPOSITORY)
+    private readonly locationsRepo: ILocationsRepository,
+    @Inject(COMMERCIAL_ROUTES_REPOSITORY)
+    private readonly commercialRoutesRepo: ICommercialRoutesRepository,
   ) {}
 
   /**
@@ -45,13 +57,18 @@ export class ReservationsService {
     dto: CrearReservaRequest,
     correlationIdHeader?: string,
     idempotencyKeyHeader?: string,
+    clientId?: string,
   ): Promise<OperacionInventarioAceptada> {
     const correlationId = correlationIdHeader || randomUUID();
-    const idempotencyKey = idempotencyKeyHeader || dto.operation_id;
 
-    if (idempotencyKeyHeader) {
-      this.validarIdempotencyKey(idempotencyKeyHeader, correlationId);
+    if (!idempotencyKeyHeader) {
+      throw ProblemDetailsException.validation(
+        'El encabezado Idempotency-Key es obligatorio para solicitar una reserva',
+        correlationId,
+      );
     }
+    this.validarIdempotencyKey(idempotencyKeyHeader, correlationId);
+    const idempotencyKey = idempotencyKeyHeader;
 
     // 1. Validaciones estructurales y de tipos
     this.validarCrearReservaInput(dto, correlationId);
@@ -213,6 +230,7 @@ export class ReservationsService {
                 fingerprint,
                 correlationId,
                 'STOCK_INSUFICIENTE',
+                clientId,
               );
             }
           }
@@ -295,6 +313,7 @@ export class ReservationsService {
             order_id: dto.order_id,
             reservation_id: reservationId,
             operation_id: dto.operation_id,
+            client_id: clientId || 'modulo-ventas',
             request_fingerprint: fingerprint,
             request_payload: JSON.stringify(dto),
             result_payload: JSON.stringify(acceptedResponse),
@@ -409,13 +428,18 @@ export class ReservationsService {
     dto: OperacionReservaRequest,
     correlationIdHeader?: string,
     idempotencyKeyHeader?: string,
+    clientId?: string,
   ): Promise<OperacionInventarioAceptada> {
     const correlationId = correlationIdHeader || randomUUID();
-    const idempotencyKey = idempotencyKeyHeader || dto.operation_id;
 
-    if (idempotencyKeyHeader) {
-      this.validarIdempotencyKey(idempotencyKeyHeader, correlationId);
+    if (!idempotencyKeyHeader) {
+      throw ProblemDetailsException.validation(
+        'El encabezado Idempotency-Key es obligatorio para confirmar una reserva',
+        correlationId,
+      );
     }
+    this.validarIdempotencyKey(idempotencyKeyHeader, correlationId);
+    const idempotencyKey = idempotencyKeyHeader;
 
     if (!UUID_REGEX.test(reservaId)) {
       throw ProblemDetailsException.validation(
@@ -423,7 +447,13 @@ export class ReservationsService {
         correlationId,
       );
     }
-    if (!dto || !UUID_REGEX.test(dto.operation_id)) {
+    if (!dto || typeof dto !== 'object') {
+      throw ProblemDetailsException.validation(
+        'El cuerpo de la solicitud no puede estar vacío',
+        correlationId,
+      );
+    }
+    if (!dto.operation_id || !UUID_REGEX.test(dto.operation_id)) {
       throw ProblemDetailsException.validation(
         'operation_id debe ser un UUID válido',
         correlationId,
@@ -530,7 +560,6 @@ export class ReservationsService {
     ) {
       if (reservaPrevia.status === 'ACTIVA') {
         await this.expirarReservaDurable(
-          reservaPrevia.id,
           reservaPrevia.reservation_id,
           dto.order_id,
           correlationId,
@@ -562,6 +591,16 @@ export class ReservationsService {
           if (reserva.status !== 'ACTIVA') {
             throw ProblemDetailsException.reservaNoActiva(
               `La reserva no está activa (estado actual: ${reserva.status})`,
+              correlationId,
+            );
+          }
+
+          // Re-comprobar expires_at dentro de la transacción tras adquirir el bloqueo
+          const now = new Date();
+          const expiresAt = new Date(reserva.expires_at);
+          if (now.getTime() >= expiresAt.getTime()) {
+            throw ProblemDetailsException.reservaExpirada(
+              'La reserva ha expirado',
               correlationId,
             );
           }
@@ -664,6 +703,7 @@ export class ReservationsService {
             order_id: dto.order_id,
             reservation_id: reservaId,
             operation_id: dto.operation_id,
+            client_id: clientId || 'modulo-ventas',
             request_fingerprint: fingerprint,
             request_payload: JSON.stringify(dto),
             result_payload: JSON.stringify(acceptedResponse),
@@ -765,13 +805,18 @@ export class ReservationsService {
     dto: LiberarReservaRequest,
     correlationIdHeader?: string,
     idempotencyKeyHeader?: string,
+    clientId?: string,
   ): Promise<OperacionInventarioAceptada> {
     const correlationId = correlationIdHeader || randomUUID();
-    const idempotencyKey = idempotencyKeyHeader || dto.operation_id;
 
-    if (idempotencyKeyHeader) {
-      this.validarIdempotencyKey(idempotencyKeyHeader, correlationId);
+    if (!idempotencyKeyHeader) {
+      throw ProblemDetailsException.validation(
+        'El encabezado Idempotency-Key es obligatorio para liberar una reserva',
+        correlationId,
+      );
     }
+    this.validarIdempotencyKey(idempotencyKeyHeader, correlationId);
+    const idempotencyKey = idempotencyKeyHeader;
 
     if (!UUID_REGEX.test(reservaId)) {
       throw ProblemDetailsException.validation(
@@ -779,7 +824,13 @@ export class ReservationsService {
         correlationId,
       );
     }
-    if (!dto || !UUID_REGEX.test(dto.operation_id)) {
+    if (!dto || typeof dto !== 'object') {
+      throw ProblemDetailsException.validation(
+        'El cuerpo de la solicitud no puede estar vacío',
+        correlationId,
+      );
+    }
+    if (!dto.operation_id || !UUID_REGEX.test(dto.operation_id)) {
       throw ProblemDetailsException.validation(
         'operation_id debe ser un UUID válido',
         correlationId,
@@ -880,7 +931,6 @@ export class ReservationsService {
     ) {
       if (reservaPrevia.status === 'ACTIVA') {
         await this.expirarReservaDurable(
-          reservaPrevia.id,
           reservaPrevia.reservation_id,
           dto.order_id,
           correlationId,
@@ -1025,6 +1075,7 @@ export class ReservationsService {
             order_id: dto.order_id,
             reservation_id: reservaId,
             operation_id: dto.operation_id,
+            client_id: clientId || 'modulo-ventas',
             request_fingerprint: fingerprint,
             request_payload: JSON.stringify(dto),
             result_payload: JSON.stringify(acceptedResponse),
@@ -1101,16 +1152,21 @@ export class ReservationsService {
    * garantizando que el cambio ACTIVA -> EXPIRADA no sufra rollback accidental.
    */
   async expirarReservaDurable(
-    reservationPk: string,
-    reservationId: string,
-    orderId: string,
-    correlationId: string,
+    reservationIdOrPk: string,
+    orderId?: string,
+    correlationId?: string,
   ): Promise<boolean> {
     return await this.databaseService.transaction<boolean>(async (txClient) => {
-      const reserva = await this.reservationsRepo.findByIdForUpdate(
+      let reserva = await this.reservationsRepo.findByReservationIdForUpdate(
         txClient,
-        reservationPk,
+        reservationIdOrPk,
       );
+      if (!reserva) {
+        reserva = await this.reservationsRepo.findByIdForUpdate(
+          txClient,
+          reservationIdOrPk,
+        );
+      }
       if (!reserva) {
         return false;
       }
@@ -1120,10 +1176,10 @@ export class ReservationsService {
 
       await this.expirarReservaInterna(
         txClient,
-        reservationPk,
-        reservationId,
-        orderId,
-        correlationId,
+        reserva.id,
+        reserva.reservation_id,
+        orderId || reserva.order_id || '',
+        correlationId || reserva.correlation_id || randomUUID(),
       );
 
       return true;
@@ -1152,37 +1208,53 @@ export class ReservationsService {
         line.location_id,
       );
 
-      if (bal) {
-        const reserved = Number(bal.reserved);
-        const newReserved = reserved >= qty ? reserved - qty : 0;
-        const newVersion = Number(bal.stock_version) + 1;
-
-        await this.stockBalanceRepo.updateStock(
-          client,
-          line.sku_id,
-          line.location_id,
-          {
-            reserved: newReserved,
-            stock_version: newVersion,
-          },
+      if (!bal) {
+        throw new Error(
+          `Inconsistencia: saldo de stock no encontrado para sku '${line.sku_id}' en ubicación '${line.location_id}' al expirar reserva`,
         );
-
-        await this.kardexService.recordMovement(client, {
-          sku_id: line.sku_id,
-          location_id: line.location_id,
-          operation_type: 'EXPIRACION',
-          reservation_id: reservationId,
-          quantity: -qty,
-          on_hand_before: Number(bal.on_hand),
-          on_hand_after: Number(bal.on_hand),
-          reserved_before: reserved,
-          reserved_after: newReserved,
-          blocked_before: Number(bal.blocked),
-          blocked_after: Number(bal.blocked),
-          stock_version: newVersion,
-          correlation_id: correlationId,
-        });
       }
+
+      const reserved = Number(bal.reserved);
+      if (reserved < qty) {
+        throw new Error(
+          `Inconsistencia: stock reservado (${reserved}) es menor a la cantidad a liberar (${qty}) para sku '${line.sku_id}' al expirar reserva`,
+        );
+      }
+
+      const newReserved = reserved - qty;
+      const newVersion = Number(bal.stock_version) + 1;
+
+      const affected = await this.stockBalanceRepo.updateStock(
+        client,
+        line.sku_id,
+        line.location_id,
+        {
+          reserved: newReserved,
+          stock_version: newVersion,
+        },
+      );
+
+      if (affected !== 1) {
+        throw new Error(
+          `Inconsistencia: la actualización de saldo para sku '${line.sku_id}' afectó ${affected} filas en lugar de 1`,
+        );
+      }
+
+      await this.kardexService.recordMovement(client, {
+        sku_id: line.sku_id,
+        location_id: line.location_id,
+        operation_type: 'EXPIRACION',
+        reservation_id: reservationId,
+        quantity: -qty,
+        on_hand_before: Number(bal.on_hand),
+        on_hand_after: Number(bal.on_hand),
+        reserved_before: reserved,
+        reserved_after: newReserved,
+        blocked_before: Number(bal.blocked),
+        blocked_after: Number(bal.blocked),
+        stock_version: newVersion,
+        correlation_id: correlationId,
+      });
     }
 
     // Outbox: inventory.reservation.expired
@@ -1216,6 +1288,7 @@ export class ReservationsService {
     fingerprint: string,
     correlationId: string,
     resultCode: string,
+    clientId?: string,
   ): Promise<OperacionInventarioAceptada> {
     const rejectedPayload = {
       status: 'REJECTED',
@@ -1230,6 +1303,7 @@ export class ReservationsService {
       result_code: resultCode,
       order_id: dto.order_id,
       operation_id: dto.operation_id,
+      client_id: clientId || 'modulo-ventas',
       request_fingerprint: fingerprint,
       request_payload: JSON.stringify(dto),
       result_payload: JSON.stringify(rejectedPayload),
@@ -1338,7 +1412,7 @@ export class ReservationsService {
     dto: CrearReservaRequest,
     correlationId: string,
   ): void {
-    if (!dto) {
+    if (!dto || typeof dto !== 'object') {
       throw ProblemDetailsException.validation(
         'El cuerpo de la solicitud no puede estar vacío',
         correlationId,
@@ -1399,7 +1473,12 @@ export class ReservationsService {
   }
 
   private validarIdempotencyKey(key: string, correlationId: string): void {
-    if (!key || typeof key !== 'string' || key.length < 8 || key.length > 128) {
+    if (
+      !key ||
+      typeof key !== 'string' ||
+      key.trim().length < 8 ||
+      key.trim().length > 128
+    ) {
       throw ProblemDetailsException.validation(
         'Idempotency-Key debe tener entre 8 y 128 caracteres',
         correlationId,

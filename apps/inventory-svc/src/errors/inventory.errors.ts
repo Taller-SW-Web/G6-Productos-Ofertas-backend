@@ -142,4 +142,19 @@ export class ProblemDetailsException extends HttpException {
       correlationId,
     });
   }
+
+  static contextoAbastecimientoInvalido(
+    detail?: string,
+    correlationId?: string,
+  ): ProblemDetailsException {
+    return new ProblemDetailsException({
+      type: '/errores/contexto-abastecimiento-invalido',
+      title:
+        'Contexto de abastecimiento o cumplimiento semánticamente inválido',
+      status: HttpStatus.UNPROCESSABLE_ENTITY,
+      code: 'CONTEXTO_ABASTECIMIENTO_INVALIDO',
+      detail,
+      correlationId,
+    });
+  }
 }

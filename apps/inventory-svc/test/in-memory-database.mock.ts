@@ -64,6 +64,7 @@ export interface OperationRow {
   accepted_at?: string | null;
   applied_at?: string | null;
   correlation_id?: string | null;
+  client_id?: string | null;
 }
 
 export interface KardexRow {
@@ -124,9 +125,9 @@ export class InMemoryDatabaseMock implements IDatabaseService {
   commercialRoutes: CommercialRouteRow[] = [];
   thresholdOverrides: ThresholdOverrideRow[] = [];
 
-  // Mutex lock simulation per (sku, location)
   private rowLocks = new Map<string, Promise<void>>();
   private lockResolvers = new Map<string, () => void>();
+  private outboxHeldLocks = new Set<string>();
 
   constructor() {
     this.seedDefaults();
@@ -269,7 +270,7 @@ export class InMemoryDatabaseMock implements IDatabaseService {
             }
           }
         }
-        return this.executeQuery<R>(sql, params);
+        return this.executeQuery<R>(sql, params, heldLocks);
       },
     };
 
@@ -282,7 +283,11 @@ export class InMemoryDatabaseMock implements IDatabaseService {
     } finally {
       // Release held locks in reverse order
       for (const key of heldLocks) {
-        this.releaseRowLock(key);
+        if (key.startsWith('outbox:::')) {
+          this.outboxHeldLocks.delete(key.substring(9));
+        } else {
+          this.releaseRowLock(key);
+        }
       }
     }
   }
@@ -299,7 +304,11 @@ export class InMemoryDatabaseMock implements IDatabaseService {
     return { healthy: true, latencyMs: 1 };
   }
 
-  private executeQuery<T = any>(sql: string, params?: any[]): QueryResult<T> {
+  private executeQuery<T = any>(
+    sql: string,
+    params?: any[],
+    heldLocks?: string[],
+  ): QueryResult<T> {
     const s = sql.trim().toUpperCase();
 
     if (s.startsWith('SELECT 1')) {
@@ -378,6 +387,17 @@ export class InMemoryDatabaseMock implements IDatabaseService {
         const rows = this.reservations.filter((r) => r.id === pk);
         return { rows: rows as any, rowCount: rows.length };
       }
+      if (s.includes("WHERE STATUS = 'ACTIVA'")) {
+        const now = Date.now();
+        const limit = params?.[0] ?? 50;
+        const rows = this.reservations
+          .filter(
+            (r) =>
+              r.status === 'ACTIVA' && new Date(r.expires_at).getTime() < now,
+          )
+          .slice(0, limit);
+        return { rows: rows as any, rowCount: rows.length };
+      }
     }
 
     // SELECT from reservation_lines
@@ -416,9 +436,21 @@ export class InMemoryDatabaseMock implements IDatabaseService {
     if (s.includes('FROM INVENTORY.OUTBOX')) {
       if (s.includes("WHERE STATUS = 'PENDING'")) {
         const limit = params?.[0] ?? 50;
+        const isSkipLocked = s.includes('SKIP LOCKED');
         const rows = this.outbox
-          .filter((o) => o.status === 'PENDING')
+          .filter(
+            (o) =>
+              o.status === 'PENDING' &&
+              (!isSkipLocked || !this.outboxHeldLocks.has(o.id)),
+          )
           .slice(0, limit);
+
+        if (isSkipLocked && heldLocks) {
+          for (const r of rows) {
+            this.outboxHeldLocks.add(r.id);
+            heldLocks.push(`outbox:::${r.id}`);
+          }
+        }
         return { rows: rows as any, rowCount: rows.length };
       }
     }
@@ -589,7 +621,7 @@ export class InMemoryDatabaseMock implements IDatabaseService {
     // INSERT INTO inventory_operations
     if (s.startsWith('INSERT INTO INVENTORY.INVENTORY_OPERATIONS')) {
       let row: OperationRow;
-      if (params && params.length === 12) {
+      if (params && (params.length === 12 || params.length === 13)) {
         row = {
           id: 'op-' + Math.random().toString(36).substring(2),
           operation_type: params[0],
@@ -612,6 +644,7 @@ export class InMemoryDatabaseMock implements IDatabaseService {
               : params[10]
             : undefined,
           correlation_id: params[11],
+          client_id: params[12] ?? null,
           accepted_at: new Date().toISOString(),
           applied_at: new Date().toISOString(),
         };
