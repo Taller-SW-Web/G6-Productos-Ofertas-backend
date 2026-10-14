@@ -680,7 +680,10 @@ export class InMemoryDatabaseMock implements IDatabaseService {
     }
 
     // UPDATE outbox SET status = 'PUBLISHED'
-    if (s.startsWith('UPDATE INVENTORY.OUTBOX SET STATUS =')) {
+    if (
+      s.startsWith('UPDATE INVENTORY.OUTBOX') &&
+      s.includes("STATUS = 'PUBLISHED'")
+    ) {
       const id = params?.[0];
       const target = this.outbox.find((o) => o.id === id);
       if (target) {

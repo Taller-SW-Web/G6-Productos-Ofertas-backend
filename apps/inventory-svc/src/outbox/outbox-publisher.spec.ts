@@ -7,6 +7,8 @@ import {
 import { DatabaseService } from '../database/database.service.js';
 import { InMemoryDatabaseMock } from '../../test/in-memory-database.mock.js';
 
+import { DrizzleOutboxRepository } from '../repositories/drizzle/drizzle-outbox.repository.js';
+
 describe('OutboxPublisherService — Publicación Confiable y Confirmación de Broker', () => {
   let publisherService: OutboxPublisherService;
   let mockDb: InMemoryDatabaseMock;
@@ -16,7 +18,8 @@ describe('OutboxPublisherService — Publicación Confiable y Confirmación de B
     mockDb = new InMemoryDatabaseMock();
     dbService = new DatabaseService();
     dbService.setCustomService(mockDb);
-    publisherService = new OutboxPublisherService(dbService);
+    const outboxRepo = new DrizzleOutboxRepository(dbService);
+    publisherService = new OutboxPublisherService(dbService, outboxRepo);
   });
 
   it('debe despachar eventos PENDING al broker y marcarlos como PUBLISHED con confirmación', async () => {

@@ -8,6 +8,7 @@ import {
   Headers,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { ReservationsService } from './reservations/reservations.service.js';
 import { OperationsService } from './operations/operations.service.js';
@@ -23,8 +24,12 @@ import {
   VerificarCantidadComercialResponse,
 } from './types/inventory.dto.js';
 import { ProblemDetailsException } from './errors/inventory.errors.js';
+import { InventoryAuthGuard } from './auth/inventory-auth.guard.js';
+import { RequireScope, AllowedClients } from './auth/auth.decorators.js';
+import { INVENTORY_SCOPES, KNOWN_CLIENTS } from './auth/auth.constants.js';
 
 @Controller('api/v1/inventario')
+@UseGuards(InventoryAuthGuard)
 export class InventoryController {
   constructor(
     private readonly reservationsService: ReservationsService,
@@ -34,6 +39,13 @@ export class InventoryController {
 
   @Post('reservas')
   @HttpCode(HttpStatus.ACCEPTED)
+  @RequireScope(INVENTORY_SCOPES.RESERVAR)
+  @AllowedClients([
+    KNOWN_CLIENTS.VENTAS,
+    KNOWN_CLIENTS.MARKETPLACE,
+    KNOWN_CLIENTS.CHATBOT,
+    KNOWN_CLIENTS.RETAIL,
+  ])
   async solicitarReserva(
     @Body() dto: CrearReservaRequest,
     @Headers('x-correlation-id') correlationId?: string,
@@ -48,6 +60,13 @@ export class InventoryController {
 
   @Post('reservas/:reservaId/confirmar')
   @HttpCode(HttpStatus.ACCEPTED)
+  @RequireScope(INVENTORY_SCOPES.CONSUMIR)
+  @AllowedClients([
+    KNOWN_CLIENTS.VENTAS,
+    KNOWN_CLIENTS.MARKETPLACE,
+    KNOWN_CLIENTS.CHATBOT,
+    KNOWN_CLIENTS.RETAIL,
+  ])
   async confirmarReserva(
     @Param('reservaId') reservaId: string,
     @Body() dto: OperacionReservaRequest,
@@ -64,6 +83,13 @@ export class InventoryController {
 
   @Post('reservas/:reservaId/liberar')
   @HttpCode(HttpStatus.ACCEPTED)
+  @RequireScope(INVENTORY_SCOPES.LIBERAR)
+  @AllowedClients([
+    KNOWN_CLIENTS.VENTAS,
+    KNOWN_CLIENTS.MARKETPLACE,
+    KNOWN_CLIENTS.CHATBOT,
+    KNOWN_CLIENTS.RETAIL,
+  ])
   async liberarReserva(
     @Param('reservaId') reservaId: string,
     @Body() dto: LiberarReservaRequest,
@@ -79,6 +105,7 @@ export class InventoryController {
   }
 
   @Get('operaciones/:operationId')
+  @RequireScope(INVENTORY_SCOPES.OPERACIONES_LEER)
   async consultarOperacion(
     @Param('operationId') operationId: string,
     @Headers('x-correlation-id') correlationId?: string,
@@ -90,6 +117,7 @@ export class InventoryController {
   }
 
   @Get('disponibilidad')
+  @RequireScope(INVENTORY_SCOPES.DISPONIBILIDAD_LEER)
   async consultarDisponibilidad(
     @Query('skus') skusQuery?: string | string[],
     @Query('location_id') locationId?: string,
@@ -123,6 +151,7 @@ export class InventoryController {
   }
 
   @Post('disponibilidad/comercial/verificar')
+  @RequireScope(INVENTORY_SCOPES.DISPONIBILIDAD_LEER)
   async verificarCantidadComercial(
     @Body() dto: VerificarCantidadComercialRequest,
     @Headers('x-correlation-id') correlationId?: string,

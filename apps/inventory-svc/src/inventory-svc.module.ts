@@ -19,6 +19,8 @@ import { DrizzleOperationsRepository } from './repositories/drizzle/drizzle-oper
 import { DrizzleKardexRepository } from './repositories/drizzle/drizzle-kardex.repository.js';
 import { DrizzleOutboxRepository } from './repositories/drizzle/drizzle-outbox.repository.js';
 
+import { InventoryAuthGuard } from './auth/inventory-auth.guard.js';
+
 @Module({
   imports: [],
   controllers: [InventorySvcController, InventoryController],
@@ -32,6 +34,7 @@ import { DrizzleOutboxRepository } from './repositories/drizzle/drizzle-outbox.r
     ReservationsService,
     OperationsService,
     DisponibilidadService,
+    InventoryAuthGuard,
     // Repositorios Drizzle
     DrizzleLocationsRepository,
     DrizzleCommercialRoutesRepository,
@@ -50,6 +53,7 @@ import { DrizzleOutboxRepository } from './repositories/drizzle/drizzle-outbox.r
     ReservationsService,
     OperationsService,
     DisponibilidadService,
+    InventoryAuthGuard,
     // Repositorios Drizzle
     DrizzleLocationsRepository,
     DrizzleCommercialRoutesRepository,

@@ -7,12 +7,19 @@ import { InventorySvcModule } from '../src/inventory-svc.module.js';
 import { DatabaseService } from '../src/database/database.service.js';
 import { ProblemDetailsFilter } from '../src/errors/problem-details.filter.js';
 import { InMemoryDatabaseMock } from './in-memory-database.mock.js';
+import { createTestJwt } from '../src/auth/test-token.helper.js';
 
-describe('InventorySvc E2E — Corte funcional G5', () => {
+describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
   let app: INestApplication<App>;
   let mockDb: InMemoryDatabaseMock;
   const locLurin = '9129b578-631e-1735-8427-b683fb524380';
   const sku = 'NIK-REV7-NEG-41';
+
+  const validToken = createTestJwt({
+    clientId: 'modulo-ventas',
+    scope:
+      'inventario:reservar inventario:consumir inventario:liberar inventario:operaciones:leer inventario:disponibilidad:leer',
+  });
 
   beforeEach(async () => {
     mockDb = new InMemoryDatabaseMock();
@@ -33,155 +40,251 @@ describe('InventorySvc E2E — Corte funcional G5', () => {
     await app.close();
   });
 
-  it('/health (GET)', () => {
+  it('/health (GET) es público', () => {
     return request(app.getHttpServer()).get('/health').expect(200).expect({
       status: 'ok',
       service: 'inventory-svc',
     });
   });
 
-  it('/api/v1/inventario/disponibilidad (GET)', async () => {
-    const res = await request(app.getHttpServer())
-      .get(`/api/v1/inventario/disponibilidad?skus=${sku}`)
-      .expect(200);
+  describe('Seguridad HTTP y Control de Acceso (Frontera P0)', () => {
+    it('debe rechazar con 401 TOKEN_INVALIDO si falta el encabezado Authorization', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/inventario/disponibilidad?skus=${sku}`)
+        .expect(401);
 
-    expect(res.body.items).toBeDefined();
-    expect(res.body.items.length).toBeGreaterThan(0);
-    expect(res.body.items[0].sku).toBe(sku);
+      expect(res.headers['content-type']).toContain('application/problem+json');
+      expect(res.body.code).toBe('TOKEN_INVALIDO');
+      expect(res.body.status).toBe(401);
+    });
+
+    it('debe rechazar con 401 TOKEN_INVALIDO si la audiencia no es api-productos', async () => {
+      const badAudToken = createTestJwt({
+        aud: 'api-otra',
+        clientId: 'modulo-ventas',
+      });
+
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/inventario/disponibilidad?skus=${sku}`)
+        .set('Authorization', `Bearer ${badAudToken}`)
+        .expect(401);
+
+      expect(res.body.code).toBe('TOKEN_INVALIDO');
+      expect(res.body.detail).toContain('api-productos');
+    });
+
+    it('debe rechazar con 401 TOKEN_INVALIDO si el token está expirado', async () => {
+      const expiredToken = createTestJwt({
+        exp: Math.floor(Date.now() / 1000) - 100,
+        clientId: 'modulo-ventas',
+      });
+
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/inventario/disponibilidad?skus=${sku}`)
+        .set('Authorization', `Bearer ${expiredToken}`)
+        .expect(401);
+
+      expect(res.body.code).toBe('TOKEN_INVALIDO');
+      expect(res.body.detail).toContain('expirado');
+    });
+
+    it('debe rechazar con 403 SCOPE_INSUFICIENTE si el token carece del scope necesario', async () => {
+      const noReserveToken = createTestJwt({
+        clientId: 'modulo-ventas',
+        scope: 'inventario:disponibilidad:leer', // Sin inventario:reservar
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/inventario/reservas')
+        .set('Authorization', `Bearer ${noReserveToken}`)
+        .send({
+          order_id: 'PED-NO-SCOPE',
+          operation_id: randomUUID(),
+          channel_id: 'VENTAS',
+          lines: [{ sku, quantity: 1, location_id: locLurin }],
+        })
+        .expect(403);
+
+      expect(res.body.code).toBe('SCOPE_INSUFICIENTE');
+      expect(res.body.status).toBe(403);
+    });
+
+    it('debe rechazar con 403 SCOPE_INSUFICIENTE si el client_id no está autorizado para reservas', async () => {
+      const unauthorizedClientToken = createTestJwt({
+        clientId: 'modulo-desconocido',
+        scope: 'inventario:reservar',
+      });
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/inventario/reservas')
+        .set('Authorization', `Bearer ${unauthorizedClientToken}`)
+        .send({
+          order_id: 'PED-UNAUTHORIZED-CLIENT',
+          operation_id: randomUUID(),
+          channel_id: 'VENTAS',
+          lines: [{ sku, quantity: 1, location_id: locLurin }],
+        })
+        .expect(403);
+
+      expect(res.body.code).toBe('SCOPE_INSUFICIENTE');
+    });
   });
 
-  it('Ciclo completo: solicitar reserva -> consultar operacion -> confirmar consumo', async () => {
-    const opIdReserva = randomUUID();
-    const orderId = 'PED-E2E-001';
+  describe('Corte Funcional Autenticado', () => {
+    it('/api/v1/inventario/disponibilidad (GET)', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/inventario/disponibilidad?skus=${sku}`)
+        .set('Authorization', `Bearer ${validToken}`)
+        .expect(200);
 
-    // 1. Solicitar reserva
-    const postReserva = await request(app.getHttpServer())
-      .post('/api/v1/inventario/reservas')
-      .set('Idempotency-Key', opIdReserva)
-      .set('X-Correlation-Id', randomUUID())
-      .send({
-        order_id: orderId,
-        operation_id: opIdReserva,
-        channel_id: 'MARKETPLACE',
-        lines: [{ sku, quantity: 2, location_id: locLurin }],
-      })
-      .expect(202);
+      expect(res.body.items).toBeDefined();
+      expect(res.body.items.length).toBeGreaterThan(0);
+      expect(res.body.items[0].sku).toBe(sku);
+    });
 
-    expect(postReserva.body.status).toBe('ACCEPTED');
-    expect(postReserva.body.operation_id).toBe(opIdReserva);
-    expect(postReserva.body.operation_type).toBe('RESERVAR');
+    it('Ciclo completo: solicitar reserva -> consultar operacion -> confirmar consumo', async () => {
+      const opIdReserva = randomUUID();
+      const orderId = 'PED-E2E-001';
 
-    // 2. Consultar operación durable
-    const getOp = await request(app.getHttpServer())
-      .get(`/api/v1/inventario/operaciones/${opIdReserva}`)
-      .expect(200);
+      // 1. Solicitar reserva
+      const postReserva = await request(app.getHttpServer())
+        .post('/api/v1/inventario/reservas')
+        .set('Authorization', `Bearer ${validToken}`)
+        .set('Idempotency-Key', opIdReserva)
+        .set('X-Correlation-Id', randomUUID())
+        .send({
+          order_id: orderId,
+          operation_id: opIdReserva,
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 2, location_id: locLurin }],
+        })
+        .expect(202);
 
-    expect(getOp.body.operation_id).toBe(opIdReserva);
-    expect(getOp.body.order_id).toBe(orderId);
-    expect(getOp.body.status).toBe('COMPLETED');
-    expect(getOp.body.reservation_id).toBeDefined();
+      expect(postReserva.body.status).toBe('ACCEPTED');
+      expect(postReserva.body.operation_id).toBe(opIdReserva);
+      expect(postReserva.body.operation_type).toBe('RESERVAR');
 
-    const reservaId = getOp.body.reservation_id;
+      // 2. Consultar operación durable
+      const getOp = await request(app.getHttpServer())
+        .get(`/api/v1/inventario/operaciones/${opIdReserva}`)
+        .set('Authorization', `Bearer ${validToken}`)
+        .expect(200);
 
-    // 3. Confirmar reserva
-    const opIdConfirmar = randomUUID();
-    const postConfirmar = await request(app.getHttpServer())
-      .post(`/api/v1/inventario/reservas/${reservaId}/confirmar`)
-      .send({
-        order_id: orderId,
-        operation_id: opIdConfirmar,
-      })
-      .expect(202);
+      expect(getOp.body.operation_id).toBe(opIdReserva);
+      expect(getOp.body.order_id).toBe(orderId);
+      expect(getOp.body.status).toBe('COMPLETED');
+      expect(getOp.body.reservation_id).toBeDefined();
 
-    expect(postConfirmar.body.status).toBe('ACCEPTED');
-    expect(postConfirmar.body.operation_type).toBe('CONFIRMAR_CONSUMO');
+      const reservaId = getOp.body.reservation_id;
 
-    // 4. Consultar operación de confirmación
-    const getOpConfirm = await request(app.getHttpServer())
-      .get(`/api/v1/inventario/operaciones/${opIdConfirmar}`)
-      .expect(200);
+      // 3. Confirmar reserva
+      const opIdConfirmar = randomUUID();
+      const postConfirmar = await request(app.getHttpServer())
+        .post(`/api/v1/inventario/reservas/${reservaId}/confirmar`)
+        .set('Authorization', `Bearer ${validToken}`)
+        .send({
+          order_id: orderId,
+          operation_id: opIdConfirmar,
+        })
+        .expect(202);
 
-    expect(getOpConfirm.body.status).toBe('COMPLETED');
-    expect(getOpConfirm.body.operation_type).toBe('CONFIRMAR_CONSUMO');
-  });
+      expect(postConfirmar.body.status).toBe('ACCEPTED');
+      expect(postConfirmar.body.operation_type).toBe('CONFIRMAR_CONSUMO');
 
-  it('Ciclo de liberación: solicitar reserva -> liberar por pago no completado', async () => {
-    const opIdReserva = randomUUID();
-    const orderId = 'PED-E2E-RELEASE';
+      // 4. Consultar operación de confirmación
+      const getOpConfirm = await request(app.getHttpServer())
+        .get(`/api/v1/inventario/operaciones/${opIdConfirmar}`)
+        .set('Authorization', `Bearer ${validToken}`)
+        .expect(200);
 
-    await request(app.getHttpServer())
-      .post('/api/v1/inventario/reservas')
-      .send({
-        order_id: orderId,
-        operation_id: opIdReserva,
-        channel_id: 'MARKETPLACE',
-        lines: [{ sku, quantity: 1, location_id: locLurin }],
-      })
-      .expect(202);
+      expect(getOpConfirm.body.status).toBe('COMPLETED');
+      expect(getOpConfirm.body.operation_type).toBe('CONFIRMAR_CONSUMO');
+    });
 
-    const getOp = await request(app.getHttpServer())
-      .get(`/api/v1/inventario/operaciones/${opIdReserva}`)
-      .expect(200);
+    it('Ciclo de liberación: solicitar reserva -> liberar por pago no completado', async () => {
+      const opIdReserva = randomUUID();
+      const orderId = 'PED-E2E-RELEASE';
 
-    const reservaId = getOp.body.reservation_id;
+      await request(app.getHttpServer())
+        .post('/api/v1/inventario/reservas')
+        .set('Authorization', `Bearer ${validToken}`)
+        .send({
+          order_id: orderId,
+          operation_id: opIdReserva,
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 1, location_id: locLurin }],
+        })
+        .expect(202);
 
-    const opIdLiberar = randomUUID();
-    const postLiberar = await request(app.getHttpServer())
-      .post(`/api/v1/inventario/reservas/${reservaId}/liberar`)
-      .send({
-        order_id: orderId,
-        operation_id: opIdLiberar,
-        reason: 'PAGO_NO_COMPLETADO',
-      })
-      .expect(202);
+      const getOp = await request(app.getHttpServer())
+        .get(`/api/v1/inventario/operaciones/${opIdReserva}`)
+        .set('Authorization', `Bearer ${validToken}`)
+        .expect(200);
 
-    expect(postLiberar.body.status).toBe('ACCEPTED');
-    expect(postLiberar.body.operation_type).toBe('LIBERAR');
-  });
+      const reservaId = getOp.body.reservation_id;
 
-  it('Error 422 CANTIDAD_INVALIDA formateado con Problem Details RFC 7807', async () => {
-    const res = await request(app.getHttpServer())
-      .post('/api/v1/inventario/reservas')
-      .send({
-        order_id: 'PED-INVALID',
-        operation_id: randomUUID(),
-        channel_id: 'MARKETPLACE',
-        lines: [{ sku, quantity: 0, location_id: locLurin }],
-      })
-      .expect(422);
+      const opIdLiberar = randomUUID();
+      const postLiberar = await request(app.getHttpServer())
+        .post(`/api/v1/inventario/reservas/${reservaId}/liberar`)
+        .set('Authorization', `Bearer ${validToken}`)
+        .send({
+          order_id: orderId,
+          operation_id: opIdLiberar,
+          reason: 'PAGO_NO_COMPLETADO',
+        })
+        .expect(202);
 
-    expect(res.headers['content-type']).toContain('application/problem+json');
-    expect(res.body.code).toBe('CANTIDAD_INVALIDA');
-    expect(res.body.status).toBe(422);
-    expect(res.body.type).toBe('/errores/cantidad-invalida');
-  });
+      expect(postLiberar.body.status).toBe('ACCEPTED');
+      expect(postLiberar.body.operation_type).toBe('LIBERAR');
+    });
 
-  it('Error 409 IDEMPOTENCY_CONFLICT ante reutilización de operation_id con payload distinto', async () => {
-    const opId = randomUUID();
-    const orderId = 'PED-E2E-CONFLICT';
+    it('Error 422 CANTIDAD_INVALIDA formateado con Problem Details RFC 7807', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/inventario/reservas')
+        .set('Authorization', `Bearer ${validToken}`)
+        .send({
+          order_id: 'PED-INVALID',
+          operation_id: randomUUID(),
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 0, location_id: locLurin }],
+        })
+        .expect(422);
 
-    await request(app.getHttpServer())
-      .post('/api/v1/inventario/reservas')
-      .send({
-        order_id: orderId,
-        operation_id: opId,
-        channel_id: 'MARKETPLACE',
-        lines: [{ sku, quantity: 1, location_id: locLurin }],
-      })
-      .expect(202);
+      expect(res.headers['content-type']).toContain('application/problem+json');
+      expect(res.body.code).toBe('CANTIDAD_INVALIDA');
+      expect(res.body.status).toBe(422);
+      expect(res.body.type).toBe('/errores/cantidad-invalida');
+    });
 
-    const res = await request(app.getHttpServer())
-      .post('/api/v1/inventario/reservas')
-      .send({
-        order_id: orderId,
-        operation_id: opId,
-        channel_id: 'MARKETPLACE',
-        lines: [{ sku, quantity: 5, location_id: locLurin }],
-      })
-      .expect(409);
+    it('Error 409 IDEMPOTENCY_CONFLICT ante reutilización de operation_id con payload distinto', async () => {
+      const opId = randomUUID();
+      const orderId = 'PED-E2E-CONFLICT';
 
-    expect(res.headers['content-type']).toContain('application/problem+json');
-    expect(res.body.code).toBe('IDEMPOTENCY_CONFLICT');
-    expect(res.body.status).toBe(409);
+      await request(app.getHttpServer())
+        .post('/api/v1/inventario/reservas')
+        .set('Authorization', `Bearer ${validToken}`)
+        .send({
+          order_id: orderId,
+          operation_id: opId,
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 1, location_id: locLurin }],
+        })
+        .expect(202);
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/inventario/reservas')
+        .set('Authorization', `Bearer ${validToken}`)
+        .send({
+          order_id: orderId,
+          operation_id: opId,
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 5, location_id: locLurin }],
+        })
+        .expect(409);
+
+      expect(res.headers['content-type']).toContain('application/problem+json');
+      expect(res.body.code).toBe('IDEMPOTENCY_CONFLICT');
+      expect(res.body.status).toBe(409);
+    });
   });
 });
