@@ -101,6 +101,34 @@ export class ProblemDetailsException extends HttpException {
     });
   }
 
+  static tokenInvalido(
+    detail?: string,
+    correlationId?: string,
+  ): ProblemDetailsException {
+    return new ProblemDetailsException({
+      type: '/errores/token-invalido',
+      title: 'Token de autenticación ausente o inválido',
+      status: HttpStatus.UNAUTHORIZED,
+      code: 'TOKEN_INVALIDO',
+      detail,
+      correlationId,
+    });
+  }
+
+  static scopeInsuficiente(
+    detail?: string,
+    correlationId?: string,
+  ): ProblemDetailsException {
+    return new ProblemDetailsException({
+      type: '/errores/scope-insuficiente',
+      title: 'Scope o client_id no autorizado',
+      status: HttpStatus.FORBIDDEN,
+      code: 'SCOPE_INSUFICIENTE',
+      detail,
+      correlationId,
+    });
+  }
+
   static operacionNoEncontrada(
     detail?: string,
     correlationId?: string,

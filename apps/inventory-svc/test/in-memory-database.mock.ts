@@ -373,6 +373,11 @@ export class InMemoryDatabaseMock implements IDatabaseService {
         );
         return { rows: rows as any, rowCount: rows.length };
       }
+      if (s.includes('WHERE ID = $1')) {
+        const pk = params?.[0];
+        const rows = this.reservations.filter((r) => r.id === pk);
+        return { rows: rows as any, rowCount: rows.length };
+      }
     }
 
     // SELECT from reservation_lines

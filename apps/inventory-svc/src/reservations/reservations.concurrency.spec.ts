@@ -284,5 +284,183 @@ describe('ReservationsService — Concurrencia, Idempotencia y Saldos', () => {
         expect(pde.problem.code).toBe('CANTIDAD_INVALIDA');
       }
     });
+
+    it('debe aceptar el canal VENTAS conforme a OpenAPI y contratos G6', async () => {
+      const opId = randomUUID();
+      const res = await reservationsService.solicitarReserva({
+        order_id: 'PED-VENTAS-01',
+        operation_id: opId,
+        channel_id: 'VENTAS',
+        lines: [{ sku: 'ADI-RF3-GRI-38', quantity: 1, location_id: locLurin }],
+      });
+      expect(res.status).toBe('ACCEPTED');
+      expect(res.operation_id).toBe(opId);
+    });
+
+    it('debe validar la longitud de Idempotency-Key (8 a 128 caracteres)', async () => {
+      // Clave demasiado corta (< 8 caracteres)
+      await expect(
+        reservationsService.solicitarReserva(
+          {
+            order_id: 'PED-SHORT-KEY',
+            operation_id: randomUUID(),
+            channel_id: 'VENTAS',
+            lines: [
+              { sku: 'ADI-RF3-GRI-38', quantity: 1, location_id: locLurin },
+            ],
+          },
+          undefined,
+          'short',
+        ),
+      ).rejects.toThrow(ProblemDetailsException);
+
+      // Clave demasiado larga (> 128 caracteres)
+      const longKey = 'a'.repeat(129);
+      await expect(
+        reservationsService.solicitarReserva(
+          {
+            order_id: 'PED-LONG-KEY',
+            operation_id: randomUUID(),
+            channel_id: 'VENTAS',
+            lines: [
+              { sku: 'ADI-RF3-GRI-38', quantity: 1, location_id: locLurin },
+            ],
+          },
+          undefined,
+          longKey,
+        ),
+      ).rejects.toThrow(ProblemDetailsException);
+    });
+  });
+
+  describe('Casos B, E de Idempotencia y Expiración durable', () => {
+    it('Caso B: misma Idempotency-Key pero distinto operation_id debe responder 409 IDEMPOTENCY_CONFLICT', async () => {
+      const sharedKey = 'shared-idempotency-key-12345';
+      const sku = 'ADI-RF3-GRI-38';
+
+      // Primera operación
+      await reservationsService.solicitarReserva(
+        {
+          order_id: 'PED-CASO-B-1',
+          operation_id: randomUUID(),
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 1, location_id: locLurin }],
+        },
+        undefined,
+        sharedKey,
+      );
+
+      // Segunda operación con distinta operation_id pero misma Idempotency-Key
+      try {
+        await reservationsService.solicitarReserva(
+          {
+            order_id: 'PED-CASO-B-2',
+            operation_id: randomUUID(),
+            channel_id: 'MARKETPLACE',
+            lines: [{ sku, quantity: 1, location_id: locLurin }],
+          },
+          undefined,
+          sharedKey,
+        );
+        expect.unreachable('Debe lanzar 409 IDEMPOTENCY_CONFLICT');
+      } catch (err) {
+        const pde = err as ProblemDetailsException;
+        expect(pde.problem.status).toBe(409);
+        expect(pde.problem.code).toBe('IDEMPOTENCY_CONFLICT');
+      }
+    });
+
+    it('Caso E: reintento idéntico de operación rechazada reproduce el rechazo durable sin reevaluar stock ni Outbox nuevo', async () => {
+      const sku = 'PUM-LIMIT-01'; // Solo tiene 2
+      const opId = randomUUID();
+      const payload = {
+        order_id: 'PED-CASO-E-REJECT',
+        operation_id: opId,
+        channel_id: 'MARKETPLACE' as const,
+        lines: [{ sku, quantity: 10, location_id: locLurin }], // Insuficiente
+      };
+
+      // Primer llamado: es rechazada
+      const res1 = await reservationsService.solicitarReserva(payload);
+      expect(res1.status).toBe('ACCEPTED');
+
+      const rejectedOutboxCount = mockDb.outbox.filter(
+        (o) => o.event_type === 'inventory.reservation.rejected',
+      ).length;
+      expect(rejectedOutboxCount).toBe(1);
+
+      // Segundo llamado idéntico: debe reproducir rechazo durable sin emitir otro outbox
+      const res2 = await reservationsService.solicitarReserva(payload);
+      expect(res2.status).toBe('ACCEPTED');
+      expect(res2.operation_id).toBe(opId);
+
+      const rejectedOutboxCount2 = mockDb.outbox.filter(
+        (o) => o.event_type === 'inventory.reservation.rejected',
+      ).length;
+      expect(rejectedOutboxCount2).toBe(1); // No aumentó
+    });
+
+    it('Expiración durable: reserva vencida debe transicionar a EXPIRADA de manera durable y no sufrir rollback', async () => {
+      const sku = 'ADI-RF3-GRI-38';
+      const opId = randomUUID();
+
+      // 1. Crear reserva exitosa
+      await reservationsService.solicitarReserva({
+        order_id: 'PED-EXPIRATION-DURABLE',
+        operation_id: opId,
+        channel_id: 'MARKETPLACE',
+        lines: [{ sku, quantity: 3, location_id: locLurin }],
+      });
+
+      const reserva = mockDb.reservations.find(
+        (r) => r.order_id === 'PED-EXPIRATION-DURABLE',
+      )!;
+      expect(reserva.status).toBe('ACTIVA');
+
+      // Forzar vencimiento (expires_at en el pasado)
+      reserva.expires_at = new Date(Date.now() - 60000).toISOString();
+
+      // 2. Intentar confirmar reserva expirada
+      try {
+        await reservationsService.confirmarReserva(reserva.reservation_id, {
+          order_id: 'PED-EXPIRATION-DURABLE',
+          operation_id: randomUUID(),
+        });
+        expect.unreachable('Debe lanzar RESERVA_EXPIRADA');
+      } catch (err) {
+        const pde = err as ProblemDetailsException;
+        expect(pde.problem.status).toBe(409);
+        expect(pde.problem.code).toBe('RESERVA_EXPIRADA');
+      }
+
+      // 3. Verificar persistencia durable de la expiración:
+      // La reserva DEBE haber quedado en estado EXPIRADA en la base de datos (NO ACTIVA)
+      const reservaFinal = mockDb.reservations.find(
+        (r) => r.reservation_id === reserva.reservation_id,
+      )!;
+      expect(reservaFinal.status).toBe('EXPIRADA');
+
+      // El saldo reservado fue liberado (reserved vuelve a 0)
+      const bal = mockDb.stockBalance.find(
+        (b) => b.sku_id === sku && b.location_id === locLurin,
+      )!;
+      expect(bal.reserved).toBe(0);
+
+      // Se registró movimiento en Kardex de tipo EXPIRACION
+      const kardexExp = mockDb.kardex.find(
+        (k) =>
+          k.reservation_id === reserva.reservation_id &&
+          k.operation_type === 'EXPIRACION',
+      );
+      expect(kardexExp).toBeDefined();
+
+      // Se encoló el evento inventory.reservation.expired en Outbox
+      const outboxExp = mockDb.outbox.find(
+        (o) =>
+          o.event_type === 'inventory.reservation.expired' &&
+          o.aggregate_id === reserva.reservation_id,
+      );
+      expect(outboxExp).toBeDefined();
+    });
   });
 });

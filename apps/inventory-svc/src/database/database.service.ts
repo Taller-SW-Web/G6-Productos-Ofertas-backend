@@ -4,6 +4,7 @@ import {
   OnModuleDestroy,
   Logger,
 } from '@nestjs/common';
+import * as fs from 'node:fs';
 import pg from 'pg';
 import {
   IDatabaseClient,
@@ -54,12 +55,36 @@ export class DatabaseService
 
   private async initPool(config: InventoryConfig): Promise<void> {
     try {
+      let sslConfig: boolean | { ca?: string; rejectUnauthorized?: boolean } =
+        false;
+      if (config.pgSslRootCert && fs.existsSync(config.pgSslRootCert)) {
+        sslConfig = {
+          ca: fs.readFileSync(config.pgSslRootCert, 'utf8'),
+          rejectUnauthorized: true,
+        };
+      } else if (config.pgSslMode === 'disable') {
+        sslConfig = false;
+      } else if (config.databaseUrl) {
+        if (
+          config.databaseUrl.includes('localhost') ||
+          config.databaseUrl.includes('sslmode=disable')
+        ) {
+          sslConfig = false;
+        } else {
+          sslConfig = { rejectUnauthorized: true };
+        }
+      } else if (
+        config.pgHost &&
+        config.pgSslMode &&
+        config.pgSslMode !== 'disable'
+      ) {
+        sslConfig = { rejectUnauthorized: true };
+      }
+
       if (config.databaseUrl) {
         this.pool = new Pool({
           connectionString: config.databaseUrl,
-          ssl: config.databaseUrl.includes('localhost')
-            ? false
-            : { rejectUnauthorized: false },
+          ssl: sslConfig,
           max: 10,
           idleTimeoutMillis: 30000,
           connectionTimeoutMillis: 5000,
@@ -71,10 +96,7 @@ export class DatabaseService
           database: config.pgDatabase ?? 'postgres',
           user: config.pgUser,
           password: config.pgPassword ?? '',
-          ssl:
-            config.pgSslMode === 'disable' || !config.pgSslMode
-              ? false
-              : { rejectUnauthorized: false },
+          ssl: sslConfig,
           max: 10,
           idleTimeoutMillis: 30000,
           connectionTimeoutMillis: 5000,

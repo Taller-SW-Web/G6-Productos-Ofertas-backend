@@ -23,11 +23,22 @@ export function loadInventoryConfig(): InventoryConfig {
   }
 
   const rawTtl = process.env.RESERVATION_TTL_SECONDS ?? '900';
-  const reservationTtlSeconds = Number(rawTtl) > 0 ? Number(rawTtl) : 900;
+  const ttlNumber = Number(rawTtl);
+  if (
+    !Number.isInteger(ttlNumber) ||
+    ttlNumber <= 0 ||
+    !Number.isFinite(ttlNumber)
+  ) {
+    throw new Error(
+      `[inventory-svc] RESERVATION_TTL_SECONDS inválido: "${rawTtl}". Debe ser un entero positivo finito.`,
+    );
+  }
+  const reservationTtlSeconds = ttlNumber;
 
   const rawThreshold = process.env.DEFAULT_LOW_STOCK_THRESHOLD ?? '5';
+  const thresholdNum = Number(rawThreshold);
   const defaultLowStockThreshold =
-    Number(rawThreshold) >= 0 ? Number(rawThreshold) : 5;
+    Number.isInteger(thresholdNum) && thresholdNum >= 0 ? thresholdNum : 5;
 
   return {
     databaseUrl: process.env.DATABASE_URL,

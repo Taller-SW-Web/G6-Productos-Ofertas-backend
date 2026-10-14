@@ -1,4 +1,4 @@
-export type Canal = 'MARKETPLACE' | 'CHATBOT' | 'RETAIL';
+export type Canal = 'MARKETPLACE' | 'CHATBOT' | 'RETAIL' | 'VENTAS';
 
 export type EstadoStock = 'AGOTADO' | 'STOCK_BAJO' | 'DISPONIBLE';
 

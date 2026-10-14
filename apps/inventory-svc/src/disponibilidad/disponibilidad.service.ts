@@ -130,6 +130,13 @@ export class DisponibilidadService {
       );
     }
 
+    if (dto.lines.length > 100) {
+      throw ProblemDetailsException.validation(
+        'El número máximo de líneas permitidas en la verificación comercial es 100',
+        correlationId,
+      );
+    }
+
     for (const line of dto.lines) {
       if (!line.sku || typeof line.sku !== 'string') {
         throw ProblemDetailsException.validation(
