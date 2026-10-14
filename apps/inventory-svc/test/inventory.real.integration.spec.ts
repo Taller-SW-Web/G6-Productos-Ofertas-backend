@@ -772,7 +772,7 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
     if (message) brokerChannel.ack(message);
   });
 
-  it('coordina dos dispatchers y conserva evento al detener/reiniciar RabbitMQ', async () => {
+  it('coordina dos dispatchers y recupera el evento pendiente tras indisponibilidad del broker', async () => {
     await database.query('DELETE FROM inventory.outbox');
     const a = await publishRecord('inventory.integration.concurrent.a');
     const b = await publishRecord('inventory.integration.concurrent.b');
