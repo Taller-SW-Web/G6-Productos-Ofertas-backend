@@ -61,12 +61,16 @@ describe('ReservationsService — Ciclo Completo G5 (Confirmación y Liberación
       // 1. Crear reserva
       const orderId = 'PED-CONFIRM-01';
       const opReserva = randomUUID();
-      await reservationsService.solicitarReserva({
-        order_id: orderId,
-        operation_id: opReserva,
-        channel_id: 'MARKETPLACE',
-        lines: [{ sku, quantity: 3, location_id: locLurin }],
-      });
+      await reservationsService.solicitarReserva(
+        {
+          order_id: orderId,
+          operation_id: opReserva,
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 3, location_id: locLurin }],
+        },
+        undefined,
+        opReserva,
+      );
 
       const reservaCreada = mockDb.reservations[0];
       const reservaId = reservaCreada.reservation_id;
@@ -79,10 +83,15 @@ describe('ReservationsService — Ciclo Completo G5 (Confirmación y Liberación
 
       // 2. Confirmar reserva
       const opConfirmar = randomUUID();
-      const resConfirm = await reservationsService.confirmarReserva(reservaId, {
-        order_id: orderId,
-        operation_id: opConfirmar,
-      });
+      const resConfirm = await reservationsService.confirmarReserva(
+        reservaId,
+        {
+          order_id: orderId,
+          operation_id: opConfirmar,
+        },
+        undefined,
+        opConfirmar,
+      );
 
       expect(resConfirm.status).toBe('ACCEPTED');
       expect(resConfirm.operation_type).toBe('CONFIRMAR_CONSUMO');
@@ -124,21 +133,30 @@ describe('ReservationsService — Ciclo Completo G5 (Confirmación y Liberación
     it('debe responder de forma idempotente ante reintentos de confirmación', async () => {
       const orderId = 'PED-CONFIRM-IDEMPOTENT';
       const opReserva = randomUUID();
-      await reservationsService.solicitarReserva({
-        order_id: orderId,
-        operation_id: opReserva,
-        channel_id: 'MARKETPLACE',
-        lines: [{ sku, quantity: 2, location_id: locLurin }],
-      });
+      await reservationsService.solicitarReserva(
+        {
+          order_id: orderId,
+          operation_id: opReserva,
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 2, location_id: locLurin }],
+        },
+        undefined,
+        opReserva,
+      );
 
       const reservaId = mockDb.reservations[0].reservation_id;
       const opConfirmar = randomUUID();
 
       // Primera confirmación
-      const res1 = await reservationsService.confirmarReserva(reservaId, {
-        order_id: orderId,
-        operation_id: opConfirmar,
-      });
+      const res1 = await reservationsService.confirmarReserva(
+        reservaId,
+        {
+          order_id: orderId,
+          operation_id: opConfirmar,
+        },
+        undefined,
+        opConfirmar,
+      );
       expect(res1.status).toBe('ACCEPTED');
 
       const balFirst = mockDb.stockBalance.find(
@@ -147,10 +165,15 @@ describe('ReservationsService — Ciclo Completo G5 (Confirmación y Liberación
       expect(balFirst.on_hand).toBe(16);
 
       // Segunda confirmación idéntica
-      const res2 = await reservationsService.confirmarReserva(reservaId, {
-        order_id: orderId,
-        operation_id: opConfirmar,
-      });
+      const res2 = await reservationsService.confirmarReserva(
+        reservaId,
+        {
+          order_id: orderId,
+          operation_id: opConfirmar,
+        },
+        undefined,
+        opConfirmar,
+      );
       expect(res2.status).toBe('ACCEPTED');
 
       // No hay doble descuento
@@ -162,18 +185,29 @@ describe('ReservationsService — Ciclo Completo G5 (Confirmación y Liberación
 
     it('debe lanzar 404 RESERVA_NO_ENCONTRADA si la reserva no existe', async () => {
       const nonExistentId = randomUUID();
+      const unknownOpId = randomUUID();
       await expect(
-        reservationsService.confirmarReserva(nonExistentId, {
-          order_id: 'PED-UNKNOWN',
-          operation_id: randomUUID(),
-        }),
+        reservationsService.confirmarReserva(
+          nonExistentId,
+          {
+            order_id: 'PED-UNKNOWN',
+            operation_id: unknownOpId,
+          },
+          undefined,
+          unknownOpId,
+        ),
       ).rejects.toThrow(ProblemDetailsException);
 
       try {
-        await reservationsService.confirmarReserva(nonExistentId, {
-          order_id: 'PED-UNKNOWN',
-          operation_id: randomUUID(),
-        });
+        await reservationsService.confirmarReserva(
+          nonExistentId,
+          {
+            order_id: 'PED-UNKNOWN',
+            operation_id: unknownOpId,
+          },
+          undefined,
+          unknownOpId,
+        );
       } catch (err) {
         const pde = err as ProblemDetailsException;
         expect(pde.problem.status).toBe(404);
@@ -183,27 +217,44 @@ describe('ReservationsService — Ciclo Completo G5 (Confirmación y Liberación
 
     it('debe lanzar 409 RESERVA_NO_ACTIVA si se intenta confirmar una reserva ya consumida con otra operación', async () => {
       const orderId = 'PED-DOUBLE-CONFIRM';
-      await reservationsService.solicitarReserva({
-        order_id: orderId,
-        operation_id: randomUUID(),
-        channel_id: 'MARKETPLACE',
-        lines: [{ sku, quantity: 1, location_id: locLurin }],
-      });
+      const opReserva = randomUUID();
+      await reservationsService.solicitarReserva(
+        {
+          order_id: orderId,
+          operation_id: opReserva,
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 1, location_id: locLurin }],
+        },
+        undefined,
+        opReserva,
+      );
 
       const reservaId = mockDb.reservations[0].reservation_id;
 
       // Primera confirmación
-      await reservationsService.confirmarReserva(reservaId, {
-        order_id: orderId,
-        operation_id: randomUUID(),
-      });
+      const opConf1 = randomUUID();
+      await reservationsService.confirmarReserva(
+        reservaId,
+        {
+          order_id: orderId,
+          operation_id: opConf1,
+        },
+        undefined,
+        opConf1,
+      );
 
       // Segunda confirmación con operation_id distinto
+      const opConf2 = randomUUID();
       try {
-        await reservationsService.confirmarReserva(reservaId, {
-          order_id: orderId,
-          operation_id: randomUUID(),
-        });
+        await reservationsService.confirmarReserva(
+          reservaId,
+          {
+            order_id: orderId,
+            operation_id: opConf2,
+          },
+          undefined,
+          opConf2,
+        );
         expect.unreachable('Debe lanzar excepción');
       } catch (err) {
         const pde = err as ProblemDetailsException;
@@ -217,12 +268,17 @@ describe('ReservationsService — Ciclo Completo G5 (Confirmación y Liberación
     it('debe liberar reserva activa, restaurar stock reservado sin mutar on_hand, y emitir eventos', async () => {
       // 1. Crear reserva
       const orderId = 'PED-RELEASE-01';
-      await reservationsService.solicitarReserva({
-        order_id: orderId,
-        operation_id: randomUUID(),
-        channel_id: 'MARKETPLACE',
-        lines: [{ sku, quantity: 4, location_id: locLurin }],
-      });
+      const opReserva = randomUUID();
+      await reservationsService.solicitarReserva(
+        {
+          order_id: orderId,
+          operation_id: opReserva,
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 4, location_id: locLurin }],
+        },
+        undefined,
+        opReserva,
+      );
 
       const reservaCreada = mockDb.reservations[0];
       const reservaId = reservaCreada.reservation_id;
@@ -235,11 +291,16 @@ describe('ReservationsService — Ciclo Completo G5 (Confirmación y Liberación
 
       // 2. Liberar reserva
       const opLiberar = randomUUID();
-      const resLiberar = await reservationsService.liberarReserva(reservaId, {
-        order_id: orderId,
-        operation_id: opLiberar,
-        reason: 'PAGO_NO_COMPLETADO',
-      });
+      const resLiberar = await reservationsService.liberarReserva(
+        reservaId,
+        {
+          order_id: orderId,
+          operation_id: opLiberar,
+          reason: 'PAGO_NO_COMPLETADO',
+        },
+        undefined,
+        opLiberar,
+      );
 
       expect(resLiberar.status).toBe('ACCEPTED');
       expect(resLiberar.operation_type).toBe('LIBERAR');
@@ -275,26 +336,43 @@ describe('ReservationsService — Ciclo Completo G5 (Confirmación y Liberación
 
     it('debe rechazar con 409 RESERVA_NO_ACTIVA si se intenta liberar una reserva ya consumida', async () => {
       const orderId = 'PED-CONSUMED-THEN-RELEASE';
-      await reservationsService.solicitarReserva({
-        order_id: orderId,
-        operation_id: randomUUID(),
-        channel_id: 'MARKETPLACE',
-        lines: [{ sku, quantity: 2, location_id: locLurin }],
-      });
+      const opReserva = randomUUID();
+      await reservationsService.solicitarReserva(
+        {
+          order_id: orderId,
+          operation_id: opReserva,
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 2, location_id: locLurin }],
+        },
+        undefined,
+        opReserva,
+      );
 
       const reservaId = mockDb.reservations[0].reservation_id;
 
-      await reservationsService.confirmarReserva(reservaId, {
-        order_id: orderId,
-        operation_id: randomUUID(),
-      });
-
-      try {
-        await reservationsService.liberarReserva(reservaId, {
+      const opConfirm = randomUUID();
+      await reservationsService.confirmarReserva(
+        reservaId,
+        {
           order_id: orderId,
-          operation_id: randomUUID(),
-          reason: 'ANULACION',
-        });
+          operation_id: opConfirm,
+        },
+        undefined,
+        opConfirm,
+      );
+
+      const opLiberar = randomUUID();
+      try {
+        await reservationsService.liberarReserva(
+          reservaId,
+          {
+            order_id: orderId,
+            operation_id: opLiberar,
+            reason: 'ANULACION',
+          },
+          undefined,
+          opLiberar,
+        );
         expect.unreachable('Debe lanzar excepción');
       } catch (err) {
         const pde = err as ProblemDetailsException;

@@ -68,12 +68,16 @@ describe('ReservationsService — Concurrencia, Idempotencia y Saldos', () => {
         async (_, idx) => {
           const opId = randomUUID();
           const orderId = `PED-CONCURRENCY-${idx + 1}`;
-          return reservationsService.solicitarReserva({
-            order_id: orderId,
-            operation_id: opId,
-            channel_id: 'MARKETPLACE',
-            lines: [{ sku, quantity: requestedQty, location_id: locLurin }],
-          });
+          return reservationsService.solicitarReserva(
+            {
+              order_id: orderId,
+              operation_id: opId,
+              channel_id: 'MARKETPLACE',
+              lines: [{ sku, quantity: requestedQty, location_id: locLurin }],
+            },
+            undefined,
+            opId,
+          );
         },
       );
 
@@ -127,12 +131,16 @@ describe('ReservationsService — Concurrencia, Idempotencia y Saldos', () => {
       const sku = 'PUM-LIMIT-01';
       const opId = randomUUID();
 
-      const res = await reservationsService.solicitarReserva({
-        order_id: 'PED-INSUFFICIENT-1',
-        operation_id: opId,
-        channel_id: 'MARKETPLACE',
-        lines: [{ sku, quantity: 5, location_id: locLurin }],
-      });
+      const res = await reservationsService.solicitarReserva(
+        {
+          order_id: 'PED-INSUFFICIENT-1',
+          operation_id: opId,
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 5, location_id: locLurin }],
+        },
+        undefined,
+        opId,
+      );
 
       expect(res.status).toBe('ACCEPTED');
 
@@ -167,15 +175,19 @@ describe('ReservationsService — Concurrencia, Idempotencia y Saldos', () => {
       const skuInsuficiente = 'PUM-LIMIT-01'; // tiene 2
       const opId = randomUUID();
 
-      await reservationsService.solicitarReserva({
-        order_id: 'PED-MULTILINE-FAIL',
-        operation_id: opId,
-        channel_id: 'MARKETPLACE',
-        lines: [
-          { sku: skuSuficiente, quantity: 4, location_id: locLurin },
-          { sku: skuInsuficiente, quantity: 8, location_id: locLurin }, // Falla aquí
-        ],
-      });
+      await reservationsService.solicitarReserva(
+        {
+          order_id: 'PED-MULTILINE-FAIL',
+          operation_id: opId,
+          channel_id: 'MARKETPLACE',
+          lines: [
+            { sku: skuSuficiente, quantity: 4, location_id: locLurin },
+            { sku: skuInsuficiente, quantity: 8, location_id: locLurin }, // Falla aquí
+          ],
+        },
+        undefined,
+        opId,
+      );
 
       // Ningún SKU debe haberse modificado
       const bal1 = mockDb.stockBalance.find(
@@ -206,7 +218,11 @@ describe('ReservationsService — Concurrencia, Idempotencia y Saldos', () => {
       };
 
       // Primer llamado
-      const res1 = await reservationsService.solicitarReserva(payload);
+      const res1 = await reservationsService.solicitarReserva(
+        payload,
+        undefined,
+        opId,
+      );
       expect(res1.status).toBe('ACCEPTED');
 
       const balAfterFirst = mockDb.stockBalance.find(
@@ -217,7 +233,11 @@ describe('ReservationsService — Concurrencia, Idempotencia y Saldos', () => {
       expect(mockDb.kardex).toHaveLength(1);
 
       // Segundo llamado: mismo operation_id, mismo contenido
-      const res2 = await reservationsService.solicitarReserva(payload);
+      const res2 = await reservationsService.solicitarReserva(
+        payload,
+        undefined,
+        opId,
+      );
       expect(res2.status).toBe('ACCEPTED');
       expect(res2.operation_id).toBe(opId);
 
@@ -235,30 +255,42 @@ describe('ReservationsService — Concurrencia, Idempotencia y Saldos', () => {
       const sku = 'ADI-RF3-GRI-38';
 
       // Primer llamado con cantidad 2
-      await reservationsService.solicitarReserva({
-        order_id: 'PED-CONFLICT-01',
-        operation_id: opId,
-        channel_id: 'MARKETPLACE',
-        lines: [{ sku, quantity: 2, location_id: locLurin }],
-      });
+      await reservationsService.solicitarReserva(
+        {
+          order_id: 'PED-CONFLICT-01',
+          operation_id: opId,
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 2, location_id: locLurin }],
+        },
+        undefined,
+        opId,
+      );
 
       // Segundo llamado con mismo operation_id pero cantidad 5
       await expect(
-        reservationsService.solicitarReserva({
-          order_id: 'PED-CONFLICT-01',
-          operation_id: opId,
-          channel_id: 'MARKETPLACE',
-          lines: [{ sku, quantity: 5, location_id: locLurin }],
-        }),
+        reservationsService.solicitarReserva(
+          {
+            order_id: 'PED-CONFLICT-01',
+            operation_id: opId,
+            channel_id: 'MARKETPLACE',
+            lines: [{ sku, quantity: 5, location_id: locLurin }],
+          },
+          undefined,
+          opId,
+        ),
       ).rejects.toThrow(ProblemDetailsException);
 
       try {
-        await reservationsService.solicitarReserva({
-          order_id: 'PED-CONFLICT-01',
-          operation_id: opId,
-          channel_id: 'MARKETPLACE',
-          lines: [{ sku, quantity: 5, location_id: locLurin }],
-        });
+        await reservationsService.solicitarReserva(
+          {
+            order_id: 'PED-CONFLICT-01',
+            operation_id: opId,
+            channel_id: 'MARKETPLACE',
+            lines: [{ sku, quantity: 5, location_id: locLurin }],
+          },
+          undefined,
+          opId,
+        );
       } catch (err) {
         const pde = err as ProblemDetailsException;
         expect(pde.problem.status).toBe(409);
@@ -270,37 +302,52 @@ describe('ReservationsService — Concurrencia, Idempotencia y Saldos', () => {
   describe('Resolución de ubicaciones y validaciones de entrada', () => {
     it('debe rechazar solicitud si faltan ubicaciones unívocas y no hay ruta de cumplimiento', async () => {
       // Sin location_id y con 2 almacenes activos sin ruta comercial
+      const noLocOpId = randomUUID();
       await expect(
-        reservationsService.solicitarReserva({
-          order_id: 'PED-NO-LOC',
-          operation_id: randomUUID(),
-          channel_id: 'MARKETPLACE',
-          lines: [{ sku: 'ADI-RF3-GRI-38', quantity: 1 }],
-        }),
+        reservationsService.solicitarReserva(
+          {
+            order_id: 'PED-NO-LOC',
+            operation_id: noLocOpId,
+            channel_id: 'MARKETPLACE',
+            lines: [{ sku: 'ADI-RF3-GRI-38', quantity: 1 }],
+          },
+          undefined,
+          noLocOpId,
+        ),
       ).rejects.toThrow(ProblemDetailsException);
     });
 
     it('debe lanzar 422 CANTIDAD_INVALIDA si la cantidad no es un entero positivo mayor a cero', async () => {
+      const invOp1 = randomUUID();
       await expect(
-        reservationsService.solicitarReserva({
-          order_id: 'PED-INVALID-QTY',
-          operation_id: randomUUID(),
-          channel_id: 'MARKETPLACE',
-          lines: [
-            { sku: 'ADI-RF3-GRI-38', quantity: 0, location_id: locLurin },
-          ],
-        }),
+        reservationsService.solicitarReserva(
+          {
+            order_id: 'PED-INVALID-QTY',
+            operation_id: invOp1,
+            channel_id: 'MARKETPLACE',
+            lines: [
+              { sku: 'ADI-RF3-GRI-38', quantity: 0, location_id: locLurin },
+            ],
+          },
+          undefined,
+          invOp1,
+        ),
       ).rejects.toThrow(ProblemDetailsException);
 
       try {
-        await reservationsService.solicitarReserva({
-          order_id: 'PED-INVALID-QTY',
-          operation_id: randomUUID(),
-          channel_id: 'MARKETPLACE',
-          lines: [
-            { sku: 'ADI-RF3-GRI-38', quantity: -2, location_id: locLurin },
-          ],
-        });
+        const invOp2 = randomUUID();
+        await reservationsService.solicitarReserva(
+          {
+            order_id: 'PED-INVALID-QTY',
+            operation_id: invOp2,
+            channel_id: 'MARKETPLACE',
+            lines: [
+              { sku: 'ADI-RF3-GRI-38', quantity: -2, location_id: locLurin },
+            ],
+          },
+          undefined,
+          invOp2,
+        );
       } catch (err) {
         const pde = err as ProblemDetailsException;
         expect(pde.problem.status).toBe(422);
@@ -310,12 +357,18 @@ describe('ReservationsService — Concurrencia, Idempotencia y Saldos', () => {
 
     it('debe aceptar el canal VENTAS conforme a OpenAPI y contratos G6', async () => {
       const opId = randomUUID();
-      const res = await reservationsService.solicitarReserva({
-        order_id: 'PED-VENTAS-01',
-        operation_id: opId,
-        channel_id: 'VENTAS',
-        lines: [{ sku: 'ADI-RF3-GRI-38', quantity: 1, location_id: locLurin }],
-      });
+      const res = await reservationsService.solicitarReserva(
+        {
+          order_id: 'PED-VENTAS-01',
+          operation_id: opId,
+          channel_id: 'VENTAS',
+          lines: [
+            { sku: 'ADI-RF3-GRI-38', quantity: 1, location_id: locLurin },
+          ],
+        },
+        undefined,
+        opId,
+      );
       expect(res.status).toBe('ACCEPTED');
       expect(res.operation_id).toBe(opId);
     });
@@ -404,7 +457,11 @@ describe('ReservationsService — Concurrencia, Idempotencia y Saldos', () => {
       };
 
       // Primer llamado: es rechazada
-      const res1 = await reservationsService.solicitarReserva(payload);
+      const res1 = await reservationsService.solicitarReserva(
+        payload,
+        undefined,
+        opId,
+      );
       expect(res1.status).toBe('ACCEPTED');
 
       const rejectedOutboxCount = mockDb.outbox.filter(
@@ -413,7 +470,11 @@ describe('ReservationsService — Concurrencia, Idempotencia y Saldos', () => {
       expect(rejectedOutboxCount).toBe(1);
 
       // Segundo llamado idéntico: debe reproducir rechazo durable sin emitir otro outbox
-      const res2 = await reservationsService.solicitarReserva(payload);
+      const res2 = await reservationsService.solicitarReserva(
+        payload,
+        undefined,
+        opId,
+      );
       expect(res2.status).toBe('ACCEPTED');
       expect(res2.operation_id).toBe(opId);
 
@@ -428,12 +489,16 @@ describe('ReservationsService — Concurrencia, Idempotencia y Saldos', () => {
       const opId = randomUUID();
 
       // 1. Crear reserva exitosa
-      await reservationsService.solicitarReserva({
-        order_id: 'PED-EXPIRATION-DURABLE',
-        operation_id: opId,
-        channel_id: 'MARKETPLACE',
-        lines: [{ sku, quantity: 3, location_id: locLurin }],
-      });
+      await reservationsService.solicitarReserva(
+        {
+          order_id: 'PED-EXPIRATION-DURABLE',
+          operation_id: opId,
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 3, location_id: locLurin }],
+        },
+        undefined,
+        opId,
+      );
 
       const reserva = mockDb.reservations.find(
         (r) => r.order_id === 'PED-EXPIRATION-DURABLE',
@@ -444,11 +509,17 @@ describe('ReservationsService — Concurrencia, Idempotencia y Saldos', () => {
       reserva.expires_at = new Date(Date.now() - 60000).toISOString();
 
       // 2. Intentar confirmar reserva expirada
+      const confirmOpId = randomUUID();
       try {
-        await reservationsService.confirmarReserva(reserva.reservation_id, {
-          order_id: 'PED-EXPIRATION-DURABLE',
-          operation_id: randomUUID(),
-        });
+        await reservationsService.confirmarReserva(
+          reserva.reservation_id,
+          {
+            order_id: 'PED-EXPIRATION-DURABLE',
+            operation_id: confirmOpId,
+          },
+          undefined,
+          confirmOpId,
+        );
         expect.unreachable('Debe lanzar RESERVA_EXPIRADA');
       } catch (err) {
         const pde = err as ProblemDetailsException;

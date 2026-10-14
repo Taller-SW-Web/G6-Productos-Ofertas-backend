@@ -7,7 +7,11 @@ import { InventorySvcModule } from '../src/inventory-svc.module.js';
 import { DatabaseService } from '../src/database/database.service.js';
 import { ProblemDetailsFilter } from '../src/errors/problem-details.filter.js';
 import { InMemoryDatabaseMock } from './in-memory-database.mock.js';
-import { createTestJwt } from '../src/auth/test-token.helper.js';
+import {
+  createCryptographicJwt,
+  TEST_PUBLIC_KEY,
+} from './crypto-test-token.helper.js';
+import { InventoryAuthGuard } from '../src/auth/inventory-auth.guard.js';
 
 describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
   let app: INestApplication<App>;
@@ -15,10 +19,18 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
   const locLurin = '9129b578-631e-1735-8427-b683fb524380';
   const sku = 'NIK-REV7-NEG-41';
 
-  const validToken = createTestJwt({
+  const validToken = createCryptographicJwt({
     clientId: 'modulo-ventas',
     scope:
       'inventario:reservar inventario:consumir inventario:liberar inventario:operaciones:leer inventario:disponibilidad:leer',
+  });
+
+  beforeAll(() => {
+    InventoryAuthGuard.setTrustedPublicKey(TEST_PUBLIC_KEY);
+  });
+
+  afterAll(() => {
+    InventoryAuthGuard.setTrustedPublicKey(null);
   });
 
   beforeEach(async () => {
@@ -59,7 +71,7 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
     });
 
     it('debe rechazar con 401 TOKEN_INVALIDO si la audiencia no es api-productos', async () => {
-      const badAudToken = createTestJwt({
+      const badAudToken = createCryptographicJwt({
         aud: 'api-otra',
         clientId: 'modulo-ventas',
       });
@@ -74,7 +86,7 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
     });
 
     it('debe rechazar con 401 TOKEN_INVALIDO si el token está expirado', async () => {
-      const expiredToken = createTestJwt({
+      const expiredToken = createCryptographicJwt({
         exp: Math.floor(Date.now() / 1000) - 100,
         clientId: 'modulo-ventas',
       });
@@ -89,7 +101,7 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
     });
 
     it('debe rechazar con 403 SCOPE_INSUFICIENTE si el token carece del scope necesario', async () => {
-      const noReserveToken = createTestJwt({
+      const noReserveToken = createCryptographicJwt({
         clientId: 'modulo-ventas',
         scope: 'inventario:disponibilidad:leer', // Sin inventario:reservar
       });
@@ -97,6 +109,7 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
       const res = await request(app.getHttpServer())
         .post('/api/v1/inventario/reservas')
         .set('Authorization', `Bearer ${noReserveToken}`)
+        .set('Idempotency-Key', randomUUID())
         .send({
           order_id: 'PED-NO-SCOPE',
           operation_id: randomUUID(),
@@ -110,7 +123,7 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
     });
 
     it('debe rechazar con 403 SCOPE_INSUFICIENTE si el client_id no está autorizado para reservas', async () => {
-      const unauthorizedClientToken = createTestJwt({
+      const unauthorizedClientToken = createCryptographicJwt({
         clientId: 'modulo-desconocido',
         scope: 'inventario:reservar',
       });
@@ -118,6 +131,7 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
       const res = await request(app.getHttpServer())
         .post('/api/v1/inventario/reservas')
         .set('Authorization', `Bearer ${unauthorizedClientToken}`)
+        .set('Idempotency-Key', randomUUID())
         .send({
           order_id: 'PED-UNAUTHORIZED-CLIENT',
           operation_id: randomUUID(),
@@ -182,6 +196,7 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
       const postConfirmar = await request(app.getHttpServer())
         .post(`/api/v1/inventario/reservas/${reservaId}/confirmar`)
         .set('Authorization', `Bearer ${validToken}`)
+        .set('Idempotency-Key', opIdConfirmar)
         .send({
           order_id: orderId,
           operation_id: opIdConfirmar,
@@ -208,6 +223,7 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
       await request(app.getHttpServer())
         .post('/api/v1/inventario/reservas')
         .set('Authorization', `Bearer ${validToken}`)
+        .set('Idempotency-Key', opIdReserva)
         .send({
           order_id: orderId,
           operation_id: opIdReserva,
@@ -227,6 +243,7 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
       const postLiberar = await request(app.getHttpServer())
         .post(`/api/v1/inventario/reservas/${reservaId}/liberar`)
         .set('Authorization', `Bearer ${validToken}`)
+        .set('Idempotency-Key', opIdLiberar)
         .send({
           order_id: orderId,
           operation_id: opIdLiberar,
@@ -242,6 +259,7 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
       const res = await request(app.getHttpServer())
         .post('/api/v1/inventario/reservas')
         .set('Authorization', `Bearer ${validToken}`)
+        .set('Idempotency-Key', randomUUID())
         .send({
           order_id: 'PED-INVALID',
           operation_id: randomUUID(),
@@ -263,6 +281,7 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
       await request(app.getHttpServer())
         .post('/api/v1/inventario/reservas')
         .set('Authorization', `Bearer ${validToken}`)
+        .set('Idempotency-Key', opId)
         .send({
           order_id: orderId,
           operation_id: opId,
@@ -274,6 +293,7 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
       const res = await request(app.getHttpServer())
         .post('/api/v1/inventario/reservas')
         .set('Authorization', `Bearer ${validToken}`)
+        .set('Idempotency-Key', opId)
         .send({
           order_id: orderId,
           operation_id: opId,
