@@ -87,10 +87,17 @@ assert.equal(
 for (const file of ['package.json', 'package-lock.json']) {
   assert.equal(
     git('hash-object', `--path=${file}`, file),
-    git('rev-parse', `${source.cueva}:${file}`),
-    'SHARED_DEPENDENCIES_CHANGED',
+    git('rev-parse', `${source.master}:${file}`),
+    'GATEWAY_ONLY_DEPENDENCIES_MUST_MATCH_MASTER',
   );
 }
+const changedPaths = git('diff', source.master, '--name-only')
+  .split('\n')
+  .filter(Boolean);
+assert.ok(
+  changedPaths.every((path) => path.startsWith('apps/api-gateway/')),
+  'GATEWAY_ONLY_SCOPE_REQUIRED: run against the publication before restoring local pending work',
+);
 const routes = readFileSync(
   'apps/api-gateway/src/routing/contract-routes.ts',
   'utf8',
@@ -103,6 +110,9 @@ const report = {
   openapi_blob: 'f64bfe9a097b2a0f74c2600988305443d92f640e',
   operation_count: 135,
   shared_dependencies_modified: false,
+  dependencies_match: source.master,
+  deferred_issues_excluded: [33, 70, 15, 112],
+  publication_changed_paths: changedPaths,
   runtime_preserved_from_latest_cueva: true,
   inventory,
   limits: [

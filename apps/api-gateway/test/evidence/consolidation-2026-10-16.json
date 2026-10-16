@@ -1,6 +1,6 @@
 {
   "result": "PASS_FILE_COMPARISON",
-  "captured_at": "2026-10-16T20:28:29.527Z",
+  "captured_at": "2026-10-16T20:59:28.541Z",
   "sources": {
     "cueva": "68c96a77ab8c77b1f218d6283de7e1f4efa45e4f",
     "castilla": "fbbb74a528c73989c83f53e27690bcfcba966308",
@@ -9,6 +9,51 @@
   "openapi_blob": "f64bfe9a097b2a0f74c2600988305443d92f640e",
   "operation_count": 135,
   "shared_dependencies_modified": false,
+  "dependencies_match": "24227527c632be4f3b8de612954328904ea57de0",
+  "deferred_issues_excluded": [
+    33,
+    70,
+    15,
+    112
+  ],
+  "publication_changed_paths": [
+    "apps/api-gateway/.env.example",
+    "apps/api-gateway/AUDITORIA-H01-H03.md",
+    "apps/api-gateway/CONSOLIDACION-GATEWAY.md",
+    "apps/api-gateway/README.md",
+    "apps/api-gateway/src/api-gateway.module.ts",
+    "apps/api-gateway/src/main.ts",
+    "apps/api-gateway/src/readiness.ts",
+    "apps/api-gateway/src/routing/bounded-response.ts",
+    "apps/api-gateway/src/routing/contract-route.ts",
+    "apps/api-gateway/src/routing/contract-routes.ts",
+    "apps/api-gateway/src/routing/gateway-identity.spec.ts",
+    "apps/api-gateway/src/routing/gateway-identity.ts",
+    "apps/api-gateway/src/routing/gateway-problem.spec.ts",
+    "apps/api-gateway/src/routing/gateway-problem.ts",
+    "apps/api-gateway/src/routing/gateway-proxy.controller.ts",
+    "apps/api-gateway/src/routing/gateway-proxy.ts",
+    "apps/api-gateway/src/routing/gateway-readiness.spec.ts",
+    "apps/api-gateway/src/routing/gateway-readiness.ts",
+    "apps/api-gateway/src/routing/gateway-settings.spec.ts",
+    "apps/api-gateway/src/routing/gateway-settings.ts",
+    "apps/api-gateway/src/routing/streamed-request.ts",
+    "apps/api-gateway/src/routing/streamed-response.ts",
+    "apps/api-gateway/test/evidence/consolidation-2026-10-16.json",
+    "apps/api-gateway/test/evidence/consolidation-validation-2026-10-16.json",
+    "apps/api-gateway/test/evidence/gateway-only-validation-2026-10-16.json",
+    "apps/api-gateway/test/fixtures/marketplace-eligibility.cases.json",
+    "apps/api-gateway/test/generate-routes.mjs",
+    "apps/api-gateway/test/marketplace.e2e-spec.ts",
+    "apps/api-gateway/test/marketplace.live.mjs",
+    "apps/api-gateway/test/marketplace.postgres.e2e-spec.ts",
+    "apps/api-gateway/test/readiness.smoke.mjs",
+    "apps/api-gateway/test/routing.e2e-spec.ts",
+    "apps/api-gateway/test/support/marketplace-runtime.spec.ts",
+    "apps/api-gateway/test/support/marketplace-runtime.ts",
+    "apps/api-gateway/test/support/signed-identity.ts",
+    "apps/api-gateway/test/verify-consolidation.mjs"
+  ],
   "runtime_preserved_from_latest_cueva": true,
   "inventory": [
     {
@@ -22,7 +67,7 @@
       "path": "apps/api-gateway/AUDITORIA-H01-H03.md",
       "cueva_blob": "65a917b6c9046772bab33d5eb2841b027a17d495",
       "castilla_blob": "64ae0bd6494cc3b7707fc737250d0f7f87687202",
-      "working_blob": "6d4479c6299b67c58bd4fedd81ec8896a2445b07",
+      "working_blob": "6019db16814b931558591fd807b040d29bd40ea1",
       "decision": "DOCUMENTATION_EXTENDED"
     },
     {
@@ -57,7 +102,7 @@
       "path": "apps/api-gateway/README.md",
       "cueva_blob": "ea4664697b08db8b9b512ec8e14fd87a50e8a03a",
       "castilla_blob": "a35c4e0688a5587be7432d4c708255951e346a55",
-      "working_blob": "4995b91fc96a46bdc4e055ae290062cd0284584b",
+      "working_blob": "9e5bc9b817d5c139b1d1cd39a77d9b8ee6ac905a",
       "decision": "DOCUMENTATION_EXTENDED"
     },
     {

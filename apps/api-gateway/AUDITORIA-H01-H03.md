@@ -6,12 +6,11 @@ validaciones se documentan en [CONSOLIDACION-GATEWAY.md](CONSOLIDACION-GATEWAY.m
 Los resultados fechados que siguen se conservan como evidencia histórica.
 
 Este informe corresponde al bloque Gateway validado en
-`b97138acdc7fa87bd854a8ed7bea1a96c87da902`. Posteriormente, el usuario autorizó
-incorporar también los siete commits locales de #70/#112/#15/#33 al mismo PR.
-Es una excepción puntual autorizada para #116; la regla de PRs pequeños,
-atómicos y específicos de AGENTS.md sigue vigente para las próximas entregas.
-La descripción del PR distingue las validaciones históricas de este bloque de
-las del conjunto ampliado, sus dependencias autorizadas y el nuevo SHA final.
+`b97138acdc7fa87bd854a8ed7bea1a96c87da902`. La ampliación posterior de
+#70/#112/#15/#33 fue retirada del diff de integración por indicación del usuario.
+El PR #116 actual contiene solo el Gateway aprobado; los pendientes se conservan
+localmente en `cueva`. Las validaciones del conjunto anterior son históricas y
+no acreditan integración de esos componentes en el alcance actual.
 
 Rama de publicación: `cueva`. Alcance: únicamente `apps/api-gateway`, con la
 autorización transversal de #106/#21 y las aclaraciones de arquitectura.

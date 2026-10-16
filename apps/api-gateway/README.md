@@ -7,10 +7,11 @@ de Marketplace, con configuración portable y evidencias separadas de las histó
 Owner asignado en #106: Axel Cueva, rama `cueva`. La autorización transversal
 de Marco está registrada en #21 y se limita a `apps/api-gateway`. No se cambian
 otros servicios, contratos, librerías, dependencias o configuración global.
-Esa delimitación corresponde al bloque Gateway. Por autorización posterior del
-usuario, el PR #116 incorpora también los commits propios de #70/#33/#15/#112;
-la ampliación, las dos dependencias autorizadas de #33 y sus evidencias se
-registran por separado en la descripción del PR y los documentos de Promotions.
+El alcance actual del PR #116 contiene exclusivamente el Gateway aprobado.
+Los avances de #70/#33/#15/#112 se retiraron del diff de integración y se
+conservan localmente en `cueva`, sin otro PR. Promotions, DATA y los dos
+manifiestos de dependencias coinciden con master en el contenido publicado.
+El PR permanece abierto en draft, sin autorización para merge.
 
 ## Contrato y comportamiento
 

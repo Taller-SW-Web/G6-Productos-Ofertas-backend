@@ -2,6 +2,24 @@
 
 Owner: Axel Cueva. Rama permanente: `cueva`. Fecha: 16/10/2026, America/Lima.
 
+## Alcance vigente del PR #116
+
+El dictamen de Marco aprueba el Gateway consolidado, incluidas H-01/H-02/H-03,
+multipart, logos, 413 y las 135 operaciones contractuales. Ese runtime se conserva
+sin cambios. El usuario pidió separar los avances pendientes: el diff de #116
+frente a master contiene exclusivamente `apps/api-gateway/`.
+
+Promotions, DATA, `package.json` y `package-lock.json` se restituyen a la base
+master indicada abajo. Los avances de #33/#70/#15/#112 quedan respaldados y se
+restauran como cambios locales sin publicar en `cueva`, sin otra rama ni otro PR.
+Por tanto, esta entrega no añade consumidor de cupones, probes de Promotions,
+datos comerciales ni ejecución de restauración. Los issues funcionales siguen
+abiertos y el PR permanece en draft, sin autorización de merge.
+
+Las validaciones anteriores del alcance ampliado se conservan como historia.
+La evidencia de la entrega separada se registra en
+`test/evidence/gateway-only-validation-2026-10-16.json`.
+
 ## Fuentes y base
 
 - Cueva: `68c96a77ab8c77b1f218d6283de7e1f4efa45e4f`.
@@ -80,11 +98,14 @@ reporta `NO_EJECUTADO`; no es un fallo funcional corregible quitando seguridad.
 
 ## Dependencias compartidas
 
-`package.json` y `package-lock.json` compartidos conservan exactamente los blobs
-de Cueva. El Gateway no necesita pg/Drizzle para hacer proxy HTTP. La propuesta
-para coordinar es **pg 8.23.1 + drizzle-orm 0.45.4 + @types/pg 8.23.1**, conservando
-**amqplib 0.10.9** de #33. No copiar el manifiesto de Castilla: omitiría amqplib y
-rompería el arranque/imports de Promotions.
+`package.json` y `package-lock.json` publicados coinciden exactamente con master
+`24227527c632be4f3b8de612954328904ea57de0`. El Gateway no necesita pg/Drizzle
+ni amqplib para hacer proxy HTTP. Las dependencias del avance de #33 se retiran
+de esta entrega junto con ese código.
+
+La propuesta experimental anterior fue **pg 8.23.1 + drizzle-orm 0.45.4 +
+@types/pg 8.23.1**, conservando **amqplib 0.10.9**. Sigue siendo una propuesta
+pendiente para otra entrega; no se adopta en #116.
 
 Las APIs utilizadas son Pool/connect/query/release/end y transacciones con un
 solo cliente; la documentación oficial de [node-postgres](https://node-postgres.com/apis/pool)
@@ -106,12 +127,11 @@ evidencia de validación.
 | Marco/owners          | Dependencias compartidas                           | Autorización expresa del manifiesto/lock y regresiones de cada owner.                                              |
 | Inventory/G5/Marco    | Evidencia funcional del cupón #33                  | Fuente autorizada para verificar reserva realmente confirmada y snapshot durable; 202 no es confirmación.          |
 
-#33 conserva el núcleo transaccional y el consumidor ya existentes, sin activarlos
-contra RabbitMQ compartido. Su integración operativa/probes/dispatcher quedan
-separados de esta consolidación. #71/#72/#75 conservan los gates BACK y se
-reutilizará ese núcleo; DATA #15/#112 conserva sus referencias/autorizaciones
-pendientes. No se atribuye implementación, homologación o despliegue por publicar
-este Gateway. No fusionar #116 ni cerrar issues automáticamente.
+El núcleo transaccional y el consumidor de #33, los avances de #70 y DATA
+#15/#112 no forman parte del contenido de integración de este PR. Permanecen
+en el trabajo local respaldado; sus dependencias siguen pendientes. #71/#72/#75
+conservan los gates BACK. No se atribuye implementación, homologación o despliegue
+por publicar este Gateway. No fusionar #116 ni cerrar issues automáticamente.
 
 Para desbloquear el adaptador de #33, Inventory/G5 deben publicar el mecanismo
 autorizado para resolver `reservation_id` junto con el pedido y comprobar su
@@ -122,9 +142,37 @@ inferencia. G5 debe definir la fuente verificable/versionada de
 incluyendo la información comercial necesaria para revalidar las reglas propias.
 No se inventa un endpoint, DTO, grant ni suscripción nueva para suplirlos.
 
-## Validaciones ejecutadas sobre la consolidación
+## Validaciones actuales de la entrega separada
 
-Instalación temporal con el lock exacto de Cueva: `npm ci --no-audit --no-fund`
+Copia limpia fuera de node_modules, con el package/lock exacto de master,
+Node 24.21.0 e instalación original conservada:
+
+| Comando | Resultado real |
+| --- | --- |
+| `npm ci --no-audit --no-fund` | PASS: 343 paquetes. |
+| `npm test -- apps/api-gateway --maxWorkers=1` | PASS: 59 unitarias Gateway. |
+| `npm run test:e2e -- apps/api-gateway --maxWorkers=1` | PASS: 312 HTTP; cuatro PostgreSQL NO EJECUTADOS. |
+| `npm test -- --maxWorkers=1` | PASS: 67 unitarias generales. |
+| `npm run test:e2e -- --maxWorkers=1` | PASS: 320 HTTP; los mismos cuatro PostgreSQL NO EJECUTADOS. |
+| `npm run typecheck`, `npm run lint`, `npm run format:check` | PASS. |
+| `npm run build`, `npm run build:all` | PASS. |
+| `node --test scripts/seed/run.test.mjs` | PASS: 14 pruebas del runner base. |
+| `node apps/api-gateway/test/readiness.smoke.mjs` | PASS: CLI compilada y proveedores HTTP aislados. |
+| Arranque compilado de Promotions base y `GET /health` | PASS: 200; sin código diferido ni dependencias directas pg/amqplib/Drizzle en esta entrega. |
+| `node apps/api-gateway/test/verify-consolidation.mjs` | PASS: 44 paths; runtime aprobado preservado, 135 operaciones y alcance exclusivo Gateway. |
+
+Detalle y hashes: `test/evidence/gateway-only-validation-2026-10-16.json`.
+Los cuatro escenarios PostgreSQL reales y el smoke externo Marketplace siguen
+pendientes de los proveedores/configuración autorizados. No se agregan mocks
+para suplirlos ni se relaja autenticación. Estos resultados no acreditan
+homologación, despliegue ni autorización de merge.
+
+## Validaciones históricas del alcance ampliado anterior
+
+Estos resultados corresponden al alcance anterior de `2797cdf`, que incluía
+Promotions y DATA. No son los resultados de la entrega actual separada.
+
+Instalación temporal con el lock anterior de Cueva: `npm ci --no-audit --no-fund`
 PASS, 362 paquetes. Se conserva el node_modules original. La primera ubicación
 dentro de node_modules se descartó porque las herramientas omitían lint y parte
 de la transformación; los checks siguientes se repitieron fuera de ese directorio,
