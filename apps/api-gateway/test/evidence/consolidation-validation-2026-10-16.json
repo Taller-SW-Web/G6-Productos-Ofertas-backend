@@ -1,0 +1,103 @@
+{
+  "captured_at": "2026-10-16T20:28:05.011Z",
+  "node": "v24.21.0",
+  "source_typescript_match_clean": true,
+  "clean_install": {
+    "command": "npm ci --no-audit --no-fund",
+    "exit_code": 0,
+    "packages_added": 362,
+    "versions": {
+      "pg": "8.16.3",
+      "amqplib": "0.10.9"
+    }
+  },
+  "checks": {
+    "focused_unit": {
+      "passed": 59
+    },
+    "focused_http": {
+      "passed": 312,
+      "not_executed_opt_in": 4
+    },
+    "clean_unit": {
+      "passed": 124
+    },
+    "clean_http": {
+      "passed": 324,
+      "not_executed_opt_in": 4
+    },
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "format": "PASS",
+    "build": "PASS",
+    "build_all": "PASS",
+    "gateway_readiness_smoke": "PASS_ISOLATED_HTTP",
+    "promotions_startup_smoke": "PASS_CONFIG_LIVENESS_ONLY",
+    "published_data_node_tests": {
+      "passed": 21
+    },
+    "marketplace_external": "NO_EJECUTADO_MISSING_CONFIGURATION"
+  },
+  "candidate_only": {
+    "adopted_in_shared_manifest": false,
+    "versions": {
+      "pg": "8.23.1",
+      "amqplib": "0.10.9",
+      "drizzle-orm": "0.45.4",
+      "@types/pg": "8.23.1"
+    },
+    "clean_install_packages_added": 364,
+    "unit_passed": 124,
+    "http_passed": 324,
+    "http_not_executed_opt_in": 4,
+    "typecheck": "PASS",
+    "build_all": "PASS",
+    "drizzle_pool_construction": "PASS_NO_CONNECTION",
+    "coupons_postgres_rabbit_smoke": {
+      "result": "PASS_DISPOSABLE_LOCAL_ONLY",
+      "scenarios": 10,
+      "postgres": "17.11",
+      "no_shared_writes": true
+    }
+  },
+  "source_sha256_lf": {
+    "apps/api-gateway/test/marketplace.e2e-spec.ts": "8207cf20a300ff3212264612bf8065bc624f72fb2ba64e2157f488eb4111ded2",
+    "apps/api-gateway/test/marketplace.live.mjs": "3df0a8957b9814535007dd74b6fc776ba375e6dc48b0400d5fbcf3af4eae65eb",
+    "apps/api-gateway/test/marketplace.postgres.e2e-spec.ts": "696dfa2d85a79b8db56a64143717a9351e9b08cdc7f5b97091a9e13175560787",
+    "apps/api-gateway/test/support/marketplace-runtime.spec.ts": "087aaf472245ea7fc89870ce5776a6b0227ff780a0ab71fe888f5d5d5d3852d4",
+    "apps/api-gateway/test/support/marketplace-runtime.ts": "c159ecedd1f7e878bb800936630baf77ea1ff7f4ecfc118fe610888fc66a4b2f",
+    "apps/api-gateway/test/verify-consolidation.mjs": "4d3aa656f368dd181a5c2b7cf95ce33b224d854d31c989477936c461adc6ba62",
+    "apps/api-gateway/src/api-gateway.controller.spec.ts": "d76bbc9d454e4032321c430d99039b6e3aaf877b6ed63ad4270a13b229ca7997",
+    "apps/api-gateway/src/api-gateway.controller.ts": "82e74d0aeea4a20bfaaced0ed9c1a15937b51546419bd8f952b36be5caff3121",
+    "apps/api-gateway/src/api-gateway.module.ts": "37bb2037cb148ad99db3f41a45db04782efceca667eb64bc39a6b4e1d007e60b",
+    "apps/api-gateway/src/api-gateway.service.ts": "75a68bd916cca4d2f7c02afa56a91592170d97178288939057a8d5d639adcc70",
+    "apps/api-gateway/src/main.ts": "7e5b5a3c954b769470bdfc2fd31e5bd677cf0a4bd956a3873cf350e759709489",
+    "apps/api-gateway/src/readiness.ts": "991638df755e19100c99db5df26536962fcad82b73ff606a33207efcff9e3b6f",
+    "apps/api-gateway/src/routing/bounded-response.ts": "2ed163a2bb8767574f71e194637750288e77020447e59ae491bea0aa36eba0fe",
+    "apps/api-gateway/src/routing/contract-route.ts": "c1b3ffdc7f7c1d61372e9e9363c97fbaf5358e0f986451f7cbfca74b86d15ea8",
+    "apps/api-gateway/src/routing/contract-routes.ts": "03ddf5e0d9a5fbb2aa75d29f2d4f16dbc843a12a85c71b221f1dd508588daff6",
+    "apps/api-gateway/src/routing/gateway-identity.spec.ts": "b837a2f16803f728ffad06ddcf8fc11f69d504354beccf1e9e9a3e4820db656f",
+    "apps/api-gateway/src/routing/gateway-identity.ts": "e7b9590b9a593f29cfd0477252080be2e50c72db609dc7b5da2f00f73cb0c2da",
+    "apps/api-gateway/src/routing/gateway-problem.spec.ts": "f5233bf191c96b8948f5e8501456455932b00513a8605e522f2c20ab0f3fdaa4",
+    "apps/api-gateway/src/routing/gateway-problem.ts": "3c5365920aac8cc00494f333e0f96798d803dd528bba9407f232a874a29f3318",
+    "apps/api-gateway/src/routing/gateway-proxy.controller.ts": "c31aca0996b1e227155722fe31e54258fe32ab2bb45f48e670c2aab13e83fd1c",
+    "apps/api-gateway/src/routing/gateway-proxy.ts": "e21c057dc27e3a5356293b396d979ebf6d58dccef928a3d3df82b31a3c576230",
+    "apps/api-gateway/src/routing/gateway-readiness.spec.ts": "cb7531063dffd68b020cc5149f0ad543588d814c47db9c9ea64016a25299aad0",
+    "apps/api-gateway/src/routing/gateway-readiness.ts": "44be50fb21f3782243a23ff0461698b0fba9851e796980b7971389492b6fec29",
+    "apps/api-gateway/src/routing/gateway-settings.spec.ts": "fe4acc8eb1ce62f7c1ecee16c8e1fd791b30d7d62f53253ef680ee708b848b6a",
+    "apps/api-gateway/src/routing/gateway-settings.ts": "9322547dee25845be803095678017dd722ac0d667b432926c119b76c60a94e92",
+    "apps/api-gateway/src/routing/streamed-request.ts": "86e48fa798fe9bd136e9a323d8e51dfd3e9c35a940738afbd6c9ecd6b1f04405",
+    "apps/api-gateway/src/routing/streamed-response.ts": "f27c7fd2aed0ae8511b82b93827845e76248bf514d2755d03178bc8e78d9adeb",
+    "apps/api-gateway/test/app.e2e-spec.ts": "8510ff5fbc93ce7b3f2d74dd62cf404333f510d91dc3dd487e3baca9ce475244",
+    "apps/api-gateway/test/generate-routes.mjs": "d1401117683c7fed7cdf262b4b9bd791d0d3b59490fb6f47c86ca0dbf7c00cfd",
+    "apps/api-gateway/test/readiness.smoke.mjs": "18892692adda7ec76197c5d7b6f7d200bd8267a3b0f822d428897cc97e8f156f",
+    "apps/api-gateway/test/routing.e2e-spec.ts": "32efc719f3c55243e39b3079ce9e92087c4c586072104fb3cf26ffc86b2b6461",
+    "apps/api-gateway/test/support/signed-identity.ts": "117f70aa13edebcd374ba0953a82980cd6ea2693ecde08b598c95219582047ca"
+  },
+  "limits": [
+    "Historical castilla database results are not new runs.",
+    "Four compiled-provider/PostgreSQL tests lack configured artifacts/env files and were not executed.",
+    "No G1 BFF, G7 effective grants, external homologation or deployment.",
+    "Current shared package.json/package-lock.json preserved; candidate dependency lock exists only in TEMP."
+  ]
+}
