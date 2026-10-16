@@ -108,7 +108,7 @@ validate_compose_files() {
   grep -Fq 'published: "3005"' <<< "$config" || fail 'Inventory dejó de conservar el puerto 3005'
   grep -Fq 'host_ip: 127.0.0.1' <<< "$config" || fail 'Inventory dejó de publicar solo en loopback'
   grep -Fq 'http://127.0.0.1:3005/health' <<< "$config" || fail 'Inventory dejó de verificar /health'
-  grep -Fq 'alias: inventory-svc' <<< "$config" || fail 'alias DNS de Inventory inesperado'
+  grep -Fq -- '- inventory-svc' <<< "$config" || fail 'alias DNS de Inventory inesperado'
 
   local required_var variable_name env_assignment
   local -a compose_env
