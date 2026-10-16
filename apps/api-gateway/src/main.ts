@@ -1,27 +1,12 @@
 import { NestFactory } from '@nestjs/core';
 import { ApiGatewayModule } from './api-gateway.module.js';
-import { readGatewayEnvironment } from './routing/gateway-settings.js';
-
-function resolvePort(): number {
-  const env = readGatewayEnvironment();
-  const rawPort = env.API_GATEWAY_PORT ?? env.PORT ?? '3000';
-  const port = Number(rawPort);
-  if (
-    !/^\d+$/.test(rawPort) ||
-    rawPort.trim() !== rawPort ||
-    !Number.isInteger(port) ||
-    port < 1 ||
-    port > 65535
-  ) {
-    throw new Error(
-      '[api-gateway] Puerto invalido. Debe ser un entero entre 1 y 65535.',
-    );
-  }
-  return port;
-}
+import {
+  readGatewayEnvironment,
+  readGatewayPort,
+} from './routing/gateway-settings.js';
 
 async function bootstrap() {
-  const port = resolvePort();
+  const port = readGatewayPort(readGatewayEnvironment());
   const app = await NestFactory.create(ApiGatewayModule, {
     bodyParser: false,
     logger: false,
