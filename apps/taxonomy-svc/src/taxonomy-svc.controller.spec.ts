@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TaxonomySvcController } from './taxonomy-svc.controller.js';
 import { TaxonomySvcService } from './taxonomy-svc.service.js';
+import { TAXONOMY_REPOSITORY } from './taxonomy.repository.js';
+import { UnconfiguredTaxonomyRepository } from './unconfigured-taxonomy.repository.js';
 
 describe('TaxonomySvcController', () => {
   let controller: TaxonomySvcController;
@@ -8,7 +10,13 @@ describe('TaxonomySvcController', () => {
   beforeEach(async () => {
     const app: TestingModule = await Test.createTestingModule({
       controllers: [TaxonomySvcController],
-      providers: [TaxonomySvcService],
+      providers: [
+        TaxonomySvcService,
+        {
+          provide: TAXONOMY_REPOSITORY,
+          useClass: UnconfiguredTaxonomyRepository,
+        },
+      ],
     }).compile();
 
     controller = app.get<TaxonomySvcController>(TaxonomySvcController);
