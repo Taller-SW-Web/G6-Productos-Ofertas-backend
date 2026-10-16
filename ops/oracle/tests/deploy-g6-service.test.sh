@@ -3,7 +3,6 @@ set -Eeuo pipefail
 
 readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 readonly TEMP_ROOT="$(mktemp -d)"
-trap 'rm -rf "$TEMP_ROOT"' EXIT
 readonly STAGED_OPS="${TEMP_ROOT}/opt/g6-productos-ofertas/lib"
 readonly MOCK_BIN="${TEMP_ROOT}/bin"
 readonly STATE_ROOT="${TEMP_ROOT}/var/lib"
@@ -16,6 +15,21 @@ readonly CATALOG_NEXT_IMAGE="ghcr.io/taller-sw-web/g6-productos-ofertas-backend/
 readonly OLD_INVENTORY_IMAGE="ghcr.io/taller-sw-web/g6-productos-ofertas-backend/inventory-svc:1111111111111111111111111111111111111111"
 readonly OLD_CATALOG_IMAGE="ghcr.io/taller-sw-web/g6-productos-ofertas-backend/catalog-svc:2222222222222222222222222222222222222222"
 readonly SOURCE_ENGINE="${REPO_ROOT}/ops/oracle/deploy-g6-service.sh"
+RUNTIME_NETWORK=''
+RUNTIME_PROJECTS=()
+
+cleanup_test() {
+  local project compose_file
+  if [[ -n "$RUNTIME_NETWORK" ]] && command -v docker >/dev/null 2>&1; then
+    for project in "${RUNTIME_PROJECTS[@]}"; do
+      compose_file="${TEMP_ROOT}/${project}.yml"
+      [[ -f "$compose_file" ]] && docker compose --project-name "$project" --file "$compose_file" down --timeout 0 >/dev/null 2>&1 || true
+    done
+    docker network rm "$RUNTIME_NETWORK" >/dev/null 2>&1 || true
+  fi
+  rm -rf "$TEMP_ROOT"
+}
+trap cleanup_test EXIT
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -52,9 +66,10 @@ sed -i \
   -e "s|/var/lib/g6-productos-ofertas|${STATE_ROOT}/g6-productos-ofertas|g" \
   -e "s|/etc/g6-|${TEMP_ROOT}/etc/g6-|g" \
   "$STAGED_OPS/services.psv"
-# Solo en esta copia de pruebas se habilita catalog-svc para simular dos
-# servicios registrados sin cambiar el estado de producción (que sigue cerrado).
+# Solo en esta copia de pruebas se habilitan catalog-svc y taxonomy-svc para
+# simular dos servicios genéricos sin cambiar el registro de producción.
 sed -i 's/^catalog-svc|false|/catalog-svc|true|/' "$STAGED_OPS/services.psv"
+sed -i 's/^taxonomy-svc|false|/taxonomy-svc|true|/' "$STAGED_OPS/services.psv"
 # Elimina esperas únicamente en la copia aislada que usa esta simulación.
 sed -i 's/sleep 2/: # espera omitida en simulación/g' "$STAGED_OPS/deploy-g6-service.sh"
 sed -i "s|/etc/g6-inventory/runtime.env|${TEMP_ROOT}/etc/g6-inventory/runtime.env|g" "$STAGED_OPS/deploy-g6-service.sh"
@@ -183,6 +198,11 @@ fi
 if [[ "${1:-}" == inspect ]]; then
   format="${3:-}"
   container="${4:-}"
+  if [[ "$format" == *'Config.Labels'*'com.docker.compose.service'* ]]; then
+    awk -F'|' -v container="$container" '$1 == container { print $3 "|" $4 }' \
+      "${ROOT}/network-members.tsv" 2>/dev/null || true
+    exit 0
+  fi
   if [[ "$format" == *'NetworkSettings.Networks'*'Aliases'* ]]; then
     awk -F'|' -v container="$container" '$1 == container { n = split($2, aliases, ","); for (i = 1; i <= n; i++) if (aliases[i] != "") print aliases[i] }' \
       "${ROOT}/network-members.tsv" 2>/dev/null || true
@@ -407,31 +427,49 @@ printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog
 run_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 1
 [[ ! -s "${TEMP_ROOT}/docker.log" ]] || fail 'se ejecutó Compose con IPAM u opciones no aprobadas'
 printf '%s\n' 'bridge|local|false|false|false|false|default|1|0' > "${TEMP_ROOT}/g6-http-config"
-printf '%s\n' 'g6-rabbitmq|rabbitmq' > "${TEMP_ROOT}/network-members.tsv"
+printf '%s\n' 'g6-rabbitmq|rabbitmq|rabbitmq|g6-rabbitmq' > "${TEMP_ROOT}/network-members.tsv"
 reset_simulation
 touch "${TEMP_ROOT}/g6-http-present"
 printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
 run_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 1
 [[ ! -s "${TEMP_ROOT}/docker.log" ]] || fail 'se ejecutó Compose con miembro no habilitado en g6-http'
-printf '%s\n' 'g6-inventory-svc|catalog-svc' > "${TEMP_ROOT}/network-members.tsv"
+printf '%s\n' 'g6-inventory-svc|catalog-svc,inventory-svc|inventory-svc|g6-inventory' > "${TEMP_ROOT}/network-members.tsv"
 reset_simulation
 touch "${TEMP_ROOT}/g6-http-present"
 printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
 run_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 1
 [[ ! -s "${TEMP_ROOT}/docker.log" ]] || fail 'se ejecutó Compose con alias del servicio objetivo ocupado'
-printf '%s\n' 'g6-inventory-svc|inventory-svc' 'g6-catalog-svc|inventory-svc' > "${TEMP_ROOT}/network-members.tsv"
+printf '%s\n' 'g6-inventory-svc|inventory-svc|inventory-svc|g6-inventory' 'g6-catalog-svc|inventory-svc|service|g6-catalog-svc' > "${TEMP_ROOT}/network-members.tsv"
 reset_simulation
 touch "${TEMP_ROOT}/g6-http-present"
 printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
 run_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 1
 [[ ! -s "${TEMP_ROOT}/docker.log" ]] || fail 'se ejecutó Compose con aliases duplicados entre miembros'
-printf '%s\n' 'g6-inventory-svc|wrong-alias' > "${TEMP_ROOT}/network-members.tsv"
+printf '%s\n' 'g6-catalog-svc|catalog-svc,service|service|g6-catalog-svc' 'g6-taxonomy-svc|taxonomy-svc,service|service|g6-taxonomy-svc' > "${TEMP_ROOT}/network-members.tsv"
+reset_simulation
+touch "${TEMP_ROOT}/g6-http-present"
+printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
+run_deploy "service-deploy catalog-svc ${IMAGE_SHA}" 3001 0
+printf 'PASS: dos servicios genéricos comparten solo el alias implícito service y conservan aliases canónicos únicos\n'
+printf '%s\n' 'g6-catalog-svc|catalog-svc,service|service|g6-catalog-svc' 'g6-taxonomy-svc|catalog-svc,service|service|g6-taxonomy-svc' > "${TEMP_ROOT}/network-members.tsv"
+reset_simulation
+touch "${TEMP_ROOT}/g6-http-present"
+printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
+run_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 1
+[[ ! -s "${TEMP_ROOT}/docker.log" ]] || fail 'se ejecutó Compose con alias canónico duplicado entre servicios'
+printf '%s\n' 'g6-inventory-svc|inventory-svc,service|inventory-svc|g6-inventory' 'g6-catalog-svc|catalog-svc,service|service|g6-catalog-svc' > "${TEMP_ROOT}/network-members.tsv"
+reset_simulation
+touch "${TEMP_ROOT}/g6-http-present"
+printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
+run_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 1
+[[ ! -s "${TEMP_ROOT}/docker.log" ]] || fail 'se ejecutó Compose al compartir service con un miembro no genérico'
+printf '%s\n' 'g6-inventory-svc|wrong-alias|inventory-svc|g6-inventory' > "${TEMP_ROOT}/network-members.tsv"
 reset_simulation
 touch "${TEMP_ROOT}/g6-http-present"
 printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
 run_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 1
 [[ ! -s "${TEMP_ROOT}/docker.log" ]] || fail 'se ejecutó Compose sin el alias canónico del miembro'
-printf '%s\n' 'g6-inventory-svc|inventory-svc' > "${TEMP_ROOT}/network-members.tsv"
+printf '%s\n' 'g6-inventory-svc|inventory-svc|inventory-svc|g6-inventory' > "${TEMP_ROOT}/network-members.tsv"
 reset_simulation
 touch "${TEMP_ROOT}/g6-http-present"
 printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
@@ -549,5 +587,105 @@ wait "$automatic_pid" || fail 'el segundo deploy de Inventario falló'
 assert_value "${STATE_ROOT}/g6-inventory/active-image" "$INVENTORY_IMAGE"
 assert_value "${STATE_ROOT}/g6-inventory/previous-image" "$INVENTORY_NEXT_IMAGE"
 printf 'PASS: wrapper manual y comando genérico automático comparten exclusión de Inventario\n'
+
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && docker info >/dev/null 2>&1 &&
+  docker image inspect inventory-svc:ci >/dev/null 2>&1; then
+  RUNTIME_PROJECT_CATALOG=g6-catalog-svc
+  RUNTIME_PROJECT_TAXONOMY=g6-taxonomy-svc
+  if docker inspect g6-catalog-svc >/dev/null 2>&1 || docker inspect g6-taxonomy-svc >/dev/null 2>&1 ||
+    [[ -n "$(docker ps -aq --filter label=com.docker.compose.project="$RUNTIME_PROJECT_CATALOG")" ]] ||
+    [[ -n "$(docker ps -aq --filter label=com.docker.compose.project="$RUNTIME_PROJECT_TAXONOMY")" ]] ||
+    docker network inspect "${RUNTIME_PROJECT_CATALOG}_default" >/dev/null 2>&1 ||
+    docker network inspect "${RUNTIME_PROJECT_TAXONOMY}_default" >/dev/null 2>&1; then
+    printf 'NO EJECUTADO: recursos Docker de los proyectos del registro ya existen; se evita tocarlos\n'
+  else
+    candidate_network="g6-h5-${BASHPID}"
+    if docker network inspect "$candidate_network" >/dev/null 2>&1; then
+      fail 'el nombre aleatorio de red de la prueba ya existe'
+    fi
+    docker network create --driver bridge "$candidate_network" >/dev/null
+    RUNTIME_NETWORK="$candidate_network"
+    RUNTIME_PROJECTS=("$RUNTIME_PROJECT_CATALOG" "$RUNTIME_PROJECT_TAXONOMY")
+
+    write_runtime_compose() {
+      local path="$1" container="$2" alias="$3"
+      cat > "$path" <<RUNTIME_COMPOSE
+services:
+  service:
+    image: inventory-svc:ci
+    container_name: ${container}
+    entrypoint: ["node", "-e"]
+    command: ["setInterval(() => {}, 1000)"]
+    networks:
+      http:
+        aliases:
+          - ${alias}
+networks:
+  http:
+    external: true
+    name: ${RUNTIME_NETWORK}
+RUNTIME_COMPOSE
+    }
+
+    write_runtime_compose "${TEMP_ROOT}/${RUNTIME_PROJECT_CATALOG}.yml" g6-catalog-svc catalog-svc
+    write_runtime_compose "${TEMP_ROOT}/${RUNTIME_PROJECT_TAXONOMY}.yml" g6-taxonomy-svc taxonomy-svc
+    docker compose --project-name "$RUNTIME_PROJECT_CATALOG" --file "${TEMP_ROOT}/${RUNTIME_PROJECT_CATALOG}.yml" up -d
+    docker compose --project-name "$RUNTIME_PROJECT_TAXONOMY" --file "${TEMP_ROOT}/${RUNTIME_PROJECT_TAXONOMY}.yml" up -d
+
+    aliases_template='{{range $name, $network := .NetworkSettings.Networks}}{{if eq $name "'
+    aliases_template+="${RUNTIME_NETWORK}"
+    aliases_template+='"}}{{range $network.Aliases}}{{println .}}{{end}}{{end}}{{end}}'
+    catalog_aliases="$(docker inspect --format "$aliases_template" g6-catalog-svc)"
+    taxonomy_aliases="$(docker inspect --format "$aliases_template" g6-taxonomy-svc)"
+    grep -Fxq service <<< "$catalog_aliases" || fail 'Docker Compose no registró el alias implícito service para catalog-svc'
+    grep -Fxq service <<< "$taxonomy_aliases" || fail 'Docker Compose no registró el alias implícito service para taxonomy-svc'
+    grep -Fxq catalog-svc <<< "$catalog_aliases" || fail 'alias Docker canónico catalog-svc ausente'
+    grep -Fxq taxonomy-svc <<< "$taxonomy_aliases" || fail 'alias Docker canónico taxonomy-svc ausente'
+    grep -Fxq taxonomy-svc <<< "$catalog_aliases" && fail 'taxonomy-svc colisionó con el alias canónico de catalog-svc'
+    grep -Fxq catalog-svc <<< "$taxonomy_aliases" && fail 'catalog-svc colisionó con el alias canónico de taxonomy-svc'
+    printf 'PASS: aliases reales Docker catalog-svc=[%s] taxonomy-svc=[%s]\n' \
+      "$(tr '\n' ' ' <<< "$catalog_aliases" | sed 's/[[:space:]]*$//')" \
+      "$(tr '\n' ' ' <<< "$taxonomy_aliases" | sed 's/[[:space:]]*$//')"
+
+    LIVE_ROOT="${TEMP_ROOT}/live"
+    mkdir -p "${LIVE_ROOT}/lib" "${LIVE_ROOT}/opt/g6-productos-ofertas/shared" \
+      "${LIVE_ROOT}/etc/g6-catalog-svc" "${LIVE_ROOT}/etc/g6-taxonomy-svc"
+    cp "${REPO_ROOT}/ops/oracle/service-registry.sh" "${LIVE_ROOT}/lib/service-registry.sh"
+    cp "${REPO_ROOT}/ops/oracle/services.psv" "${LIVE_ROOT}/lib/services.psv"
+    cp "$SOURCE_ENGINE" "${LIVE_ROOT}/lib/deploy-g6-service.sh"
+    sed -i \
+      -e 's/^catalog-svc|false|/catalog-svc|true|/' \
+      -e 's/^taxonomy-svc|false|/taxonomy-svc|true|/' \
+      -e "s|/opt/g6-productos-ofertas|${LIVE_ROOT}/opt/g6-productos-ofertas|g" \
+      -e "s|/var/lib/g6-productos-ofertas|${LIVE_ROOT}/var/lib/g6-productos-ofertas|g" \
+      -e "s|/etc/g6-|${LIVE_ROOT}/etc/g6-|g" \
+      "${LIVE_ROOT}/lib/service-registry.sh" "${LIVE_ROOT}/lib/services.psv"
+    sed -i \
+      -e "s|/opt/g6-productos-ofertas/shared/docker-compose.service.http.yml|${LIVE_ROOT}/opt/g6-productos-ofertas/shared/docker-compose.service.http.yml|g" \
+      -e "s|/opt/g6-productos-ofertas|${LIVE_ROOT}/opt/g6-productos-ofertas|g" \
+      -e "s|/var/lib/g6-productos-ofertas|${LIVE_ROOT}/var/lib/g6-productos-ofertas|g" \
+      -e "s|/etc/g6-|${LIVE_ROOT}/etc/g6-|g" \
+      -e "s|g6-http|${RUNTIME_NETWORK}|g" \
+      "${LIVE_ROOT}/lib/deploy-g6-service.sh"
+    touch "${LIVE_ROOT}/opt/g6-productos-ofertas/shared/docker-compose.service.yml" \
+      "${LIVE_ROOT}/etc/g6-catalog-svc/runtime.env" "${LIVE_ROOT}/etc/g6-taxonomy-svc/runtime.env"
+    mkdir -p "${LIVE_ROOT}/opt/g6-productos-ofertas/shared"
+    chmod +x "${LIVE_ROOT}/lib/deploy-g6-service.sh"
+    result=0
+    if printf '%s\n%s\n' 'simulation-only-user' 'simulation-only-token' |
+      env SSH_ORIGINAL_COMMAND="service-deploy catalog-svc ${IMAGE_SHA}" \
+        bash "${LIVE_ROOT}/lib/deploy-g6-service.sh" > "${TEMP_ROOT}/runtime-preflight.log" 2>&1; then
+      result=0
+    else
+      result=$?
+    fi
+    [[ "$result" == 1 ]] || fail "preflight Docker real terminó inesperadamente: $(<"${TEMP_ROOT}/runtime-preflight.log")"
+    grep -Fq 'la imagen actual no pertenece al servicio registrado' "${TEMP_ROOT}/runtime-preflight.log" ||
+      fail "preflight Docker no superó la validación de aliases: $(<"${TEMP_ROOT}/runtime-preflight.log")"
+    printf 'PASS: preflight real aceptó ambos miembros; se detuvo luego en el gate de imagen antes de login/pull/up\n'
+  fi
+else
+  printf 'NO EJECUTADO: Docker daemon e imagen inventory-svc:ci requeridos para verificar aliases runtime\n'
+fi
 
 printf 'Todas las simulaciones de despliegue genérico pasaron.\n'

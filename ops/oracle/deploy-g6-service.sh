@@ -51,11 +51,14 @@ IFS= read -r GHCR_TOKEN || fail 'falta token GHCR en stdin'
 [[ -n "$GHCR_USERNAME" && -n "$GHCR_TOKEN" ]] || fail 'credenciales GHCR vacías'
 
 g6_http_member_expected_alias() {
-  local requested_container="$1" service enabled
-  while IFS='|' read -r service enabled _; do
+  local requested_container="$1" service enabled project compose_unit
+  local member_kind
+  while IFS='|' read -r service enabled _ _ _ _ _ _ project compose_unit _ _ _; do
     [[ -n "$service" && "$service" != \#* ]] || continue
     if [[ "$enabled" == true && "g6-${service}" == "$requested_container" ]]; then
-      printf '%s\n' "$service"
+      member_kind=other
+      [[ "$compose_unit" == service && "$service" != inventory-svc ]] && member_kind=generic
+      printf '%s|%s|%s|%s\n' "$service" "$member_kind" "$project" "$compose_unit"
       return 0
     fi
   done < "$G6_SERVICE_REGISTRY"
@@ -63,9 +66,10 @@ g6_http_member_expected_alias() {
 }
 
 g6_validate_http_network() {
-  local target_alias="$1" target_container="$2" contract members member aliases alias previous expected_alias alias_found
+  local target_alias="$1" target_container="$2" contract members member aliases alias previous member_metadata expected_alias member_kind expected_project expected_compose_unit identity actual_project actual_compose_unit alias_found
   local driver scope internal attachable ingress config_only ipam_driver ipam_configs options_count
   local -A seen_aliases=()
+  local -A generic_members=()
 
   contract="$(docker network inspect --format \
     '{{.Driver}}|{{.Scope}}|{{.Internal}}|{{.Attachable}}|{{.Ingress}}|{{.ConfigOnly}}|{{.IPAM.Driver}}|{{len .IPAM.Config}}|{{len .Options}}' \
@@ -81,8 +85,16 @@ g6_validate_http_network() {
     g6-http 2>/dev/null)" || fail 'no se pudieron inspeccionar los miembros de g6-http; no se descargó ni cambió el servicio'
   while IFS= read -r member; do
     [[ -n "$member" ]] || continue
-    expected_alias="$(g6_http_member_expected_alias "$member")" ||
+    member_metadata="$(g6_http_member_expected_alias "$member")" ||
       fail "g6-http contiene un miembro no habilitado: ${member}; no se descargó ni cambió el servicio"
+    IFS='|' read -r expected_alias member_kind expected_project expected_compose_unit <<< "$member_metadata"
+    generic_members["$member"]="$member_kind"
+    identity="$(docker inspect --format \
+      '{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.project"}}' \
+      "$member" 2>/dev/null)" || fail "no se pudo identificar el proyecto Compose de ${member}; no se descargó ni cambió el servicio"
+    IFS='|' read -r actual_compose_unit actual_project <<< "$identity"
+    [[ "$actual_compose_unit" == "$expected_compose_unit" && "$actual_project" == "$expected_project" ]] ||
+      fail "g6-http contiene un miembro ajeno al proyecto Compose registrado: ${member}; no se descargó ni cambió el servicio"
     alias_found=false
     aliases="$(docker inspect --format \
       '{{range $name, $network := .NetworkSettings.Networks}}{{if eq $name "g6-http"}}{{range $network.Aliases}}{{.}}{{"\n"}}{{end}}{{end}}{{end}}' \
@@ -93,8 +105,10 @@ g6_validate_http_network() {
         fail "g6-http contiene un alias no reconocido en ${member}; no se descargó ni cambió el servicio"
       [[ "$alias" != "$expected_alias" ]] || alias_found=true
       previous="${seen_aliases[$alias]:-}"
-      [[ -z "$previous" || "$previous" == "$member" ]] ||
-        fail "g6-http tiene el alias ${alias} duplicado entre ${previous} y ${member}; no se descargó ni cambió el servicio"
+      if [[ -n "$previous" && "$previous" != "$member" ]]; then
+        [[ "$alias" == service && "$member_kind" == generic && "${generic_members[$previous]:-other}" == generic ]] ||
+          fail "g6-http tiene el alias ${alias} duplicado entre ${previous} y ${member}; no se descargó ni cambió el servicio"
+      fi
       seen_aliases["$alias"]="$member"
       if [[ "$alias" == "$target_alias" && "$member" != "$target_container" ]]; then
         fail "el alias ${target_alias} de g6-http ya pertenece a ${member}; no se descargó ni cambió el servicio"
