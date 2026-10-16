@@ -1,28 +1,38 @@
 -- =====================================================================
 -- Lote .......: 001_taxonomy_inka_athletics
 -- Marketplace : Inka Athletics (datos maestros de taxonomia)
--- Issue ......: [DATA-001] backend #11 (via Supabase MCP / SQL directo)
+-- Issue ......: [DATA-001] backend #11 (revision de auditoria de calidad de datos)
 -- Esquema ....: taxonomy
 -- Rama .......: lopez
 -- =====================================================================
--- PROPOSITO (revision de auditoria)
---   Reestructurar la jerarquia comercial del marketplace Inka Athletics:
---     * Renombrar las 3 categorias raiz a nombres comerciales limpios:
---         "Calzado deportivo"        -> "Calzado"
---         "Ropa deportiva"           -> "Ropa"
---         "Accesorios deportivos"    -> "Equipamiento y Accesorios"
---     * Agregar 6 subcategorias comerciales (nivel 2):
---         Calzado: Chimpunes / Futbol, Zapatillas Running,
---                  Zapatillas Entrenamiento
---         Ropa:    Camisetas y Tops, Shorts y Pantalones,
---                  Casacas y Polerones
---     * Completar tallas por uso: Calzado 38-43 y Ropa XS-XL
---       (mas las medidas de balon "5" y equipamiento "Talla Unica").
---     * Definir la paleta de colores comerciales: Negro, Blanco,
---       Azul Marino, Rojo, Gris, Verde Oliva.
---     * Agregar 3 marcas reales y el SEO de categoria.
---   Las subcategorias YA existentes (Futbol, Running, Entrenamiento,
---   Balones) se CONSERVAN; este lote solo agrega/renombra.
+-- PROPOSITO (revision 2026-10-16, auditoria de calidad de datos)
+--   Correcciones de coherencia comercial tras consultar el estado REAL de
+--   Supabase (taxonomy_dev_login, solo lectura). El lote:
+--     * Renombra las 3 categorias raiz a nombres comerciales limpios
+--       (MISMOS UUID, no cambia la identidad):
+--         "Calzado deportivo"     -> "Calzado"
+--         "Ropa deportiva"        -> "Ropa"
+--         "Accesorios deportivos" -> "Equipamiento y Accesorios"
+--     * REUTILIZA las subcategorias existentes "Futbol" y "Running"
+--       (nivel 2 bajo Calzado) en lugar de crear duplicados.
+--     * Agrega 3 marcas reales: Marathon, Under Armour, Walon.
+--     * Completa tallas comerciales por uso: Calzado 38-43 y Ropa XS-XL
+--       (mas la medida de balon "5" y equipamiento "Talla Unica").
+--     * Agrega el SEO de las 3 categorias raiz.
+--
+--   NO se agregan subcategorias especulativas y NO se altera el color
+--   existente "Azul". El detalle se documenta en "PENDIENTES".
+--
+-- PENDIENTES / FUERA DE ALCANCE (requieren confirmacion externa)
+--   * Subcategorias de familia (Camisetas y Tops, Shorts y Pantalones,
+--     Casacas y Polerones, Zapatillas Entrenamiento): NO se crean hasta
+--     que Catalogo (owner Poma) confirme productos reales en esas
+--     familias. Evita categorias que solo rellenen tablas.
+--   * Color: el valor existente "Azul" ya lo referencia un producto real
+--     (adidas Entrada 22). NO se renombra a "Azul Marino" ni se agregan
+--     colores nuevos hasta identificar el tono real de nuestra variante.
+--   Estos candidatos se listan como "pendientes_de_confirmacion" en la
+--   matriz/manifest, SIN estado en la base.
 --
 -- IDEMPOTENCIA CON VERIFICACION DE CONTENIDO
 --   1) Primero un bloque de VERIFICACION que compara, para cada fila
@@ -30,8 +40,8 @@
 --      existe pero su contenido difiere -> RAISE EXCEPTION y se detiene
 --      la carga (no se sobrescribe nada inesperado).
 --   2) RENOMBRES controlados (UPDATE ... WHERE nombre = <viejo>): solo
---      actuan sobre las raices y el color "Azul" previstos y son
---      no-op si el renombre ya se aplico (reejecucion idempotente).
+--      actuan sobre las 3 raices previstas y son no-op si el renombre ya
+--      se aplico (reejecucion idempotente).
 --   3) INSERT ... ON CONFLICT DO NOTHING para las filas nuevas.
 --   4) Al final una verificacion de existencia de todas las filas.
 --   Ejecutar SIEMPRE dentro de una transaccion explicita para que
@@ -54,8 +64,7 @@
 --   Poma (owner de dataset.json). Sin cambios unilaterales.
 --
 -- ORDEN DE EJECUCION
---   1) renombres  2) categories  3) brands
---   4) characteristic_values  5) category_seo
+--   1) renombres  2) brands  3) characteristic_values  4) category_seo
 --
 -- EJECUCION (fuera del archivo; controla el operador/MCP):
 --   BEGIN;
@@ -69,10 +78,9 @@
 -- 0) VERIFICACION PREVIA (guardas de conflicto; no escriben nada)
 -- =====================================================================
 
--- 0.1) Raices de nivel 1 requeridas por las subcategorias: deben existir
---      ACTIVAS y de nivel 1, y su nombre debe ser el viejo (a renombrar)
---      o el nuevo (reejecucion). Ademas el nombre destino no debe estar
---      ya en uso por otra raiz.
+-- 0.1) Raices de nivel 1 requeridas: deben existir ACTIVAS y de nivel 1,
+--      y su nombre debe ser el viejo (a renombrar) o el nuevo (reejecucion).
+--      Ademas el nombre destino no debe estar ya en uso por otra raiz.
 DO $$
 DECLARE v_issues text;
 BEGIN
@@ -114,34 +122,34 @@ BEGIN
     END IF;
 END $$;
 
--- 0.2) categorias nuevas: conflicto si el id existe con otro contenido, o
---      si ya existe una fila con el mismo (nombre, padre) pero distinto id.
+-- 0.2) Subcategorias REUTILIZADAS: "Futbol" y "Running" deben existir
+--      ACTIVAS, de nivel 2, bajo la raiz Calzado. Ademas se verifica que
+--      NO existan subcategorias duplicadas de esas familias (evita crear
+--      categorias repetidas o con productos separados incorrectamente).
 DO $$
-DECLARE v_conflicts text;
+DECLARE v_issues text;
 BEGIN
-    WITH e(id, nombre, padre) AS (VALUES
-        ('59da00cd-e66b-50fc-bfd9-1f3b3deb1a07'::uuid, 'Chimpunes / Fútbol',          'cd8aa953-eafd-ce4e-628b-4988ebbcded4'::uuid),
-        ('3592c4c4-a619-593b-9cd6-98c38488143c'::uuid, 'Zapatillas Running',           'cd8aa953-eafd-ce4e-628b-4988ebbcded4'::uuid),
-        ('b8996ca5-6002-5dfd-95d2-6a85e8bf4604'::uuid, 'Zapatillas Entrenamiento',     'cd8aa953-eafd-ce4e-628b-4988ebbcded4'::uuid),
-        ('09a4fc9d-1f1c-5e13-afb5-96e2c7a4b091'::uuid, 'Camisetas y Tops',             '3523cb0c-0f00-27dd-d300-2daffdaf285a'::uuid),
-        ('060744ba-c68f-58ad-ae06-cb3832208d96'::uuid, 'Shorts y Pantalones',          '3523cb0c-0f00-27dd-d300-2daffdaf285a'::uuid),
-        ('413bb36e-e5c4-540f-8274-24e2504407f1'::uuid, 'Casacas y Polerones',          '3523cb0c-0f00-27dd-d300-2daffdaf285a'::uuid)
-    )
-    SELECT string_agg(conflict, E'\n') INTO v_conflicts FROM (
-        SELECT format('categories: id=%s existe con nombre=%L padre=%s (esperado nombre=%L padre=%s)',
-                      c.id, c.nombre, c.categoria_padre_id, e.nombre, e.padre) AS conflict
-        FROM e JOIN taxonomy.categories c ON c.id = e.id
-        WHERE c.nombre <> e.nombre OR c.categoria_padre_id IS DISTINCT FROM e.padre
+    SELECT string_agg(issue, E'\n') INTO v_issues FROM (
+        SELECT format('categories reutilizadas: falta/estado/padre/nivel incorrecto id=%s nombre=%L',
+                      r.id, r.nombre) AS issue
+        FROM (VALUES
+            ('dbd02734-85f5-b47b-5c95-ee768d5dc875'::uuid, 'Fútbol'),
+            ('303886ae-f3f0-bc9c-145a-660979597595'::uuid, 'Running')
+        ) AS r(id, nombre)
+        WHERE NOT EXISTS (
+            SELECT 1 FROM taxonomy.categories c
+            WHERE c.id = r.id AND c.nivel = 2 AND c.estado = 'ACTIVO'
+              AND c.categoria_padre_id = 'cd8aa953-eafd-ce4e-628b-4988ebbcded4'::uuid
+              AND lower(btrim(c.nombre)) = lower(btrim(r.nombre))
+        )
         UNION ALL
-        SELECT format('categories: ya existe nombre=%L padre=%s con id=%s (esperado id=%s)',
-                      e.nombre, e.padre, c.id, e.id)
-        FROM e JOIN taxonomy.categories c
-          ON lower(btrim(c.nombre)) = lower(btrim(e.nombre))
-         AND c.categoria_padre_id IS NOT DISTINCT FROM e.padre
-        WHERE c.id <> e.id
+        SELECT format('categories duplicadas: ya existe nombre=%L id=%s (debe reutilizarse la existente)',
+                      d.nombre, c.id)
+        FROM (VALUES ('Chimpunes / Fútbol'), ('Zapatillas Running')) AS d(nombre)
+        JOIN taxonomy.categories c ON lower(btrim(c.nombre)) = lower(btrim(d.nombre))
     ) x;
-    IF v_conflicts IS NOT NULL THEN
-        RAISE EXCEPTION E'CONFLICTO DE LOTE (categories):\n%', v_conflicts;
+    IF v_issues IS NOT NULL THEN
+        RAISE EXCEPTION E'CONFLICTO DE LOTE (categorias reutilizadas):\n%', v_issues;
     END IF;
 END $$;
 
@@ -214,61 +222,40 @@ BEGIN
     END IF;
 END $$;
 
--- 0.5) valores de caracteristica "Color": clave natural (caracteristica_id, nombre).
---      El color existente "Azul" se renombra a "Azul Marino" (mismo UUID):
---      se acepta el nombre viejo o el nuevo. Se agregan Blanco, Rojo y
---      Verde Oliva para completar la paleta comercial.
+-- 0.5) Color: se CONSERVA el estado existente. El valor "Azul" NO se
+--      renombra (lo referencia un producto real) y no se agregan colores
+--      nuevos. Solo se verifica que Azul, Gris y Negro existan ACTIVOS.
 DO $$
-DECLARE v_conflicts text;
+DECLARE v_issues text;
 BEGIN
-    WITH e(id, nombre, nombre_alt) AS (VALUES
-        ('931a4c7d-03d4-1ae2-bc95-817315fafcd6'::uuid, 'Azul Marino', 'Azul'),
-        ('50347024-7af0-2f6b-03fd-f5bbd3f408cf'::uuid, 'Gris',        NULL),
-        ('61174517-27e1-1c5f-253b-4f6f2daa8b3f'::uuid, 'Negro',       NULL),
-        ('c0b1a113-b479-5f84-9fa3-0e6cb3a41fea'::uuid, 'Blanco',      NULL),
-        ('c76ce899-4df1-56a8-918f-b41903ba83e5'::uuid, 'Rojo',        NULL),
-        ('8b1a6420-8e61-5f16-94b6-9a70fe308163'::uuid, 'Verde Oliva', NULL)
-    )
-    SELECT string_agg(conflict, E'\n') INTO v_conflicts FROM (
-        SELECT format('characteristic_values(Color): (%L) existe con id=%s estado=%s (esperado id=%s ACTIVO)',
-                      e.nombre, cv.id, cv.estado, e.id) AS conflict
-        FROM e JOIN taxonomy.characteristic_values cv
-          ON cv.caracteristica_id = 'acee6db1-ba1c-f020-caf8-f439b09556ff'::uuid
-         AND cv.nombre = e.nombre
-        WHERE cv.id <> e.id OR cv.estado <> 'ACTIVO'
-        UNION ALL
-        SELECT format('characteristic_values(Color): id=%s ya usado por (%L) (esperado %L)',
-                      cv.id, cv.nombre, e.nombre)
-        FROM e JOIN taxonomy.characteristic_values cv ON cv.id = e.id
-        WHERE cv.caracteristica_id <> 'acee6db1-ba1c-f020-caf8-f439b09556ff'::uuid
-           OR (cv.nombre <> e.nombre AND (e.nombre_alt IS NULL OR cv.nombre <> e.nombre_alt))
-        UNION ALL
-        SELECT format('characteristic_values(Color): el nombre destino %L ya lo usa id=%s',
-                      e.nombre, o.id)
-        FROM e JOIN taxonomy.characteristic_values o
-          ON o.id <> e.id
-         AND o.caracteristica_id = 'acee6db1-ba1c-f020-caf8-f439b09556ff'::uuid
-         AND o.nombre = e.nombre
+    SELECT string_agg(issue, E'\n') INTO v_issues FROM (
+        SELECT format('characteristic_values(Color): falta/estado/nombre incorrecto id=%s esperado %L',
+                      e.id, e.nombre) AS issue
+        FROM (VALUES
+            ('931a4c7d-03d4-1ae2-bc95-817315fafcd6'::uuid, 'Azul'),
+            ('50347024-7af0-2f6b-03fd-f5bbd3f408cf'::uuid, 'Gris'),
+            ('61174517-27e1-1c5f-253b-4f6f2daa8b3f'::uuid, 'Negro')
+        ) AS e(id, nombre)
+        WHERE NOT EXISTS (
+            SELECT 1 FROM taxonomy.characteristic_values cv
+            WHERE cv.id = e.id
+              AND cv.caracteristica_id = 'acee6db1-ba1c-f020-caf8-f439b09556ff'::uuid
+              AND cv.nombre = e.nombre AND cv.estado = 'ACTIVO'
+        )
     ) x;
-    IF v_conflicts IS NOT NULL THEN
-        RAISE EXCEPTION E'CONFLICTO DE LOTE (characteristic_values Color):\n%', v_conflicts;
+    IF v_issues IS NOT NULL THEN
+        RAISE EXCEPTION E'CONFLICTO DE LOTE (color existente):\n%', v_issues;
     END IF;
 END $$;
 
--- 0.6) SEO de categoria: claves naturales slug y categoria_id.
+-- 0.6) SEO de categoria (3 categorias raiz): claves naturales slug y categoria_id.
 DO $$
 DECLARE v_conflicts text;
 BEGIN
     WITH e(id, categoria_id, slug) AS (VALUES
         ('916527ee-9a8a-590a-af25-69a7d4cf7710'::uuid, 'cd8aa953-eafd-ce4e-628b-4988ebbcded4'::uuid, 'calzado'),
         ('087aaf9a-5d4f-5316-b735-6f49bc9a6087'::uuid, '3523cb0c-0f00-27dd-d300-2daffdaf285a'::uuid, 'ropa'),
-        ('f5901f8f-8cac-5a25-be31-56d8dc5927e5'::uuid, '49a1dbd0-666d-0d43-6d1e-1053d4564455'::uuid, 'equipamiento-y-accesorios'),
-        ('b8066156-5cc4-5ed5-8355-d666c937a651'::uuid, '59da00cd-e66b-50fc-bfd9-1f3b3deb1a07'::uuid, 'chimpunes-futbol'),
-        ('1f6561b4-cdb7-512c-a6b4-da044a94a579'::uuid, '3592c4c4-a619-593b-9cd6-98c38488143c'::uuid, 'zapatillas-running'),
-        ('b0a69119-0df0-5348-b955-b29192b67f9b'::uuid, 'b8996ca5-6002-5dfd-95d2-6a85e8bf4604'::uuid, 'zapatillas-entrenamiento'),
-        ('40d6a503-9524-51f2-9115-c89e99437974'::uuid, '09a4fc9d-1f1c-5e13-afb5-96e2c7a4b091'::uuid, 'camisetas-y-tops'),
-        ('b5cff3db-8834-5f29-8ac2-6e404ca26636'::uuid, '060744ba-c68f-58ad-ae06-cb3832208d96'::uuid, 'shorts-y-pantalones'),
-        ('f6fd4bc0-eb57-59b6-9da0-192e663ff2e6'::uuid, '413bb36e-e5c4-540f-8274-24e2504407f1'::uuid, 'casacas-y-polerones')
+        ('f5901f8f-8cac-5a25-be31-56d8dc5927e5'::uuid, '49a1dbd0-666d-0d43-6d1e-1053d4564455'::uuid, 'equipamiento-y-accesorios')
     )
     SELECT string_agg(conflict, E'\n') INTO v_conflicts FROM (
         SELECT format('category_seo: slug=%L existe con id=%s categoria=%s (esperado id=%s categoria=%s)',
@@ -290,7 +277,8 @@ END $$;
 
 
 -- =====================================================================
--- 1) RENOMBRES COMERCIALES (mismos UUID; no-op si ya se aplicaron)
+-- 1) RENOMBRES COMERCIALES DE LAS RAICES (mismos UUID; no-op si ya
+--    se aplicaron). No se renombra ningun color.
 -- =====================================================================
 UPDATE taxonomy.categories SET nombre = 'Equipamiento y Accesorios'
  WHERE id = '49a1dbd0-666d-0d43-6d1e-1053d4564455' AND nombre = 'Accesorios deportivos';
@@ -301,42 +289,9 @@ UPDATE taxonomy.categories SET nombre = 'Calzado'
 UPDATE taxonomy.categories SET nombre = 'Ropa'
  WHERE id = '3523cb0c-0f00-27dd-d300-2daffdaf285a' AND nombre = 'Ropa deportiva';
 
-UPDATE taxonomy.characteristic_values SET nombre = 'Azul Marino'
- WHERE id = '931a4c7d-03d4-1ae2-bc95-817315fafcd6' AND nombre = 'Azul';
-
 
 -- =====================================================================
--- 2) CATEGORIAS  (6 subcategorias comerciales, nivel 2)
---    Calzado: Chimpunes / Futbol, Zapatillas Running,
---             Zapatillas Entrenamiento
---    Ropa:    Camisetas y Tops, Shorts y Pantalones, Casacas y Polerones
--- =====================================================================
-INSERT INTO taxonomy.categories
-    (id, nombre, descripcion, categoria_padre_id, nivel, orden, estado, taxonomy_version)
-VALUES
-    ('59da00cd-e66b-50fc-bfd9-1f3b3deb1a07', 'Chimpunes / Fútbol',
-     'Calzado de fútbol para césped, sintético y futsal; agarre y control en cada jugada.',
-     'cd8aa953-eafd-ce4e-628b-4988ebbcded4', 2, 0, 'ACTIVO', 0),
-    ('3592c4c4-a619-593b-9cd6-98c38488143c', 'Zapatillas Running',
-     'Zapatillas ligeras y amortiguadas para entrenamiento y competencia de running.',
-     'cd8aa953-eafd-ce4e-628b-4988ebbcded4', 2, 1, 'ACTIVO', 0),
-    ('b8996ca5-6002-5dfd-95d2-6a85e8bf4604', 'Zapatillas Entrenamiento',
-     'Zapatillas versátiles para gym, cross-training y uso diario.',
-     'cd8aa953-eafd-ce4e-628b-4988ebbcded4', 2, 2, 'ACTIVO', 0),
-    ('09a4fc9d-1f1c-5e13-afb5-96e2c7a4b091', 'Camisetas y Tops',
-     'Camisetas, tops y polos deportivos de secado rápido.',
-     '3523cb0c-0f00-27dd-d300-2daffdaf285a', 2, 0, 'ACTIVO', 0),
-    ('060744ba-c68f-58ad-ae06-cb3832208d96', 'Shorts y Pantalones',
-     'Shorts, leggings y pantalones deportivos para entrenar con libertad.',
-     '3523cb0c-0f00-27dd-d300-2daffdaf285a', 2, 1, 'ACTIVO', 0),
-    ('413bb36e-e5c4-540f-8274-24e2504407f1', 'Casacas y Polerones',
-     'Casacas, polerones y buzos para abrigo y calentamiento.',
-     '3523cb0c-0f00-27dd-d300-2daffdaf285a', 2, 2, 'ACTIVO', 0)
-ON CONFLICT DO NOTHING;
-
-
--- =====================================================================
--- 3) MARCAS  (3 marcas reales)
+-- 2) MARCAS  (3 marcas reales)
 -- =====================================================================
 INSERT INTO taxonomy.brands
     (id, nombre, descripcion, pais_origen_iso, estado, taxonomy_version)
@@ -351,7 +306,7 @@ ON CONFLICT DO NOTHING;
 
 
 -- =====================================================================
--- 4) VALORES DE CARACTERISTICA "Talla" (tipo LISTA)
+-- 3) VALORES DE CARACTERISTICA "Talla" (tipo LISTA)
 --    Calzado: 38-43  |  Ropa: XS, S, M, L, XL
 --    Balon: "5"      |  Equipamiento: "Talla Unica"
 --    Solo se insertan los valores NUEVOS; los existentes (38,39,41,42,5,M)
@@ -371,58 +326,25 @@ ON CONFLICT DO NOTHING;
 
 
 -- =====================================================================
--- 5) VALORES DE CARACTERISTICA "Color" (tipo LISTA)
---    Paleta comercial: Negro, Blanco, Azul Marino, Rojo, Gris, Verde Oliva.
---    "Azul" (existente) se renombra a "Azul Marino" en la seccion 1.
---    Solo se insertan los valores NUEVOS; Gris y Negro se verifican en 0.5.
--- =====================================================================
-INSERT INTO taxonomy.characteristic_values
-    (id, caracteristica_id, nombre, estado, taxonomy_version)
-VALUES
-    ('c0b1a113-b479-5f84-9fa3-0e6cb3a41fea', 'acee6db1-ba1c-f020-caf8-f439b09556ff', 'Blanco', 'ACTIVO', 0),
-    ('c76ce899-4df1-56a8-918f-b41903ba83e5', 'acee6db1-ba1c-f020-caf8-f439b09556ff', 'Rojo', 'ACTIVO', 0),
-    ('8b1a6420-8e61-5f16-94b6-9a70fe308163', 'acee6db1-ba1c-f020-caf8-f439b09556ff', 'Verde Oliva', 'ACTIVO', 0)
-ON CONFLICT DO NOTHING;
-
-
--- =====================================================================
--- 6) SEO DE CATEGORIA (3 categorias raiz + 6 subcategorias comerciales)
+-- 4) SEO DE CATEGORIA (3 categorias raiz renombradas)
 -- =====================================================================
 INSERT INTO taxonomy.category_seo
     (id, categoria_id, slug, meta_titulo, meta_descripcion, taxonomy_version)
 VALUES
     ('916527ee-9a8a-590a-af25-69a7d4cf7710', 'cd8aa953-eafd-ce4e-628b-4988ebbcded4',
      'calzado', 'Calzado | Inka Athletics',
-     'Calzado deportivo: chimpunes, zapatillas de running y entrenamiento.', 0),
+     'Calzado deportivo: chimpunes, zapatillas de running y de entrenamiento.', 0),
     ('087aaf9a-5d4f-5316-b735-6f49bc9a6087', '3523cb0c-0f00-27dd-d300-2daffdaf285a',
      'ropa', 'Ropa | Inka Athletics',
-     'Camisetas, tops, shorts, pantalones, casacas y polerones deportivos.', 0),
+     'Ropa deportiva para entrenamiento y competencia.', 0),
     ('f5901f8f-8cac-5a25-be31-56d8dc5927e5', '49a1dbd0-666d-0d43-6d1e-1053d4564455',
      'equipamiento-y-accesorios', 'Equipamiento y Accesorios | Inka Athletics',
-     'Equipamiento y accesorios para entrenamiento y competencia.', 0),
-    ('b8066156-5cc4-5ed5-8355-d666c937a651', '59da00cd-e66b-50fc-bfd9-1f3b3deb1a07',
-     'chimpunes-futbol', 'Chimpunes y Fútbol | Inka Athletics',
-     'Chimpunes y calzado de fútbol para césped, sintético y futsal.', 0),
-    ('1f6561b4-cdb7-512c-a6b4-da044a94a579', '3592c4c4-a619-593b-9cd6-98c38488143c',
-     'zapatillas-running', 'Zapatillas Running | Inka Athletics',
-     'Zapatillas para running: ligereza, amortiguación y tracción.', 0),
-    ('b0a69119-0df0-5348-b955-b29192b67f9b', 'b8996ca5-6002-5dfd-95d2-6a85e8bf4604',
-     'zapatillas-entrenamiento', 'Zapatillas Entrenamiento | Inka Athletics',
-     'Zapatillas para gym, cross-training y uso diario.', 0),
-    ('40d6a503-9524-51f2-9115-c89e99437974', '09a4fc9d-1f1c-5e13-afb5-96e2c7a4b091',
-     'camisetas-y-tops', 'Camisetas y Tops | Inka Athletics',
-     'Camisetas, tops y polos deportivos.', 0),
-    ('b5cff3db-8834-5f29-8ac2-6e404ca26636', '060744ba-c68f-58ad-ae06-cb3832208d96',
-     'shorts-y-pantalones', 'Shorts y Pantalones | Inka Athletics',
-     'Shorts, leggings y pantalones deportivos.', 0),
-    ('f6fd4bc0-eb57-59b6-9da0-192e663ff2e6', '413bb36e-e5c4-540f-8274-24e2504407f1',
-     'casacas-y-polerones', 'Casacas y Polerones | Inka Athletics',
-     'Casacas, polerones y buzos deportivos.', 0)
+     'Balones, equipo y accesorios para entrenamiento y competencia.', 0)
 ON CONFLICT DO NOTHING;
 
 
 -- =====================================================================
--- 7) VERIFICACION POSTERIOR (existencia y coincidencia de todas las filas)
+-- 5) VERIFICACION POSTERIOR (existencia y coincidencia de todas las filas)
 -- =====================================================================
 DO $$
 DECLARE v_issues text;
@@ -440,17 +362,16 @@ BEGIN
             WHERE c.id = r.id AND c.nombre = r.nombre AND c.nivel = 1 AND c.estado = 'ACTIVO'
         )
         UNION ALL
-        -- subcategorias nuevas
-        SELECT format('categories: falta o no coincide id=%s', e.id)
+        -- subcategorias reutilizadas
+        SELECT format('categories reutilizadas: falta o no coincide id=%s', r.id)
         FROM (VALUES
-            ('59da00cd-e66b-50fc-bfd9-1f3b3deb1a07'::uuid, 'Chimpunes / Fútbol'),
-            ('3592c4c4-a619-593b-9cd6-98c38488143c'::uuid, 'Zapatillas Running'),
-            ('b8996ca5-6002-5dfd-95d2-6a85e8bf4604'::uuid, 'Zapatillas Entrenamiento'),
-            ('09a4fc9d-1f1c-5e13-afb5-96e2c7a4b091'::uuid, 'Camisetas y Tops'),
-            ('060744ba-c68f-58ad-ae06-cb3832208d96'::uuid, 'Shorts y Pantalones'),
-            ('413bb36e-e5c4-540f-8274-24e2504407f1'::uuid, 'Casacas y Polerones')
-        ) AS e(id, nombre)
-        WHERE NOT EXISTS (SELECT 1 FROM taxonomy.categories c WHERE c.id = e.id AND c.nombre = e.nombre AND c.nivel = 2 AND c.estado = 'ACTIVO')
+            ('dbd02734-85f5-b47b-5c95-ee768d5dc875'::uuid, 'Fútbol'),
+            ('303886ae-f3f0-bc9c-145a-660979597595'::uuid, 'Running')
+        ) AS r(id, nombre)
+        WHERE NOT EXISTS (
+            SELECT 1 FROM taxonomy.categories c
+            WHERE c.id = r.id AND c.nombre = r.nombre AND c.nivel = 2 AND c.estado = 'ACTIVO'
+        )
         UNION ALL
         -- marcas
         SELECT format('brands: falta o no coincide id=%s', e.id)
@@ -461,7 +382,7 @@ BEGIN
         ) AS e(id, nombre)
         WHERE NOT EXISTS (SELECT 1 FROM taxonomy.brands b WHERE b.id = e.id AND b.nombre = e.nombre AND b.estado = 'ACTIVO')
         UNION ALL
-        -- tallas nuevas y existentes
+        -- tallas nuevas (las existentes se verifican en 0.4)
         SELECT format('characteristic_values: falta o no coincide id=%s', e.id)
         FROM (VALUES
             ('c90f8581-0fe2-5fd4-b08c-8b5d3f616399'::uuid, '40'),
@@ -474,28 +395,12 @@ BEGIN
         ) AS e(id, nombre)
         WHERE NOT EXISTS (SELECT 1 FROM taxonomy.characteristic_values cv WHERE cv.id = e.id AND cv.nombre = e.nombre AND cv.estado = 'ACTIVO')
         UNION ALL
-        -- colores (incluye el renombre Azul -> Azul Marino)
-        SELECT format('characteristic_values(Color): falta o no coincide id=%s', e.id)
-        FROM (VALUES
-            ('931a4c7d-03d4-1ae2-bc95-817315fafcd6'::uuid, 'Azul Marino'),
-            ('c0b1a113-b479-5f84-9fa3-0e6cb3a41fea'::uuid, 'Blanco'),
-            ('c76ce899-4df1-56a8-918f-b41903ba83e5'::uuid, 'Rojo'),
-            ('8b1a6420-8e61-5f16-94b6-9a70fe308163'::uuid, 'Verde Oliva')
-        ) AS e(id, nombre)
-        WHERE NOT EXISTS (SELECT 1 FROM taxonomy.characteristic_values cv WHERE cv.id = e.id AND cv.nombre = e.nombre AND cv.estado = 'ACTIVO')
-        UNION ALL
         -- seo
         SELECT format('category_seo: falta o no coincide id=%s', e.id)
         FROM (VALUES
             ('916527ee-9a8a-590a-af25-69a7d4cf7710'::uuid),
             ('087aaf9a-5d4f-5316-b735-6f49bc9a6087'::uuid),
-            ('f5901f8f-8cac-5a25-be31-56d8dc5927e5'::uuid),
-            ('b8066156-5cc4-5ed5-8355-d666c937a651'::uuid),
-            ('1f6561b4-cdb7-512c-a6b4-da044a94a579'::uuid),
-            ('b0a69119-0df0-5348-b955-b29192b67f9b'::uuid),
-            ('40d6a503-9524-51f2-9115-c89e99437974'::uuid),
-            ('b5cff3db-8834-5f29-8ac2-6e404ca26636'::uuid),
-            ('f6fd4bc0-eb57-59b6-9da0-192e663ff2e6'::uuid)
+            ('f5901f8f-8cac-5a25-be31-56d8dc5927e5'::uuid)
         ) AS e(id)
         WHERE NOT EXISTS (SELECT 1 FROM taxonomy.category_seo s WHERE s.id = e.id)
     ) x;

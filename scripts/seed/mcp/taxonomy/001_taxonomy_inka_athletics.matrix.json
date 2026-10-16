@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "matrix_version": "1.1.0",
+  "matrix_version": "1.2.0",
   "lote": "001_taxonomy_inka_athletics",
   "marketplace": "Inka Athletics",
   "issue": "[DATA-001] backend #11",
   "generado_por": "lopez",
-  "sql_sha256": "e54ff25ec6601e0c5d7556363a41eba067535f870d254ca0dca46ff7e87e84f6",
+  "sql_sha256": "f8d6db550ad11f9662dd4f0377398c6d29135fc9415e2b7fb1ef9281383741c2",
   "namespace": {
     "algoritmo": "uuid5",
     "namespace_url": "https://g6.inka-athletics/taxonomy",
@@ -21,62 +21,7 @@
     "nota": "La clave se deriva de columnas propias de cada fila (reproducible sin estado externo)."
   },
   "tables": {
-    "categories": [
-      {
-        "id": "59da00cd-e66b-50fc-bfd9-1f3b3deb1a07",
-        "nombre": "Chimpunes / Fútbol",
-        "descripcion": "Calzado de fútbol para césped, sintético y futsal; agarre y control en cada jugada.",
-        "categoria_padre_id": "cd8aa953-eafd-ce4e-628b-4988ebbcded4",
-        "nivel": 2,
-        "orden": 0,
-        "origen": "nuevo"
-      },
-      {
-        "id": "3592c4c4-a619-593b-9cd6-98c38488143c",
-        "nombre": "Zapatillas Running",
-        "descripcion": "Zapatillas ligeras y amortiguadas para entrenamiento y competencia de running.",
-        "categoria_padre_id": "cd8aa953-eafd-ce4e-628b-4988ebbcded4",
-        "nivel": 2,
-        "orden": 1,
-        "origen": "nuevo"
-      },
-      {
-        "id": "b8996ca5-6002-5dfd-95d2-6a85e8bf4604",
-        "nombre": "Zapatillas Entrenamiento",
-        "descripcion": "Zapatillas versátiles para gym, cross-training y uso diario.",
-        "categoria_padre_id": "cd8aa953-eafd-ce4e-628b-4988ebbcded4",
-        "nivel": 2,
-        "orden": 2,
-        "origen": "nuevo"
-      },
-      {
-        "id": "09a4fc9d-1f1c-5e13-afb5-96e2c7a4b091",
-        "nombre": "Camisetas y Tops",
-        "descripcion": "Camisetas, tops y polos deportivos de secado rápido.",
-        "categoria_padre_id": "3523cb0c-0f00-27dd-d300-2daffdaf285a",
-        "nivel": 2,
-        "orden": 0,
-        "origen": "nuevo"
-      },
-      {
-        "id": "060744ba-c68f-58ad-ae06-cb3832208d96",
-        "nombre": "Shorts y Pantalones",
-        "descripcion": "Shorts, leggings y pantalones deportivos para entrenar con libertad.",
-        "categoria_padre_id": "3523cb0c-0f00-27dd-d300-2daffdaf285a",
-        "nivel": 2,
-        "orden": 1,
-        "origen": "nuevo"
-      },
-      {
-        "id": "413bb36e-e5c4-540f-8274-24e2504407f1",
-        "nombre": "Casacas y Polerones",
-        "descripcion": "Casacas, polerones y buzos para abrigo y calentamiento.",
-        "categoria_padre_id": "3523cb0c-0f00-27dd-d300-2daffdaf285a",
-        "nivel": 2,
-        "orden": 2,
-        "origen": "nuevo"
-      }
-    ],
+    "categories": [],
     "brands": [
       {
         "id": "380d9fe0-0290-580a-95e6-6bcd378b9b92",
@@ -185,24 +130,6 @@
         "nombre": "Talla Única",
         "grupo": "equipamiento",
         "origen": "nuevo"
-      },
-      {
-        "id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
-        "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
-        "nombre": "Blanco",
-        "origen": "nuevo"
-      },
-      {
-        "id": "c76ce899-4df1-56a8-918f-b41903ba83e5",
-        "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
-        "nombre": "Rojo",
-        "origen": "nuevo"
-      },
-      {
-        "id": "8b1a6420-8e61-5f16-94b6-9a70fe308163",
-        "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
-        "nombre": "Verde Oliva",
-        "origen": "nuevo"
       }
     ],
     "category_seo": [
@@ -211,7 +138,7 @@
         "categoria_id": "cd8aa953-eafd-ce4e-628b-4988ebbcded4",
         "slug": "calzado",
         "meta_titulo": "Calzado | Inka Athletics",
-        "meta_descripcion": "Calzado deportivo: chimpunes, zapatillas de running y entrenamiento.",
+        "meta_descripcion": "Calzado deportivo: chimpunes, zapatillas de running y de entrenamiento.",
         "origen": "nuevo"
       },
       {
@@ -219,7 +146,7 @@
         "categoria_id": "3523cb0c-0f00-27dd-d300-2daffdaf285a",
         "slug": "ropa",
         "meta_titulo": "Ropa | Inka Athletics",
-        "meta_descripcion": "Camisetas, tops, shorts, pantalones, casacas y polerones deportivos.",
+        "meta_descripcion": "Ropa deportiva para entrenamiento y competencia.",
         "origen": "nuevo"
       },
       {
@@ -227,55 +154,7 @@
         "categoria_id": "49a1dbd0-666d-0d43-6d1e-1053d4564455",
         "slug": "equipamiento-y-accesorios",
         "meta_titulo": "Equipamiento y Accesorios | Inka Athletics",
-        "meta_descripcion": "Equipamiento y accesorios para entrenamiento y competencia.",
-        "origen": "nuevo"
-      },
-      {
-        "id": "b8066156-5cc4-5ed5-8355-d666c937a651",
-        "categoria_id": "59da00cd-e66b-50fc-bfd9-1f3b3deb1a07",
-        "slug": "chimpunes-futbol",
-        "meta_titulo": "Chimpunes y Fútbol | Inka Athletics",
-        "meta_descripcion": "Chimpunes y calzado de fútbol para césped, sintético y futsal.",
-        "origen": "nuevo"
-      },
-      {
-        "id": "1f6561b4-cdb7-512c-a6b4-da044a94a579",
-        "categoria_id": "3592c4c4-a619-593b-9cd6-98c38488143c",
-        "slug": "zapatillas-running",
-        "meta_titulo": "Zapatillas Running | Inka Athletics",
-        "meta_descripcion": "Zapatillas para running: ligereza, amortiguación y tracción.",
-        "origen": "nuevo"
-      },
-      {
-        "id": "b0a69119-0df0-5348-b955-b29192b67f9b",
-        "categoria_id": "b8996ca5-6002-5dfd-95d2-6a85e8bf4604",
-        "slug": "zapatillas-entrenamiento",
-        "meta_titulo": "Zapatillas Entrenamiento | Inka Athletics",
-        "meta_descripcion": "Zapatillas para gym, cross-training y uso diario.",
-        "origen": "nuevo"
-      },
-      {
-        "id": "40d6a503-9524-51f2-9115-c89e99437974",
-        "categoria_id": "09a4fc9d-1f1c-5e13-afb5-96e2c7a4b091",
-        "slug": "camisetas-y-tops",
-        "meta_titulo": "Camisetas y Tops | Inka Athletics",
-        "meta_descripcion": "Camisetas, tops y polos deportivos.",
-        "origen": "nuevo"
-      },
-      {
-        "id": "b5cff3db-8834-5f29-8ac2-6e404ca26636",
-        "categoria_id": "060744ba-c68f-58ad-ae06-cb3832208d96",
-        "slug": "shorts-y-pantalones",
-        "meta_titulo": "Shorts y Pantalones | Inka Athletics",
-        "meta_descripcion": "Shorts, leggings y pantalones deportivos.",
-        "origen": "nuevo"
-      },
-      {
-        "id": "f6fd4bc0-eb57-59b6-9da0-192e663ff2e6",
-        "categoria_id": "413bb36e-e5c4-540f-8274-24e2504407f1",
-        "slug": "casacas-y-polerones",
-        "meta_titulo": "Casacas y Polerones | Inka Athletics",
-        "meta_descripcion": "Casacas, polerones y buzos deportivos.",
+        "meta_descripcion": "Balones, equipo y accesorios para entrenamiento y competencia.",
         "origen": "nuevo"
       }
     ]
@@ -298,12 +177,42 @@
       "id": "49a1dbd0-666d-0d43-6d1e-1053d4564455",
       "nombre_antes": "Accesorios deportivos",
       "nombre_despues": "Equipamiento y Accesorios"
+    }
+  ],
+  "categories_reused": [
+    {
+      "nombre": "Fútbol",
+      "id": "dbd02734-85f5-b47b-5c95-ee768d5dc875",
+      "padre": "cd8aa953-eafd-ce4e-628b-4988ebbcded4",
+      "motivo": "Ya existe (nivel 2 bajo Calzado); se reutiliza en lugar de crear 'Chimpunes / Fútbol'."
     },
     {
-      "tabla": "characteristic_values",
-      "id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6",
-      "nombre_antes": "Azul",
-      "nombre_despues": "Azul Marino"
+      "nombre": "Running",
+      "id": "303886ae-f3f0-bc9c-145a-660979597595",
+      "padre": "cd8aa953-eafd-ce4e-628b-4988ebbcded4",
+      "motivo": "Ya existe (nivel 2 bajo Calzado); se reutiliza en lugar de crear 'Zapatillas Running'."
+    }
+  ],
+  "categories_pending_poma": [
+    {
+      "nombre": "Camisetas y Tops",
+      "padre": "3523cb0c-0f00-27dd-d300-2daffdaf285a",
+      "motivo": "Familia de ropa sin respaldo comercial confirmado por Catalogo (Poma)."
+    },
+    {
+      "nombre": "Shorts y Pantalones",
+      "padre": "3523cb0c-0f00-27dd-d300-2daffdaf285a",
+      "motivo": "Familia de ropa sin respaldo comercial confirmado por Catalogo (Poma)."
+    },
+    {
+      "nombre": "Casacas y Polerones",
+      "padre": "3523cb0c-0f00-27dd-d300-2daffdaf285a",
+      "motivo": "Familia de ropa sin respaldo comercial confirmado por Catalogo (Poma)."
+    },
+    {
+      "nombre": "Zapatillas Entrenamiento",
+      "padre": "cd8aa953-eafd-ce4e-628b-4988ebbcded4",
+      "motivo": "Familia de calzado sin respaldo comercial confirmado por Catalogo (Poma)."
     }
   ],
   "preserved_existing_masters": {
@@ -417,12 +326,9 @@
     },
     "propuesta_reemplazo": {
       "category_id": {
-        "propuesto": "59da00cd-e66b-50fc-bfd9-1f3b3deb1a07",
-        "nombre": "Chimpunes / Fútbol",
-        "alternativa_existente": {
-          "id": "cd8aa953-eafd-ce4e-628b-4988ebbcded4",
-          "nombre": "Calzado"
-        }
+        "propuesto": "dbd02734-85f5-b47b-5c95-ee768d5dc875",
+        "nombre": "Fútbol",
+        "nota": "existente; se reutiliza (no se crea categoria nueva)"
       },
       "brand_id": {
         "propuesto": "380d9fe0-0290-580a-95e6-6bcd378b9b92",
@@ -534,26 +440,13 @@
       "nombre": "Color",
       "tipo": "LISTA"
     },
-    "paleta_comercial": [
+    "estado": "SIN CAMBIOS: se conserva la paleta existente.",
+    "paleta_actual": [
       {
-        "nombre": "Negro",
-        "id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-        "origen": "existente"
-      },
-      {
-        "nombre": "Blanco",
-        "id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
-        "origen": "nuevo"
-      },
-      {
-        "nombre": "Azul Marino",
+        "nombre": "Azul",
         "id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6",
-        "origen": "renombrado desde 'Azul'"
-      },
-      {
-        "nombre": "Rojo",
-        "id": "c76ce899-4df1-56a8-918f-b41903ba83e5",
-        "origen": "nuevo"
+        "origen": "existente",
+        "nota": "referenciado por un producto real (adidas Entrada 22); NO se renombra ni cambia de significado."
       },
       {
         "nombre": "Gris",
@@ -561,13 +454,30 @@
         "origen": "existente"
       },
       {
-        "nombre": "Verde Oliva",
-        "id": "8b1a6420-8e61-5f16-94b6-9a70fe308163",
-        "origen": "nuevo"
+        "nombre": "Negro",
+        "id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+        "origen": "existente"
       }
-    ]
+    ],
+    "pendiente": [
+      "Azul Marino",
+      "Blanco",
+      "Rojo",
+      "Verde Oliva"
+    ],
+    "bloqueo": "Confirmar con Catalogo (Poma) el tono real de la variante (adidas Entrada 22) antes de renombrar 'Azul' o agregar colores nuevos."
   },
   "coordination": [
+    {
+      "owner": "poma",
+      "asunto": "Confirmar familias de producto (Camisetas y Tops, Shorts y Pantalones, Casacas y Polerones, Zapatillas Entrenamiento) antes de crear esas categorias",
+      "condicion_de_desbloqueo": "Poma confirma productos reales en esas familias; entonces se agregan como subcategorias nivel 2"
+    },
+    {
+      "owner": "poma",
+      "asunto": "Confirmar el tono real de la variante 'adidas Entrada 22' (color 'Azul') y si se requieren colores nuevos",
+      "condicion_de_desbloqueo": "Poma entrega el mapeo producto -> color; entonces se decide sobre 'Azul Marino'/Blanco/Rojo/Verde Oliva"
+    },
     {
       "owner": "poma",
       "asunto": "Reemplazar IDs reservados de dataset.json (...ec0/...ec1/...ec2) por identidades comerciales",
