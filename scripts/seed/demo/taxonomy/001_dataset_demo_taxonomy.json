@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "schema": "taxonomy",
+  "kind": "demo",
+  "description": "Identidades demo reservadas en dataset.json (category_id, brand_id, product_type_id) para la integracion con Catalogo. Pendiente de revision de owners y de la allowlist de registry.json; no son maestros normativos ni alteran el baseline (categories=7, brands=3, product_types=4).",
+  "inserts": [
+    {
+      "table": "categories",
+      "rows": [
+        {
+          "id": "d60674d1-05fd-47f2-955b-5c2b6e504ec0",
+          "nombre": "Coleccion demo",
+          "descripcion": "Categoria de demostracion reservada por dataset.json para Catalogo",
+          "categoria_padre_id": "3523cb0c-0f00-27dd-d300-2daffdaf285a",
+          "nivel": 2,
+          "orden": 0,
+          "estado": "ACTIVO",
+          "taxonomy_version": "0"
+        }
+      ]
+    },
+    {
+      "table": "brands",
+      "rows": [
+        {
+          "id": "d60674d1-05fd-47f2-955b-5c2b6e504ec1",
+          "nombre": "Marca demo",
+          "estado": "ACTIVO",
+          "taxonomy_version": "0"
+        }
+      ]
+    },
+    {
+      "table": "product_types",
+      "rows": [
+        {
+          "id": "d60674d1-05fd-47f2-955b-5c2b6e504ec2",
+          "nombre": "Tipo de producto demo",
+          "estado": "ACTIVO",
+          "taxonomy_version": "0"
+        }
+      ]
+    }
+  ]
+}
