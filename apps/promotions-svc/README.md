@@ -1,6 +1,9 @@
 # Promotions: estructura y configuración — backend #70
 
 Owner: Axel Cueva. Rama: `cueva`. Alcance: `apps/promotions-svc/`.
+Este documento acredita el bloque #70. Por autorización posterior del usuario,
+el PR #116 incluye también #33, #15 y #112, además del Gateway #106; el cambio
+de las dos dependencias de #33 se explica en `COUPON_COMMANDS.md`.
 No se modifican otras aplicaciones, dependencias/configuración global, contratos,
 migraciones históricas, permisos ni datos compartidos.
 
@@ -171,4 +174,6 @@ no se cambian dependencias o configuración compartida por este issue.
 
 Estos resultados históricos son del bloque #70, anteriores a los nuevos tests
 de #33. Ver `COUPON_COMMANDS.md` y `test/evidence/` para las pruebas posteriores
-de cupones. El PR #116 conserva el alcance Gateway; estos cambios aún son locales.
+de cupones. Los commits de este bloque se incorporan al PR #116 por autorización
+expresa del usuario; su descripción registra SHA y validaciones del conjunto
+publicado. La publicación no acredita revisión, merge ni cierre del issue.

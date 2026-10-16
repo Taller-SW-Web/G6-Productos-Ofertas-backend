@@ -72,8 +72,10 @@ Verificación local del 2026-10-16: validador PASS, 18 pruebas Node PASS
 (14 del runner existente y 4 del validador), rechazo de `--apply` PASS,
 formato/lint de los scripts PASS. Validaciones generales del árbol local:
 81 pruebas unitarias y 154 HTTP PASS; typecheck, lint, formato y revisión de
-whitespace PASS. Son resultados locales; estos archivos aún no forman parte
-del PR #116, que conserva únicamente el alcance del Gateway.
+whitespace PASS. Son resultados históricos locales. Por autorización posterior
+del usuario, estos archivos se incorporan al alcance ampliado del PR #116; su
+descripción registra el SHA y las validaciones del conjunto publicado. Eso no
+acredita una restauración comercial ni autoriza persistencia.
 
 Dependencias: cada owner entrega fixtures comerciales completos/aprobados;
 Marco coordina DATA-VAL #17 y autoriza cualquier ejecución/persistencia que lo

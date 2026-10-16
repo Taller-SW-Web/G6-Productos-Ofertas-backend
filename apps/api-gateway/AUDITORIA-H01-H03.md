@@ -1,5 +1,13 @@
 # Evidencia de correcciones H-01, H-02 y H-03 — PR #116
 
+Este informe corresponde al bloque Gateway validado en
+`b97138acdc7fa87bd854a8ed7bea1a96c87da902`. Posteriormente, el usuario autorizó
+incorporar también los siete commits locales de #70/#112/#15/#33 al mismo PR.
+Es una excepción puntual autorizada para #116; la regla de PRs pequeños,
+atómicos y específicos de AGENTS.md sigue vigente para las próximas entregas.
+La descripción del PR distingue las validaciones históricas de este bloque de
+las del conjunto ampliado, sus dependencias autorizadas y el nuevo SHA final.
+
 Rama de publicación: `cueva`. Alcance: únicamente `apps/api-gateway`, con la
 autorización transversal de #106/#21 y las aclaraciones de arquitectura.
 OpenAPI 0.6.0-rc.1, Docs `c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b`.
