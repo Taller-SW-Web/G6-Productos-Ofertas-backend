@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PromotionsSvcController } from './promotions-svc.controller.js';
 import { PromotionsSvcService } from './promotions-svc.service.js';
+import { couponProviders } from './coupons/coupon-providers.js';
 import {
   PromotionsConfigService,
   readPromotionsEnvironment,
@@ -15,6 +16,7 @@ import {
   imports: [],
   controllers: [PromotionsSvcController],
   providers: [
+    ...couponProviders,
     PromotionsSvcService,
     {
       provide: PromotionsConfigService,

@@ -8,6 +8,9 @@ import {
   validatePromotionsConfiguration,
 } from '../src/infrastructure/config/promotions-config.js';
 import { PromotionsReadinessService } from '../src/health/promotions-readiness.service.js';
+import { COUPON_EVIDENCE_PROVIDER } from '../src/coupons/coupon-providers.js';
+import { CouponCommandDeliveryHandler } from '../src/coupons/coupon-amqp.js';
+import type { CouponEvidenceProvider } from '../src/coupons/coupon-transactions.js';
 import { createEnvironmentFixture } from './support/environment.js';
 
 describe('PromotionsSvcController (e2e)', () => {
@@ -46,6 +49,34 @@ describe('PromotionsSvcController (e2e)', () => {
       status: 'ok',
       service: 'promotions-svc',
     });
+  });
+
+  it('registers coupon adapters without starting an unverified shared consumer', async () => {
+    expect(app.get(CouponCommandDeliveryHandler)).toBeInstanceOf(
+      CouponCommandDeliveryHandler,
+    );
+    const evidence = app.get<CouponEvidenceProvider>(COUPON_EVIDENCE_PROVIDER);
+    await expect(
+      evidence.verify(
+        {
+          message_id: 'isolated-restoration',
+          schema_version: 2,
+          operation_id: '6d86380f-5f55-4b9f-9bc4-5e3cf2bfc999',
+          occurred_at: '2026-10-16T12:00:00Z',
+          correlation_id: 'trace',
+          causation_id: 'cancellation',
+          producer: 'modulo-ventas',
+          kind: 'command',
+          name: 'promotions.coupon.restoration.requested',
+          data: {
+            order_id: 'PED-TEST',
+            cancellation_reason: 'test',
+            cancelled_at: '2026-10-16T12:00:00Z',
+          },
+        },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow('COUPON_EVIDENCE_UNAVAILABLE');
   });
 
   afterEach(async () => {
