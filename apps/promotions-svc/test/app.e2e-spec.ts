@@ -3,17 +3,42 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { PromotionsSvcModule } from './../src/promotions-svc.module.js';
+import {
+  PromotionsConfigService,
+  validatePromotionsConfiguration,
+} from '../src/infrastructure/config/promotions-config.js';
+import { PromotionsReadinessService } from '../src/health/promotions-readiness.service.js';
+import { createEnvironmentFixture } from './support/environment.js';
 
 describe('PromotionsSvcController (e2e)', () => {
   let app: INestApplication<App>;
+  const fixture = createEnvironmentFixture();
+  afterAll(() => fixture.cleanup());
 
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [PromotionsSvcModule],
-    }).compile();
+    })
+      .overrideProvider(PromotionsConfigService)
+      .useFactory({
+        factory: () =>
+          new PromotionsConfigService(
+            validatePromotionsConfiguration(fixture.environment),
+          ),
+      })
+      .compile();
 
     app = moduleFixture.createNestApplication();
     await app.init();
+  });
+
+  it('keeps readiness internal and does not publish new HTTP routes', async () => {
+    expect(await app.get(PromotionsReadinessService).check()).toMatchObject({
+      status: 'not_ready',
+      dependencies: { database: 'not_implemented', broker: 'not_implemented' },
+    });
+    await request(app.getHttpServer()).get('/health/live').expect(404);
+    await request(app.getHttpServer()).get('/health/ready').expect(404);
   });
 
   it('/health (GET)', () => {
@@ -25,5 +50,43 @@ describe('PromotionsSvcController (e2e)', () => {
 
   afterEach(async () => {
     await app.close();
+  });
+});
+
+describe('Promotions module startup configuration', () => {
+  const fixture = createEnvironmentFixture();
+  beforeEach(() => {
+    vi.spyOn(process, 'cwd').mockReturnValue(fixture.directory);
+    for (const [name, value] of Object.entries(fixture.environment)) {
+      vi.stubEnv(name, value);
+    }
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+  afterAll(() => fixture.cleanup());
+
+  it('validates the real configuration provider while building the module', async () => {
+    const module = await Test.createTestingModule({
+      imports: [PromotionsSvcModule],
+    }).compile();
+    try {
+      expect(module.get(PromotionsConfigService).settings.port).toBe(3004);
+      expect(
+        await module.get(PromotionsReadinessService).check(),
+      ).toMatchObject({
+        status: 'not_ready',
+      });
+    } finally {
+      await module.close();
+    }
+  });
+
+  it('refuses startup with a missing mandatory variable', async () => {
+    vi.stubEnv('PGPASSWORD', undefined);
+    await expect(
+      Test.createTestingModule({ imports: [PromotionsSvcModule] }).compile(),
+    ).rejects.toThrow('PGPASSWORD');
   });
 });
