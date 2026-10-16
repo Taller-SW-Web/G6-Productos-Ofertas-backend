@@ -427,6 +427,12 @@
     "decision_5_vs_N_5": "Se conserva el valor existente '5' (talla de balón) y NO se agrega 'N° 5' (mismo concepto).",
     "riesgo": "Una sola caracteristica 'Talla' es compartida por los tipos de producto (PTC obligatoria). Evitar combinaciones incorrectas (p. ej. una camiseta con talla 42) requiere separar caracteristicas o validar por tipo de producto.",
     "accion": "Coordinar con Catalogo (poma). NO se altera el modelo de BD unilateralmente.",
+    "definiciones": {
+      "Talla Única": "Valor real en tabla para productos de una sola talla (ej. gorra ajustable).",
+      "Sin talla": "Característica Talla no aplica a ese tipo de producto; no se crea valor en characteristic_values.",
+      "Talla pendiente": "El producto requiere talla, pero el dato aún no está completo."
+    },
+    "coordinacion": "Los tipos de producto sin talla deberán configurarse coordinando con Poma, ya que los cuatro tipos actuales en la taxonomía tienen la característica Talla como obligatoria.",
     "reservado": {
       "valor": "Talla Única",
       "motivo": "Equipamiento/uno-talla no confirmado por Catalogo (Poma); se reserva para una revision posterior. No se inserta en este lote."
