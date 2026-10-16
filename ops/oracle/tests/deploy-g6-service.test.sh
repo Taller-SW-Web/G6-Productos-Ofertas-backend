@@ -37,7 +37,7 @@ fail() {
 }
 
 source "${REPO_ROOT}/ops/oracle/service-registry.sh"
-[[ "$(g6_enabled_services_json)" == '["inventory-svc"]' ]] || fail 'Inventario debe ser el único servicio habilitado'
+[[ "$(g6_enabled_services_json)" == '["api-gateway","catalog-svc","inventory-svc","taxonomy-svc"]' ]] || fail 'Los cuatro servicios autorizados deben estar habilitados'
 [[ "$(awk -F'|' '$1 !~ /^#/ && NF { count++ } END { print count+0 }' "${REPO_ROOT}/ops/oracle/services.psv")" == 9 ]] ||
   fail 'el registro debe contener exactamente nueve servicios'
 
@@ -516,7 +516,7 @@ printf 'PASS: rollback de Inventario mantiene imagen y estado previos\n'
 
 for invalid_command in \
   'service-deploy unknown-svc 0123456789012345678901234567890123456789' \
-  'service-deploy taxonomy-svc 0123456789012345678901234567890123456789' \
+  'service-deploy pricing-svc 0123456789012345678901234567890123456789' \
   'service-deploy catalog-svc ../../etc/passwd' \
   'service-deploy catalog-svc 0123456789012345678901234567890123456789;id' \
   'inventory-deploy 01234567890123456789012345678901234567890' \

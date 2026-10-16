@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import type { INestApplication, LoggerService } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { TaxonomySvcModule } from './taxonomy-svc.module.js';
-import { Database, readDatabaseConfig } from './database.js';
+import { Database, readDatabaseConfig, parseDatabaseUrl } from './database.js';
 import { validarEntorno } from './config/environment.js';
 import type { TaxonomyEnv } from './config/environment.js';
 import { SanitizedLogger } from './logging/sanitized-logger.js';
@@ -68,34 +68,38 @@ export async function iniciarTaxonomySvc(
     cargarEnv();
   }
 
-  if (process.env.PGHOST?.trim() && !opciones.env?.DATABASE_URL) {
-    readDatabaseConfig(process.env);
-    const { port, host } = readHttpConfig(process.env);
-    const logger = new SanitizedLogger(opciones.logger);
-    const app = await NestFactory.create(TaxonomySvcModule, {
-      logger,
-      abortOnError: false,
-    });
-    try {
-      await app.get(Database).verifyIdentity();
-      app.enableShutdownHooks();
-      await app.listen(port, host);
-      logger.log({ service: 'taxonomy-svc', code: 'APPLICATION_STARTED' });
-      return {
-        app,
-        env: {
-          nodeEnv: (process.env.NODE_ENV as any) ?? 'development',
-          port,
-          databaseUrl: '',
-        },
-      };
-    } catch (err) {
-      await app.close();
-      throw err;
-    }
-  }
+  const rawEnv = opciones.env ?? process.env;
+  const urlParams = rawEnv.DATABASE_URL?.trim()
+    ? parseDatabaseUrl(rawEnv.DATABASE_URL)
+    : {};
+  const env: NodeJS.ProcessEnv = {
+    ...rawEnv,
+    ...urlParams,
+  };
 
-  const aplicacion = await crearAplicacion(opciones);
-  await aplicacion.app.listen(aplicacion.env.port);
-  return aplicacion;
+  readDatabaseConfig(env);
+  const { port, host } = readHttpConfig(env);
+  const logger = new SanitizedLogger(opciones.logger);
+  const app = await NestFactory.create(TaxonomySvcModule, {
+    logger,
+    abortOnError: false,
+  });
+  app.useLogger(logger);
+  try {
+    await app.get(Database).verifyIdentity(env);
+    app.enableShutdownHooks();
+    await app.listen(port, host);
+    logger.log({ service: 'taxonomy-svc', code: 'APPLICATION_STARTED' });
+    return {
+      app,
+      env: {
+        nodeEnv: (env.NODE_ENV as any) ?? 'development',
+        port,
+        databaseUrl: rawEnv.DATABASE_URL ?? '',
+      },
+    };
+  } catch (err) {
+    await app.close();
+    throw err;
+  }
 }

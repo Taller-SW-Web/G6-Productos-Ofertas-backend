@@ -32,7 +32,7 @@ export function proveedorDeRepositorio(databaseUrl?: string): Provider {
   return {
     provide: TAXONOMY_REPOSITORY,
     useFactory: (db: Database) => {
-      if (process.env.PGHOST?.trim()) {
+      if (process.env.PGHOST?.trim() || process.env.DATABASE_URL?.trim()) {
         return new PostgresTaxonomyRepository(db);
       }
       return new UnconfiguredTaxonomyRepository();

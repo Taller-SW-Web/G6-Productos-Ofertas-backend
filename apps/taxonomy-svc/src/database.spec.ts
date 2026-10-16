@@ -1,7 +1,7 @@
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Database, readDatabaseConfig } from './database.js';
+import { Database, readDatabaseConfig, parseDatabaseUrl } from './database.js';
 
 describe('taxonomy PostgreSQL configuration and lifecycle', () => {
   const directory = mkdtempSync(join(tmpdir(), 'g6-taxonomy-'));
@@ -85,5 +85,42 @@ describe('taxonomy PostgreSQL configuration and lifecycle', () => {
     } finally {
       await database.onModuleDestroy();
     }
+  });
+  it('parses DATABASE_URL and enforces strict TLS and identity checks', () => {
+    const dbUrl = `postgresql://taxonomy_dev_login.project:only-a-test-password@db.example.test:5432/postgres?sslmode=verify-full&sslrootcert=${encodeURIComponent(ca)}&currentSchema=taxonomy`;
+    const config = readDatabaseConfig({
+      DATABASE_URL: dbUrl,
+      G6_EXPECTED_ROLE: 'taxonomy_dev_login',
+      G6_CONNECTION_MODE: 'session',
+    });
+    expect(config.host).toBe('db.example.test');
+    expect(config.port).toBe(5432);
+    expect(config.database).toBe('postgres');
+    expect(config.user).toBe('taxonomy_dev_login.project');
+    expect(config.ssl).toMatchObject({
+      rejectUnauthorized: true,
+      servername: 'db.example.test',
+    });
+  });
+  it.each([
+    'postgresql://taxonomy_dev_login.project:pass@db.example.test:5432/postgres?sslmode=disable',
+    'postgresql://postgres:pass@db.example.test:5432/postgres?sslmode=verify-full',
+    'postgresql://taxonomy_dev_login.project:pass@db.example.test:5432/postgres?sslmode=verify-full&sslrootcert=relative.crt',
+    'postgresql://taxonomy_dev_login.project:pass@db.example.test:5432/postgres?sslmode=verify-full&currentSchema=public',
+    'not-a-valid-url',
+  ])('rejects insecure or non-compliant DATABASE_URL %s', (invalidUrl) => {
+    expect(() =>
+      readDatabaseConfig({
+        DATABASE_URL: invalidUrl,
+        G6_EXPECTED_ROLE: 'taxonomy_dev_login',
+        G6_CONNECTION_MODE: 'session',
+        G6_DATABASE_SCHEMA: 'taxonomy',
+        PGSSLROOTCERT: ca,
+        PGSSLMODE: 'verify-full',
+      }),
+    ).toThrow('Configuración PostgreSQL taxonomy inválida');
+  });
+  it('handles invalid URL safely in parseDatabaseUrl without throwing', () => {
+    expect(parseDatabaseUrl(':::not-a-url:::')).toEqual({});
   });
 });
