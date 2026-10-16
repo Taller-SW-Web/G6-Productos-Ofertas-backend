@@ -15,9 +15,9 @@
 --         "Accesorios deportivos" -> "Equipamiento y Accesorios"
 --     * REUTILIZA las subcategorias existentes "Futbol" y "Running"
 --       (nivel 2 bajo Calzado) en lugar de crear duplicados.
---     * Agrega 3 marcas reales: Marathon, Under Armour, Walon.
+--     * Agrega 3 marcas reales: Marathon Sports, Under Armour, Walon.
 --     * Completa tallas comerciales por uso: Calzado 38-43 y Ropa XS-XL
---       (mas la medida de balon "5" y equipamiento "Talla Unica").
+--       (mas la medida de balon "5").
 --     * Agrega el SEO de las 3 categorias raiz.
 --
 --   NO se agregan subcategorias especulativas y NO se altera el color
@@ -29,9 +29,11 @@
 --     que Catalogo (owner Poma) confirme productos reales en esas
 --     familias. Evita categorias que solo rellenen tablas.
 --   * Color: el valor existente "Azul" ya lo referencia un producto real
---     (adidas Entrada 22). NO se renombra a "Azul Marino" ni se agregan
---     colores nuevos hasta identificar el tono real de nuestra variante.
---   Estos candidatos se listan como "pendientes_de_confirmacion" en la
+--     (adidas Entrada 22). NO se renombra ni se agregan tonos nuevos
+--     hasta identificar el tono real de nuestra variante.
+--   * Talla "Talla Unica" (equipamiento uno-talla): RESERVADA; no se
+--     inserta hasta que Catalogo (Poma) confirme su uso.
+--   Estos candidatos se listan como "pendientes"/"reservados" en la
 --   matriz/manifest, SIN estado en la base.
 --
 -- IDEMPOTENCIA CON VERIFICACION DE CONTENIDO
@@ -158,7 +160,7 @@ DO $$
 DECLARE v_conflicts text;
 BEGIN
     WITH e(id, nombre, norm, descripcion, pais) AS (VALUES
-        ('380d9fe0-0290-580a-95e6-6bcd378b9b92'::uuid, 'Marathon',     'marathon',     'Marca ecuatoriana de ropa y calzado deportivo (fundada en Quito, 1980).', 'EC'),
+        ('07cb79e8-33ee-54d5-aec8-0dbae3cae5b4'::uuid, 'Marathon Sports', 'marathon sports', 'Empresa ecuatoriana de confeccion y distribucion de ropa y calzado deportivo, fundada en Quito en 1980; equipa a la seleccion de futbol de Ecuador desde 1994.', 'EC'),
         ('514d9c18-b418-559b-a692-e304183560ad'::uuid, 'Under Armour', 'under armour', 'Marca estadounidense de indumentaria y calzado deportivo (fundada en 1996).', 'US'),
         ('2ae5529a-b33e-507f-900d-b4a04fc0f831'::uuid, 'Walon',        'walon',        'Marca peruana de indumentaria deportiva (fundada en Lima, 1989).', 'PE')
     )
@@ -200,8 +202,7 @@ BEGIN
         ('6e7505c8-4ae3-5850-86b2-d01d0b40bace'::uuid, 'XS'),
         ('6787802a-f29f-5a1b-a495-1d034f1002b6'::uuid, 'S'),
         ('68e9a97e-7e35-5c46-aed9-046556f9387b'::uuid, 'L'),
-        ('353dbffe-8b38-5575-8f35-a7a8e42d8946'::uuid, 'XL'),
-        ('4ea97ea9-df49-55a2-b6ab-ea2d0aef3504'::uuid, 'Talla Única')
+        ('353dbffe-8b38-5575-8f35-a7a8e42d8946'::uuid, 'XL')
     )
     SELECT string_agg(conflict, E'\n') INTO v_conflicts FROM (
         SELECT format('characteristic_values: (Talla,%L) existe con id=%s estado=%s (esperado id=%s ACTIVO)',
@@ -296,8 +297,8 @@ UPDATE taxonomy.categories SET nombre = 'Ropa'
 INSERT INTO taxonomy.brands
     (id, nombre, descripcion, pais_origen_iso, estado, taxonomy_version)
 VALUES
-    ('380d9fe0-0290-580a-95e6-6bcd378b9b92', 'Marathon',
-     'Marca ecuatoriana de ropa y calzado deportivo (fundada en Quito, 1980).', 'EC', 'ACTIVO', 0),
+    ('07cb79e8-33ee-54d5-aec8-0dbae3cae5b4', 'Marathon Sports',
+     'Empresa ecuatoriana de confeccion y distribucion de ropa y calzado deportivo, fundada en Quito en 1980; equipa a la seleccion de futbol de Ecuador desde 1994.', 'EC', 'ACTIVO', 0),
     ('514d9c18-b418-559b-a692-e304183560ad', 'Under Armour',
      'Marca estadounidense de indumentaria y calzado deportivo (fundada en 1996).', 'US', 'ACTIVO', 0),
     ('2ae5529a-b33e-507f-900d-b4a04fc0f831', 'Walon',
@@ -307,10 +308,10 @@ ON CONFLICT DO NOTHING;
 
 -- =====================================================================
 -- 3) VALORES DE CARACTERISTICA "Talla" (tipo LISTA)
---    Calzado: 38-43  |  Ropa: XS, S, M, L, XL
---    Balon: "5"      |  Equipamiento: "Talla Unica"
+--    Calzado: 38-43  |  Ropa: XS, S, M, L, XL  |  Balon: "5"
 --    Solo se insertan los valores NUEVOS; los existentes (38,39,41,42,5,M)
 --    se verifican en 0.4 con sus UUID reales y NO se re-insertan.
+--    "Talla Unica" (equipamiento) queda RESERVADA; ver 0 (PENDIENTES).
 -- =====================================================================
 INSERT INTO taxonomy.characteristic_values
     (id, caracteristica_id, nombre, estado, taxonomy_version)
@@ -320,8 +321,7 @@ VALUES
     ('6e7505c8-4ae3-5850-86b2-d01d0b40bace', 'fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd', 'XS', 'ACTIVO', 0),
     ('6787802a-f29f-5a1b-a495-1d034f1002b6', 'fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd', 'S', 'ACTIVO', 0),
     ('68e9a97e-7e35-5c46-aed9-046556f9387b', 'fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd', 'L', 'ACTIVO', 0),
-    ('353dbffe-8b38-5575-8f35-a7a8e42d8946', 'fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd', 'XL', 'ACTIVO', 0),
-    ('4ea97ea9-df49-55a2-b6ab-ea2d0aef3504', 'fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd', 'Talla Única', 'ACTIVO', 0)
+    ('353dbffe-8b38-5575-8f35-a7a8e42d8946', 'fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd', 'XL', 'ACTIVO', 0)
 ON CONFLICT DO NOTHING;
 
 
@@ -333,13 +333,13 @@ INSERT INTO taxonomy.category_seo
 VALUES
     ('916527ee-9a8a-590a-af25-69a7d4cf7710', 'cd8aa953-eafd-ce4e-628b-4988ebbcded4',
      'calzado', 'Calzado | Inka Athletics',
-     'Calzado deportivo: chimpunes, zapatillas de running y de entrenamiento.', 0),
+     'Calzado deportivo de futbol y running.', 0),
     ('087aaf9a-5d4f-5316-b735-6f49bc9a6087', '3523cb0c-0f00-27dd-d300-2daffdaf285a',
      'ropa', 'Ropa | Inka Athletics',
      'Ropa deportiva para entrenamiento y competencia.', 0),
     ('f5901f8f-8cac-5a25-be31-56d8dc5927e5', '49a1dbd0-666d-0d43-6d1e-1053d4564455',
      'equipamiento-y-accesorios', 'Equipamiento y Accesorios | Inka Athletics',
-     'Balones, equipo y accesorios para entrenamiento y competencia.', 0)
+     'Balones, equipamiento y accesorios deportivos.', 0)
 ON CONFLICT DO NOTHING;
 
 
@@ -376,7 +376,7 @@ BEGIN
         -- marcas
         SELECT format('brands: falta o no coincide id=%s', e.id)
         FROM (VALUES
-            ('380d9fe0-0290-580a-95e6-6bcd378b9b92'::uuid, 'Marathon'),
+            ('07cb79e8-33ee-54d5-aec8-0dbae3cae5b4'::uuid, 'Marathon Sports'),
             ('514d9c18-b418-559b-a692-e304183560ad'::uuid, 'Under Armour'),
             ('2ae5529a-b33e-507f-900d-b4a04fc0f831'::uuid, 'Walon')
         ) AS e(id, nombre)
@@ -390,8 +390,7 @@ BEGIN
             ('6e7505c8-4ae3-5850-86b2-d01d0b40bace'::uuid, 'XS'),
             ('6787802a-f29f-5a1b-a495-1d034f1002b6'::uuid, 'S'),
             ('68e9a97e-7e35-5c46-aed9-046556f9387b'::uuid, 'L'),
-            ('353dbffe-8b38-5575-8f35-a7a8e42d8946'::uuid, 'XL'),
-            ('4ea97ea9-df49-55a2-b6ab-ea2d0aef3504'::uuid, 'Talla Única')
+            ('353dbffe-8b38-5575-8f35-a7a8e42d8946'::uuid, 'XL')
         ) AS e(id, nombre)
         WHERE NOT EXISTS (SELECT 1 FROM taxonomy.characteristic_values cv WHERE cv.id = e.id AND cv.nombre = e.nombre AND cv.estado = 'ACTIVO')
         UNION ALL

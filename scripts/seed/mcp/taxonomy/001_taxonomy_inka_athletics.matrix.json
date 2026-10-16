@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "matrix_version": "1.2.0",
+  "matrix_version": "1.3.0",
   "lote": "001_taxonomy_inka_athletics",
   "marketplace": "Inka Athletics",
   "issue": "[DATA-001] backend #11",
   "generado_por": "lopez",
-  "sql_sha256": "f8d6db550ad11f9662dd4f0377398c6d29135fc9415e2b7fb1ef9281383741c2",
+  "sql_sha256": "0a202761bde0de3c1494510ecfbb3a090a0d8f65e36af6a7753e8c52bbb71273",
   "namespace": {
     "algoritmo": "uuid5",
     "namespace_url": "https://g6.inka-athletics/taxonomy",
@@ -24,10 +24,10 @@
     "categories": [],
     "brands": [
       {
-        "id": "380d9fe0-0290-580a-95e6-6bcd378b9b92",
-        "nombre": "Marathon",
+        "id": "07cb79e8-33ee-54d5-aec8-0dbae3cae5b4",
+        "nombre": "Marathon Sports",
         "pais_origen_iso": "EC",
-        "descripcion": "Marca ecuatoriana de ropa y calzado deportivo (fundada en Quito, 1980).",
+        "descripcion": "Empresa ecuatoriana de confeccion y distribucion de ropa y calzado deportivo, fundada en Quito en 1980; equipa a la seleccion de futbol de Ecuador desde 1994.",
         "origen": "nuevo"
       },
       {
@@ -123,13 +123,6 @@
         "nombre": "XL",
         "grupo": "ropa",
         "origen": "nuevo"
-      },
-      {
-        "id": "4ea97ea9-df49-55a2-b6ab-ea2d0aef3504",
-        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
-        "nombre": "Talla Única",
-        "grupo": "equipamiento",
-        "origen": "nuevo"
       }
     ],
     "category_seo": [
@@ -138,7 +131,7 @@
         "categoria_id": "cd8aa953-eafd-ce4e-628b-4988ebbcded4",
         "slug": "calzado",
         "meta_titulo": "Calzado | Inka Athletics",
-        "meta_descripcion": "Calzado deportivo: chimpunes, zapatillas de running y de entrenamiento.",
+        "meta_descripcion": "Calzado deportivo de futbol y running.",
         "origen": "nuevo"
       },
       {
@@ -154,7 +147,7 @@
         "categoria_id": "49a1dbd0-666d-0d43-6d1e-1053d4564455",
         "slug": "equipamiento-y-accesorios",
         "meta_titulo": "Equipamiento y Accesorios | Inka Athletics",
-        "meta_descripcion": "Balones, equipo y accesorios para entrenamiento y competencia.",
+        "meta_descripcion": "Balones, equipamiento y accesorios deportivos.",
         "origen": "nuevo"
       }
     ]
@@ -331,14 +324,18 @@
         "nota": "existente; se reutiliza (no se crea categoria nueva)"
       },
       "brand_id": {
-        "propuesto": "380d9fe0-0290-580a-95e6-6bcd378b9b92",
-        "nombre": "Marathon"
+        "propuesto": "07cb79e8-33ee-54d5-aec8-0dbae3cae5b4",
+        "nombre": "Marathon Sports"
       },
       "product_type_id": {
         "propuesto": "4d68c7e4-69d4-9e79-8e9e-379aa2a3a01a",
         "nombre": "Chimpunes",
         "nota": "existente"
       }
+    },
+    "marcas": {
+      "nombre": "Marathon Sports",
+      "nota": "Empresa fabricante ecuatoriana (grupo Superdeporte); 'Marathon' es una marca de producto del mismo grupo."
     },
     "owner_para_confirmar": "Poma (owner de scripts/seed/dataset.json)"
   },
@@ -424,15 +421,16 @@
       ],
       "balon": [
         "5"
-      ],
-      "equipamiento": [
-        "Talla Única"
       ]
     },
     "distincion_calzado_ropa": "Calzado usa tallas numericas EU 38-43; Ropa usa tallas alfabeticas XS-XL. No se cruzan.",
     "decision_5_vs_N_5": "Se conserva el valor existente '5' (talla de balón) y NO se agrega 'N° 5' (mismo concepto).",
     "riesgo": "Una sola caracteristica 'Talla' es compartida por los tipos de producto (PTC obligatoria). Evitar combinaciones incorrectas (p. ej. una camiseta con talla 42) requiere separar caracteristicas o validar por tipo de producto.",
-    "accion": "Coordinar con Catalogo (poma). NO se altera el modelo de BD unilateralmente."
+    "accion": "Coordinar con Catalogo (poma). NO se altera el modelo de BD unilateralmente.",
+    "reservado": {
+      "valor": "Talla Única",
+      "motivo": "Equipamiento/uno-talla no confirmado por Catalogo (Poma); se reserva para una revision posterior. No se inserta en este lote."
+    }
   },
   "colores_comerciales": {
     "caracteristica": {
@@ -487,6 +485,11 @@
       "owner": "poma",
       "asunto": "Evitar combinaciones invalidas de talla por tipo de producto (Talla compartida)",
       "condicion_de_desbloqueo": "Definir caracteristicas/validacion por tipo sin cambio unilateral de BD"
+    },
+    {
+      "owner": "poma",
+      "asunto": "Confirmar si se necesitara el valor de talla 'Talla Unica' para equipamiento",
+      "condicion_de_desbloqueo": "Poma confirma equipamiento uno-talla; de lo contrario el valor queda reservado y no se inserta"
     },
     {
       "owner": "axel/cueva",
