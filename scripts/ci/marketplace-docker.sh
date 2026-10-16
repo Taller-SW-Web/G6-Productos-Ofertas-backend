@@ -10,8 +10,9 @@ pg_name="${project}-postgres"
 issuer="${project}-issuer"
 compose=(docker compose -p "$project" -f docker-compose.marketplace.yml -f "$scratch/override.yml")
 cleanup() {
+  docker rm -f "$issuer" >/dev/null 2>&1 || true
   "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
-  docker rm -f "$pg_name" "$issuer" >/dev/null 2>&1 || true
+  docker rm -f "$pg_name" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
   rm -rf -- "$scratch"
 }
