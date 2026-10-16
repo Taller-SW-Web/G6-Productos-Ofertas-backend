@@ -1,0 +1,206 @@
+{
+  "version": 1,
+  "lote": "001_taxonomy_inka_athletics",
+  "marketplace": "Inka Athletics",
+  "issue": "[DATA-001] backend #11",
+  "esquema": "taxonomy",
+  "rama": "lopez",
+  "archivo_sql": "001_taxonomy_inka_athletics.sql",
+  "sql_sha256": "a8e0ba95ce96d1ad34b1de667efa0a864b8517a702155cf59c966b65c4008427",
+  "sha256_algoritmo": "SHA-256",
+  "generador_ids": {
+    "algoritmo": "uuid5",
+    "namespace_url": "https://g6.inka-athletics/taxonomy",
+    "namespace_uuid": "13ecad95-d9d2-5e70-8ccf-22ea14c41805",
+    "convencion_clave": {
+      "categories": "category:<slug>",
+      "brands": "brand:<slug>",
+      "characteristic_values": "characteristic_value:<caracteristica_id>:<nombre>",
+      "category_seo": "category_seo:<slug>"
+    }
+  },
+  "idempotencia": "INSERT ... ON CONFLICT DO NOTHING",
+  "orden_insercion": [
+    "categories",
+    "brands",
+    "product_types",
+    "characteristic_values",
+    "category_seo"
+  ],
+  "conteo_filas_por_tabla": {
+    "categories": 4,
+    "brands": 4,
+    "product_types": 1,
+    "characteristic_values": 10,
+    "category_seo": 6
+  },
+  "total_filas": 25,
+  "ids_involucrados": {
+    "categories": [
+      {
+        "id": "4c9766ab-16d9-5dc9-99a3-bfa5a3a65db3",
+        "nombre": "Chimpunes",
+        "categoria_padre_id": "cd8aa953-eafd-ce4e-628b-4988ebbcded4"
+      },
+      {
+        "id": "2d648061-8a15-5592-a33b-4f543de0eca0",
+        "nombre": "Camisetas deportivas",
+        "categoria_padre_id": "3523cb0c-0f00-27dd-d300-2daffdaf285a"
+      },
+      {
+        "id": "55dc6d05-8bf4-5976-8ae5-7b8c3f0e9bd8",
+        "nombre": "Equipamiento de entrenamiento",
+        "categoria_padre_id": "49a1dbd0-666d-0d43-6d1e-1053d4564455"
+      },
+      {
+        "id": "d60674d1-05fd-47f2-955b-5c2b6e504ec0",
+        "nombre": "Coleccion demo",
+        "categoria_padre_id": "3523cb0c-0f00-27dd-d300-2daffdaf285a",
+        "reservado_dataset_json": true
+      }
+    ],
+    "brands": [
+      {
+        "id": "380d9fe0-0290-580a-95e6-6bcd378b9b92",
+        "nombre": "Marathon",
+        "pais_origen_iso": "PE"
+      },
+      {
+        "id": "8c51fbfc-eb63-5a4f-9ce3-c5ff7fec107b",
+        "nombre": "Under Armour",
+        "pais_origen_iso": "US"
+      },
+      {
+        "id": "2ae5529a-b33e-507f-900d-b4a04fc0f831",
+        "nombre": "Walon",
+        "pais_origen_iso": "PE"
+      },
+      {
+        "id": "d60674d1-05fd-47f2-955b-5c2b6e504ec1",
+        "nombre": "Marca demo",
+        "pais_origen_iso": null,
+        "reservado_dataset_json": true
+      }
+    ],
+    "product_types": [
+      {
+        "id": "d60674d1-05fd-47f2-955b-5c2b6e504ec2",
+        "nombre": "Tipo de producto demo",
+        "reservado_dataset_json": true
+      }
+    ],
+    "characteristic_values": [
+      {
+        "id": "2e748d50-4b22-5f6b-9760-eda6a8b4cb87",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "39",
+        "grupo": "calzado"
+      },
+      {
+        "id": "c90f8581-0fe2-5fd4-b08c-8b5d3f616399",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "40",
+        "grupo": "calzado"
+      },
+      {
+        "id": "3f14c9ba-cbde-535c-aaed-1a35b2c2085a",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "41",
+        "grupo": "calzado"
+      },
+      {
+        "id": "734854bc-4dde-5b90-9d35-41acff69df5e",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "42",
+        "grupo": "calzado"
+      },
+      {
+        "id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "S",
+        "grupo": "ropa"
+      },
+      {
+        "id": "02234f98-27cb-52ba-b71b-3414d66d1a6a",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "M",
+        "grupo": "ropa"
+      },
+      {
+        "id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "L",
+        "grupo": "ropa"
+      },
+      {
+        "id": "353dbffe-8b38-5575-8f35-a7a8e42d8946",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "XL",
+        "grupo": "ropa"
+      },
+      {
+        "id": "9cd57c7e-854f-5149-addc-194353b6a5a2",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "N° 5",
+        "grupo": "balon_equipamiento"
+      },
+      {
+        "id": "4ea97ea9-df49-55a2-b6ab-ea2d0aef3504",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "Talla Única",
+        "grupo": "balon_equipamiento"
+      }
+    ],
+    "category_seo": [
+      {
+        "id": "bc73900d-cf60-54f3-8fd5-2e0a98ded9b9",
+        "categoria_id": "49a1dbd0-666d-0d43-6d1e-1053d4564455",
+        "slug": "accesorios-deportivos"
+      },
+      {
+        "id": "341f6685-e6f0-5683-b59d-96ba8bf38fe8",
+        "categoria_id": "cd8aa953-eafd-ce4e-628b-4988ebbcded4",
+        "slug": "calzado-deportivo"
+      },
+      {
+        "id": "0e5da1a9-819f-52e3-bcb7-5ceef5e088e8",
+        "categoria_id": "3523cb0c-0f00-27dd-d300-2daffdaf285a",
+        "slug": "ropa-deportiva"
+      },
+      {
+        "id": "5622435e-4271-5475-b9ba-07f050cdefa6",
+        "categoria_id": "4c9766ab-16d9-5dc9-99a3-bfa5a3a65db3",
+        "slug": "chimpunes"
+      },
+      {
+        "id": "8259af8a-74bc-5e15-a5e4-b3a073538eb5",
+        "categoria_id": "2d648061-8a15-5592-a33b-4f543de0eca0",
+        "slug": "camisetas-deportivas"
+      },
+      {
+        "id": "3dbdddd7-0d38-52b7-97a2-64eb5044c68d",
+        "categoria_id": "55dc6d05-8bf4-5976-8ae5-7b8c3f0e9bd8",
+        "slug": "equipamiento-de-entrenamiento"
+      }
+    ]
+  },
+  "identidades_reservadas_dataset_json": {
+    "category_id": "d60674d1-05fd-47f2-955b-5c2b6e504ec0",
+    "brand_id": "d60674d1-05fd-47f2-955b-5c2b6e504ec1",
+    "product_type_id": "d60674d1-05fd-47f2-955b-5c2b6e504ec2"
+  },
+  "no_modifica": [
+    "categorias existentes (7, nivel 1 y 2)",
+    "marcas existentes adidas/Nike/Puma",
+    "tipos de producto existentes (4)",
+    "caracteristicas existentes Color/Talla"
+  ],
+  "notas": [
+    "Los UUID derivados con uuid5 son reproducibles: re-ejecutar el script reutiliza los mismos ids.",
+    "La unicidad de characteristic_values es (caracteristica_id, nombre); 39/41/42/M ya existen y se omiten sin error.",
+    "Preexiste el valor de Talla '5' (balon); se conserva. El lote agrega 'N° 5' y 'Talla Única' como medidas reales.",
+    "No se define la relacion product_type_characteristics del tipo demo ...ec2 (pendiente de aprobacion del owner).",
+    "category_seo cubre 3 categorias de nivel 1 y 3 subcategorias comerciales nuevas (no la categoria demo).",
+    "El archivo .sql no incluye BEGIN/COMMIT: el operador/MCP controla la transaccion y el SET LOCAL ROLE."
+  ]
+}
