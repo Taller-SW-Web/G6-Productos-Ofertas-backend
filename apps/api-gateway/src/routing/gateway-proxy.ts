@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { finished } from 'node:stream/promises';
 import { Inject, Injectable } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { CONTRACT_ROUTES } from './contract-routes.js';
@@ -165,13 +166,13 @@ export class GatewayProxy {
           throw new GatewayFailure(400, 'VALIDACION');
         headers['content-type'] = contentType;
       }
-      // All three file-import operations declare 413; none defines a byte cap.
-      // Do not apply the JSON buffer budget to their file or multipart overhead.
-      const importsFile =
-        route.requestTypes.includes('multipart/form-data') &&
-        route.responses['413']?.codes.includes('ARCHIVO_EXCEDE_LIMITE');
+      // File owners enforce their contractual limits (including brand logos).
+      // The JSON buffer budget does not apply to multipart files or framing.
+      const streamsMultipart = route.requestTypes.includes(
+        'multipart/form-data',
+      );
       let body: RequestInit['body'];
-      if (importsFile) {
+      if (streamsMultipart) {
         upload = streamedRequest(req);
         body = upload.body;
       } else {
@@ -211,6 +212,12 @@ export class GatewayProxy {
           response,
           this.settings.maxBytes,
         );
+        if (upload && !req.readableEnded) {
+          // Discard remaining bytes before ending the response: otherwise an
+          // early 413 can reset a client still uploading a large multipart.
+          upload.close();
+          await finished(req, { signal: controller.signal, cleanup: true });
+        }
         let code = '';
         try {
           const problem: unknown = JSON.parse(payload.toString('utf8'));

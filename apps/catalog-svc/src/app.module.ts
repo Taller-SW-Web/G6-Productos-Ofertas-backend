@@ -1,3 +1,4 @@
+import { ReadinessController } from './readiness.controller.js';
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
@@ -15,7 +16,7 @@ import { ProblemFilter } from './problem.filter.js';
 
 @Module({
   imports: [],
-  controllers: [AppController, CommercialController],
+  controllers: [AppController, CommercialController, ReadinessController],
   providers: [
     AppService,
     Database,

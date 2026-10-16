@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
+import { checkServerIdentity } from 'node:tls';
 import pg, { type PoolConfig } from 'pg';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { sql } from 'drizzle-orm';
@@ -47,7 +48,13 @@ export function readDatabaseConfig(
       database: env.PGDATABASE,
       user: env.PGUSER,
       password: env.PGPASSWORD,
-      ssl: { ca, rejectUnauthorized: true, servername: env.PGHOST },
+      ssl: {
+        ca,
+        rejectUnauthorized: true,
+        servername: env.PGHOST,
+        checkServerIdentity: (_host, certificate) =>
+          checkServerIdentity(env.PGHOST!, certificate),
+      },
       max: 4,
       connectionTimeoutMillis: 10000,
       idleTimeoutMillis: 10000,

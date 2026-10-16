@@ -456,6 +456,153 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
     },
   );
 
+  describe.each([
+    {
+      operationId: 'crearMarca',
+      method: 'post',
+      path: '/api/v1/marcas',
+      success: 201,
+    },
+    {
+      operationId: 'actualizarMarca',
+      method: 'patch',
+      path: '/api/v1/marcas/11111111-1111-1111-1111-111111111111',
+      success: 200,
+    },
+  ] as const)(
+    '$operationId brand multipart (H-02)',
+    ({ method, path, success }) => {
+      let previousTimeout: number;
+      beforeEach(() => {
+        previousTimeout = settings.timeoutMs;
+        Object.assign(settings, { timeoutMs: 10000 });
+      });
+      afterEach(() => Object.assign(settings, { timeoutMs: previousTimeout }));
+      const authorized = () =>
+        signed.token({
+          tipo: 'acceso',
+          sub: '11111111-1111-1111-1111-111111111111',
+          roles: ['GESTOR_COMERCIAL'],
+        });
+
+      it('streams a logo below the SPEC-011 file limit and above the JSON buffer budget', async () => {
+        reply.status = success;
+        reply.body = JSON.stringify({
+          marcaId: '11111111-1111-1111-1111-111111111111',
+          nombre: 'Marca deportiva de prueba',
+          estado: 'ACTIVO',
+          version: 1,
+          createdAt: '2026-10-16T00:00:00Z',
+          updatedAt: '2026-10-16T00:00:00Z',
+        });
+        const correlationId = '22222222-2222-2222-2222-222222222222';
+        const logo = Buffer.alloc(2 * 1024 * 1024, 97);
+        const response = await request(app.getHttpServer())
+          [method](path)
+          .set('Authorization', `Bearer ${authorized()}`)
+          .set('X-Correlation-Id', correlationId)
+          .field('nombre', 'Marca deportiva de prueba')
+          .field('version', '1')
+          .attach('logo', logo, {
+            filename: 'transport-logo.png',
+            contentType: 'image/png',
+          });
+        expect(response.status).toBe(success);
+        expect(response.body).toEqual(JSON.parse(reply.body));
+        expect(calls).toHaveLength(1);
+        expect(calls[0].method).toBe(method.toUpperCase());
+        expect(calls[0].url).toBe(path);
+        expect(calls[0].headers['x-correlation-id']).toBe(correlationId);
+        expect(calls[0].headers['content-type']).toMatch(
+          /multipart\/form-data; boundary=/,
+        );
+        expect(calls[0].body).toContain(
+          'name="logo"; filename="transport-logo.png"',
+        );
+        expect(calls[0].body.includes(logo.toString('ascii'))).toBe(true);
+        expect(response.headers['x-correlation-id']).toBe(correlationId);
+      });
+
+      it.each([false, true])(
+        'preserves contractual 413 for a logo above the old 10 MiB buffer, early=%s',
+        async (early) => {
+          reply = {
+            ...reply,
+            early,
+            status: 413,
+            type: 'application/problem+json',
+            body: '{"code":"LOGO_EXCEDE_LIMITE","status":413,"detail":"private-logo-storage"}',
+          };
+          const response = await request(app.getHttpServer())
+            [method](path)
+            .set('Authorization', `Bearer ${authorized()}`)
+            .field('nombre', 'Marca deportiva de prueba')
+            .field('version', '1')
+            .attach(
+              'logo',
+              Buffer.alloc(11 * 1024 * 1024, 97),
+              'oversized.png',
+            );
+          expect(response.status).toBe(413);
+          expect(response.body).toMatchObject({
+            status: 413,
+            code: 'LOGO_EXCEDE_LIMITE',
+          });
+          expect(response.headers['content-type']).toContain(
+            'application/problem+json',
+          );
+          expect(response.text).not.toContain('private-logo-storage');
+          expect(calls).toHaveLength(1);
+          if (!early)
+            expect(Buffer.byteLength(calls[0].body)).toBeGreaterThan(
+              11 * 1024 * 1024,
+            );
+        },
+      );
+
+      it('does not accept an import-only code as the logo limit error', async () => {
+        reply.status = 413;
+        reply.type = 'application/problem+json';
+        reply.body = '{"code":"ARCHIVO_EXCEDE_LIMITE","detail":"private-code"}';
+        const response = await request(app.getHttpServer())
+          [method](path)
+          .set('Authorization', `Bearer ${authorized()}`)
+          .field('nombre', 'Marca deportiva de prueba')
+          .field('version', '1')
+          .attach(
+            'logo',
+            Buffer.alloc(2 * 1024 * 1024, 97),
+            'transport-logo.png',
+          );
+        expect(response.status).toBe(500);
+        expect(response.body.code).toBe('ERROR_INTERNO');
+        expect(response.text).not.toContain('private-code');
+        expect(calls).toHaveLength(1);
+      });
+
+      it('keeps authentication and authorization before forwarding a multipart logo', async () => {
+        const unauthenticated = await request(app.getHttpServer())
+          [method](path)
+          .attach(
+            'logo',
+            Buffer.alloc(2 * 1024 * 1024, 97),
+            'unauthorized.png',
+          );
+        expect(unauthenticated.status).toBe(401);
+        const denied = await request(app.getHttpServer())
+          [method](path)
+          .set(
+            'Authorization',
+            `Bearer ${signed.token({ tipo: 'acceso', sub: '11111111-1111-1111-1111-111111111111', roles: [] })}`,
+          )
+          .attach('logo', Buffer.alloc(2 * 1024 * 1024, 97), 'forbidden.png');
+        expect(denied.status).toBe(403);
+        expect(denied.body.code).toBe('SCOPE_INSUFICIENTE');
+        expect(calls).toHaveLength(0);
+      });
+    },
+  );
+
   it.each([false, true])(
     'preserves the provider file limit rejection, early=%s',
     async (early) => {

@@ -26,6 +26,8 @@ describe('Commercial query contract', () => {
     { tamanio: ['2'] },
     { orden: 'PRECIO_ASC' },
     { precioMin: '-1' },
+    { precioMin: '0x10' },
+    { precioMin: '0b10' },
     { precioMax: 'NaN' },
     { precioMin: '3', precioMax: '2' },
     { estado: 'ACTIVA' },

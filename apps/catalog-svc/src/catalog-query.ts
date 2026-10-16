@@ -48,7 +48,7 @@ export function parseProductQuery(
     if (
       typeof raw !== 'string' ||
       raw.trim() !== raw ||
-      raw === '' ||
+      !/^\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(raw) ||
       !Number.isFinite(+raw) ||
       +raw < 0
     )

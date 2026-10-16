@@ -1,3 +1,4 @@
+import { ReadinessController } from './readiness.controller.js';
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { ProblemDetailsFilter } from './errors/problem-details.filter.js';
@@ -10,7 +11,7 @@ import { Database } from './database.js';
 
 @Module({
   imports: [],
-  controllers: [TaxonomySvcController, TaxonomyController],
+  controllers: [TaxonomySvcController, TaxonomyController, ReadinessController],
   providers: [
     TaxonomySvcService,
     Database,
