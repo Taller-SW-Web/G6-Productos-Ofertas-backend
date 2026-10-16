@@ -1,34 +1,37 @@
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import { TaxonomySvcModule } from './taxonomy-svc.module.js';
+import { Database, readDatabaseConfig } from './database.js';
 
-function loadEnv(): void {
-  const envPath = resolve(process.cwd(), '.env');
-  if (existsSync(envPath) && typeof process.loadEnvFile === 'function') {
-    process.loadEnvFile(envPath);
-  }
-}
-
-function resolvePort(): number {
-  const rawPort = process.env.TAXONOMY_SVC_PORT ?? process.env.PORT ?? '3006';
-  const port = Number(rawPort);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(
-      '[' +
-        'taxonomy-svc' +
-        '] Puerto invalido: ' +
-        String(rawPort) +
-        '. Debe ser un entero entre 1 y 65535.',
+async function bootstrap(): Promise<void> {
+  // --env-file externo se inyecta antes de Nest; no copiar archivos privados.
+  readDatabaseConfig(process.env);
+  const raw = process.env.TAXONOMY_SVC_PORT ?? '3006';
+  const port = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isInteger(port) || port < 1 || port > 65535)
+    throw new Error('Puerto inválido');
+  const app = await NestFactory.create(TaxonomySvcModule, {
+    logger: false,
+    abortOnError: false,
+  });
+  try {
+    await app.get(Database).verifyIdentity();
+    app.enableShutdownHooks();
+    await app.listen(port, '127.0.0.1');
+    process.stdout.write(
+      JSON.stringify({ service: 'taxonomy-svc', code: 'APPLICATION_STARTED' }) +
+        '\n',
     );
+  } catch {
+    await app.close();
+    throw new Error('No se pudo iniciar el servicio');
   }
-  return port;
 }
-
-async function bootstrap() {
-  loadEnv();
-  const port = resolvePort();
-  const app = await NestFactory.create(TaxonomySvcModule);
-  await app.listen(port);
-}
-await bootstrap();
+await bootstrap().catch(() => {
+  process.stderr.write(
+    JSON.stringify({
+      service: 'taxonomy-svc',
+      code: 'APPLICATION_START_FAILED',
+    }) + '\n',
+  );
+  process.exitCode = 1;
+});
