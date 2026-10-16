@@ -15,9 +15,16 @@ y tres proyecciones propias: **todos cero**. No se consultaron schemas ajenos.
 La consulta se ejecutó con el MCP como `postgres`, no con el login individual.
 Los permisos SELECT/INSERT/UPDATE/DELETE declarados de `promotions_dev_login`
 se comprobaron como metadatos para las seis tablas maestras; eso no demuestra
-una conexión autenticada con ese login. El `.env.local` del usuario se carga,
-pero al validarlo falta `RABBITMQ_URL` y la ruta de `PGSSLROOTCERT` no existe.
-No se imprimieron valores. No se ejecutó una conexión local sin CA validado.
+una conexión autenticada con ese login. En la revisión inicial faltaba el broker
+y el CA local no existía. En la verificación posterior, el CA ya valida y se
+configuró un broker real de desarrollo ligado a 127.0.0.1; el arranque de
+liveness pasó. También pasó la conexión PostgreSQL del login configurado,
+con TLS autorizado, identidad/base esperadas y BEGIN READ ONLY/ROLLBACK.
+Los seis conteos propios siguieron en cero. Evidencia reproducible:
+`apps/promotions-svc/dev/check-local-database.mjs` y
+`apps/promotions-svc/test/evidence/local-postgres-2026-10-16.json`.
+No se imprimieron valores ni se modificaron datos o permisos; no se infiere
+una auditoría completa de membresías ni homologación externa.
 
 ## Borrador comercial
 
@@ -50,13 +57,13 @@ posible de los otros owners.
 
 ## Dependencias específicas
 
-| Owner                         | Operación                                    | Desbloqueo verificable                                                                                                                                        |
-| ----------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gabriel Poma / Catálogo / #12 | Alcances de campaña y recomendaciones        | Manifiesto/API versionados con IDs/SKU vendibles de las familias elegidas y sus estados.                                                                      |
-| Leonardo Vera / Pricing / #13 | Coherencia económica y elegibilidad          | Precios, canales y vigencias publicados para las referencias elegidas.                                                                                        |
-| Axel / configuración local    | Autenticación PostgreSQL con el login propio | El CA ya pasa la validación local; aún falta comprobar la conexión/TLS e identidad. RABBITMQ_URL sigue pendiente para el arranque real.                       |
-| Marco / owner Promotions      | Ensayo en compartido                         | Autorizar alcance, tablas y destino del ensayo; revisar cuerpos/efectos de triggers y garantizar transacción completa.                                        |
-| Marco / owner Promotions      | Persistencia                                 | Tras completar referencias y validaciones, aprobar SQL/manifiesto/hash y destino exactos; baseline fresco, comparación de conflictos, repetición y postcheck. |
+| Owner                         | Operación                                    | Desbloqueo verificable                                                                                                                                            |
+| ----------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gabriel Poma / Catálogo / #12 | Alcances de campaña y recomendaciones        | Manifiesto/API versionados con IDs/SKU vendibles de las familias elegidas y sus estados.                                                                          |
+| Leonardo Vera / Pricing / #13 | Coherencia económica y elegibilidad          | Precios, canales y vigencias publicados para las referencias elegidas.                                                                                            |
+| Axel / configuración local    | Autenticación PostgreSQL con el login propio | Verificada en solo lectura: TLS autorizado, login/base esperados y SELECT de los seis maestros propios. No acredita integración comercial ni aprobación de carga. |
+| Marco / owner Promotions      | Ensayo en compartido                         | Autorizar alcance, tablas y destino del ensayo; revisar cuerpos/efectos de triggers y garantizar transacción completa.                                            |
+| Marco / owner Promotions      | Persistencia                                 | Tras completar referencias y validaciones, aprobar SQL/manifiesto/hash y destino exactos; baseline fresco, comparación de conflictos, repetición y postcheck.     |
 
 La preparación no espera homologación G1/G4/G5/G7. La frontera de referencias
 pendientes no paraliza el diseño interno de Promotions. El registry del runner
