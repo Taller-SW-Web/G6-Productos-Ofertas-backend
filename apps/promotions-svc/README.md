@@ -104,8 +104,34 @@ la configuración y evaluación interna de #70 sin inventar endpoints ahora.
 Estado de #70: configuración, logging y evaluación interna implementados y
 probados. Sondas autenticadas y exposición HTTP de readiness pertenecen a los
 bloques posteriores; homologación y despliegue no se acreditan. El cierre formal
-requiere revisión y PR fusionado. La configuración privada todavía debe completar
-RABBITMQ_URL para arrancar con ese archivo; no se rellena con un broker ficticio.
+requiere revisión y PR fusionado. La configuración privada ya pasó validación
+y arranque real de liveness usando un broker local de desarrollo; no acredita
+readiness funcional. La prueba separada de PostgreSQL autenticado también pasó
+con TLS autorizado y solo consultas de lectura sobre el schema propio.
+
+## Broker local de desarrollo
+
+Con Docker activo, ejecutar `node apps/promotions-svc/dev/start-local-broker.mjs`.
+Si ya existe RABBITMQ_URL, la conserva. Si está vacío, inicia RabbitMQ real
+con puerto aleatorio ligado a 127.0.0.1 y credenciales generadas, comprueba la
+conexión y completa únicamente esa variable en el .env.local ignorado. No
+imprime credenciales ni cambia topologías compartidas. El contenedor queda
+activo para desarrollo; el comando informa su nombre y cómo detenerlo.
+Al detenerlo se elimina el contenedor descartable. Para crear otro, vaciar
+únicamente RABBITMQ_URL y volver a ejecutar el helper; este no reemplaza una
+configuración existente automáticamente.
+
+Después del build, `node apps/promotions-svc/dev/check-local-startup.mjs`
+valida la configuración y comprueba /health en un puerto temporal. Detiene
+el proceso al terminar, no inicia consumidores compartidos ni prueba integración
+de base de datos. Verificación real del 2026-10-16: PASS. El servicio puede
+iniciarse después con el comando start:dev indicado arriba.
+
+`node apps/promotions-svc/dev/check-local-database.mjs` comprueba TLS, login/base
+esperados, atributos no administrativos y SELECT sobre las seis tablas maestras
+propias dentro de BEGIN READ ONLY/ROLLBACK. Resultado real: PASS, seis conteos
+cero; evidencia en `test/evidence/local-postgres-2026-10-16.json`. No verifica
+todos los grants/membresías, reglas de negocio, integración ni homologación.
 
 ## Verificación
 
