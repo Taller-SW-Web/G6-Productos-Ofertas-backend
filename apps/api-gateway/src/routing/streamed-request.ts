@@ -1,7 +1,7 @@
 import { PassThrough, Readable } from 'node:stream';
 import type { Request } from 'express';
 
-// Import owners enforce their file limits; the contract does not specify bytes.
+// Owners enforce file limits, including SPEC-011's 5 MB for brand logos.
 // Stream the entire multipart framing unchanged, with bounded backpressure.
 export function streamedRequest(req: Request): {
   body: ReadableStream<Uint8Array>;
