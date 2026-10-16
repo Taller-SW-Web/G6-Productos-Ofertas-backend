@@ -5,8 +5,10 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=service-registry.sh
 source "${SCRIPT_DIR}/service-registry.sh"
 
-readonly G6_DEPLOY_EXECUTOR_VERSION=3
+readonly G6_DEPLOY_EXECUTOR_VERSION=4
 readonly G6_SUPPORTED_SERVICE_REGISTRY_VERSION=2
+readonly G6_HTTP_GENERIC_OVERLAY="/opt/g6-productos-ofertas/shared/docker-compose.service.http.yml"
+readonly G6_HTTP_INVENTORY_OVERLAY="/opt/g6-productos-ofertas/inventory/docker-compose.inventory.http.yml"
 
 fail() {
   printf 'G6 deployment: %s\n' "$1" >&2
@@ -54,10 +56,22 @@ if [[ "$SERVICE_NAME" == inventory-svc ]]; then
   [[ -r "$RUNTIME_ENV_FILE" ]] || fail "no se puede leer ${RUNTIME_ENV_FILE}"
   grep -Eq "^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*('[^']+'|\"[^\"]+\"|[^[:space:]#'\"]+)" "$RUNTIME_ENV_FILE" ||
     fail "DATABASE_URL no está definido en ${RUNTIME_ENV_FILE}"
+  if [[ -e "$G6_HTTP_INVENTORY_OVERLAY" ]]; then
+    [[ -f "$G6_HTTP_INVENTORY_OVERLAY" && -r "$G6_HTTP_INVENTORY_OVERLAY" ]] ||
+      fail 'la configuración opcional g6-http de Inventory no es un archivo legible'
+    docker network inspect g6-http >/dev/null 2>&1 ||
+      fail 'la red externa g6-http no está preparada; no se descargó ni cambió Inventory'
+  fi
 else
   [[ -f "$G6_SERVICE_COMPOSE_FILE" ]] || fail "no existe ${G6_SERVICE_COMPOSE_FILE}"
   [[ -f "$G6_SERVICE_ENV_FILE" && -r "$G6_SERVICE_ENV_FILE" ]] ||
     fail "no se puede leer la configuración privada ${G6_SERVICE_ENV_FILE}"
+  if [[ -e "$G6_HTTP_GENERIC_OVERLAY" ]]; then
+    [[ -f "$G6_HTTP_GENERIC_OVERLAY" && -r "$G6_HTTP_GENERIC_OVERLAY" ]] ||
+      fail 'la configuración opcional g6-http no es un archivo legible'
+    docker network inspect g6-http >/dev/null 2>&1 ||
+      fail 'la red externa g6-http no está preparada; no se descargó ni cambió la instancia'
+  fi
 fi
 
 mkdir -p "$G6_SERVICE_STATE_DIR"
@@ -90,16 +104,20 @@ compose() {
   local image="$1"
   shift
   if [[ "$SERVICE_NAME" == inventory-svc ]]; then
+    local -a compose_files=(--file "$G6_SERVICE_COMPOSE_FILE")
+    [[ ! -f "$G6_HTTP_INVENTORY_OVERLAY" ]] || compose_files+=(--file "$G6_HTTP_INVENTORY_OVERLAY")
     env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
       DOCKER_CONFIG="$DOCKER_CONFIG" INVENTORY_IMAGE="$image" \
-      docker compose --file "$G6_SERVICE_COMPOSE_FILE" --project-name "$G6_SERVICE_COMPOSE_PROJECT" "$@" "$G6_SERVICE_COMPOSE_UNIT"
+      docker compose "${compose_files[@]}" --project-name "$G6_SERVICE_COMPOSE_PROJECT" "$@" "$G6_SERVICE_COMPOSE_UNIT"
   else
+    local -a compose_files=(--file "$G6_SERVICE_COMPOSE_FILE")
+    [[ ! -f "$G6_HTTP_GENERIC_OVERLAY" ]] || compose_files+=(--file "$G6_HTTP_GENERIC_OVERLAY")
     env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
       DOCKER_CONFIG="$DOCKER_CONFIG" G6_SERVICE_IMAGE="$image" \
       G6_SERVICE_PORT="$G6_SERVICE_PORT" G6_SERVICE_PORT_ENV="$G6_SERVICE_PORT_ENV" \
-      G6_SERVICE_CONTAINER="$G6_SERVICE_CONTAINER" \
+      G6_SERVICE_CONTAINER="$G6_SERVICE_CONTAINER" G6_SERVICE_IMAGE_NAME="$G6_SERVICE_IMAGE_NAME" \
       G6_SERVICE_ENV_FILE="$G6_SERVICE_ENV_FILE" \
-      docker compose --file "$G6_SERVICE_COMPOSE_FILE" --project-name "$G6_SERVICE_COMPOSE_PROJECT" "$@" "$G6_SERVICE_COMPOSE_UNIT"
+      docker compose "${compose_files[@]}" --project-name "$G6_SERVICE_COMPOSE_PROJECT" "$@" "$G6_SERVICE_COMPOSE_UNIT"
   fi
 }
 

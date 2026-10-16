@@ -1,0 +1,15 @@
+# Opt-in overlay for Inventory after g6-http has been prepared.
+# The legacy Compose, project, command, loopback port, env file and healthcheck
+# remain in docker-compose.inventory.yml.
+services:
+  inventory-svc:
+    networks:
+      default: {}
+      g6-http:
+        aliases:
+          - inventory-svc
+
+networks:
+  g6-http:
+    external: true
+    name: g6-http

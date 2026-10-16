@@ -86,6 +86,42 @@ g6_service_needs_update() {
   return 1
 }
 
+# An infra-only merge must not trigger the conservative "missing deployment
+# history" fallback for Inventory. This allowlist deliberately excludes build
+# inputs such as Dockerfile.service and build-service.sh.
+g6_is_infrastructure_control_commit() {
+  local selected_sha="$1" parent paths_file path count=0
+  parent="$(git rev-parse --verify "${selected_sha}^1" 2>/dev/null)" || return 1
+  paths_file="$(mktemp)" || return 1
+  if ! git diff --no-renames --name-only -z "$parent" "$selected_sha" > "$paths_file"; then
+    rm -f "$paths_file"
+    return 1
+  fi
+  while IFS= read -r -d '' path; do
+    ((count += 1))
+    case "$path" in
+      ops/oracle/README.md|\
+      ops/oracle/deploy-g6-service.sh|\
+      ops/oracle/deploy-inventory-svc.sh|\
+      ops/oracle/docker-compose.inventory.http.yml|\
+      ops/oracle/docker-compose.service.http.yml|\
+      ops/oracle/docker-compose.service.yml|\
+      ops/oracle/github-deployment-api.sh|\
+      ops/oracle/select-cd-services.sh|\
+      ops/oracle/service-registry.sh|\
+      ops/oracle/services.psv|\
+      ops/oracle/tests/*)
+        ;;
+      *)
+        rm -f "$paths_file"
+        return 1
+        ;;
+    esac
+  done < "$paths_file"
+  rm -f "$paths_file"
+  ((count > 0))
+}
+
 mode="${1:-}"
 case "$mode" in
   automatic)
@@ -94,6 +130,11 @@ case "$mode" in
     selected_sha="$3"
     [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { usage; exit 64; }
     [[ "$selected_sha" =~ ^[0-9a-f]{40}$ ]] || { usage; exit 64; }
+    if g6_is_infrastructure_control_commit "$selected_sha"; then
+      echo 'Cambio de control de infraestructura: sin selección automática de servicios. El despliegue requiere dispatch explícito.' >&2
+      printf '[]\n'
+      exit 0
+    fi
     selected=()
     for service in "${G6_EXPECTED_SERVICES[@]}"; do
       g6_service_config "$service" || { echo 'Registro de servicios inválido.' >&2; exit 65; }

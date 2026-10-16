@@ -76,6 +76,20 @@ expect_selection() {
   printf 'PASS: selección conservadora %s\n' "$expected"
 }
 
+# Un merge de control de infraestructura se omite antes del fallback que
+# selecciona servicios sin historial exitoso. Un input de build compartido
+# permanece fuera de la excepción y conserva el comportamiento conservador.
+mkdir -p "$GIT_ROOT/ops/oracle"
+printf 'executor control\n' > "$GIT_ROOT/ops/oracle/deploy-g6-service.sh"
+git -C "$GIT_ROOT" add .
+git -C "$GIT_ROOT" commit --quiet -m 'infraestructura oracle control'
+expect_selection '[]'
+
+printf 'build input\n' > "$GIT_ROOT/ops/oracle/build-service.sh"
+git -C "$GIT_ROOT" add .
+git -C "$GIT_ROOT" commit --quiet -m 'cambio de input de build'
+expect_selection '["catalog-svc","inventory-svc"]'
+BASE_SHA="$(git -C "$GIT_ROOT" rev-parse HEAD)"
 record_deployment inventory-svc 1 "$BASE_SHA" success '2026-01-01T00:00:00Z'
 record_deployment catalog-svc 11 "$BASE_SHA" success '2026-01-01T00:00:00Z'
 
