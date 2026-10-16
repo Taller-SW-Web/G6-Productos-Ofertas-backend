@@ -1,0 +1,26 @@
+FROM node:24.15.0-alpine@sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f AS build
+
+WORKDIR /app
+RUN apk add --no-cache bash
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY apps ./apps
+COPY nest-cli.json tsconfig.json ./
+COPY ops/oracle ./ops/oracle
+ARG SERVICE_NAME
+RUN bash ops/oracle/build-service.sh "$SERVICE_NAME"
+
+FROM node:24.15.0-alpine@sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f AS runtime
+
+ENV NODE_ENV=production
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+COPY --from=build --chown=node:node /app/dist/apps ./dist/apps
+
+USER node
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || '3000') + '/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+
+CMD ["node", "dist/apps/g6-service-entrypoint.mjs"]

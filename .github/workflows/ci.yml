@@ -25,6 +25,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Validate GitHub Actions workflows with actionlint
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -shellcheck=
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -67,6 +70,134 @@ jobs:
             fi
           done
           echo "All 9 applications have valid executable artifacts."
+
+      - name: Build inventory-svc container image
+        run: docker build --file Dockerfile.inventory-svc --tag inventory-svc:ci .
+
+      - name: Simulate generic Oracle deployment, isolation and rollback
+        run: bash ops/oracle/tests/deploy-g6-service.test.sh
+
+      - name: Test GitHub Deployment selection and recovery
+        run: bash ops/oracle/tests/select-cd-services.test.sh
+
+      - name: Test GitHub Deployment API lifecycle with mock
+        run: bash ops/oracle/tests/deployment-api.test.sh
+
+      - name: Test publication failure isolation
+        run: bash ops/oracle/tests/publish-isolation.test.sh
+
+      - name: Validate closed Oracle service registry
+        run: |
+          set -euo pipefail
+          for file in ops/oracle/service-registry.sh ops/oracle/deploy-g6-service.sh ops/oracle/deploy-inventory-svc.sh ops/oracle/build-service.sh ops/oracle/select-cd-services.sh ops/oracle/github-deployment-api.sh ops/oracle/tests/deploy-g6-service.test.sh ops/oracle/tests/deploy-inventory-svc.test.sh ops/oracle/tests/select-cd-services.test.sh ops/oracle/tests/deployment-api.test.sh ops/oracle/tests/publish-isolation.test.sh; do
+            bash -n "$file"
+          done
+          enabled="$(bash -c 'source ops/oracle/service-registry.sh; g6_enabled_services_json')"
+          test "$enabled" = '["inventory-svc"]'
+          test "$(awk -F'|' '$1 !~ /^#/ && NF { count++ } END { print count+0 }' ops/oracle/services.psv)" = 9
+
+      - name: Validate service port, environment and healthcheck consistency
+        run: |
+          set -euo pipefail
+          runtime_env="$(mktemp)"
+          inventory_compose="$(mktemp --suffix=.yml)"
+          trap 'rm -f "$runtime_env" "$inventory_compose"' EXIT
+          while IFS='|' read -r service enabled port port_env build_script main_module image_name compose_file project compose_unit container state_dir runtime_env_file; do
+            [[ -n "$service" && "$service" != \#* ]] || continue
+            export G6_SERVICE_IMAGE="ghcr.io/taller-sw-web/g6-productos-ofertas-backend/${service}:0123456789012345678901234567890123456789"
+            export G6_SERVICE_CONTAINER="$container"
+            export G6_SERVICE_PORT="$port"
+            export G6_SERVICE_PORT_ENV="$port_env"
+            export G6_SERVICE_ENV_FILE="$runtime_env"
+            config="$(docker compose --file ops/oracle/docker-compose.service.yml config --format json --no-env-resolution)"
+            jq -e --arg port "$port" --arg port_env "$port_env" \
+              '.services.service.environment.PORT == $port and
+               .services.service.environment[$port_env] == $port and
+               .services.service.ports[0].host_ip == "127.0.0.1" and
+               (.services.service.ports[0].published | tostring) == $port and
+               ((.services.service.healthcheck.test | join(" ")) | contains("127.0.0.1:" + $port + "/health"))' \
+              <<< "$config" >/dev/null
+          done < ops/oracle/services.psv
+          source ops/oracle/service-registry.sh
+          g6_service_config inventory-svc
+          grep -Fq "process.env.${G6_SERVICE_PORT_ENV} ?? process.env.PORT ?? '${G6_SERVICE_PORT}'" apps/inventory-svc/src/main.ts
+          grep -Fq "127.0.0.1:${G6_SERVICE_PORT}/health" Dockerfile.inventory-svc
+          export INVENTORY_IMAGE="ghcr.io/taller-sw-web/g6-productos-ofertas-backend/inventory-svc:0123456789012345678901234567890123456789"
+          sed "s|/etc/g6-inventory/runtime.env|${runtime_env}|" docker-compose.inventory.yml > "$inventory_compose"
+          inventory_config="$(docker compose --file "$inventory_compose" config --format json --no-env-resolution)"
+          jq -e --arg port "$G6_SERVICE_PORT" --arg port_env "$G6_SERVICE_PORT_ENV" \
+            '.services["inventory-svc"].environment.PORT == $port and
+             .services["inventory-svc"].environment[$port_env] == $port and
+             .services["inventory-svc"].ports[0].host_ip == "127.0.0.1" and
+             (.services["inventory-svc"].ports[0].published | tostring) == $port and
+             ((.services["inventory-svc"].healthcheck.test | join(" ")) | contains("127.0.0.1:" + $port + "/health"))' \
+            <<< "$inventory_config" >/dev/null
+          printf 'Consistencia de los nueve puertos/env/Compose/healthchecks validada; Inventario conserva puerto y healthcheck.\n'
+
+      - name: Build generic inventory and catalog service images
+        run: |
+          set -euo pipefail
+          docker build --file Dockerfile.service --build-arg SERVICE_NAME=inventory-svc --tag g6-service:inventory-svc-ci .
+          docker build --file Dockerfile.service --build-arg SERVICE_NAME=catalog-svc --tag g6-service:catalog-svc-ci .
+
+      - name: Smoke test generic inventory and catalog service images
+        run: |
+          set -euo pipefail
+          for service in inventory-svc catalog-svc; do
+            case "$service" in
+              inventory-svc) port=3005; port_env=INVENTORY_SVC_PORT ;;
+              catalog-svc) port=3001; port_env=CATALOG_SVC_PORT ;;
+            esac
+            name="${service}-generic-ci"
+            trap 'docker rm --force "$name" >/dev/null 2>&1 || true' EXIT
+            docker run --detach --name "$name" --publish "127.0.0.1::${port}" \
+              --env "PORT=${port}" --env "${port_env}=${port}" "g6-service:${service}-ci" >/dev/null
+            host_port="$(docker port "$name" "${port}/tcp" | awk -F: '{print $NF}')"
+            response=''
+            for attempt in {1..30}; do
+              if response="$(curl --fail --silent "http://127.0.0.1:${host_port}/health")"; then break; fi
+              sleep 2
+            done
+            node -e '
+              const payload = JSON.parse(process.argv[1]);
+              if (payload.status !== "ok" || payload.service !== process.argv[2]) {
+                console.error("Unexpected generic health payload:", payload);
+                process.exit(1);
+              }
+            ' "$response" "$service"
+            healthy=''
+            for attempt in {1..30}; do
+              healthy="$(docker inspect --format '{{.State.Health.Status}}' "$name")"
+              [[ "$healthy" == healthy ]] && break
+              sleep 2
+            done
+            [[ "$healthy" == healthy ]]
+            docker rm --force "$name" >/dev/null
+            trap - EXIT
+            printf 'PASS: Dockerfile.service %s escuchó en %s/%s y su healthcheck quedó healthy.\n' "$service" "$port_env" "$port"
+          done
+
+      - name: Smoke test inventory-svc container health
+        run: |
+          set -euo pipefail
+          trap 'docker rm --force inventory-svc-ci >/dev/null 2>&1 || true' EXIT
+          docker run --detach --name inventory-svc-ci --publish 127.0.0.1::3005 inventory-svc:ci
+          port="$(docker port inventory-svc-ci 3005/tcp | awk -F: '{print $NF}')"
+          response=''
+          for attempt in {1..30}; do
+            if response="$(curl --fail --silent "http://127.0.0.1:${port}/health")"; then
+              break
+            fi
+            sleep 2
+          done
+          node -e '
+            const payload = JSON.parse(process.argv[1]);
+            if (payload.status !== "ok" || payload.service !== "inventory-svc") {
+              console.error("Unexpected inventory-svc health payload:", payload);
+              process.exit(1);
+            }
+            console.log("inventory-svc process health passed; this does not verify Supabase readiness.");
+          ' "$response"
 
       - name: Smoke test compiled executable
         run: |

@@ -1,0 +1,328 @@
+{
+  "result": "PASS_FILE_COMPARISON",
+  "captured_at": "2026-10-16T20:28:29.527Z",
+  "sources": {
+    "cueva": "68c96a77ab8c77b1f218d6283de7e1f4efa45e4f",
+    "castilla": "fbbb74a528c73989c83f53e27690bcfcba966308",
+    "master": "24227527c632be4f3b8de612954328904ea57de0"
+  },
+  "openapi_blob": "f64bfe9a097b2a0f74c2600988305443d92f640e",
+  "operation_count": 135,
+  "shared_dependencies_modified": false,
+  "runtime_preserved_from_latest_cueva": true,
+  "inventory": [
+    {
+      "path": "apps/api-gateway/.env.example",
+      "cueva_blob": "4672629c6d51db9dba9d3898357fcc46a19ec8ce",
+      "castilla_blob": "4672629c6d51db9dba9d3898357fcc46a19ec8ce",
+      "working_blob": "4672629c6d51db9dba9d3898357fcc46a19ec8ce",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/AUDITORIA-H01-H03.md",
+      "cueva_blob": "65a917b6c9046772bab33d5eb2841b027a17d495",
+      "castilla_blob": "64ae0bd6494cc3b7707fc737250d0f7f87687202",
+      "working_blob": "6d4479c6299b67c58bd4fedd81ec8896a2445b07",
+      "decision": "DOCUMENTATION_EXTENDED"
+    },
+    {
+      "path": "apps/api-gateway/INT-ASAP-INTERVENCION.md",
+      "cueva_blob": null,
+      "castilla_blob": "34b1be9493e4cfe64c88c5192d0babcaa12bbc12",
+      "working_blob": null,
+      "decision": "HISTORICAL_DOCUMENT_OR_PRIVATE_PROBE_RETAINED_AT_SOURCE"
+    },
+    {
+      "path": "apps/api-gateway/INT-ASAP-MARKETPLACE.md",
+      "cueva_blob": null,
+      "castilla_blob": "875888c37662ec5839de2e2fe28b6fad86d1fdf0",
+      "working_blob": null,
+      "decision": "HISTORICAL_DOCUMENT_OR_PRIVATE_PROBE_RETAINED_AT_SOURCE"
+    },
+    {
+      "path": "apps/api-gateway/INT-ASAP-RESULTADO.md",
+      "cueva_blob": null,
+      "castilla_blob": "d5c133084d3d4e326582617d28f7da5d3e5c8771",
+      "working_blob": null,
+      "decision": "HISTORICAL_DOCUMENT_OR_PRIVATE_PROBE_RETAINED_AT_SOURCE"
+    },
+    {
+      "path": "apps/api-gateway/POSTGRES-RUNTIME-2026-10-16.md",
+      "cueva_blob": null,
+      "castilla_blob": "a33598fa5ce55d3bfb6c803bc47af3569cee8fd4",
+      "working_blob": null,
+      "decision": "HISTORICAL_DOCUMENT_OR_PRIVATE_PROBE_RETAINED_AT_SOURCE"
+    },
+    {
+      "path": "apps/api-gateway/README.md",
+      "cueva_blob": "ea4664697b08db8b9b512ec8e14fd87a50e8a03a",
+      "castilla_blob": "a35c4e0688a5587be7432d4c708255951e346a55",
+      "working_blob": "4995b91fc96a46bdc4e055ae290062cd0284584b",
+      "decision": "DOCUMENTATION_EXTENDED"
+    },
+    {
+      "path": "apps/api-gateway/src/api-gateway.controller.spec.ts",
+      "cueva_blob": "cfc6242b7e5f8ada55babf21a2317cb71a7f3088",
+      "castilla_blob": "cfc6242b7e5f8ada55babf21a2317cb71a7f3088",
+      "working_blob": "cfc6242b7e5f8ada55babf21a2317cb71a7f3088",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/api-gateway.controller.ts",
+      "cueva_blob": "d94d7aca26f5a426e704facfef22255b6967a7e4",
+      "castilla_blob": "d94d7aca26f5a426e704facfef22255b6967a7e4",
+      "working_blob": "d94d7aca26f5a426e704facfef22255b6967a7e4",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/api-gateway.module.ts",
+      "cueva_blob": "739699ff0cff22881e59b316f50e03c440a68f9f",
+      "castilla_blob": "739699ff0cff22881e59b316f50e03c440a68f9f",
+      "working_blob": "739699ff0cff22881e59b316f50e03c440a68f9f",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/api-gateway.service.ts",
+      "cueva_blob": "534da6fb1e8d9bcea67bbff45496ae45fbb9c813",
+      "castilla_blob": "534da6fb1e8d9bcea67bbff45496ae45fbb9c813",
+      "working_blob": "534da6fb1e8d9bcea67bbff45496ae45fbb9c813",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/main.ts",
+      "cueva_blob": "a0786e50b50098387bd93ec0d0188f669a733e95",
+      "castilla_blob": "a0786e50b50098387bd93ec0d0188f669a733e95",
+      "working_blob": "a0786e50b50098387bd93ec0d0188f669a733e95",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/readiness.ts",
+      "cueva_blob": "205b2399061f799b3ea19a3228dd04f80d9d2d46",
+      "castilla_blob": "205b2399061f799b3ea19a3228dd04f80d9d2d46",
+      "working_blob": "205b2399061f799b3ea19a3228dd04f80d9d2d46",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/routing/bounded-response.ts",
+      "cueva_blob": "fb9cc3a9ea894ca67636fd3886453a72142ababc",
+      "castilla_blob": "fb9cc3a9ea894ca67636fd3886453a72142ababc",
+      "working_blob": "fb9cc3a9ea894ca67636fd3886453a72142ababc",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/routing/contract-route.ts",
+      "cueva_blob": "2111e767592a1a88bc736fd97aedb35b1ff61334",
+      "castilla_blob": "2111e767592a1a88bc736fd97aedb35b1ff61334",
+      "working_blob": "2111e767592a1a88bc736fd97aedb35b1ff61334",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/routing/contract-routes.ts",
+      "cueva_blob": "5c998c93bb5485d8f00946687e9f2b7b3d8b6a78",
+      "castilla_blob": "5c998c93bb5485d8f00946687e9f2b7b3d8b6a78",
+      "working_blob": "5c998c93bb5485d8f00946687e9f2b7b3d8b6a78",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/routing/gateway-identity.spec.ts",
+      "cueva_blob": "d21e96f143b4bb89083b8db28b09ee4376d152a5",
+      "castilla_blob": "d21e96f143b4bb89083b8db28b09ee4376d152a5",
+      "working_blob": "d21e96f143b4bb89083b8db28b09ee4376d152a5",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/routing/gateway-identity.ts",
+      "cueva_blob": "d44e9afb904a5193c40cb4948a838ea88c6ca8ef",
+      "castilla_blob": "d44e9afb904a5193c40cb4948a838ea88c6ca8ef",
+      "working_blob": "d44e9afb904a5193c40cb4948a838ea88c6ca8ef",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/routing/gateway-problem.spec.ts",
+      "cueva_blob": "1d5521acc3be128e6dde968cb86ab212682ca299",
+      "castilla_blob": "1d5521acc3be128e6dde968cb86ab212682ca299",
+      "working_blob": "1d5521acc3be128e6dde968cb86ab212682ca299",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/routing/gateway-problem.ts",
+      "cueva_blob": "175423910d3371aacf2ef6d5033201a9c259542b",
+      "castilla_blob": "175423910d3371aacf2ef6d5033201a9c259542b",
+      "working_blob": "175423910d3371aacf2ef6d5033201a9c259542b",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/routing/gateway-proxy.controller.ts",
+      "cueva_blob": "ed2c8416a877045f36598706d8737b5a4a147560",
+      "castilla_blob": "ed2c8416a877045f36598706d8737b5a4a147560",
+      "working_blob": "ed2c8416a877045f36598706d8737b5a4a147560",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/routing/gateway-proxy.ts",
+      "cueva_blob": "763ce541f5f819e724922f5caf0050347ebba374",
+      "castilla_blob": "b2e5df25a5dbca0326bc590dbd4afdf067582c2d",
+      "working_blob": "763ce541f5f819e724922f5caf0050347ebba374",
+      "decision": "LATEST_CUEVA_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/routing/gateway-readiness.spec.ts",
+      "cueva_blob": "9354db786a3cb5aab00e33ea47274be384379866",
+      "castilla_blob": "9354db786a3cb5aab00e33ea47274be384379866",
+      "working_blob": "9354db786a3cb5aab00e33ea47274be384379866",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/routing/gateway-readiness.ts",
+      "cueva_blob": "f27a56f2d62b76641300c2d0864e4de36790d00a",
+      "castilla_blob": "f27a56f2d62b76641300c2d0864e4de36790d00a",
+      "working_blob": "f27a56f2d62b76641300c2d0864e4de36790d00a",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/routing/gateway-settings.spec.ts",
+      "cueva_blob": "d6e676a6f7a06b4a36608e901e3a0f5e4d454bf2",
+      "castilla_blob": "d6e676a6f7a06b4a36608e901e3a0f5e4d454bf2",
+      "working_blob": "d6e676a6f7a06b4a36608e901e3a0f5e4d454bf2",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/routing/gateway-settings.ts",
+      "cueva_blob": "bd1f65dc95c088982f350112681206f982b9c6f9",
+      "castilla_blob": "bd1f65dc95c088982f350112681206f982b9c6f9",
+      "working_blob": "bd1f65dc95c088982f350112681206f982b9c6f9",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/routing/streamed-request.ts",
+      "cueva_blob": "989e1545e897d544a5ad1a0a8ea2d21d832e742e",
+      "castilla_blob": "c0f53ffbaf0c541e6408fd4ff6905a15b39352ed",
+      "working_blob": "989e1545e897d544a5ad1a0a8ea2d21d832e742e",
+      "decision": "LATEST_CUEVA_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/src/routing/streamed-response.ts",
+      "cueva_blob": "332e9acd28e5166fb22620e8e20f23b3887b1582",
+      "castilla_blob": "332e9acd28e5166fb22620e8e20f23b3887b1582",
+      "working_blob": "332e9acd28e5166fb22620e8e20f23b3887b1582",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/test/app.e2e-spec.ts",
+      "cueva_blob": "355076164ce2ed17364beb894fe780fd8882b9cb",
+      "castilla_blob": "355076164ce2ed17364beb894fe780fd8882b9cb",
+      "working_blob": "355076164ce2ed17364beb894fe780fd8882b9cb",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/test/evidence/dependencies-clean-2026-10-16.json",
+      "cueva_blob": null,
+      "castilla_blob": "aa6cdb85a46364f86b3b597a4a8cd94220ce5d70",
+      "working_blob": null,
+      "decision": "HISTORICAL_DOCUMENT_OR_PRIVATE_PROBE_RETAINED_AT_SOURCE"
+    },
+    {
+      "path": "apps/api-gateway/test/evidence/intervention-manifest-2026-10-16.json",
+      "cueva_blob": null,
+      "castilla_blob": "3ce7a6d9535eb22e337f66d0fca5016cf7255a92",
+      "working_blob": null,
+      "decision": "HISTORICAL_DOCUMENT_OR_PRIVATE_PROBE_RETAINED_AT_SOURCE"
+    },
+    {
+      "path": "apps/api-gateway/test/evidence/marketplace-postgres-partial-2026-10-16.json",
+      "cueva_blob": null,
+      "castilla_blob": "a5743de233ec4f5d1654f702c2f341ad64ec77d9",
+      "working_blob": null,
+      "decision": "HISTORICAL_DOCUMENT_OR_PRIVATE_PROBE_RETAINED_AT_SOURCE"
+    },
+    {
+      "path": "apps/api-gateway/test/evidence/postgres-catalog-2026-10-16.json",
+      "cueva_blob": null,
+      "castilla_blob": "e7f5640142b3c245571423b387913044d680b320",
+      "working_blob": null,
+      "decision": "HISTORICAL_DOCUMENT_OR_PRIVATE_PROBE_RETAINED_AT_SOURCE"
+    },
+    {
+      "path": "apps/api-gateway/test/evidence/postgres-taxonomy-2026-10-16.json",
+      "cueva_blob": null,
+      "castilla_blob": "f5b4675a2f272747f6180e0726e193a41f48cd67",
+      "working_blob": null,
+      "decision": "HISTORICAL_DOCUMENT_OR_PRIVATE_PROBE_RETAINED_AT_SOURCE"
+    },
+    {
+      "path": "apps/api-gateway/test/fixtures/marketplace-eligibility.cases.json",
+      "cueva_blob": null,
+      "castilla_blob": "f26d72593484ec7e688055fcf375de5d7aebf2d4",
+      "working_blob": "f26d72593484ec7e688055fcf375de5d7aebf2d4",
+      "decision": "MARKETPLACE_TOOL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/test/generate-routes.mjs",
+      "cueva_blob": "c10ed048d7cd99a669f7c699655b86d04db9e3d8",
+      "castilla_blob": "c10ed048d7cd99a669f7c699655b86d04db9e3d8",
+      "working_blob": "c10ed048d7cd99a669f7c699655b86d04db9e3d8",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/test/marketplace.live.mjs",
+      "cueva_blob": null,
+      "castilla_blob": "87c86e74661e11cb41a34d8dfafd79510302dfa1",
+      "working_blob": "87c86e74661e11cb41a34d8dfafd79510302dfa1",
+      "decision": "MARKETPLACE_TOOL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/test/marketplace.postgres.e2e-spec.ts",
+      "cueva_blob": null,
+      "castilla_blob": "f6a8a475c13944f576f34b633a1dce5a85ffa9a1",
+      "working_blob": "10e484fe3ba4b812863850b91079a49ac94352c2",
+      "decision": "MARKETPLACE_TEST_PORTABLE_CONFIGURATION"
+    },
+    {
+      "path": "apps/api-gateway/test/postgres-runtime.readonly.mjs",
+      "cueva_blob": null,
+      "castilla_blob": "1f241a9f7cfa2925dd85335eb2250c97dfe7cdb8",
+      "working_blob": null,
+      "decision": "HISTORICAL_DOCUMENT_OR_PRIVATE_PROBE_RETAINED_AT_SOURCE"
+    },
+    {
+      "path": "apps/api-gateway/test/readiness.smoke.mjs",
+      "cueva_blob": "1bdd4ac6e4f2f4f11876257437cfa545974bc276",
+      "castilla_blob": "1bdd4ac6e4f2f4f11876257437cfa545974bc276",
+      "working_blob": "1bdd4ac6e4f2f4f11876257437cfa545974bc276",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/test/routing.e2e-spec.ts",
+      "cueva_blob": "c66e6dedd5e779784cc38f5adbdfe6a445ebe078",
+      "castilla_blob": "c47e51917383c495922091930b91acf115373f4a",
+      "working_blob": "c66e6dedd5e779784cc38f5adbdfe6a445ebe078",
+      "decision": "LATEST_CUEVA_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/test/support/signed-identity.ts",
+      "cueva_blob": "7517691c6c0760f2bc0d1cee703206d8f99472a3",
+      "castilla_blob": "7517691c6c0760f2bc0d1cee703206d8f99472a3",
+      "working_blob": "7517691c6c0760f2bc0d1cee703206d8f99472a3",
+      "decision": "IDENTICAL_PRESERVED"
+    },
+    {
+      "path": "apps/api-gateway/test/verify-intervention.mjs",
+      "cueva_blob": null,
+      "castilla_blob": "95466c7e4d2cec50cbfe9a1653236c3b6ea54bca",
+      "working_blob": null,
+      "decision": "HISTORICAL_DOCUMENT_OR_PRIVATE_PROBE_RETAINED_AT_SOURCE"
+    },
+    {
+      "path": "apps/api-gateway/tsconfig.app.json",
+      "cueva_blob": "e23ad13e873e071d468b3c4a25b0c38d78f0e9b5",
+      "castilla_blob": "e23ad13e873e071d468b3c4a25b0c38d78f0e9b5",
+      "working_blob": "e23ad13e873e071d468b3c4a25b0c38d78f0e9b5",
+      "decision": "IDENTICAL_PRESERVED"
+    }
+  ],
+  "limits": [
+    "File comparison is not test execution, authenticated integration, homologation or deployment.",
+    "Historical castilla evidence is linked at its immutable source, not reissued as current results.",
+    "Local DATA work is excluded from the Gateway publication."
+  ]
+}

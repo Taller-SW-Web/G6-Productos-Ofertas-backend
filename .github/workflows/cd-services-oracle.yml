@@ -1,0 +1,270 @@
+name: CD servicios Oracle
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Servicio registrado (solo los habilitados pueden desplegarse)
+        required: true
+        type: choice
+        options:
+          - api-gateway
+          - bulk-svc
+          - catalog-svc
+          - combos-svc
+          - inventory-svc
+          - price-audit-svc
+          - pricing-svc
+          - promotions-svc
+          - taxonomy-svc
+        default: inventory-svc
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  prepare:
+    name: Validar CI, selección y SHA de master
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.repository.full_name == github.repository &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.head_branch == 'master' &&
+       github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      deployments: read
+    outputs:
+      sha: ${{ steps.selection.outputs.sha }}
+      repository: ${{ steps.selection.outputs.repository }}
+      services: ${{ steps.targets.outputs.services || '[]' }}
+    steps:
+      - name: Select successful master commit
+        id: selection
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == workflow_run ]]; then
+            sha="$WORKFLOW_HEAD_SHA"
+          else
+            sha="$GITHUB_SHA"
+            ci_success="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch master --commit "$sha" --json conclusion,event,headBranch --jq 'any(.[]; .conclusion == "success" and .event == "push" and .headBranch == "master")')"
+            if [[ "$ci_success" != true ]]; then
+              echo "No successful CI push run was found for master commit $sha." >&2
+              exit 1
+            fi
+          fi
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          current="$(gh api "repos/${GITHUB_REPOSITORY}/commits/master" --jq .sha)"
+          if [[ "$sha" != "$current" ]]; then
+            echo "Skipping obsolete commit $sha; master is $current."
+            echo 'sha=' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "repository=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout selected master commit and deployment history
+        if: steps.selection.outputs.sha != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.selection.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Select services with pending changes or validate manual selection
+        id: targets
+        if: steps.selection.outputs.sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_SERVICE: ${{ inputs.service }}
+          SELECTED_SHA: ${{ steps.selection.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            services="$(bash ops/oracle/select-cd-services.sh manual "$REQUESTED_SERVICE")"
+          else
+            services="$(bash ops/oracle/select-cd-services.sh automatic "$GITHUB_REPOSITORY" "$SELECTED_SHA")"
+          fi
+          echo "Servicios seleccionados: $services"
+          echo "services=$services" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Publicar y desplegar ${{ matrix.service }}
+    needs: prepare
+    if: needs.prepare.outputs.sha != '' && needs.prepare.outputs.services != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.prepare.outputs.services) }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-g6-services-oracle-${{ github.repository }}-${{ matrix.service }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+      deployments: write
+    steps:
+      - name: Checkout validated SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish image tagged with the SHA
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.service
+          build-args: SERVICE_NAME=${{ matrix.service }}
+          push: true
+          tags: ghcr.io/${{ needs.prepare.outputs.repository }}/${{ matrix.service }}:${{ needs.prepare.outputs.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ needs.prepare.outputs.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      - name: Confirm commit is still the master head
+        id: freshness
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/${GITHUB_REPOSITORY}/commits/master" --jq .sha)"
+          if [[ "$IMAGE_SHA" != "$current" ]]; then
+            echo "Skipping obsolete commit $IMAGE_SHA; master is now $current."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate deployment secrets
+        if: steps.freshness.outputs.deploy == 'true'
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_PRIVATE_KEY: ${{ secrets.ORACLE_SSH_PRIVATE_KEY }}
+          ORACLE_SSH_KNOWN_HOSTS: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
+          ORACLE_GHCR_USERNAME: ${{ secrets.ORACLE_GHCR_USERNAME }}
+          ORACLE_GHCR_TOKEN: ${{ secrets.ORACLE_GHCR_TOKEN }}
+        run: |
+          set -euo pipefail
+          for name in ORACLE_HOST ORACLE_USER ORACLE_SSH_PRIVATE_KEY ORACLE_SSH_KNOWN_HOSTS ORACLE_GHCR_USERNAME ORACLE_GHCR_TOKEN; do
+            if [[ -z "${!name}" ]]; then
+              echo "Required GitHub Secret $name is not configured; Oracle CD is not activated." >&2
+              exit 1
+            fi
+          done
+
+      - name: Configure verified SSH access
+        if: steps.freshness.outputs.deploy == 'true'
+        env:
+          ORACLE_SSH_PRIVATE_KEY: ${{ secrets.ORACLE_SSH_PRIVATE_KEY }}
+          ORACLE_SSH_KNOWN_HOSTS: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$ORACLE_SSH_PRIVATE_KEY" > ~/.ssh/oracle_g6
+          chmod 600 ~/.ssh/oracle_g6
+          printf '%s\n' "$ORACLE_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Verify restricted SSH authentication from GitHub Actions
+        if: steps.freshness.outputs.deploy == 'true'
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+        run: |
+          set -euo pipefail
+          set +e
+          ssh -vv -i ~/.ssh/oracle_g6 -o BatchMode=yes -o IdentitiesOnly=yes \
+            "$ORACLE_USER@$ORACLE_HOST" connectivity-probe > /tmp/oracle-ssh.out 2> /tmp/oracle-ssh.err
+          ssh_status=$?
+          set -e
+          cat /tmp/oracle-ssh.err >&2
+          cat /tmp/oracle-ssh.out
+          if [[ "$ssh_status" == 255 ]] || ! grep -q 'Authenticated to ' /tmp/oracle-ssh.err; then
+            echo 'No se pudo autenticar por SSH desde GitHub Actions.' >&2
+            exit 1
+          fi
+          if ! grep -q 'comando remoto no autorizado' /tmp/oracle-ssh.err /tmp/oracle-ssh.out; then
+            echo 'La clave no llegó al ejecutor forzado esperado; se detiene el despliegue.' >&2
+            exit 1
+          fi
+
+      - name: Register deployment attempt
+        id: deployment
+        if: steps.freshness.outputs.deploy == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SERVICE_NAME: ${{ matrix.service }}
+          IMAGE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          set -euo pipefail
+          deployment_id="$(bash ops/oracle/github-deployment-api.sh create "$GITHUB_REPOSITORY" "$SERVICE_NAME" "$IMAGE_SHA")"
+          echo "deployment_id=$deployment_id" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy image, check health and roll back on failure
+        if: steps.freshness.outputs.deploy == 'true'
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_GHCR_USERNAME: ${{ secrets.ORACLE_GHCR_USERNAME }}
+          ORACLE_GHCR_TOKEN: ${{ secrets.ORACLE_GHCR_TOKEN }}
+          SERVICE_NAME: ${{ matrix.service }}
+          IMAGE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$IMAGE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SERVICE_NAME" =~ ^[a-z][a-z0-9-]{0,31}$ ]] || {
+            echo 'Servicio no autorizado para SSH.' >&2
+            exit 1
+          }
+          if [[ "$SERVICE_NAME" == inventory-svc ]]; then
+            remote_command="inventory-deploy $IMAGE_SHA"
+          else
+            remote_command="service-deploy $SERVICE_NAME $IMAGE_SHA"
+          fi
+          printf '%s\n%s\n' "$ORACLE_GHCR_USERNAME" "$ORACLE_GHCR_TOKEN" |
+            ssh -i ~/.ssh/oracle_g6 -o BatchMode=yes -o IdentitiesOnly=yes \
+              "$ORACLE_USER@$ORACLE_HOST" "$remote_command"
+
+      - name: Record successful deployment after remote health checks
+        if: success() && steps.deployment.outputs.deployment_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
+        run: |
+          set -euo pipefail
+          bash ops/oracle/github-deployment-api.sh status "$GITHUB_REPOSITORY" "$DEPLOYMENT_ID" success
+
+      - name: Mark failed deployment attempt
+        if: failure() && steps.deployment.outputs.deployment_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
+        run: |
+          set -euo pipefail
+          bash ops/oracle/github-deployment-api.sh status "$GITHUB_REPOSITORY" "$DEPLOYMENT_ID" failure

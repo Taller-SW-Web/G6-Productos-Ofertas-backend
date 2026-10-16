@@ -1,5 +1,10 @@
 # Evidencia de correcciones H-01, H-02 y H-03 — PR #116
 
+La consolidación posterior con `castilla` conserva íntegramente estas
+correcciones y sus regresiones. Las decisiones por archivo y las nuevas
+validaciones se documentan en [CONSOLIDACION-GATEWAY.md](CONSOLIDACION-GATEWAY.md).
+Los resultados fechados que siguen se conservan como evidencia histórica.
+
 Este informe corresponde al bloque Gateway validado en
 `b97138acdc7fa87bd854a8ed7bea1a96c87da902`. Posteriormente, el usuario autorizó
 incorporar también los siete commits locales de #70/#112/#15/#33 al mismo PR.

@@ -1,0 +1,44 @@
+{
+  "purpose": "Casos aislados pendientes de ejecutar con el provider Catalog real. No son datos runtime, DTOs, persistencia ni política aprobada.",
+  "channel": "MARKETPLACE",
+  "eligibilityBoundary": "El adaptador de prueba configura el resultado del port de elegibilidad. No se infiere del estado ni se conecta como provider de producción.",
+  "cases": [
+    {
+      "id": "activo-elegible",
+      "productState": "ACTIVO",
+      "eligibilityPortResult": true,
+      "listContainsProduct": true,
+      "slugStatus": 200
+    },
+    {
+      "id": "activo-no-elegible",
+      "productState": "ACTIVO",
+      "eligibilityPortResult": false,
+      "listContainsProduct": false,
+      "slugStatus": 404,
+      "problemCode": "PRODUCTO_NO_ENCONTRADO"
+    },
+    {
+      "id": "borrador-con-port-positivo",
+      "productState": "BORRADOR",
+      "eligibilityPortResult": true,
+      "listContainsProduct": false,
+      "slugStatus": 404,
+      "problemCode": "PRODUCTO_NO_ENCONTRADO"
+    },
+    {
+      "id": "inactivo-con-port-positivo",
+      "productState": "INACTIVO",
+      "eligibilityPortResult": true,
+      "listContainsProduct": false,
+      "slugStatus": 404,
+      "problemCode": "PRODUCTO_NO_ENCONTRADO"
+    }
+  ],
+  "unresolvedCases": [
+    {
+      "id": "sin-evidencia-de-elegibilidad",
+      "blocker": "D-CAT-05/06: definir fuente, persistencia, default y comportamiento ante ausencia antes de fijar una expectativa productiva."
+    }
+  ]
+}

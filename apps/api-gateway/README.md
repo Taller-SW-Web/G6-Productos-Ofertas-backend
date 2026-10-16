@@ -1,5 +1,9 @@
 # Gateway HTTP — #106 y coordinación #21
 
+Consolidación posterior con `castilla`: ver [CONSOLIDACION-GATEWAY.md](CONSOLIDACION-GATEWAY.md).
+Conserva el runtime corregido de 68c96a7 y añade las herramientas/pruebas válidas
+de Marketplace, con configuración portable y evidencias separadas de las históricas.
+
 Owner asignado en #106: Axel Cueva, rama `cueva`. La autorización transversal
 de Marco está registrada en #21 y se limita a `apps/api-gateway`. No se cambian
 otros servicios, contratos, librerías, dependencias o configuración global.
