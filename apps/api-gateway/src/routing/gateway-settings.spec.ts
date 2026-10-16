@@ -1,7 +1,47 @@
-import { readGatewaySettings } from './gateway-settings.js';
+import { readGatewaySettings, readGatewayPort } from './gateway-settings.js';
 import { matchContractRoute } from './gateway-proxy.js';
 
 describe('Gateway route boundaries and configuration', () => {
+  it('preserves the Oracle/CD port and existing override precedence', () => {
+    expect(readGatewayPort({})).toBe(3000);
+    expect(readGatewayPort({ PORT: '3001', API_GATEWAY_PORT: '3000' })).toBe(
+      3000,
+    );
+    expect(readGatewayPort({ PORT: '3000' })).toBe(3000);
+    for (const value of ['0', '65536', '-1', ' 3000', '1.5', 'secret'])
+      expect(() => readGatewayPort({ API_GATEWAY_PORT: value })).toThrow(
+        'Invalid Gateway port',
+      );
+  });
+  it.each([
+    '/health',
+    '/health/live',
+    '//other.test/ready',
+    '/ready?token=secret',
+    '/ready#fragment',
+    '/a/../ready',
+    'https://other.test/ready',
+  ])('does not accept liveness or an unsafe readiness target %s', (path) => {
+    expect(() =>
+      readGatewaySettings({
+        GATEWAY_CATALOG_SVC_URL: 'http://catalog.internal',
+        GATEWAY_CATALOG_SVC_READINESS_PATH: path,
+      }),
+    ).toThrow('Invalid Gateway configuration');
+  });
+  it('requires an enabled upstream for an explicit readiness endpoint', () => {
+    expect(() =>
+      readGatewaySettings({
+        GATEWAY_CATALOG_SVC_READINESS_PATH: '/health/ready',
+      }),
+    ).toThrow();
+    expect(
+      readGatewaySettings({
+        GATEWAY_CATALOG_SVC_URL: 'http://catalog.internal',
+        GATEWAY_CATALOG_SVC_READINESS_PATH: '/health/ready',
+      }).readinessPaths,
+    ).toEqual({ 'catalog-svc': '/health/ready' });
+  });
   it.each([
     'https://user:secret@host',
     'https://host/path',

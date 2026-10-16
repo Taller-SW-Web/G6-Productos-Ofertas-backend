@@ -6,6 +6,9 @@ import { GatewayFailure, GatewayIdentity } from './gateway-identity.js';
 import { GATEWAY_SETTINGS, type GatewaySettings } from './gateway-settings.js';
 import type { ContractRoute } from './contract-route.js';
 import { readLimitedResponse } from './bounded-response.js';
+import { sendGatewayProblem } from './gateway-problem.js';
+import { streamedRequest } from './streamed-request.js';
+import { streamFileResponse } from './streamed-response.js';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const routes = [...CONTRACT_ROUTES].sort(
@@ -93,37 +96,6 @@ export class GatewayProxy {
     private readonly identity: GatewayIdentity,
   ) {}
 
-  private problem(
-    res: Response,
-    route: ContractRoute,
-    status: number,
-    code: string,
-    correlationId: string,
-  ) {
-    if (!route.responses[String(status)]?.codes.includes(code)) {
-      status = 500;
-      code = 'ERROR_INTERNO';
-    }
-    res
-      .status(status)
-      .type('application/problem+json')
-      .json({
-        title:
-          status === 401
-            ? 'No autenticado'
-            : status === 403
-              ? 'Permisos insuficientes'
-              : status === 400
-                ? 'Datos de entrada inválidos'
-                : status === 503
-                  ? 'Servicio no disponible'
-                  : 'Error interno',
-        status,
-        code,
-        correlationId,
-      });
-  }
-
   async forward(req: Request, res: Response): Promise<void> {
     const path = req.originalUrl.split('?')[0];
     const route = matchContractRoute(req.method, path);
@@ -143,6 +115,7 @@ export class GatewayProxy {
       if (!res.writableEnded) controller.abort();
     };
     res.on('close', disconnected);
+    let upload: ReturnType<typeof streamedRequest> | undefined;
     try {
       const uniqueHeaders = new Set([
         'authorization',
@@ -192,23 +165,35 @@ export class GatewayProxy {
           throw new GatewayFailure(400, 'VALIDACION');
         headers['content-type'] = contentType;
       }
-      const body = await readRequest(
-        req,
-        this.settings.maxBytes,
-        controller.signal,
-      );
-      if (body.length > this.settings.maxBytes)
-        throw new GatewayFailure(400, 'VALIDACION');
-      const response = await fetch(new URL(req.originalUrl, base), {
+      // All three file-import operations declare 413; none defines a byte cap.
+      // Do not apply the JSON buffer budget to their file or multipart overhead.
+      const importsFile =
+        route.requestTypes.includes('multipart/form-data') &&
+        route.responses['413']?.codes.includes('ARCHIVO_EXCEDE_LIMITE');
+      let body: RequestInit['body'];
+      if (importsFile) {
+        upload = streamedRequest(req);
+        body = upload.body;
+      } else {
+        const buffered = await readRequest(
+          req,
+          this.settings.maxBytes,
+          controller.signal,
+        );
+        if (buffered.length > this.settings.maxBytes)
+          throw new GatewayFailure(400, 'VALIDACION');
+        if (buffered.length && !['GET', 'HEAD'].includes(route.method))
+          body = new Uint8Array(buffered).buffer;
+      }
+      const init: RequestInit & { duplex?: 'half' } = {
         method: route.method,
         headers,
         redirect: 'manual',
         signal: controller.signal,
-        body:
-          body.length && !['GET', 'HEAD'].includes(route.method)
-            ? new Uint8Array(body).buffer
-            : undefined,
-      });
+        body,
+        ...(upload ? { duplex: 'half' as const } : {}),
+      };
+      const response = await fetch(new URL(req.originalUrl, base), init);
       const contractResponse = route.responses[String(response.status)];
       if (
         !contractResponse ||
@@ -217,15 +202,15 @@ export class GatewayProxy {
         await response.body?.cancel();
         throw new GatewayFailure(503, 'SERVICIO_NO_DISPONIBLE');
       }
-      const payload = await readLimitedResponse(
-        response,
-        this.settings.maxBytes,
-      );
       for (const header of contractResponse.headers) {
         const value = response.headers.get(header);
         if (value) res.setHeader(header, value);
       }
       if (response.status >= 400) {
+        const payload = await readLimitedResponse(
+          response,
+          this.settings.maxBytes,
+        );
         let code = '';
         try {
           const problem: unknown = JSON.parse(payload.toString('utf8'));
@@ -239,7 +224,14 @@ export class GatewayProxy {
         } catch {
           /* Never forward raw upstream failures. */
         }
-        this.problem(res, route, response.status, code, correlationId);
+        sendGatewayProblem(
+          res,
+          route,
+          response.status,
+          code,
+          correlationId,
+          'provider',
+        );
         return;
       }
       const responseType = response.headers
@@ -254,6 +246,15 @@ export class GatewayProxy {
         throw new GatewayFailure(503, 'SERVICIO_NO_DISPONIBLE');
       if (responseType)
         res.setHeader('Content-Type', response.headers.get('content-type')!);
+      if (responseType && responseType !== 'application/json') {
+        res.status(response.status);
+        await streamFileResponse(response, res, controller.signal);
+        return;
+      }
+      const payload = await readLimitedResponse(
+        response,
+        this.settings.maxBytes,
+      );
       res.status(response.status).send(payload);
     } catch (error: unknown) {
       const failure =
@@ -262,11 +263,19 @@ export class GatewayProxy {
           : new GatewayFailure(503, 'SERVICIO_NO_DISPONIBLE');
       if (!res.destroyed && !res.headersSent) {
         if (controller.signal.aborted) res.setHeader('Connection', 'close');
-        this.problem(res, route, failure.status, failure.code, correlationId);
+        sendGatewayProblem(
+          res,
+          route,
+          failure.status,
+          failure.code,
+          correlationId,
+          'gateway',
+        );
       }
     } finally {
       clearTimeout(timer);
       res.off('close', disconnected);
+      upload?.close();
     }
   }
 }

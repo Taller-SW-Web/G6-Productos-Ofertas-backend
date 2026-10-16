@@ -36,10 +36,21 @@ request. No se siguen redirects. Headers de conexión/cookies no se propagan;
 correlation e idempotency siguen las declaraciones de cada operación.
 Multipart/JSON se reenvían como bytes cuando se arranca desde `main.ts`.
 
-Timeout total configurable, cancelación por desconexión, lectura de cuerpos y
-respuestas acotada (10 MiB), error técnico visible. Problem Details conserva
-solo código/status contractuales, título genérico y correlación; descarta
-detail/stack y payload raw del proveedor. No hay logs de tokens ni credenciales.
+Timeout total configurable y cancelación por desconexión. El presupuesto técnico
+de memoria de 10 MiB se aplica a JSON y errores bufferizados. Los tres imports
+multipart y las respuestas de archivos se transmiten con backpressure, sin
+aplicar ese presupuesto como límite del archivo. OpenAPI, SPEC-001 y SPEC-013
+consultadas no fijan un máximo numérico de bytes para esos imports. El owner del
+import aplica su límite y el Gateway conserva `413 ARCHIVO_EXCEDE_LIMITE`, incluso
+si el proveedor rechaza antes de terminar la subida. No se inventa un máximo
+contractual a partir del prototipo.
+
+Los errores locales de validación (400), identidad (401), autorización (403) e
+indisponibilidad (503) conservan sus códigos técnicos conocidos aunque la
+operación no enumere esa respuesta. Los errores del proveedor siguen sujetos a
+los pares status/código declarados por operación. Problem Details usa título
+genérico y correlación; descarta detail/stack y payload raw del proveedor. No hay
+logs de tokens ni credenciales. No se modifica el OpenAPI.
 Los destinos no configurados responden indisponibilidad; no hay mocks en runtime.
 
 ## Seguridad
@@ -81,23 +92,56 @@ No se cambia package.json para cargar archivos de otra aplicación.
 - `GATEWAY_PUBLIC_OPERATION_IDS`: solo operationIds contractualmente anónimos
   cuya exposición esté aprobada. Vacío por defecto.
 
-`GET /health` sigue indicando únicamente liveness. La comprobación interna
-`GatewayReadiness.check()` consulta `/health/ready` de upstreams habilitados con
-timeout; cero upstreams o cualquier fallo implica not_ready. No hace fan-out en
-cada request de negocio/liveness. No se crean endpoints técnicos adicionales.
+## Liveness y readiness de despliegue
+
+`GET /health` conserva el liveness del Gateway y el puerto por defecto 3000.
+El healthcheck preparado para ejecución dentro del contenedor es:
+
+```sh
+node dist/apps/api-gateway/readiness.js
+```
+
+Comprueba `/health` del propio proceso por loopback y ejecuta
+`GatewayReadiness.check()`. Devuelve JSON sanitizado y código de salida 0 solo
+si el proceso está vivo y todas las dependencias habilitadas están listas; en
+cualquier otro caso sale con 1. No abre listeners ni endpoints adicionales.
+Su incorporación al despliegue corresponde al owner de infraestructura; este
+PR no modifica Compose, Caddy, Oracle ni CD.
+
+Cada origin habilitado necesita `GATEWAY_<SERVICIO>_READINESS_PATH`, una ruta
+local previamente verificada por su owner. La sonda exige HTTP 200, JSON y
+`status: "ready"`; ese acuerdo técnico y su implementación deben acreditarse
+antes de configurar la ruta. No se presume que exista `/health/ready` ni se
+acepta el liveness `/health` o `/health/live` como readiness. Los controladores
+de los ocho servicios revisados en Backend
+`24227527c632be4f3b8de612954328904ea57de0` solo acreditan `/health`.
+
+Sin ruta verificada, una dependencia habilitada queda `unverified` y el
+healthcheck falla. Un timeout, respuesta inválida, redirect o dependencia caída
+produce `not_ready`. Sin origins configurados también falla. Los servicios sin
+origin se informan como `not_configured`; `coverage: "partial"` identifica el
+despliegue progresivo, aunque los servicios habilitados estén listos. Un resultado
+`ready` parcial no acredita disponibilidad de las 135 operaciones, grants,
+introspección ni integración real. La sonda no se ejecuta por request de negocio
+o liveness.
 
 ## Verificación
 
 ```powershell
 npm test -- apps/api-gateway --maxWorkers=1
 npm run test:e2e -- apps/api-gateway --maxWorkers=1
+node apps/api-gateway/test/readiness.smoke.mjs # requiere build previo
 ```
 
-Pruebas enfocadas ejecutadas: **31 unitarias / 143 HTTP, PASS**. Cubren las 135
+Pruebas enfocadas ejecutadas: **57 unitarias / 289 HTTP, PASS**. Cubren las 135
 operaciones del inventario (las cinco de introspección se acreditan como rechazo
 seguro), firmas reales RS256 sintéticas, audiencia/cliente/scope/tipo/rol,
 manipulación, expiración, caché, matching, forwarding a proveedor HTTP aislado,
-headers, errores sanitizados, timeout, multipart, cuerpos incompletos y readiness.
+headers, errores sanitizados, timeout, multipart y reportes mayores de 10 MiB,
+rechazo 413 temprano, cuerpos incompletos y readiness. Las 133 operaciones
+protegidas también rechazan identidad ausente y roles insuficientes antes de
+contactar upstreams. El smoke ejecuta el healthcheck compilado con liveness y
+dependencias disponibles, ausentes, inválidas, lentas y configuración parcial.
 El proveedor se reutiliza una vez por suite. No son E2E de negocio ni prueba G7.
 
 Regeneración offline: descargar el OpenAPI del commit indicado, convertir YAML
@@ -117,11 +161,14 @@ reales, autenticación G7, homologación y despliegue: NO EJECUTADOS.
 | G7 / integración G6    | Uso autenticado externo            | Issuer/JWKS, grants y credenciales efectivos por consumidor/operación, y prueba real.                                  |
 | Vera / Pricing y G7    | Cinco mutaciones con introspección | Integración autorizada de introspección y pruebas contra el contrato vigente; conservar rechazo seguro hasta entonces. |
 | Cada owner de upstream | Routing de negocio real            | Handler/contrato de la ruta implementado y provider probado en su servicio.                                            |
+| Cada owner de upstream | Readiness de dependencias          | Acreditar ruta y respuesta técnica de readiness real, distintas del liveness, antes de configurar la sonda.            |
+| Infraestructura G6     | Healthcheck de despliegue          | Adoptar el comando compilado y configurar las rutas verificadas para los servicios habilitados.                        |
 | Marco / exposición     | Rutas SEO anónimas                 | Allowlist revisada y evidencia efectiva de exposición autorizada.                                                      |
 | Marco / revisión       | Continuación de #107/#108/#110     | Criterios, revisión y merge de #106 exigidos como prerrequisito.                                                       |
 
-**#20 HTTPS:** pendiente por decisión del usuario; todavía no existe URL pública
-del Gateway. No se ejecutan más comprobaciones de HTTPS ni cambios de Oracle,
-DNS, firewall, proxy o despliegue. En el registro remoto Backend
-`24227527c632be4f3b8de612954328904ea57de0` solo Inventory está habilitado; eso
-no acredita un Gateway publicado. Retomar cuando haya endpoint/alcance autorizado.
+HTTPS operativo en `https://g6-productos-ofertas.duckdns.org` según la
+coordinación recibida. Este PR no verifica ese despliegue ni cambia Oracle,
+DNS, firewall, Caddy o CD. Tampoco implementa RabbitMQ (#108), la demo anónima
+(#107) ni upstreams reales. Las pruebas con proveedores aislados acreditan el
+código del Gateway; no acreditan integración autenticada, homologación externa
+o despliegue.

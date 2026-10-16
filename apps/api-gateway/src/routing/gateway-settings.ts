@@ -8,9 +8,25 @@ export interface GatewaySettings {
   readonly upstreams: Readonly<Record<string, string>>;
   readonly timeoutMs: number;
   readonly maxBytes: number;
+  readonly readinessPaths?: Readonly<Record<string, string>>;
   readonly issuer?: string;
   readonly jwksUrl?: string;
   readonly publicOperations: readonly string[];
+}
+
+export function readGatewayPort(env: Readonly<NodeJS.ProcessEnv>): number {
+  const raw = env.API_GATEWAY_PORT ?? env.PORT ?? '3000';
+  const port = Number(raw);
+  if (
+    !/^\d+$/.test(raw) ||
+    raw.trim() !== raw ||
+    !Number.isInteger(port) ||
+    port < 1 ||
+    port > 65535
+  ) {
+    throw new Error('Invalid Gateway port');
+  }
+  return port;
 }
 
 export function readGatewayEnvironment(cwd = process.cwd()): NodeJS.ProcessEnv {
@@ -46,9 +62,26 @@ export function readGatewaySettings(
 ): GatewaySettings {
   try {
     const upstreams: Record<string, string> = {};
+    const readinessPaths: Record<string, string> = {};
     for (const service of new Set(CONTRACT_ROUTES.map((r) => r.service))) {
       const variable = `GATEWAY_${service.replaceAll('-', '_').toUpperCase()}_URL`;
       if (env[variable]) upstreams[service] = origin(env[variable]);
+      const path = env[variable.replace(/_URL$/, '_READINESS_PATH')];
+      if (path) {
+        // A readiness endpoint must be explicitly confirmed by the owner.
+        // Liveness paths cannot be used as successful readiness substitutes.
+        if (
+          !upstreams[service] ||
+          !/^\/[a-zA-Z0-9_/-]+$/.test(path) ||
+          path.startsWith('//') ||
+          path.includes('//') ||
+          ['/health', '/health/', '/health/live', '/health/live/'].includes(
+            path,
+          )
+        )
+          throw new Error();
+        readinessPaths[service] = path;
+      }
     }
     const timeoutMs = Number(env.GATEWAY_TIMEOUT_MS ?? '5000');
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000)
@@ -80,6 +113,7 @@ export function readGatewaySettings(
       throw new Error();
     return Object.freeze({
       upstreams: Object.freeze(upstreams),
+      readinessPaths: Object.freeze(readinessPaths),
       timeoutMs,
       maxBytes: 10 * 1024 * 1024,
       issuer: env.AUTH_ISSUER,
