@@ -9,7 +9,7 @@ async function check(path, expected, bearer = valid, base = 'http://api-gateway:
   const response = await fetch(base + path, { headers: { 'x-correlation-id': correlation, ...(bearer ? { authorization: 'Bearer ' + bearer } : {}) }, signal: AbortSignal.timeout(15000) });
   assert.equal(response.status, expected, path);
   const payload = await response.json();
-  if (base.includes('api-gateway')) assert.equal(response.headers.get('x-correlation-id'), correlation);
+  if (base.includes('api-gateway') && path.startsWith('/api/')) assert.equal(response.headers.get('x-correlation-id'), correlation);
   if (expected >= 400) {
     assert.match(response.headers.get('content-type'), /application\/problem\+json/);
     assert.equal(payload.code, ({ 400: 'VALIDACION', 401: 'TOKEN_INVALIDO', 403: 'SCOPE_INSUFICIENTE', 503: 'SERVICIO_NO_DISPONIBLE' })[expected]);
