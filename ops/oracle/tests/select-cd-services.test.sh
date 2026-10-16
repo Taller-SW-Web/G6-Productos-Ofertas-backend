@@ -30,7 +30,11 @@ cat > "$MOCK_BIN/gh" <<'MOCK_GH'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 endpoint="${!#}"
-if [[ "$endpoint" == *'/deployments/'*'/statuses?'* ]]; then
+if [[ "$endpoint" == *'/actions/workflows/ci.yml/runs?'* ]]; then
+  [[ ! -f "${MOCK_STATE}/ci.api-error" ]] || exit 1
+  [[ -f "${MOCK_STATE}/ci-push-runs.tsv" ]] || exit 0
+  cat "${MOCK_STATE}/ci-push-runs.tsv"
+elif [[ "$endpoint" == *'/deployments/'*'/statuses?'* ]]; then
   remainder="${endpoint#*/deployments/}"
   deployment_id="${remainder%%/*}"
   [[ -f "${MOCK_STATE}/${deployment_id}.statuses.tsv" ]] || exit 0
@@ -61,6 +65,11 @@ record_status() {
   printf '%s\t%s\t%s\n' "$status_id" "$state" "$created" >> "$MOCK_STATE/${id}.statuses.tsv"
 }
 
+record_ci_push_success() {
+  local run_number="$1" sha="$2"
+  printf '%s\t%s\n' "$run_number" "$sha" >> "$MOCK_STATE/ci-push-runs.tsv"
+}
+
 select_auto() {
   (cd "$GIT_ROOT" && env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" \
     bash "$SELECTOR" automatic example/backend "$(git rev-parse HEAD)")
@@ -76,19 +85,48 @@ expect_selection() {
   printf 'PASS: selección conservadora %s\n' "$expected"
 }
 
-# Un merge de control de infraestructura se omite antes del fallback que
-# selecciona servicios sin historial exitoso. Un input de build compartido
-# permanece fuera de la excepción y conserva el comportamiento conservador.
+# Un cambio de control aislado desde un baseline CI exitoso no dispara el
+# fallback de Inventory sin deployment history.
+record_ci_push_success 1 "$BASE_SHA"
 mkdir -p "$GIT_ROOT/ops/oracle"
 printf 'executor control\n' > "$GIT_ROOT/ops/oracle/deploy-g6-service.sh"
 git -C "$GIT_ROOT" add .
 git -C "$GIT_ROOT" commit --quiet -m 'infraestructura oracle control'
+INFRA_SHA="$(git -C "$GIT_ROOT" rev-parse HEAD)"
+record_ci_push_success 2 "$INFRA_SHA"
 expect_selection '[]'
+touch "$MOCK_STATE/ci.api-error"
+expect_selection '["catalog-svc","inventory-svc"]'
+rm -f "$MOCK_STATE/ci.api-error"
 
+# Reproduce un solo push con commits de aplicación/build seguidos por un último
+# commit que solo modifica control. El diff contra el padre inmediato no ve los
+# cambios previos; el rango desde el último CI exitoso sí debe seleccionarlos.
+printf 'inventory cambio agrupado\n' >> "$GIT_ROOT/apps/inventory-svc/src/main.ts"
+git -C "$GIT_ROOT" add .
+git -C "$GIT_ROOT" commit --quiet -m 'inventario antes de control'
 printf 'build input\n' > "$GIT_ROOT/ops/oracle/build-service.sh"
 git -C "$GIT_ROOT" add .
 git -C "$GIT_ROOT" commit --quiet -m 'cambio de input de build'
+printf 'documentación de control\n' >> "$GIT_ROOT/ops/oracle/deploy-g6-service.sh"
+git -C "$GIT_ROOT" add .
+git -C "$GIT_ROOT" commit --quiet -m 'control al final del push'
+MULTI_PUSH_SHA="$(git -C "$GIT_ROOT" rev-parse HEAD)"
+record_ci_push_success 3 "$MULTI_PUSH_SHA"
 expect_selection '["catalog-svc","inventory-svc"]'
+
+# Un merge commit con padres múltiples se compara contra el último CI exitoso
+# de master, no únicamente contra el primer padre inmediato.
+git -C "$GIT_ROOT" checkout --quiet -b infra-merge-side "$MULTI_PUSH_SHA"
+printf 'merge infra\n' > "$GIT_ROOT/ops/oracle/README.md"
+git -C "$GIT_ROOT" add .
+git -C "$GIT_ROOT" commit --quiet -m 'infra merge side'
+git -C "$GIT_ROOT" checkout --quiet master
+git -C "$GIT_ROOT" merge --quiet --no-ff infra-merge-side -m 'merge infra control'
+MERGE_SHA="$(git -C "$GIT_ROOT" rev-parse HEAD)"
+record_ci_push_success 4 "$MERGE_SHA"
+expect_selection '[]'
+
 BASE_SHA="$(git -C "$GIT_ROOT" rev-parse HEAD)"
 record_deployment inventory-svc 1 "$BASE_SHA" success '2026-01-01T00:00:00Z'
 record_deployment catalog-svc 11 "$BASE_SHA" success '2026-01-01T00:00:00Z'

@@ -50,6 +50,61 @@ IFS= read -r GHCR_USERNAME || fail 'falta usuario GHCR en stdin'
 IFS= read -r GHCR_TOKEN || fail 'falta token GHCR en stdin'
 [[ -n "$GHCR_USERNAME" && -n "$GHCR_TOKEN" ]] || fail 'credenciales GHCR vacías'
 
+g6_http_member_expected_alias() {
+  local requested_container="$1" service enabled
+  while IFS='|' read -r service enabled _; do
+    [[ -n "$service" && "$service" != \#* ]] || continue
+    if [[ "$enabled" == true && "g6-${service}" == "$requested_container" ]]; then
+      printf '%s\n' "$service"
+      return 0
+    fi
+  done < "$G6_SERVICE_REGISTRY"
+  return 1
+}
+
+g6_validate_http_network() {
+  local target_alias="$1" target_container="$2" contract members member aliases alias previous expected_alias alias_found
+  local driver scope internal attachable ingress config_only ipam_driver ipam_configs options_count
+  local -A seen_aliases=()
+
+  contract="$(docker network inspect --format \
+    '{{.Driver}}|{{.Scope}}|{{.Internal}}|{{.Attachable}}|{{.Ingress}}|{{.ConfigOnly}}|{{.IPAM.Driver}}|{{len .IPAM.Config}}|{{len .Options}}' \
+    g6-http 2>/dev/null)" || fail 'no se pudo inspeccionar g6-http; no se descargó ni cambió el servicio'
+  IFS='|' read -r driver scope internal attachable ingress config_only ipam_driver ipam_configs options_count <<< "$contract"
+  [[ "$driver" == bridge && "$scope" == local && "$internal" == false &&
+    "$attachable" == false && "$ingress" == false && "$config_only" == false &&
+    "$ipam_driver" == default && "$ipam_configs" =~ ^[1-9][0-9]*$ && "$options_count" == 0 ]] ||
+    fail 'g6-http no coincide con bridge local, no-internal y configuración IPAM predeterminada; no se descargó ni cambió el servicio'
+
+  members="$(docker network inspect --format \
+    '{{range $id, $container := .Containers}}{{$container.Name}}{{"\n"}}{{end}}' \
+    g6-http 2>/dev/null)" || fail 'no se pudieron inspeccionar los miembros de g6-http; no se descargó ni cambió el servicio'
+  while IFS= read -r member; do
+    [[ -n "$member" ]] || continue
+    expected_alias="$(g6_http_member_expected_alias "$member")" ||
+      fail "g6-http contiene un miembro no habilitado: ${member}; no se descargó ni cambió el servicio"
+    alias_found=false
+    aliases="$(docker inspect --format \
+      '{{range $name, $network := .NetworkSettings.Networks}}{{if eq $name "g6-http"}}{{range $network.Aliases}}{{.}}{{"\n"}}{{end}}{{end}}{{end}}' \
+      "$member" 2>/dev/null)" || fail "no se pudieron validar aliases del miembro ${member}; no se descargó ni cambió el servicio"
+    while IFS= read -r alias; do
+      [[ -n "$alias" ]] || continue
+      [[ "$alias" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$ ]] ||
+        fail "g6-http contiene un alias no reconocido en ${member}; no se descargó ni cambió el servicio"
+      [[ "$alias" != "$expected_alias" ]] || alias_found=true
+      previous="${seen_aliases[$alias]:-}"
+      [[ -z "$previous" || "$previous" == "$member" ]] ||
+        fail "g6-http tiene el alias ${alias} duplicado entre ${previous} y ${member}; no se descargó ni cambió el servicio"
+      seen_aliases["$alias"]="$member"
+      if [[ "$alias" == "$target_alias" && "$member" != "$target_container" ]]; then
+        fail "el alias ${target_alias} de g6-http ya pertenece a ${member}; no se descargó ni cambió el servicio"
+      fi
+    done <<< "$aliases"
+    [[ "$alias_found" == true ]] ||
+      fail "g6-http no contiene el alias canónico ${expected_alias} para ${member}; no se descargó ni cambió el servicio"
+  done <<< "$members"
+}
+
 if [[ "$SERVICE_NAME" == inventory-svc ]]; then
   readonly RUNTIME_ENV_FILE="$G6_SERVICE_ENV_FILE"
   [[ -f "$G6_SERVICE_COMPOSE_FILE" ]] || fail "no existe ${G6_SERVICE_COMPOSE_FILE}"
@@ -59,8 +114,7 @@ if [[ "$SERVICE_NAME" == inventory-svc ]]; then
   if [[ -e "$G6_HTTP_INVENTORY_OVERLAY" ]]; then
     [[ -f "$G6_HTTP_INVENTORY_OVERLAY" && -r "$G6_HTTP_INVENTORY_OVERLAY" ]] ||
       fail 'la configuración opcional g6-http de Inventory no es un archivo legible'
-    docker network inspect g6-http >/dev/null 2>&1 ||
-      fail 'la red externa g6-http no está preparada; no se descargó ni cambió Inventory'
+    g6_validate_http_network "$G6_SERVICE_IMAGE_NAME" "$G6_SERVICE_CONTAINER"
   fi
 else
   [[ -f "$G6_SERVICE_COMPOSE_FILE" ]] || fail "no existe ${G6_SERVICE_COMPOSE_FILE}"
@@ -69,8 +123,7 @@ else
   if [[ -e "$G6_HTTP_GENERIC_OVERLAY" ]]; then
     [[ -f "$G6_HTTP_GENERIC_OVERLAY" && -r "$G6_HTTP_GENERIC_OVERLAY" ]] ||
       fail 'la configuración opcional g6-http no es un archivo legible'
-    docker network inspect g6-http >/dev/null 2>&1 ||
-      fail 'la red externa g6-http no está preparada; no se descargó ni cambió la instancia'
+    g6_validate_http_network "$G6_SERVICE_IMAGE_NAME" "$G6_SERVICE_CONTAINER"
   fi
 fi
 

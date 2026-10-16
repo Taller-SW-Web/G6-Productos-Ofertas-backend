@@ -159,15 +159,35 @@ if [[ "${1:-}" == login ]]; then
   exit 0
 fi
 
-if [[ "${1:-}" == network && "${2:-}" == inspect && "${3:-}" == g6-http ]]; then
+if [[ "${1:-}" == network && "${2:-}" == inspect ]]; then
+  format=''
+  network=''
+  if [[ "${3:-}" == --format ]]; then format="${4:-}"; network="${5:-}"; else network="${3:-}"; fi
+  [[ "$network" == g6-http ]] || exit 89
   printf 'inspect g6-http\n' >> "${ROOT}/network.log"
   [[ -f "${ROOT}/g6-http-present" ]] || exit 1
+  case "$format" in
+    '') exit 0 ;;
+    *'IPAM.Driver'*'len .IPAM.Config'*'len .Options'*)
+      [[ -f "${ROOT}/g6-http-config" ]] || exit 1
+      cat "${ROOT}/g6-http-config"
+      ;;
+    *'.Containers'*'.Name'*)
+      [[ ! -f "${ROOT}/network-members.tsv" ]] || cut -d'|' -f1 "${ROOT}/network-members.tsv"
+      ;;
+    *) exit 88 ;;
+  esac
   exit 0
 fi
 
 if [[ "${1:-}" == inspect ]]; then
   format="${3:-}"
   container="${4:-}"
+  if [[ "$format" == *'NetworkSettings.Networks'*'Aliases'* ]]; then
+    awk -F'|' -v container="$container" '$1 == container { n = split($2, aliases, ","); for (i = 1; i <= n; i++) if (aliases[i] != "") print aliases[i] }' \
+      "${ROOT}/network-members.tsv" 2>/dev/null || true
+    exit 0
+  fi
   active_file="${ACTIVE_DIR}/${container}"
   [[ -f "$active_file" ]] || exit 1
   image="$(<"$active_file")"
@@ -262,6 +282,8 @@ cat > "${MOCK_BIN}/sleep" <<'MOCK_SLEEP'
 exit 0
 MOCK_SLEEP
 chmod +x "${MOCK_BIN}/docker" "${MOCK_BIN}/curl" "${MOCK_BIN}/sleep"
+printf '%s\n' 'bridge|local|false|false|false|false|default|1|0' > "${TEMP_ROOT}/g6-http-config"
+: > "${TEMP_ROOT}/network-members.tsv"
 
 reset_simulation() {
   rm -rf "${TEMP_ROOT}/var/lib/containers"
@@ -354,8 +376,67 @@ run_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 1
 [[ -f "${TEMP_ROOT}/network.log" ]] || fail 'no se verificó la existencia de g6-http'
 assert_value "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc" "$OLD_CATALOG_IMAGE"
 touch "${TEMP_ROOT}/g6-http-present"
+printf '%s\n' 'bridge|local|false|false|false|false|default|1|0' > "${TEMP_ROOT}/g6-http-config"
+: > "${TEMP_ROOT}/network-members.tsv"
+: > "${TEMP_ROOT}/network.log"
 run_deploy "service-deploy catalog-svc ${IMAGE_SHA}" 3001 0
 [[ "$(<"${TEMP_ROOT}/network.log")" == $'inspect g6-http\ninspect g6-http' ]] || fail 'preflight de g6-http no fue determinista'
+printf 'host|local|false|false|false|false|default|1|0\n' > "${TEMP_ROOT}/g6-http-config"
+reset_simulation
+touch "${TEMP_ROOT}/g6-http-present"
+printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
+run_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 1
+[[ ! -s "${TEMP_ROOT}/docker.log" ]] || fail 'se ejecutó Compose con driver de g6-http incompatible'
+assert_value "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc" "$OLD_CATALOG_IMAGE"
+printf '%s\n' 'bridge|local|true|false|false|false|default|1|0' > "${TEMP_ROOT}/g6-http-config"
+reset_simulation
+touch "${TEMP_ROOT}/g6-http-present"
+printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
+run_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 1
+[[ ! -s "${TEMP_ROOT}/docker.log" ]] || fail 'se ejecutó Compose con g6-http internal'
+printf '%s\n' 'bridge|local|false|true|false|false|default|1|0' > "${TEMP_ROOT}/g6-http-config"
+reset_simulation
+touch "${TEMP_ROOT}/g6-http-present"
+printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
+run_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 1
+[[ ! -s "${TEMP_ROOT}/docker.log" ]] || fail 'se ejecutó Compose con g6-http attachable inesperado'
+printf '%s\n' 'bridge|local|false|false|false|false|custom|1|1' > "${TEMP_ROOT}/g6-http-config"
+reset_simulation
+touch "${TEMP_ROOT}/g6-http-present"
+printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
+run_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 1
+[[ ! -s "${TEMP_ROOT}/docker.log" ]] || fail 'se ejecutó Compose con IPAM u opciones no aprobadas'
+printf '%s\n' 'bridge|local|false|false|false|false|default|1|0' > "${TEMP_ROOT}/g6-http-config"
+printf '%s\n' 'g6-rabbitmq|rabbitmq' > "${TEMP_ROOT}/network-members.tsv"
+reset_simulation
+touch "${TEMP_ROOT}/g6-http-present"
+printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
+run_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 1
+[[ ! -s "${TEMP_ROOT}/docker.log" ]] || fail 'se ejecutó Compose con miembro no habilitado en g6-http'
+printf '%s\n' 'g6-inventory-svc|catalog-svc' > "${TEMP_ROOT}/network-members.tsv"
+reset_simulation
+touch "${TEMP_ROOT}/g6-http-present"
+printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
+run_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 1
+[[ ! -s "${TEMP_ROOT}/docker.log" ]] || fail 'se ejecutó Compose con alias del servicio objetivo ocupado'
+printf '%s\n' 'g6-inventory-svc|inventory-svc' 'g6-catalog-svc|inventory-svc' > "${TEMP_ROOT}/network-members.tsv"
+reset_simulation
+touch "${TEMP_ROOT}/g6-http-present"
+printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
+run_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 1
+[[ ! -s "${TEMP_ROOT}/docker.log" ]] || fail 'se ejecutó Compose con aliases duplicados entre miembros'
+printf '%s\n' 'g6-inventory-svc|wrong-alias' > "${TEMP_ROOT}/network-members.tsv"
+reset_simulation
+touch "${TEMP_ROOT}/g6-http-present"
+printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
+run_deploy "service-deploy catalog-svc ${NEXT_SHA}" 3001 1
+[[ ! -s "${TEMP_ROOT}/docker.log" ]] || fail 'se ejecutó Compose sin el alias canónico del miembro'
+printf '%s\n' 'g6-inventory-svc|inventory-svc' > "${TEMP_ROOT}/network-members.tsv"
+reset_simulation
+touch "${TEMP_ROOT}/g6-http-present"
+printf '%s\n' "$OLD_CATALOG_IMAGE" > "${TEMP_ROOT}/var/lib/containers/g6-catalog-svc"
+run_deploy "service-deploy catalog-svc ${IMAGE_SHA}" 3001 0
+printf 'PASS: red externa valida configuración, miembros y colisiones de alias antes de pull/up\n'
 printf 'PASS: overlay solo se aplica con g6-http preparado y aliases validados\n'
 
 # Inventory mantiene el comando/Compose legado incluso si hay overlay genérico;

@@ -86,14 +86,48 @@ g6_service_needs_update() {
   return 1
 }
 
-# An infra-only merge must not trigger the conservative "missing deployment
-# history" fallback for Inventory. This allowlist deliberately excludes build
-# inputs such as Dockerfile.service and build-service.sh.
+# Find the nearest successful CI push on master before this tree along its
+# first-parent history. Using a verified CI baseline captures all commits in a
+# push, including an app/build commit followed by a control-only final commit.
+g6_previous_successful_master_ci_sha() {
+  local selected_sha="$1" repository="$2" runs run_number run_sha sha
+  local commits_file
+  local -A successful_ci_sha=()
+
+  runs="$(gh api --paginate --jq '.workflow_runs[] | select(.event == "push" and .head_branch == "master" and .conclusion == "success") | [.run_number, .head_sha] | @tsv' \
+    "repos/${repository}/actions/workflows/ci.yml/runs?branch=master&event=push&per_page=100")" || return 1
+  [[ -n "$runs" ]] || return 1
+  while IFS=$'\t' read -r run_number run_sha; do
+    [[ "$run_number" =~ ^[0-9]+$ && "$run_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+    [[ "$run_sha" == "$selected_sha" ]] || successful_ci_sha["$run_sha"]=1
+  done <<< "$runs"
+
+  commits_file="$(mktemp)" || return 1
+  if ! git rev-list --first-parent "$selected_sha" > "$commits_file"; then
+    rm -f "$commits_file"
+    return 1
+  fi
+  while IFS= read -r sha; do
+    [[ "$sha" == "$selected_sha" ]] && continue
+    if [[ -v "successful_ci_sha[$sha]" ]]; then
+      rm -f "$commits_file"
+      printf '%s\n' "$sha"
+      return 0
+    fi
+  done < "$commits_file"
+  rm -f "$commits_file"
+  return 1
+}
+
+# An infra-only range must not trigger the conservative "missing deployment
+# history" fallback for Inventory. The strict allowlist deliberately excludes
+# build inputs such as Dockerfile.service and build-service.sh. If no reliable
+# successful master CI baseline is available, selection remains conservative.
 g6_is_infrastructure_control_commit() {
-  local selected_sha="$1" parent paths_file path count=0
-  parent="$(git rev-parse --verify "${selected_sha}^1" 2>/dev/null)" || return 1
+  local selected_sha="$1" repository="$2" baseline_sha paths_file path count=0
+  baseline_sha="$(g6_previous_successful_master_ci_sha "$selected_sha" "$repository")" || return 1
   paths_file="$(mktemp)" || return 1
-  if ! git diff --no-renames --name-only -z "$parent" "$selected_sha" > "$paths_file"; then
+  if ! git diff --no-renames --name-only -z "$baseline_sha" "$selected_sha" > "$paths_file"; then
     rm -f "$paths_file"
     return 1
   fi
@@ -130,7 +164,7 @@ case "$mode" in
     selected_sha="$3"
     [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { usage; exit 64; }
     [[ "$selected_sha" =~ ^[0-9a-f]{40}$ ]] || { usage; exit 64; }
-    if g6_is_infrastructure_control_commit "$selected_sha"; then
+    if g6_is_infrastructure_control_commit "$selected_sha" "$repository"; then
       echo 'Cambio de control de infraestructura: sin selección automática de servicios. El despliegue requiere dispatch explícito.' >&2
       printf '[]\n'
       exit 0
