@@ -30,7 +30,10 @@ export async function crearAplicacion(
   const env = opciones.env ?? process.env;
   const configuracion = validarEntorno(env);
   const logger = new SanitizedLogger(opciones.logger);
-  const app = await NestFactory.create(TaxonomySvcModule, { logger });
+  const app = await NestFactory.create(
+    TaxonomySvcModule.forRoot({ databaseUrl: configuracion.databaseUrl }),
+    { logger },
+  );
   app.useLogger(logger);
   logger.log('Configuracion de arranque validada', {
     entorno: configuracion.nodeEnv,

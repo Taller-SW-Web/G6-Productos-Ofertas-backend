@@ -25,7 +25,9 @@ const REPOSITORIO_CON_FALLO: TaxonomyRepository & TaxonomyReadinessIndicator = {
 async function crearApp(
   repositorio?: TaxonomyRepository,
 ): Promise<INestApplication<App>> {
-  const builder = Test.createTestingModule({ imports: [TaxonomySvcModule] });
+  const builder = Test.createTestingModule({
+    imports: [TaxonomySvcModule.forRoot()],
+  });
   if (repositorio) {
     builder.overrideProvider(TAXONOMY_REPOSITORY).useValue(repositorio);
   }
