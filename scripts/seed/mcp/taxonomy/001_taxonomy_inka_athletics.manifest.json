@@ -1,0 +1,596 @@
+{
+  "version": 1,
+  "lote": "001_taxonomy_inka_athletics",
+  "matrix_file": "001_taxonomy_inka_athletics.matrix.json",
+  "marketplace": "Inka Athletics",
+  "issue": "[DATA-001] backend #11",
+  "esquema": "taxonomy",
+  "rama": "lopez",
+  "archivo_sql": "001_taxonomy_inka_athletics.sql",
+  "sql_sha256": "0a202761bde0de3c1494510ecfbb3a090a0d8f65e36af6a7753e8c52bbb71273",
+  "sha256_algoritmo": "SHA-256",
+  "generador_ids": {
+    "algoritmo": "uuid5",
+    "namespace_url": "https://g6.inka-athletics/taxonomy",
+    "namespace_uuid": "13ecad95-d9d2-5e70-8ccf-22ea14c41805",
+    "convencion_version": 2,
+    "convencion_clave": {
+      "categories": "category:<categoria_padre_id>:<nombre_normalizado>",
+      "brands": "brand:<nombre_normalizado>",
+      "characteristic_values": "characteristic_value:<caracteristica_id>:<nombre>",
+      "category_seo": "category_seo:<slug>"
+    },
+    "nombre_normalizado": "btrim + minusculas + colapso de espacios",
+    "nota": "La clave se deriva de columnas propias de cada fila (reproducible sin estado externo)."
+  },
+  "revision": {
+    "motivo": "Auditoria de calidad de datos (revision final): no crear categorias sin respaldo, no alterar el color 'Azul' existente, registrar la marca 'Marathon Sports' (empresa fabricante ecuatoriana) en lugar de 'Marathon', y reservar la talla 'Talla Unica' de equipamiento hasta confirmacion de Catalogo (Poma).",
+    "motivo_anterior": "Auditoria de calidad de datos: evitar categorias duplicadas o sin respaldo, y no alterar el color 'Azul' existente.",
+    "fuente_estado": "Supabase taxonomy (lectura, taxonomy_dev_login); 7 categorias, 3 marcas, 9 valores de caracteristica, 0 seo."
+  },
+  "idempotencia": {
+    "estrategia": "Verificacion de contenido previa + renombres controlados + INSERT ... ON CONFLICT DO NOTHING + verificacion posterior",
+    "conflicto": "Si una fila existente difiere de lo esperado -> RAISE EXCEPTION y se detiene la carga (no sobrescribe)",
+    "transaccion": "Ejecutar dentro de una transaccion explicita; usar ROLLBACK para verificacion en seco"
+  },
+  "orden_ejecucion": [
+    "renombres",
+    "brands",
+    "characteristic_values",
+    "category_seo"
+  ],
+  "conteo": {
+    "filas_nuevas_por_tabla": {
+      "categories": 0,
+      "brands": 3,
+      "characteristic_values": 6,
+      "category_seo": 3
+    },
+    "total_filas_nuevas": 12,
+    "filas_renombradas": 3,
+    "referencias_existentes_verificadas": {
+      "categories_raiz": 3,
+      "categories_subcategorias_reutilizadas": 2,
+      "characteristic_values_Talla": 6,
+      "characteristic_values_Color": 3
+    }
+  },
+  "renombres": [
+    {
+      "tabla": "categories",
+      "id": "cd8aa953-eafd-ce4e-628b-4988ebbcded4",
+      "nombre_antes": "Calzado deportivo",
+      "nombre_despues": "Calzado"
+    },
+    {
+      "tabla": "categories",
+      "id": "3523cb0c-0f00-27dd-d300-2daffdaf285a",
+      "nombre_antes": "Ropa deportiva",
+      "nombre_despues": "Ropa"
+    },
+    {
+      "tabla": "categories",
+      "id": "49a1dbd0-666d-0d43-6d1e-1053d4564455",
+      "nombre_antes": "Accesorios deportivos",
+      "nombre_despues": "Equipamiento y Accesorios"
+    }
+  ],
+  "registros_nuevos": {
+    "categories": [],
+    "brands": [
+      {
+        "id": "07cb79e8-33ee-54d5-aec8-0dbae3cae5b4",
+        "nombre": "Marathon Sports",
+        "pais_origen_iso": "EC",
+        "descripcion": "Empresa ecuatoriana de confeccion y distribucion de ropa y calzado deportivo, fundada en Quito en 1980; equipa a la seleccion de futbol de Ecuador desde 1994."
+      },
+      {
+        "id": "514d9c18-b418-559b-a692-e304183560ad",
+        "nombre": "Under Armour",
+        "pais_origen_iso": "US",
+        "descripcion": "Marca estadounidense de indumentaria y calzado deportivo (fundada en 1996)."
+      },
+      {
+        "id": "2ae5529a-b33e-507f-900d-b4a04fc0f831",
+        "nombre": "Walon",
+        "pais_origen_iso": "PE",
+        "descripcion": "Marca peruana de indumentaria deportiva (fundada en Lima, 1989)."
+      }
+    ],
+    "characteristic_values": [
+      {
+        "id": "c90f8581-0fe2-5fd4-b08c-8b5d3f616399",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "40",
+        "grupo": "calzado"
+      },
+      {
+        "id": "c636cd16-7146-52d9-a1a5-faab92c5ea42",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "43",
+        "grupo": "calzado"
+      },
+      {
+        "id": "6e7505c8-4ae3-5850-86b2-d01d0b40bace",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "XS",
+        "grupo": "ropa"
+      },
+      {
+        "id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "S",
+        "grupo": "ropa"
+      },
+      {
+        "id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "L",
+        "grupo": "ropa"
+      },
+      {
+        "id": "353dbffe-8b38-5575-8f35-a7a8e42d8946",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "XL",
+        "grupo": "ropa"
+      }
+    ],
+    "category_seo": [
+      {
+        "id": "916527ee-9a8a-590a-af25-69a7d4cf7710",
+        "categoria_id": "cd8aa953-eafd-ce4e-628b-4988ebbcded4",
+        "slug": "calzado",
+        "meta_titulo": "Calzado | Inka Athletics",
+        "meta_descripcion": "Calzado deportivo de futbol y running."
+      },
+      {
+        "id": "087aaf9a-5d4f-5316-b735-6f49bc9a6087",
+        "categoria_id": "3523cb0c-0f00-27dd-d300-2daffdaf285a",
+        "slug": "ropa",
+        "meta_titulo": "Ropa | Inka Athletics",
+        "meta_descripcion": "Ropa deportiva para entrenamiento y competencia."
+      },
+      {
+        "id": "f5901f8f-8cac-5a25-be31-56d8dc5927e5",
+        "categoria_id": "49a1dbd0-666d-0d43-6d1e-1053d4564455",
+        "slug": "equipamiento-y-accesorios",
+        "meta_titulo": "Equipamiento y Accesorios | Inka Athletics",
+        "meta_descripcion": "Balones, equipamiento y accesorios deportivos."
+      }
+    ]
+  },
+  "categorias_reutilizadas": [
+    {
+      "nombre": "Fútbol",
+      "id": "dbd02734-85f5-b47b-5c95-ee768d5dc875",
+      "padre": "cd8aa953-eafd-ce4e-628b-4988ebbcded4",
+      "motivo": "Ya existe (nivel 2 bajo Calzado); se reutiliza en lugar de crear 'Chimpunes / Fútbol'."
+    },
+    {
+      "nombre": "Running",
+      "id": "303886ae-f3f0-bc9c-145a-660979597595",
+      "padre": "cd8aa953-eafd-ce4e-628b-4988ebbcded4",
+      "motivo": "Ya existe (nivel 2 bajo Calzado); se reutiliza en lugar de crear 'Zapatillas Running'."
+    }
+  ],
+  "categorias_pendientes_confirmacion_poma": [
+    {
+      "nombre": "Camisetas y Tops",
+      "padre": "3523cb0c-0f00-27dd-d300-2daffdaf285a",
+      "motivo": "Familia de ropa sin respaldo comercial confirmado por Catalogo (Poma)."
+    },
+    {
+      "nombre": "Shorts y Pantalones",
+      "padre": "3523cb0c-0f00-27dd-d300-2daffdaf285a",
+      "motivo": "Familia de ropa sin respaldo comercial confirmado por Catalogo (Poma)."
+    },
+    {
+      "nombre": "Casacas y Polerones",
+      "padre": "3523cb0c-0f00-27dd-d300-2daffdaf285a",
+      "motivo": "Familia de ropa sin respaldo comercial confirmado por Catalogo (Poma)."
+    },
+    {
+      "nombre": "Zapatillas Entrenamiento",
+      "padre": "cd8aa953-eafd-ce4e-628b-4988ebbcded4",
+      "motivo": "Familia de calzado sin respaldo comercial confirmado por Catalogo (Poma)."
+    }
+  ],
+  "registros_existentes": {
+    "categories": [
+      {
+        "id": "49a1dbd0-666d-0d43-6d1e-1053d4564455",
+        "nombre": "Accesorios deportivos",
+        "nivel": 1,
+        "categoria_padre_id": null
+      },
+      {
+        "id": "cd8aa953-eafd-ce4e-628b-4988ebbcded4",
+        "nombre": "Calzado deportivo",
+        "nivel": 1,
+        "categoria_padre_id": null
+      },
+      {
+        "id": "3523cb0c-0f00-27dd-d300-2daffdaf285a",
+        "nombre": "Ropa deportiva",
+        "nivel": 1,
+        "categoria_padre_id": null
+      },
+      {
+        "id": "fcb3cac1-b14a-b935-fc1a-c147b878a5c6",
+        "nombre": "Balones",
+        "nivel": 2,
+        "categoria_padre_id": "49a1dbd0-666d-0d43-6d1e-1053d4564455"
+      },
+      {
+        "id": "69bda117-9700-d41d-9ccf-f207717068e0",
+        "nombre": "Entrenamiento",
+        "nivel": 2,
+        "categoria_padre_id": "3523cb0c-0f00-27dd-d300-2daffdaf285a"
+      },
+      {
+        "id": "dbd02734-85f5-b47b-5c95-ee768d5dc875",
+        "nombre": "Fútbol",
+        "nivel": 2,
+        "categoria_padre_id": "cd8aa953-eafd-ce4e-628b-4988ebbcded4"
+      },
+      {
+        "id": "303886ae-f3f0-bc9c-145a-660979597595",
+        "nombre": "Running",
+        "nivel": 2,
+        "categoria_padre_id": "cd8aa953-eafd-ce4e-628b-4988ebbcded4"
+      }
+    ],
+    "brands": [
+      {
+        "id": "d05cc621-2d16-faa3-f620-19fb3173737c",
+        "nombre": "adidas",
+        "nombre_normalizado": "adidas",
+        "pais_origen_iso": "DE"
+      },
+      {
+        "id": "d5649b17-23aa-dbf2-cb87-60164737fcf9",
+        "nombre": "Nike",
+        "nombre_normalizado": "nike",
+        "pais_origen_iso": "US"
+      },
+      {
+        "id": "c489b6d1-08e1-5dcb-cb4d-2864df0c2ed4",
+        "nombre": "Puma",
+        "nombre_normalizado": "puma",
+        "pais_origen_iso": "DE"
+      }
+    ],
+    "product_types": [
+      {
+        "id": "455e292f-face-5ea3-387d-db95b93cc9af",
+        "nombre": "Balón deportivo",
+        "schema_version": 3
+      },
+      {
+        "id": "b023a151-d69f-ff9a-483a-678eefe6842e",
+        "nombre": "Camiseta deportiva",
+        "schema_version": 3
+      },
+      {
+        "id": "4d68c7e4-69d4-9e79-8e9e-379aa2a3a01a",
+        "nombre": "Chimpunes",
+        "schema_version": 3
+      },
+      {
+        "id": "457dbfec-c787-826f-7898-d231aeabb589",
+        "nombre": "Zapatillas deportivas",
+        "schema_version": 3
+      }
+    ],
+    "characteristics": [
+      {
+        "id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+        "nombre": "Color",
+        "tipo": "LISTA",
+        "unidad_medida": null
+      },
+      {
+        "id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "Talla",
+        "tipo": "LISTA",
+        "unidad_medida": null
+      }
+    ],
+    "characteristic_values": [
+      {
+        "id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6",
+        "caracteristica": "Color",
+        "nombre": "Azul"
+      },
+      {
+        "id": "50347024-7af0-2f6b-03fd-f5bbd3f408cf",
+        "caracteristica": "Color",
+        "nombre": "Gris"
+      },
+      {
+        "id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+        "caracteristica": "Color",
+        "nombre": "Negro"
+      },
+      {
+        "id": "ae3eba02-52e6-4a8a-d71f-231960bdd9a4",
+        "caracteristica": "Talla",
+        "nombre": "38"
+      },
+      {
+        "id": "ea281936-1025-b09c-755e-545db73051b6",
+        "caracteristica": "Talla",
+        "nombre": "39"
+      },
+      {
+        "id": "7325e3a3-aa9a-db8e-9339-9f2b414b0d42",
+        "caracteristica": "Talla",
+        "nombre": "41"
+      },
+      {
+        "id": "122e93d8-cd1a-4b0e-8224-859fcff6db25",
+        "caracteristica": "Talla",
+        "nombre": "42"
+      },
+      {
+        "id": "52d4b91a-f829-c05e-d60e-31ada29b0513",
+        "caracteristica": "Talla",
+        "nombre": "5"
+      },
+      {
+        "id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
+        "caracteristica": "Talla",
+        "nombre": "M"
+      }
+    ],
+    "talla_uuid_reales": [
+      {
+        "id": "ae3eba02-52e6-4a8a-d71f-231960bdd9a4",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "38",
+        "origen": "existente"
+      },
+      {
+        "id": "ea281936-1025-b09c-755e-545db73051b6",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "39",
+        "origen": "existente"
+      },
+      {
+        "id": "7325e3a3-aa9a-db8e-9339-9f2b414b0d42",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "41",
+        "origen": "existente"
+      },
+      {
+        "id": "122e93d8-cd1a-4b0e-8224-859fcff6db25",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "42",
+        "origen": "existente"
+      },
+      {
+        "id": "52d4b91a-f829-c05e-d60e-31ada29b0513",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "5",
+        "origen": "existente"
+      },
+      {
+        "id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
+        "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+        "nombre": "M",
+        "origen": "existente"
+      }
+    ]
+  },
+  "conflictos_detectados": [],
+  "relaciones_product_type_characteristics": [
+    {
+      "id": "46cabd8c-e6f4-4f37-94db-e73aac11bb43",
+      "tipo_producto": "Balón deportivo",
+      "caracteristica": "Color",
+      "obligatoria": true,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "d95e3fc6-1ce0-46d3-b926-0a00049eadc8",
+      "tipo_producto": "Balón deportivo",
+      "caracteristica": "Talla",
+      "obligatoria": true,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "7054506c-f144-4c1d-8938-12099d417358",
+      "tipo_producto": "Camiseta deportiva",
+      "caracteristica": "Color",
+      "obligatoria": true,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "23c96a8d-1b4c-4f83-a855-710570e9e5aa",
+      "tipo_producto": "Camiseta deportiva",
+      "caracteristica": "Talla",
+      "obligatoria": true,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "574895ac-015f-43c0-8958-229095a8c4db",
+      "tipo_producto": "Chimpunes",
+      "caracteristica": "Color",
+      "obligatoria": true,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "e1a23656-970d-4766-a8cd-6f8ffce18811",
+      "tipo_producto": "Chimpunes",
+      "caracteristica": "Talla",
+      "obligatoria": true,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "12b26028-3be1-4446-a462-2734a077337b",
+      "tipo_producto": "Zapatillas deportivas",
+      "caracteristica": "Color",
+      "obligatoria": true,
+      "estado": "ACTIVO"
+    },
+    {
+      "id": "21d0ea00-2932-4122-976b-f97da5edda79",
+      "tipo_producto": "Zapatillas deportivas",
+      "caracteristica": "Talla",
+      "obligatoria": true,
+      "estado": "ACTIVO"
+    }
+  ],
+  "tallas_y_medidas": {
+    "caracteristica": {
+      "id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+      "nombre": "Talla",
+      "tipo": "LISTA"
+    },
+    "mapeo_comercial_propuesto": {
+      "calzado": [
+        "38",
+        "39",
+        "40",
+        "41",
+        "42",
+        "43"
+      ],
+      "ropa": [
+        "XS",
+        "S",
+        "M",
+        "L",
+        "XL"
+      ],
+      "balon": [
+        "5"
+      ]
+    },
+    "distincion_calzado_ropa": "Calzado usa tallas numericas EU 38-43; Ropa usa tallas alfabeticas XS-XL. No se cruzan.",
+    "decision_5_vs_N_5": "Se conserva el valor existente '5' (talla de balón) y NO se agrega 'N° 5' (mismo concepto).",
+    "riesgo": "Una sola caracteristica 'Talla' es compartida por los tipos de producto (PTC obligatoria). Evitar combinaciones incorrectas (p. ej. una camiseta con talla 42) requiere separar caracteristicas o validar por tipo de producto.",
+    "accion": "Coordinar con Catalogo (poma). NO se altera el modelo de BD unilateralmente.",
+    "reservado": {
+      "valor": "Talla Única",
+      "motivo": "Equipamiento/uno-talla no confirmado por Catalogo (Poma); se reserva para una revision posterior. No se inserta en este lote."
+    }
+  },
+  "colores_comerciales": {
+    "caracteristica": {
+      "id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+      "nombre": "Color",
+      "tipo": "LISTA"
+    },
+    "estado": "SIN CAMBIOS: se conserva la paleta existente.",
+    "paleta_actual": [
+      {
+        "nombre": "Azul",
+        "id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6",
+        "origen": "existente",
+        "nota": "referenciado por un producto real (adidas Entrada 22); NO se renombra ni cambia de significado."
+      },
+      {
+        "nombre": "Gris",
+        "id": "50347024-7af0-2f6b-03fd-f5bbd3f408cf",
+        "origen": "existente"
+      },
+      {
+        "nombre": "Negro",
+        "id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+        "origen": "existente"
+      }
+    ],
+    "pendiente": [
+      "Azul Marino",
+      "Blanco",
+      "Rojo",
+      "Verde Oliva"
+    ],
+    "bloqueo": "Confirmar con Catalogo (Poma) el tono real de la variante (adidas Entrada 22) antes de renombrar 'Azul' o agregar colores nuevos."
+  },
+  "identidades_reservadas_dataset_json": {
+    "estado": "OBSOLETO como maestro generico; NO usado por este lote",
+    "dataset_json_ids": {
+      "category_id": "d60674d1-05fd-47f2-955b-5c2b6e504ec0",
+      "brand_id": "d60674d1-05fd-47f2-955b-5c2b6e504ec1",
+      "product_type_id": "d60674d1-05fd-47f2-955b-5c2b6e504ec2"
+    },
+    "propuesta_reemplazo": {
+      "category_id": {
+        "propuesto": "dbd02734-85f5-b47b-5c95-ee768d5dc875",
+        "nombre": "Fútbol",
+        "nota": "existente; se reutiliza (no se crea categoria nueva)"
+      },
+      "brand_id": {
+        "propuesto": "07cb79e8-33ee-54d5-aec8-0dbae3cae5b4",
+        "nombre": "Marathon Sports"
+      },
+      "product_type_id": {
+        "propuesto": "4d68c7e4-69d4-9e79-8e9e-379aa2a3a01a",
+        "nombre": "Chimpunes",
+        "nota": "existente"
+      }
+    },
+    "marcas": {
+      "nombre": "Marathon Sports",
+      "nota": "Empresa fabricante ecuatoriana (grupo Superdeporte); 'Marathon' es una marca de producto del mismo grupo."
+    },
+    "owner_para_confirmar": "Poma (owner de scripts/seed/dataset.json)"
+  },
+  "validacion_rollback": {
+    "metodo": "Ejecucion del script 2 veces en una transaccion y ROLLBACK (0 escrituras persistidas)",
+    "conteo_antes": {
+      "categories": 7,
+      "brands": 3,
+      "characteristic_values": 9,
+      "category_seo": 0
+    },
+    "conteo_despues": {
+      "categories": 7,
+      "brands": 6,
+      "characteristic_values": 15,
+      "category_seo": 3
+    },
+    "delta": {
+      "categories": 0,
+      "brands": 3,
+      "characteristic_values": 6,
+      "category_seo": 3
+    },
+    "nota": "Los conteos describen el efecto esperado; deben re-verificarse al ejecutar con el rol de siembra.",
+    "persistido": false
+  },
+  "coordinacion": [
+    {
+      "owner": "poma",
+      "asunto": "Confirmar familias de producto (Camisetas y Tops, Shorts y Pantalones, Casacas y Polerones, Zapatillas Entrenamiento) antes de crear esas categorias",
+      "condicion_de_desbloqueo": "Poma confirma productos reales en esas familias; entonces se agregan como subcategorias nivel 2"
+    },
+    {
+      "owner": "poma",
+      "asunto": "Confirmar el tono real de la variante 'adidas Entrada 22' (color 'Azul') y si se requieren colores nuevos",
+      "condicion_de_desbloqueo": "Poma entrega el mapeo producto -> color; entonces se decide sobre 'Azul Marino'/Blanco/Rojo/Verde Oliva"
+    },
+    {
+      "owner": "poma",
+      "asunto": "Reemplazar IDs reservados de dataset.json (...ec0/...ec1/...ec2) por identidades comerciales",
+      "condicion_de_desbloqueo": "Poma confirma mapeo propuesto y actualiza dataset.json"
+    },
+    {
+      "owner": "poma",
+      "asunto": "Evitar combinaciones invalidas de talla por tipo de producto (Talla compartida)",
+      "condicion_de_desbloqueo": "Definir caracteristicas/validacion por tipo sin cambio unilateral de BD"
+    },
+    {
+      "owner": "poma",
+      "asunto": "Confirmar si se necesitara el valor de talla 'Talla Unica' para equipamiento",
+      "condicion_de_desbloqueo": "Poma confirma equipamiento uno-talla; de lo contrario el valor queda reservado y no se inserta"
+    },
+    {
+      "owner": "axel/cueva",
+      "asunto": "Carga persistente del lote",
+      "condicion_de_desbloqueo": "Aprobar SQL/manifest final, hash y destino; ejecutar con rol de siembra"
+    }
+  ]
+}

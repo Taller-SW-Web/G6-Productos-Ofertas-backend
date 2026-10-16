@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { asc, eq } from 'drizzle-orm';
 import { Database } from './database.js';
 import { categories, brands } from './taxonomy.schema.js';
+import { ProblemDetailsException } from './errors/taxonomy.errors.js';
+import type { TaxonomyReadinessIndicator } from './health/readiness.port.js';
 import type {
   TaxonomyRepository,
   CategoriaRow,
@@ -9,7 +11,9 @@ import type {
 } from './taxonomy.repository.js';
 
 @Injectable()
-export class PostgresTaxonomyRepository implements TaxonomyRepository {
+export class PostgresTaxonomyRepository
+  implements TaxonomyRepository, TaxonomyReadinessIndicator
+{
   constructor(private readonly database: Database) {}
 
   async findCategoriasActivas(): Promise<CategoriaRow[]> {
@@ -58,6 +62,15 @@ export class PostgresTaxonomyRepository implements TaxonomyRepository {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  async verificarReadiness(): Promise<void> {
+    const ok = await this.readiness();
+    if (!ok) {
+      throw ProblemDetailsException.noDisponible(
+        'Fuente de datos de taxonomía no disponible.',
+      );
     }
   }
 }
