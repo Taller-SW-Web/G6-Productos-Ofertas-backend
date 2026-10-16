@@ -9,7 +9,7 @@
     "restoration, repeated restoration, no-restore policy, no consumption and unknown reference",
     "ambiguous fallback rejected; explicit consumption identity restores only its own use",
     "outbox insert failure rolls back effect, receipt and inbox without ACK",
-    "real AMQP command and ACK after durable commit",
+    "continuous AMQP subscription, explicit test identity and ACK after durable commit",
     "real broker redelivery after lost ACK does not repeat the effect",
     "outbox survives failed publication and publishes with real broker confirms"
   ],

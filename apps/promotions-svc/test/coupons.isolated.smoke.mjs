@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CouponCommandProcessor } from '../../../dist/apps/promotions-svc/coupons/coupon-transactions.js';
 import { CouponOutbox } from '../../../dist/apps/promotions-svc/coupons/coupon-outbox.js';
+import { CouponCommandConsumer } from '../../../dist/apps/promotions-svc/coupons/coupon-consumer.js';
 import {
   CouponAmqpPublisher,
   CouponCommandDeliveryHandler,
@@ -427,6 +428,34 @@ try {
   const results = await channel.assertQueue('', { exclusive: true });
   await channel.bindQueue(results.queue, 'po.results.x', 'promotions.coupon.#');
   const brokerCommand = command();
+  const receiving = await connection.createChannel();
+  receiving.on('error', () => undefined);
+  let committedAtAck;
+  const originalAck = receiving.ack.bind(receiving);
+  receiving.ack = (message) => {
+    committedAtAck = admin.query(
+      'SELECT status FROM promotions.coupon_command_receipts WHERE operation_id=$1',
+      [brokerCommand.operation_id],
+    );
+    originalAck(message);
+  };
+  const worker = new CouponCommandConsumer(
+    receiving,
+    new CouponCommandDeliveryHandler(processor),
+    {
+      authenticatedActor: async (delivery) => {
+        assert.equal(delivery.properties.userId, 'guest');
+        return 'modulo-ventas'; // Explicit identity mapping only for the isolated test broker.
+      },
+      handleOtherAssignedEvent: async () => {
+        throw new Error('unimplemented-test-event');
+      },
+      failed: () => {
+        throw new Error('unexpected-test-consumer-failure');
+      },
+    },
+  );
+  await worker.start();
   channel.publish(
     'po.commands.x',
     brokerCommand.name,
@@ -435,28 +464,19 @@ try {
       persistent: true,
       contentType: 'application/json',
       messageId: brokerCommand.message_id,
+      userId: 'guest',
     },
   );
   await channel.waitForConfirms();
-  const delivery = await ready(async () => {
-    const message = await channel.get('po.promotions.q', { noAck: false });
-    if (!message) throw new Error('WAIT');
-    return message;
+  await ready(async () => {
+    if (!committedAtAck) throw new Error('WAIT');
+    return committedAtAck;
   });
-  let committedAtAck;
-  await new CouponCommandDeliveryHandler(processor).handle(
-    delivery,
-    'modulo-ventas',
-    () => {
-      committedAtAck = admin.query(
-        'SELECT status FROM promotions.coupon_command_receipts WHERE operation_id=$1',
-        [brokerCommand.operation_id],
-      );
-      channel.ack(delivery);
-    },
-  );
   assert.equal((await committedAtAck).rows[0].status, 'COMPLETED');
-  checks.push('real AMQP command and ACK after durable commit');
+  await worker.stop();
+  checks.push(
+    'continuous AMQP subscription, explicit test identity and ACK after durable commit',
+  );
 
   const lostAckCommand = command();
   channel.publish(

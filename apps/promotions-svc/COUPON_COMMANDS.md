@@ -27,6 +27,10 @@ sin campos, eventos, códigos de negocio ni endpoints nuevos.
   su uso, aplica la política histórica y no inventa ni incrementa usos.
 - Efecto, resultado, receipt y Outbox se guardan en la misma transacción. El ACK
   ocurre después del commit, aunque la publicación siga pendiente.
+- Consumidor continuo con `basic.consume`, prefetch 20 y ACK manual sobre la
+  cola contractual. Requiere resolver actor autenticado y delegar los otros
+  eventos asignados; sin dispatcher no los descarta. Un fallo cierra su canal
+  sin ACK, dejando la reentrega a la supervisión acordada, sin retry/DLX inventado.
 - Outbox con `FOR UPDATE SKIP LOCKED`, publicación persistente/mandatory y
   confirmación del broker. Fallo/return/NACK/timeout conserva la fila pendiente
   con diagnóstico fijo. Un fallo después del confirm y antes del marcado puede
@@ -46,6 +50,9 @@ El provider `COUPON_EVIDENCE_PROVIDER` por defecto rechaza con
 una reserva/snapshot a partir de las referencias opacas del comando. No valida
 una referencia por existir ni convierte un 202 en éxito. Para integración debe
 reemplazarse por el adaptador autorizado, conservando las comprobaciones propias.
+La elegibilidad autoritativa de alcance/monto mínimo/proyecciones pertenece a
+Promotions (#71/#72/#75), no a Ventas ni a Inventario. El provider de prueba
+solo es válido en el smoke aislado; no sustituye esas reglas propias.
 
 No se instala un consumidor automático sobre `po.promotions.q`: la cola también
 contiene eventos de proyecciones que pertenecen a #75. El dispatcher debe llamar
@@ -54,20 +61,22 @@ la identidad/ACL homologada del broker; la identidad no se obtiene del JSON.
 Tampoco se inicia automáticamente el pump de Outbox contra el broker compartido.
 No se declaran colas, exchanges, políticas retry/DLX, ACL ni túneles compartidos.
 
-| Owner                                  | Operación afectada                         | Desbloqueo verificable                                                                                                                                   |
-| -------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Ventas/Inventario y coordinación Marco | Evidencia de reserva/snapshot/elegibilidad | Fuente contractual/autorizada para verificar referencias del comando; implementar y probar el adaptador, sin acceso cross-schema.                        |
-| G5/owner mensajería G6                 | Consumo/pump continuos en broker real      | Conectividad/identidad/ACL y dispatcher de la cola compartida que conserve los eventos de #75; supervisión/reconexión y retry/DLX según acuerdo vigente. |
-| Axel/configuración local               | Arranque con configuración privada         | Completar RABBITMQ_URL autorizado. La validación local actual solo informa ese nombre como pendiente, sin valores.                                       |
+| Owner                                  | Operación afectada                    | Desbloqueo verificable                                                                                                                                                     |
+| -------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ventas/Inventario y coordinación Marco | Evidencia de reserva/snapshot         | Fuente contractual/autorizada para verificar las referencias opacas del comando; implementar y probar el adaptador, sin acceso cross-schema.                               |
+| Axel/Promotions #71/#72/#75            | Elegibilidad autoritativa propia      | Repositorios, reglas de alcance/mínimo y proyecciones propias implementados y probados; conservar una sola implementación y respetar los prerrequisitos de esos bloques.   |
+| G5/owner mensajería G6                 | Consumo/pump continuos en broker real | Conectividad/identidad/ACL y dispatcher de la cola compartida que conserve los eventos de #75; supervisión/reconexión y retry/DLX según acuerdo vigente.                   |
+| Axel/configuración local               | Arranque con configuración privada    | Resuelto localmente: broker de desarrollo aislado, RABBITMQ_URL completado y arranque real de liveness PASS. La integración con el broker de G5 conserva su gate separado. |
 
 Estado: `IMPLEMENTAR_PARCIAL`. Núcleo transaccional/adaptadores probados localmente;
-suscripción continua, evidencia autenticada externa, homologación y despliegue
-no acreditados. No se declara cerrado #33.
+suscripción continua local probada; activación en el broker compartido,
+evidencia autenticada externa, homologación y despliegue no acreditados.
+No se declara cerrado #33.
 
 ## Pruebas reproducibles
 
-Resultado local final del 2026-10-16: 57 unitarias y 5 HTTP de Promotions PASS;
-95 unitarias y 155 HTTP del árbol completo PASS; typecheck, lint, formato,
+Resultado local final del 2026-10-16: 58 unitarias y 5 HTTP de Promotions PASS;
+96 unitarias y 155 HTTP del árbol completo PASS; typecheck, lint, formato,
 build:all y smoke de arranque compilado PASS. El smoke de PostgreSQL/RabbitMQ
 pasó sus 10 escenarios y eliminó sus contenedores. Son pruebas locales del
 árbol modificado, no CI de estos cambios ni integración autenticada externa.
