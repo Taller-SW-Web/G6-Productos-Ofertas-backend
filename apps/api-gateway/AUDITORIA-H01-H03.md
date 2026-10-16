@@ -1,17 +1,82 @@
 # Evidencia de correcciones H-01, H-02 y H-03 — PR #116
 
+La consolidación posterior con `castilla` conserva íntegramente estas
+correcciones y sus regresiones. Las decisiones por archivo y las nuevas
+validaciones se documentan en [CONSOLIDACION-GATEWAY.md](CONSOLIDACION-GATEWAY.md).
+Los resultados fechados que siguen se conservan como evidencia histórica.
+
 Este informe corresponde al bloque Gateway validado en
-`b97138acdc7fa87bd854a8ed7bea1a96c87da902`. Posteriormente, el usuario autorizó
-incorporar también los siete commits locales de #70/#112/#15/#33 al mismo PR.
-Es una excepción puntual autorizada para #116; la regla de PRs pequeños,
-atómicos y específicos de AGENTS.md sigue vigente para las próximas entregas.
-La descripción del PR distingue las validaciones históricas de este bloque de
-las del conjunto ampliado, sus dependencias autorizadas y el nuevo SHA final.
+`b97138acdc7fa87bd854a8ed7bea1a96c87da902`. La ampliación posterior de
+#70/#112/#15/#33 fue retirada del diff de integración por indicación del usuario.
+El PR #116 actual contiene solo el Gateway aprobado; los pendientes se conservan
+localmente en `cueva`. Las validaciones del conjunto anterior son históricas y
+no acreditan integración de esos componentes en el alcance actual.
 
 Rama de publicación: `cueva`. Alcance: únicamente `apps/api-gateway`, con la
 autorización transversal de #106/#21 y las aclaraciones de arquitectura.
 OpenAPI 0.6.0-rc.1, Docs `c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b`.
 El SHA publicado y la ejecución de CI se registran en la descripción del PR.
+
+## Seguimiento de auditoría: H-02 de marcas y H-04 diferido
+
+H-01 y H-03 fueron aceptados como corregidos; su implementación se conserva.
+La corrección adicional de H-02 transmite **todos los multipart contractuales**:
+tres imports y `crearMarca`/`actualizarMarca`, sin depender de un código de error
+exclusivo de importación. El inventario de 135 operaciones/108 paths no cambia.
+
+Fuente: OpenAPI y SPEC-011 del mismo commit Docs indicado arriba. SPEC-011 fija
+un máximo de **5 MB para el logo**, aplicado por el owner Taxonomía. El Gateway
+no convierte su presupuesto JSON de 10 MiB en un límite del logo ni introduce
+otro máximo; transmite el archivo y conserva `413 LOGO_EXCEDE_LIMITE`.
+Ante rechazo temprano lee primero el problema del proveedor y descarta sin
+bufferizar el resto del cuerpo entrante antes de finalizar la respuesta, dentro
+del timeout existente. Se evita el cierre que ocultaba el 413 durante la subida.
+
+Diez regresiones HTTP nuevas, cinco por operación:
+
+- Éxito controlado 201/200 con fixture de logo de 2 MiB, por encima del presupuesto
+  JSON de prueba de 1 MiB y por debajo del límite de SPEC-011; conserva bytes,
+  framing, método, path y correlación.
+- Logo de 11 MiB: conserva 413 `LOGO_EXCEDE_LIMITE` normal y temprano, sanitizado.
+- Un 413 con código de importación ajeno se rechaza, sin ampliar el contrato.
+- Sin identidad o sin permisos: 401/403 antes de contactar al proveedor.
+
+Las nuevas pruebas reprodujeron el fallo antes de corregirlo. Son fixtures de
+transporte y proveedores aislados: no acreditan validación real de imágenes ni
+integración con Taxonomía. No se relajan ni omiten las pruebas anteriores.
+
+Verificación del árbol ampliado con esta corrección:
+
+| Comando                                                           | Resultado                     |
+| ----------------------------------------------------------------- | ----------------------------- |
+| HTTP filtradas por `brand multipart`                              | PASS: 10 nuevas regresiones   |
+| `npm test -- apps/api-gateway --maxWorkers=1`                     | PASS: 57 unitarias            |
+| `npm run test:e2e -- apps/api-gateway --maxWorkers=1`             | PASS: 299 HTTP                |
+| `npm test -- --maxWorkers=1`                                      | PASS: 122 unitarias generales |
+| `npm run test:e2e -- --maxWorkers=1`                              | PASS: 311 HTTP generales      |
+| Tests Node del runner, borrador y restore-plan                    | PASS: 21 pruebas              |
+| `npm run typecheck`, `npm run lint`, `npm run format:check`       | PASS                          |
+| `npm run build`, `npm run build:all`                              | PASS                          |
+| Smoke compilado de readiness Gateway y startup Promotions         | PASS                          |
+| Regeneración del inventario y comparación de código JWT/H-01/H-03 | PASS: sin cambios             |
+| Formato de documentos y `git diff --check`                        | PASS                          |
+
+H-04 queda **diferido y no bloqueante**, registrado en
+[backend #107](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/107#issuecomment-6223045108).
+Axel/integración G6, G7/Seguridad y Marco deben acordar la tolerancia de reloj
+antes de implementar y probar la validación adicional de `iat` futuro.
+No se habilita integración G7 ahora ni se modifica JWT, guards, autorización
+o comportamiento fail-closed de las operaciones protegidas.
+
+La autorización expresa de `pg@8.16.3` y `amqplib@0.10.9` quedó registrada en
+[backend #33](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/33#issuecomment-6223044436),
+con el alcance exacto de package.json/package-lock.json y la trazabilidad de
+los siete commits incluidos por excepción puntual en #116. Esa excepción no
+cambia la política de PRs pequeños y específicos para las próximas entregas.
+Esta corrección no modifica dependencias, contratos, otros servicios o
+infraestructura; sin despliegue ni merge del PR.
+
+## Evidencia histórica del bloque inicial
 
 ## Correcciones verificables
 

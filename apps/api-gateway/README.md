@@ -1,12 +1,17 @@
 # Gateway HTTP — #106 y coordinación #21
 
+Consolidación posterior con `castilla`: ver [CONSOLIDACION-GATEWAY.md](CONSOLIDACION-GATEWAY.md).
+Conserva el runtime corregido de 68c96a7 y añade las herramientas/pruebas válidas
+de Marketplace, con configuración portable y evidencias separadas de las históricas.
+
 Owner asignado en #106: Axel Cueva, rama `cueva`. La autorización transversal
 de Marco está registrada en #21 y se limita a `apps/api-gateway`. No se cambian
 otros servicios, contratos, librerías, dependencias o configuración global.
-Esa delimitación corresponde al bloque Gateway. Por autorización posterior del
-usuario, el PR #116 incorpora también los commits propios de #70/#33/#15/#112;
-la ampliación, las dos dependencias autorizadas de #33 y sus evidencias se
-registran por separado en la descripción del PR y los documentos de Promotions.
+El alcance actual del PR #116 contiene exclusivamente el Gateway aprobado.
+Los avances de #70/#33/#15/#112 se retiraron del diff de integración y se
+conservan localmente en `cueva`, sin otro PR. Promotions, DATA y los dos
+manifiestos de dependencias coinciden con master en el contenido publicado.
+El PR permanece abierto en draft, sin autorización para merge.
 
 ## Contrato y comportamiento
 
@@ -42,12 +47,22 @@ Multipart/JSON se reenvían como bytes cuando se arranca desde `main.ts`.
 
 Timeout total configurable y cancelación por desconexión. El presupuesto técnico
 de memoria de 10 MiB se aplica a JSON y errores bufferizados. Los tres imports
-multipart y las respuestas de archivos se transmiten con backpressure, sin
+multipart, los dos multipart de marcas y las respuestas de archivos se transmiten
+con backpressure, sin
 aplicar ese presupuesto como límite del archivo. OpenAPI, SPEC-001 y SPEC-013
 consultadas no fijan un máximo numérico de bytes para esos imports. El owner del
 import aplica su límite y el Gateway conserva `413 ARCHIVO_EXCEDE_LIMITE`, incluso
 si el proveedor rechaza antes de terminar la subida. No se inventa un máximo
 contractual a partir del prototipo.
+
+`crearMarca` y `actualizarMarca` transmiten sus logos y framing multipart por el
+mismo flujo. SPEC-011 fija un máximo de **5 MB** para el logo; Taxonomía aplica
+esa validación de archivo. El Gateway no lo sustituye por el presupuesto JSON,
+no acepta códigos de importación como errores de logo y conserva
+`413 LOGO_EXCEDE_LIMITE`. Ante rechazo temprano lee primero el problema del
+proveedor y descarta el cuerpo entrante restante sin bufferizarlo antes de
+terminar la respuesta, dentro del timeout ya existente; así evita perder el
+413 por cierre de conexión mientras el cliente sigue subiendo.
 
 Los errores locales de validación (400), identidad (401), autorización (403) e
 indisponibilidad (503) conservan sus códigos técnicos conocidos aunque la
@@ -79,6 +94,13 @@ iat/jti y tipo. No se confía en claves/URLs del header entrante. Caché de clav
 
 No se atribuyen grants, homologación ni autenticación G7 real por disponer de
 este validador. Los tokens firmados y proveedores usados en pruebas son aislados.
+
+H-04 queda diferido y no bloqueante para este PR, por aclaración expresa del
+usuario: la validación temporal adicional de `iat` futuro se abordará en #107
+cuando G7/Seguridad y la coordinación G6 acuerden la tolerancia de reloj.
+No se inventa una tolerancia ni se activa integración G7 ahora. Se mantienen
+la validación JWT actual, los guards y el rechazo de operaciones protegidas
+sin identidad o permisos válidos; diferir esa mejora no habilita anonimato.
 
 ## Configuración local
 
@@ -137,7 +159,7 @@ npm run test:e2e -- apps/api-gateway --maxWorkers=1
 node apps/api-gateway/test/readiness.smoke.mjs # requiere build previo
 ```
 
-Pruebas enfocadas ejecutadas: **57 unitarias / 289 HTTP, PASS**. Cubren las 135
+Pruebas enfocadas ejecutadas: **57 unitarias / 299 HTTP, PASS**. Cubren las 135
 operaciones del inventario (las cinco de introspección se acreditan como rechazo
 seguro), firmas reales RS256 sintéticas, audiencia/cliente/scope/tipo/rol,
 manipulación, expiración, caché, matching, forwarding a proveedor HTTP aislado,
@@ -147,6 +169,11 @@ protegidas también rechazan identidad ausente y roles insuficientes antes de
 contactar upstreams. El smoke ejecuta el healthcheck compilado con liveness y
 dependencias disponibles, ausentes, inválidas, lentas y configuración parcial.
 El proveedor se reutiliza una vez por suite. No son E2E de negocio ni prueba G7.
+Las diez regresiones adicionales de marcas cubren ambos métodos, transporte
+del logo de 2 MiB por encima del presupuesto JSON de prueba (1 MiB) y por debajo
+de los 5 MB de SPEC-011, rechazo 413 de 11 MiB normal/temprano, código ajeno
+rechazado y 401/403 antes de contactar al proveedor. Son fixtures sintéticos
+de transporte, sin acreditar validación de imágenes ni integración Taxonomía.
 
 Regeneración offline: descargar el OpenAPI del commit indicado, convertir YAML
 a JSON con un parser YAML y ejecutar
