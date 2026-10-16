@@ -5,16 +5,20 @@ import { App } from 'supertest/types';
 import { TaxonomySvcModule } from './../src/taxonomy-svc.module.js';
 import { TAXONOMY_REPOSITORY } from './../src/taxonomy.repository.js';
 import type { TaxonomyRepository } from './../src/taxonomy.repository.js';
+import type { TaxonomyReadinessIndicator } from './../src/health/readiness.port.js';
 import { RepositorioPrueba } from './repositorio-prueba.js';
 
 const CORRELACION = '0c0d092e-6192-47c1-8d18-5ed0e2aa4518';
 
-const REPOSITORIO_CON_FALLO: TaxonomyRepository = {
+const REPOSITORIO_CON_FALLO: TaxonomyRepository & TaxonomyReadinessIndicator = {
   async findCategoriasActivas(): Promise<never[]> {
     throw new Error('select * from taxonomy.categories: conexion rechazada');
   },
   async findMarcasActivas(): Promise<never[]> {
     throw new Error('select * from taxonomy.brands: conexion rechazada');
+  },
+  async verificarReadiness(): Promise<void> {
+    throw new Error('conexion con el esquema taxonomy rechazada');
   },
 };
 
@@ -49,6 +53,63 @@ describe('TaxonomySvc (e2e) — GET /api/v1/categorias y /api/v1/marcas (#22)', 
       status: 'ok',
       service: 'taxonomy-svc',
     });
+  });
+
+  it('/health (GET) responde 200 sin depender de la fuente de datos', async () => {
+    const appConFallo = await crearApp(REPOSITORIO_CON_FALLO);
+
+    try {
+      await request(appConFallo.getHttpServer())
+        .get('/health')
+        .expect(200)
+        .expect({ status: 'ok', service: 'taxonomy-svc' });
+    } finally {
+      await appConFallo.close();
+    }
+  });
+
+  it('/health/readiness (GET) responde 200 cuando la dependencia está lista', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/health/readiness')
+      .expect(200);
+
+    expect(res.headers['content-type']).toContain('application/json');
+    expect(res.body).toEqual({ status: 'ready', service: 'taxonomy-svc' });
+  });
+
+  it('/health/readiness (GET) responde 503 SERVICIO_NO_DISPONIBLE si la dependencia no está lista', async () => {
+    repositorio.listo = false;
+
+    const res = await request(app.getHttpServer())
+      .get('/health/readiness')
+      .expect(503);
+
+    expect(res.headers['content-type']).toContain('application/problem+json');
+    expect(res.body).toMatchObject({
+      type: '/errores/servicio-no-disponible',
+      status: 503,
+      code: 'SERVICIO_NO_DISPONIBLE',
+    });
+  });
+
+  it('/health/readiness (GET) responde 503 en configuración sin fuente de datos, con /health aún en 200', async () => {
+    const appSinFuente = await crearApp();
+
+    try {
+      await request(appSinFuente.getHttpServer())
+        .get('/health')
+        .expect(200)
+        .expect({ status: 'ok', service: 'taxonomy-svc' });
+
+      const res = await request(appSinFuente.getHttpServer())
+        .get('/health/readiness')
+        .expect(503);
+
+      expect(res.headers['content-type']).toContain('application/problem+json');
+      expect(res.body.code).toBe('SERVICIO_NO_DISPONIBLE');
+    } finally {
+      await appSinFuente.close();
+    }
   });
 
   it('/api/v1/categorias (GET) devuelve las categorías activas', async () => {

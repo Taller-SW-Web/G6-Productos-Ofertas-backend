@@ -1,34 +1,19 @@
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { NestFactory } from '@nestjs/core';
-import { TaxonomySvcModule } from './taxonomy-svc.module.js';
+import { iniciarTaxonomySvc } from './bootstrap.js';
+import { ConfiguracionInvalidaError } from './config/environment.js';
+import { SanitizedLogger } from './logging/sanitized-logger.js';
 
-function loadEnv(): void {
-  const envPath = resolve(process.cwd(), '.env');
-  if (existsSync(envPath) && typeof process.loadEnvFile === 'function') {
-    process.loadEnvFile(envPath);
+async function arrancar(): Promise<void> {
+  const logger = new SanitizedLogger();
+  try {
+    await iniciarTaxonomySvc({ logger });
+  } catch (error) {
+    const detalle =
+      error instanceof ConfiguracionInvalidaError
+        ? error.message
+        : 'Fallo al iniciar taxonomy-svc.';
+    logger.error(detalle, 'Bootstrap');
+    process.exit(1);
   }
 }
 
-function resolvePort(): number {
-  const rawPort = process.env.TAXONOMY_SVC_PORT ?? process.env.PORT ?? '3006';
-  const port = Number(rawPort);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(
-      '[' +
-        'taxonomy-svc' +
-        '] Puerto invalido: ' +
-        String(rawPort) +
-        '. Debe ser un entero entre 1 y 65535.',
-    );
-  }
-  return port;
-}
-
-async function bootstrap() {
-  loadEnv();
-  const port = resolvePort();
-  const app = await NestFactory.create(TaxonomySvcModule);
-  await app.listen(port);
-}
-await bootstrap();
+await arrancar();
