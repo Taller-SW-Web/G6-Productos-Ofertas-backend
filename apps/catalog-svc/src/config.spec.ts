@@ -124,6 +124,17 @@ describe('CatalogConfig PG contract', () => {
     expect(config.database.expectedRole).toBe('catalog_app');
   });
 
+  it('snapshots the validated Taxonomy origin independently of mutable environment', () => {
+    const env = {
+      ...validEnv(),
+      CATALOG_TAXONOMY_URL: 'https://taxonomy.example.test/',
+    };
+    const config = new CatalogConfig(env);
+    env.CATALOG_TAXONOMY_URL = 'http://invalid.example.test';
+    expect(config.taxonomy.origin).toBe('https://taxonomy.example.test');
+    expect(Object.isFrozen(config.taxonomy)).toBe(true);
+  });
+
   it('rejects an unknown environment and does not echo secret values', () => {
     expect(
       () => new CatalogConfig({ ...validEnv(), NODE_ENV: 'private-secret' }),

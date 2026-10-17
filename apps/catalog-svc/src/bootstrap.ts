@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { BadRequestException } from '@nestjs/common';
+import { correlationId, isCorrelationId } from './correlation.js';
 import type { Request, Response, NextFunction } from 'express';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
@@ -35,12 +36,13 @@ export async function createApplication(
   });
   app.use((req: Request, res: Response, next: NextFunction) => {
     const supplied = req.get('X-Correlation-Id');
-    const correlationId =
-      supplied && /^[A-Za-z0-9._-]{1,128}$/.test(supplied)
-        ? supplied
-        : randomUUID();
-    req.headers['x-correlation-id'] = correlationId;
-    res.setHeader('X-Correlation-Id', correlationId);
+    const id = correlationId(supplied);
+    req.headers['x-correlation-id'] = id;
+    res.setHeader('X-Correlation-Id', id);
+    if (supplied !== undefined && !isCorrelationId(supplied)) {
+      next(new BadRequestException());
+      return;
+    }
     next();
   });
   app.enableShutdownHooks();

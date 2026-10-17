@@ -1,4 +1,5 @@
 import { readPostgresSettings, type PostgresSettings } from './database.js';
+import { readTaxonomyConfig, type TaxonomyConfig } from './taxonomy-config.js';
 import { readHttpConfig } from './http-config.js';
 
 export type Environment = 'development' | 'test' | 'production';
@@ -8,6 +9,7 @@ export class CatalogConfig {
   readonly port: number;
   readonly host: string;
   readonly database: PostgresSettings;
+  readonly taxonomy: TaxonomyConfig;
 
   constructor(env: Record<string, string | undefined>) {
     const errors: string[] = [];
@@ -34,25 +36,15 @@ export class CatalogConfig {
           : 'Configuracion PostgreSQL catalog invalida.',
       );
     }
-    if (env.CATALOG_TAXONOMY_URL !== undefined) {
-      try {
-        const url = new URL(env.CATALOG_TAXONOMY_URL);
-        if (
-          !['http:', 'https:'].includes(url.protocol) ||
-          url.username ||
-          url.password ||
-          url.pathname !== '/' ||
-          url.search ||
-          url.hash
-        )
-          throw new Error();
-      } catch {
-        errors.push(
-          'CATALOG_TAXONOMY_URL debe ser un origen HTTP(S) sin credenciales.',
-        );
-      }
+    let taxonomy: TaxonomyConfig | undefined;
+    try {
+      taxonomy = readTaxonomyConfig(env);
+    } catch {
+      errors.push(
+        'CATALOG_TAXONOMY_URL debe ser un origen HTTP(S) sin credenciales.',
+      );
     }
-    if (errors.length || !http || !database) {
+    if (errors.length || !http || !database || !taxonomy) {
       throw new Error(
         'Configuracion de catalog-svc invalida: ' + errors.join(' '),
       );
@@ -61,6 +53,7 @@ export class CatalogConfig {
     this.port = http.port;
     this.host = http.host;
     this.database = database;
+    this.taxonomy = taxonomy;
     Object.freeze(this);
   }
 }

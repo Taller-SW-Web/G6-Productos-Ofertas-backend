@@ -2,7 +2,9 @@
 
 Rama personal `poma`. El PR #119 conserva el c√≥digo comercial incorporado desde
 master; estas correcciones se limitan a configuraci√≥n, arranque, observabilidad,
-readiness y sus pruebas. No cambian CI, contratos, otros servicios ni migraciones.
+readiness y sus pruebas. Las ediciones propias no cambian CI, contratos, otros servicios ni migraciones.
+La integraciÛn solicitada de master conserva tambiÈn los cambios ajenos tal como
+fueron publicados por sus owners.
 
 ## Contrato de configuraci√≥n
 

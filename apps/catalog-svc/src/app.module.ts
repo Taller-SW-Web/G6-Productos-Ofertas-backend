@@ -11,6 +11,10 @@ import {
   COMMERCIAL_ELIGIBILITY,
   PendingCommercialEligibility,
 } from './commercial-eligibility.js';
+import {
+  CATALOG_TAXONOMY_CONFIG,
+  readTaxonomyConfig,
+} from './taxonomy-config.js';
 import { TaxonomyClient } from './taxonomy.client.js';
 import { ProblemFilter } from './problem.filter.js';
 import { CatalogConfig } from './config.js';
@@ -25,6 +29,10 @@ import { CATALOG_DATABASE, ReadinessController } from './readiness.js';
     PostgresCatalogRepository,
     CommercialService,
     TaxonomyClient,
+    {
+      provide: CATALOG_TAXONOMY_CONFIG,
+      useFactory: () => readTaxonomyConfig(process.env),
+    },
     CommercialReadinessController,
     {
       provide: CATALOG_DATABASE,
@@ -45,6 +53,7 @@ export class AppModule {
       module: AppModule,
       providers: [
         { provide: CatalogConfig, useValue: config },
+        { provide: CATALOG_TAXONOMY_CONFIG, useValue: config.taxonomy },
         { provide: CATALOG_POSTGRES_CONFIG, useValue: config.database },
       ],
     };

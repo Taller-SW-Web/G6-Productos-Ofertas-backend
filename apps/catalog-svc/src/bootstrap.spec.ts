@@ -3,6 +3,8 @@ import { createApplication } from './bootstrap.js';
 import request from 'supertest';
 import { Test } from '@nestjs/testing';
 import { AppModule } from './app.module.js';
+import { CATALOG_TAXONOMY_CONFIG } from './taxonomy-config.js';
+import { isCorrelationId } from './correlation.js';
 import { CatalogConfig } from './config.js';
 import { CATALOG_POSTGRES_CONFIG, Database } from './database.js';
 import { mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from 'node:fs';
@@ -56,11 +58,39 @@ describe('bootstrap configuration', () => {
       expect(config.port).toBe(3001);
       await request(await app.getUrl())
         .get('/health/live')
-        .set('X-Correlation-Id', 'fixture-correlation')
-        .expect('X-Correlation-Id', 'fixture-correlation')
+        .set('X-Correlation-Id', '3FA85F64-5717-4562-B3FC-2C963F66AFA6')
+        .expect('X-Correlation-Id', '3FA85F64-5717-4562-B3FC-2C963F66AFA6')
         .expect(200);
       const response = await request(await app.getUrl()).get('/health');
       expect(response.headers['x-correlation-id']).toMatch(/^[a-f0-9-]{36}$/);
+      for (const supplied of [undefined, 'invalid', 'abc-123', '']) {
+        for (const path of [
+          '/health/live',
+          '/api/v1/productos?canal=MARKETPLACE',
+        ]) {
+          let call = request(await app.getUrl()).get(path);
+          if (supplied !== undefined)
+            call = call.set('X-Correlation-Id', supplied);
+          const result = await call;
+          expect(result.status).toBe(
+            supplied === undefined
+              ? path === '/health/live'
+                ? 200
+                : 503
+              : 400,
+          );
+          const id = result.headers['x-correlation-id'];
+          expect(isCorrelationId(id)).toBe(true);
+          if (result.status !== 200) expect(result.body.correlationId).toBe(id);
+        }
+      }
+      const id = '3FA85F64-5717-4562-B3FC-2C963F66AFA6';
+      const problem = await request(await app.getUrl())
+        .get('/api/v1/productos?canal=MARKETPLACE')
+        .set('X-Correlation-Id', id)
+        .expect(503);
+      expect(problem.headers['x-correlation-id']).toBe(id);
+      expect(problem.body.correlationId).toBe(id);
       expect(JSON.stringify(output.mock.calls)).not.toContain('fixture-secret');
     } finally {
       await app.close();
@@ -93,6 +123,9 @@ describe('readiness after integrating master', () => {
         .compile();
       try {
         const readiness = module.get<CatalogDatabase>(CATALOG_DATABASE);
+        expect(module.get(CATALOG_TAXONOMY_CONFIG)).toBe(
+          module.get(CatalogConfig).taxonomy,
+        );
         expect(module.get(CATALOG_POSTGRES_CONFIG)).toBe(
           module.get(CatalogConfig).database,
         );

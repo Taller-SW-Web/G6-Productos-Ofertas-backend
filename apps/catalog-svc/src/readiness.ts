@@ -24,23 +24,35 @@ export class UnconfiguredDatabase implements CatalogDatabase {
 
 @Controller('health')
 export class ReadinessController {
+  private inFlight?: Promise<void>;
   constructor(
     @Inject(CATALOG_DATABASE) private readonly database: CatalogDatabase,
   ) {}
 
   @Get('ready')
   async ready() {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        this.database.check(),
+    if (!this.inFlight) {
+      const work = Promise.resolve().then(() => this.database.check());
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      this.inFlight = Promise.race([
+        work,
         new Promise<never>((_, reject) => {
           timer = setTimeout(
             () => reject(new Error('Readiness timeout')),
             2000,
           );
         }),
-      ]);
+      ]).finally(() => clearTimeout(timer));
+      // A deadline bounds the response, not cancellation of the shared PG pool.
+      // Keep the rejected flight until the underlying work drains: no new checks
+      // can accumulate behind a slow dependency, and late success is never cached.
+      const drained = () => {
+        this.inFlight = undefined;
+      };
+      void work.then(drained, drained);
+    }
+    try {
+      await this.inFlight;
       return { status: 'ready', service: 'catalog-svc' };
     } catch {
       throw new ServiceUnavailableException({
@@ -48,8 +60,6 @@ export class ReadinessController {
         service: 'catalog-svc',
         dependencies: { database: 'unavailable' },
       });
-    } finally {
-      clearTimeout(timer);
     }
   }
 }

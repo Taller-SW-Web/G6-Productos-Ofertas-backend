@@ -1,8 +1,13 @@
 import {
   HttpException,
   Injectable,
+  Inject,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import {
+  CATALOG_TAXONOMY_CONFIG,
+  type TaxonomyConfig,
+} from './taxonomy-config.js';
 import type { CommercialBrand } from './commercial.types.js';
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -10,22 +15,18 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 @Injectable()
 export class TaxonomyClient {
+  constructor(
+    @Inject(CATALOG_TAXONOMY_CONFIG) private readonly config: TaxonomyConfig,
+  ) {}
+
   private async get(
     path: string,
     key: string,
     correlationId?: string,
   ): Promise<Record<string, unknown>[]> {
     try {
-      const url = new URL(process.env.CATALOG_TAXONOMY_URL ?? '');
-      if (
-        !['http:', 'https:'].includes(url.protocol) ||
-        url.username ||
-        url.password ||
-        url.pathname !== '/' ||
-        url.search ||
-        url.hash
-      )
-        throw new Error();
+      if (!this.config.origin) throw new Error();
+      const url = new URL(this.config.origin);
       const response = await fetch(new URL(path, url), {
         redirect: 'error',
         signal: AbortSignal.timeout(5000),
