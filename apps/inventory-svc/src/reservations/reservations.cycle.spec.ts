@@ -529,5 +529,42 @@ describe('ReservationsService — Ciclo Completo G5 (Confirmación y Liberación
         expect(pde.problem.code).toBe('RESERVA_NO_ACTIVA');
       }
     });
+
+    it('responde 409 RESERVA_NO_ACTIVA al liberar una reserva expirada', async () => {
+      const orderId = 'PED-EXPIRED-THEN-RELEASE';
+      const opReserva = randomUUID();
+      await reservationsService.solicitarReserva(
+        {
+          order_id: orderId,
+          operation_id: opReserva,
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 2, location_id: locLurin }],
+        },
+        undefined,
+        opReserva,
+      );
+
+      const reserva = mockDb.reservations[0];
+      reserva.expires_at = new Date(Date.now() - 60000).toISOString();
+
+      const opLiberar = randomUUID();
+      try {
+        await reservationsService.liberarReserva(
+          reserva.reservation_id,
+          {
+            order_id: orderId,
+            operation_id: opLiberar,
+            reason: 'ANULACION',
+          },
+          undefined,
+          opLiberar,
+        );
+        expect.unreachable('Debe lanzar excepción');
+      } catch (err) {
+        const pde = err as ProblemDetailsException;
+        expect(pde.problem.status).toBe(409);
+        expect(pde.problem.code).toBe('RESERVA_NO_ACTIVA');
+      }
+    });
   });
 });
