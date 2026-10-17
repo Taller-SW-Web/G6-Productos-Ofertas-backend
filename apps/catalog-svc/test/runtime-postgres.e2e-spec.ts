@@ -257,6 +257,10 @@ describe.skipIf(!dockerAvailable)(
           if (stopped) {
             command('docker', ['start', container]);
             await until(ready);
+            // Docker can allocate a new ephemeral host port when restarting.
+            databasePort = command('docker', ['port', container, '5432/tcp'])
+              .split(':')
+              .at(-1)!;
           }
         }
       },
