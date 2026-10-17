@@ -81,7 +81,7 @@ sudo -u inventory-deploy env -u SSH_ORIGINAL_COMMAND /usr/local/lib/g6-productos
 
 Compara checksums contra el checkout revisado y exige la salida exacta `ejecutor=4 registro=2`. No continúes ante diferencias o versiones incompatibles. La versión 4 conserva `flock` y el estado privado por servicio; el bloqueo se mantiene durante pull, cambio de contenedor, comprobación de salud y rollback. No cambies la ruta de estado de Inventario.
 
-Antes de cambiar el wrapper, inspecciona que solo Inventario está habilitado y valida el Compose actual sin imprimir secretos ni cambiar contenedores:
+Antes de cambiar el wrapper, inspecciona los servicios habilitados y verifica que coincidan con el registro aprobado, y valida el Compose actual sin imprimir secretos ni cambiar contenedores:
 
 ```bash
 sudo bash -c 'source /usr/local/lib/g6-productos-ofertas/service-registry.sh; g6_enabled_services_json'
