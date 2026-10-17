@@ -15,6 +15,12 @@ export class GatewayFailure extends Error {
 export type JwtClaims = Readonly<Record<string, unknown>>;
 export type KeySource = () => Promise<readonly JsonWebKey[]>;
 
+const DEMO_ANONYMOUS_ROUTES = new Map([
+  ['listarCategorias', 'GET /api/v1/categorias'],
+  ['listarProductos', 'GET /api/v1/productos'],
+  ['obtenerProductoPorSlug', 'GET /api/v1/productos/por-slug/{slug}'],
+]);
+
 function object(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -149,10 +155,23 @@ export class GatewayIdentity {
     ).verify(token);
   }
 
+  usesDemoAnonymousAccess(
+    route: ContractRoute,
+    authorization: string | undefined,
+  ): boolean {
+    return (
+      this.settings.demoAnonymousEnabled &&
+      authorization === undefined &&
+      DEMO_ANONYMOUS_ROUTES.get(route.operationId) ===
+        `${route.method} ${route.path}`
+    );
+  }
+
   async authorize(
     route: ContractRoute,
     authorization: string | undefined,
   ): Promise<void> {
+    if (this.usesDemoAnonymousAccess(route, authorization)) return;
     if (!route.security.length) {
       if (!this.settings.publicOperations.includes(route.operationId))
         throw new GatewayFailure(403, 'SCOPE_INSUFICIENTE');

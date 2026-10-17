@@ -12,6 +12,7 @@ export interface GatewaySettings {
   readonly issuer?: string;
   readonly jwksUrl?: string;
   readonly publicOperations: readonly string[];
+  readonly demoAnonymousEnabled: boolean;
 }
 
 export function readGatewayPort(env: Readonly<NodeJS.ProcessEnv>): number {
@@ -102,6 +103,8 @@ export function readGatewaySettings(
     const publicOperations = (env.GATEWAY_PUBLIC_OPERATION_IDS ?? '')
       .split(',')
       .filter(Boolean);
+    const demoAnonymousEnabled = env.GATEWAY_DEMO_ANONYMOUS_ENABLED ?? 'false';
+    if (!['true', 'false'].includes(demoAnonymousEnabled)) throw new Error();
     if (
       publicOperations.some(
         (id) =>
@@ -119,6 +122,7 @@ export function readGatewaySettings(
       issuer: env.AUTH_ISSUER,
       jwksUrl: env.AUTH_JWKS_URL,
       publicOperations: Object.freeze(publicOperations),
+      demoAnonymousEnabled: demoAnonymousEnabled === 'true',
     });
   } catch {
     throw new Error(

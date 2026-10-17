@@ -89,6 +89,7 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
       publicOperations: CONTRACT_ROUTES.filter((r) => !r.security.length).map(
         (r) => r.operationId,
       ),
+      demoAnonymousEnabled: false,
     };
     signed = createSignedIdentity(settings);
     const module = await Test.createTestingModule({

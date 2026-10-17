@@ -155,8 +155,92 @@ describe('Gateway identity from G6/G7 contracts', () => {
     await expect(identity.authorize(product, undefined)).rejects.toMatchObject({
       status: 401,
     });
+    const categories = CONTRACT_ROUTES.find(
+      (route) => route.operationId === 'listarCategorias',
+    )!;
+    await expect(
+      identity.authorize(categories, undefined),
+    ).rejects.toMatchObject({
+      status: 401,
+    });
     await expect(
       identity.authorize(product, `Bearer ${signed.token()}`),
     ).rejects.toMatchObject({ status: 503 });
+  });
+  it('allows only the three exact demo GET operations without Authorization', async () => {
+    const demoIdentity = new GatewayIdentity({
+      ...settings,
+      demoAnonymousEnabled: true,
+    });
+    const routes = [
+      'listarCategorias',
+      'listarProductos',
+      'obtenerProductoPorSlug',
+    ].map((operationId) =>
+      CONTRACT_ROUTES.find((route) => route.operationId === operationId)!,
+    );
+    for (const route of routes) {
+      expect(demoIdentity.usesDemoAnonymousAccess(route, undefined)).toBe(true);
+      await expect(
+        demoIdentity.authorize(route, undefined),
+      ).resolves.toBeUndefined();
+    }
+    for (const route of [
+      CONTRACT_ROUTES.find((r) => r.operationId === 'obtenerProducto')!,
+      CONTRACT_ROUTES.find((r) => r.operationId === 'crearCategoria')!,
+    ]) {
+      expect(demoIdentity.usesDemoAnonymousAccess(route, undefined)).toBe(
+        false,
+      );
+      await expect(
+        demoIdentity.authorize(route, undefined),
+      ).rejects.toMatchObject({
+        status: 401,
+      });
+    }
+    expect(demoIdentity.usesDemoAnonymousAccess(routes[0], '')).toBe(false);
+    await expect(demoIdentity.authorize(routes[0], '')).rejects.toMatchObject({
+      status: 401,
+    });
+  });
+  it('preserves JWT validation when a token is supplied to a demo route', async () => {
+    const demoIdentity = new GatewayIdentity({
+      ...settings,
+      issuer: 'https://isolated.test/issuer',
+      jwksUrl: 'https://isolated.test/jwks',
+      demoAnonymousEnabled: true,
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ keys: [signed.key] }), { status: 200 }),
+        ),
+    );
+    const categories = CONTRACT_ROUTES.find(
+      (route) => route.operationId === 'listarCategorias',
+    )!;
+    expect(
+      demoIdentity.usesDemoAnonymousAccess(
+        { ...categories, method: 'POST' },
+        undefined,
+      ),
+    ).toBe(false);
+    expect(
+      demoIdentity.usesDemoAnonymousAccess(
+        { ...categories, operationId: 'anotherOperation' },
+        undefined,
+      ),
+    ).toBe(false);
+    expect(
+      demoIdentity.usesDemoAnonymousAccess(
+        categories,
+        `Bearer ${signed.token()}`,
+      ),
+    ).toBe(false);
+    await expect(
+      demoIdentity.authorize(categories, `Bearer ${signed.token()}`),
+    ).resolves.toBeUndefined();
   });
 });

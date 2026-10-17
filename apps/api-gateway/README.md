@@ -117,6 +117,18 @@ No se cambia package.json para cargar archivos de otra aplicación.
   Sin configuración de confianza ninguna operación protegida se reenvía.
 - `GATEWAY_PUBLIC_OPERATION_IDS`: solo operationIds contractualmente anónimos
   cuya exposición esté aprobada. Vacío por defecto.
+- `GATEWAY_DEMO_ANONYMOUS_ENABLED`: excepción temporal y explícita para la demo,
+  apagada por defecto. Cuando es `true`, solo permite sin token `GET
+  /api/v1/categorias`, `GET /api/v1/productos` y `GET
+  /api/v1/productos/por-slug/{slug}`. La allowlist de rutas, métodos y
+  operationIds vive en código y no puede ampliarse por entorno. Si se usa esta
+  excepción, el Gateway no reenvía `Authorization` al upstream. Cuando se
+  proporciona un token, se conserva la validación JWT vigente.
+
+Esta excepción de demo se aparta temporalmente de la seguridad declarada en
+OpenAPI. No modifica el contrato candidato ni declara homologación del contrato
+de producción, autorización de G7, despliegue o acceso público efectivo.
+Operaciones no incluidas y métodos de escritura conservan la protección vigente.
 
 ## Liveness y readiness de despliegue
 
@@ -199,7 +211,8 @@ reales, autenticación G7, homologación y despliegue: NO EJECUTADOS.
 
 HTTPS operativo en `https://g6-productos-ofertas.duckdns.org` según la
 coordinación recibida. Este PR no verifica ese despliegue ni cambia Oracle,
-DNS, firewall, Caddy o CD. Tampoco implementa RabbitMQ (#108), la demo anónima
-(#107) ni upstreams reales. Las pruebas con proveedores aislados acreditan el
+DNS, firewall, Caddy o CD. Tampoco implementa RabbitMQ (#108) ni configura
+upstreams reales. La excepción demo anónima (#107) requiere activación explícita
+en runtime y no está desplegada por este PR. Las pruebas con proveedores aislados acreditan el
 código del Gateway; no acreditan integración autenticada, homologación externa
 o despliegue.
