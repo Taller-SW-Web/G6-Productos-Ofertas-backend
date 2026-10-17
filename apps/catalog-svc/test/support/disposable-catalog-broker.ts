@@ -32,7 +32,6 @@ export class DisposableCatalogBroker {
   async start(): Promise<void> {
     this.command([
       'run',
-      '--rm',
       '--detach',
       '--name',
       this.name,
