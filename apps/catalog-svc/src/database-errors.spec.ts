@@ -16,7 +16,9 @@ describe('safe PostgreSQL failure translation', () => {
     ['ECONNRESET', false, 'connection'],
     ['53300', false, 'connection'],
     ['57P01', false, 'connection'],
-    ['57014', false, 'other'],
+    ['57014', false, 'connection'],
+    ['55P03', false, 'connection'],
+    ['42501', false, 'other'],
     ['23514', true, 'deferred_constraint'],
   ] as const)(
     'classifies SQLSTATE %s at commit=%s',
@@ -89,4 +91,20 @@ describe('safe PostgreSQL failure translation', () => {
     const domainFailure = new Error('catalog validation failed');
     expect(translatePostgresFailure(domainFailure)).toBeUndefined();
   });
+  it.each([
+    'Query read timeout',
+    'timeout exceeded when trying to connect',
+    'Connection terminated due to connection timeout',
+    'Connection terminated unexpectedly',
+    'Connection terminated',
+  ])(
+    'classifies pg code-less failure %s through Drizzle without retaining text',
+    (message) => {
+      const translated = translatePostgresFailure(
+        new Error('private SQL', { cause: new Error(message) }),
+      );
+      expect(translated).toMatchObject({ failure: 'connection' });
+      expect(JSON.stringify(translated)).not.toContain('private SQL');
+    },
+  );
 });

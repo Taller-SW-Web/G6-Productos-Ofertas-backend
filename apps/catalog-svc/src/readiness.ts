@@ -58,7 +58,6 @@ export class ReadinessController {
       throw new ServiceUnavailableException({
         status: 'not_ready',
         service: 'catalog-svc',
-        dependencies: { database: 'unavailable' },
       });
     }
   }

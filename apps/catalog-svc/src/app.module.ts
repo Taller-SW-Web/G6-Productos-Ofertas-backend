@@ -31,6 +31,7 @@ import {
 } from './catalog-mutation.service.js';
 import { approvedCatalogProductPolicy } from './catalog-product.policy.js';
 import { CatalogMasterClient } from './catalog-master.client.js';
+import { CatalogTelemetry } from './catalog-telemetry.js';
 import { CatalogMessageService } from './catalog-message.service.js';
 import {
   CATALOG_AMQP_SETTINGS,
@@ -73,6 +74,7 @@ import {
     },
     CatalogMasterClient,
     CatalogMessageService,
+    CatalogTelemetry,
     CatalogAmqpRuntime,
     {
       provide: CATALOG_AMQP_SETTINGS,

@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { CatalogTelemetry } from './catalog-telemetry.js';
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import { Database } from './database.js';
 import { activationChecks, inbox, outbox, products } from './catalog.schema.js';
@@ -29,14 +30,18 @@ export interface CatalogPublisher {
 }
 @Injectable()
 export class CatalogMessageService {
-  constructor(private readonly database: Database) {}
+  constructor(
+    private readonly database: Database,
+    @Optional()
+    private readonly telemetry: CatalogTelemetry = new CatalogTelemetry(),
+  ) {}
 
   async consume(
     message: CatalogEnvelope,
   ): Promise<'APPLIED' | 'STALE' | 'TERMINAL' | 'DUPLICATE'> {
     if (!(preparationResults as readonly string[]).includes(message.name))
       throw new BlockedCatalogHandler();
-    return this.database.transaction(async (tx) => {
+    const result = await this.database.transaction(async (tx) => {
       const [hint] = await tx
         .select()
         .from(activationChecks)
@@ -136,13 +141,19 @@ export class CatalogMessageService {
           .where(eq(activationChecks.id, check.id));
       return result;
     });
+    this.telemetry.record(`INBOX_${result}`, {
+      correlationId: message.correlation_id,
+      operationId: message.operation_id ?? undefined,
+      messageId: message.message_id,
+    });
+    return result;
   }
 
   /** One row lock per confirmed publish; a crash before commit leaves the immutable message pending. */
   async relayOne(
     publisher: CatalogPublisher,
   ): Promise<'PUBLISHED' | 'PENDING' | 'EMPTY'> {
-    return this.database.transaction(async (tx) => {
+    const result = await this.database.transaction(async (tx) => {
       const [row] = await tx
         .select()
         .from(outbox)
@@ -185,5 +196,10 @@ export class CatalogMessageService {
         .where(eq(outbox.id, row.id));
       return 'PUBLISHED';
     });
+    if (result !== 'EMPTY')
+      this.telemetry.record(
+        result === 'PUBLISHED' ? 'OUTBOX_PUBLISHED' : 'OUTBOX_PENDING',
+      );
+    return result;
   }
 }

@@ -192,6 +192,7 @@ async function jsonResponse(response: Response): Promise<unknown> {
 @Injectable()
 export class CatalogTokenVerifier {
   private cache?: CachedKeys;
+  private loading?: Promise<CachedKeys>;
 
   constructor(
     @Inject(CATALOG_SECURITY_CONFIG)
@@ -201,6 +202,18 @@ export class CatalogTokenVerifier {
   private async loadKeys(): Promise<CachedKeys> {
     if (!this.config) throw new CatalogSecurityUnavailable();
     if (this.cache && this.cache.expiresAt > Date.now()) return this.cache;
+    // Share discovery/JWKS work during expiry, outages and rotation.
+    // A failed fetch is never cached as a healthy key set.
+    if (!this.loading) {
+      this.loading = this.fetchKeys().finally(() => {
+        this.loading = undefined;
+      });
+    }
+    return this.loading;
+  }
+
+  private async fetchKeys(): Promise<CachedKeys> {
+    if (!this.config) throw new CatalogSecurityUnavailable();
 
     try {
       const discoveryResponse = await fetch(this.config.discoveryUrl, {

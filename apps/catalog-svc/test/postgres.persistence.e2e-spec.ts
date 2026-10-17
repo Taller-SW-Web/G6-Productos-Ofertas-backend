@@ -10,6 +10,9 @@ import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
+import { DisposableCatalogBroker } from './support/disposable-catalog-broker.js';
+import { CatalogAmqpRuntime } from '../src/catalog-amqp.js';
+import { CatalogTelemetry } from '../src/catalog-telemetry.js';
 import { and, eq, sql } from 'drizzle-orm';
 import { CatalogMutationService } from '../src/catalog-mutation.service.js';
 import type { CatalogMasterClient } from '../src/catalog-master.client.js';
@@ -18,7 +21,11 @@ import { CatalogQueryRepository } from '../src/catalog-query.repository.js';
 import { activeAttempt, parseCatalogMessage } from '../src/catalog-messages.js';
 import type { Attribute } from '../src/commercial.types.js';
 import { CatalogPersistenceError } from '../src/database-errors.js';
-import { Database, readPostgresSettings } from '../src/database.js';
+import {
+  Database,
+  readPostgresSettings,
+  type PostgresSettings,
+} from '../src/database.js';
 import { CatalogTransactionManager } from '../src/catalog-transaction.js';
 import { PostgresCatalogWriteRepository } from '../src/postgres-catalog-write.repository.js';
 import {
@@ -109,9 +116,12 @@ describe.skipIf(!dockerAvailable)(
     let caFile = '';
     let port = '';
     let database: Database;
+    let persistenceSettings: PostgresSettings;
     let transactions: CatalogTransactionManager;
     const repository = new PostgresCatalogWriteRepository();
     let closed = false;
+    const jointBroker = new DisposableCatalogBroker();
+    let jointRuntime: CatalogAmqpRuntime | undefined;
 
     const ready = () =>
       spawnSync(
@@ -212,12 +222,16 @@ describe.skipIf(!dockerAvailable)(
         G6_EXPECTED_ROLE: 'catalog_app',
         G6_CONNECTION_MODE: 'direct',
       };
-      database = new Database(readPostgresSettings(env));
+      persistenceSettings = readPostgresSettings(env);
+      database = new Database(persistenceSettings);
       transactions = new CatalogTransactionManager(database);
       await database.verifyIdentity();
+      await jointBroker.start();
     }, 180000);
 
     afterAll(async () => {
+      await jointRuntime?.onModuleDestroy();
+      await jointBroker.close();
       if (!closed) await database?.onModuleDestroy();
       spawnSync('docker', ['rm', '--force', container], {
         timeout: 15000,
@@ -248,6 +262,195 @@ describe.skipIf(!dockerAvailable)(
         tiene_variantes: false,
       };
     }
+
+    it('JOINT-01: commits aggregate/Outbox, transports requested/results through a real broker, deduplicates Inbox and reconnects', async () => {
+      // Seed an internal BORRADOR coordination fixture, not a mocked HTTP or Taxonomy flow.
+      const correlation = randomUUID(),
+        operation = randomUUID(),
+        messageId = randomUUID(),
+        sku = '000-JOINT-' + randomUUID();
+      const product = await transactions.run(async (tx) => {
+        const row = await repository.insertProduct(tx, productInput(sku));
+        const data = { product_id: row.id, sku, variant_id: null };
+        await repository.insertActivationCheck(tx, {
+          product_id: row.id,
+          sku,
+          dependency: 'INVENTORY',
+          operation_id: operation,
+          correlation_id: correlation,
+          state: 'PENDING',
+          request_payload: data,
+        });
+        await repository.insertOutboxMessage(tx, {
+          message_id: messageId,
+          event_name: 'inventory.sku.initialization.requested',
+          kind: 'command',
+          correlation_id: correlation,
+          operation_id: operation,
+          occurred_at: new Date(),
+          payload: data,
+        });
+        return row;
+      });
+      const signals = new CatalogTelemetry();
+      jointRuntime = new CatalogAmqpRuntime(
+        new CatalogMessageService(database, signals),
+        jointBroker.settings,
+      );
+      jointRuntime.onModuleInit();
+      const requested = await jointBroker.next('po.inventory.q');
+      expect(JSON.parse(requested.content.toString()).message_id).toBe(
+        messageId,
+      );
+      const result = {
+        message_id: randomUUID(),
+        schema_version: 1,
+        occurred_at: new Date().toISOString(),
+        correlation_id: correlation,
+        operation_id: operation,
+        causation_id: messageId,
+        producer: 'inventory-svc',
+        kind: 'result',
+        name: 'inventory.sku.initialization.completed',
+        data: {
+          product_id: product.id,
+          sku,
+          variant_id: null,
+          status: 'INITIALIZED',
+          completed_at: new Date().toISOString(),
+        },
+      };
+      await jointBroker.result('inventory', result);
+      async function completed() {
+        const [row] = await database.read((db) =>
+          db
+            .select()
+            .from(activationChecks)
+            .where(eq(activationChecks.operation_id, operation)),
+        );
+        return row.state === 'COMPLETED';
+      }
+      const deadline = Date.now() + 15000;
+      while (!(await completed())) {
+        if (Date.now() > deadline)
+          throw new Error('Joint result not committed');
+        await pause(50);
+      }
+      await jointBroker.result('inventory', result);
+      const replayDeadline = Date.now() + 15000;
+      while (!signals.snapshot().INBOX_DUPLICATE) {
+        if (Date.now() > replayDeadline)
+          throw new Error('Joint replay not processed');
+        await pause(50);
+      }
+      const seen = await database.read((db) =>
+        db.execute(
+          sql`SELECT count(*)::int AS n FROM catalog.inbox WHERE message_id=${result.message_id}`,
+        ),
+      );
+      expect(seen.rows[0]?.n).toBe(1);
+      const [published] = await database.read((db) =>
+        db.select().from(outbox).where(eq(outbox.message_id, messageId)),
+      );
+      expect(published.published_at).not.toBeNull();
+      jointBroker.stop();
+      const followupId = randomUUID();
+      await transactions.run(async (tx) => {
+        const pending = await repository.insertProduct(
+          tx,
+          productInput('AFTER-OUTAGE-' + randomUUID()),
+        );
+        const nextOperation = randomUUID(),
+          data = {
+            product_id: pending.id,
+            sku: pending.sku_base,
+            variant_id: null,
+          };
+        await repository.insertActivationCheck(tx, {
+          product_id: pending.id,
+          sku: pending.sku_base,
+          dependency: 'INVENTORY',
+          operation_id: nextOperation,
+          correlation_id: correlation,
+          state: 'PENDING',
+          request_payload: data,
+        });
+        return repository.insertOutboxMessage(tx, {
+          message_id: followupId,
+          event_name: 'inventory.sku.initialization.requested',
+          kind: 'command',
+          correlation_id: correlation,
+          operation_id: nextOperation,
+          occurred_at: new Date(),
+          payload: data,
+        });
+      });
+      const [pending] = await database.read((db) =>
+        db.select().from(outbox).where(eq(outbox.message_id, followupId)),
+      );
+      expect(pending.published_at).toBeNull();
+      await jointBroker.resume();
+      expect(
+        JSON.parse(
+          (await jointBroker.next('po.inventory.q')).content.toString(),
+        ).message_id,
+      ).toBe(followupId);
+      await jointRuntime.onModuleDestroy();
+      jointRuntime = undefined;
+    }, 90000);
+
+    it('PG-FAULT-01: statement timeout rolls back the transaction and the same pool recovers', async () => {
+      const sku = 'TIMEOUT-' + randomUUID();
+      await expect(
+        transactions.run(async (tx) => {
+          await repository.insertProduct(tx, productInput(sku));
+          await tx.execute(sql`SET LOCAL statement_timeout='20ms'`);
+          await tx.execute(sql`SELECT pg_sleep(0.1)`);
+        }),
+      ).rejects.toMatchObject({ failure: 'connection', sqlState: '57014' });
+      expect(
+        await database.read((db) =>
+          db.select().from(products).where(eq(products.sku_base, sku)),
+        ),
+      ).toHaveLength(0);
+      await expect(database.verifyIdentity()).resolves.toBeUndefined();
+    });
+
+    it('PG-FAULT-02: pool saturation times out safely and the same test pool recovers after release', async () => {
+      // Dedicated small pool only in this fault-injection test; same disposable PG instance.
+      const saturated = new Database({
+        ...persistenceSettings,
+        pool: {
+          ...persistenceSettings.pool,
+          max: 1,
+          connectionTimeoutMillis: 1000,
+        },
+      });
+      let release!: () => void, ready!: () => void;
+      const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+        acquired = new Promise<void>((resolve) => {
+          ready = resolve;
+        });
+      const blocker = saturated.transaction(async () => {
+        ready();
+        await gate;
+      });
+      try {
+        await acquired;
+        await expect(saturated.verifyIdentity()).rejects.toMatchObject({
+          failure: 'connection',
+        });
+        release();
+        await blocker;
+        await expect(saturated.verifyIdentity()).resolves.toBeUndefined();
+      } finally {
+        release();
+        await blocker;
+        await saturated.onModuleDestroy();
+      }
+    });
 
     it('persists a product, trigger-created SKU identity, and exact numeric profile values', async () => {
       const sku = 'SKU-' + randomUUID();

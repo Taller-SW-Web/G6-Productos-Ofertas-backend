@@ -70,7 +70,28 @@ export function translatePostgresFailure(
 ): CatalogPersistenceError | undefined {
   if (value instanceof CatalogPersistenceError) return value;
   const postgresFailure = findPostgresFailure(value);
-  if (!postgresFailure) return undefined;
+  if (!postgresFailure) {
+    // pg/pg-pool emit these exact timeout/disconnect errors without SQLSTATE.
+    // Do not classify arbitrary domain exceptions by a broad text match.
+    const seen = new Set<unknown>();
+    let current = value;
+    while (current instanceof Error && !seen.has(current)) {
+      seen.add(current);
+      if (
+        current.name === 'Error' &&
+        [
+          'Query read timeout',
+          'timeout exceeded when trying to connect',
+          'Connection terminated due to connection timeout',
+          'Connection terminated unexpectedly',
+          'Connection terminated',
+        ].includes(current.message)
+      )
+        return new CatalogPersistenceError('connection');
+      current = current.cause;
+    }
+    return undefined;
+  }
   const code = postgresFailure.code;
   const driverCode = typeof code === 'string' ? code : undefined;
   const sqlState =
@@ -83,7 +104,7 @@ export function translatePostgresFailure(
   if (
     driverCode?.startsWith('08') ||
     driverCode?.startsWith('53') ||
-    ['57P01', '57P02', '57P03'].includes(driverCode ?? '') ||
+    ['57P01', '57P02', '57P03', '57014', '55P03'].includes(driverCode ?? '') ||
     [
       'ECONNREFUSED',
       'ECONNRESET',

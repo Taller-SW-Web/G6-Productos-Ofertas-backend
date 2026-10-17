@@ -1,6 +1,7 @@
 import {
   Inject,
   Injectable,
+  Optional,
   type OnModuleInit,
   type OnModuleDestroy,
 } from '@nestjs/common';
@@ -25,6 +26,7 @@ import {
   type CatalogEnvelope,
 } from './catalog-messages.js';
 import { object } from './catalog-mutation.input.js';
+import { CatalogTelemetry, type CatalogSignal } from './catalog-telemetry.js';
 
 export interface CatalogAmqpConfig {
   url: string;
@@ -202,6 +204,8 @@ export class CatalogAmqpRuntime implements OnModuleInit, OnModuleDestroy {
     private readonly settings: CatalogAmqpSettings = {
       connection: readCatalogAmqpConfig(),
     },
+    @Optional()
+    private readonly telemetry: CatalogTelemetry = new CatalogTelemetry(),
   ) {}
   onModuleInit(): void {
     if (!this.config) return;
@@ -252,7 +256,11 @@ export class CatalogAmqpRuntime implements OnModuleInit, OnModuleDestroy {
           await consumer.consume(
             'po.catalog.q',
             (delivery) => {
-              if (!delivery) return;
+              if (!delivery) {
+                this.log('AMQP_CONSUMER_CANCELLED');
+                void this.reset(connection);
+                return;
+              }
               const processing = this.handle(
                 delivery,
                 consumer,
@@ -263,6 +271,7 @@ export class CatalogAmqpRuntime implements OnModuleInit, OnModuleDestroy {
             },
             { noAck: false },
           );
+          this.log('AMQP_CONNECTED');
         } catch (error) {
           await this.reset(connection);
           throw error;
@@ -340,6 +349,13 @@ export class CatalogAmqpRuntime implements OnModuleInit, OnModuleDestroy {
         },
       },
     );
+    this.telemetry.record(
+      retry ? 'AMQP_RETRY_CONFIRMED' : 'AMQP_DLQ_CONFIRMED',
+      {
+        correlationId: delivery.properties.correlationId,
+        messageId: delivery.properties.messageId,
+      },
+    );
     // Only after the business transaction or the confirmed retry/DLQ publish.
     consumer.ack(delivery);
   }
@@ -351,15 +367,28 @@ export class CatalogAmqpRuntime implements OnModuleInit, OnModuleDestroy {
     }
     await connection.close().catch(() => undefined);
   }
-  private log(code: string): void {
-    process.stderr.write(
-      JSON.stringify({ service: 'catalog-svc', code }) + '\n',
-    );
+  private log(code: CatalogSignal): void {
+    this.telemetry.record(code);
   }
   async onModuleDestroy(): Promise<void> {
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
-    if (this.connection) await this.reset(this.connection);
-    await Promise.allSettled(this.deliveries);
+    const closing = this.connection
+      ? this.reset(this.connection)
+      : Promise.resolve();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        closing.then(() => Promise.allSettled(this.deliveries)),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(() => {
+            this.log('AMQP_SHUTDOWN_PENDING');
+            resolve();
+          }, 5000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }

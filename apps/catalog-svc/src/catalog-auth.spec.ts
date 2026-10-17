@@ -119,6 +119,29 @@ describe('Catalog JWT verification', () => {
       roles: ['GESTOR_COMERCIAL'],
     });
   });
+  it('shares a cold discovery/JWKS load across 100 simultaneous verifications and recovers after failure', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch');
+    try {
+      const cold = new CatalogTokenVerifier(
+        readCatalogSecurityConfig({
+          SECURITY_ISSUER: issuer,
+          SECURITY_DISCOVERY_URL: origin + '/.well-known/openid-configuration',
+          SECURITY_JWKS_URL: origin + '/.well-known/jwks.json',
+        }),
+      );
+      fetcher.mockRejectedValueOnce(new Error('Bearer private-network-detail'));
+      await expect(cold.verify(token())).rejects.toBeInstanceOf(
+        CatalogSecurityUnavailable,
+      );
+      fetcher.mockClear();
+      await Promise.all(
+        Array.from({ length: 100 }, () => cold.verify(token())),
+      );
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    } finally {
+      fetcher.mockRestore();
+    }
+  });
 
   it('verifies service audience and space-delimited scopes without converting identity', async () => {
     await expect(
