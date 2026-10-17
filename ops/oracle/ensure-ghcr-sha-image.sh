@@ -21,7 +21,7 @@ if docker manifest inspect "$image" >/dev/null 2>"$inspect_error"; then
   docker pull "$image" >/dev/null
   labels="$(docker image inspect "$image" --format '{{json .Config.Labels}}')"
   jq -e --arg source "$source" --arg revision "$sha" \
-    '."org.opencontainers.image.source" == $source and ."org.opencontainers.image.revision" == $revision' \
+    '((."org.opencontainers.image.source" | ascii_downcase) == $source) and ."org.opencontainers.image.revision" == $revision' \
     <<< "$labels" >/dev/null || {
       echo 'Existe una imagen para este SHA, pero su origen o revisión no se puede verificar; no se sobrescribe.' >&2
       exit 1

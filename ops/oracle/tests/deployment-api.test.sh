@@ -61,10 +61,15 @@ elif [[ "$method" == GET && "$endpoint" =~ ^repos/example/backend/deployments/([
   printf 'g6-oracle-inventory-svc\tdeploy\t%s\t%s\t77\n' "$EXPECT_SHA" "${MOCK_TRIGGER:-workflow_dispatch}"
 elif [[ "$method" == GET && "$endpoint" =~ ^repos/example/backend/actions/runs/([0-9]+)$ ]]; then
   [[ "${BASH_REMATCH[1]}" == 77 ]] || exit 2
-  printf 'CD servicios Oracle\t.github/workflows/cd-services-oracle.yml\tworkflow_dispatch\tmaster\t%s\tsuccess\texample/backend\n' "$EXPECT_SHA"
+  printf 'CD servicios Oracle\t.github/workflows/cd-services-oracle.yml\t%s\t%s\t%s\t%s\texample/backend\n' \
+    "${MOCK_RUN_EVENT:-workflow_dispatch}" "${MOCK_RUN_BRANCH:-master}" "${MOCK_RUN_SHA:-$EXPECT_SHA}" "${MOCK_RUN_CONCLUSION:-success}"
 elif [[ "$method" == GET && "$endpoint" =~ ^repos/example/backend/deployments/([0-9]+)/statuses\?per_page=100$ ]]; then
   id="${BASH_REMATCH[1]}"
-  [[ -f "$MOCK_STATE/$id.statuses.tsv" ]] && cat "$MOCK_STATE/$id.statuses.tsv"
+  if [[ -n "${MOCK_STATUS_OVERRIDE:-}" ]]; then
+    printf '9999\t%s\t2026-03-02T00:00:00Z\n' "$MOCK_STATUS_OVERRIDE"
+  else
+    [[ -f "$MOCK_STATE/$id.statuses.tsv" ]] && cat "$MOCK_STATE/$id.statuses.tsv"
+  fi
 else
   echo "solicitud API inesperada: $method $endpoint" >&2
   exit 2
@@ -87,24 +92,46 @@ mkdir -p "$REPO/apps/inventory-svc/src"
 printf 'base\n' > "$REPO/apps/inventory-svc/src/main.ts"
 git -C "$REPO" add .
 git -C "$REPO" commit --quiet -m 'base'
-readonly SHA="$(git -C "$REPO" rev-parse HEAD)"
+readonly SHA_A="$(git -C "$REPO" rev-parse HEAD)"
+readonly SHA_B=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+[[ "$SHA_A" != "$SHA_B" ]] || { echo 'FAIL: fixture de SHA histórico y futuro debe diferir.' >&2; exit 1; }
 
-run_api() { env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" EXPECT_SHA="$SHA" bash "$ORACLE_DIR/github-deployment-api.sh" "$@"; }
+run_api() { env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" EXPECT_SHA="$SHA_A" bash "$ORACLE_DIR/github-deployment-api.sh" "$@"; }
 run_selector() { (cd "$REPO" && env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" bash "$ORACLE_DIR/select-cd-services.sh" manual inventory-svc); }
 
-deployment_id="$(run_api create example/backend inventory-svc "$SHA" workflow_dispatch 77)"
+deployment_id="$(run_api create example/backend inventory-svc "$SHA_A" workflow_dispatch 77)"
 [[ "$deployment_id" == 100 ]]
 [[ "$(run_selector)" == '["inventory-svc"]' ]]
 run_api status example/backend "$deployment_id" success
-env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" EXPECT_SHA="$SHA" bash "$ROOT/ops/oracle/verify-manual-release-provenance.sh" example/backend "$deployment_id" inventory-svc "$SHA"
-if env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" EXPECT_SHA="$SHA" MOCK_TRIGGER=workflow_run bash "$ROOT/ops/oracle/verify-manual-release-provenance.sh" example/backend "$deployment_id" inventory-svc "$SHA" >/dev/null 2>&1; then
+env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" EXPECT_SHA="$SHA_A" bash "$ROOT/ops/oracle/verify-manual-release-provenance.sh" example/backend "$deployment_id" inventory-svc https://github.com/example/backend/actions/runs/77/readiness
+if env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" EXPECT_SHA="$SHA_A" MOCK_TRIGGER=workflow_run bash "$ROOT/ops/oracle/verify-manual-release-provenance.sh" example/backend "$deployment_id" inventory-svc https://github.com/example/backend/actions/runs/77/readiness >/dev/null 2>&1; then
   echo 'FAIL: un Deployment automático se aceptó como liberación manual.' >&2
   exit 1
 fi
 echo 'PASS: procedencia workflow_run rechazada como evidencia de liberación manual.'
+if env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" EXPECT_SHA="$SHA_A" MOCK_RUN_SHA="$SHA_B" bash "$ROOT/ops/oracle/verify-manual-release-provenance.sh" example/backend "$deployment_id" inventory-svc https://github.com/example/backend/actions/runs/77/readiness >/dev/null 2>&1; then
+  echo 'FAIL: se aceptó una ejecución manual cuyo SHA difiere del Deployment.' >&2
+  exit 1
+fi
+echo 'PASS: Deployment manual en SHA A se acepta como autorización independiente para SHA automático B; run con SHA distinto se rechaza.'
+for overrides in 'MOCK_RUN_CONCLUSION=failure' 'MOCK_RUN_BRANCH=feature'; do
+  if env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" EXPECT_SHA="$SHA_A" $overrides bash "$ROOT/ops/oracle/verify-manual-release-provenance.sh" example/backend "$deployment_id" inventory-svc https://github.com/example/backend/actions/runs/77/readiness >/dev/null 2>&1; then
+    echo "FAIL: ejecución manual con $overrides se aceptó." >&2
+    exit 1
+  fi
+done
+if env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" EXPECT_SHA="$SHA_A" MOCK_STATUS_OVERRIDE=failure bash "$ROOT/ops/oracle/verify-manual-release-provenance.sh" example/backend "$deployment_id" inventory-svc https://github.com/example/backend/actions/runs/77/readiness >/dev/null 2>&1; then
+  echo 'FAIL: Deployment manual fallido se aceptó.' >&2
+  exit 1
+fi
+if env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" EXPECT_SHA="$SHA_A" bash "$ROOT/ops/oracle/verify-manual-release-provenance.sh" example/backend "$deployment_id" inventory-svc '' >/dev/null 2>&1; then
+  echo 'FAIL: se aceptó evidencia funcional vacía.' >&2
+  exit 1
+fi
+echo 'PASS: rama, conclusión, estado del Deployment y evidencia vacía se rechazan.'
 printf 'PASS: mock API validó parámetros, creación, estados y lectura del baseline exitoso.\n'
 
-if run_api create example/backend pricing-svc "$SHA" workflow_dispatch 77 >/dev/null 2>&1; then
+if run_api create example/backend pricing-svc "$SHA_A" workflow_dispatch 77 >/dev/null 2>&1; then
   echo 'FAIL: se permitió crear un Deployment para servicio deshabilitado.' >&2
   exit 1
 fi

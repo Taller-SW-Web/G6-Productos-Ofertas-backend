@@ -182,7 +182,7 @@ jobs:
               row="$(awk -F'|' -v service="$service" '$1 == service { print $2 "\t" $3 "\t" $4 }' ops/oracle/auto-release-authorization.psv)"
               IFS=$'\t' read -r enabled manual_deployment_id readiness_evidence <<< "$row"
               [[ "$enabled" == true && "$manual_deployment_id" =~ ^[0-9]+$ && "$readiness_evidence" =~ ^https://[^[:space:]|]+$ ]] || { echo "Autorización incompleta para $service." >&2; exit 1; }
-              bash ops/oracle/verify-manual-release-provenance.sh "$GITHUB_REPOSITORY" "$manual_deployment_id" "$service" "${{ github.event.workflow_run.head_sha }}"
+              bash ops/oracle/verify-manual-release-provenance.sh "$GITHUB_REPOSITORY" "$manual_deployment_id" "$service" "$readiness_evidence"
               echo "Readiness/smoke aprobado para $service: referencia registrada."
             done < <(jq -r '.[]' <<< "$services")
           else
