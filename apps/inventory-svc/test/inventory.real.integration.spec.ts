@@ -406,6 +406,14 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
       app.useGlobalFilters(new ProblemDetailsFilter());
       await app.listen(0, '127.0.0.1');
       const origin = await app.getUrl();
+      await request(origin)
+        .get('/health')
+        .expect(200)
+        .expect({ status: 'ok', service: 'inventory-svc' });
+      await request(origin)
+        .get('/health/readiness')
+        .expect(200)
+        .expect({ status: 'ready', service: 'inventory-svc' });
       const token = createCryptographicJwt({ clientId: 'modulo-ventas' });
       const sku = await seedStock();
       const orderId = `PED-HTTP-${randomUUID()}`;
