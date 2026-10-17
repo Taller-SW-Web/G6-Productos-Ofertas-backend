@@ -2,6 +2,7 @@ export type CatalogPersistenceFailure =
   | 'connection'
   | 'unique'
   | 'foreign_key'
+  | 'not_null'
   | 'check'
   | 'serialization'
   | 'deadlock'
@@ -105,6 +106,9 @@ export function translatePostgresFailure(
         break;
       case '23503':
         failure = 'foreign_key';
+        break;
+      case '23502':
+        failure = 'not_null';
         break;
       case '23514':
         failure = 'check';

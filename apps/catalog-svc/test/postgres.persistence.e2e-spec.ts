@@ -334,6 +334,21 @@ describe.skipIf(!dockerAvailable)(
           });
         }),
       ).rejects.toMatchObject({ failure: 'check' });
+      const notNullError = await transactions
+        .run(async (tx) => {
+          await tx.execute(
+            sql`UPDATE ${products} SET ${products.nombre} = ${null} WHERE ${products.id} = ${parent.id}`,
+          );
+        })
+        .catch((error: unknown) => error);
+      expect(notNullError).toMatchObject({
+        failure: 'not_null',
+        sqlState: '23502',
+        message: 'Falló una operación de persistencia de Catálogo',
+      });
+      expect(JSON.stringify(notNullError)).not.toContain('UPDATE');
+      expect(JSON.stringify(notNullError)).not.toContain('catalog.products');
+      expect(JSON.stringify(notNullError)).not.toContain(parent.id);
       await expect(
         database.read((db) =>
           db.execute(sql`SELECT 'INVALID'::catalog.estado_producto`),

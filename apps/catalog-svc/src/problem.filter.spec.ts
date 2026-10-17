@@ -28,6 +28,7 @@ describe('ProblemFilter persistence status mapping', () => {
   it.each([
     ['unique', 500, 'ERROR_INTERNO'],
     ['foreign_key', 500, 'ERROR_INTERNO'],
+    ['not_null', 500, 'ERROR_INTERNO'],
     ['check', 500, 'ERROR_INTERNO'],
     ['serialization', 500, 'ERROR_INTERNO'],
     ['deadlock', 500, 'ERROR_INTERNO'],
@@ -41,6 +42,12 @@ describe('ProblemFilter persistence status mapping', () => {
         undefined,
         'private_constraint_name',
       );
+      Object.assign(error, {
+        query: 'INSERT INTO catalog.products VALUES ($1)',
+        parameters: ['private-token-value'],
+        detail: 'private password value',
+        cause: new Error('driver leaked private SQL'),
+      });
       const response = responseFor(error);
 
       expect(error).not.toHaveProperty('getStatus');
@@ -51,6 +58,11 @@ describe('ProblemFilter persistence status mapping', () => {
       expect(JSON.stringify(response.json.mock.calls[0]?.[0])).not.toContain(
         'private_constraint_name',
       );
+      const publicResponse = JSON.stringify(response.json.mock.calls[0]?.[0]);
+      expect(publicResponse).not.toContain('INSERT INTO');
+      expect(publicResponse).not.toContain('private-token-value');
+      expect(publicResponse).not.toContain('private password');
+      expect(publicResponse).not.toContain('driver leaked');
     },
   );
 });

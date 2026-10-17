@@ -99,10 +99,12 @@ diferidos existentes. Los errores se exponen mediante `CatalogPersistenceError`
 con una categoría interna segura;
 el SQL, los parámetros y el texto del driver no se incluyen en mensajes.
 
-Las pruebas de `postgres.persistence.e2e-spec.ts` usan una instancia efímera de
-PostgreSQL 17 con TLS, role `catalog_app` y un schema ajeno de comprobación. Se
-omiten si Docker u OpenSSL no están disponibles; un resultado omitido no cuenta
-como integración PostgreSQL aprobada. Esta suite no usa ni escribe en Supabase.
+Las cinco pruebas de `postgres.persistence.e2e-spec.ts` usan PostgreSQL 17
+efímero con TLS, role `catalog_app` y un schema ajeno de comprobación. En local,
+la suite se omite si Docker u OpenSSL no están disponibles. En CI, la suite falla
+explícitamente en esas condiciones y no acepta una omisión como resultado
+aprobado. La cobertura incluye persistencia, rollback/constraints, permisos y
+violaciones NOT NULL. La suite no usa ni escribe en Supabase.
 
 ## Ejecución y pruebas
 

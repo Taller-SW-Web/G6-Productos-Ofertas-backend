@@ -8,6 +8,7 @@ describe('safe PostgreSQL failure translation', () => {
   it.each([
     ['23505', false, 'unique'],
     ['23503', false, 'foreign_key'],
+    ['23502', false, 'not_null'],
     ['23514', false, 'check'],
     ['40001', false, 'serialization'],
     ['40P01', false, 'deadlock'],
