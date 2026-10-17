@@ -75,6 +75,7 @@ export class PostgresTaxonomyRepository
             id: categories.id,
             nombre: categories.nombre,
             categoria_padre_id: categories.categoria_padre_id,
+            orden: categories.orden,
             estado: categories.estado,
           })
           .from(categories)

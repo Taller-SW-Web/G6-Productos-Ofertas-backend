@@ -277,26 +277,6 @@ jobs:
     name: Taxonomy integration on disposable PostgreSQL
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: taxonomy_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-
-    env:
-      TAXONOMY_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/taxonomy_test
-      TAXONOMY_TEST_DB_ACK: desechable-aislado
-      TAXONOMY_TEST_DB_EPHEMERAL: '1'
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -309,6 +289,9 @@ jobs:
 
       - name: Install dependencies (clean)
         run: npm ci
+
+      - name: Reject caller-supplied database URLs before Docker access
+        run: node --test scripts/ci/run-taxonomy-integration.test.mjs
 
       - name: Taxonomy integration tests (must not be skipped)
         run: node scripts/ci/run-taxonomy-integration.mjs

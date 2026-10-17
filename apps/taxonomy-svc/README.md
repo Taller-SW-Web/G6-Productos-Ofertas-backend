@@ -17,10 +17,10 @@ El servicio valida la configuración en el arranque y falla cerrado (`fail-close
 
 - `GET /health`: liveness estático; responde `200` sin consultar dependencias.
 - `GET /health/readiness`: readiness; verifica acceso de lectura real con dos consultas Drizzle ORM independientes (sin concatenar SQL), cada una con `WHERE estado = 'ACTIVO' LIMIT 1`:
-  - `taxonomy.categories`: selecciona `id`, `nombre`, `categoria_padre_id`, `estado`.
+  - `taxonomy.categories`: selecciona `id`, `nombre`, `categoria_padre_id`, `orden`, `estado`. `orden` se incluye porque la lectura comercial productiva lo usa en `ORDER BY`.
   - `taxonomy.brands`: selecciona `id`, `nombre`, `descripcion`, `pais_origen_iso`, `logo_url`, `estado`.
 
-  Responde `200` solo si ambas consultas resuelven, o `503` (problem+json, `SERVICIO_NO_DISPONIBLE`) ante cualquier error: conexión fallida, permisos denegados (`42501`) sobre la tabla o sobre la columna `logo_url`, o tabla/columna ausente.
+  Responde `200` solo si ambas consultas resuelven, o `503` (problem+json, `SERVICIO_NO_DISPONIBLE`) ante cualquier error: conexión fallida, permisos denegados (`42501`) sobre las columnas consultadas —incluidas `categories.orden` y `brands.logo_url`—, o tabla/columna ausente.
 
 ## Persistencia
 
@@ -32,13 +32,10 @@ El servicio valida la configuración en el arranque y falla cerrado (`fail-close
 
 ## Pruebas de integración (Postgres aislado)
 
-`test/persistencia-drizzle.e2e-spec.ts` corre solo si `TAXONOMY_TEST_DATABASE_URL` apunta a un Postgres desechable (nunca la base compartida de Supabase). Sin esa variable la suite se omite automáticamente, de modo que CI permanece verde.
+`scripts/ci/run-taxonomy-integration.mjs` aprovisiona y elimina su propio contenedor `postgres:17-alpine`, publica el puerto solo en loopback y genera la URL/credenciales internamente. Rechaza `TAXONOMY_TEST_DATABASE_URL` recibida desde el entorno. PostgreSQL se inicia con un identificador aleatorio de sesión que el preflight coteja mediante `current_setting()` antes de permitir cualquier DDL; un testigo insertado en una URL recibida no se considera acreditación. No apuntar pruebas destructivas a Supabase ni a bases compartidas.
 
-```powershell
-docker run --rm -d --name taxonomy-test -p 55432:5432 -e POSTGRES_PASSWORD=postgres postgres:16-alpine
-$env:TAXONOMY_TEST_DATABASE_URL = "postgresql://postgres:postgres@127.0.0.1:55432/postgres"
-npm run test:e2e
-docker stop taxonomy-test
+```sh
+node scripts/ci/run-taxonomy-integration.mjs
 ```
 
-La suite crea esquema, roles y datos de prueba en esa base, verifica permisos efectivos (positivos y negativos), transacciones (commit/rollback), readiness y el camino `503`, y elimina el esquema al finalizar.
+La suite crea esquema, roles y datos de prueba únicamente en el contenedor gestionado por el runner, verifica permisos efectivos (positivos y negativos), transacciones (commit/rollback), readiness y el camino `503`, y elimina contenedor y esquema al finalizar.

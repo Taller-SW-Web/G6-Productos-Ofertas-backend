@@ -151,6 +151,7 @@ export class DrizzleTaxonomyRepository
           id: categorias.id,
           nombre: categorias.nombre,
           categoria_padre_id: categorias.categoriaPadreId,
+          orden: categorias.orden,
           estado: categorias.estado,
         })
         .from(categorias)

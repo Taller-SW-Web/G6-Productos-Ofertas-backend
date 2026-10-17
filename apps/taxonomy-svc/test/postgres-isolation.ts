@@ -11,10 +11,12 @@
  *  2. Host de la URL estrictamente loopback numérico (127.0.0.1 / ::1). NO se
  *     admite `0.0.0.0` (dirección de escucha comodín) ni `localhost` (puede
  *     resolverse a un túnel).
- *  3. Preflight en vivo: la instancia debe reportar una dirección de servidor
- *     loopback o privada y presentar un TESTIGO efímero creado por el harness
- *     (`TAXONOMY_TEST_DB_WITNESS`). Un túnel local hacia una base compartida no
- *     posee el testigo y es rechazado antes de cualquier DDL.
+ *  3. El harness aprovisiona PostgreSQL en un contenedor propio e inicia el
+ *     servidor con un identificador aleatorio de sesión. La conexión debe
+ *     presentar ese identificador mediante current_setting(); crear un testigo
+ *     dentro de una URL recibida no acredita quién aprovisionó la instancia.
+ *  4. Preflight en vivo: la instancia debe reportar una dirección de servidor
+ *     local/privada y el identificador de harness esperado.
  *
  * Solo una `AcreditacionInstanciaEfimera` (obtenida tras el preflight en vivo)
  * permite construir el DDL destructivo.
@@ -24,10 +26,8 @@ import pg from 'pg';
 
 export const ACK_VARIABLE = 'TAXONOMY_TEST_DB_ACK';
 export const ACK_VALOR = 'desechable-aislado';
-export const WITNESS_VARIABLE = 'TAXONOMY_TEST_DB_WITNESS';
-export const WITNESS_ESQUEMA = 'g6_ephemeral_probe';
-export const WITNESS_TABLA = 'witness';
-export const WITNESS_ID = 'taxonomy';
+export const HARNESS_ID_VARIABLE = 'TAXONOMY_TEST_HARNESS_ID';
+export const HARNESS_ID_SETTING = 'g6.taxonomy_harness_id';
 
 export class BaseNoAisladaError extends Error {
   constructor(detalle: string) {
@@ -204,23 +204,20 @@ export interface OpcionesAcreditacionEfimera {
 }
 
 /**
- * Acreditación en vivo de una instancia efímera. Requiere el testigo
- * (`TAXONOMY_TEST_DB_WITNESS`) sembrado por el harness y una dirección de
- * servidor local/privada. Es la ÚNICA credencial aceptada por el DDL destructivo.
+ * Acreditación en vivo de la instancia creada por el harness. El identificador
+ * esperado no se escribe en una base recibida: se configura al iniciar el
+ * servidor PostgreSQL propiedad del harness y se coteja con current_setting().
+ * Es la ÚNICA credencial aceptada por el DDL destructivo.
  */
 export class AcreditacionInstanciaEfimera {
   private constructor(
     private readonly base: AcreditacionBaseDesechable,
-    private readonly testigo: string,
+    private readonly harnessId: string,
     public readonly direccionServidor: string,
   ) {}
 
   get connectionString(): string {
     return this.base.connectionString;
-  }
-
-  get testigoEfimero(): string {
-    return this.testigo;
   }
 
   static async acreditar(
@@ -230,10 +227,10 @@ export class AcreditacionInstanciaEfimera {
     const env = opciones.env ?? process.env;
     const base = AcreditacionBaseDesechable.acreditar(databaseUrl, env);
 
-    const testigo = env[WITNESS_VARIABLE]?.trim();
-    if (!testigo || testigo.length < 8) {
+    const harnessId = env[HARNESS_ID_VARIABLE]?.trim();
+    if (!harnessId || !/^[a-f0-9-]{32,}$/i.test(harnessId)) {
       throw new BaseNoAisladaError(
-        `falta ${WITNESS_VARIABLE} (testigo de instancia efímera).`,
+        `falta ${HARNESS_ID_VARIABLE} emitido al aprovisionar la instancia del harness.`,
       );
     }
 
@@ -252,41 +249,23 @@ export class AcreditacionInstanciaEfimera {
         );
       }
 
-      const fila = await cliente.consultar<{ token: string }>(
-        `SELECT token FROM ${WITNESS_ESQUEMA}.${WITNESS_TABLA} WHERE id = $1`,
-        [WITNESS_ID],
+      const identidad = await cliente.consultar<{ harness_id: string | null }>(
+        `SELECT current_setting('${HARNESS_ID_SETTING}', true) AS harness_id`,
       );
-      if (fila.rows[0]?.token !== testigo) {
+      if (identidad.rows[0]?.harness_id !== harnessId) {
         throw new BaseNoAisladaError(
-          'la base no presenta el testigo efímero esperado; no se acredita como instancia desechable.',
+          'PostgreSQL no fue iniciado por el harness de pruebas esperado; se rechaza un túnel o instancia ajena.',
         );
       }
 
-      return new AcreditacionInstanciaEfimera(base, testigo, direccion);
+      return new AcreditacionInstanciaEfimera(base, harnessId, direccion);
     } catch (error) {
       if (error instanceof BaseNoAisladaError) throw error;
       throw new BaseNoAisladaError(
-        'no se pudo verificar la instancia efímera (conexión o testigo inaccesible).',
+        'no se pudo verificar la instancia efímera (conexión o configuración del harness inaccesible).',
       );
     } finally {
       await cliente.cerrar().catch(() => undefined);
     }
   }
-}
-
-/** Siembra idempotente del testigo. La ejecuta el harness que aprovisiona la
- * instancia efímera (contenedor de CI o PostgreSQL embebido local). */
-export async function sembrarTestigoEfimero(
-  cliente: ClienteVerificacion,
-  testigo: string,
-): Promise<void> {
-  await cliente.consultar(`CREATE SCHEMA IF NOT EXISTS ${WITNESS_ESQUEMA}`);
-  await cliente.consultar(
-    `CREATE TABLE IF NOT EXISTS ${WITNESS_ESQUEMA}.${WITNESS_TABLA} (id text PRIMARY KEY, token text NOT NULL)`,
-  );
-  await cliente.consultar(
-    `INSERT INTO ${WITNESS_ESQUEMA}.${WITNESS_TABLA} (id, token) VALUES ($1, $2)
-     ON CONFLICT (id) DO UPDATE SET token = EXCLUDED.token`,
-    [WITNESS_ID, testigo],
-  );
 }

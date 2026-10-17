@@ -4,8 +4,7 @@ import {
   AcreditacionBaseDesechable,
   AcreditacionInstanciaEfimera,
   BaseNoAisladaError,
-  WITNESS_TABLA,
-  WITNESS_VARIABLE,
+  HARNESS_ID_VARIABLE,
   esDireccionLocalOPrivada,
   esHostCompartido,
   esHostDesechable,
@@ -21,7 +20,7 @@ const SUPABASE_POOLER =
   'postgresql://postgres:secreto@aws-0-us-east-1.pooler.supabase.com:5432/postgres';
 const SUPABASE_DIRECTO =
   'postgresql://postgres:secreto@db.slzglmtiyrzygpkiuthf.supabase.co:5432/postgres';
-const TESTIGO = 'testigo-efimero-1234';
+const HARNESS_ID = 'a'.repeat(64);
 
 function env(
   extra: Record<string, string | undefined> = {},
@@ -31,7 +30,7 @@ function env(
 
 interface OpcionesCliente {
   direccion?: string | null;
-  token?: string | null;
+  harnessId?: string | null;
   fallaConexion?: boolean;
   fallaConsulta?: boolean;
 }
@@ -51,9 +50,12 @@ function clienteFalso(opciones: OpcionesCliente): ClienteVerificacion {
           rows: [{ direccion: opciones.direccion ?? null }],
         });
       }
-      if (sql.includes(WITNESS_TABLA)) {
+      if (sql.includes('current_setting')) {
         return Promise.resolve({
-          rows: opciones.token ? [{ token: opciones.token }] : [],
+          rows:
+            opciones.harnessId === null
+              ? [{ harness_id: null }]
+              : [{ harness_id: opciones.harnessId ?? HARNESS_ID }],
         });
       }
       return Promise.resolve({ rows: [] });
@@ -64,10 +66,10 @@ function clienteFalso(opciones: OpcionesCliente): ClienteVerificacion {
 
 function acreditarCon(
   cliente: ClienteVerificacion,
-  testigo: string | undefined = TESTIGO,
+  harnessId: string | undefined = HARNESS_ID,
 ) {
   return AcreditacionInstanciaEfimera.acreditar(LOOPBACK, {
-    env: env({ [ACK_VARIABLE]: ACK_VALOR, [WITNESS_VARIABLE]: testigo }),
+    env: env({ [ACK_VARIABLE]: ACK_VALOR, [HARNESS_ID_VARIABLE]: harnessId }),
     fabricaCliente: () => cliente,
   });
 }
@@ -190,41 +192,39 @@ describe('Acreditación de base desechable (seguridad P0)', () => {
   });
 
   describe('acreditación en vivo de instancia efímera', () => {
-    it('acredita cuando la instancia es local y presenta el testigo', async () => {
+    it('acredita cuando el servidor presenta el identificador de harness esperado', async () => {
       const acreditacion = await acreditarCon(
-        clienteFalso({ direccion: '127.0.0.1', token: TESTIGO }),
+        clienteFalso({ direccion: '127.0.0.1', harnessId: HARNESS_ID }),
       );
       expect(acreditacion.direccionServidor).toBe('127.0.0.1');
-      expect(acreditacion.testigoEfimero).toBe(TESTIGO);
     });
 
     it('rechaza un túnel hacia un servidor remoto (inet_server_addr pública)', async () => {
       await expect(
         acreditarCon(
-          clienteFalso({ direccion: '203.0.113.10', token: TESTIGO }),
+          clienteFalso({ direccion: '203.0.113.10', harnessId: HARNESS_ID }),
         ),
       ).rejects.toThrow(/túnel|remoto/i);
     });
 
-    it('rechaza cuando la base no presenta el testigo efímero', async () => {
-      await expect(
-        acreditarCon(clienteFalso({ direccion: '127.0.0.1', token: 'otro' })),
-      ).rejects.toThrow(/testigo efímero/i);
-    });
-
-    it('rechaza cuando el testigo no existe (instancia compartida)', async () => {
-      await expect(
-        acreditarCon(clienteFalso({ direccion: '127.0.0.1', token: null })),
-      ).rejects.toThrow(BaseNoAisladaError);
-    });
-
-    it('rechaza cuando falta la variable de testigo', async () => {
+    it('rechaza cuando el servidor fue iniciado con otro identificador de harness', async () => {
       await expect(
         acreditarCon(
-          clienteFalso({ direccion: '127.0.0.1', token: TESTIGO }),
-          '',
+          clienteFalso({ direccion: '127.0.0.1', harnessId: 'b'.repeat(64) }),
         ),
-      ).rejects.toThrow(/TAXONOMY_TEST_DB_WITNESS/);
+      ).rejects.toThrow(/harness de pruebas esperado/i);
+    });
+
+    it('rechaza una instancia local sin identificador del harness', async () => {
+      await expect(
+        acreditarCon(clienteFalso({ direccion: '127.0.0.1', harnessId: null })),
+      ).rejects.toThrow(/harness de pruebas esperado/i);
+    });
+
+    it('rechaza cuando falta el identificador emitido por el harness', async () => {
+      await expect(
+        acreditarCon(clienteFalso({ direccion: '127.0.0.1' }), ''),
+      ).rejects.toThrow(/TAXONOMY_TEST_HARNESS_ID/);
     });
 
     it('rechaza cuando la conexión de verificación falla', async () => {
@@ -248,7 +248,7 @@ describe('Acreditación de base desechable (seguridad P0)', () => {
 
     it('construye el DROP con una acreditación efímera verificada', async () => {
       const acreditacion = await acreditarCon(
-        clienteFalso({ direccion: '127.0.0.1', token: TESTIGO }),
+        clienteFalso({ direccion: '127.0.0.1', harnessId: HARNESS_ID }),
       );
       expect(construirSentenciaDropDdl(acreditacion)).toBe(
         'DROP SCHEMA IF EXISTS taxonomy CASCADE',

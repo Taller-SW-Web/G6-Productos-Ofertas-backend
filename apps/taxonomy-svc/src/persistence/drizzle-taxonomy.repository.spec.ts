@@ -219,6 +219,7 @@ describe('DrizzleTaxonomyRepository (#35)', () => {
         'id',
         'nombre',
         'categoria_padre_id',
+        'orden',
         'estado',
       ]);
       expect(capturas[1].tabla).toBe(marcas);

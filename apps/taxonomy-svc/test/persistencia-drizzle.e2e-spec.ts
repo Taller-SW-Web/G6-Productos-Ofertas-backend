@@ -238,6 +238,27 @@ describeIntegracion(
         }
       });
 
+      it('responde 503 si falta SELECT sobre categories.orden usado por la lectura comercial', async () => {
+        await admin.query(
+          `REVOKE SELECT ON taxonomy.categories FROM ${ROL_APP}`,
+        );
+        await admin.query(
+          `GRANT SELECT (id, nombre, categoria_padre_id, nivel, estado) ON taxonomy.categories TO ${ROL_APP}`,
+        );
+        try {
+          await request(appNest.getHttpServer())
+            .get('/health/readiness')
+            .expect(HttpStatus.SERVICE_UNAVAILABLE);
+        } finally {
+          await admin.query(
+            `REVOKE SELECT (id, nombre, categoria_padre_id, nivel, estado) ON taxonomy.categories FROM ${ROL_APP}`,
+          );
+          await admin.query(
+            `GRANT SELECT ON taxonomy.categories TO ${ROL_APP}`,
+          );
+        }
+      });
+
       it('responde 503 si se revoca SELECT sobre la columna logo_url', async () => {
         await admin.query(`REVOKE SELECT ON taxonomy.brands FROM ${ROL_APP}`);
         await admin.query(
@@ -395,6 +416,39 @@ describeIntegracion(
             .get('/health/readiness')
             .expect(HttpStatus.OK);
         } finally {
+          await appRuntime.close();
+        }
+      });
+
+      it('responde 503 cuando falta SELECT en categories.orden y falla la lectura comercial que ordena por esa columna', async () => {
+        const moduleFixture = await Test.createTestingModule({
+          imports: [TaxonomySvcModule],
+        })
+          .overrideProvider(TAXONOMY_REPOSITORY)
+          .useValue(repoRuntime)
+          .compile();
+        const appRuntime: INestApplication<App> =
+          moduleFixture.createNestApplication();
+        await appRuntime.init();
+
+        await admin.query(
+          `REVOKE SELECT ON taxonomy.categories FROM ${ROL_APP}`,
+        );
+        await admin.query(
+          `GRANT SELECT (id, nombre, categoria_padre_id, estado) ON taxonomy.categories TO ${ROL_APP}`,
+        );
+        try {
+          await expect(repoRuntime.findCategoriasActivas()).rejects.toThrow();
+          await request(appRuntime.getHttpServer())
+            .get('/health/readiness')
+            .expect(HttpStatus.SERVICE_UNAVAILABLE);
+        } finally {
+          await admin.query(
+            `REVOKE SELECT (id, nombre, categoria_padre_id, estado) ON taxonomy.categories FROM ${ROL_APP}`,
+          );
+          await admin.query(
+            `GRANT SELECT ON taxonomy.categories TO ${ROL_APP}`,
+          );
           await appRuntime.close();
         }
       });

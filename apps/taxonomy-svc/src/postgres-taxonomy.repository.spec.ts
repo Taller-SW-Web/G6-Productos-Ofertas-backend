@@ -65,6 +65,9 @@ describe('PostgresTaxonomyRepository.readiness (producción)', () => {
       (q) => q.text.includes('"categories"') || q.text.includes('"brands"'),
     );
     expect(sondeos).toHaveLength(2);
+    expect(
+      sondeos.find((sondeo) => sondeo.text.includes('"categories"'))?.text,
+    ).toContain('"orden"');
     for (const sondeo of sondeos) {
       expect(sondeo.text).toContain('limit');
       expect(sondeo.text).toContain('where');
@@ -88,6 +91,32 @@ describe('PostgresTaxonomyRepository.readiness (producción)', () => {
         Promise.reject(
           Object.assign(new Error('permission denied'), { code: '42501' }),
         ),
+      verifyIdentity: () => Promise.resolve(),
+    };
+    const repo = new PostgresTaxonomyRepository(database);
+
+    await expect(repo.readiness()).resolves.toBe(false);
+  });
+
+  it('incluye categories.orden en el sondeo para detectar el permiso requerido por la lectura comercial', async () => {
+    const queries: { text: string; values: unknown[] }[] = [];
+    const db = drizzle(crearPoolFalso(queries));
+    const database: TaxonomyDataSource = {
+      read: async <T>(callback: (connection: typeof db) => Promise<T>) => {
+        const result = await callback(db);
+        const consultaCategorias = queries.find((query) =>
+          query.text.includes('"categories"'),
+        );
+        if (consultaCategorias?.text.includes('"orden"')) {
+          throw Object.assign(
+            new Error('permission denied for categories.orden'),
+            {
+              code: '42501',
+            },
+          );
+        }
+        return result;
+      },
       verifyIdentity: () => Promise.resolve(),
     };
     const repo = new PostgresTaxonomyRepository(database);
