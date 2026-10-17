@@ -130,6 +130,12 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
         const safeLogs = logs
           .split('\n')
           .map((line) => {
+            if (/Error when reading.*\.erlang\.cookie.*eacces/i.test(line)) {
+              return 'ERLANG_COOKIE_READ_PERMISSION_DENIED';
+            }
+            if (/cookie.*must be accessible by owner only/i.test(line)) {
+              return 'ERLANG_COOKIE_FILE_PERMISSIONS_INVALID';
+            }
             if (
               /password|cookie|credential|secret|amqps?:\/\/|postgres(?:ql)?:\/\//i.test(
                 line,
@@ -216,6 +222,7 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
       await waitForContainer(
         rabbitContainer,
         'rabbitmq-diagnostics -q check_running',
+        'rabbitmq',
       );
       const docsRoot = new URL(
         '../../../../docs/datos/inventory-svc/',
@@ -264,6 +271,8 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
       );
       docker([
         'exec',
+        '--user',
+        'rabbitmq',
         rabbitContainer,
         'rabbitmqctl',
         'add_vhost',
@@ -271,6 +280,8 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
       ]);
       docker([
         'exec',
+        '--user',
+        'rabbitmq',
         rabbitContainer,
         'rabbitmqctl',
         'set_permissions',
@@ -1440,15 +1451,25 @@ async function viWaitFor(
 async function waitForContainer(
   container: string,
   command: string,
+  user?: string,
 ): Promise<void> {
   const started = Date.now();
   let lastError: unknown;
   while (Date.now() - started < 60_000) {
     try {
-      execFileSync('docker', ['exec', container, ...command.split(' ')], {
-        stdio: 'ignore',
-        timeout: 5000,
-      });
+      execFileSync(
+        'docker',
+        [
+          'exec',
+          ...(user ? ['--user', user] : []),
+          container,
+          ...command.split(' '),
+        ],
+        {
+          stdio: 'ignore',
+          timeout: 5000,
+        },
+      );
       return;
     } catch (error) {
       lastError = error;
