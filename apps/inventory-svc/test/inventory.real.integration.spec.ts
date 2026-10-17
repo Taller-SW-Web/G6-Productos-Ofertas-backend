@@ -4,6 +4,17 @@ import { readFile } from 'node:fs/promises';
 import amqp from 'amqplib';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Test } from '@nestjs/testing';
+import type { INestApplication } from '@nestjs/common';
+import request from 'supertest';
+import { InventorySvcModule } from '../src/inventory-svc.module.js';
+import { InventoryAuthGuard } from '../src/auth/inventory-auth.guard.js';
+import { ProblemDetailsFilter } from '../src/errors/problem-details.filter.js';
+import {
+  createCryptographicJwt,
+  TEST_ISSUER,
+  TEST_PUBLIC_KEY,
+} from './crypto-test-token.helper.js';
 import { DatabaseService } from '../src/database/database.service.js';
 import { IdempotencyService } from '../src/idempotency/idempotency.service.js';
 import { KardexService } from '../src/kardex/kardex.service.js';
@@ -283,7 +294,7 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
       {
         order_id: order,
         operation_id: randomUUID(),
-        channel_id: 'VENTAS',
+        channel_id: 'MARKETPLACE',
         lines: [{ sku, quantity: qty, location_id: locationId }],
       },
       undefined,
@@ -318,6 +329,112 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
     );
     return { eventId, messageId, id: row.rows[0].id };
   }
+
+  it('HTTP real persiste reserva/consumo en PostgreSQL y entrega el resultado por RabbitMQ', async () => {
+    const previousIssuer = process.env.G7_JWT_ISSUER;
+    const previousDemo = process.env.INVENTORY_DEMO_NO_AUTH_ENABLED;
+    let app: INestApplication | undefined;
+    process.env.G7_JWT_ISSUER = TEST_ISSUER;
+    process.env.INVENTORY_DEMO_NO_AUTH_ENABLED = 'false';
+    InventoryAuthGuard.setTrustedPublicKey(TEST_PUBLIC_KEY);
+    try {
+      await brokerChannel.assertQueue('po.inventory.q', { durable: true });
+      const module = await Test.createTestingModule({
+        imports: [InventorySvcModule],
+      })
+        // Solo detenemos el scheduler: la DB, repositorios y publicación son reales.
+        .overrideProvider(InventoryWorkersService)
+        .useValue({})
+        .compile();
+      app = module.createNestApplication();
+      app.useGlobalFilters(new ProblemDetailsFilter());
+      await app.listen(0, '127.0.0.1');
+      const origin = await app.getUrl();
+      const token = createCryptographicJwt({ clientId: 'modulo-ventas' });
+      const sku = await seedStock();
+      const orderId = `PED-HTTP-${randomUUID()}`;
+      const operationId = randomUUID();
+      const correlation = randomUUID();
+      await request(origin)
+        .post('/api/v1/inventario/reservas')
+        .auth(token, { type: 'bearer' })
+        .set('Idempotency-Key', operationId)
+        .set('X-Correlation-Id', correlation)
+        .send({
+          operation_id: operationId,
+          order_id: orderId,
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 3, location_id: locationId }],
+        })
+        .expect(202);
+      const durable = await request(origin)
+        .get(`/api/v1/inventario/operaciones/${operationId}`)
+        .auth(token, { type: 'bearer' })
+        .expect(200);
+      expect(durable.body).toMatchObject({
+        status: 'COMPLETED',
+        order_id: orderId,
+      });
+      const confirm = { operation_id: randomUUID(), order_id: orderId };
+      const confirmPath = `/api/v1/inventario/reservas/${durable.body.reservation_id}/confirmar`;
+      const first = await request(origin)
+        .post(confirmPath)
+        .auth(token, { type: 'bearer' })
+        .set('Idempotency-Key', confirm.operation_id)
+        .set('X-Correlation-Id', correlation)
+        .send(confirm)
+        .expect(202);
+      const retry = await request(origin)
+        .post(confirmPath)
+        .auth(token, { type: 'bearer' })
+        .set('Idempotency-Key', confirm.operation_id)
+        .set('X-Correlation-Id', randomUUID())
+        .send(confirm)
+        .expect(202);
+      expect(retry.body).toEqual(first.body);
+      expect((await stockRepo.findBySkus([sku], locationId))[0]).toMatchObject({
+        on_hand: 17,
+        reserved: 0,
+      });
+      const kardex = await database.query<{ count: string }>(
+        `SELECT count(*)::text AS count FROM inventory.kardex WHERE operation_id=$1 AND operation_type='CONSUMO'`,
+        [confirm.operation_id],
+      );
+      expect(kardex.rows[0].count).toBe('1');
+      await new OutboxPublisherService(database, outboxRepo).dispatchPending(
+        10,
+      );
+      let consumedResult = false;
+      for (;;) {
+        const message = await brokerChannel.get(queue);
+        if (!message) break;
+        const payload = JSON.parse(message.content.toString('utf8'));
+        if (
+          payload.operation_id === confirm.operation_id &&
+          payload.name === 'inventory.consumption.completed'
+        ) {
+          expect(payload).toMatchObject({
+            correlation_id: correlation,
+            data: {
+              order_id: orderId,
+              reservation_id: durable.body.reservation_id,
+            },
+          });
+          consumedResult = true;
+        }
+        brokerChannel.ack(message);
+      }
+      expect(consumedResult).toBe(true);
+    } finally {
+      await app?.close();
+      InventoryAuthGuard.setTrustedPublicKey(null);
+      if (previousIssuer === undefined) delete process.env.G7_JWT_ISSUER;
+      else process.env.G7_JWT_ISSUER = previousIssuer;
+      if (previousDemo === undefined)
+        delete process.env.INVENTORY_DEMO_NO_AUTH_ENABLED;
+      else process.env.INVENTORY_DEMO_NO_AUTH_ENABLED = previousDemo;
+    }
+  }, 30_000);
 
   it('ejecuta Drizzle y acredita UPDATE RETURNING para cero y una fila', async () => {
     const sku = await seedStock();
@@ -511,7 +628,7 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
     const req = () => ({
       order_id: `PED-${randomUUID()}`,
       operation_id: randomUUID(),
-      channel_id: 'VENTAS' as const,
+      channel_id: 'MARKETPLACE' as const,
       lines: [{ sku, quantity: 4, location_id: locationId }],
     });
     const results = await Promise.all(
@@ -537,7 +654,7 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
     const idemDto = {
       order_id: `PED-${randomUUID()}`,
       operation_id: randomUUID(),
-      channel_id: 'VENTAS' as const,
+      channel_id: 'MARKETPLACE' as const,
       lines: [{ sku: idemSku, quantity: 1, location_id: locationId }],
     };
     const key = `idem-${randomUUID()}`;
@@ -568,7 +685,7 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
     const rejectedDto = {
       order_id: `PED-${randomUUID()}`,
       operation_id: randomUUID(),
-      channel_id: 'VENTAS' as const,
+      channel_id: 'MARKETPLACE' as const,
       lines: [{ sku: rejectedSku, quantity: 2, location_id: locationId }],
     };
     const rejectedKey = `idem-${randomUUID()}`;
@@ -623,7 +740,7 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
             )
           : reservations.liberarReserva(
               reservationId,
-              request,
+              { ...request, reason: 'ANULACION' },
               undefined,
               key,
               'modulo-ventas',
@@ -787,7 +904,7 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
       unrouted.id,
     ]);
     const message = await brokerChannel.get(queue);
-    expect(message?.properties.messageId).toBeDefined();
+    expect(message && message.properties.messageId).toBeTruthy();
     if (message) brokerChannel.ack(message);
   });
 
@@ -933,6 +1050,327 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
       brokerChannel.ack(msg);
     }
     expect(found).toBe(true);
+  });
+
+  describe('BACK-02 — reconciliación del modelo físico y permisos en PostgreSQL aislado', () => {
+    const MODEL_TABLES = [
+      'locations',
+      'stock_balance',
+      'reservations',
+      'reservation_lines',
+      'inventory_operations',
+      'kardex',
+      'incidencias',
+      'traslados',
+      'traslado_recepciones',
+      'stock_threshold_override',
+      'inventory_config',
+      'dashboard_projection',
+      'outbox',
+      'inbox',
+      'commercial_fulfillment_routes',
+    ];
+
+    it('materializa las 15 tablas del modelo solo dentro del schema inventory', async () => {
+      const res = await database.query<{ tablename: string }>(
+        `SELECT tablename FROM pg_tables WHERE schemaname = 'inventory'`,
+      );
+      const names = res.rows.map((row) => row.tablename);
+      for (const table of MODEL_TABLES) {
+        expect(names, `falta inventory.${table}`).toContain(table);
+      }
+
+      const elsewhere = await database.query<{ schemaname: string }>(
+        `SELECT schemaname FROM pg_tables
+          WHERE tablename = ANY($1) AND schemaname <> 'inventory'`,
+        [MODEL_TABLES],
+      );
+      expect(elsewhere.rowCount).toBe(0);
+    });
+
+    it('publica los enums del modelo con sus etiquetas exactas', async () => {
+      const res = await database.query<{ typname: string; labels: string[] }>(
+        `SELECT t.typname AS typname,
+                array_agg(e.enumlabel ORDER BY e.enumsortorder) AS labels
+           FROM pg_type t
+           JOIN pg_enum e ON e.enumtypid = t.oid
+           JOIN pg_namespace n ON n.oid = t.typnamespace
+          WHERE n.nspname = 'inventory' AND t.typname = ANY($1)
+          GROUP BY t.typname`,
+        [
+          [
+            'incidencia_estado',
+            'tipo_resolucion_incidencia',
+            'traslado_estado',
+            'disposicion_recepcion_traslado',
+          ],
+        ],
+      );
+      const labels = Object.fromEntries(
+        res.rows.map((row) => [row.typname, row.labels]),
+      );
+      expect(labels.incidencia_estado).toEqual([
+        'ABIERTA',
+        'RESUELTA',
+        'TRASLADO_PENDIENTE',
+      ]);
+      expect(labels.tipo_resolucion_incidencia).toEqual([
+        'REHABILITADO',
+        'MERMA',
+        'FALTANTE_CONFIRMADO',
+        'TRASLADO_ALMACEN_CENTRAL',
+      ]);
+      expect(labels.traslado_estado).toEqual([
+        'EN_TRANSITO',
+        'RECIBIDO_PARCIAL',
+        'COMPLETADO',
+        'COMPLETADO_CON_DISCREPANCIA',
+      ]);
+      expect(labels.disposicion_recepcion_traslado).toEqual([
+        'REINGRESAR_DISPONIBLE',
+        'REINGRESAR_BLOQUEADO',
+        'CONFIRMAR_MERMA',
+      ]);
+    });
+
+    it('aplica FK, unicidad y deduplicación de las tablas nuevas', async () => {
+      await expect(
+        database.query(
+          `INSERT INTO inventory.traslados
+             (traslado_id,sku_id,source_location_id,target_location_id,quantity_shipped)
+           VALUES($1,$2,$3,$3,1)`,
+          [randomUUID(), `sku-${randomUUID()}`, randomUUID()],
+        ),
+      ).rejects.toThrow();
+
+      const trasladoId = randomUUID();
+      const sku = `sku-${randomUUID()}`;
+      const inserted = await database.query<{ id: string }>(
+        `INSERT INTO inventory.traslados
+           (traslado_id,sku_id,source_location_id,target_location_id,quantity_shipped)
+         VALUES($1,$2,$3,$3,5)
+         RETURNING id`,
+        [trasladoId, sku, locationId],
+      );
+      const trasladoPk = inserted.rows[0].id;
+
+      await expect(
+        database.query(
+          `INSERT INTO inventory.traslados
+             (traslado_id,sku_id,source_location_id,target_location_id,quantity_shipped)
+           VALUES($1,$2,$3,$3,5)`,
+          [trasladoId, sku, locationId],
+        ),
+      ).rejects.toThrow();
+
+      await expect(
+        database.query(
+          `INSERT INTO inventory.traslado_recepciones
+             (recepcion_id,traslado_id,cantidad_recibida,disposicion,sub_gestor,idempotency_key)
+           VALUES($1,$2,1,'REINGRESAR_DISPONIBLE','it-sub',$3)`,
+          [randomUUID(), randomUUID(), `idem-${randomUUID()}`],
+        ),
+      ).rejects.toThrow();
+
+      const idempotencyKey = `idem-${randomUUID()}`;
+      await database.query(
+        `INSERT INTO inventory.traslado_recepciones
+           (recepcion_id,traslado_id,cantidad_recibida,disposicion,sub_gestor,idempotency_key)
+         VALUES($1,$2,2,'REINGRESAR_DISPONIBLE','it-sub',$3)`,
+        [randomUUID(), trasladoPk, idempotencyKey],
+      );
+      await expect(
+        database.query(
+          `INSERT INTO inventory.traslado_recepciones
+             (recepcion_id,traslado_id,cantidad_recibida,disposicion,sub_gestor,idempotency_key)
+           VALUES($1,$2,2,'REINGRESAR_DISPONIBLE','it-sub',$3)`,
+          [randomUUID(), trasladoPk, idempotencyKey],
+        ),
+      ).rejects.toThrow();
+
+      await database.query(`DELETE FROM inventory.traslados WHERE id = $1`, [
+        trasladoPk,
+      ]);
+      const orphan = await database.query(
+        `SELECT 1 FROM inventory.traslado_recepciones WHERE traslado_id = $1`,
+        [trasladoPk],
+      );
+      expect(orphan.rowCount).toBe(0);
+    });
+
+    it('deduplica incidencias e inbox por sus claves únicas', async () => {
+      const incidenciaId = randomUUID();
+      await database.query(
+        `INSERT INTO inventory.incidencias
+           (incidencia_id,sku_id,location_id,cantidad_bloqueada,idempotency_key)
+         VALUES($1,$2,$3,3,$4)`,
+        [
+          incidenciaId,
+          `sku-${randomUUID()}`,
+          locationId,
+          `idem-${randomUUID()}`,
+        ],
+      );
+      await expect(
+        database.query(
+          `INSERT INTO inventory.incidencias
+             (incidencia_id,sku_id,location_id,cantidad_bloqueada,idempotency_key)
+           VALUES($1,$2,$3,3,$4)`,
+          [
+            incidenciaId,
+            `sku-${randomUUID()}`,
+            locationId,
+            `idem-${randomUUID()}`,
+          ],
+        ),
+      ).rejects.toThrow();
+
+      const messageId = randomUUID();
+      await database.query(
+        `INSERT INTO inventory.inbox(message_id,message_type,source,payload)
+         VALUES($1,'catalog.sku.deactivated','catalog',$2)`,
+        [messageId, JSON.stringify({ sku_id: 'sku-x' })],
+      );
+      await expect(
+        database.query(
+          `INSERT INTO inventory.inbox(message_id,message_type,source,payload)
+           VALUES($1,'catalog.sku.deactivated','catalog',$2)`,
+          [messageId, JSON.stringify({ sku_id: 'sku-x' })],
+        ),
+      ).rejects.toThrow();
+    });
+
+    it('deriva available y protege la PK compuesta de dashboard_projection', async () => {
+      const sku = `sku-${randomUUID()}`;
+      await database.query(
+        `INSERT INTO inventory.dashboard_projection
+           (sku_id,location_id,on_hand,reserved,blocked,status,umbral_efectivo)
+         VALUES($1,$2,10,3,2,'STOCK_BAJO',5)`,
+        [sku, locationId],
+      );
+      const derived = await database.query<{ available: number }>(
+        `SELECT available FROM inventory.dashboard_projection
+          WHERE sku_id = $1 AND location_id = $2`,
+        [sku, locationId],
+      );
+      expect(derived.rows[0].available).toBe(5);
+
+      await database.query(
+        `UPDATE inventory.dashboard_projection SET on_hand = 8
+          WHERE sku_id = $1 AND location_id = $2`,
+        [sku, locationId],
+      );
+      const recalculated = await database.query<{ available: number }>(
+        `SELECT available FROM inventory.dashboard_projection
+          WHERE sku_id = $1 AND location_id = $2`,
+        [sku, locationId],
+      );
+      expect(recalculated.rows[0].available).toBe(3);
+
+      // CHECK chk_dp_reserved_plus_blocked: reserved + blocked <= on_hand.
+      await expect(
+        database.query(
+          `UPDATE inventory.dashboard_projection SET on_hand = 1
+            WHERE sku_id = $1 AND location_id = $2`,
+          [sku, locationId],
+        ),
+      ).rejects.toThrow();
+
+      await expect(
+        database.query(
+          `INSERT INTO inventory.dashboard_projection
+             (sku_id,location_id,on_hand,reserved,blocked,status,umbral_efectivo)
+           VALUES($1,$2,1,0,0,'STOCK_BAJO',5)`,
+          [sku, locationId],
+        ),
+      ).rejects.toThrow();
+
+      await expect(
+        database.query(
+          `INSERT INTO inventory.dashboard_projection
+             (sku_id,location_id,on_hand,reserved,blocked,available,status,umbral_efectivo)
+           VALUES($1,$2,1,0,0,7,'STOCK_BAJO',5)`,
+          [`sku-${randomUUID()}`, locationId],
+        ),
+      ).rejects.toThrow();
+    });
+
+    it('revierte por completo una transacción sobre las tablas nuevas', async () => {
+      const sku = `sku-${randomUUID()}`;
+      await expect(
+        database.transaction(async (client) => {
+          await client.query(
+            `INSERT INTO inventory.incidencias
+               (incidencia_id,sku_id,location_id,cantidad_bloqueada,idempotency_key)
+             VALUES($1,$2,$3,4,$4)`,
+            [randomUUID(), sku, locationId, `idem-${randomUUID()}`],
+          );
+          await client.query(
+            `INSERT INTO inventory.inventory_config(key,value) VALUES('it-rollback',$1)`,
+            [JSON.stringify({ sku })],
+          );
+          await client.query(
+            `INSERT INTO inventory.inventory_config(key,value) VALUES('it-rollback',$1)`,
+            [JSON.stringify({ sku })],
+          );
+        }),
+      ).rejects.toThrow();
+
+      const incidencias = await database.query(
+        `SELECT 1 FROM inventory.incidencias WHERE sku_id = $1`,
+        [sku],
+      );
+      const config = await database.query(
+        `SELECT 1 FROM inventory.inventory_config WHERE key = 'it-rollback'`,
+      );
+      expect(incidencias.rowCount).toBe(0);
+      expect(config.rowCount).toBe(0);
+    });
+
+    it('aplica permisos requeridos y denegados del runtime en el schema aislado', async () => {
+      const role = `it_runtime_${randomUUID().replaceAll('-', '')}`;
+      const rolePassword = randomBytes(18).toString('hex');
+      await database.query(
+        `CREATE ROLE ${role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '${rolePassword}'`,
+      );
+      await database.query(`GRANT USAGE ON SCHEMA inventory TO ${role}`);
+      await database.query(
+        `GRANT SELECT ON inventory.locations, inventory.stock_balance, inventory.commercial_fulfillment_routes TO ${role}`,
+      );
+      await database.query(`CREATE SCHEMA IF NOT EXISTS it_foreign`);
+      await database.query(
+        `CREATE TABLE IF NOT EXISTS it_foreign.orders(id integer)`,
+      );
+
+      const url = new URL(pgUrl);
+      url.username = role;
+      url.password = rolePassword;
+      const runtime = new pg.Client({ connectionString: url.toString() });
+      await runtime.connect();
+      try {
+        const allowed = await runtime.query<{ total: number }>(
+          `SELECT count(*)::int AS total FROM inventory.locations`,
+        );
+        expect(allowed.rows[0].total).toBeGreaterThanOrEqual(1);
+
+        await expect(
+          runtime.query(`SELECT 1 FROM inventory.outbox LIMIT 1`),
+        ).rejects.toThrow(/permission denied/);
+        await expect(
+          runtime.query(`CREATE TABLE inventory.it_hack(id integer)`),
+        ).rejects.toThrow(/permission denied/);
+        await expect(
+          runtime.query(
+            `INSERT INTO inventory.locations(code,name,type) VALUES('it-x','x','TIENDA')`,
+          ),
+        ).rejects.toThrow(/permission denied/);
+        await expect(
+          runtime.query(`SELECT 1 FROM it_foreign.orders LIMIT 1`),
+        ).rejects.toThrow(/permission denied/);
+      } finally {
+        await runtime.end();
+      }
+    });
   });
 });
 

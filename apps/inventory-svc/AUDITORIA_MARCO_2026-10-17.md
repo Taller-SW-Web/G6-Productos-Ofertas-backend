@@ -1,0 +1,81 @@
+# Seguimiento de la auditoría de Marco — Inventory
+
+## Prioridad 1: resolución autorizada y publicada
+
+Base de trabajo: `taco@44c2f02a5d03aa37cf829a694e0f0b3ffb835b38`.
+Master descargado en modo lectura: `2970df90babf2c8caa1849b179b02918fc74a005`.
+Estado inicial del PR #10: abierto, draft, `mergeable=false`, `mergeable_state=dirty`.
+Divergencia inicial verificada: 44 commits exclusivos de taco y 118 de master.
+
+Se ejecutó `git merge-tree --write-tree --name-only --messages HEAD origin/master`.
+La simulación escribió únicamente objetos Git; no cambió rama, índice ni archivos.
+Árbol provisional con conflictos: `86dc0d0be1a5a434e44665b593a4fddabe37830e`.
+
+| Archivo             | Conflicto                                                                                                             | Resolución revisada y aplicada                                                                                                                                                                                           |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `package.json`      | Taco declara rangos con `^` para Drizzle/pg/tipos de pg y añade AMQP; master fija versiones de Drizzle/pg/tipos de pg | Conservar `drizzle-orm: 0.45.4`, `pg: 8.23.1`, `@types/pg: 8.23.1` de master y mantener `amqplib: ^2.2.0`, `@types/amqplib: ^0.10.8` requeridos por Inventory. Conservar todos los scripts y ajustes vigentes de master. |
+| `package-lock.json` | Metadatos de dependencias compartidas                                                                                 | Regenerar con npm y Node admitido a partir del manifest reconciliado; comprobar `npm ci` y revisar el diff, sin seleccionar ciegamente ours/theirs.                                                                      |
+
+La comparación del árbol provisional contra master para `ops/oracle`, `.github` y `scripts` no muestra diferencias: sus incorporaciones se preservan íntegramente en la combinación simulada. No se ejecutó el nuevo deploy runner ni un despliegue. Ausencia de conflictos de texto no equivale a validación funcional.
+
+Se propuso y autorizó un merge normal de master **hacia taco**, sin rebase, force push ni merge a master. El cambio local preexistente `test/inventory.real.integration.spec.ts` quedó fuera del commit de merge con SHA-256 `07C4C9A86E66895349C259B3295EDFD62DE1A6E6790E48A1D960B39BF8E763AA`.
+
+El usuario autorizó expresamente la integración y esa resolución después de revisar los dos conflictos. Se aplicó merge normal y se creó `89c24d3618a167a5fd3d23f8bbee5d666027f48c`; `taco` queda 45 commits por delante y **0 por detrás** del master descargado. Las dependencias finales difieren de master únicamente en AMQP y sus tipos. `npm ci` con Node 24.15.0 instaló limpiamente 361 paquetes; permaneció una advertencia de peer opcional de tsconfck/TypeScript, sin fallo de instalación. `ops/oracle`, `.github` y `scripts` son idénticos a master tras el merge; no se ejecutó despliegue.
+
+Se corrigió además `src/main.ts`: conserva configuración fail-closed, logger sanitizado, shutdown hooks y filtro Problem Details, y expresa la misma precedencia de puerto requerida por la comprobación estática de la CI Oracle. La comprobación literal de CI ahora encuentra la expresión efectiva, sin añadir un comentario o código muerto para engañarla.
+
+## Validación y demás hallazgos
+
+Se descargaron Node 24.15.0 y 22.22.3 portables dentro de `dist/inventory-audit-tools`, verificando cada ZIP contra el SHA-256 publicado en nodejs.org. No se sustituyó la instalación global 22.16.0 ni se cambió el pin del repositorio/CI.
+
+| Comprobación del árbol integrado                                             | Resultado                                                             |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Configuración, reintegros y ciclo de reservas, Node 24.15.0                  | PASS: 58 pruebas                                                      |
+| Provider G5 y demo/Gateway aislado, Node 24.15.0                             | PASS: 39 pruebas HTTP                                                 |
+| `npm test`, Node 24.15.0                                                     | PASS: 763 pruebas; 18 omitidas; 69 archivos aprobados y uno omitido   |
+| `npm run test:e2e`, Node 22.22.3, con artefacto Gateway del bloque 04        | PASS: 592 pruebas; 61 omitidas; 19 archivos aprobados y seis omitidos |
+| `npm run typecheck`, Node 24.15.0                                            | PASS                                                                  |
+| `npm run lint`, Node 24.15.0                                                 | PASS                                                                  |
+| `npm run format:check`, Node 24.15.0                                         | PASS                                                                  |
+| `npm run build:all` y `npm run build:inventory-svc`, Node 24.15.0            | PASS                                                                  |
+| `node --test apps/inventory-svc/data/data-f1/dry-run.test.mjs`, Node 24.15.0 | PASS: 27 pruebas                                                      |
+| Comparación con master de ejecutor Oracle/workflows/scripts                  | Sin diferencias tras integrar master; no es evidencia de despliegue   |
+
+La suite HTTP global en Node 24.15.0/Windows falló por terminación nativa de un worker durante los tests de Gateway, incluso en ejecución serial. Un diagnóstico fuera del código versionado capturó exit code `3221226505`, signal null. El [reporte upstream Node #63620](https://github.com/nodejs/node/issues/63620) describe una caída compatible con ese runtime, Windows y muchas conexiones HTTP; se registra como hipótesis compatible, no como análisis de un dump local. La misma suite completa pasó usando Node 22.22.3, también admitido por engines. No se alteraron Gateway, sus pruebas, Vitest ni contratos para ocultar el fallo.
+
+Docker local no estuvo disponible: la consulta acotada `docker info --format` terminó con status 1; el servicio Windows consultado figura detenido. No se repitió una solicitud de acceso Docker rechazada previamente. No se conectó a Supabase.
+
+El usuario autorizó expresamente añadir el job CI y publicar el test corregido para validarlo allí. Se añadió `inventory-integration` a `.github/workflows/ci.yml`: Ubuntu, Node 24.15.0, checkouts hermanos Backend/Docs fijados, permisos contents:read, timeout de diez minutos e `INVENTORY_REAL_INTEGRATION=1`. La prueba aprovisiona sus contenedores PostgreSQL/RabbitMQ, puertos loopback, credenciales/vhost aleatorios y cleanup limitado por etiqueta propia. No consume credenciales Supabase/Oracle.
+
+El test real conserva el bloque preexistente BACK-02 de siete pruebas/321 líneas. Se corrigieron cuatro fixtures VENTAS→MARKETPLACE y dos errores de tipado del código previo: reason de liberación y respuesta falsa de basic.get. Se añadió un caso HTTP real que abre Nest en loopback, firma un JWT sintético, reserva/consume/reintenta contra repositorios PostgreSQL reales y recupera el resultado publicado en RabbitMQ. Solo se desactiva el scheduler automático de ese caso para controlar la publicación explícita; no se sustituye la persistencia ni el broker. Esto no acredita grants G7, G5 bilateral ni browser/React E2E.
+
+Antes de publicar: `tsc -p apps/inventory-svc/test/tsconfig.real.json` PASS; YAML/Prettier PASS; suites generales repetidas con PASS, 763 pruebas unitarias/19 reales omitidas localmente y 592 HTTP/61 omitidas. Los 19 casos reales quedan pendientes de ejecución en el nuevo job de Actions, que debe juzgarse en el SHA finalmente publicado. Una omisión local no se presenta como prueba real aprobada.
+
+## Prioridades 3–5: fronteras que se mantienen explícitas
+
+| Hallazgo / archivo                                                                       | Trabajo y prueba disponibles                                                                                                                                                               | Estado / desbloqueo                                                                                                                                                 |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Consumer Bulk/deactivated, `src/inbox/inventory-command.service.ts` y `CONFIGURACION.md` | Los dos comandos continúan con BLOCKED_CONTRACT; documentación describe pausa sin ACK, cierre de canal y recuperación interna por resume/reinicio. No se fabrican payload, retries ni DLX. | BLOQUEADO_ESPECÍFICO: Marco y owners Bulk/Catálogo deben definir payload y semántica ejecutables; Infra/G5 deben homologar topología.                               |
+| Dashboard, `src/dashboard/dashboard.service.ts`                                          | Producto/categoría/marca se rechazan explícitamente; no se ignoran filtros ni se consultan tablas ajenas.                                                                                  | BLOQUEADO_ESPECÍFICO: Poma/Marco deben suministrar mapping contractual a SKU y resolver métricas SPEC-016 ausentes en OpenAPI.                                      |
+| Offline, `src/conciliacion/offline-consumption.policy.ts`                                | La política pura mantiene invariantes y sus pruebas. No se conectó una mutación incompleta.                                                                                                | BLOQUEADO_ESPECÍFICO: Marco/G4/G5/G7 deben homologar identidad estable, deduplicación, actor y ubicación según DEC-F-009/014/015.                                   |
+| DATA-004, `data/data-f1/`                                                                | Se preservan propuesta, baseline sintética y preparador; 27 pruebas aprobadas. No son SKU actualmente publicados ni datos cargados.                                                        | PARTIAL: Poma/#12 confirma SKU vigentes; Marco/Infra proporciona baseline y alcance antes de cualquier propuesta de carga. Sin inserts ni conexión a Supabase.      |
+| Errores del POST verificador, Gateway                                                    | La caracterización local sigue comprobando la conversión incorrecta de errores upstream a 500; código de Gateway permanece de master.                                                      | Marco/Castilla #106/#107 debe corregirlo. Tras su cambio, repetir contrato HTTP esperando los códigos originales; esta auditoría no atribuye esa corrección a Taco. |
+
+## Prioridad 6: PR #10
+
+Se preparó una descripción completa en `dist/inventory-audit-tools/PR_10_DESCRIPCION.md`, con los bloques 01–06, el HEAD publicado conocido, el merge local, evidencia por runtime y bloqueos. Los endpoints de actualización de PR y de su metadato de issue devolvieron ambos `403 Resource not accessible by integration`. No se actualizó remotamente su título ni descripción. Se requiere una conexión GitHub con permiso de edición o que el usuario aplique el texto preparado; al publicarse el merge debe actualizarse la referencia al SHA publicado efectivo. El PR sigue abierto y draft; no se abrieron PR nuevos, cerraron issues ni fusionó master.
+
+La revisión automática rechazó el primer intento de push de `89c24d3` por exigir autorización explícita para esa publicación concreta. El usuario la dio y el push normal se completó: `origin/taco` avanzó de `44c2f02` a `89c24d3`. La CI asociada es [run 39034991892](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/39034991892); en el corte previo al nuevo commit aprobó tipos, lint, tests, builds, simulaciones del ejecutor Oracle y consistencia de puertos. Su resultado no sustituye la CI del siguiente commit que incorpora el job real.
+
+## Entrega local y condiciones de continuación
+
+| Prioridad | Archivo/cambio                                                                                  | Prueba                                                                                                                     | Estado                                                                                      |
+| --------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| 1         | Merge `89c24d3`, `package.json`, `package-lock.json`, compatibilidad de puerto en `src/main.ts` | npm ci, builds, tipos, suites y comparación íntegra de infraestructura                                                     | PASS: merge publicado; cero behind del master integrado                                     |
+| 2         | `inventory-integration` en CI y test real con tipado verificado                                 | 763 unitarias y 592 HTTP/globales aprobadas con runtimes admitidos; sin pruebas reales omitidas presentadas como aprobadas | IMPLEMENTADO: ejecución real pendiente de CI del SHA final                                  |
+| 3         | Consumer, dashboard y política offline conservados; fronteras documentadas arriba               | Pruebas locales incluidas en las suites; contratos vigentes consultados                                                    | PARTIAL: contratos/datos/autorización externos pendientes; no inventados                    |
+| 4         | `data/data-f1/` intacto                                                                         | 27 pruebas y nuevo dry-run: 38 candidatos, 0 conflictos, ready_for_load=false; mismo hash semántico                        | PARTIAL: Poma/Marco/Infra deben validar SKU y baseline; cero conexiones/escrituras Supabase |
+| 5         | Gateway de master preservado                                                                    | Caracterización HTTP del defecto del verificador pasa como evidencia del defecto, no de su corrección                      | BLOQUEADO_ESPECÍFICO: corrección de Castilla y prueba conjunta posterior                    |
+| 6         | `dist/inventory-audit-tools/PR_10_DESCRIPCION.md`                                               | Dos intentos API de actualización devuelven 403                                                                            | BLOQUEADO_PERMISOS: texto listo; no publicado                                               |
+
+Corte del informe: preparación del commit del job/test real autorizado; resultados posteriores deben verificarse en Actions por su SHA y se comunican al cerrar la sesión. La propuesta YAML ya se incorporó al workflow y no se conserva una segunda copia inactiva. El test pendiente se incorpora con las correcciones autorizadas y mantiene las siete pruebas BACK-02. Estado general: **PARTIAL**, condicionado a CI real y a las dependencias externas descritas; no constituye aprobación para merge a master ni despliegue.
