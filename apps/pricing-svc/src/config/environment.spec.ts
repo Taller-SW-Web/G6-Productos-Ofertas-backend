@@ -13,6 +13,36 @@ const valid = {
 };
 
 describe('Pricing configuration', () => {
+  it('valida ambas URLs de identidad sin permitir secretos, fragmentos ni HTTP remoto', () => {
+    expect(
+      validateEnvironment({
+        ...valid,
+        AUTH_ISSUER: 'https://identity.test',
+        AUTH_JWKS_URL: 'https://identity.test/jwks',
+      }).auth,
+    ).toEqual({
+      issuer: 'https://identity.test',
+      jwksUrl: 'https://identity.test/jwks',
+    });
+    for (const pair of [
+      { AUTH_ISSUER: 'https://identity.test' },
+      {
+        AUTH_ISSUER: 'https://identity.test',
+        AUTH_JWKS_URL: 'http://identity.test/jwks',
+      },
+      {
+        AUTH_ISSUER: 'https://user:secret@identity.test',
+        AUTH_JWKS_URL: 'https://identity.test/jwks',
+      },
+      {
+        AUTH_ISSUER: 'https://identity.test#fragment',
+        AUTH_JWKS_URL: 'https://identity.test/jwks',
+      },
+    ])
+      expect(() => validateEnvironment({ ...valid, ...pair })).toThrow(
+        InvalidPricingConfig,
+      );
+  });
   it('acepta configuración válida y prioriza el puerto propio', () => {
     expect(validateEnvironment({ ...valid, PORT: '3000' })).toEqual({
       nodeEnv: 'test',

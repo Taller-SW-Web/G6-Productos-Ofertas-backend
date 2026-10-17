@@ -2,6 +2,11 @@
 
 Owner: Leonardo Vera, rama `vera`. Alcance operativo: `IMPLEMENTAR_AHORA`.
 
+**Entrega interna #13, #24, #55–#60:** consultas administrativas, autenticación
+de lectura y casos de uso transaccionales parciales. La trazabilidad por issue,
+evidencia y fronteras pendientes están en [AUDIT-OPEN-ISSUES.md](AUDIT-OPEN-ISSUES.md).
+Las secciones #52–#54 conservan la evidencia histórica de sus entregas.
+
 ## Configuración y ejecución
 
 Se conservan los scripts del monorepo: `npm run build:pricing-svc`,
@@ -17,6 +22,8 @@ de la raíz si existe; las variables de la sesión tienen precedencia.
 | `DATABASE_URL` | Conexión PostgreSQL directa/pooler para el rol runtime de Pricing, con host, usuario y base. Inyectar desde la sesión o gestor de secretos. | Sí |
 | `PGSSLMODE` | Alternativa al parámetro `sslmode` de la URL. Se exige `verify-full` en producción y para hosts remotos. | Condicional |
 | `PGSSLROOTCERT` | Ruta a la CA PEM del proveedor; alternativa a `sslrootcert` en la URL. Si se declara, debe existir y ser un certificado válido. | Para CA no incluida en la confianza de Node |
+| `AUTH_ISSUER` | Issuer exacto del JWT humano de G7. | Para readiness y consultas de negocio |
+| `AUTH_JWKS_URL` | URL HTTPS configurada de claves públicas. Nunca se obtiene del JWT. | Junto con `AUTH_ISSUER` |
 
 No hay valores implícitos para variables obligatorias. Configuración ausente o
 malformada impide crear Nest/abrir el listener y termina con código 1. No se
@@ -44,10 +51,12 @@ frontend ni acceso a schemas ajenos. No se cambia exposición de puertos.
 | `GET /health/ready` | Disponibilidad de PostgreSQL y lectura de `pricing.prices`. | 200, `status=ready`; 503, `status=not_ready` |
 
 Todas las respuestas identifican `service=pricing-svc`. Readiness ejecuta
-`SELECT 1 FROM pricing.prices LIMIT 0`: comprueba conexión y acceso a una tabla
-propia, sin leer filas ni escribir datos. Una base caída, schema/tabla ausente
-o permisos insuficientes produce 503; liveness sigue en 200. No acredita todas
-las tablas, grants de escritura ni funcionalidades de precios.
+una consulta `LIMIT 0` sobre `prices`, `price_validities`, `scheduled_prices`,
+`bulk_price_jobs`, `bulk_price_rows` y `outbox` del schema propio. Comprueba
+conexión y permisos de lectura sin obtener filas ni escribir datos. Una base
+caída, tabla ausente, permisos insuficientes o configuración de identidad
+ausente produce 503; liveness sigue en 200. No acredita grants de escritura ni
+disponibilidad remota de G7; readiness no consulta JWKS por request.
 El pool limita conexiones a 2 y tiempos de conexión/consulta a 2 segundos
 cada uno; se libera al cerrar la aplicación y en señales de apagado de Nest.
 No hace fan-out a otros servicios. Broker no es dependencia de este scaffold:

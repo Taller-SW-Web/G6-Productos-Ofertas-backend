@@ -21,7 +21,14 @@ describe('PricingReadiness', () => {
       databaseUrl: 'postgresql://pricing:fixture@localhost/fixture',
       databaseSsl: false,
     });
-    const readiness = new PricingReadiness(database);
+    const config = validateEnvironment({
+      NODE_ENV: 'test',
+      PRICING_SVC_PORT: '3002',
+      DATABASE_URL: 'postgresql://pricing:fixture@localhost/fixture',
+      AUTH_ISSUER: 'https://identity.test',
+      AUTH_JWKS_URL: 'https://identity.test/jwks',
+    });
+    const readiness = new PricingReadiness(database, config);
     const pool = vi.mocked(Pool).mock.instances.at(-1)!;
     expect(Pool).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -32,10 +39,10 @@ describe('PricingReadiness', () => {
         statement_timeout: 2000,
       }),
     );
-    vi.mocked(pool.query).mockResolvedValueOnce({ rows: [] });
+    vi.mocked(pool.query).mockImplementationOnce(async () => ({ rows: [] }));
     expect(await readiness.check()).toBe(true);
     expect(pool.query).toHaveBeenCalledWith(
-      'SELECT 1 FROM pricing.prices LIMIT 0',
+      'SELECT 1 FROM pricing.prices, pricing.price_validities, pricing.scheduled_prices, pricing.bulk_price_jobs, pricing.bulk_price_rows, pricing.outbox LIMIT 0',
     );
     vi.mocked(pool.query).mockRejectedValueOnce(
       new Error('fixture-sensitive-value'),
@@ -44,6 +51,20 @@ describe('PricingReadiness', () => {
     await database.onApplicationShutdown();
     expect(pool.end).toHaveBeenCalledOnce();
     expect(pool.on).toHaveBeenCalledWith('error', expect.any(Function));
+  });
+
+  it('no anuncia readiness cuando falta la configuración de identidad requerida por HTTP', async () => {
+    const config = validateEnvironment({
+      NODE_ENV: 'test',
+      PRICING_SVC_PORT: '3002',
+      DATABASE_URL: 'postgresql://pricing:fixture@localhost/fixture',
+    });
+    const database = new PricingDatabase(config);
+    const readiness = new PricingReadiness(database, config);
+    expect(await readiness.check()).toBe(false);
+    const pool = vi.mocked(Pool).mock.instances.at(-1)!;
+    expect(pool.query).not.toHaveBeenCalled();
+    await database.onApplicationShutdown();
   });
 
   it('pasa TLS explícito al pool sin parámetros URL que puedan degradarlo', async () => {

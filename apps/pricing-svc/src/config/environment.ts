@@ -9,6 +9,7 @@ export interface PricingConfig {
   port: number;
   databaseUrl: string;
   databaseSsl: false | ConnectionOptions;
+  auth?: { issuer: string; jwksUrl: string };
 }
 
 export class InvalidPricingConfig extends Error {}
@@ -114,5 +115,37 @@ export function validateEnvironment(env: NodeJS.ProcessEnv): PricingConfig {
     }
   }
   url.search = '';
-  return { nodeEnv, port, databaseUrl: url.toString(), databaseSsl };
+  let auth: PricingConfig['auth'];
+  if (env.AUTH_ISSUER !== undefined || env.AUTH_JWKS_URL !== undefined) {
+    try {
+      for (const value of [env.AUTH_ISSUER, env.AUTH_JWKS_URL]) {
+        if (!value || value !== value.trim()) throw new Error();
+        const endpoint = new URL(value);
+        if (
+          endpoint.username ||
+          endpoint.password ||
+          endpoint.hash ||
+          (endpoint.protocol !== 'https:' &&
+            !(
+              nodeEnv === 'test' &&
+              endpoint.protocol === 'http:' &&
+              ['localhost', '127.0.0.1', '[::1]'].includes(endpoint.hostname)
+            ))
+        )
+          throw new Error();
+      }
+      auth = { issuer: env.AUTH_ISSUER!, jwksUrl: env.AUTH_JWKS_URL! };
+    } catch {
+      throw new InvalidPricingConfig(
+        'AUTH_ISSUER y AUTH_JWKS_URL deben ser URLs seguras válidas.',
+      );
+    }
+  }
+  return {
+    nodeEnv,
+    port,
+    databaseUrl: url.toString(),
+    databaseSsl,
+    ...(auth ? { auth } : {}),
+  };
 }
