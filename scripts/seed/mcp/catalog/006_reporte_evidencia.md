@@ -1,6 +1,6 @@
 # DATA-002 — Evidencia preservada para el issue #12
 
-**Estado:** lote corregido y conservado en la historia de `poma`; se excluye del diff final del PR #125, cuyo alcance queda en el issue #44. No se escribió en Supabase compartido.
+**Estado:** lote corregido e integrado nuevamente al tip de `poma` y al alcance del PR #125 junto con el issue #44. No se escribió en Supabase compartido.
 
 ## Cambios y validaciones
 
@@ -22,6 +22,6 @@ El workflow completo tuvo un fallo aparte en el job `Taxonomy integration on dis
 - `001_preflight_readonly.sql`: `00d60aecfe75d3c14ededee87fc74e4dbc43a3d29b19c9eacbf2d2d2571d0b60`
 - `003_carga_catalogo.sql`: `afd56282d02dd2e07191135a8757e3981ed6ccc23ef0a66dc41c1734c205f9b7`
 - `004_postcheck_readonly.sql`: `d734539591f159d91994adc378a365d62d78b11d54e1481d63edf2313310c14b`
-- `005_matriz_productos_imagenes.csv`: `5c4c180d55c0d4624942f729398d372eff9aa82382df1da890da8835d7e7a5ca`
+- `005_matriz_productos_imagenes.csv`: `8421776487664f97bd4b6b2329475fa89bcc48113513bbfd2564d536639e3e96`
 
 Estos hashes identifican los artefactos auditados en la historia de `poma`; no autorizan su ejecución en ningún destino compartido.

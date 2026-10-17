@@ -1,6 +1,6 @@
 # DATA-002 — Catálogo Inka Athletics
 
-Este directorio conserva los artefactos de DATA-002 (#12) en el historial de la rama `poma`; se excluyen del diff final del PR #125, que queda limitado a la persistencia de catalog-svc (#44). Lote preparado para reauditoría; **no se ejecuta en Supabase compartido**.
+Este PR reúne el issue #44 (persistencia Drizzle de `catalog-svc`) y DATA-002 (#12) (lote de catálogo Inka Athletics). Los artefactos de DATA-002 se integraron de nuevo al tip de `poma`; el lote queda preparado para reauditoría y validación aislada, pero **no se ejecuta en Supabase compartido**.
 
 ## Contenido y seguridad
 
