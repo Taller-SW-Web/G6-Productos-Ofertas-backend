@@ -8,6 +8,35 @@ describe('Readiness for enabled dependencies only (H-03)', () => {
     GATEWAY_TIMEOUT_MS: '20',
   });
   afterEach(() => vi.unstubAllGlobals());
+  it('readies Taxonomy alone while Catalog remains unconfigured', async () => {
+    const taxonomyOnlySettings = readGatewaySettings({
+      GATEWAY_TAXONOMY_SVC_URL: 'http://taxonomy-svc:3006',
+      GATEWAY_TAXONOMY_SVC_READINESS_PATH: '/health/ready',
+    });
+    const remote = vi.fn(
+      async () =>
+        new Response('{"status":"ready","service":"taxonomy-svc"}', {
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    vi.stubGlobal('fetch', remote);
+
+    await expect(
+      new GatewayReadiness(taxonomyOnlySettings).check(),
+    ).resolves.toMatchObject({
+      status: 'ready',
+      coverage: 'partial',
+      dependencies: {
+        'taxonomy-svc': 'ready',
+        'catalog-svc': 'not_configured',
+      },
+    });
+    expect(remote).toHaveBeenCalledTimes(1);
+    expect(remote).toHaveBeenCalledWith(
+      new URL('http://taxonomy-svc:3006/health/ready'),
+      expect.objectContaining({ redirect: 'error' }),
+    );
+  });
   it('keeps a complete inventory while accepting verified, healthy partial deployment', async () => {
     const remote = vi.fn(
       async () =>

@@ -90,14 +90,17 @@ jobs:
       - name: Test publication failure isolation
         run: bash ops/oracle/tests/publish-isolation.test.sh
 
+      - name: Test immutable GHCR image reuse guards
+        run: bash ops/oracle/tests/ensure-ghcr-sha-image.test.sh
+
       - name: Validate closed Oracle service registry
         run: |
           set -euo pipefail
-          for file in ops/oracle/service-registry.sh ops/oracle/deploy-g6-service.sh ops/oracle/deploy-inventory-svc.sh ops/oracle/build-service.sh ops/oracle/select-cd-services.sh ops/oracle/github-deployment-api.sh ops/oracle/tests/deploy-g6-service.test.sh ops/oracle/tests/deploy-inventory-svc.test.sh ops/oracle/tests/select-cd-services.test.sh ops/oracle/tests/deployment-api.test.sh ops/oracle/tests/publish-isolation.test.sh; do
+          for file in ops/oracle/service-registry.sh ops/oracle/deploy-g6-service.sh ops/oracle/deploy-inventory-svc.sh ops/oracle/build-service.sh ops/oracle/select-cd-services.sh ops/oracle/validate-cd-source.sh ops/oracle/github-deployment-api.sh ops/oracle/verify-manual-release-provenance.sh ops/oracle/ensure-ghcr-sha-image.sh ops/oracle/tests/deploy-g6-service.test.sh ops/oracle/tests/deploy-inventory-svc.test.sh ops/oracle/tests/select-cd-services.test.sh ops/oracle/tests/validate-cd-source.test.sh ops/oracle/tests/deployment-api.test.sh ops/oracle/tests/publish-isolation.test.sh ops/oracle/tests/ensure-ghcr-sha-image.test.sh; do
             bash -n "$file"
           done
           enabled="$(bash -c 'source ops/oracle/service-registry.sh; g6_enabled_services_json')"
-          test "$enabled" = '["api-gateway","catalog-svc","inventory-svc","taxonomy-svc"]'
+          test "$enabled" = '["api-gateway","bulk-svc","catalog-svc","combos-svc","inventory-svc","price-audit-svc","pricing-svc","promotions-svc","taxonomy-svc"]'
           test "$(awk -F'|' '$1 !~ /^#/ && NF { count++ } END { print count+0 }' ops/oracle/services.psv)" = 9
 
       - name: Validate service port, environment and healthcheck consistency
@@ -113,14 +116,42 @@ jobs:
             export G6_SERVICE_PORT="$port"
             export G6_SERVICE_PORT_ENV="$port_env"
             export G6_SERVICE_ENV_FILE="$runtime_env"
-            config="$(docker compose --file ops/oracle/docker-compose.service.yml config --format json --no-env-resolution)"
+            export G6_SERVICE_IMAGE_NAME="$image_name"
+            compose_file=ops/oracle/docker-compose.service.yml
+            if [[ "$service" == api-gateway ]]; then
+              compose_file=ops/oracle/docker-compose.gateway.yml
+            fi
+            config="$(docker compose --file "$compose_file" config --format json --no-env-resolution)"
             jq -e --arg port "$port" --arg port_env "$port_env" \
               '.services.service.environment.PORT == $port and
                .services.service.environment[$port_env] == $port and
                .services.service.ports[0].host_ip == "127.0.0.1" and
                (.services.service.ports[0].published | tostring) == $port and
-               ((.services.service.healthcheck.test | join(" ")) | contains("127.0.0.1:" + $port + "/health"))' \
+               any(.services.service.volumes[]; .target == "/run/g6-certs/supabase-server-root.crt" and .read_only == true)' \
               <<< "$config" >/dev/null
+            if [[ "$service" == api-gateway ]]; then
+              jq -e '.services.service.healthcheck.test == ["CMD", "node", "dist/apps/api-gateway/readiness.js"] and
+                .services.service.healthcheck.interval == "30s" and
+                .services.service.healthcheck.timeout == "15s" and
+                .services.service.healthcheck.start_period == "30s" and
+                .services.service.healthcheck.retries == 3' \
+                <<< "$config" >/dev/null
+            else
+              jq -e --arg port "$port" \
+                '((.services.service.healthcheck.test | join(" ")) | contains("127.0.0.1:" + $port + "/health"))' \
+                <<< "$config" >/dev/null
+            fi
+            http_config="$(docker compose --file "$compose_file" --file ops/oracle/docker-compose.service.http.yml config --format json --no-env-resolution)"
+            jq -e --arg alias "$image_name" \
+              '.services.service.networks["g6-http"].aliases | index($alias) != null' \
+              <<< "$http_config" >/dev/null
+            if [[ "$service" == api-gateway ]]; then
+              jq -e '.services.service.networks["g6-edge"].aliases | index("g6-api-gateway") != null' \
+                <<< "$http_config" >/dev/null
+            else
+              jq -e '(.services.service.networks | has("g6-edge")) | not' \
+                <<< "$http_config" >/dev/null
+            fi
           done < ops/oracle/services.psv
           source ops/oracle/service-registry.sh
           g6_service_config inventory-svc
@@ -128,42 +159,65 @@ jobs:
           grep -Fq "127.0.0.1:${G6_SERVICE_PORT}/health" Dockerfile.inventory-svc
           export INVENTORY_IMAGE="ghcr.io/taller-sw-web/g6-productos-ofertas-backend/inventory-svc:0123456789012345678901234567890123456789"
           sed "s|/etc/g6-inventory/runtime.env|${runtime_env}|" docker-compose.inventory.yml > "$inventory_compose"
-          inventory_config="$(docker compose --file "$inventory_compose" config --format json --no-env-resolution)"
+          inventory_config="$(docker compose --file "$inventory_compose" --file ops/oracle/docker-compose.inventory.http.yml config --format json --no-env-resolution)"
           jq -e --arg port "$G6_SERVICE_PORT" --arg port_env "$G6_SERVICE_PORT_ENV" \
+            --arg ca_source "/etc/g6-postgres/supabase-server-root.crt" \
+            --arg ca_target "/run/g6-certs/supabase-server-root.crt" \
             '.services["inventory-svc"].environment.PORT == $port and
              .services["inventory-svc"].environment[$port_env] == $port and
              .services["inventory-svc"].ports[0].host_ip == "127.0.0.1" and
              (.services["inventory-svc"].ports[0].published | tostring) == $port and
-             ((.services["inventory-svc"].healthcheck.test | join(" ")) | contains("127.0.0.1:" + $port + "/health"))' \
+             ((.services["inventory-svc"].healthcheck.test | join(" ")) | contains("127.0.0.1:" + $port + "/health")) and
+             any(.services["inventory-svc"].volumes[]; .source == $ca_source and .target == $ca_target and .read_only == true) and
+             (.services["inventory-svc"].networks["g6-http"].aliases | index("inventory-svc") != null)' \
             <<< "$inventory_config" >/dev/null
-          printf 'Consistencia de los nueve puertos/env/Compose/healthchecks validada; Inventario conserva puerto y healthcheck.\n'
+          printf 'Consistencia de los nueve puertos/env/Compose/healthchecks validada; Inventory conserva puerto, healthcheck, alias g6-http y montaje CA read-only.\n'
 
-      - name: Build generic service images for enabled Oracle CD services
+      - name: Build generic service images for all Oracle CD services
         run: |
           set -euo pipefail
-          docker build --file Dockerfile.service --build-arg SERVICE_NAME=inventory-svc --tag g6-service:inventory-svc-ci .
-          docker build --file Dockerfile.service --build-arg SERVICE_NAME=catalog-svc --tag g6-service:catalog-svc-ci .
-          docker build --file Dockerfile.service --build-arg SERVICE_NAME=taxonomy-svc --tag g6-service:taxonomy-svc-ci .
-          docker build --file Dockerfile.service --build-arg SERVICE_NAME=api-gateway --tag g6-service:api-gateway-ci .
+          enabled="$(bash -c 'source ops/oracle/service-registry.sh; g6_enabled_services_json')"
+          while IFS= read -r service; do
+            [[ -n "$service" ]] || continue
+            docker build --file Dockerfile.service --build-arg SERVICE_NAME="$service" --tag "g6-service:${service}-ci" .
+          done < <(jq -r '.[]' <<< "$enabled")
 
-      - name: Smoke test generic inventory and api-gateway images
+      - name: Smoke test dependency-free generic service images
         run: |
           set -euo pipefail
-          for service in inventory-svc api-gateway; do
+          while IFS='|' read -r service enabled port port_env _; do
+            [[ -n "$service" && "$service" != \#* ]] || continue
+            [[ "$enabled" == true ]] || continue
             case "$service" in
-              inventory-svc) port=3005; port_env=INVENTORY_SVC_PORT ;;
-              api-gateway) port=3000; port_env=API_GATEWAY_PORT ;;
+              catalog-svc|taxonomy-svc)
+                printf 'NO EJECUTADO: %s requiere configuración PostgreSQL runtime ausente en CI.\n' "$service"
+                continue
+                ;;
             esac
             name="${service}-generic-ci"
+            if [[ "$service" == api-gateway ]]; then
+              docker run --rm --entrypoint node "g6-service:${service}-ci" -e \
+                "require('node:fs').accessSync('/app/dist/apps/api-gateway/readiness.js')"
+            fi
             trap 'docker rm --force "$name" >/dev/null 2>&1 || true' EXIT
+            runtime_env=()
+            if [[ "$service" == pricing-svc ]]; then
+              # Fixture aislada: liveness no necesita una base disponible.
+              runtime_env+=(--env 'DATABASE_URL=postgresql://pricing:ci-fixture@127.0.0.1:1/pricing?sslmode=verify-full')
+            fi
             docker run --detach --name "$name" --publish "127.0.0.1::${port}" \
-              --env "PORT=${port}" --env "${port_env}=${port}" "g6-service:${service}-ci" >/dev/null
+              --env "PORT=${port}" --env "${port_env}=${port}" "${runtime_env[@]}" "g6-service:${service}-ci" >/dev/null
             host_port="$(docker port "$name" "${port}/tcp" | awk -F: '{print $NF}')"
             response=''
             for attempt in {1..30}; do
               if response="$(curl --fail --silent "http://127.0.0.1:${host_port}/health")"; then break; fi
               sleep 2
             done
+            if [[ -z "$response" ]]; then
+              printf 'FAIL: %s no respondió /health con HTTP 200.\n' "$service" >&2
+              docker inspect --format 'status={{.State.Status}} exit={{.State.ExitCode}}' "$name" >&2
+              exit 1
+            fi
             node -e '
               const payload = JSON.parse(process.argv[1]);
               if (payload.status !== "ok" || payload.service !== process.argv[2]) {
@@ -171,6 +225,14 @@ jobs:
                 process.exit(1);
               }
             ' "$response" "$service"
+            if [[ "$service" == pricing-svc ]]; then
+              readiness_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${host_port}/health/ready")"
+              if [[ "$readiness_status" != 503 ]]; then
+                printf 'FAIL: pricing-svc debe responder readiness=503 con la base de fixture inaccesible.\n' >&2
+                exit 1
+              fi
+              printf 'PASS: pricing-svc mantiene liveness=200 y readiness=503 con PostgreSQL inaccesible.\n'
+            fi
             healthy=''
             for attempt in {1..30}; do
               healthy="$(docker inspect --format '{{.State.Health.Status}}' "$name")"
@@ -181,7 +243,7 @@ jobs:
             docker rm --force "$name" >/dev/null
             trap - EXIT
             printf 'PASS: Dockerfile.service %s escuchó en %s/%s y su healthcheck quedó healthy.\n' "$service" "$port_env" "$port"
-          done
+          done < ops/oracle/services.psv
 
       - name: Smoke test inventory-svc container health
         run: |

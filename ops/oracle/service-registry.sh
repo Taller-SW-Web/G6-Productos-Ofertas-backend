@@ -38,8 +38,12 @@ g6_service_config() {
         "$container" == g6-inventory-svc && "$state_dir" == /var/lib/g6-inventory &&
         "$runtime_env_file" == /etc/g6-inventory/runtime.env ]] || return 65
     else
-      [[ "$compose_file" == /opt/g6-productos-ofertas/shared/docker-compose.service.yml &&
-        "$project" == "g6-${service}" && "$compose_unit" == service &&
+      if [[ "$service" == api-gateway ]]; then
+        [[ "$compose_file" == /opt/g6-productos-ofertas/api-gateway/docker-compose.gateway.yml ]] || return 65
+      else
+        [[ "$compose_file" == /opt/g6-productos-ofertas/shared/docker-compose.service.yml ]] || return 65
+      fi
+      [[ "$project" == "g6-${service}" && "$compose_unit" == service &&
         "$container" == "g6-${service}" &&
         "$state_dir" == "/var/lib/g6-productos-ofertas/${service}" &&
         "$runtime_env_file" == "/etc/g6-${service}/runtime.env" ]] || return 65

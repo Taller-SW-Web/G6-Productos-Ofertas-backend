@@ -1,5 +1,6 @@
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
+import { readTaxonomyConfig } from './taxonomy-config.js';
 import { TaxonomyClient } from './taxonomy.client.js';
 
 describe('Taxonomy HTTP boundary', () => {
@@ -7,7 +8,8 @@ describe('Taxonomy HTTP boundary', () => {
   let status = 200;
   let body: object = {};
   let path = '';
-  const client = new TaxonomyClient();
+  let origin: string;
+  let client: TaxonomyClient;
   beforeAll(async () => {
     server = createServer((request, response) => {
       path = request.url ?? '';
@@ -18,7 +20,13 @@ describe('Taxonomy HTTP boundary', () => {
     await once(server, 'listening');
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error();
-    vi.stubEnv('CATALOG_TAXONOMY_URL', 'http://127.0.0.1:' + address.port);
+    origin = 'http://127.0.0.1:' + address.port;
+    client = new TaxonomyClient(
+      readTaxonomyConfig({
+        CATALOG_TAXONOMY_URL: origin,
+      }),
+    );
+    vi.stubEnv('CATALOG_TAXONOMY_URL', 'http://127.0.0.1:1');
   });
   afterAll(async () => {
     vi.unstubAllEnvs();
@@ -27,6 +35,22 @@ describe('Taxonomy HTTP boundary', () => {
   beforeEach(() => {
     status = 200;
     body = {};
+  });
+  it('fails closed without an injected origin even when process.env contains one', async () => {
+    await expect(
+      new TaxonomyClient(readTaxonomyConfig({})).brand('b'),
+    ).rejects.toMatchObject({ status: 503 });
+  });
+  it('keeps standalone tooling compatible using the same validated snapshot', async () => {
+    vi.stubEnv('CATALOG_TAXONOMY_URL', origin);
+    const standalone = new TaxonomyClient();
+    vi.stubEnv('CATALOG_TAXONOMY_URL', 'malformed');
+    body = { categories: [] };
+    await expect(standalone.category('missing')).rejects.toMatchObject({
+      status: 422,
+    });
+    expect(path).toBe('/api/v1/categorias');
+    expect(() => new TaxonomyClient()).toThrow('CATALOG_TAXONOMY_URL');
   });
   it('projects the contractual brand, discarding administrative fields', async () => {
     body = {

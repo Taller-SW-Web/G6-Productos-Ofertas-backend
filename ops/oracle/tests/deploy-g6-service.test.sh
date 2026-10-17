@@ -37,7 +37,7 @@ fail() {
 }
 
 source "${REPO_ROOT}/ops/oracle/service-registry.sh"
-[[ "$(g6_enabled_services_json)" == '["api-gateway","catalog-svc","inventory-svc","taxonomy-svc"]' ]] || fail 'Los cuatro servicios autorizados deben estar habilitados'
+[[ "$(g6_enabled_services_json)" == '["api-gateway","bulk-svc","catalog-svc","combos-svc","inventory-svc","price-audit-svc","pricing-svc","promotions-svc","taxonomy-svc"]' ]] || fail 'Los nueve servicios de Hito 3 deben estar habilitados para dispatch manual'
 [[ "$(awk -F'|' '$1 !~ /^#/ && NF { count++ } END { print count+0 }' "${REPO_ROOT}/ops/oracle/services.psv")" == 9 ]] ||
   fail 'el registro debe contener exactamente nueve servicios'
 
@@ -124,6 +124,9 @@ validate_compose_files() {
   grep -Fq 'host_ip: 127.0.0.1' <<< "$config" || fail 'Inventory dejó de publicar solo en loopback'
   grep -Fq 'http://127.0.0.1:3005/health' <<< "$config" || fail 'Inventory dejó de verificar /health'
   grep -Fq -- '- inventory-svc' <<< "$config" || fail 'alias DNS de Inventory inesperado'
+  grep -Fq 'source: /etc/g6-postgres/supabase-server-root.crt' <<< "$config" || fail 'Inventory no monta la CA PostgreSQL esperada'
+  grep -Fq 'target: /run/g6-certs/supabase-server-root.crt' <<< "$config" || fail 'ruta de destino de la CA PostgreSQL inesperada'
+  grep -Fq 'read_only: true' <<< "$config" || fail 'el montaje de CA PostgreSQL de Inventory no es de solo lectura'
 
   local required_var variable_name env_assignment
   local -a compose_env
@@ -525,7 +528,7 @@ for invalid_command in \
   run_deploy "$invalid_command" 3001 1
   [[ ! -s "${TEMP_ROOT}/docker.log" ]] || fail "entrada rechazada ejecutó operaciones Docker: ${invalid_command}"
 done
-printf 'PASS: nombres no registrados, servicios deshabilitados y entradas inválidas rechazadas\n'
+printf 'PASS: nombres no registrados y entradas inválidas rechazadas\n'
 
 # Dos despliegues del mismo servicio se serializan en el host y el estado final
 # conserva active-image/previous-image como pares coherentes.

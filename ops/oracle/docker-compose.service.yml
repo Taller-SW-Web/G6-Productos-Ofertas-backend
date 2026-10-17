@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     env_file:
       - ${G6_SERVICE_ENV_FILE:?G6_SERVICE_ENV_FILE es obligatorio}
+    volumes:
+      - /etc/g6-postgres/supabase-server-root.crt:/run/g6-certs/supabase-server-root.crt:ro
     environment:
       - NODE_ENV=production
       - PORT=${G6_SERVICE_PORT:?G6_SERVICE_PORT es obligatorio}

@@ -7,18 +7,14 @@ import {
   Query,
 } from '@nestjs/common';
 import { CommercialService } from './commercial.service.js';
+import { isCorrelationId } from './correlation.js';
 import { parseProductQuery } from './catalog-query.js';
 
 @Controller('api/v1/productos')
 export class CommercialController {
   constructor(private readonly service: CommercialService) {}
   private validateCorrelation(value?: string): void {
-    if (
-      value !== undefined &&
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        value,
-      )
-    )
+    if (value !== undefined && !isCorrelationId(value))
       throw new BadRequestException();
   }
   @Get()

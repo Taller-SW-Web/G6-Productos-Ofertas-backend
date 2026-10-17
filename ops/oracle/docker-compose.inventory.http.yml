@@ -3,6 +3,8 @@
 # remain in docker-compose.inventory.yml.
 services:
   inventory-svc:
+    volumes:
+      - /etc/g6-postgres/supabase-server-root.crt:/run/g6-certs/supabase-server-root.crt:ro
     networks:
       default: {}
       g6-http:
