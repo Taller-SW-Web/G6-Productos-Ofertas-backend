@@ -7,10 +7,8 @@ import { CATALOG_POSTGRES_CONFIG, Database } from './database.js';
 import { PostgresCatalogRepository } from './postgres-catalog.repository.js';
 import { CommercialService } from './commercial.service.js';
 import { CommercialController } from './commercial.controller.js';
-import {
-  COMMERCIAL_ELIGIBILITY,
-  PendingCommercialEligibility,
-} from './commercial-eligibility.js';
+import { COMMERCIAL_ELIGIBILITY } from './commercial-eligibility.js';
+import { PostgresCommercialEligibility } from './postgres-commercial-eligibility.js';
 import {
   CATALOG_TAXONOMY_CONFIG,
   readTaxonomyConfig,
@@ -43,7 +41,10 @@ import { CATALOG_DATABASE, ReadinessController } from './readiness.js';
       }),
       inject: [CommercialReadinessController],
     },
-    { provide: COMMERCIAL_ELIGIBILITY, useClass: PendingCommercialEligibility },
+    {
+      provide: COMMERCIAL_ELIGIBILITY,
+      useClass: PostgresCommercialEligibility,
+    },
     { provide: APP_FILTER, useClass: ProblemFilter },
   ],
 })
