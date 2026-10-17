@@ -16,6 +16,7 @@ export const INVENTORY_SCOPES = {
   LIBERAR: 'inventario:liberar',
   OPERACIONES_LEER: 'inventario:operaciones:leer',
   DISPONIBILIDAD_LEER: 'inventario:disponibilidad:leer',
+  REINTEGRAR: 'inventario:reintegrar',
 } as const;
 
 export const KNOWN_CLIENTS = {

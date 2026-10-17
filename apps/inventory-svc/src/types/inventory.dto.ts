@@ -116,3 +116,40 @@ export interface VerificarCantidadComercialResponse {
   binding: false;
   items: VerificarCantidadComercialItem[];
 }
+
+export type MotivoReintegroInventario =
+  'DEVOLUCION_ACEPTADA' | 'ANULACION_POST_CONSUMO' | 'RETORNO_LOGISTICO';
+
+export interface LineaInventarioUbicada {
+  sku: string;
+  quantity: number;
+  location_id: string;
+}
+
+export class ReintegroInventarioRequest {
+  operation_id!: string;
+  order_id!: string;
+  source_ref!: string;
+  reason!: MotivoReintegroInventario;
+  lines!: LineaInventarioUbicada[];
+}
+
+export interface ReintegroLineaResultado {
+  sku: string;
+  location_id: string;
+  quantity: number;
+  on_hand: number;
+  reserved: number;
+  blocked: number;
+  available: number;
+  stock_version: number;
+}
+
+export interface ReintegroInventarioResponse {
+  operation_id: string;
+  order_id: string;
+  source_ref: string;
+  status: 'COMPLETED';
+  lines: ReintegroLineaResultado[];
+  completed_at: string;
+}

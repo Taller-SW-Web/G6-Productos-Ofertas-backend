@@ -11,6 +11,7 @@ import { ReservationsService } from './reservations/reservations.service.js';
 import { ReservationExpirationService } from './reservations/reservation-expiration.service.js';
 import { OperationsService } from './operations/operations.service.js';
 import { DisponibilidadService } from './disponibilidad/disponibilidad.service.js';
+import { ReintegrosService } from './reintegros/reintegros.service.js';
 
 import { DrizzleLocationsRepository } from './repositories/drizzle/drizzle-locations.repository.js';
 import { DrizzleCommercialRoutesRepository } from './repositories/drizzle/drizzle-commercial-routes.repository.js';
@@ -47,6 +48,7 @@ import { InventoryWorkersService } from './workers/inventory-workers.service.js'
     ReservationExpirationService,
     OperationsService,
     DisponibilidadService,
+    ReintegrosService,
     InventoryAuthGuard,
     InventoryWorkersService,
     // Repositorios Drizzle vinculados a sus tokens de interfaz
@@ -97,6 +99,7 @@ import { InventoryWorkersService } from './workers/inventory-workers.service.js'
     ReservationExpirationService,
     OperationsService,
     DisponibilidadService,
+    ReintegrosService,
     InventoryAuthGuard,
     LOCATIONS_REPOSITORY,
     COMMERCIAL_ROUTES_REPOSITORY,

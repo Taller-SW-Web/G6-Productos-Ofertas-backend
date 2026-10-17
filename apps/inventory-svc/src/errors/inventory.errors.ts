@@ -157,4 +157,46 @@ export class ProblemDetailsException extends HttpException {
       correlationId,
     });
   }
+
+  static reintegroNoAplicable(
+    detail?: string,
+    correlationId?: string,
+  ): ProblemDetailsException {
+    return new ProblemDetailsException({
+      type: '/errores/reintegro-no-aplicable',
+      title: 'Reintegro no aplicable',
+      status: HttpStatus.UNPROCESSABLE_ENTITY,
+      code: 'REINTEGRO_NO_APLICABLE',
+      detail,
+      correlationId,
+    });
+  }
+
+  static skuNoEncontrado(
+    detail?: string,
+    correlationId?: string,
+  ): ProblemDetailsException {
+    return new ProblemDetailsException({
+      type: '/errores/sku-no-encontrado',
+      title: 'SKU no encontrado',
+      status: HttpStatus.UNPROCESSABLE_ENTITY,
+      code: 'SKU_NO_ENCONTRADO',
+      detail,
+      correlationId,
+    });
+  }
+
+  static ubicacionNoEncontrada(
+    detail?: string,
+    correlationId?: string,
+  ): ProblemDetailsException {
+    return new ProblemDetailsException({
+      type: '/errores/ubicacion-no-encontrada',
+      title: 'Ubicación no encontrada',
+      status: HttpStatus.UNPROCESSABLE_ENTITY,
+      code: 'UBICACION_NO_ENCONTRADA',
+      detail,
+      correlationId,
+    });
+  }
 }

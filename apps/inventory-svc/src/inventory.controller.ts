@@ -14,6 +14,7 @@ import {
 import { ReservationsService } from './reservations/reservations.service.js';
 import { OperationsService } from './operations/operations.service.js';
 import { DisponibilidadService } from './disponibilidad/disponibilidad.service.js';
+import { ReintegrosService } from './reintegros/reintegros.service.js';
 import {
   CrearReservaRequest,
   OperacionReservaRequest,
@@ -25,6 +26,8 @@ import {
   CanalComercial,
   VerificarCantidadComercialRequest,
   VerificarCantidadComercialResponse,
+  ReintegroInventarioRequest,
+  ReintegroInventarioResponse,
 } from './types/inventory.dto.js';
 import { ProblemDetailsException } from './errors/inventory.errors.js';
 import { InventoryAuthGuard } from './auth/inventory-auth.guard.js';
@@ -84,6 +87,7 @@ export class InventoryController {
     private readonly reservationsService: ReservationsService,
     private readonly operationsService: OperationsService,
     private readonly disponibilidadService: DisponibilidadService,
+    private readonly reintegrosService: ReintegrosService,
   ) {}
 
   @Post('reservas')
@@ -183,6 +187,31 @@ export class InventoryController {
     );
   }
 
+  @Post('reintegros')
+  @HttpCode(HttpStatus.OK)
+  @RequireScope(INVENTORY_SCOPES.REINTEGRAR)
+  @AllowedClients([KNOWN_CLIENTS.VENTAS, KNOWN_CLIENTS.POSTVENTA])
+  async reintegrarInventario(
+    @Body() dto: ReintegroInventarioRequest,
+    @Req() req: any,
+    @Headers('x-correlation-id') correlationId?: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ): Promise<ReintegroInventarioResponse> {
+    if (!idempotencyKey) {
+      throw ProblemDetailsException.validation(
+        'El encabezado Idempotency-Key es obligatorio para reintegrar inventario',
+        correlationId,
+      );
+    }
+    const clientId = req?.clientId;
+    return this.reintegrosService.reintegrarInventario(
+      dto,
+      correlationId,
+      idempotencyKey,
+      clientId,
+    );
+  }
+
   @Get('operaciones/:operationId')
   @RequireScope(INVENTORY_SCOPES.OPERACIONES_LEER)
   @AllowedClients([KNOWN_CLIENTS.VENTAS])
@@ -198,7 +227,7 @@ export class InventoryController {
 
   @Get('disponibilidad')
   @RequireScope(INVENTORY_SCOPES.DISPONIBILIDAD_LEER)
-  @AllowedClients([KNOWN_CLIENTS.VENTAS])
+  @AllowedClients([KNOWN_CLIENTS.VENTAS, KNOWN_CLIENTS.POSTVENTA])
   async consultarDisponibilidad(
     @Query('skus') skusQuery?: string | string[],
     @Query('location_id') locationId?: string,
