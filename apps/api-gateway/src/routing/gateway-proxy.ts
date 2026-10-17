@@ -133,17 +133,13 @@ export class GatewayProxy {
       if (incomingCorrelation && !uuid.test(incomingCorrelation))
         throw new GatewayFailure(400, 'VALIDACION');
       const authorization = req.header('authorization');
-      const demoAnonymous = this.identity.usesDemoAnonymousAccess(
-        route,
-        authorization,
-      );
       await this.identity.authorize(route, authorization);
       const base = this.settings.upstreams[route.service];
       if (!base) throw new GatewayFailure(503, 'SERVICIO_NO_DISPONIBLE');
       const headers: Record<string, string> = {
         accept: req.header('accept') ?? 'application/json',
       };
-      if (authorization && !demoAnonymous)
+      if (authorization && !this.settings.demoNoAuthEnabled)
         headers.authorization = authorization;
       for (const header of route.headers) {
         const value =

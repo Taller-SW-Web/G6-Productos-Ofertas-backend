@@ -167,80 +167,36 @@ describe('Gateway identity from G6/G7 contracts', () => {
       identity.authorize(product, `Bearer ${signed.token()}`),
     ).rejects.toMatchObject({ status: 503 });
   });
-  it('allows only the three exact demo GET operations without Authorization', async () => {
+  it('bypasses all JWT checks for every contract operation only in demo mode', async () => {
     const demoIdentity = new GatewayIdentity({
       ...settings,
-      demoAnonymousEnabled: true,
+      issuer: undefined,
+      jwksUrl: undefined,
+      demoNoAuthEnabled: true,
     });
-    const routes = [
-      'listarCategorias',
-      'listarProductos',
-      'obtenerProductoPorSlug',
-    ].map((operationId) =>
-      CONTRACT_ROUTES.find((route) => route.operationId === operationId)!,
-    );
-    for (const route of routes) {
-      expect(demoIdentity.usesDemoAnonymousAccess(route, undefined)).toBe(true);
+    for (const route of CONTRACT_ROUTES) {
       await expect(
         demoIdentity.authorize(route, undefined),
       ).resolves.toBeUndefined();
-    }
-    for (const route of [
-      CONTRACT_ROUTES.find((r) => r.operationId === 'obtenerProducto')!,
-      CONTRACT_ROUTES.find((r) => r.operationId === 'crearCategoria')!,
-    ]) {
-      expect(demoIdentity.usesDemoAnonymousAccess(route, undefined)).toBe(
-        false,
-      );
       await expect(
-        demoIdentity.authorize(route, undefined),
-      ).rejects.toMatchObject({
-        status: 401,
-      });
+        demoIdentity.authorize(route, 'Bearer malformed-secret-token'),
+      ).resolves.toBeUndefined();
     }
-    expect(demoIdentity.usesDemoAnonymousAccess(routes[0], '')).toBe(false);
-    await expect(demoIdentity.authorize(routes[0], '')).rejects.toMatchObject({
-      status: 401,
-    });
+    expect(CONTRACT_ROUTES.some((route) => route.method !== 'GET')).toBe(true);
   });
-  it('preserves JWT validation when a token is supplied to a demo route', async () => {
-    const demoIdentity = new GatewayIdentity({
+  it('restores JWT and authorization checks when demo mode is disabled', async () => {
+    const identity = new GatewayIdentity({
       ...settings,
-      issuer: 'https://isolated.test/issuer',
-      jwksUrl: 'https://isolated.test/jwks',
-      demoAnonymousEnabled: true,
+      demoNoAuthEnabled: false,
     });
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response(JSON.stringify({ keys: [signed.key] }), { status: 200 }),
-        ),
-    );
     const categories = CONTRACT_ROUTES.find(
       (route) => route.operationId === 'listarCategorias',
     )!;
-    expect(
-      demoIdentity.usesDemoAnonymousAccess(
-        { ...categories, method: 'POST' },
-        undefined,
-      ),
-    ).toBe(false);
-    expect(
-      demoIdentity.usesDemoAnonymousAccess(
-        { ...categories, operationId: 'anotherOperation' },
-        undefined,
-      ),
-    ).toBe(false);
-    expect(
-      demoIdentity.usesDemoAnonymousAccess(
-        categories,
-        `Bearer ${signed.token()}`,
-      ),
-    ).toBe(false);
     await expect(
-      demoIdentity.authorize(categories, `Bearer ${signed.token()}`),
-    ).resolves.toBeUndefined();
+      identity.authorize(categories, undefined),
+    ).rejects.toMatchObject({ status: 401, code: 'TOKEN_INVALIDO' });
+    await expect(
+      identity.authorize(product, `Bearer ${signed.token()}`),
+    ).rejects.toMatchObject({ status: 503, code: 'SERVICIO_NO_DISPONIBLE' });
   });
 });

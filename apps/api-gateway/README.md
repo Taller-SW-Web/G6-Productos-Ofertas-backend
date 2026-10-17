@@ -117,18 +117,40 @@ No se cambia package.json para cargar archivos de otra aplicación.
   Sin configuración de confianza ninguna operación protegida se reenvía.
 - `GATEWAY_PUBLIC_OPERATION_IDS`: solo operationIds contractualmente anónimos
   cuya exposición esté aprobada. Vacío por defecto.
-- `GATEWAY_DEMO_ANONYMOUS_ENABLED`: excepción temporal y explícita para la demo,
-  apagada por defecto. Cuando es `true`, solo permite sin token `GET
-  /api/v1/categorias`, `GET /api/v1/productos` y `GET
-  /api/v1/productos/por-slug/{slug}`. La allowlist de rutas, métodos y
-  operationIds vive en código y no puede ampliarse por entorno. Si se usa esta
-  excepción, el Gateway no reenvía `Authorization` al upstream. Cuando se
-  proporciona un token, se conserva la validación JWT vigente.
+- `GATEWAY_DEMO_NO_AUTH_ENABLED`: modo temporal de demo, `false` por defecto.
+  Si es `true`, todas las combinaciones método/ruta ya registradas en
+  `CONTRACT_ROUTES` omiten por completo autenticación y autorización JWT,
+  incluidos issuer, JWKS, audience, scopes, roles, client_id e introspección.
+  No requiere `Authorization`; si llega, se ignora y nunca se reenvía. No se
+  fabrican tokens ni identidades. El enrutamiento exacto, los headers
+  contractuales (incluida idempotencia), tipos/tamaños técnicos, timeouts y las
+  respuestas de reglas de negocio upstream permanecen activos. Operaciones y
+  métodos no registrados continúan en 404. Cuando es `false`, conserva la
+  validación JWT/autorización anterior sin cambios. El flag anterior
+  `GATEWAY_DEMO_ANONYMOUS_ENABLED` fue retirado.
 
-Esta excepción de demo se aparta temporalmente de la seguridad declarada en
-OpenAPI. No modifica el contrato candidato ni declara homologación del contrato
-de producción, autorización de G7, despliegue o acceso público efectivo.
-Operaciones no incluidas y métodos de escritura conservan la protección vigente.
+El modo anónimo es una excepción temporal de demo respecto de los requisitos de
+seguridad JWT que declara el OpenAPI; el archivo OpenAPI no se modifica y esta
+excepción no implica homologación externa. Cualquier persona que alcance una
+instancia pública podrá invocar todas las operaciones contractuales accesibles,
+incluidas escrituras; CORS no limita clientes ajenos al navegador. No habilitar
+la exposición pública de escrituras hasta acreditar aislamiento del conjunto de
+datos de demo frente a datos reales compartidos, permisos mínimos de roles
+runtime, respaldo y recuperación, límites de solicitudes adecuados y revisión
+de exposición. Sin esa evidencia, mantener bloqueada la activación pública.
+Estas pruebas aisladas no acreditan dichas condiciones. Las operaciones que
+dependan de identidad de comprador no reciben una identidad inventada: requieren
+que la regla del upstream funcione sin ella o rechace la solicitud.
+
+No hay orígenes Vercel de navegador verificados y publicados en la configuración
+del frontend a la fecha de esta actualización; por eso el Gateway no habilita
+CORS con wildcard ni agrega orígenes supuestos. Antes de habilitar llamadas
+desde navegador, registrar los origins HTTPS reales de producción y los previews
+que efectivamente se usarán, y configurar una allowlist exacta. Responder
+OPTIONS y permitir solo métodos/headers contractuales necesarios, incluido
+`Authorization` solo cuando se use autenticación, además de los headers de
+correlación/idempotencia requeridos. CORS es política del navegador, no control
+de acceso a la API. No se cambia CORS, Caddy ni despliegue en este PR.
 
 ## Liveness y readiness de despliegue
 
@@ -168,19 +190,28 @@ o liveness.
 ```powershell
 npm test -- apps/api-gateway --maxWorkers=1
 npm run test:e2e -- apps/api-gateway --maxWorkers=1
+npm run build:api-gateway
 node apps/api-gateway/test/readiness.smoke.mjs # requiere build previo
 ```
 
-Pruebas enfocadas ejecutadas: **57 unitarias / 299 HTTP, PASS**. Cubren las 135
-operaciones del inventario (las cinco de introspección se acreditan como rechazo
-seguro), firmas reales RS256 sintéticas, audiencia/cliente/scope/tipo/rol,
+La verificación actual del cambio no JWT ejecutó **352 unitarias / 453 HTTP, PASS**
+(5 omitidas por configuración externa). Incluye 64 unitarias del Gateway y
+prueba las 135 operaciones de `CONTRACT_ROUTES` a través de proveedores HTTP
+aislados sin Authorization, incluso las cinco antes sujetas a introspección;
+canales MARKETPLACE, CHATBOT, RETAIL y VENTAS se reenvían sin alterar el query.
+También comprueba Authorization entrante inválido ignorado/no filtrado, errores
+de validación e idempotencia y 404. Esto prueba el comportamiento de frontera del
+Gateway, no validaciones comerciales de los servicios upstream. La suite
+completa incluye firmas RS256 sintéticas, audiencia/cliente/scope/tipo/rol,
 manipulación, expiración, caché, matching, forwarding a proveedor HTTP aislado,
 headers, errores sanitizados, timeout, multipart y reportes mayores de 10 MiB,
 rechazo 413 temprano, cuerpos incompletos y readiness. Las 133 operaciones
 protegidas también rechazan identidad ausente y roles insuficientes antes de
 contactar upstreams. El smoke ejecuta el healthcheck compilado con liveness y
 dependencias disponibles, ausentes, inválidas, lentas y configuración parcial.
-El proveedor se reutiliza una vez por suite. No son E2E de negocio ni prueba G7.
+El healthcheck real incorporado por PR #129 (`node
+dist/apps/api-gateway/readiness.js`) quedó intacto y el smoke compilado PASS.
+No son E2E de negocio ni prueba G7.
 Las diez regresiones adicionales de marcas cubren ambos métodos, transporte
 del logo de 2 MiB por encima del presupuesto JSON de prueba (1 MiB) y por debajo
 de los 5 MB de SPEC-011, rechazo 413 de 11 MiB normal/temprano, código ajeno
@@ -214,5 +245,6 @@ coordinación recibida. Este PR no verifica ese despliegue ni cambia Oracle,
 DNS, firewall, Caddy o CD. Tampoco implementa RabbitMQ (#108) ni configura
 upstreams reales. La excepción demo anónima (#107) requiere activación explícita
 en runtime y no está desplegada por este PR. Las pruebas con proveedores aislados acreditan el
-código del Gateway; no acreditan integración autenticada, homologación externa
-o despliegue.
+código del Gateway; no acreditan integración autenticada, homologación externa,
+aislamiento de datos, mínimos privilegios, recuperación, rate limiting, CORS de
+orígenes reales o despliegue.
