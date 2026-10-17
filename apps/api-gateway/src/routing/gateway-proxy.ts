@@ -3,7 +3,11 @@ import { finished } from 'node:stream/promises';
 import { Inject, Injectable } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { CONTRACT_ROUTES } from './contract-routes.js';
-import { GatewayFailure, GatewayIdentity } from './gateway-identity.js';
+import {
+  GatewayFailure,
+  GatewayIdentity,
+  isDemoPublicRoute,
+} from './gateway-identity.js';
 import { GATEWAY_SETTINGS, type GatewaySettings } from './gateway-settings.js';
 import type { ContractRoute } from './contract-route.js';
 import { readLimitedResponse } from './bounded-response.js';
@@ -133,13 +137,15 @@ export class GatewayProxy {
       if (incomingCorrelation && !uuid.test(incomingCorrelation))
         throw new GatewayFailure(400, 'VALIDACION');
       const authorization = req.header('authorization');
-      await this.identity.authorize(route, authorization);
+      const demoBypass =
+        isDemoPublicRoute(route) && isDemoPublicRequest(route, req.originalUrl);
+      await this.identity.authorize(route, authorization, demoBypass);
       const base = this.settings.upstreams[route.service];
       if (!base) throw new GatewayFailure(503, 'SERVICIO_NO_DISPONIBLE');
       const headers: Record<string, string> = {
         accept: req.header('accept') ?? 'application/json',
       };
-      if (authorization && !this.settings.demoNoAuthEnabled)
+      if (authorization && (!this.settings.demoNoAuthEnabled || !demoBypass))
         headers.authorization = authorization;
       for (const header of route.headers) {
         const value =
@@ -286,4 +292,21 @@ export class GatewayProxy {
       upload?.close();
     }
   }
+}
+
+function isDemoPublicRequest(
+  route: ContractRoute,
+  originalUrl: string,
+): boolean {
+  if (route.operationId === 'listarCategorias') return true;
+  if (
+    route.operationId !== 'listarProductos' &&
+    route.operationId !== 'obtenerProductoPorSlug'
+  )
+    return false;
+  const values = new URL(
+    originalUrl,
+    'http://gateway.invalid',
+  ).searchParams.getAll('canal');
+  return values.length === 1 && values[0] === 'MARKETPLACE';
 }
