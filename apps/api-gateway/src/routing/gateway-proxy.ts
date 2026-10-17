@@ -132,14 +132,15 @@ export class GatewayProxy {
       }
       if (incomingCorrelation && !uuid.test(incomingCorrelation))
         throw new GatewayFailure(400, 'VALIDACION');
-      await this.identity.authorize(route, req.header('authorization'));
+      const authorization = req.header('authorization');
+      await this.identity.authorize(route, authorization);
       const base = this.settings.upstreams[route.service];
       if (!base) throw new GatewayFailure(503, 'SERVICIO_NO_DISPONIBLE');
       const headers: Record<string, string> = {
         accept: req.header('accept') ?? 'application/json',
       };
-      if (req.header('authorization'))
-        headers.authorization = req.header('authorization')!;
+      if (authorization && !this.settings.demoNoAuthEnabled)
+        headers.authorization = authorization;
       for (const header of route.headers) {
         const value =
           header.name === 'x-correlation-id'
