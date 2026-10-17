@@ -61,29 +61,109 @@ jobs:
           echo 'PASS: presencia de configuración y destino Oracle aprobados.'
 
       - name: Join Tailscale using GitHub OIDC
+        id: tailscale
+        continue-on-error: true
         uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4
         with:
           oauth-client-id: ${{ vars.TS_OIDC_CLIENT_ID }}
           audience: ${{ vars.TS_OIDC_AUDIENCE }}
           tags: tag:g6-deploy-actions
           version: 1.90.1
+          ping: 100.87.22.28
 
-      - name: Verify Oracle Tailscale reachability
+      - name: Diagnose Tailscale peer visibility and TCP/22 if join or ping failed
+        if: always() && steps.tailscale.outcome != 'skipped'
         env:
-          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          TAILSCALE_OUTCOME: ${{ steps.tailscale.outcome }}
         run: |
           set -euo pipefail
-          tailscale ping --c 1 --timeout=20s 100.87.22.28 >/dev/null 2>&1 || { echo 'FAIL: Tailscale ping a Oracle.' >&2; exit 1; }
-          [[ "$ORACLE_HOST" == 100.87.22.28 ]] || { echo 'FAIL: host Oracle no coincide.' >&2; exit 1; }
-          echo 'PASS: Oracle responde como peer Tailscale.'
+          if [[ "$TAILSCALE_OUTCOME" == success ]]; then
+            echo 'PASS: OIDC/Tailscale y ping oficial a Oracle.'
+            exit 0
+          fi
+
+          target=100.87.22.28
+          failure=1
+          if ! command -v tailscale >/dev/null 2>&1; then
+            echo 'FAIL: cliente Tailscale no instalado; revisar OIDC y preparación del action.' >&2
+          elif ! tailscale status --json > /tmp/tailscale-status.json 2>/dev/null; then
+            echo 'FAIL: Tailscale no quedó conectado; revisar OIDC, autenticación y estado del daemon.' >&2
+          else
+            peer_state="$(jq -r --arg ip "$target" '[.Peer[]? | select((.TailscaleIPs // []) | index($ip))] | if length == 0 then "not-visible" elif any(.[]; .Online == true) then "online" else "offline" end' /tmp/tailscale-status.json)"
+            case "$peer_state" in
+              not-visible)
+                echo 'FAIL: Oracle no es visible como peer; revisar aprobación del dispositivo, tag y política Tailscale.' >&2
+                ;;
+              offline)
+                echo 'FAIL: Oracle aparece en la tailnet pero está offline.' >&2
+                ;;
+              online)
+                ping_log=/tmp/tailscale-oracle-ping.log
+                if tailscale ping --c 1 --timeout=15s "$target" > "$ping_log" 2>&1; then
+                  echo 'FAIL: ping del action agotó la espera; el reintento respondió, señal transitoria/propagación.' >&2
+                elif grep -Eiq 'timeout|timed out|deadline exceeded|no response' "$ping_log"; then
+                  echo 'FAIL: timeout Tailscale hacia peer visible; revisar relay, ruta y ACL de red.' >&2
+                else
+                  echo 'FAIL: peer visible, pero Tailscale ping falló; revisar política/ACL o ruta.' >&2
+                fi
+                rm -f "$ping_log"
+                ;;
+              *)
+                echo 'FAIL: no se pudo clasificar la visibilidad del peer Oracle.' >&2
+                ;;
+            esac
+          fi
+
+          if python3 - "$target" <<'PY'
+          import socket
+          import sys
+
+          host = sys.argv[1]
+          try:
+              with socket.create_connection((host, 22), timeout=8):
+                  print("PASS: TCP/22 alcanzable durante el diagnóstico.")
+          except ConnectionRefusedError:
+              print("FAIL: TCP/22 rechazado; el host responde, pero SSH no escucha en ese puerto.")
+              sys.exit(2)
+          except TimeoutError:
+              print("FAIL: timeout TCP/22; probable ACL/firewall/ruta que descarta el tráfico.")
+              sys.exit(3)
+          except OSError as exc:
+              print(f"FAIL: error de red TCP/22 ({exc.errno}); revisar ruta/firewall.")
+              sys.exit(4)
+          PY
+          then
+            tcp_status=0
+          else
+            tcp_status=$?
+          fi
+          [[ "$tcp_status" == 0 ]] || failure=1
+          rm -f /tmp/tailscale-status.json
+          exit "$failure"
 
       - name: Verify TCP port 22
         env:
           ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
         run: |
           set -euo pipefail
-          timeout 10 bash -c 'exec 3<>/dev/tcp/$1/22' _ "$ORACLE_HOST" >/dev/null 2>&1 || { echo 'FAIL: conexión TCP/22 a Oracle.' >&2; exit 1; }
-          echo 'PASS: Oracle acepta TCP/22 desde Actions por Tailscale.'
+          python3 - "$ORACLE_HOST" <<'PY'
+          import socket
+          import sys
+
+          host = sys.argv[1]
+          try:
+              with socket.create_connection((host, 22), timeout=8):
+                  print("PASS: Oracle acepta TCP/22 desde Actions por Tailscale.")
+          except ConnectionRefusedError:
+              print("FAIL: TCP/22 rechazado; el host responde, pero SSH no escucha en ese puerto.", file=sys.stderr)
+              sys.exit(2)
+          except TimeoutError:
+              print("FAIL: timeout TCP/22; revisar ACL/firewall/ruta.", file=sys.stderr)
+              sys.exit(3)
+          except OSError as exc:
+              print(f"FAIL: error de red TCP/22 ({exc.errno}); revisar ruta/firewall.", file=sys.stderr)
+              sys.exit(4)
+          PY
 
       - name: Verify ED25519 host identity and strict known_hosts
         env:
@@ -142,6 +222,14 @@ jobs:
       repository: ${{ steps.selection.outputs.repository }}
       services: ${{ steps.targets.outputs.services || '[]' }}
     steps:
+      - name: Checkout trusted master source before validation
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: refs/heads/master
+          fetch-depth: 1
+          persist-credentials: false
+
       - name: Validate CI run and select fresh master commit
         id: selection
         env:
@@ -163,6 +251,7 @@ jobs:
         with:
           ref: ${{ steps.selection.outputs.sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Validate service selection
         id: targets
@@ -274,17 +363,7 @@ jobs:
           audience: ${{ vars.TS_OIDC_AUDIENCE }}
           tags: tag:g6-deploy-actions
           version: 1.90.1
-
-      - name: Require Oracle host to resolve as a Tailscale peer
-        if: steps.publish_freshness.outputs.publish == 'true'
-        env:
-          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
-        run: |
-          set -euo pipefail
-          tailscale ping --c 1 --timeout=20s "$ORACLE_HOST" >/dev/null 2>&1 || {
-            echo 'ORACLE_HOST is not reachable as a peer in the configured tailnet.' >&2
-            exit 1
-          }
+          ping: ${{ secrets.ORACLE_HOST }}
 
       - name: Verify restricted SSH authentication from GitHub Actions
         if: steps.publish_freshness.outputs.publish == 'true'

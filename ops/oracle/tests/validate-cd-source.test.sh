@@ -46,7 +46,9 @@ run_validator() {
 run_validator >/dev/null
 grep -Fq "sha=$SHA" "$TEMP_ROOT/output"
 grep -Fq "repository=${REPOSITORY,,}" "$TEMP_ROOT/output"
-echo 'PASS: successful CI push on current master SHA accepted'
+automatic_services="$(bash "$ROOT/ops/oracle/select-cd-services.sh" automatic "$REPOSITORY")"
+[[ "$automatic_services" == '[]' ]] || { echo 'FAIL: valid CI push must no-op while auto authorization is empty.' >&2; exit 1; }
+echo 'PASS: successful workflow_run source validated; nine disabled services produce an empty no-op selection.'
 
 # A CI run caused by a PR is rejected, even when it comes from the same repository.
 if env PATH="$TEMP_ROOT/bin:$PATH" GITHUB_OUTPUT="$TEMP_ROOT/pr-output" GITHUB_REPOSITORY="$REPOSITORY" \
