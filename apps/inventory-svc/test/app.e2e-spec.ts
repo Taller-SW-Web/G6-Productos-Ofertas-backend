@@ -456,4 +456,144 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
       expect(res.body.items[0].result).toBe('SUFICIENTE');
     });
   });
+
+  describe('Reintegro F3/Postventa (POST /api/v1/inventario/reintegros)', () => {
+    const postventaToken = createCryptographicJwt({
+      clientId: 'modulo-postventa',
+      scope: 'inventario:reintegrar inventario:disponibilidad:leer',
+    });
+    const ventasReintegroToken = createCryptographicJwt({
+      clientId: 'modulo-ventas',
+      scope: 'inventario:reintegrar',
+    });
+
+    function reintegroBody(operationId: string, quantity = 2) {
+      return {
+        operation_id: operationId,
+        order_id: 'PED-F3-E2E',
+        source_ref: 'DEV-E2E',
+        reason: 'DEVOLUCION_ACEPTADA',
+        lines: [{ sku, quantity, location_id: locLurin }],
+      };
+    }
+
+    it('aplica el incremento y responde 200 COMPLETED', async () => {
+      const opId = randomUUID();
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/inventario/reintegros')
+        .set('Authorization', `Bearer ${postventaToken}`)
+        .set('Idempotency-Key', opId)
+        .send(reintegroBody(opId))
+        .expect(200);
+
+      expect(res.body.status).toBe('COMPLETED');
+      expect(res.body.lines).toEqual([
+        {
+          sku,
+          location_id: locLurin,
+          quantity: 2,
+          on_hand: 20,
+          reserved: 0,
+          blocked: 0,
+          available: 20,
+          stock_version: 2,
+        },
+      ]);
+    });
+
+    it('un retry idéntico no duplica stock ni Kardex', async () => {
+      const opId = randomUUID();
+      const body = reintegroBody(opId);
+
+      await request(app.getHttpServer())
+        .post('/api/v1/inventario/reintegros')
+        .set('Authorization', `Bearer ${postventaToken}`)
+        .set('Idempotency-Key', opId)
+        .send(body)
+        .expect(200);
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/inventario/reintegros')
+        .set('Authorization', `Bearer ${postventaToken}`)
+        .set('Idempotency-Key', opId)
+        .send(body)
+        .expect(200);
+
+      expect(res.body.lines[0].on_hand).toBe(20);
+      expect(
+        mockDb.kardex.filter((row) => row.operation_type === 'REINTEGRO'),
+      ).toHaveLength(1);
+    });
+
+    it('responde 409 IDEMPOTENCY_CONFLICT con identidad reutilizada y payload distinto', async () => {
+      const opId = randomUUID();
+      await request(app.getHttpServer())
+        .post('/api/v1/inventario/reintegros')
+        .set('Authorization', `Bearer ${postventaToken}`)
+        .set('Idempotency-Key', opId)
+        .send(reintegroBody(opId))
+        .expect(200);
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/inventario/reintegros')
+        .set('Authorization', `Bearer ${postventaToken}`)
+        .set('Idempotency-Key', opId)
+        .send({ ...reintegroBody(opId), source_ref: 'DEV-OTRO' })
+        .expect(409);
+
+      expect(res.body.code).toBe('IDEMPOTENCY_CONFLICT');
+    });
+
+    it('responde 422 REINTEGRO_NO_APLICABLE si Ventas usa DEVOLUCION_ACEPTADA', async () => {
+      const opId = randomUUID();
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/inventario/reintegros')
+        .set('Authorization', `Bearer ${ventasReintegroToken}`)
+        .set('Idempotency-Key', opId)
+        .send(reintegroBody(opId))
+        .expect(422);
+
+      expect(res.body.code).toBe('REINTEGRO_NO_APLICABLE');
+    });
+
+    it('responde 403 SCOPE_INSUFICIENTE para un cliente no autorizado', async () => {
+      const marketplaceToken = createCryptographicJwt({
+        clientId: 'modulo-marketplace',
+        scope: 'inventario:reintegrar',
+      });
+      const opId = randomUUID();
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/inventario/reintegros')
+        .set('Authorization', `Bearer ${marketplaceToken}`)
+        .set('Idempotency-Key', opId)
+        .send(reintegroBody(opId))
+        .expect(403);
+
+      expect(res.body.code).toBe('SCOPE_INSUFICIENTE');
+    });
+
+    it('responde 400 VALIDACION sin Idempotency-Key', async () => {
+      const opId = randomUUID();
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/inventario/reintegros')
+        .set('Authorization', `Bearer ${postventaToken}`)
+        .send(reintegroBody(opId))
+        .expect(400);
+
+      expect(res.body.code).toBe('VALIDACION');
+    });
+
+    it('habilita a Postventa la consulta informativa de disponibilidad', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/inventario/disponibilidad?skus=${sku}`)
+        .set('Authorization', `Bearer ${postventaToken}`)
+        .expect(200);
+
+      expect(res.body.items[0].sku).toBe(sku);
+    });
+  });
 });

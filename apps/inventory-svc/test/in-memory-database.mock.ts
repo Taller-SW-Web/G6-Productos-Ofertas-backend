@@ -553,6 +553,24 @@ export class InMemoryDatabaseMock implements IDatabaseService {
         }
         return { rows: [], rowCount: 1 };
       }
+      if (s.includes('SET STOCK_VERSION = $3, ON_HAND = $4')) {
+        const sku = params?.[0];
+        const loc = params?.[1];
+        const newVersion = Number(params?.[2]);
+        const newOnHand = Number(params?.[3]);
+        const target = this.stockBalance.find(
+          (b) => b.sku_id === sku && b.location_id === loc,
+        );
+        if (target) {
+          target.on_hand = newOnHand;
+          target.stock_version = newVersion;
+          target.available = Math.max(
+            0,
+            target.on_hand - target.reserved - target.blocked,
+          );
+        }
+        return { rows: [], rowCount: 1 };
+      }
     }
 
     // UPDATE reservations
