@@ -4,14 +4,22 @@ import {
   Controller,
   Get,
   Headers,
+  HttpCode,
   Param,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
-import { CatalogAuthGuard, RequireCatalogIdentity } from './catalog-auth.js';
+import {
+  CatalogAuthGuard,
+  RequireCatalogIdentity,
+  type CatalogPrincipal,
+} from './catalog-auth.js';
+import type { Request } from 'express';
 import { CatalogQueryService } from './catalog-query.service.js';
 import { isCorrelationId } from './correlation.js';
+import { parseProductQuery } from './catalog-query.js';
 
 @Controller('api/v1/productos')
 @UseGuards(CatalogAuthGuard)
@@ -31,14 +39,24 @@ export class CatalogQueryController {
   })
   product(
     @Param('productoId') productId: string,
-    @Query('canal') channel: string | undefined,
+    @Query() query: Record<string, unknown>,
     @Headers('x-correlation-id') correlationId?: string,
+    @Req() request?: Request & { catalogPrincipal?: CatalogPrincipal },
   ) {
     this.validateCorrelation(correlationId);
-    return this.service.product(productId, channel, correlationId);
+    return this.service.product(
+      productId,
+      parseProductQuery(query, true).canal,
+      correlationId,
+      {
+        authorization: request?.headers.authorization,
+        user: request?.catalogPrincipal?.kind === 'user',
+      },
+    );
   }
 
   @Post('datos-fisicos/consulta')
+  @HttpCode(200)
   @RequireCatalogIdentity({
     identity: 'service',
     scope: 'productos:fisicos:leer',
@@ -85,6 +103,7 @@ export class CatalogQueryController {
   }
 
   @Post('codigos-barras/resolver')
+  @HttpCode(200)
   @RequireCatalogIdentity({
     identity: 'service',
     scope: 'catalogo:leer',

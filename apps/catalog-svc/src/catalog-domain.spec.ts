@@ -29,6 +29,62 @@ const readyProduct = (
 });
 
 describe('catalog domain activation rules', () => {
+  it.each([
+    'minimumDataValid',
+    'mastersValid',
+    'requiredAttributesComplete',
+    'imageValid',
+  ] as const)('requires %s for activation and active edits', (key) => {
+    expect(canActivateProduct(readyProduct({ [key]: false }))).toBe(false);
+  });
+  it.each(['PENDING', 'REJECTED'] as const)(
+    'rejects uncompleted preparation %s',
+    (status) => {
+      expect(canActivateProduct(readyProduct({ pricingStatus: status }))).toBe(
+        false,
+      );
+      expect(
+        canActivateProduct(readyProduct({ inventoryStatus: status })),
+      ).toBe(false);
+    },
+  );
+  it('forbids physical data and inventory readiness on a parent with variants', () => {
+    const child = {
+      status: 'ACTIVA' as const,
+      skuAndCombinationValid: true,
+      attributesAndImageValid: true,
+      physicalProfile: completeProfile,
+      inventoryStatus: 'COMPLETED' as const,
+    };
+    expect(
+      canActivateProduct(
+        readyProduct({ hasVariants: true, variants: [child] }),
+      ),
+    ).toBe(false);
+    expect(
+      canActivateProduct(
+        readyProduct({
+          hasVariants: true,
+          physicalProfile: undefined,
+          inventoryStatus: undefined,
+          variants: [
+            child,
+            { ...child, status: 'INACTIVA', inventoryStatus: 'REJECTED' },
+          ],
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      canActivateProduct(
+        readyProduct({
+          hasVariants: true,
+          physicalProfile: undefined,
+          inventoryStatus: undefined,
+          variants: [child, { ...child, inventoryStatus: 'PENDING' }],
+        }),
+      ),
+    ).toBe(false);
+  });
   it('accepts incomplete positive profile data for a draft but requires completeness to activate', () => {
     expect(isPhysicalProfileValid({ pesoKg: 1 })).toBe(true);
     expect(isPhysicalProfileComplete({ pesoKg: 1 })).toBe(false);

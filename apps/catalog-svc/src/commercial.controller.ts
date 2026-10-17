@@ -52,6 +52,10 @@ export class CommercialController {
       parseProductQuery(query),
       correlationId,
       administrativeState,
+      {
+        authorization: request?.headers.authorization,
+        user: request?.catalogPrincipal?.kind === 'user',
+      },
     );
   }
   @Get('por-slug/:slug')
@@ -64,12 +68,17 @@ export class CommercialController {
     @Param('slug') slug: string,
     @Query() query: Record<string, unknown>,
     @Headers('x-correlation-id') correlationId?: string,
+    @Req() request?: Request & { catalogPrincipal?: CatalogPrincipal },
   ) {
     this.validateCorrelation(correlationId);
     return this.service.detail(
       slug,
       parseProductQuery(query, true),
       correlationId,
+      {
+        authorization: request?.headers.authorization,
+        user: request?.catalogPrincipal?.kind === 'user',
+      },
     );
   }
 }

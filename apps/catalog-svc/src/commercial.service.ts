@@ -14,6 +14,7 @@ import type {
 } from './commercial.types.js';
 import { PostgresCatalogRepository } from './postgres-catalog.repository.js';
 import { TaxonomyClient } from './taxonomy.client.js';
+import type { TaxonomyIdentity } from './taxonomy.client.js';
 
 @Injectable()
 export class CommercialService {
@@ -27,15 +28,16 @@ export class CommercialService {
     query: ProductQuery,
     correlationId?: string,
     administrativeState = false,
+    identity?: TaxonomyIdentity,
   ): Promise<ProductPage> {
     if (query.precioMin !== undefined || query.precioMax !== undefined) {
       // Falta semántica de precio por producto y frontera Pricing aprobada.
       throw new ServiceUnavailableException();
     }
     if (query.categoriaId !== undefined)
-      await this.taxonomy.category(query.categoriaId, correlationId);
+      await this.taxonomy.category(query.categoriaId, correlationId, identity);
     if (query.marcaId !== undefined)
-      await this.taxonomy.brand(query.marcaId, correlationId);
+      await this.taxonomy.brand(query.marcaId, correlationId, identity);
     const isAdministrativeState =
       query.estado !== undefined && query.estado !== 'ACTIVO';
     if (isAdministrativeState && !administrativeState)
@@ -49,6 +51,7 @@ export class CommercialService {
     slug: string,
     query: ProductQuery,
     correlationId?: string,
+    identity?: TaxonomyIdentity,
   ): Promise<ProductDetail> {
     const selection = await this.eligibility.resolve(query.canal);
     const product = await this.repository.findCandidateBySlug(
@@ -61,7 +64,11 @@ export class CommercialService {
     try {
       return {
         ...product,
-        marca: await this.taxonomy.brand(product.marca_id, correlationId),
+        marca: await this.taxonomy.brand(
+          product.marca_id,
+          correlationId,
+          identity,
+        ),
       };
     } catch {
       // La marca obligatoria no se fabrica ni se reemplaza por el ID.
@@ -73,6 +80,7 @@ export class CommercialService {
     productId: string,
     canal: ProductQuery['canal'],
     correlationId?: string,
+    identity?: TaxonomyIdentity,
   ): Promise<ProductDetail> {
     const selection = await this.eligibility.resolve(canal);
     const product = await this.repository.findCandidateByProductId(
@@ -85,7 +93,11 @@ export class CommercialService {
     try {
       return {
         ...product,
-        marca: await this.taxonomy.brand(product.marca_id, correlationId),
+        marca: await this.taxonomy.brand(
+          product.marca_id,
+          correlationId,
+          identity,
+        ),
       };
     } catch {
       throw new ServiceUnavailableException();

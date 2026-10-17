@@ -99,7 +99,7 @@ export interface CatalogAuthPolicy {
 
 export function RequireCatalogIdentity(
   policy: CatalogAuthPolicy,
-): MethodDecorator {
+): MethodDecorator & ClassDecorator {
   return SetMetadata(CATALOG_AUTH_POLICY, policy);
 }
 
@@ -269,6 +269,7 @@ export class CatalogTokenVerifier {
       throw new CatalogTokenRejected();
     }
     if (
+      !record(header) ||
       header.alg !== 'RS256' ||
       typeof header.kid !== 'string' ||
       !record(claims)

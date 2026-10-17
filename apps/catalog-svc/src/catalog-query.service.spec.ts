@@ -33,6 +33,7 @@ describe('CatalogQueryService', () => {
       'p-1',
       'RETAIL',
       'correlation',
+      undefined,
     );
     expect(() => service.product('p-1', 'UNKNOWN')).toThrow(
       BadRequestException,

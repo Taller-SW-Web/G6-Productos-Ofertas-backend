@@ -84,6 +84,12 @@ export function canActivateProduct(facts: ProductActivationFacts): boolean {
       isPhysicalProfileComplete(facts.physicalProfile)
     );
 
+  if (
+    facts.physicalProfile !== undefined ||
+    facts.inventoryStatus !== undefined
+  )
+    return false;
+
   const activeVariants = (facts.variants ?? []).filter(
     (variant) => variant.status === 'ACTIVA',
   );

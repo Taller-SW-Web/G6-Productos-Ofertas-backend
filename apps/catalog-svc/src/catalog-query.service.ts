@@ -7,6 +7,7 @@ import {
 import { CatalogQueryRepository } from './catalog-query.repository.js';
 import { CommercialService } from './commercial.service.js';
 import type { Canal } from './commercial.types.js';
+import type { TaxonomyIdentity } from './taxonomy.client.js';
 
 const channels: readonly Canal[] = [
   'MARKETPLACE',
@@ -67,13 +68,19 @@ export class CatalogQueryService {
     private readonly commercial: CommercialService,
   ) {}
 
-  product(productId: string, channel: unknown, correlationId?: string) {
+  product(
+    productId: string,
+    channel: unknown,
+    correlationId?: string,
+    identity?: TaxonomyIdentity,
+  ) {
     if (typeof channel !== 'string' || !channels.includes(channel as Canal))
       throw new BadRequestException();
     return this.commercial.productById(
       productId,
       channel as Canal,
       correlationId,
+      identity,
     );
   }
 

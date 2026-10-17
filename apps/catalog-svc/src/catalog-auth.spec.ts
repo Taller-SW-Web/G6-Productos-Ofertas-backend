@@ -103,6 +103,16 @@ describe('Catalog JWT verification', () => {
     expect(readCatalogSecurityConfig({})).toBeUndefined();
   });
 
+  it.each([null, [], 'not-an-object', 1])(
+    'rejects a malformed JWT header %j as an invalid token',
+    async (header) => {
+      const encoded = Buffer.from(JSON.stringify(header)).toString('base64url');
+      await expect(
+        verifier.verify(encoded + '.e30.signature'),
+      ).rejects.toBeInstanceOf(CatalogTokenRejected);
+    },
+  );
+
   it('verifies user tokens with RS256, exact issuer, UUID subject and roles', async () => {
     await expect(verifier.verify(token())).resolves.toMatchObject({
       kind: 'user',
