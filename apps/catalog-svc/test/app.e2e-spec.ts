@@ -3,6 +3,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module.js';
+import { CATALOG_DATABASE } from './../src/readiness.js';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
@@ -21,6 +22,48 @@ describe('AppController (e2e)', () => {
       status: 'ok',
       service: 'catalog-svc',
     });
+  });
+
+  it('/health/live remains alive while readiness is unavailable', async () => {
+    await request(app.getHttpServer())
+      .get('/health/ready')
+      .expect(503)
+      .expect({
+        status: 'not_ready',
+        service: 'catalog-svc',
+        dependencies: { database: 'unavailable' },
+      });
+    await request(app.getHttpServer()).get('/health/live').expect(200).expect({
+      status: 'ok',
+      service: 'catalog-svc',
+    });
+  });
+
+  it('reflects dependency availability and loss with an isolated test adapter', async () => {
+    const check = vi.fn().mockResolvedValue(undefined);
+    const fixture = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(CATALOG_DATABASE)
+      .useValue({ check })
+      .compile();
+    const isolated = fixture.createNestApplication();
+    await isolated.init();
+    try {
+      await request(isolated.getHttpServer())
+        .get('/health/ready')
+        .expect(200)
+        .expect({
+          status: 'ready',
+          service: 'catalog-svc',
+        });
+      check.mockRejectedValue(new Error('fixture-secret'));
+      const response = await request(isolated.getHttpServer())
+        .get('/health/ready')
+        .expect(503);
+      expect(response.text).not.toContain('fixture-secret');
+      await request(isolated.getHttpServer()).get('/health').expect(200);
+    } finally {
+      await isolated.close();
+    }
   });
 
   afterEach(async () => {
