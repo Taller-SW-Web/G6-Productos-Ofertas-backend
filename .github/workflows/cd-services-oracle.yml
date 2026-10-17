@@ -363,17 +363,7 @@ jobs:
           audience: ${{ vars.TS_OIDC_AUDIENCE }}
           tags: tag:g6-deploy-actions
           version: 1.90.1
-
-      - name: Require Oracle host to resolve as a Tailscale peer
-        if: steps.publish_freshness.outputs.publish == 'true'
-        env:
-          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
-        run: |
-          set -euo pipefail
-          tailscale ping --c 1 --timeout=20s "$ORACLE_HOST" >/dev/null 2>&1 || {
-            echo 'ORACLE_HOST is not reachable as a peer in the configured tailnet.' >&2
-            exit 1
-          }
+          ping: ${{ secrets.ORACLE_HOST }}
 
       - name: Verify restricted SSH authentication from GitHub Actions
         if: steps.publish_freshness.outputs.publish == 'true'

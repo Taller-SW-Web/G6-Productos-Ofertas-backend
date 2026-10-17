@@ -114,6 +114,15 @@ grep -Fq 'workflow_dispatch:' <<< "$workflow_on" || {
 grep -Fq 'connectivity-check' "$WORKFLOW" || { echo 'FAIL: falta modo de conectividad'; exit 1; }
 grep -Fq "inputs.mode == 'connectivity-check'" "$WORKFLOW" || { echo 'FAIL: conectividad no tiene guard exclusivo'; exit 1; }
 grep -Fq 'ping: 100.87.22.28' "$WORKFLOW" || { echo 'FAIL: falta el ping oficial del action al host aprobado'; exit 1; }
+release_ping_line="$(grep -nF 'ping: ${{ secrets.ORACLE_HOST }}' "$WORKFLOW" | cut -d: -f1)"
+release_action_line="$(grep -n 'name: Join Tailscale using GitHub OIDC' "$WORKFLOW" | tail -n 1 | cut -d: -f1)"
+release_ssh_line="$(grep -n 'name: Verify restricted SSH authentication from GitHub Actions' "$WORKFLOW" | cut -d: -f1)"
+[[ -n "$release_ping_line" && -n "$release_action_line" && -n "$release_ssh_line" && "$release_action_line" -lt "$release_ping_line" && "$release_ping_line" -lt "$release_ssh_line" ]] || { echo 'FAIL: release no espera ping oficial después de Tailscale y antes de SSH'; exit 1; }
+[[ "$(grep -Fc 'ping: ${{ secrets.ORACLE_HOST }}' "$WORKFLOW")" -eq 1 ]] || { echo 'FAIL: se esperaba exactamente un ping oficial dinámico para release'; exit 1; }
+if grep -Eq 'tailscale ping --c 1 --timeout=20s' "$WORKFLOW"; then
+  echo 'FAIL: release conserva ping inmediato redundante' >&2
+  exit 1
+fi
 grep -Fq 'continue-on-error: true' "$WORKFLOW" || { echo 'FAIL: no se ejecutaría el diagnóstico si falla el ping oficial'; exit 1; }
 grep -Fq 'FAIL: Oracle no es visible como peer' "$WORKFLOW" || { echo 'FAIL: falta diagnóstico de peer no visible'; exit 1; }
 grep -Fq 'timeout TCP/22' "$WORKFLOW" || { echo 'FAIL: falta diagnóstico de timeout/restricción TCP'; exit 1; }
