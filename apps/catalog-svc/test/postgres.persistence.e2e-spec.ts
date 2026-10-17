@@ -1,5 +1,11 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  mkdtempSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
@@ -41,6 +47,36 @@ function command(executable: string, args: string[], input?: string): string {
   return result.stdout.trim();
 }
 
+function sanitizedPostgresLogs(container: string): string {
+  const result = spawnSync('docker', ['logs', '--tail', '80', container], {
+    encoding: 'utf8',
+    timeout: 5000,
+    windowsHide: true,
+  });
+  const diagnostics = (result.stdout + '\n' + result.stderr)
+    .split(/\r?\n/)
+    .filter((line) =>
+      /database system is ready to accept connections|starting PostgreSQL|permission denied|private key|server certificate|could not (?:open|read|load).*?(?:certificate|key)|fatal:/i.test(
+        line,
+      ),
+    )
+    .map((line) => {
+      if (
+        /permission denied|private key|server certificate|could not/i.test(line)
+      )
+        return '[PostgreSQL startup] TLS certificate/key access diagnostic';
+      if (/ready to accept connections/i.test(line))
+        return '[PostgreSQL startup] ready to accept connections';
+      if (/fatal:/i.test(line))
+        return '[PostgreSQL startup] fatal server error';
+      return '[PostgreSQL startup] server starting';
+    });
+  const uniqueDiagnostics = [...new Set(diagnostics)].slice(-20);
+  return uniqueDiagnostics.length
+    ? uniqueDiagnostics.join('\n')
+    : 'No sanitized startup diagnostics were emitted.';
+}
+
 async function until(check: () => boolean, timeout = 30000): Promise<void> {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
@@ -75,8 +111,11 @@ describe.skipIf(!dockerAvailable)(
 
     beforeAll(async () => {
       directory = mkdtempSync(join(tmpdir(), 'catalog-persistence-'));
-      const cert = join(directory, 'server.crt');
-      const key = join(directory, 'server.key');
+      const certDirectory = join(directory, 'certs');
+      mkdirSync(certDirectory);
+      chmodSync(certDirectory, 0o755);
+      const cert = join(certDirectory, 'server.crt');
+      const key = join(certDirectory, 'server.key');
       caFile = cert;
       command('openssl', [
         'req',
@@ -95,6 +134,8 @@ describe.skipIf(!dockerAvailable)(
         '-out',
         cert,
       ]);
+      chmodSync(key, 0o644);
+      chmodSync(cert, 0o644);
       command('docker', [
         'run',
         '--detach',
@@ -105,14 +146,21 @@ describe.skipIf(!dockerAvailable)(
         '--env',
         'POSTGRES_PASSWORD=isolated-admin-password',
         '--volume',
-        directory + ':/certs:ro',
+        certDirectory + ':/certs:ro',
         '--entrypoint',
         'sh',
         'postgres:17-alpine',
         '-c',
         'cp /certs/server.key /tmp/server.key; chown postgres:postgres /tmp/server.key; chmod 600 /tmp/server.key; exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/certs/server.crt -c ssl_key_file=/tmp/server.key',
       ]);
-      await until(ready);
+      try {
+        await until(ready);
+      } catch {
+        throw new Error(
+          'Isolated PostgreSQL did not become available in time. Sanitized container logs:\n' +
+            sanitizedPostgresLogs(container),
+        );
+      }
 
       const migration = readFileSync(
         resolve('apps/catalog-svc/test/fixtures/0001_create_catalog.sql'),
@@ -217,12 +265,13 @@ describe.skipIf(!dockerAvailable)(
 
     it('rolls back operation failures and reports deferred aggregate constraints at commit', async () => {
       const rolledBackSku = 'SKU-' + randomUUID();
+      const rollbackFailure = new Error('force rollback');
       await expect(
         transactions.run(async (tx) => {
           await repository.insertProduct(tx, productInput(rolledBackSku));
-          throw new Error('force rollback');
+          throw rollbackFailure;
         }),
-      ).rejects.toBeInstanceOf(CatalogPersistenceError);
+      ).rejects.toBe(rollbackFailure);
       const [missing] = await database.read((db) =>
         db
           .select({ id: products.id })

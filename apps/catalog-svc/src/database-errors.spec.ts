@@ -22,6 +22,8 @@ describe('safe PostgreSQL failure translation', () => {
         constraint: 'catalog_internal_guard',
       });
       const translated = translatePostgresFailure(error, commit);
+      expect(translated).toBeDefined();
+      if (!translated) throw new Error('Expected a PostgreSQL failure');
       expect(translated).toBeInstanceOf(CatalogPersistenceError);
       expect(translated.failure).toBe(expected);
       expect(translated.sqlState).toBe(
@@ -39,13 +41,46 @@ describe('safe PostgreSQL failure translation', () => {
       Object.assign(
         new Error('SELECT secret FROM catalog WHERE token=password'),
         {
-          code: 'XXXXX',
+          code: '22P02',
           detail: 'sensitive parameter value',
         },
       ),
     );
+    expect(translated).toBeDefined();
+    if (!translated) throw new Error('Expected a PostgreSQL failure');
     expect(translated.failure).toBe('other');
     expect(JSON.stringify(translated)).not.toContain('secret');
     expect(translated.message).toBe('Servicio temporalmente no disponible');
+  });
+
+  it.each([
+    ['23505', false, 'unique'],
+    ['23503', false, 'foreign_key'],
+    ['23514', false, 'check'],
+    ['23514', true, 'deferred_constraint'],
+  ] as const)(
+    'extracts SQLSTATE %s from DrizzleQueryError.cause at commit=%s',
+    (code, commit, expected) => {
+      const postgresError = Object.assign(
+        new Error('private SQL and parameter'),
+        { code, constraint: 'catalog_internal_guard' },
+      );
+      const drizzleError = Object.assign(new Error('Drizzle query failed'), {
+        cause: postgresError,
+        query: 'SELECT private_data',
+      });
+      const translated = translatePostgresFailure(drizzleError, commit);
+      expect(translated).toBeDefined();
+      if (!translated) throw new Error('Expected a PostgreSQL failure');
+      expect(translated.failure).toBe(expected);
+      expect(translated.sqlState).toBe(code);
+      expect(translated.message).not.toContain('private');
+      expect(JSON.stringify(translated)).not.toContain('SELECT');
+    },
+  );
+
+  it('does not translate business or validation exceptions without a database cause', () => {
+    const domainFailure = new Error('catalog validation failed');
+    expect(translatePostgresFailure(domainFailure)).toBeUndefined();
   });
 });

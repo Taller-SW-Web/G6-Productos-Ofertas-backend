@@ -13,6 +13,7 @@ export type CatalogPersistenceFailure =
 type PostgresFailure = Error & {
   code?: unknown;
   constraint?: unknown;
+  cause?: unknown;
 };
 
 export class CatalogPersistenceError extends ServiceUnavailableException {
@@ -37,16 +38,45 @@ function isPostgresFailure(value: unknown): value is PostgresFailure {
   return value instanceof Error && 'code' in value;
 }
 
+function isDatabaseCode(code: string): boolean {
+  return (
+    /^[0-9A-Z]{5}$/.test(code) ||
+    code.startsWith('ECONN') ||
+    code.startsWith('EHOST') ||
+    code.startsWith('ENOTFOUND') ||
+    code.startsWith('ETIMEDOUT') ||
+    code.startsWith('ERR_TLS_')
+  );
+}
+
+function findPostgresFailure(value: unknown): PostgresFailure | undefined {
+  const seen = new Set<unknown>();
+  let current: unknown = value;
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    if (
+      isPostgresFailure(current) &&
+      typeof current.code === 'string' &&
+      isDatabaseCode(current.code)
+    )
+      return current;
+    current = current.cause;
+  }
+  return undefined;
+}
+
 export function translatePostgresFailure(
   value: unknown,
   commitPhase = false,
-): CatalogPersistenceError {
+): CatalogPersistenceError | undefined {
   if (value instanceof CatalogPersistenceError) return value;
-  const code = isPostgresFailure(value) ? value.code : undefined;
+  const postgresFailure = findPostgresFailure(value);
+  if (!postgresFailure) return undefined;
+  const code = postgresFailure.code;
   const driverCode = typeof code === 'string' ? code : undefined;
   const sqlState =
     driverCode && /^[0-9A-Z]{5}$/.test(driverCode) ? driverCode : undefined;
-  const constraint = isPostgresFailure(value) ? value.constraint : undefined;
+  const constraint = postgresFailure.constraint;
   const constraintName =
     typeof constraint === 'string' ? constraint : undefined;
 

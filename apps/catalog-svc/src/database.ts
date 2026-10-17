@@ -17,7 +17,10 @@ import {
 import { sql, type ExtractTablesWithRelations } from 'drizzle-orm';
 import type { PgTransactionConfig } from 'drizzle-orm/pg-core';
 import { catalogSchema } from './catalog.schema.js';
-import { translatePostgresFailure } from './database-errors.js';
+import {
+  CatalogPersistenceError,
+  translatePostgresFailure,
+} from './database-errors.js';
 
 export const CATALOG_POSTGRES_CONFIG = Symbol('CATALOG_POSTGRES_CONFIG');
 
@@ -152,7 +155,7 @@ export class Database implements OnModuleDestroy {
   }
 
   private connection(): CatalogDatabase {
-    if (this.closed) throw new Error('Database provider is closed');
+    if (this.closed) throw new CatalogPersistenceError('connection');
     if (!this.pool) {
       this.pool = new pg.Pool(this.getSettings().pool);
       // pg emits idle client errors outside the query promise. Never log driver details.
@@ -174,7 +177,9 @@ export class Database implements OnModuleDestroy {
     try {
       return await query(this.connection());
     } catch (error) {
-      throw translatePostgresFailure(error);
+      const translated = translatePostgresFailure(error);
+      if (translated) throw translated;
+      throw error;
     }
   }
 
@@ -190,7 +195,9 @@ export class Database implements OnModuleDestroy {
         return result;
       }, config);
     } catch (error) {
-      throw translatePostgresFailure(error, callbackFinished);
+      const translated = translatePostgresFailure(error, callbackFinished);
+      if (translated) throw translated;
+      throw error;
     }
   }
 
