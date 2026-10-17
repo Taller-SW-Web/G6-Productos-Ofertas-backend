@@ -48,9 +48,32 @@ const attributeProjection = {
   valor: productAttributes.valor,
 };
 
+function isDemoImageUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.trim().length === 0) return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      url.hostname !== 'placehold.co' &&
+      !url.hostname.endsWith('.placehold.co')
+    );
+  } catch {
+    return false;
+  }
+}
+
 @Injectable()
 export class PostgresCatalogRepository {
   constructor(private readonly database: Database) {}
+
+  async checkDemoReadAccess(): Promise<void> {
+    await this.database.read(async (db) => {
+      await db.execute(sql.raw('SELECT 1 FROM catalog.products LIMIT 0'));
+      await db.execute(sql.raw('SELECT 1 FROM catalog.variants LIMIT 0'));
+      await db.execute(sql.raw('SELECT 1 FROM catalog.product_images LIMIT 0'));
+      await db.execute(sql.raw('SELECT 1 FROM catalog.variant_images LIMIT 0'));
+    });
+  }
 
   private demoWhere(query: ProductQuery): SQL | undefined {
     const conditions: SQL[] = [];
@@ -77,17 +100,13 @@ export class PostgresCatalogRepository {
     const own = await tx.execute(sql`SELECT url FROM catalog.product_images
       WHERE product_id = ${productId}::uuid AND length(trim(url)) > 0
       ORDER BY principal DESC, posicion ASC, id ASC`);
-    const ownUrls = own.rows
-      .map((row) => row.url)
-      .filter((url): url is string => typeof url === 'string');
+    const ownUrls = own.rows.map((row) => row.url).filter(isDemoImageUrl);
     if (ownUrls.length) return ownUrls;
     const variantsGallery = await tx.execute(sql`SELECT vi.url
       FROM catalog.variants v JOIN catalog.variant_images vi ON vi.variant_id = v.id
       WHERE v.product_id = ${productId}::uuid AND length(trim(vi.url)) > 0
       ORDER BY vi.posicion ASC, vi.id ASC, v.id ASC`);
-    return variantsGallery.rows
-      .map((row) => row.url)
-      .filter((url): url is string => typeof url === 'string');
+    return variantsGallery.rows.map((row) => row.url).filter(isDemoImageUrl);
   }
 
   async listDemoCandidates(

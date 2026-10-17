@@ -73,6 +73,9 @@ describe.skipIf(process.env.G6_READONLY_INTEGRATION !== 'catalog')(
           .limit(1);
       });
     }, 30000);
+    it('checks the four demo read grants against the real Catalog schema', async () => {
+      await expect(repo.checkDemoReadAccess()).resolves.toBeUndefined();
+    }, 30000);
     it('executes read-only paged queries, detail and own-schema composition', async () => {
       const page = await repo.listCandidates(query);
       const count = await db.read((d) =>
@@ -130,10 +133,14 @@ describe.skipIf(process.env.G6_READONLY_INTEGRATION !== 'catalog')(
         count(*) FILTER (WHERE estado = ${'BORRADOR'})::integer AS drafts,
         (SELECT count(DISTINCT p.id)::integer FROM catalog.products p
           WHERE EXISTS (SELECT 1 FROM catalog.product_images pi
-            WHERE pi.product_id = p.id AND length(trim(pi.url)) > 0)
+            WHERE pi.product_id = p.id AND pi.url LIKE 'https://%'
+              AND pi.url NOT LIKE 'https://placehold.co/%'
+              AND pi.url NOT LIKE 'https://%.placehold.co/%')
           OR EXISTS (SELECT 1 FROM catalog.variants v
             JOIN catalog.variant_images vi ON vi.variant_id = v.id
-            WHERE v.product_id = p.id AND length(trim(vi.url)) > 0)) AS products_with_images
+            WHERE v.product_id = p.id AND vi.url LIKE 'https://%'
+              AND vi.url NOT LIKE 'https://placehold.co/%'
+              AND vi.url NOT LIKE 'https://%.placehold.co/%')) AS products_with_valid_images
         FROM catalog.products`),
       );
       const observed = counts.rows[0];
@@ -142,17 +149,14 @@ describe.skipIf(process.env.G6_READONLY_INTEGRATION !== 'catalog')(
           row.images.some((url) => url.trim().length > 0),
         ),
       ).toBe(true);
-      expect(demoRows.length).toBeLessThanOrEqual(
-        Number(observed.products_with_images),
-      );
-      expect(demoRows.length).toBe(Number(observed.products_with_images));
+      expect(demoRows.length).toBe(Number(observed.products_with_valid_images));
       process.stdout.write(
         JSON.stringify({
           evidence: 'catalog-demo-readonly-observation',
           products: observed.products,
           drafts: observed.drafts,
-          productsWithImages: observed.products_with_images,
-          demoRowsWithImages: demoRows.length,
+          productsWithValidImages: observed.products_with_valid_images,
+          demoRowsWithValidImages: demoRows.length,
           pricing: 'not queried; requires Pricing HTTP operation',
           writes: 0,
         }) + '\n',

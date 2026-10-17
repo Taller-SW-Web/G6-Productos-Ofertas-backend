@@ -57,7 +57,7 @@ export class PricingClient {
   async checkReady(): Promise<void> {
     // One read through the actual Pricing operation verifies route, guard and DB
     // without walking the demo catalog or manufacturing a price.
-    await this.currentPrice('00000000-0000-4000-8000-000000000000', 1000);
+    await this.currentPrice('00000000-0000-4000-8000-000000000000');
   }
 
   async currentPrice(

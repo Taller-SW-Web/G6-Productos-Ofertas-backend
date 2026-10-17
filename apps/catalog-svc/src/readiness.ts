@@ -94,10 +94,13 @@ async function runReadinessProbe(): Promise<void> {
   let status = 'not_ready';
   let eligibilityStatus = 'unverified';
   let pricingStatus = 'not_checked';
+  let demoCatalogRead = false;
   try {
     await app.get(Database).verifyIdentity();
     database = 'ready';
     if (config.marketplaceDemoPreview) {
+      await app.get(repository.PostgresCatalogRepository).checkDemoReadAccess();
+      demoCatalogRead = true;
       await app.get(PricingClient).checkReady();
       pricingStatus = 'ready';
       eligibilityStatus = 'not_required_demo';
@@ -116,7 +119,11 @@ async function runReadinessProbe(): Promise<void> {
     status = 'ready';
   } catch {
     status = 'not_ready';
-    if (config.marketplaceDemoPreview && database === 'ready')
+    if (
+      config.marketplaceDemoPreview &&
+      database === 'ready' &&
+      demoCatalogRead
+    )
       pricingStatus = 'unavailable';
   } finally {
     await app.close();

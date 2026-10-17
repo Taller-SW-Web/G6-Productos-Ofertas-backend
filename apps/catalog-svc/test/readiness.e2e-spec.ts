@@ -5,6 +5,7 @@ import { Database } from '../src/database.js';
 import { CatalogConfig } from '../src/config.js';
 import { CommercialService } from '../src/commercial.service.js';
 import { PricingClient } from '../src/pricing.client.js';
+import { PostgresCatalogRepository } from '../src/postgres-catalog.repository.js';
 import { mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -70,6 +71,8 @@ describe('Catalog readiness versus liveness', () => {
       .useValue({ list })
       .overrideProvider(PricingClient)
       .useValue({ checkReady: pricing })
+      .overrideProvider(PostgresCatalogRepository)
+      .useValue({ checkDemoReadAccess: vi.fn().mockResolvedValue(undefined) })
       .compile();
     const app = module.createNestApplication();
     await app.init();
@@ -97,6 +100,8 @@ describe('Catalog readiness versus liveness', () => {
           throw new Error('fixture');
         },
       })
+      .overrideProvider(PostgresCatalogRepository)
+      .useValue({ checkDemoReadAccess: vi.fn().mockResolvedValue(undefined) })
       .compile();
     const app = module.createNestApplication();
     await app.init();
@@ -105,6 +110,35 @@ describe('Catalog readiness versus liveness', () => {
         .get('/health/ready')
         .expect(503);
       expect(response.body.code).toBe('SERVICIO_NO_DISPONIBLE');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('keeps demo readiness closed when a Catalog table SELECT fails', async () => {
+    const pricing = vi.fn();
+    const module = await Test.createTestingModule({
+      imports: [AppModule.forRoot(new CatalogConfig(validEnv()))],
+    })
+      .overrideProvider(Database)
+      .useValue({ verifyIdentity: async () => undefined })
+      .overrideProvider(PricingClient)
+      .useValue({ checkReady: pricing })
+      .overrideProvider(PostgresCatalogRepository)
+      .useValue({
+        checkDemoReadAccess: async () => {
+          throw new Error('fixture SELECT denied');
+        },
+      })
+      .compile();
+    const app = module.createNestApplication();
+    await app.init();
+    try {
+      const response = await request(app.getHttpServer())
+        .get('/health/ready')
+        .expect(503);
+      expect(response.body.code).toBe('SERVICIO_NO_DISPONIBLE');
+      expect(pricing).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }
