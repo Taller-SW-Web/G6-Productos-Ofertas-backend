@@ -9,6 +9,8 @@ export interface PricingConfig {
   port: number;
   databaseUrl: string;
   databaseSsl: false | ConnectionOptions;
+  auth?: { issuer: string; jwksUrl: string };
+  demoNoAuthEnabled?: boolean;
 }
 
 export class InvalidPricingConfig extends Error {}
@@ -24,6 +26,26 @@ export function validateEnvironment(env: NodeJS.ProcessEnv): PricingConfig {
       'NODE_ENV debe ser development, test o production.',
     );
   }
+  const demoFlag = env.GATEWAY_DEMO_NO_AUTH_ENABLED ?? 'false';
+  const productionConfirmed = env.PRICING_DEMO_PRODUCTION_CONFIRMED ?? 'false';
+  if (
+    !['true', 'false'].includes(demoFlag) ||
+    !['true', 'false'].includes(productionConfirmed)
+  ) {
+    throw new InvalidPricingConfig(
+      'GATEWAY_DEMO_NO_AUTH_ENABLED y PRICING_DEMO_PRODUCTION_CONFIRMED deben ser true/false.',
+    );
+  }
+  if (
+    demoFlag === 'true' &&
+    nodeEnv === 'production' &&
+    productionConfirmed !== 'true'
+  ) {
+    throw new InvalidPricingConfig(
+      'Demo en production requiere PRICING_DEMO_PRODUCTION_CONFIRMED=true.',
+    );
+  }
+  const demoNoAuthEnabled = demoFlag === 'true';
   const rawPort = env.PRICING_SVC_PORT ?? env.PORT;
   const port = Number(rawPort);
   if (
@@ -114,5 +136,41 @@ export function validateEnvironment(env: NodeJS.ProcessEnv): PricingConfig {
     }
   }
   url.search = '';
-  return { nodeEnv, port, databaseUrl: url.toString(), databaseSsl };
+  let auth: PricingConfig['auth'];
+  if (
+    !demoNoAuthEnabled &&
+    (env.AUTH_ISSUER !== undefined || env.AUTH_JWKS_URL !== undefined)
+  ) {
+    try {
+      for (const value of [env.AUTH_ISSUER, env.AUTH_JWKS_URL]) {
+        if (!value || value !== value.trim()) throw new Error();
+        const endpoint = new URL(value);
+        if (
+          endpoint.username ||
+          endpoint.password ||
+          endpoint.hash ||
+          (endpoint.protocol !== 'https:' &&
+            !(
+              nodeEnv === 'test' &&
+              endpoint.protocol === 'http:' &&
+              ['localhost', '127.0.0.1', '[::1]'].includes(endpoint.hostname)
+            ))
+        )
+          throw new Error();
+      }
+      auth = { issuer: env.AUTH_ISSUER!, jwksUrl: env.AUTH_JWKS_URL! };
+    } catch {
+      throw new InvalidPricingConfig(
+        'AUTH_ISSUER y AUTH_JWKS_URL deben ser URLs seguras válidas.',
+      );
+    }
+  }
+  return {
+    nodeEnv,
+    port,
+    databaseUrl: url.toString(),
+    databaseSsl,
+    ...(auth ? { auth } : {}),
+    ...(demoNoAuthEnabled ? { demoNoAuthEnabled: true } : {}),
+  };
 }

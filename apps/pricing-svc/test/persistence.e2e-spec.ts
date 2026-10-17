@@ -10,7 +10,10 @@ import {
   PricingDatabase,
   type PricingTransaction,
 } from '../src/persistence/pricing.database.js';
-import { PricingRepository } from '../src/persistence/pricing.repository.js';
+import {
+  PricingRepository,
+  MAX_INLINE_IMPORT_ROWS,
+} from '../src/persistence/pricing.repository.js';
 import { PricingPersistenceError } from '../src/persistence/persistence.error.js';
 import {
   prices,
@@ -23,6 +26,8 @@ import {
   pricingSchema,
 } from '../src/persistence/pricing.schema.js';
 import { IsolatedPostgres } from './isolated-postgres.js';
+import { SignedUser } from './signed-user.js';
+import { PricingMutations } from '../src/application/pricing-mutations.js';
 import {
   changePrice,
   initializeProduct,
@@ -34,9 +39,11 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
   'Pricing Drizzle / PostgreSQL aislado (#53)',
   () => {
     const postgres = new IsolatedPostgres();
+    const identity = new SignedUser();
     let app: INestApplication<App> | undefined;
     let repository: PricingRepository;
     let database: PricingDatabase;
+    let mutations: PricingMutations;
     const from = new Date('2030-01-01T00:00:00Z');
     const boundary = new Date('2031-01-01T00:00:00Z');
     const snapshot = (priceId: string, version = 1n) => ({
@@ -76,6 +83,7 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
 
     beforeAll(async () => {
       await postgres.start();
+      await identity.start();
       const version = await postgres.admin!.query<{ server_version: string }>(
         'SHOW server_version',
       );
@@ -89,11 +97,14 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
             PRICING_SVC_PORT: '3002',
             DATABASE_URL: postgres.runtimeUrl,
             PGSSLMODE: 'disable',
+            AUTH_ISSUER: identity.issuer,
+            AUTH_JWKS_URL: identity.issuer + '/jwks',
           }),
         ],
       }).compile();
       database = module.get(PricingDatabase);
       repository = module.get(PricingRepository);
+      mutations = module.get(PricingMutations);
       app = module.createNestApplication();
       await app.init();
     }, 90000);
@@ -102,9 +113,621 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
       try {
         await app?.close();
       } finally {
-        await postgres.stop();
+        try {
+          await identity.stop();
+        } finally {
+          await postgres.stop();
+        }
       }
     }, 30000);
+
+    it('HTTP devuelve precio base vigente real, contrato y correlación; no expone actor ni historial', async () => {
+      const productId = randomUUID();
+      const started = new Date(Date.now() - 60000);
+      await repository.transaction(async (tx) => {
+        const [price] = await tx
+          .insert(prices)
+          .values({ productId })
+          .returning();
+        await tx
+          .insert(priceValidities)
+          .values({ ...snapshot(price.id), validFrom: started });
+      });
+      const correlation = randomUUID();
+      const response = await request(app!.getHttpServer())
+        .get(`/api/v1/precios/productos/${productId}`)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .set('X-Correlation-Id', correlation)
+        .expect(200);
+      expect(response.headers['x-correlation-id']).toBe(correlation);
+      expect(response.body).toEqual({
+        product_id: productId,
+        precio_regular: 99.99,
+        precio_oferta: 80.25,
+        currency: 'PEN',
+        channel_id: null,
+        valid_from: started.toISOString(),
+        valid_until: null,
+        price_version: 1,
+      });
+      expect(response.text).not.toContain('fixture-actor');
+      const unknown = await request(app!.getHttpServer())
+        .get(`/api/v1/precios/productos/${randomUUID()}`)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .expect(404);
+      expect(unknown.headers['content-type']).toContain(
+        'application/problem+json',
+      );
+      expect(unknown.body).toMatchObject({
+        status: 404,
+        code: 'PRECIO_NO_ENCONTRADO',
+      });
+    });
+
+    it('HTTP pagina programaciones propias por producto/SKU y deriva estados sin escribir', async () => {
+      const productId = randomUUID();
+      const sku = `0000-${randomUUID()}`;
+      const now = Date.now();
+      const future = new Date(now + 3600000);
+      await repository.transaction(async (tx) => {
+        for (const target of [{ productId }, { sku }]) {
+          const [price] = await tx
+            .insert(prices)
+            .values({ ...target, priceVersion: 2n })
+            .returning();
+          const [past] = await tx
+            .insert(priceValidities)
+            .values({
+              ...snapshot(price.id),
+              validFrom: new Date(now - 3600000),
+              validUntil: future,
+            })
+            .returning();
+          const [later] = await tx
+            .insert(priceValidities)
+            .values({ ...snapshot(price.id, 2n), validFrom: future })
+            .returning();
+          await tx.insert(scheduledPrices).values([
+            {
+              priceId: price.id,
+              validityId: past.id,
+              tipoPrecio: 'REGULAR',
+              importe: '99.99',
+            },
+            {
+              priceId: price.id,
+              validityId: later.id,
+              tipoPrecio: 'REGULAR',
+              importe: '99.99',
+            },
+          ]);
+        }
+      });
+      for (const path of [`productos/${productId}`, `skus/${sku}`]) {
+        const response = await request(app!.getHttpServer())
+          .get(`/api/v1/precios/${path}/programaciones?pagina=1&tamanio=1`)
+          .set('Authorization', `Bearer ${identity.token()}`)
+          .expect(200);
+        expect(response.body.meta).toEqual({
+          pagina: 1,
+          tamanio: 1,
+          total: 2,
+          totalPaginas: 2,
+        });
+        expect(response.body.items[0]).toMatchObject({
+          estado: 'ACTIVE',
+          importe: 99.99,
+          moneda: 'PEN',
+          priceVersion: 1,
+        });
+        const next = await request(app!.getHttpServer())
+          .get(`/api/v1/precios/${path}/programaciones?pagina=2&tamanio=1`)
+          .set('Authorization', `Bearer ${identity.token()}`)
+          .expect(200);
+        expect(next.body.items[0]).toMatchObject({
+          estado: 'SCHEDULED',
+          priceVersion: 2,
+        });
+      }
+    });
+
+    it('precio base pagina y cuenta solo programaciones globales; SKU conserva sus canales', async () => {
+      const productId = randomUUID();
+      const sku = 'channel-' + randomUUID();
+      await repository.transaction(async (tx) => {
+        for (const target of [{ productId }, { sku }]) {
+          for (const channelId of [null, 'MARKETPLACE', 'RETAIL']) {
+            const [price] = await tx
+              .insert(prices)
+              .values({ ...target, channelId, priceVersion: 2n })
+              .returning();
+            for (const version of [1n, 2n]) {
+              const [validity] = await tx
+                .insert(priceValidities)
+                .values({
+                  ...snapshot(price.id, version),
+                  validFrom: version === 1n ? from : boundary,
+                  validUntil: version === 1n ? boundary : null,
+                })
+                .returning();
+              await tx.insert(scheduledPrices).values({
+                priceId: price.id,
+                validityId: validity.id,
+                tipoPrecio: 'REGULAR',
+                importe: '99.99',
+              });
+            }
+          }
+        }
+      });
+      for (const pagina of [1, 2]) {
+        const result = await request(app!.getHttpServer())
+          .get(
+            `/api/v1/precios/productos/${productId}/programaciones?pagina=${pagina}&tamanio=1`,
+          )
+          .set('Authorization', `Bearer ${identity.token()}`)
+          .expect(200);
+        expect(result.body.meta).toEqual({
+          pagina,
+          tamanio: 1,
+          total: 2,
+          totalPaginas: 2,
+        });
+        expect(result.body.items).toHaveLength(1);
+        expect(result.body.items[0]).toMatchObject({
+          product_id: productId,
+          channelId: null,
+          priceVersion: pagina,
+        });
+      }
+      const skuResult = await request(app!.getHttpServer())
+        .get(`/api/v1/precios/skus/${sku}/programaciones?tamanio=1`)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .expect(200);
+      expect(skuResult.body.meta).toEqual({
+        pagina: 1,
+        tamanio: 1,
+        total: 6,
+        totalPaginas: 6,
+      });
+      const skuAll = await request(app!.getHttpServer())
+        .get(`/api/v1/precios/skus/${sku}/programaciones`)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .expect(200);
+      expect(
+        skuAll.body.items.map(
+          (item: { channelId: string | null }) => item.channelId,
+        ),
+      ).toEqual(expect.arrayContaining([null, 'MARKETPLACE', 'RETAIL']));
+    });
+
+    it('precio base devuelve 404 si solo hay definición por canal y 200 vacío si existe global', async () => {
+      const productId = randomUUID();
+      await repository.transaction(async (tx) => {
+        const { definition, validity } = await create(
+          tx,
+          { productId },
+          'RETAIL',
+        );
+        await tx.insert(scheduledPrices).values({
+          priceId: definition.id,
+          validityId: validity.id,
+          tipoPrecio: 'REGULAR',
+          importe: '99.99',
+        });
+      });
+      const path = `/api/v1/precios/productos/${productId}/programaciones`;
+      const missing = await request(app!.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .expect(404);
+      expect(missing.body.code).toBe('PRECIO_NO_ENCONTRADO');
+      await repository.transaction((tx) => create(tx, { productId }));
+      const empty = await request(app!.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .expect(200);
+      expect(empty.body).toEqual({
+        items: [],
+        meta: { pagina: 1, tamanio: 20, total: 0, totalPaginas: 0 },
+      });
+    });
+
+    it.each(['productos', 'skus'])(
+      'HTTP %s distingue definición inexistente de ausencia de programaciones',
+      async (kind) => {
+        const key = randomUUID();
+        const path = `/api/v1/precios/${kind}/${key}/programaciones`;
+        const missing = await request(app!.getHttpServer())
+          .get(path)
+          .set('Authorization', `Bearer ${identity.token()}`)
+          .expect(404);
+        expect(missing.body).toMatchObject({
+          status: 404,
+          code: 'PRECIO_NO_ENCONTRADO',
+        });
+        expect(missing.headers['content-type']).toContain(
+          'application/problem+json',
+        );
+        await repository.transaction(async (tx) => {
+          const [price] = await tx
+            .insert(prices)
+            .values(kind === 'productos' ? { productId: key } : { sku: key })
+            .returning();
+          await tx.insert(priceValidities).values(snapshot(price.id));
+        });
+        const empty = await request(app!.getHttpServer())
+          .get(path)
+          .set('Authorization', `Bearer ${identity.token()}`)
+          .expect(200);
+        expect(empty.body).toEqual({
+          items: [],
+          meta: { pagina: 1, tamanio: 20, total: 0, totalPaginas: 0 },
+        });
+      },
+    );
+
+    it('demo explícita permite consultas sin Authorization/G7 y readiness sigue dependiendo de PostgreSQL', async () => {
+      const { definition } = await repository.transaction(async (tx) => {
+        const [definition] = await tx
+          .insert(prices)
+          .values({ productId: randomUUID() })
+          .returning();
+        await tx.insert(priceValidities).values({
+          ...snapshot(definition.id),
+          validFrom: new Date(Date.now() - 60000),
+        });
+        return { definition };
+      });
+      const module = await Test.createTestingModule({
+        imports: [
+          PricingSvcModule.forRoot({
+            NODE_ENV: 'test',
+            PRICING_SVC_PORT: '3002',
+            DATABASE_URL: postgres.runtimeUrl,
+            PGSSLMODE: 'disable',
+            GATEWAY_DEMO_NO_AUTH_ENABLED: 'true',
+          }),
+        ],
+      }).compile();
+      const demoApp = module.createNestApplication();
+      const remote = vi.spyOn(globalThis, 'fetch');
+      try {
+        await demoApp.init();
+        const path = `/api/v1/precios/productos/${definition.productId}`;
+        await request(app!.getHttpServer()).get(path).expect(401);
+        const result = await request(demoApp.getHttpServer())
+          .get(path)
+          .expect(200);
+        expect(result.body).toMatchObject({
+          product_id: definition.productId,
+          precio_regular: 99.99,
+        });
+        await request(demoApp.getHttpServer())
+          .get(path)
+          .set('Authorization', 'Bearer unused-invalid-token')
+          .expect(200);
+        await request(demoApp.getHttpServer())
+          .get(`${path}/programaciones`)
+          .expect(200);
+        await request(demoApp.getHttpServer())
+          .get(path)
+          .set('X-Correlation-Id', 'invalid')
+          .expect(400);
+        await request(demoApp.getHttpServer()).get('/health/ready').expect(200);
+        expect(remote).not.toHaveBeenCalled();
+        await postgres.admin!.query(
+          'REVOKE SELECT ON pricing.prices FROM pricing_app',
+        );
+        try {
+          await request(demoApp.getHttpServer())
+            .get('/health/live')
+            .expect(200);
+          await request(demoApp.getHttpServer())
+            .get('/health/ready')
+            .expect(503);
+          const failed = await request(demoApp.getHttpServer())
+            .get(path)
+            .expect(503);
+          expect(failed.body.code).toBe('SERVICIO_NO_DISPONIBLE');
+        } finally {
+          await postgres.admin!.query(
+            'GRANT SELECT ON pricing.prices TO pricing_app',
+          );
+        }
+        await request(demoApp.getHttpServer()).get('/health/ready').expect(200);
+        await request(app!.getHttpServer()).get(path).expect(401);
+      } finally {
+        remote.mockRestore();
+        await demoApp.close();
+      }
+    });
+
+    it('HTTP consulta un lote persistido sin filtrar row_input, report_uri ni detalle libre', async () => {
+      const job = await repository.transaction(async (tx) => {
+        const [job] = await tx
+          .insert(bulkPriceJobs)
+          .values({
+            allowPartial: false,
+            totalRows: 1,
+            correlationId: randomUUID(),
+            usuarioId: 'fixture-sensitive-actor',
+            reportUri: 'https://private.invalid/secret',
+          })
+          .returning();
+        await tx.insert(bulkPriceRows).values({
+          batchId: job.id,
+          rowId: '1',
+          sku: '0001',
+          rowInput: { secret: 'fixture-sensitive-input' },
+          detail: 'fixture-sensitive-detail',
+        });
+        return job;
+      });
+      const response = await request(app!.getHttpServer())
+        .get(`/api/v1/precios/importaciones/${job.id}`)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .expect(200);
+      expect(response.body).toEqual({
+        batch_id: job.id,
+        status: 'QUEUED',
+        allow_partial: false,
+        total_rows: 1,
+        completed_rows: 0,
+        failed_rows: 0,
+        rows: [{ row_id: '1', sku: '0001', status: 'PENDING' }],
+      });
+      expect(response.text).not.toMatch(/fixture-sensitive|private.invalid/);
+      const selected = await repository.readImport(job.id);
+      expect(Object.keys(selected!.rows![0]).sort()).toEqual([
+        'code',
+        'rowId',
+        'sku',
+        'status',
+      ]);
+      const absent = await request(app!.getHttpServer())
+        .get(`/api/v1/precios/importaciones/${randomUUID()}`)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .expect(404);
+      expect(absent.body.code).toBe('LOTE_NO_ENCONTRADO');
+    });
+
+    it('importaciones grandes devuelven resumen contractual y jamás detalle truncado', async () => {
+      const job = await repository.transaction(async (tx) => {
+        const [job] = await tx
+          .insert(bulkPriceJobs)
+          .values({
+            allowPartial: false,
+            totalRows: MAX_INLINE_IMPORT_ROWS + 1,
+            correlationId: randomUUID(),
+          })
+          .returning();
+        await tx.execute(sql`INSERT INTO pricing.bulk_price_rows (batch_id,row_id,sku,row_input)
+          SELECT ${job.id}::uuid, value::text, 'SKU-' || value, jsonb_build_object('private',repeat('x',1024))
+          FROM generate_series(1,${MAX_INLINE_IMPORT_ROWS}) AS value`);
+        return job;
+      });
+      const boundary = await repository.readImport(job.id);
+      expect(boundary!.rows).toHaveLength(MAX_INLINE_IMPORT_ROWS);
+      await repository.transaction((tx) =>
+        tx
+          .insert(bulkPriceRows)
+          .values({ batchId: job.id, rowId: 'extra', rowInput: {} }),
+      );
+      const result = await repository.readImport(job.id);
+      expect(result!.rows).toBeUndefined();
+      const response = await request(app!.getHttpServer())
+        .get(`/api/v1/precios/importaciones/${job.id}`)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .expect(200);
+      expect(response.body).toEqual({
+        batch_id: job.id,
+        status: 'QUEUED',
+        allow_partial: false,
+        total_rows: MAX_INLINE_IMPORT_ROWS + 1,
+        completed_rows: 0,
+        failed_rows: 0,
+      });
+    });
+
+    it('HTTP niega acceso y parámetros inválidos antes de consultar datos', async () => {
+      const path = `/api/v1/precios/productos/${randomUUID()}/programaciones`;
+      await request(app!.getHttpServer()).get(path).expect(401);
+      const forbidden = await request(app!.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${identity.token({ roles: ['OTRO'] })}`)
+        .expect(403);
+      expect(forbidden.body.code).toBe('SCOPE_INSUFICIENTE');
+      for (const query of [
+        'pagina=0',
+        'pagina=1e2',
+        'tamanio=201',
+        'pagina=1&pagina=2',
+        'canal=RETAIL',
+        'pagina=9999999999999999999',
+      ]) {
+        const response = await request(app!.getHttpServer())
+          .get(`${path}?${query}`)
+          .set('Authorization', `Bearer ${identity.token()}`)
+          .expect(400);
+        expect(response.body.code).toBe('VALIDACION');
+      }
+      await request(app!.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .set('X-Correlation-Id', 'secret-not-uuid')
+        .expect(400);
+      await request(app!.getHttpServer())
+        .get('/api/v1/precios/importaciones/not-uuid')
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .expect(400);
+    });
+
+    it('#56: el caso de uso real serializa escritores y revierte precio/historia si falla Outbox', async () => {
+      const productId = randomUUID();
+      const now = new Date();
+      await repository.transaction(async (tx) => {
+        const [price] = await tx
+          .insert(prices)
+          .values({ productId })
+          .returning();
+        await tx.insert(priceValidities).values({
+          ...snapshot(price.id),
+          validFrom: new Date(now.getTime() - 60000),
+        });
+      });
+      const fact = {
+        messageId: randomUUID(),
+        correlationId: randomUUID(),
+        payload: {},
+      };
+      const input = {
+        precioRegular: '120.00',
+        accionPrecioOferta: 'CONSERVAR' as const,
+        currency: 'PEN',
+        motivoCambio: 'fixture-change',
+        usuarioId: 'fixture-actor',
+      };
+      const results = await Promise.allSettled([
+        mutations.update({ productId }, null, input, 1n, now, fact),
+        mutations.update({ productId }, null, input, 1n, now, {
+          ...fact,
+          messageId: randomUUID(),
+        }),
+      ]);
+      expect(
+        results.filter((result) => result.status === 'fulfilled'),
+      ).toHaveLength(1);
+      expect(
+        results.find((result) => result.status === 'rejected'),
+      ).toMatchObject({ reason: { code: 'VERSION_CONFLICT' } });
+      const definition = (await repository.findDefinition(
+        { productId },
+        null,
+      ))!;
+      expect(definition.priceVersion).toBe(2n);
+      expect(await repository.findValidities(definition.id)).toHaveLength(2);
+      const committedFacts = await database.db
+        .select()
+        .from(outbox)
+        .where(eq(outbox.correlationId, fact.correlationId));
+      expect(committedFacts).toHaveLength(1);
+      await expect(
+        mutations.update(
+          { productId },
+          null,
+          input,
+          2n,
+          new Date(now.getTime() + 1000),
+          { ...fact, messageId: committedFacts[0].messageId },
+        ),
+      ).rejects.toMatchObject({ sqlState: '23505' });
+      expect(
+        (await repository.findDefinition({ productId }, null))!.priceVersion,
+      ).toBe(2n);
+      expect(await repository.findValidities(definition.id)).toHaveLength(2);
+      const facts = await database.db
+        .select()
+        .from(outbox)
+        .where(eq(outbox.correlationId, fact.correlationId));
+      expect(facts).toHaveLength(1);
+      expect(facts[0]).toMatchObject({
+        eventName: 'pricing.price.changed',
+        publishedAt: null,
+      });
+    });
+
+    it('#56: programa bajo lock sin versión cliente y conserva precio vigente hasta el inicio', async () => {
+      const productId = randomUUID();
+      const now = new Date();
+      const future = new Date(now.getTime() + 3600000);
+      await repository.transaction(async (tx) => {
+        const [price] = await tx
+          .insert(prices)
+          .values({ productId })
+          .returning();
+        await tx.insert(priceValidities).values({
+          ...snapshot(price.id),
+          validFrom: new Date(now.getTime() - 60000),
+        });
+      });
+      const input = {
+        tipoPrecio: 'OFERTA' as const,
+        importe: '70.00',
+        currency: 'PEN',
+        motivoCambio: 'fixture-schedule',
+        usuarioId: 'fixture-actor',
+        validFrom: future,
+        validUntil: null,
+      };
+      const fact = () => ({
+        messageId: randomUUID(),
+        correlationId: randomUUID(),
+        payload: {},
+      });
+      await mutations.schedule({ productId }, null, input, now, fact());
+      const definition = (await repository.findDefinition(
+        { productId },
+        null,
+      ))!;
+      expect(definition.priceVersion).toBe(2n);
+      const validities = await repository.findValidities(definition.id);
+      expect(validities.map((value) => value.validUntil)).toEqual([
+        future,
+        null,
+      ]);
+      expect(
+        await repository.readSchedules({ productId }, 1, 20),
+      ).toMatchObject({ total: 1 });
+      const current = await request(app!.getHttpServer())
+        .get(`/api/v1/precios/productos/${productId}`)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .expect(200);
+      expect(current.body).toMatchObject({
+        precio_oferta: 80.25,
+        price_version: 2,
+      });
+      await expect(
+        mutations.schedule(
+          { productId },
+          null,
+          {
+            ...input,
+            validFrom: new Date(future.getTime() - 1000),
+            validUntil: new Date(future.getTime() + 1000),
+          },
+          now,
+          fact(),
+        ),
+      ).rejects.toMatchObject({ code: 'VIGENCIA_SUPERPUESTA' });
+      expect(
+        (await repository.findDefinition({ productId }, null))!.priceVersion,
+      ).toBe(2n);
+    });
+
+    it('HTTP no confunde falta de permisos DB con precio ausente y se recupera', async () => {
+      await postgres.admin!.query(
+        'REVOKE SELECT ON pricing.prices FROM pricing_app',
+      );
+      try {
+        const response = await request(app!.getHttpServer())
+          .get(`/api/v1/precios/productos/${randomUUID()}`)
+          .set('Authorization', `Bearer ${identity.token()}`)
+          .expect(503);
+        expect(response.body.code).toBe('SERVICIO_NO_DISPONIBLE');
+        expect(response.text).not.toMatch(
+          /SELECT|permission|pricing_app|postgresql/,
+        );
+      } finally {
+        await postgres.admin!.query(
+          'GRANT SELECT ON pricing.prices TO pricing_app',
+        );
+      }
+      await request(app!.getHttpServer())
+        .get(`/api/v1/precios/productos/${randomUUID()}`)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .expect(404);
+    });
 
     it('el mapping coincide con todas las columnas reales, nullabilidad y tipos', async () => {
       const { rows } = await postgres.admin!.query<{

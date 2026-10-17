@@ -2,6 +2,11 @@
 
 Owner: Leonardo Vera, rama `vera`. Alcance operativo: `IMPLEMENTAR_AHORA`.
 
+**Entrega interna #13, #24, #55–#60:** consultas administrativas, autenticación
+de lectura y casos de uso transaccionales parciales. La trazabilidad por issue,
+evidencia y fronteras pendientes están en [AUDIT-OPEN-ISSUES.md](AUDIT-OPEN-ISSUES.md).
+Las secciones #52–#54 conservan la evidencia histórica de sus entregas.
+
 ## Configuración y ejecución
 
 Se conservan los scripts del monorepo: `npm run build:pricing-svc`,
@@ -17,6 +22,24 @@ de la raíz si existe; las variables de la sesión tienen precedencia.
 | `DATABASE_URL` | Conexión PostgreSQL directa/pooler para el rol runtime de Pricing, con host, usuario y base. Inyectar desde la sesión o gestor de secretos. | Sí |
 | `PGSSLMODE` | Alternativa al parámetro `sslmode` de la URL. Se exige `verify-full` en producción y para hosts remotos. | Condicional |
 | `PGSSLROOTCERT` | Ruta a la CA PEM del proveedor; alternativa a `sslrootcert` en la URL. Si se declara, debe existir y ser un certificado válido. | Para CA no incluida en la confianza de Node |
+| `AUTH_ISSUER` | Issuer exacto del JWT humano de G7. | Para readiness y consultas en modo autenticado |
+| `AUTH_JWKS_URL` | URL HTTPS configurada de claves públicas. Nunca se obtiene del JWT. | Junto con `AUTH_ISSUER`, en modo autenticado |
+| `GATEWAY_DEMO_NO_AUTH_ENABLED` | `true` solicita explícitamente demo sin JWT/G7; ausente o `false` conserva autenticación. En `production` exige la segunda confirmación. | No, predeterminado `false` |
+| `PRICING_DEMO_PRODUCTION_CONFIRMED` | `true` confirma excepcionalmente demo en `production`, únicamente si el flag anterior también es `true`. Por sí sola no activa demo. | Solo para demo en producción; predeterminado `false` |
+
+Para la demo, inyectar `GATEWAY_DEMO_NO_AUTH_ENABLED=true` tanto al Gateway
+como a Pricing en su entorno privado de demo. Pricing ignora Authorization y
+la configuración G7 en ese modo; conserva consultas reales, validación,
+correlación y errores. El flag no cambia `NODE_ENV`, TLS ni permisos PostgreSQL.
+Reiniciar con el flag ausente/`false` restaura JWT/JWKS y rol; no hay detección
+automática de demo ni activación por falta de credenciales.
+En `NODE_ENV=production`, ambos flags deben ser exactamente `true`; sin la
+segunda confirmación el proceso rechaza la configuración antes de arrancar.
+En `development`/`test` no se exige esa segunda confirmación. Ambos flags
+rechazan valores distintos de `true`/`false`. La excepción conserva TLS
+`verify-full` y todas las validaciones PostgreSQL. El responsable del despliegue
+verifica exposición privada, aislamiento de datos y permisos mínimos antes
+de activarla; este cambio no activa ni despliega la excepción en Oracle.
 
 No hay valores implícitos para variables obligatorias. Configuración ausente o
 malformada impide crear Nest/abrir el listener y termina con código 1. No se
@@ -44,10 +67,13 @@ frontend ni acceso a schemas ajenos. No se cambia exposición de puertos.
 | `GET /health/ready` | Disponibilidad de PostgreSQL y lectura de `pricing.prices`. | 200, `status=ready`; 503, `status=not_ready` |
 
 Todas las respuestas identifican `service=pricing-svc`. Readiness ejecuta
-`SELECT 1 FROM pricing.prices LIMIT 0`: comprueba conexión y acceso a una tabla
-propia, sin leer filas ni escribir datos. Una base caída, schema/tabla ausente
-o permisos insuficientes produce 503; liveness sigue en 200. No acredita todas
-las tablas, grants de escritura ni funcionalidades de precios.
+una consulta `LIMIT 0` sobre `prices`, `price_validities`, `scheduled_prices`,
+`bulk_price_jobs`, `bulk_price_rows` y `outbox` del schema propio. Comprueba
+conexión y permisos de lectura sin obtener filas ni escribir datos. Una base
+caída, tabla ausente o permisos insuficientes produce 503 en ambos modos;
+configuración de identidad ausente produce 503 solo en modo autenticado.
+Liveness sigue en 200. No acredita grants de escritura ni
+disponibilidad remota de G7; readiness no consulta JWKS por request.
 El pool limita conexiones a 2 y tiempos de conexión/consulta a 2 segundos
 cada uno; se libera al cerrar la aplicación y en señales de apagado de Nest.
 No hace fan-out a otros servicios. Broker no es dependencia de este scaffold:
