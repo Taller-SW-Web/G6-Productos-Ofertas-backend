@@ -1,7 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { X509Certificate } from 'node:crypto';
+import { checkServerIdentity, type ConnectionOptions } from 'node:tls';
+
 export interface PricingConfig {
   nodeEnv: 'development' | 'test' | 'production';
   port: number;
   databaseUrl: string;
+  databaseSsl: false | ConnectionOptions;
 }
 
 export class InvalidPricingConfig extends Error {}
@@ -31,6 +36,7 @@ export function validateEnvironment(env: NodeJS.ProcessEnv): PricingConfig {
     );
   }
   const databaseUrl = env.DATABASE_URL;
+  let url: URL;
   try {
     if (
       !databaseUrl ||
@@ -38,7 +44,7 @@ export function validateEnvironment(env: NodeJS.ProcessEnv): PricingConfig {
       /\s/.test(databaseUrl)
     )
       throw new Error();
-    const url = new URL(databaseUrl);
+    url = new URL(databaseUrl);
     if (
       !['postgres:', 'postgresql:'].includes(url.protocol) ||
       !url.hostname ||
@@ -57,5 +63,54 @@ export function validateEnvironment(env: NodeJS.ProcessEnv): PricingConfig {
       'DATABASE_URL debe incluir host, usuario y base PostgreSQL válidos.',
     );
   }
-  return { nodeEnv, port, databaseUrl };
+  // No dejar que el parser de pg reemplace ssl o el host validado desde la URL.
+  for (const key of url.searchParams.keys()) {
+    if (
+      !['sslmode', 'sslrootcert'].includes(key) ||
+      url.searchParams.getAll(key).length !== 1
+    ) {
+      throw new InvalidPricingConfig(
+        'DATABASE_URL solo permite parámetros sslmode y sslrootcert únicos.',
+      );
+    }
+  }
+  if (
+    env.NODE_TLS_REJECT_UNAUTHORIZED === '0' ||
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0'
+  ) {
+    throw new InvalidPricingConfig(
+      'La validación TLS global debe permanecer habilitada.',
+    );
+  }
+  const mode = url.searchParams.get('sslmode') ?? env.PGSSLMODE;
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(
+    url.hostname.toLowerCase(),
+  );
+  const allowPlaintext =
+    nodeEnv !== 'production' &&
+    local &&
+    (mode === undefined || mode === 'disable');
+  let databaseSsl: PricingConfig['databaseSsl'] = false;
+  if (!allowPlaintext) {
+    if (mode !== 'verify-full') {
+      throw new InvalidPricingConfig(
+        'DATABASE_URL requiere sslmode=verify-full fuera de pruebas locales aisladas.',
+      );
+    }
+    databaseSsl = { rejectUnauthorized: true, checkServerIdentity };
+    const caPath = url.searchParams.get('sslrootcert') ?? env.PGSSLROOTCERT;
+    if (caPath !== undefined) {
+      try {
+        const ca = readFileSync(caPath, 'utf8');
+        new X509Certificate(ca);
+        databaseSsl.ca = ca;
+      } catch {
+        throw new InvalidPricingConfig(
+          'PGSSLROOTCERT/sslrootcert debe contener una CA legible.',
+        );
+      }
+    }
+  }
+  url.search = '';
+  return { nodeEnv, port, databaseUrl: url.toString(), databaseSsl };
 }

@@ -17,6 +17,7 @@ export class PricingReadiness implements OnApplicationShutdown {
   constructor(@Inject(PRICING_CONFIG) config: PricingConfig) {
     this.pool = new Pool({
       connectionString: config.databaseUrl,
+      ssl: config.databaseSsl,
       max: 2,
       connectionTimeoutMillis: 2000,
       idleTimeoutMillis: 10000,

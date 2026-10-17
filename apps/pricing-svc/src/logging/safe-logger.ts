@@ -1,16 +1,21 @@
 import { ConsoleLogger, type LoggerService } from '@nestjs/common';
 
-// Objetos, errores y mensajes sensibles se omiten completos: no serializar payloads.
-function safeMessage(value: unknown): string {
-  if (
-    typeof value !== 'string' ||
-    /:\/\/|\bBearer\s|\beyJ[A-Za-z0-9_-]*\.|password|passwd|secret|token|authorization|cookie|credential|api[_-]?key/i.test(
-      value,
-    )
-  ) {
-    return '[REDACTED]';
-  }
-  return value;
+const MESSAGES = new Set([
+  'pricing-svc iniciado.',
+  'Configuración inválida: revisar NODE_ENV, PRICING_SVC_PORT/PORT y DATABASE_URL/TLS.',
+  'No se pudo iniciar pricing-svc.',
+  'Conexión PostgreSQL inactiva no disponible.',
+]);
+const CONTEXTS = new Set([
+  'Bootstrap',
+  'PricingReadiness',
+  'NestFactory',
+  'NestApplication',
+]);
+
+// Lista cerrada: ningún contenido externo/dinámico se serializa ni inspecciona.
+function controlled(value: unknown, allowed: ReadonlySet<string>): string {
+  return typeof value === 'string' && allowed.has(value) ? value : '[REDACTED]';
 }
 
 export class SafeLogger implements LoggerService {
@@ -28,9 +33,12 @@ export class SafeLogger implements LoggerService {
   ): void {
     const record = {
       service: 'pricing-svc',
-      environment: this.environment,
-      message: safeMessage(message),
-      context: optional.map(safeMessage),
+      environment: controlled(
+        this.environment,
+        new Set(['development', 'test', 'production', 'unknown']),
+      ),
+      message: controlled(message, MESSAGES),
+      context: optional.map((value) => controlled(value, CONTEXTS)),
     };
     this.destination[level]?.(record);
   }

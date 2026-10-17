@@ -31,13 +31,57 @@ describe('SafeLogger', () => {
       expect(output).not.toContain(secret);
       expect(output).not.toContain('eyJhbGci');
       expect(output).toContain('[REDACTED]');
-      logger[level]('Configuración validada.', 'Bootstrap');
+      logger[level]('pricing-svc iniciado.', 'Bootstrap');
       expect(sink[level]).toHaveBeenLastCalledWith({
         service: 'pricing-svc',
         environment: 'test',
-        message: 'Configuración validada.',
+        message: 'pricing-svc iniciado.',
         context: ['Bootstrap'],
       });
     },
   );
+
+  it('nunca escribe secretos arbitrarios sin etiquetas en stdout/stderr', () => {
+    const secret = 'q7Zx4vM2n8Lb5cR9';
+    const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      const logger = new SafeLogger(secret);
+      for (const level of [
+        'log',
+        'error',
+        'warn',
+        'debug',
+        'verbose',
+        'fatal',
+      ] as const) {
+        for (const value of [
+          secret,
+          `falló: ${secret}`,
+          { value: secret },
+          new Error(secret),
+        ])
+          logger[level](value, secret);
+        logger[level]('pricing-svc iniciado.', secret);
+      }
+      const output = [...stdout.mock.calls, ...stderr.mock.calls]
+        .map(([value]) => String(value))
+        .join('');
+      expect(stdout).toHaveBeenCalled();
+      expect(stderr).toHaveBeenCalled();
+      expect(output).not.toContain(secret);
+      for (const line of output.trim().split('\n')) {
+        const record = JSON.parse(line);
+        expect(record).toHaveProperty('timestamp');
+        expect(record).toHaveProperty('level');
+        expect(record.message).toMatchObject({
+          service: 'pricing-svc',
+          environment: '[REDACTED]',
+        });
+        expect(record.message.context).toEqual(['[REDACTED]']);
+      }
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
 });

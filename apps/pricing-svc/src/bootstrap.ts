@@ -34,7 +34,7 @@ export async function startPricing(): Promise<void> {
   } catch (error) {
     new SafeLogger().error(
       error instanceof InvalidPricingConfig
-        ? error.message
+        ? 'Configuración inválida: revisar NODE_ENV, PRICING_SVC_PORT/PORT y DATABASE_URL/TLS.'
         : 'No se pudo iniciar pricing-svc.',
     );
     process.exitCode = 1;

@@ -1,4 +1,10 @@
 import { InvalidPricingConfig, validateEnvironment } from './environment.js';
+import { writeFileSync, unlinkSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { checkServerIdentity, rootCertificates } from 'node:tls';
+import { Client } from 'pg';
 
 const valid = {
   NODE_ENV: 'test',
@@ -12,6 +18,7 @@ describe('Pricing configuration', () => {
       nodeEnv: 'test',
       port: 3002,
       databaseUrl: valid.DATABASE_URL,
+      databaseSsl: false,
     });
     expect(
       validateEnvironment({
@@ -70,5 +77,128 @@ describe('Pricing configuration', () => {
     expect(() =>
       validateEnvironment({ ...valid, NODE_ENV: 'fixture-secret' }),
     ).toThrow('NODE_ENV debe ser development, test o production.');
+  });
+
+  describe('TLS fail-closed', () => {
+    const remoteUrl = 'postgresql://pricing:fixture@db.example.invalid/fixture';
+    const caPath = join(tmpdir(), `pricing-ca-${randomUUID()}.crt`);
+    beforeAll(() => writeFileSync(caPath, rootCertificates[0]));
+    afterAll(() => unlinkSync(caPath));
+
+    it.each([
+      undefined,
+      'disable',
+      'allow',
+      'prefer',
+      'require',
+      'verify-ca',
+      'no-verify',
+      '',
+    ])('rechaza producción sin verify-full (%s)', (mode) => {
+      const url =
+        mode === undefined ? remoteUrl : `${remoteUrl}?sslmode=${mode}`;
+      expect(() =>
+        validateEnvironment({
+          ...valid,
+          NODE_ENV: 'production',
+          DATABASE_URL: url,
+        }),
+      ).toThrow('sslmode=verify-full');
+    });
+
+    it('solo permite texto plano en localhost fuera de producción', () => {
+      expect(
+        validateEnvironment({
+          ...valid,
+          DATABASE_URL: `${valid.DATABASE_URL}?sslmode=disable`,
+        }).databaseSsl,
+      ).toBe(false);
+      expect(() =>
+        validateEnvironment({ ...valid, NODE_ENV: 'production' }),
+      ).toThrow('sslmode=verify-full');
+      expect(() =>
+        validateEnvironment({ ...valid, DATABASE_URL: remoteUrl }),
+      ).toThrow('sslmode=verify-full');
+    });
+
+    it('conserva CA, certificado y hostname verificados después del parser de pg', () => {
+      const config = validateEnvironment({
+        ...valid,
+        NODE_ENV: 'production',
+        DATABASE_URL: `${remoteUrl}?sslmode=verify-full&sslrootcert=${encodeURIComponent(caPath)}`,
+      });
+      expect(config.databaseUrl).toBe(remoteUrl);
+      expect(config.databaseSsl).toEqual({
+        rejectUnauthorized: true,
+        checkServerIdentity,
+        ca: rootCertificates[0],
+      });
+      const client = new Client({
+        connectionString: config.databaseUrl,
+        ssl: config.databaseSsl,
+      });
+      expect(client.ssl).toEqual(config.databaseSsl);
+    });
+
+    it('admite verify-full con las CA de confianza de Node o PGSSLROOTCERT', () => {
+      expect(
+        validateEnvironment({
+          ...valid,
+          NODE_ENV: 'production',
+          DATABASE_URL: remoteUrl,
+          PGSSLMODE: 'verify-full',
+        }).databaseSsl,
+      ).toEqual({ rejectUnauthorized: true, checkServerIdentity });
+      expect(
+        validateEnvironment({
+          ...valid,
+          NODE_ENV: 'production',
+          DATABASE_URL: `${remoteUrl}?sslmode=verify-full`,
+          PGSSLROOTCERT: caPath,
+        }).databaseSsl,
+      ).toHaveProperty('ca', rootCertificates[0]);
+    });
+
+    it.each([
+      'ssl=0',
+      'ssl=no-verify',
+      'sslmode=verify-full&sslmode=disable',
+      'host=localhost',
+      'uselibpqcompat=true',
+      'sslcert=fixture',
+    ])('impide sobrescribir la configuración validada (%s)', (query) => {
+      expect(() =>
+        validateEnvironment({
+          ...valid,
+          NODE_ENV: 'production',
+          DATABASE_URL: `${remoteUrl}?${query}`,
+        }),
+      ).toThrow(InvalidPricingConfig);
+    });
+
+    it('rechaza CA ilegible/malformada y TLS global desactivado sin reflejar valores', () => {
+      const secure = {
+        ...valid,
+        NODE_ENV: 'production',
+        DATABASE_URL: `${remoteUrl}?sslmode=verify-full`,
+      };
+      expect(() =>
+        validateEnvironment({
+          ...secure,
+          PGSSLROOTCERT: 'arbitrary-unknown-value',
+        }),
+      ).toThrow('CA legible');
+      writeFileSync(caPath, 'arbitrary-unknown-value');
+      try {
+        expect(() =>
+          validateEnvironment({ ...secure, PGSSLROOTCERT: caPath }),
+        ).toThrow('CA legible');
+      } finally {
+        writeFileSync(caPath, rootCertificates[0]);
+      }
+      expect(() =>
+        validateEnvironment({ ...secure, NODE_TLS_REJECT_UNAUTHORIZED: '0' }),
+      ).toThrow('TLS global');
+    });
   });
 });
