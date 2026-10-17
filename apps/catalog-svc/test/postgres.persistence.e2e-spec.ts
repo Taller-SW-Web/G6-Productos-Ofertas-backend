@@ -444,6 +444,8 @@ describe.skipIf(!dockerAvailable)(
         INSERT INTO taxonomy.characteristics (id, nombre, estado) VALUES ${rows(characteristicRows)};
         INSERT INTO taxonomy.characteristic_values (id, caracteristica_id, nombre, estado) VALUES ${rows(valueRows)};
         INSERT INTO taxonomy.product_type_characteristics (tipo_producto_id, caracteristica_id, obligatoria, estado) VALUES ${rows(relationRows)};
+        GRANT USAGE ON SCHEMA taxonomy TO po_catalog_owner;
+        GRANT SELECT ON ALL TABLES IN SCHEMA taxonomy TO po_catalog_owner;
       `;
       command(
         'docker',
@@ -460,6 +462,32 @@ describe.skipIf(!dockerAvailable)(
         taxonomyFixture,
       );
 
+      const preflightSql = readFileSync(
+        join(catalogDirectory, '001_preflight_readonly.sql'),
+        'utf8',
+      );
+      const runSql = (input: string) =>
+        spawnSync(
+          'docker',
+          [
+            'exec',
+            '-i',
+            container,
+            'psql',
+            '-X',
+            '-q',
+            '-U',
+            'postgres',
+            '-v',
+            'ON_ERROR_STOP=1',
+          ],
+          {
+            encoding: 'utf8',
+            input,
+            timeout: 120000,
+            windowsHide: true,
+          },
+        );
       const preflight = command(
         'docker',
         [
@@ -474,16 +502,88 @@ describe.skipIf(!dockerAvailable)(
           '-v',
           'ON_ERROR_STOP=1',
         ],
-        readFileSync(
-          join(catalogDirectory, '001_preflight_readonly.sql'),
-          'utf8',
-        ),
+        preflightSql,
       );
-      expect(preflight).not.toContain('FALTA_O_INACTIVA');
+      expect(preflight).not.toMatch(
+        /FALTA_INACTIVA_O_CARACTERISTICA_INCORRECTA|RELACION_FALTA_O_INACTIVA|DATA002_PREFLIGHT_BLOCKED/,
+      );
 
       const batch = readFileSync(
         join(catalogDirectory, '003_carga_catalogo.sql'),
         'utf8',
+      );
+      const expectPreflightToBlock = (
+        mutation: string,
+        restoration: string,
+      ) => {
+        command(
+          'docker',
+          [
+            'exec',
+            '-i',
+            container,
+            'psql',
+            '-X',
+            '-q',
+            '-U',
+            'postgres',
+            '-v',
+            'ON_ERROR_STOP=1',
+          ],
+          mutation,
+        );
+        for (const sqlText of [preflightSql, batch]) {
+          const result = runSql(sqlText);
+          expect(result.error).toBeUndefined();
+          expect(result.status).not.toBe(0);
+          expect(result.stderr).toContain('DATA002_PREFLIGHT_BLOCKED');
+        }
+        expect(
+          command('docker', [
+            'exec',
+            '-i',
+            container,
+            'psql',
+            '-X',
+            '-At',
+            '-U',
+            'postgres',
+            '-c',
+            'SELECT count(*) FROM catalog.products',
+          ]),
+        ).toBe('0');
+        command(
+          'docker',
+          [
+            'exec',
+            '-i',
+            container,
+            'psql',
+            '-X',
+            '-q',
+            '-U',
+            'postgres',
+            '-v',
+            'ON_ERROR_STOP=1',
+          ],
+          restoration,
+        );
+      };
+      const brandEntry = Object.entries(manifest.taxonomy.brands).find(
+        ([, id]) => id === 'd05cc621-2d16-faa3-f620-19fb3173737c',
+      );
+      expect(brandEntry).toBeDefined();
+      expectPreflightToBlock(
+        "DELETE FROM taxonomy.brands WHERE id = 'd05cc621-2d16-faa3-f620-19fb3173737c';",
+        `INSERT INTO taxonomy.brands (id, nombre, estado) VALUES (${sqlLiteral(brandEntry![1])}, ${sqlLiteral(brandEntry![0])}, 'ACTIVO');`,
+      );
+      expectPreflightToBlock(
+        "UPDATE taxonomy.product_types SET estado = 'INACTIVO' WHERE id = 'b023a151-d69f-ff9a-483a-678eefe6842e';",
+        "UPDATE taxonomy.product_types SET estado = 'ACTIVO' WHERE id = 'b023a151-d69f-ff9a-483a-678eefe6842e';",
+      );
+      expectPreflightToBlock(
+        "UPDATE taxonomy.product_type_characteristics SET estado = 'INACTIVO' WHERE tipo_producto_id = 'b023a151-d69f-ff9a-483a-678eefe6842e' AND caracteristica_id = 'acee6db1-ba1c-f020-caf8-f439b09556ff';",
+        "UPDATE taxonomy.product_type_characteristics SET estado = 'ACTIVO' WHERE tipo_producto_id = 'b023a151-d69f-ff9a-483a-678eefe6842e' AND caracteristica_id = 'acee6db1-ba1c-f020-caf8-f439b09556ff';",
       );
       const executeBatch = () =>
         command(
@@ -514,6 +614,8 @@ describe.skipIf(!dockerAvailable)(
           'psql',
           '-X',
           '-At',
+          '-F',
+          '|',
           '-U',
           'postgres',
           '-v',
@@ -524,7 +626,14 @@ describe.skipIf(!dockerAvailable)(
           'utf8',
         ),
       );
-      expect(postcheck).toContain('15|45|90|6|48|45|3');
+      const postcheckRows = postcheck
+        .split(/\r?\n/)
+        .filter((row) => row.length > 0);
+      expect(postcheckRows).toHaveLength(12);
+      expect(postcheckRows.every((row) => row.endsWith('|PASS'))).toBe(true);
+      expect(postcheckRows).toContain('productos|15|15|PASS');
+      expect(postcheckRows).toContain('variantes|45|45|PASS');
+      expect(postcheckRows).toContain('payloads_jsonb_validos|0|0|PASS');
 
       const conflict = spawnSync(
         'docker',
