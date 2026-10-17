@@ -15,71 +15,63 @@ export interface InventoryConfig {
   workerBatchSize: number;
 }
 
+function integerSetting(
+  name: string,
+  fallback: number,
+  minimum: number,
+  maximum = Number.MAX_SAFE_INTEGER,
+): number {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const value = Number(raw);
+  if (
+    !/^\d+$/.test(raw.trim()) ||
+    !Number.isSafeInteger(value) ||
+    value < minimum ||
+    value > maximum
+  ) {
+    // No registrar el valor recibido: puede contener material confidencial.
+    const label =
+      name === 'INVENTORY_SVC_PORT' || name === 'PORT'
+        ? `Puerto inválido (${name})`
+        : `${name} inválido`;
+    throw new Error(
+      `[inventory-svc] ${label}. Debe ser un entero decimal entre ${minimum} y ${maximum}.`,
+    );
+  }
+  return value;
+}
+
 export function loadInventoryConfig(): InventoryConfig {
-  const rawPort = process.env.INVENTORY_SVC_PORT ?? process.env.PORT ?? '3005';
-  const port = Number(rawPort);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(
-      `[inventory-svc] Puerto inválido: ${rawPort}. Debe ser un entero entre 1 y 65535.`,
-    );
-  }
-
-  const rawTtl = process.env.RESERVATION_TTL_SECONDS ?? '900';
-  const ttlNumber = Number(rawTtl);
-  if (
-    !Number.isInteger(ttlNumber) ||
-    ttlNumber <= 0 ||
-    !Number.isFinite(ttlNumber)
-  ) {
-    throw new Error(
-      `[inventory-svc] RESERVATION_TTL_SECONDS inválido: "${rawTtl}". Debe ser un entero positivo finito.`,
-    );
-  }
-  const reservationTtlSeconds = ttlNumber;
-
-  const rawThreshold = process.env.DEFAULT_LOW_STOCK_THRESHOLD ?? '5';
-  const thresholdNum = Number(rawThreshold);
-  if (!Number.isInteger(thresholdNum) || thresholdNum < 0) {
-    throw new Error(
-      `[inventory-svc] DEFAULT_LOW_STOCK_THRESHOLD inválido: "${rawThreshold}". Debe ser un entero >= 0.`,
-    );
-  }
-  const defaultLowStockThreshold = thresholdNum;
-
-  const rawWorkerInterval = process.env.INVENTORY_WORKER_INTERVAL_MS ?? '5000';
-  const workerIntervalMs = Number(rawWorkerInterval);
-  if (!Number.isInteger(workerIntervalMs) || workerIntervalMs < 250) {
-    throw new Error(
-      `[inventory-svc] INVENTORY_WORKER_INTERVAL_MS inválido: "${rawWorkerInterval}". Debe ser un entero >= 250.`,
-    );
-  }
-  const rawWorkerBatchSize = process.env.INVENTORY_WORKER_BATCH_SIZE ?? '50';
-  const workerBatchSize = Number(rawWorkerBatchSize);
-  if (
-    !Number.isInteger(workerBatchSize) ||
-    workerBatchSize < 1 ||
-    workerBatchSize > 500
-  ) {
-    throw new Error(
-      `[inventory-svc] INVENTORY_WORKER_BATCH_SIZE inválido: "${rawWorkerBatchSize}". Debe ser un entero entre 1 y 500.`,
-    );
-  }
-
-  const rawPgPort = process.env.PGPORT;
-  let pgPort = 5432;
-  if (rawPgPort !== undefined && rawPgPort.trim() !== '') {
-    const parsedPgPort = Number(rawPgPort);
-    if (
-      !Number.isInteger(parsedPgPort) ||
-      parsedPgPort < 1 ||
-      parsedPgPort > 65535
-    ) {
-      throw new Error(
-        `[inventory-svc] PGPORT inválido: "${rawPgPort}". Debe ser un entero entre 1 y 65535.`,
-      );
-    }
-    pgPort = parsedPgPort;
-  }
+  const portName =
+    process.env.INVENTORY_SVC_PORT === undefined
+      ? 'PORT'
+      : 'INVENTORY_SVC_PORT';
+  const port = integerSetting(portName, 3005, 1, 65535);
+  const reservationTtlSeconds = integerSetting(
+    'RESERVATION_TTL_SECONDS',
+    900,
+    1,
+  );
+  const defaultLowStockThreshold = integerSetting(
+    'DEFAULT_LOW_STOCK_THRESHOLD',
+    5,
+    0,
+  );
+  // Node convierte intervalos mayores al máximo de int32 en un intervalo de 1 ms.
+  const workerIntervalMs = integerSetting(
+    'INVENTORY_WORKER_INTERVAL_MS',
+    5000,
+    250,
+    2147483647,
+  );
+  const workerBatchSize = integerSetting(
+    'INVENTORY_WORKER_BATCH_SIZE',
+    50,
+    1,
+    500,
+  );
+  const pgPort = integerSetting('PGPORT', 5432, 1, 65535);
 
   return {
     databaseUrl: process.env.DATABASE_URL,

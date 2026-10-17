@@ -101,13 +101,18 @@ export class DatabaseService
           idleTimeoutMillis: 30000,
           connectionTimeoutMillis: 5000,
         });
-      } else if (config.pgHost && config.pgUser) {
+      } else if (
+        config.pgHost &&
+        config.pgUser &&
+        config.pgDatabase &&
+        config.pgPassword
+      ) {
         this.pool = new Pool({
           host: config.pgHost,
           port: config.pgPort ?? 5432,
-          database: config.pgDatabase ?? 'postgres',
+          database: config.pgDatabase,
           user: config.pgUser,
-          password: config.pgPassword ?? '',
+          password: config.pgPassword,
           ssl: sslConfig,
           max: 10,
           idleTimeoutMillis: 30000,

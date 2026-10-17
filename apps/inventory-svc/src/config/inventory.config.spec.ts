@@ -60,6 +60,34 @@ describe('loadInventoryConfig — configuración fail-closed', () => {
     expect(loadInventoryConfig().defaultLowStockThreshold).toBe(0);
   });
 
+  it.each(['', '   ', '0x10', '1e2', '9007199254740992'])(
+    'rechaza un umbral que no representa un entero decimal seguro: %j',
+    (value) => {
+      process.env.DEFAULT_LOW_STOCK_THRESHOLD = value;
+      expect(() => loadInventoryConfig()).toThrow(
+        /DEFAULT_LOW_STOCK_THRESHOLD/,
+      );
+    },
+  );
+
+  it.each(['', '   '])('rechaza PGPORT vacío explícito: %j', (value) => {
+    process.env.PGPORT = value;
+    expect(() => loadInventoryConfig()).toThrow(/PGPORT/);
+  });
+
+  it('rechaza intervalos que desbordan el temporizador de Node', () => {
+    process.env.INVENTORY_WORKER_INTERVAL_MS = '2147483648';
+    expect(() => loadInventoryConfig()).toThrow(/INVENTORY_WORKER_INTERVAL_MS/);
+  });
+
+  it('no incluye valores de configuración inválidos en el error de arranque', () => {
+    process.env.INVENTORY_SVC_PORT = 'valor-confidencial-de-prueba';
+    expect(() => loadInventoryConfig()).toThrow(/Puerto inválido/);
+    expect(() => loadInventoryConfig()).not.toThrow(
+      /valor-confidencial-de-prueba/,
+    );
+  });
+
   it('rechaza PGPORT no numérico (fail-closed)', () => {
     process.env.PGPORT = 'abc';
 

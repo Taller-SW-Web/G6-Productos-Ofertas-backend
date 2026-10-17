@@ -391,16 +391,19 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
       expect(res.body.items).toEqual([{ sku, status: 'INDETERMINADO' }]);
     });
 
-    it('GET responde 400 VALIDACION cuando el canal no pertenece al enum', async () => {
-      const res = await request(app.getHttpServer())
-        .get(
-          `/api/v1/inventario/disponibilidad/comercial?skus=${sku}&canal=VENTAS`,
-        )
-        .set('Authorization', `Bearer ${marketplaceToken}`)
-        .expect(400);
+    it.each(['VENTAS', '__proto__', 'constructor'])(
+      'GET responde 400 VALIDACION cuando el canal no pertenece al enum: %s',
+      async (canal) => {
+        const res = await request(app.getHttpServer())
+          .get(
+            `/api/v1/inventario/disponibilidad/comercial?skus=${sku}&canal=${canal}`,
+          )
+          .set('Authorization', `Bearer ${marketplaceToken}`)
+          .expect(400);
 
-      expect(res.body.code).toBe('VALIDACION');
-    });
+        expect(res.body.code).toBe('VALIDACION');
+      },
+    );
 
     it('GET responde 403 SCOPE_INSUFICIENTE cuando el canal no corresponde al cliente', async () => {
       const res = await request(app.getHttpServer())
@@ -455,6 +458,65 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
       expect(res.body.binding).toBe(false);
       expect(res.body.items[0].result).toBe('SUFICIENTE');
     });
+
+    it('POST sin referencia no afirma suficiencia usando la modalidad equivocada', async () => {
+      const before = structuredClone(mockDb.stockBalance);
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/inventario/disponibilidad/comercial/verificar')
+        .set('Authorization', `Bearer ${marketplaceToken}`)
+        .send({
+          channel_id: 'MARKETPLACE',
+          fulfillment: { mode: 'RETIRO_TIENDA' },
+          lines: [{ sku, quantity: 1 }],
+        })
+        .expect(200);
+      expect(res.body.binding).toBe(false);
+      expect(res.body.items).toEqual([
+        {
+          sku,
+          requested_quantity: 1,
+          result: 'INDETERMINADO',
+          reason_code: 'RUTA_CUMPLIMIENTO_NO_RESUELTA',
+        },
+      ]);
+      expect(mockDb.stockBalance).toEqual(before);
+    });
+
+    it('GET distingue SKU no evaluable de stock agotado', async () => {
+      const res = await request(app.getHttpServer())
+        .get(
+          '/api/v1/inventario/disponibilidad/comercial?skus=DESCONOCIDO&canal=MARKETPLACE',
+        )
+        .set('Authorization', `Bearer ${marketplaceToken}`)
+        .expect(200);
+      expect(res.body).toEqual({
+        items: [{ sku: 'DESCONOCIDO', status: 'INDETERMINADO' }],
+      });
+    });
+
+    it.each([
+      null,
+      {},
+      { sku, quantity: 0 },
+      { sku, quantity: 1, location_id: locLurin },
+    ])(
+      'POST rechaza una línea malformada con Problem Details: %j',
+      async (line) => {
+        const res = await request(app.getHttpServer())
+          .post('/api/v1/inventario/disponibilidad/comercial/verificar')
+          .set('Authorization', `Bearer ${marketplaceToken}`)
+          .send({
+            channel_id: 'MARKETPLACE',
+            fulfillment: { mode: 'ENVIO_DOMICILIO', fulfillment_ref: 'REF-MP' },
+            lines: [line],
+          })
+          .expect(400);
+        expect(res.headers['content-type']).toContain(
+          'application/problem+json',
+        );
+        expect(res.body.code).toBe('VALIDACION');
+      },
+    );
   });
 
   describe('Reintegro F3/Postventa (POST /api/v1/inventario/reintegros)', () => {

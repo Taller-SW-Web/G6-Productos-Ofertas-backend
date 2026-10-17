@@ -173,7 +173,8 @@ export class DisponibilidadService {
     const items: DisponibilidadComercial[] = uniqueSkus.map((sku) => {
       const row = balanceBySku.get(sku);
       if (!row) {
-        return { sku, status: 'AGOTADO' };
+        // Sin saldo no se ha demostrado la existencia/evaluabilidad del SKU (HU-015 CA-46).
+        return { sku, status: 'INDETERMINADO' };
       }
       const available = Math.max(
         0,
@@ -234,7 +235,12 @@ export class DisponibilidadService {
   ): Promise<VerificarCantidadComercialResponse> {
     if (
       !dto ||
-      !dto.channel_id ||
+      typeof dto !== 'object' ||
+      Array.isArray(dto) ||
+      Object.keys(dto).some(
+        (key) => !['channel_id', 'fulfillment', 'lines'].includes(key),
+      ) ||
+      !CANALES_COMERCIALES.some((canal) => canal === dto.channel_id) ||
       !Array.isArray(dto.lines) ||
       dto.lines.length === 0
     ) {
@@ -245,8 +251,16 @@ export class DisponibilidadService {
     }
 
     // Validar objeto fulfillment
-    if (!dto.fulfillment || !dto.fulfillment.mode) {
-      throw ProblemDetailsException.contextoAbastecimientoInvalido(
+    if (
+      !dto.fulfillment ||
+      typeof dto.fulfillment !== 'object' ||
+      Array.isArray(dto.fulfillment) ||
+      typeof dto.fulfillment.mode !== 'string' ||
+      Object.keys(dto.fulfillment).some(
+        (key) => !['mode', 'fulfillment_ref'].includes(key),
+      )
+    ) {
+      throw ProblemDetailsException.validation(
         'El objeto fulfillment con su modo es obligatorio en la verificación comercial',
         correlationId,
       );
@@ -279,7 +293,14 @@ export class DisponibilidadService {
     }
 
     for (const line of dto.lines) {
-      if (!line.sku || typeof line.sku !== 'string') {
+      if (
+        !line ||
+        typeof line !== 'object' ||
+        Array.isArray(line) ||
+        !line.sku ||
+        typeof line.sku !== 'string' ||
+        Object.keys(line).some((key) => !['sku', 'quantity'].includes(key))
+      ) {
         throw ProblemDetailsException.validation(
           'Cada línea debe especificar sku',
           correlationId,
@@ -287,10 +308,10 @@ export class DisponibilidadService {
       }
       if (
         typeof line.quantity !== 'number' ||
-        !Number.isInteger(line.quantity) ||
+        !Number.isSafeInteger(line.quantity) ||
         line.quantity <= 0
       ) {
-        throw ProblemDetailsException.cantidadInvalida(
+        throw ProblemDetailsException.validation(
           'La cantidad debe ser un entero positivo',
           correlationId,
         );
@@ -300,21 +321,12 @@ export class DisponibilidadService {
     const evaluatedAt = new Date().toISOString();
 
     // D-INV-01: resolución de ruta de cumplimiento unívoca
-    let targetLocationId: string | null = null;
-
-    if (dto.fulfillment?.mode && dto.fulfillment?.fulfillment_ref) {
-      targetLocationId =
-        await this.commercialRoutesRepository.findActiveByChannelAndFulfillment(
-          dto.channel_id,
-          dto.fulfillment.mode,
-          dto.fulfillment.fulfillment_ref,
-        );
-    } else {
-      targetLocationId =
-        await this.commercialRoutesRepository.findActiveByChannel(
-          dto.channel_id,
-        );
-    }
+    const targetLocationId =
+      await this.commercialRoutesRepository.findActiveByChannelAndFulfillment(
+        dto.channel_id,
+        dto.fulfillment.mode,
+        dto.fulfillment.fulfillment_ref ?? null,
+      );
 
     // Si falta la correspondencia o es ambigua: devolver INDETERMINADO sin mutar ni inventar almacén
     if (!targetLocationId) {
@@ -336,29 +348,38 @@ export class DisponibilidadService {
     // Ubicación resuelta: verificar capacidad en esa ubicación única
     const items: VerificarCantidadComercialItem[] = [];
 
+    // Evaluar todas las líneas contra el mismo snapshot, incluida la demanda repetida de un SKU.
+    const requestedBySku = new Map<string, number>();
     for (const line of dto.lines) {
-      const balances = await this.stockBalanceRepository.findBySkus(
-        [line.sku],
-        targetLocationId,
+      requestedBySku.set(
+        line.sku,
+        (requestedBySku.get(line.sku) ?? 0) + line.quantity,
       );
+    }
+    const balances = await this.stockBalanceRepository.findBySkus(
+      [...requestedBySku.keys()],
+      targetLocationId,
+    );
+    const balanceBySku = new Map(balances.map((row) => [row.sku_id, row]));
 
-      if (balances.length === 0) {
+    for (const line of dto.lines) {
+      const bal = balanceBySku.get(line.sku);
+
+      if (!bal) {
         items.push({
           sku: line.sku,
           requested_quantity: line.quantity,
-          result: 'INSUFICIENTE',
-          reason_code: 'STOCK_INSUFICIENTE',
+          result: 'INDETERMINADO',
         });
         continue;
       }
 
-      const bal = balances[0];
       const available = Math.max(
         0,
         Number(bal.on_hand) - Number(bal.reserved) - Number(bal.blocked),
       );
 
-      if (available >= line.quantity) {
+      if (available >= requestedBySku.get(line.sku)!) {
         items.push({
           sku: line.sku,
           requested_quantity: line.quantity,

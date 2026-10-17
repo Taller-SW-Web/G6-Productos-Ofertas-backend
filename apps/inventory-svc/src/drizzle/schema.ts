@@ -10,6 +10,9 @@ import {
   jsonb,
   primaryKey,
   uniqueIndex,
+  index,
+  check,
+  unique,
 } from 'drizzle-orm/pg-core';
 
 export const inventorySchema = pgSchema('inventory');
@@ -119,7 +122,18 @@ export const stockBalance = inventorySchema.table(
       .defaultNow()
       .notNull(),
   },
-  (t) => [primaryKey({ columns: [t.sku_id, t.location_id] })],
+  (t) => [
+    primaryKey({ columns: [t.sku_id, t.location_id] }),
+    check(
+      'ck_sb_no_negativo',
+      sql`${t.on_hand} >= 0 AND ${t.reserved} >= 0 AND ${t.blocked} >= 0`,
+    ),
+    check(
+      'ck_sb_reserved_plus_blocked',
+      sql`${t.reserved} + ${t.blocked} <= ${t.on_hand}`,
+    ),
+    index('ix_stock_balance_location_id').on(t.location_id),
+  ],
 );
 
 // 3. reservations
@@ -151,6 +165,22 @@ export const reservations = inventorySchema.table(
     uniqueIndex('uq_inventory_reservations_operation_id')
       .on(t.operation_id)
       .where(sql`${t.operation_id} IS NOT NULL`),
+    check(
+      'ck_reservations_order_id_nonblank',
+      sql`${t.order_id} IS NULL OR length(btrim(${t.order_id})) > 0`,
+    ),
+    check(
+      'ck_inventory_reservations_fingerprint',
+      sql`${t.request_fingerprint} IS NULL OR ${t.request_fingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'ck_inventory_reservations_accepted_payload',
+      sql`${t.accepted_payload} IS NULL OR jsonb_typeof(${t.accepted_payload}) = 'object'`,
+    ),
+    index('ix_reservations_ttl')
+      .on(t.status, t.expires_at)
+      .where(sql`${t.status} = 'ACTIVA'`),
+    index('ix_inventory_reservations_order_id').on(t.order_id),
   ],
 );
 
@@ -169,11 +199,15 @@ export const reservationLines = inventorySchema.table(
     quantity: integer('quantity').notNull(),
   },
   (t) => [
-    uniqueIndex('uq_reservation_lines').on(
+    unique('uq_reservation_lines').on(
       t.reservation_id,
       t.sku_id,
       t.location_id,
     ),
+    check('reservation_lines_quantity_check', sql`${t.quantity} > 0`),
+    index('ix_reservation_lines_reservation_id').on(t.reservation_id),
+    index('ix_reservation_lines_location_id').on(t.location_id),
+    index('ix_reservation_lines_sku').on(t.sku_id, t.location_id),
   ],
 );
 
@@ -215,48 +249,89 @@ export const inventoryOperations = inventorySchema.table(
     uniqueIndex('uq_inventory_operations_operation_id')
       .on(t.operation_id)
       .where(sql`${t.operation_id} IS NOT NULL`),
+    check(
+      'chk_op_qty',
+      sql`(${t.quantity_requested} IS NULL OR ${t.quantity_requested} >= 0) AND (${t.quantity_applied} IS NULL OR ${t.quantity_applied} >= 0)`,
+    ),
+    check(
+      'ck_inventory_operations_order_id_nonblank',
+      sql`${t.order_id} IS NULL OR length(btrim(${t.order_id})) > 0`,
+    ),
+    check(
+      'ck_inventory_operation_client_id',
+      sql`${t.client_id} IS NULL OR length(btrim(${t.client_id})) > 0`,
+    ),
+    check(
+      'ck_inventory_operation_request_fingerprint',
+      sql`${t.request_fingerprint} IS NULL OR ${t.request_fingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'ck_inventory_operation_request_payload',
+      sql`${t.request_payload} IS NULL OR jsonb_typeof(${t.request_payload}) = 'object'`,
+    ),
+    check(
+      'ck_inventory_operation_result_payload',
+      sql`${t.result_payload} IS NULL OR jsonb_typeof(${t.result_payload}) = 'object'`,
+    ),
+    index('ix_inventory_operations_location_id').on(t.location_id),
+    index('ix_operations_sku').on(t.sku_id, t.location_id),
+    index('ix_operations_type_status').on(t.operation_type, t.status),
+    index('ix_inventory_operations_order_id').on(t.order_id),
   ],
 );
 
 // 6. kardex
-export const kardex = inventorySchema.table('kardex', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  sku_id: text('sku_id').notNull(),
-  location_id: uuid('location_id')
-    .notNull()
-    .references(() => locations.id, { onDelete: 'restrict' }),
-  operation_type: operationTypeEnum('operation_type').notNull(),
-  operation_id: uuid('operation_id'),
-  reservation_id: uuid('reservation_id'),
-  quantity: integer('quantity').notNull(),
-  on_hand_before: integer('on_hand_before').notNull(),
-  on_hand_after: integer('on_hand_after').notNull(),
-  reserved_before: integer('reserved_before').notNull(),
-  reserved_after: integer('reserved_after').notNull(),
-  blocked_before: integer('blocked_before').notNull(),
-  blocked_after: integer('blocked_after').notNull(),
-  stock_version: bigint('stock_version', { mode: 'number' }).notNull(),
-  correlation_id: uuid('correlation_id'),
-  created_at: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const kardex = inventorySchema.table(
+  'kardex',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    sku_id: text('sku_id').notNull(),
+    location_id: uuid('location_id')
+      .notNull()
+      .references(() => locations.id, { onDelete: 'restrict' }),
+    operation_type: operationTypeEnum('operation_type').notNull(),
+    operation_id: uuid('operation_id'),
+    reservation_id: uuid('reservation_id'),
+    quantity: integer('quantity').notNull(),
+    on_hand_before: integer('on_hand_before').notNull(),
+    on_hand_after: integer('on_hand_after').notNull(),
+    reserved_before: integer('reserved_before').notNull(),
+    reserved_after: integer('reserved_after').notNull(),
+    blocked_before: integer('blocked_before').notNull(),
+    blocked_after: integer('blocked_after').notNull(),
+    stock_version: bigint('stock_version', { mode: 'number' }).notNull(),
+    correlation_id: uuid('correlation_id'),
+    created_at: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    check('kardex_quantity_check', sql`${t.quantity} <> 0`),
+    index('ix_kardex_location_id').on(t.location_id),
+    index('ix_kardex_saldo').on(t.sku_id, t.location_id, t.created_at.desc()),
+    index('ix_kardex_operation').on(t.operation_id),
+  ],
+);
 
 // 7. outbox
-export const outbox = inventorySchema.table('outbox', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  event_id: uuid('event_id').notNull().unique(),
-  event_type: text('event_type').notNull(),
-  aggregate_type: text('aggregate_type').notNull(),
-  aggregate_id: text('aggregate_id').notNull(),
-  correlation_id: uuid('correlation_id'),
-  payload: jsonb('payload').notNull(),
-  status: outboxStatusEnum('status').default('PENDING').notNull(),
-  published_at: timestamp('published_at', { withTimezone: true }),
-  created_at: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const outbox = inventorySchema.table(
+  'outbox',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    event_id: uuid('event_id').notNull().unique(),
+    event_type: text('event_type').notNull(),
+    aggregate_type: text('aggregate_type').notNull(),
+    aggregate_id: text('aggregate_id').notNull(),
+    correlation_id: uuid('correlation_id'),
+    payload: jsonb('payload').notNull(),
+    status: outboxStatusEnum('status').default('PENDING').notNull(),
+    published_at: timestamp('published_at', { withTimezone: true }),
+    created_at: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index('ix_outbox_dispatcher').on(t.status, t.created_at)],
+);
 
 // 8. commercial_fulfillment_routes
 export const commercialFulfillmentRoutes = inventorySchema.table(
@@ -277,6 +352,26 @@ export const commercialFulfillmentRoutes = inventorySchema.table(
       .defaultNow()
       .notNull(),
   },
+  (t) => [
+    check(
+      'commercial_fulfillment_routes_channel_id_check',
+      sql`${t.channel_id} IN ('MARKETPLACE', 'CHATBOT', 'RETAIL')`,
+    ),
+    check(
+      'commercial_fulfillment_routes_mode_check',
+      sql`${t.mode} IN ('ENVIO_DOMICILIO', 'RETIRO_TIENDA', 'VENTA_TIENDA')`,
+    ),
+    check(
+      'commercial_fulfillment_routes_fulfillment_ref_check',
+      sql`length(btrim(${t.fulfillment_ref})) > 0`,
+    ),
+    uniqueIndex('uq_commercial_fulfillment_routes_active')
+      .on(t.channel_id, t.mode, t.fulfillment_ref)
+      .where(sql`${t.active}`),
+    index('ix_commercial_fulfillment_routes_location')
+      .on(t.location_id)
+      .where(sql`${t.active}`),
+  ],
 );
 
 // 9. stock_threshold_override
@@ -296,31 +391,57 @@ export const stockThresholdOverride = inventorySchema.table(
       .defaultNow()
       .notNull(),
   },
+  (t) => [
+    check(
+      'stock_threshold_override_umbral_efectivo_check',
+      sql`${t.umbral_efectivo} >= 0`,
+    ),
+    check(
+      'chk_threshold_scope',
+      sql`${t.location_id} IS NULL AND (${t.sku_id} IS NULL OR ${t.sku_id} IS NOT NULL)`,
+    ),
+    unique('uq_threshold_override').on(t.sku_id, t.location_id),
+    uniqueIndex('ix_threshold_global')
+      .on(sql`(1)`)
+      .where(sql`${t.sku_id} IS NULL AND ${t.location_id} IS NULL`),
+  ],
 );
 
 // 10. incidencias
-export const incidencias = inventorySchema.table('incidencias', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  incidencia_id: uuid('incidencia_id').notNull().unique(),
-  sku_id: text('sku_id').notNull(),
-  location_id: uuid('location_id')
-    .notNull()
-    .references(() => locations.id, { onDelete: 'restrict' }),
-  external_incident_id: text('external_incident_id'),
-  act_ref: text('act_ref'),
-  estado: incidenciaEstadoEnum('estado').default('ABIERTA').notNull(),
-  tipo_resolucion: tipoResolucionIncidenciaEnum('tipo_resolucion'),
-  cantidad_bloqueada: integer('cantidad_bloqueada').notNull(),
-  idempotency_key: text('idempotency_key').notNull().unique(),
-  correlation_id: uuid('correlation_id'),
-  created_at: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  updated_at: timestamp('updated_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-  resolved_at: timestamp('resolved_at', { withTimezone: true }),
-});
+export const incidencias = inventorySchema.table(
+  'incidencias',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    incidencia_id: uuid('incidencia_id').notNull().unique(),
+    sku_id: text('sku_id').notNull(),
+    location_id: uuid('location_id')
+      .notNull()
+      .references(() => locations.id, { onDelete: 'restrict' }),
+    external_incident_id: text('external_incident_id'),
+    act_ref: text('act_ref'),
+    estado: incidenciaEstadoEnum('estado').default('ABIERTA').notNull(),
+    tipo_resolucion: tipoResolucionIncidenciaEnum('tipo_resolucion'),
+    cantidad_bloqueada: integer('cantidad_bloqueada').notNull(),
+    idempotency_key: text('idempotency_key').notNull().unique(),
+    correlation_id: uuid('correlation_id'),
+    created_at: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updated_at: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    resolved_at: timestamp('resolved_at', { withTimezone: true }),
+  },
+  (t) => [
+    check(
+      'incidencias_cantidad_bloqueada_check',
+      sql`${t.cantidad_bloqueada} > 0`,
+    ),
+    index('ix_incidencias_location_id').on(t.location_id),
+    index('ix_incidencias_estado').on(t.estado),
+    index('ix_incidencias_sku').on(t.sku_id, t.location_id),
+  ],
+);
 
 // 11. traslados
 export const traslados = inventorySchema.table(
@@ -351,6 +472,19 @@ export const traslados = inventorySchema.table(
     uniqueIndex('ix_traslado_por_incidencia')
       .on(t.source_incident_id)
       .where(sql`${t.source_incident_id} IS NOT NULL`),
+    check('traslados_quantity_shipped_check', sql`${t.quantity_shipped} > 0`),
+    check(
+      'traslados_quantity_received_check',
+      sql`${t.quantity_received} >= 0`,
+    ),
+    check(
+      'chk_traslado_missing',
+      sql`${t.missing_quantity} IS NULL OR ${t.missing_quantity} >= 0`,
+    ),
+    index('ix_traslados_source_location_id').on(t.source_location_id),
+    index('ix_traslados_target_location_id').on(t.target_location_id),
+    index('ix_traslados_estado').on(t.estado),
+    index('ix_traslados_source').on(t.source_location_id, t.estado),
   ],
 );
 
@@ -372,6 +506,13 @@ export const trasladoRecepciones = inventorySchema.table(
       .defaultNow()
       .notNull(),
   },
+  (t) => [
+    check(
+      'traslado_recepciones_cantidad_recibida_check',
+      sql`${t.cantidad_recibida} > 0`,
+    ),
+    index('ix_recepciones_traslado').on(t.traslado_id),
+  ],
 );
 
 // 13. inventory_config
@@ -404,19 +545,36 @@ export const dashboardProjection = inventorySchema.table(
       .defaultNow()
       .notNull(),
   },
-  (t) => [primaryKey({ columns: [t.sku_id, t.location_id] })],
+  (t) => [
+    primaryKey({ columns: [t.sku_id, t.location_id] }),
+    check(
+      'chk_dp_no_negativo',
+      sql`${t.on_hand} >= 0 AND ${t.reserved} >= 0 AND ${t.blocked} >= 0`,
+    ),
+    check(
+      'chk_dp_reserved_plus_blocked',
+      sql`${t.reserved} + ${t.blocked} <= ${t.on_hand}`,
+    ),
+    index('ix_dashboard_projection_location_id').on(t.location_id),
+    index('ix_dashboard_ubicacion_estado').on(t.location_id, t.status),
+    index('ix_dashboard_estado').on(t.status),
+  ],
 );
 
 // 15. inbox
-export const inbox = inventorySchema.table('inbox', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  message_id: uuid('message_id').notNull().unique(),
-  message_type: text('message_type').notNull(),
-  source: text('source').notNull(),
-  payload: jsonb('payload').notNull(),
-  status: inboxStatusEnum('status').default('RECEIVED').notNull(),
-  processed_at: timestamp('processed_at', { withTimezone: true }),
-  created_at: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const inbox = inventorySchema.table(
+  'inbox',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    message_id: uuid('message_id').notNull().unique(),
+    message_type: text('message_type').notNull(),
+    source: text('source').notNull(),
+    payload: jsonb('payload').notNull(),
+    status: inboxStatusEnum('status').default('RECEIVED').notNull(),
+    processed_at: timestamp('processed_at', { withTimezone: true }),
+    created_at: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index('ix_inbox_processing').on(t.status, t.created_at)],
+);

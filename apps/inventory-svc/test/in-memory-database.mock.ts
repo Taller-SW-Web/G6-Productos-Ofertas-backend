@@ -407,7 +407,16 @@ export class InMemoryDatabaseMock implements IDatabaseService {
     if (s.includes('FROM INVENTORY.COMMERCIAL_FULFILLMENT_ROUTES')) {
       const channel = params?.[0];
       const filtered = this.commercialRoutes.filter(
-        (r) => r.active && r.channel_id === channel,
+        (r) =>
+          r.active &&
+          r.channel_id === channel &&
+          (!s.includes('MODE = $2') || r.mode === params?.[1]) &&
+          (!s.includes('FULFILLMENT_REF = $3') ||
+            r.fulfillment_ref === params?.[2]) &&
+          (!s.includes('JOIN INVENTORY.LOCATIONS') ||
+            this.locations.some(
+              (location) => location.id === r.location_id && location.active,
+            )),
       );
       return { rows: filtered as any, rowCount: filtered.length };
     }

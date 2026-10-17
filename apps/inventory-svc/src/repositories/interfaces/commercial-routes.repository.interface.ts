@@ -13,7 +13,7 @@ export interface ICommercialRoutesRepository {
   findActiveByChannelAndFulfillment(
     channelId: string,
     mode: string,
-    fulfillmentRef: string,
+    fulfillmentRef: string | null,
     client?: IDatabaseClient,
   ): Promise<string | null>;
 

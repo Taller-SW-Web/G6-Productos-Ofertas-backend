@@ -12,56 +12,49 @@ export class DrizzleCommercialRoutesRepository implements ICommercialRoutesRepos
   async findActiveByChannelAndFulfillment(
     channelId: string,
     mode: string,
-    fulfillmentRef: string,
+    fulfillmentRef: string | null,
     client?: IDatabaseClient,
   ): Promise<string | null> {
-    const db = client?.drizzle ?? this.databaseService.getDrizzle();
-    if (db) {
-      const rows = await db
-        .select({
-          location_id: schema.commercialFulfillmentRoutes.location_id,
-        })
-        .from(schema.commercialFulfillmentRoutes)
-        .where(
-          and(
-            eq(schema.commercialFulfillmentRoutes.channel_id, channelId),
-            eq(schema.commercialFulfillmentRoutes.mode, mode),
-            eq(
-              schema.commercialFulfillmentRoutes.fulfillment_ref,
-              fulfillmentRef,
-            ),
-            eq(schema.commercialFulfillmentRoutes.active, true),
-          ),
-        );
-
-      if (rows.length === 1) {
-        return rows[0].location_id;
-      }
-      return null;
-    }
-
-    const sql = `
-      SELECT location_id FROM inventory.commercial_fulfillment_routes
-      WHERE channel_id = $1 AND mode = $2 AND fulfillment_ref = $3 AND active = true
-    `;
-    const res = client
-      ? await client.query(sql, [channelId, mode, fulfillmentRef])
-      : await this.databaseService.query(sql, [
-          channelId,
-          mode,
-          fulfillmentRef,
-        ]);
-
-    if (res.rows.length === 1) {
-      return res.rows[0].location_id;
-    }
-    return null;
+    return this.findUniqueActiveLocation(
+      channelId,
+      client,
+      mode,
+      fulfillmentRef,
+    );
   }
 
   async findActiveByChannel(
     channelId: string,
     client?: IDatabaseClient,
   ): Promise<string | null> {
+    return this.findUniqueActiveLocation(channelId, client);
+  }
+
+  private async findUniqueActiveLocation(
+    channelId: string,
+    client?: IDatabaseClient,
+    mode?: string,
+    fulfillmentRef?: string | null,
+  ): Promise<string | null> {
+    const conditions = [
+      eq(schema.commercialFulfillmentRoutes.channel_id, channelId),
+      eq(schema.commercialFulfillmentRoutes.active, true),
+      eq(schema.locations.active, true),
+    ];
+    const params = [channelId];
+    const sqlConditions = ['routes.channel_id = $1', 'routes.active = true'];
+    if (mode !== undefined) {
+      conditions.push(eq(schema.commercialFulfillmentRoutes.mode, mode));
+      params.push(mode);
+      sqlConditions.push('routes.mode = $2');
+    }
+    if (fulfillmentRef != null) {
+      conditions.push(
+        eq(schema.commercialFulfillmentRoutes.fulfillment_ref, fulfillmentRef),
+      );
+      params.push(fulfillmentRef);
+      sqlConditions.push('routes.fulfillment_ref = $3');
+    }
     const db = client?.drizzle ?? this.databaseService.getDrizzle();
     if (db) {
       const rows = await db
@@ -69,12 +62,15 @@ export class DrizzleCommercialRoutesRepository implements ICommercialRoutesRepos
           location_id: schema.commercialFulfillmentRoutes.location_id,
         })
         .from(schema.commercialFulfillmentRoutes)
-        .where(
-          and(
-            eq(schema.commercialFulfillmentRoutes.channel_id, channelId),
-            eq(schema.commercialFulfillmentRoutes.active, true),
+        .innerJoin(
+          schema.locations,
+          eq(
+            schema.locations.id,
+            schema.commercialFulfillmentRoutes.location_id,
           ),
-        );
+        )
+        .where(and(...conditions))
+        .limit(2);
 
       if (rows.length === 1) {
         return rows[0].location_id;
@@ -83,12 +79,15 @@ export class DrizzleCommercialRoutesRepository implements ICommercialRoutesRepos
     }
 
     const sql = `
-      SELECT location_id FROM inventory.commercial_fulfillment_routes
-      WHERE channel_id = $1 AND active = true
+      SELECT routes.location_id FROM inventory.commercial_fulfillment_routes AS routes
+      JOIN inventory.locations AS eligible_location
+        ON eligible_location.id = routes.location_id AND eligible_location.active = true
+      WHERE ${sqlConditions.join(' AND ')}
+      LIMIT 2
     `;
     const res = client
-      ? await client.query(sql, [channelId])
-      : await this.databaseService.query(sql, [channelId]);
+      ? await client.query<{ location_id: string }>(sql, params)
+      : await this.databaseService.query<{ location_id: string }>(sql, params);
 
     if (res.rows.length === 1) {
       return res.rows[0].location_id;

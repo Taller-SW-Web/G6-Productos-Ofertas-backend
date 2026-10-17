@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DisponibilidadService } from './disponibilidad.service.js';
 import { DatabaseService } from '../database/database.service.js';
 import { InMemoryDatabaseMock } from '../../test/in-memory-database.mock.js';
@@ -171,11 +171,11 @@ describe('DisponibilidadService — Consultas de Stock y D-INV-01', () => {
         'MARKETPLACE',
       );
 
-      // Lurín: NIK 18 (DISPONIBLE), PUM 2 (STOCK_BAJO con umbral 5); sin saldo => AGOTADO.
+      // Sin saldo registrado no se puede afirmar que un SKU exista y esté agotado (CA-46).
       expect(res.items).toEqual([
         { sku: 'NIK-REV7-NEG-41', status: 'DISPONIBLE' },
         { sku: 'PUM-LIMIT-01', status: 'STOCK_BAJO' },
-        { sku: 'SKU-INEXISTENTE', status: 'AGOTADO' },
+        { sku: 'SKU-INEXISTENTE', status: 'INDETERMINADO' },
       ]);
       for (const item of res.items) {
         expect(Object.keys(item).sort()).toEqual(['sku', 'status']);
@@ -231,6 +231,173 @@ describe('DisponibilidadService — Consultas de Stock y D-INV-01', () => {
           'MARKETPLACE',
         ),
       ).rejects.toThrow();
+    });
+  });
+
+  describe('Regresiones de la política D-INV-01 (#25)', () => {
+    const sku = 'NIK-REV7-NEG-41';
+    const request = (
+      mode = 'ENVIO_DOMICILIO',
+      ref: string | null = 'LIMA',
+    ) => ({
+      channel_id: 'MARKETPLACE' as const,
+      fulfillment: { mode, fulfillment_ref: ref },
+      lines: [{ sku, quantity: 2 }],
+    });
+
+    beforeEach(() => {
+      mockDb.commercialRoutes.push({
+        id: 'route-lurin',
+        channel_id: 'MARKETPLACE',
+        mode: 'ENVIO_DOMICILIO',
+        fulfillment_ref: 'LIMA',
+        location_id: locLurin,
+        active: true,
+      });
+    });
+
+    it('no usa la ruta de otra modalidad cuando falta la referencia', async () => {
+      const res = await disponibilidadService.verificarCantidadComercial(
+        request('RETIRO_TIENDA', null),
+      );
+      expect(res.items[0].result).toBe('INDETERMINADO');
+    });
+
+    it('sin referencia resuelve únicamente la modalidad solicitada', async () => {
+      mockDb.commercialRoutes.push({
+        id: 'route-retiro',
+        channel_id: 'MARKETPLACE',
+        mode: 'RETIRO_TIENDA',
+        fulfillment_ref: 'TIENDA',
+        location_id: locMiraflores,
+        active: true,
+      });
+      const res = await disponibilidadService.verificarCantidadComercial(
+        request('ENVIO_DOMICILIO', null),
+      );
+      expect(res.items[0].result).toBe('SUFICIENTE');
+    });
+
+    it('no sustituye una referencia desconocida por la única ruta del canal', async () => {
+      const res = await disponibilidadService.verificarCantidadComercial(
+        request('ENVIO_DOMICILIO', 'OTRA'),
+      );
+      expect(res.items[0].result).toBe('INDETERMINADO');
+    });
+
+    it('no suma ubicaciones ni elige una arbitraria ante un mapeo ambiguo', async () => {
+      mockDb.commercialRoutes.push({
+        ...mockDb.commercialRoutes[0],
+        id: 'route-ambigua',
+        location_id: locMiraflores,
+      });
+      const get = await disponibilidadService.consultarDisponibilidadComercial(
+        [sku],
+        'MARKETPLACE',
+      );
+      const post =
+        await disponibilidadService.verificarCantidadComercial(request());
+      expect(get.items[0].status).toBe('INDETERMINADO');
+      expect(post.items[0].result).toBe('INDETERMINADO');
+    });
+
+    it('descarta rutas inactivas y ubicaciones deshabilitadas', async () => {
+      mockDb.commercialRoutes[0].active = false;
+      expect(
+        (await disponibilidadService.verificarCantidadComercial(request()))
+          .items[0].result,
+      ).toBe('INDETERMINADO');
+      mockDb.commercialRoutes[0].active = true;
+      mockDb.locations.find((location) => location.id === locLurin)!.active =
+        false;
+      expect(
+        (await disponibilidadService.verificarCantidadComercial(request()))
+          .items[0].result,
+      ).toBe('INDETERMINADO');
+      expect(
+        (
+          await disponibilidadService.consultarDisponibilidadComercial(
+            [sku],
+            'MARKETPLACE',
+          )
+        ).items[0].status,
+      ).toBe('INDETERMINADO');
+    });
+
+    it('distingue un saldo cero de la ausencia de información sobre el SKU', async () => {
+      mockDb.stockBalance.find(
+        (balance) => balance.sku_id === sku && balance.location_id === locLurin,
+      )!.reserved = 18;
+      expect(
+        (
+          await disponibilidadService.consultarDisponibilidadComercial(
+            [sku, 'DESCONOCIDO'],
+            'MARKETPLACE',
+          )
+        ).items,
+      ).toEqual([
+        { sku, status: 'AGOTADO' },
+        { sku: 'DESCONOCIDO', status: 'INDETERMINADO' },
+      ]);
+      const input = request();
+      input.lines = [{ sku: 'DESCONOCIDO', quantity: 1 }];
+      expect(
+        (await disponibilidadService.verificarCantidadComercial(input)).items[0]
+          .result,
+      ).toBe('INDETERMINADO');
+    });
+
+    it('evalúa la demanda completa de un SKU repetido sin reservar unidades', async () => {
+      const input = request();
+      input.lines = [
+        { sku, quantity: 10 },
+        { sku, quantity: 10 },
+      ];
+      const res = await disponibilidadService.verificarCantidadComercial(input);
+      expect(res.items.map((item) => item.result)).toEqual([
+        'INSUFICIENTE',
+        'INSUFICIENTE',
+      ]);
+    });
+
+    it('GET y POST no modifican saldos, reservas, operaciones, Kardex ni Outbox', async () => {
+      const state = () =>
+        structuredClone({
+          stock: mockDb.stockBalance,
+          reservations: mockDb.reservations,
+          operations: mockDb.operations,
+          kardex: mockDb.kardex,
+          outbox: mockDb.outbox,
+        });
+      const before = state();
+      const transaction = vi.spyOn(mockDb, 'transaction');
+      const res =
+        await disponibilidadService.verificarCantidadComercial(request());
+      await disponibilidadService.consultarDisponibilidadComercial(
+        [sku],
+        'MARKETPLACE',
+      );
+      expect(res.binding).toBe(false);
+      expect(Object.keys(res.items[0]).sort()).toEqual(
+        ['sku', 'requested_quantity', 'result', 'reason_code'].sort(),
+      );
+      expect(transaction).not.toHaveBeenCalled();
+      expect(state()).toEqual(before);
+    });
+
+    it.each([
+      null,
+      {},
+      { sku },
+      { sku, quantity: 0 },
+      { sku, quantity: 1.5 },
+      { sku, quantity: '2' },
+      { sku, quantity: 2, location_id: locLurin },
+    ])('rechaza líneas malformadas con 400 VALIDACION: %j', async (line) => {
+      const input = { ...request(), lines: [line] };
+      await expect(
+        disponibilidadService.verificarCantidadComercial(input as never),
+      ).rejects.toMatchObject({ problem: { status: 400, code: 'VALIDACION' } });
     });
   });
 });

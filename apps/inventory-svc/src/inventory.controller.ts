@@ -69,7 +69,10 @@ function assertCanalDelCliente(
   clientId: string | undefined,
   correlationId?: string,
 ): void {
-  const expectedClient = canal ? CANAL_CLIENT_MAP[canal] : undefined;
+  const expectedClient =
+    typeof canal === 'string' && Object.hasOwn(CANAL_CLIENT_MAP, canal)
+      ? CANAL_CLIENT_MAP[canal]
+      : undefined;
   if (!expectedClient) {
     throw ProblemDetailsException.validation(
       `El canal '${canal ?? ''}' debe ser MARKETPLACE, CHATBOT o RETAIL`,
