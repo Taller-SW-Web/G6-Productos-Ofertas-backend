@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { correlationId, isCorrelationId } from './correlation.js';
+import { CatalogPersistenceError } from './database-errors.js';
 
 @Catch()
 export class ProblemFilter implements ExceptionFilter {
@@ -13,7 +14,15 @@ export class ProblemFilter implements ExceptionFilter {
     const context = host.switchToHttp();
     const request = context.getRequest<Request>();
     const response = context.getResponse<Response>();
-    const status = error instanceof HttpException ? error.getStatus() : 500;
+    const databaseUnavailable =
+      error instanceof CatalogPersistenceError &&
+      error.failure === 'connection';
+    const status =
+      error instanceof HttpException
+        ? error.getStatus()
+        : databaseUnavailable
+          ? 503
+          : 500;
     const body =
       error instanceof HttpException ? error.getResponse() : undefined;
     const supplied =

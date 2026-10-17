@@ -1,5 +1,3 @@
-import { ServiceUnavailableException } from '@nestjs/common';
-
 export type CatalogPersistenceFailure =
   | 'connection'
   | 'unique'
@@ -16,7 +14,7 @@ type PostgresFailure = Error & {
   cause?: unknown;
 };
 
-export class CatalogPersistenceError extends ServiceUnavailableException {
+export class CatalogPersistenceError extends Error {
   readonly failure: CatalogPersistenceFailure;
   readonly sqlState?: string;
   readonly constraintName?: string;
@@ -26,7 +24,7 @@ export class CatalogPersistenceError extends ServiceUnavailableException {
     sqlState?: string,
     constraintName?: string,
   ) {
-    super('Servicio temporalmente no disponible');
+    super('Falló una operación de persistencia de Catálogo');
     this.name = 'CatalogPersistenceError';
     this.failure = failure;
     this.sqlState = sqlState;
@@ -84,7 +82,7 @@ export function translatePostgresFailure(
   if (
     driverCode?.startsWith('08') ||
     driverCode?.startsWith('53') ||
-    driverCode?.startsWith('57') ||
+    ['57P01', '57P02', '57P03'].includes(driverCode ?? '') ||
     [
       'ECONNREFUSED',
       'ECONNRESET',

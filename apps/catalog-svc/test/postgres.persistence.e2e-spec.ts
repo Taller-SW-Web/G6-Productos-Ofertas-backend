@@ -32,6 +32,13 @@ const dockerAvailable =
     timeout: 5000,
     windowsHide: true,
   }).status === 0;
+const isCi = process.env.CI?.toLowerCase() === 'true';
+
+if (isCi && !dockerAvailable) {
+  throw new Error(
+    'Catalog persistence E2E requires Docker and OpenSSL in CI; refusing to skip PostgreSQL coverage',
+  );
+}
 
 function command(executable: string, args: string[], input?: string): string {
   const result = spawnSync(executable, args, {
@@ -382,10 +389,182 @@ describe.skipIf(!dockerAvailable)(
           db.execute(sql`CREATE TABLE public.catalog_forbidden (id integer)`),
         ),
       ).rejects.toMatchObject({ failure: 'other' });
+
+      const schemaTables = [
+        'products',
+        'variants',
+        'sku_identity',
+        'product_images',
+        'variant_images',
+        'product_attribute_values',
+        'variant_attribute_values',
+        'product_identifying_characteristics',
+        'sku_physical_profiles',
+        'activation_checks',
+        'master_barriers',
+        'outbox',
+        'inbox',
+      ];
+      const mutableTables = new Set([
+        'products',
+        'variants',
+        'product_images',
+        'variant_images',
+        'product_attribute_values',
+        'variant_attribute_values',
+        'product_identifying_characteristics',
+        'sku_physical_profiles',
+        'activation_checks',
+        'master_barriers',
+      ]);
+      const deletableTables = new Set([
+        'product_images',
+        'variant_images',
+        'product_attribute_values',
+        'variant_attribute_values',
+        'product_identifying_characteristics',
+        'sku_physical_profiles',
+      ]);
+      const grants = await database.read((db) =>
+        db.execute(sql`
+          SELECT table_name,
+            has_table_privilege(current_user, format('catalog.%I', table_name), 'SELECT') AS can_select,
+            has_table_privilege(current_user, format('catalog.%I', table_name), 'INSERT') AS can_insert,
+            has_table_privilege(current_user, format('catalog.%I', table_name), 'UPDATE') AS can_update,
+            has_table_privilege(current_user, format('catalog.%I', table_name), 'DELETE') AS can_delete
+          FROM unnest(${schemaTables}::text[]) AS tables(table_name)
+        `),
+      );
+      expect(grants.rows).toHaveLength(schemaTables.length);
+      expect(grants.rows).toEqual(
+        expect.arrayContaining(
+          schemaTables.map((table_name) => ({
+            table_name,
+            can_select: true,
+            can_insert: true,
+            can_update: mutableTables.has(table_name),
+            can_delete: deletableTables.has(table_name),
+          })),
+        ),
+      );
+
+      const outboxColumnGrants = await database.read((db) =>
+        db.execute(sql`
+          SELECT column_name,
+            has_column_privilege(current_user, 'catalog.outbox', column_name, 'UPDATE') AS can_update
+          FROM unnest(ARRAY['published_at', 'attempts', 'last_error', 'payload']::text[])
+            AS columns(column_name)
+        `),
+      );
+      expect(outboxColumnGrants.rows).toEqual(
+        expect.arrayContaining([
+          { column_name: 'published_at', can_update: true },
+          { column_name: 'attempts', can_update: true },
+          { column_name: 'last_error', can_update: true },
+          { column_name: 'payload', can_update: false },
+        ]),
+      );
+
+      const sku = 'SKU-' + randomUUID();
+      const product = await transactions.run((tx) =>
+        repository.insertProduct(tx, productInput(sku)),
+      );
+      await database.read((db) =>
+        db.execute(sql`
+          UPDATE catalog.products SET descripcion = 'Runtime permission fixture updated'
+          WHERE id = ${product.id}
+        `),
+      );
+      const updatedProduct = await database.read((db) =>
+        db.execute(
+          sql`SELECT descripcion FROM catalog.products WHERE id = ${product.id}`,
+        ),
+      );
+      expect(updatedProduct.rows[0]?.descripcion).toBe(
+        'Runtime permission fixture updated',
+      );
+      await expect(
+        database.read((db) =>
+          db.execute(
+            sql`DELETE FROM catalog.products WHERE id = ${product.id}`,
+          ),
+        ),
+      ).rejects.toMatchObject({ failure: 'other', sqlState: '42501' });
+      await expect(
+        database.read((db) =>
+          db.execute(
+            sql`UPDATE catalog.sku_identity SET sku = ${'SKU-' + randomUUID()} WHERE sku = ${sku}`,
+          ),
+        ),
+      ).rejects.toMatchObject({ failure: 'other', sqlState: '42501' });
+      await expect(
+        database.read((db) =>
+          db.execute(sql`DELETE FROM catalog.sku_identity WHERE sku = ${sku}`),
+        ),
+      ).rejects.toMatchObject({ failure: 'other', sqlState: '42501' });
+
+      const imageId = randomUUID();
+      await database.read((db) =>
+        db.execute(sql`
+          INSERT INTO catalog.product_images (id, product_id, url)
+          VALUES (${imageId}, ${product.id}, 'https://example.test/catalog-fixture')
+        `),
+      );
+      await database.read((db) =>
+        db.execute(sql`
+          UPDATE catalog.product_images
+          SET url = 'https://example.test/catalog-fixture-updated'
+          WHERE id = ${imageId}
+        `),
+      );
+      await database.read((db) =>
+        db.execute(
+          sql`DELETE FROM catalog.product_images WHERE id = ${imageId}`,
+        ),
+      );
+
+      const outboxMessageId = randomUUID();
+      await database.read((db) =>
+        db.execute(sql`
+          INSERT INTO catalog.outbox
+            (message_id, event_name, kind, correlation_id, occurred_at, payload)
+          VALUES (
+            ${outboxMessageId}, 'catalog.test', 'event', ${randomUUID()},
+            now(), ${JSON.stringify({ immutable: true })}::jsonb
+          )
+        `),
+      );
+      await database.read((db) =>
+        db.execute(sql`
+          UPDATE catalog.outbox SET attempts = attempts + 1, last_error = 'fixture retry'
+          WHERE message_id = ${outboxMessageId}
+        `),
+      );
+      await database.read((db) =>
+        db.execute(sql`
+          UPDATE catalog.outbox SET published_at = now()
+          WHERE message_id = ${outboxMessageId}
+        `),
+      );
+      const outboxRow = await database.read((db) =>
+        db.execute(
+          sql`SELECT payload FROM catalog.outbox WHERE message_id = ${outboxMessageId}`,
+        ),
+      );
+      expect(outboxRow.rows[0]?.payload).toEqual({ immutable: true });
+      await expect(
+        database.read((db) =>
+          db.execute(sql`
+            UPDATE catalog.outbox SET payload = ${JSON.stringify({ changed: true })}::jsonb
+            WHERE message_id = ${outboxMessageId}
+          `),
+        ),
+      ).rejects.toMatchObject({ failure: 'other', sqlState: '42501' });
+
       await database.onModuleDestroy();
       closed = true;
       await expect(database.read(async () => true)).rejects.toMatchObject({
-        status: 503,
+        failure: 'connection',
       });
     });
   },

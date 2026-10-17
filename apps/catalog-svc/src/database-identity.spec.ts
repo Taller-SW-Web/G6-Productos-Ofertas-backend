@@ -105,7 +105,7 @@ describe('Database identity and shared pool', () => {
     const database = new Database(readPostgresSettings(env()));
     try {
       await expect(database.verifyIdentity()).rejects.toMatchObject({
-        status: 503,
+        failure: 'other',
       });
     } finally {
       await database.onModuleDestroy();
@@ -127,8 +127,8 @@ describe('Database identity and shared pool', () => {
         }),
       );
       await expect(database.verifyIdentity()).rejects.toMatchObject({
-        status: 503,
-        message: 'Servicio temporalmente no disponible',
+        failure: 'connection',
+        message: 'Falló una operación de persistencia de Catálogo',
       });
       await database.verifyIdentity();
       expect(driver.pool).toHaveBeenCalledOnce();

@@ -1,3 +1,4 @@
+import { ServiceUnavailableException } from '@nestjs/common';
 import {
   CatalogPersistenceError,
   translatePostgresFailure,
@@ -13,6 +14,8 @@ describe('safe PostgreSQL failure translation', () => {
     ['08006', false, 'connection'],
     ['ECONNRESET', false, 'connection'],
     ['53300', false, 'connection'],
+    ['57P01', false, 'connection'],
+    ['57014', false, 'other'],
     ['23514', true, 'deferred_constraint'],
   ] as const)(
     'classifies SQLSTATE %s at commit=%s',
@@ -32,7 +35,7 @@ describe('safe PostgreSQL failure translation', () => {
       expect(translated.constraintName).toBe('catalog_internal_guard');
       expect(translated.message).not.toContain('private SQL');
       expect(translated.message).not.toContain('password');
-      expect(translated.getStatus()).toBe(503);
+      expect(translated).not.toBeInstanceOf(ServiceUnavailableException);
     },
   );
 
@@ -50,7 +53,9 @@ describe('safe PostgreSQL failure translation', () => {
     if (!translated) throw new Error('Expected a PostgreSQL failure');
     expect(translated.failure).toBe('other');
     expect(JSON.stringify(translated)).not.toContain('secret');
-    expect(translated.message).toBe('Servicio temporalmente no disponible');
+    expect(translated.message).toBe(
+      'Falló una operación de persistencia de Catálogo',
+    );
   });
 
   it.each([

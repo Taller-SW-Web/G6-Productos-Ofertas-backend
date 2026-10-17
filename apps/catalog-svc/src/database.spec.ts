@@ -87,7 +87,7 @@ describe('catalog PostgreSQL configuration and lifecycle', () => {
     );
     await database.onModuleDestroy();
     await expect(database.read(async () => true)).rejects.toMatchObject({
-      status: 503,
+      failure: 'connection',
     });
   });
   it('preserves domain failures and translates SQLSTATE errors wrapped by Drizzle', async () => {
@@ -115,9 +115,8 @@ describe('catalog PostgreSQL configuration and lifecycle', () => {
         })
         .catch((error: unknown) => error);
       expect(translated).toMatchObject({
-        status: 503,
         failure: 'unique',
-        message: 'Servicio temporalmente no disponible',
+        message: 'Falló una operación de persistencia de Catálogo',
       });
       expect(JSON.stringify(translated)).not.toContain('private-password');
       expect(JSON.stringify(translated)).not.toContain('INSERT INTO');
