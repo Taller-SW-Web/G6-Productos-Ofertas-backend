@@ -1,9 +1,19 @@
 # DATA-002 — Catálogo Inka Athletics
 
-Lote para issue #12: manifiesto, preflight, carga propuesta, postcheck, matriz y reporte. **PREPARADO / NO EJECUTADO**; no se escribió en Supabase.
+Este directorio contiene los artefactos de DATA-002 (#12), incluido en el PR #125 junto con la persistencia de catalog-svc (#44). Lote preparado para reauditoría; **no se ejecuta en Supabase compartido**.
 
-15 productos: 12 padres con variantes (45 variantes), 3 simples y 48 SKU vendibles nuevos. Se preservan 5 productos históricos y 7 SKU vendibles. Todo en BORRADOR. DEC-F-001 separa SKU base de padres y SKU simples; DEC-F-009 exige no-op idéntico y conflicto explícito; DEC-F-012 registra fuentes y versión. Entrada 26 y Everyday Plus se agrupan por modelo/color; Park III hombre y mujer son distintos. Messi, Academy y Orbita simples talla 5. Cada SKU de medias es un par. Predator conserva Flexible Ground y tallas exactas.
+## Contenido y seguridad
 
-Bloqueo: PUMA Manchester City 25/26 780338_01. Imagen verificada, sin categoría activa compatible con camiseta oficial de club. Owner: Taxonomía (López). Desbloqueo: categoría activa compatible asociada a Camiseta deportiva.
+- 15 productos propuestos: 12 con variantes y 3 simples; 45 variantes y 48 SKU vendibles. La presentación bloqueada por Taxonomía se mantiene fuera del SQL.
+- 90 atributos de variante y 6 de productos simples usan JSONB no nulo `{"valor_id":"UUID"}`. Los 45 `identifying_key` son objetos por característica, con forma `{"<caracteristica_id>":{"valor_id":"<UUID>"}}`, igual a `catalog.fn_assert_product()`.
+- La carga no modifica/elimina filas ni inserta manualmente `sku_identity`; se apoya en triggers oficiales y aborta ante contenido existente divergente.
+- `001_preflight_readonly.sql` revisa referencias Taxonomía activas. Debe devolver cero filas en el destino antes de una eventual carga. Once referencias no aparecen en el manifiesto local de Taxonomía; su estado real queda **sin verificar** hasta un preflight autorizado.
+- `004_postcheck_readonly.sql` comprueba conteos, atributos, `identifying_key`, identidades SKU y cobertura de imágenes sin escribir.
 
-Antes de una eventual carga, revisar manifiesto y hashes, obtener autorización explícita de Marco para contenido/SHA/destino, ejecutar preflight, SQL transaccional y postcheck. No ejecutar como seed. Fuentes: physical-model.md, SPEC-003/004, DEC-F-001/009/012 e issue #12.
+## Evidencia de imágenes
+
+`005_matriz_productos_imagenes.csv` relaciona modelo, presentación, objeto Storage y URL pública con la fuente comercial, los SKU/tallas y la cantidad de filas de imagen asociadas al lote. La evidencia anterior registró 18 objetos: 17 asociados y 1 bloqueado por Taxonomía; las 17 URLs asociadas fueron cargadas e inspeccionadas visualmente en la verificación previa del 2026-10-16. Esta revisión no vuelve a consultar Storage compartido.
+
+## Validación
+
+`006_reporte_evidencia.md` contiene hashes SHA-256 actuales, resultados del PostgreSQL descartable y el límite de la validación de referencias activas. El lote completo se prueba localmente con primera ejecución, reejecución idéntica y conflicto de contenido. No correr el SQL contra Supabase compartido durante la auditoría.

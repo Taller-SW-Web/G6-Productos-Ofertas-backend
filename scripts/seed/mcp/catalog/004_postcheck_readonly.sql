@@ -1,4 +1,63 @@
--- Solo lectura después de carga aprobada
-select id,nombre,sku_base,slug,tiene_variantes,estado from catalog.products where id in ('96c6972f-2bd2-5528-8028-5293fe719db9','8be3020b-0f9c-5343-ad74-41740393bece','ad478840-d9fa-5c02-8e4f-d6bdbd0b1914','9d5e65cb-10c9-5a2b-a69d-090e3208bd77','457f749f-2aaf-56a3-9776-a95df5d24d59','59022191-2fb1-5db3-903f-05f8e6be19b1','536287fd-b2fa-5c1d-a086-7db284725485','2ee6399e-2333-5916-847b-f6d2a0f03527','ff8e9b30-f939-51cd-9294-4753cdae05b8','b8224b4b-8268-57e4-9d61-d4424828544c','0f9cc95c-6502-54ce-82d5-72f192bbd33c','79c03413-cf12-56fe-bcd1-32e45cf40221','7b1abfe1-87c2-5e60-81dc-cfb6daf247cc','8111028a-4a0e-5cb1-a4b8-8095cc098a83','858ed760-beb9-5fdf-aa6d-b6b543b162d2');
-select p.sku_base,count(v.id) from catalog.products p left join catalog.variants v on v.product_id=p.id where p.id in ('96c6972f-2bd2-5528-8028-5293fe719db9','8be3020b-0f9c-5343-ad74-41740393bece','ad478840-d9fa-5c02-8e4f-d6bdbd0b1914','9d5e65cb-10c9-5a2b-a69d-090e3208bd77','457f749f-2aaf-56a3-9776-a95df5d24d59','59022191-2fb1-5db3-903f-05f8e6be19b1','536287fd-b2fa-5c1d-a086-7db284725485','2ee6399e-2333-5916-847b-f6d2a0f03527','ff8e9b30-f939-51cd-9294-4753cdae05b8','b8224b4b-8268-57e4-9d61-d4424828544c','0f9cc95c-6502-54ce-82d5-72f192bbd33c','79c03413-cf12-56fe-bcd1-32e45cf40221','7b1abfe1-87c2-5e60-81dc-cfb6daf247cc','8111028a-4a0e-5cb1-a4b8-8095cc098a83','858ed760-beb9-5fdf-aa6d-b6b543b162d2') group by p.id;
-select v.sku,v.identifying_key,si.product_id,si.variant_id,count(vi.id) from catalog.variants v left join catalog.sku_identity si on si.variant_id=v.id left join catalog.variant_images vi on vi.variant_id=v.id where v.id in ('347eebb8-f145-5e3f-8cad-31ffa45ccabc','3cde5b53-8282-5491-a423-80a912ee8b71','f60c691e-74fe-5507-a111-a1fd4e1c1f5a','83709a1d-e38f-5c11-b389-4b72321eda59','7f943d67-1e76-5594-b3be-f0670c1072bc','d756023d-9a33-5fab-af73-9d386b498f21','eecf0794-1eea-5cf3-83a6-42795902726e','0cd5c7bf-363b-5501-b237-d6ff14814f67','9a4bb6a1-1e68-5d32-b861-51a1f20ba8f3','840b28a1-46fc-5e3a-a176-cb150e25e8a7','864ea99c-a2d8-5906-b93f-ac5300fdfa3e','2cc6f948-5d34-5ed1-9bfc-c5ff9f39d63f','284276f3-e0ab-5ffb-a394-3664374aa09b','629792a7-60fb-57f5-9747-f3b54cf8b553','b1d488a5-fba8-5fd4-90b7-b7440cd59a40','677f8fcc-caaf-5cc9-a060-c7756d5ab1c2','91f677b4-3ee9-539d-9ed9-6804f8922a26','ab8ae29e-84d5-58fb-b237-c07bc618386c','30723507-bc26-53e2-b3e1-e2a03124445d','0d6a3d1f-50fc-5e74-b50b-3844d2f3bcfa','62ca791d-dd40-5846-8105-3650730c08cf','161d02f4-1913-51c7-aa37-140c6fef4bca','968ec637-15e1-549c-b8ba-da77ed375edc','7f8c7bf8-3086-5849-a21f-722bb13bff1c','73829aef-a02c-5555-82f1-03a495d44ced','1c995251-cf8c-55e2-878a-ea83f9f4b351','e8a0b20b-a6fd-5a78-9e6b-8199f32742c2','bc260f04-d0c1-57d6-862a-6d7ae44c74ff','bd42a0bd-dd7e-595c-8d1d-7afabc4ed049','4ef2fc98-fe62-5d4c-b050-5ad312c088e0','df53883d-2875-5a71-afe8-1f4097e8b234','923d14cc-c3d8-53b2-b0c5-57568e9f1abd','e3cd5843-307f-576a-b721-2f58d7df3fdc','a6a0d134-e4a9-58ba-b512-37076fc99a33','29cf5cee-af27-5da0-aaba-c8f4f6712101','909bf47b-9242-5955-b2ed-03adf2922580','f3890276-9ad2-545b-948b-484f5ed1495b','033875cd-b8de-50d6-bb3d-49e98e146178','96945dfc-af18-5da8-8e6e-c49b8c673ed2','7a594c35-880e-5682-b282-a3cc01d8854c','d82aafc7-3257-5bc8-8093-c9139562e910','61600bf0-bb76-5b31-9c9b-1df55ddd3471','b6bdb52f-a904-56b8-a863-f23aea89ffc6','b271319c-457a-58c5-bbbf-62280abd0803','09875bf7-7cbd-5f6d-92e9-47d78e8763a6') group by v.id,si.product_id,si.variant_id;
+-- Verificacion posterior del lote DATA-002. Solo lectura; falla ante drift o faltantes.
+\set ON_ERROR_STOP on
+BEGIN TRANSACTION READ ONLY;
+DO $check$
+DECLARE
+    product_ids uuid[] := ARRAY['96c6972f-2bd2-5528-8028-5293fe719db9', '8be3020b-0f9c-5343-ad74-41740393bece', 'ad478840-d9fa-5c02-8e4f-d6bdbd0b1914', '9d5e65cb-10c9-5a2b-a69d-090e3208bd77', '457f749f-2aaf-56a3-9776-a95df5d24d59', '59022191-2fb1-5db3-903f-05f8e6be19b1', '536287fd-b2fa-5c1d-a086-7db284725485', '2ee6399e-2333-5916-847b-f6d2a0f03527', 'ff8e9b30-f939-51cd-9294-4753cdae05b8', 'b8224b4b-8268-57e4-9d61-d4424828544c', '0f9cc95c-6502-54ce-82d5-72f192bbd33c', '79c03413-cf12-56fe-bcd1-32e45cf40221', '7b1abfe1-87c2-5e60-81dc-cfb6daf247cc', '8111028a-4a0e-5cb1-a4b8-8095cc098a83', '858ed760-beb9-5fdf-aa6d-b6b543b162d2']::uuid[];
+BEGIN
+    IF (SELECT count(*) FROM catalog.products WHERE id = ANY(product_ids)) <> 15 THEN
+        RAISE EXCEPTION 'DATA-002: conteo de productos incorrecto';
+    END IF;
+    IF (SELECT count(*) FROM catalog.variants WHERE product_id = ANY(product_ids)) <> 45 THEN
+        RAISE EXCEPTION 'DATA-002: conteo de variantes incorrecto';
+    END IF;
+    IF (SELECT count(*) FROM catalog.product_identifying_characteristics WHERE product_id = ANY(product_ids)) <> 24 THEN
+        RAISE EXCEPTION 'DATA-002: caracteristicas identificadoras incorrectas';
+    END IF;
+    IF (SELECT count(*) FROM catalog.variant_attribute_values a JOIN catalog.variants v ON v.id = a.variant_id WHERE v.product_id = ANY(product_ids)) <> 90 THEN
+        RAISE EXCEPTION 'DATA-002: atributos de variante incorrectos';
+    END IF;
+    IF (SELECT count(*) FROM catalog.product_attribute_values WHERE product_id = ANY(product_ids)) <> 6 THEN
+        RAISE EXCEPTION 'DATA-002: atributos de producto simple incorrectos';
+    END IF;
+    IF (SELECT count(*) FROM catalog.variant_images i JOIN catalog.variants v ON v.id = i.variant_id WHERE v.product_id = ANY(product_ids)) <> 45 OR
+       (SELECT count(*) FROM catalog.product_images WHERE product_id = ANY(product_ids)) <> 3 THEN
+        RAISE EXCEPTION 'DATA-002: imagenes asociadas incorrectas';
+    END IF;
+    IF (SELECT count(DISTINCT url) FROM (
+        SELECT i.url FROM catalog.variant_images i JOIN catalog.variants v ON v.id = i.variant_id WHERE v.product_id = ANY(product_ids)
+        UNION ALL SELECT url FROM catalog.product_images WHERE product_id = ANY(product_ids)
+    ) image_urls) <> 17 THEN
+        RAISE EXCEPTION 'DATA-002: archivos de imagen asociados incorrectos';
+    END IF;
+    IF (SELECT count(*) FROM catalog.sku_identity s WHERE s.variant_id IN (
+        SELECT id FROM catalog.variants WHERE product_id = ANY(product_ids)
+    ) OR s.product_id IN ('ad478840-d9fa-5c02-8e4f-d6bdbd0b1914', '2ee6399e-2333-5916-847b-f6d2a0f03527', '8111028a-4a0e-5cb1-a4b8-8095cc098a83')) <> 48 THEN
+        RAISE EXCEPTION 'DATA-002: identidades SKU vendibles incorrectas';
+    END IF;
+    IF EXISTS (SELECT 1 FROM catalog.variant_attribute_values a JOIN catalog.variants v ON v.id = a.variant_id
+        WHERE v.product_id = ANY(product_ids) AND (a.valor IS NULL OR jsonb_typeof(a.valor) <> 'object' OR a.valor->>'valor_id' IS DISTINCT FROM a.valor_id)) OR
+       EXISTS (SELECT 1 FROM catalog.product_attribute_values a WHERE a.product_id = ANY(product_ids)
+        AND (a.valor IS NULL OR jsonb_typeof(a.valor) <> 'object' OR a.valor->>'valor_id' IS DISTINCT FROM a.valor_id)) THEN
+        RAISE EXCEPTION 'DATA-002: representacion JSONB de atributos incorrecta';
+    END IF;
+    IF EXISTS (SELECT 1 FROM catalog.variants v CROSS JOIN LATERAL (
+        SELECT jsonb_object_agg(a.caracteristica_id, jsonb_build_object('valor_id', a.valor_id)) AS derived_key
+        FROM catalog.variant_attribute_values a WHERE a.variant_id = v.id AND a.es_identificador
+    ) a WHERE v.product_id = ANY(product_ids) AND v.identifying_key IS DISTINCT FROM a.derived_key) THEN
+        RAISE EXCEPTION 'DATA-002: identifying_key no coincide con fn_assert_product';
+    END IF;
+    IF EXISTS (SELECT 1 FROM catalog.variants v WHERE v.product_id = ANY(product_ids) AND NOT EXISTS (SELECT 1 FROM catalog.variant_images i WHERE i.variant_id = v.id)) THEN
+        RAISE EXCEPTION 'DATA-002: variante sin imagen';
+    END IF;
+END
+$check$;
+SELECT
+    (SELECT count(*) FROM catalog.products WHERE id = ANY(ARRAY['96c6972f-2bd2-5528-8028-5293fe719db9', '8be3020b-0f9c-5343-ad74-41740393bece', 'ad478840-d9fa-5c02-8e4f-d6bdbd0b1914', '9d5e65cb-10c9-5a2b-a69d-090e3208bd77', '457f749f-2aaf-56a3-9776-a95df5d24d59', '59022191-2fb1-5db3-903f-05f8e6be19b1', '536287fd-b2fa-5c1d-a086-7db284725485', '2ee6399e-2333-5916-847b-f6d2a0f03527', 'ff8e9b30-f939-51cd-9294-4753cdae05b8', 'b8224b4b-8268-57e4-9d61-d4424828544c', '0f9cc95c-6502-54ce-82d5-72f192bbd33c', '79c03413-cf12-56fe-bcd1-32e45cf40221', '7b1abfe1-87c2-5e60-81dc-cfb6daf247cc', '8111028a-4a0e-5cb1-a4b8-8095cc098a83', '858ed760-beb9-5fdf-aa6d-b6b543b162d2']::uuid[])) AS productos,
+    (SELECT count(*) FROM catalog.variants WHERE product_id = ANY(ARRAY['96c6972f-2bd2-5528-8028-5293fe719db9', '8be3020b-0f9c-5343-ad74-41740393bece', 'ad478840-d9fa-5c02-8e4f-d6bdbd0b1914', '9d5e65cb-10c9-5a2b-a69d-090e3208bd77', '457f749f-2aaf-56a3-9776-a95df5d24d59', '59022191-2fb1-5db3-903f-05f8e6be19b1', '536287fd-b2fa-5c1d-a086-7db284725485', '2ee6399e-2333-5916-847b-f6d2a0f03527', 'ff8e9b30-f939-51cd-9294-4753cdae05b8', 'b8224b4b-8268-57e4-9d61-d4424828544c', '0f9cc95c-6502-54ce-82d5-72f192bbd33c', '79c03413-cf12-56fe-bcd1-32e45cf40221', '7b1abfe1-87c2-5e60-81dc-cfb6daf247cc', '8111028a-4a0e-5cb1-a4b8-8095cc098a83', '858ed760-beb9-5fdf-aa6d-b6b543b162d2']::uuid[])) AS variantes,
+    (SELECT count(*) FROM catalog.variant_attribute_values a JOIN catalog.variants v ON v.id = a.variant_id WHERE v.product_id = ANY(ARRAY['96c6972f-2bd2-5528-8028-5293fe719db9', '8be3020b-0f9c-5343-ad74-41740393bece', 'ad478840-d9fa-5c02-8e4f-d6bdbd0b1914', '9d5e65cb-10c9-5a2b-a69d-090e3208bd77', '457f749f-2aaf-56a3-9776-a95df5d24d59', '59022191-2fb1-5db3-903f-05f8e6be19b1', '536287fd-b2fa-5c1d-a086-7db284725485', '2ee6399e-2333-5916-847b-f6d2a0f03527', 'ff8e9b30-f939-51cd-9294-4753cdae05b8', 'b8224b4b-8268-57e4-9d61-d4424828544c', '0f9cc95c-6502-54ce-82d5-72f192bbd33c', '79c03413-cf12-56fe-bcd1-32e45cf40221', '7b1abfe1-87c2-5e60-81dc-cfb6daf247cc', '8111028a-4a0e-5cb1-a4b8-8095cc098a83', '858ed760-beb9-5fdf-aa6d-b6b543b162d2']::uuid[])) AS atributos_variante,
+    (SELECT count(*) FROM catalog.product_attribute_values WHERE product_id = ANY(ARRAY['96c6972f-2bd2-5528-8028-5293fe719db9', '8be3020b-0f9c-5343-ad74-41740393bece', 'ad478840-d9fa-5c02-8e4f-d6bdbd0b1914', '9d5e65cb-10c9-5a2b-a69d-090e3208bd77', '457f749f-2aaf-56a3-9776-a95df5d24d59', '59022191-2fb1-5db3-903f-05f8e6be19b1', '536287fd-b2fa-5c1d-a086-7db284725485', '2ee6399e-2333-5916-847b-f6d2a0f03527', 'ff8e9b30-f939-51cd-9294-4753cdae05b8', 'b8224b4b-8268-57e4-9d61-d4424828544c', '0f9cc95c-6502-54ce-82d5-72f192bbd33c', '79c03413-cf12-56fe-bcd1-32e45cf40221', '7b1abfe1-87c2-5e60-81dc-cfb6daf247cc', '8111028a-4a0e-5cb1-a4b8-8095cc098a83', '858ed760-beb9-5fdf-aa6d-b6b543b162d2']::uuid[])) AS atributos_producto,
+    (SELECT count(*) FROM catalog.sku_identity s WHERE s.variant_id IN (SELECT id FROM catalog.variants WHERE product_id = ANY(ARRAY['96c6972f-2bd2-5528-8028-5293fe719db9', '8be3020b-0f9c-5343-ad74-41740393bece', 'ad478840-d9fa-5c02-8e4f-d6bdbd0b1914', '9d5e65cb-10c9-5a2b-a69d-090e3208bd77', '457f749f-2aaf-56a3-9776-a95df5d24d59', '59022191-2fb1-5db3-903f-05f8e6be19b1', '536287fd-b2fa-5c1d-a086-7db284725485', '2ee6399e-2333-5916-847b-f6d2a0f03527', 'ff8e9b30-f939-51cd-9294-4753cdae05b8', 'b8224b4b-8268-57e4-9d61-d4424828544c', '0f9cc95c-6502-54ce-82d5-72f192bbd33c', '79c03413-cf12-56fe-bcd1-32e45cf40221', '7b1abfe1-87c2-5e60-81dc-cfb6daf247cc', '8111028a-4a0e-5cb1-a4b8-8095cc098a83', '858ed760-beb9-5fdf-aa6d-b6b543b162d2']::uuid[])) OR s.product_id IN ('ad478840-d9fa-5c02-8e4f-d6bdbd0b1914', '2ee6399e-2333-5916-847b-f6d2a0f03527', '8111028a-4a0e-5cb1-a4b8-8095cc098a83')) AS sku_vendibles,
+    (SELECT count(*) FROM catalog.variant_images i JOIN catalog.variants v ON v.id = i.variant_id WHERE v.product_id = ANY(ARRAY['96c6972f-2bd2-5528-8028-5293fe719db9', '8be3020b-0f9c-5343-ad74-41740393bece', 'ad478840-d9fa-5c02-8e4f-d6bdbd0b1914', '9d5e65cb-10c9-5a2b-a69d-090e3208bd77', '457f749f-2aaf-56a3-9776-a95df5d24d59', '59022191-2fb1-5db3-903f-05f8e6be19b1', '536287fd-b2fa-5c1d-a086-7db284725485', '2ee6399e-2333-5916-847b-f6d2a0f03527', 'ff8e9b30-f939-51cd-9294-4753cdae05b8', 'b8224b4b-8268-57e4-9d61-d4424828544c', '0f9cc95c-6502-54ce-82d5-72f192bbd33c', '79c03413-cf12-56fe-bcd1-32e45cf40221', '7b1abfe1-87c2-5e60-81dc-cfb6daf247cc', '8111028a-4a0e-5cb1-a4b8-8095cc098a83', '858ed760-beb9-5fdf-aa6d-b6b543b162d2']::uuid[])) AS imagenes_variante,
+    (SELECT count(*) FROM catalog.product_images WHERE product_id = ANY(ARRAY['96c6972f-2bd2-5528-8028-5293fe719db9', '8be3020b-0f9c-5343-ad74-41740393bece', 'ad478840-d9fa-5c02-8e4f-d6bdbd0b1914', '9d5e65cb-10c9-5a2b-a69d-090e3208bd77', '457f749f-2aaf-56a3-9776-a95df5d24d59', '59022191-2fb1-5db3-903f-05f8e6be19b1', '536287fd-b2fa-5c1d-a086-7db284725485', '2ee6399e-2333-5916-847b-f6d2a0f03527', 'ff8e9b30-f939-51cd-9294-4753cdae05b8', 'b8224b4b-8268-57e4-9d61-d4424828544c', '0f9cc95c-6502-54ce-82d5-72f192bbd33c', '79c03413-cf12-56fe-bcd1-32e45cf40221', '7b1abfe1-87c2-5e60-81dc-cfb6daf247cc', '8111028a-4a0e-5cb1-a4b8-8095cc098a83', '858ed760-beb9-5fdf-aa6d-b6b543b162d2']::uuid[])) AS imagenes_producto;
+ROLLBACK;

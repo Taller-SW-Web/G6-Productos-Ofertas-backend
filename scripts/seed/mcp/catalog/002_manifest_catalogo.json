@@ -1,7 +1,7 @@
 {
   "lote": "DATA-002",
   "issue": 12,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "branch": "poma",
   "project_id": "slzglmtiyrzygpkiuthf",
   "bucket": "catalog-products",
@@ -105,12 +105,36 @@
           "talla": "S",
           "talla_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "50347024-7af0-2f6b-03fd-f5bbd3f408cf",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "50347024-7af0-2f6b-03fd-f5bbd3f408cf"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-entrada-h57505-gris.jpg",
-          "image_id": "e7c5ced1-8d22-5396-98df-bea755fa7ae4"
+          "image_id": "e7c5ced1-8d22-5396-98df-bea755fa7ae4",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "50347024-7af0-2f6b-03fd-f5bbd3f408cf",
+              "valor": {
+                "valor_id": "50347024-7af0-2f6b-03fd-f5bbd3f408cf"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
+              "valor": {
+                "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "3cde5b53-8282-5491-a423-80a912ee8b71",
@@ -121,12 +145,36 @@
           "talla": "M",
           "talla_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "50347024-7af0-2f6b-03fd-f5bbd3f408cf",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "50347024-7af0-2f6b-03fd-f5bbd3f408cf"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-entrada-h57505-gris.jpg",
-          "image_id": "086393dc-39a2-5822-afb5-2d978e51af90"
+          "image_id": "086393dc-39a2-5822-afb5-2d978e51af90",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "50347024-7af0-2f6b-03fd-f5bbd3f408cf",
+              "valor": {
+                "valor_id": "50347024-7af0-2f6b-03fd-f5bbd3f408cf"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
+              "valor": {
+                "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "f60c691e-74fe-5507-a111-a1fd4e1c1f5a",
@@ -137,12 +185,36 @@
           "talla": "L",
           "talla_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "50347024-7af0-2f6b-03fd-f5bbd3f408cf",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "50347024-7af0-2f6b-03fd-f5bbd3f408cf"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-entrada-h57505-gris.jpg",
-          "image_id": "b05dba36-483c-5770-b602-50deb1de9dd6"
+          "image_id": "b05dba36-483c-5770-b602-50deb1de9dd6",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "50347024-7af0-2f6b-03fd-f5bbd3f408cf",
+              "valor": {
+                "valor_id": "50347024-7af0-2f6b-03fd-f5bbd3f408cf"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
+              "valor": {
+                "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+              },
+              "es_identificador": true
+            }
+          ]
         }
       ]
     },
@@ -188,12 +260,36 @@
           "talla": "S",
           "talla_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "931a4c7d-03d4-1ae2-bc95-817315fafcd6",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-entrada26-jz2506-azul.avif",
-          "image_id": "62f00564-5572-525c-b974-b60e8d57a551"
+          "image_id": "62f00564-5572-525c-b974-b60e8d57a551",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6",
+              "valor": {
+                "valor_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
+              "valor": {
+                "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "7f943d67-1e76-5594-b3be-f0670c1072bc",
@@ -204,12 +300,36 @@
           "talla": "M",
           "talla_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "931a4c7d-03d4-1ae2-bc95-817315fafcd6",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-entrada26-jz2506-azul.avif",
-          "image_id": "b109d088-166a-51fa-891b-f14c194f1a61"
+          "image_id": "b109d088-166a-51fa-891b-f14c194f1a61",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6",
+              "valor": {
+                "valor_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
+              "valor": {
+                "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "d756023d-9a33-5fab-af73-9d386b498f21",
@@ -220,12 +340,36 @@
           "talla": "L",
           "talla_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "931a4c7d-03d4-1ae2-bc95-817315fafcd6",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-entrada26-jz2506-azul.avif",
-          "image_id": "b96c126f-fbb9-5a89-bc01-e276642cf283"
+          "image_id": "b96c126f-fbb9-5a89-bc01-e276642cf283",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6",
+              "valor": {
+                "valor_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
+              "valor": {
+                "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "eecf0794-1eea-5cf3-83a6-42795902726e",
@@ -236,12 +380,36 @@
           "talla": "S",
           "talla_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-entrada26-jz2508-blanco.avif",
-          "image_id": "21606197-768e-5fa9-93f9-eef7722a1f21"
+          "image_id": "21606197-768e-5fa9-93f9-eef7722a1f21",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
+              "valor": {
+                "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
+              "valor": {
+                "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "0cd5c7bf-363b-5501-b237-d6ff14814f67",
@@ -252,12 +420,36 @@
           "talla": "M",
           "talla_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-entrada26-jz2508-blanco.avif",
-          "image_id": "f0c29790-e273-591e-9bf8-8bd16277d0c8"
+          "image_id": "f0c29790-e273-591e-9bf8-8bd16277d0c8",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
+              "valor": {
+                "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
+              "valor": {
+                "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "9a4bb6a1-1e68-5d32-b861-51a1f20ba8f3",
@@ -268,12 +460,36 @@
           "talla": "L",
           "talla_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-entrada26-jz2508-blanco.avif",
-          "image_id": "6129a2bd-8595-5a41-9bad-648752e2b02e"
+          "image_id": "6129a2bd-8595-5a41-9bad-648752e2b02e",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
+              "valor": {
+                "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
+              "valor": {
+                "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+              },
+              "es_identificador": true
+            }
+          ]
         }
       ]
     },
@@ -303,11 +519,17 @@
       "atributos_simple": [
         {
           "name": "Color",
-          "value_id": "35e25c52-aa9b-5572-b656-15b701e4894c"
+          "value_id": "35e25c52-aa9b-5572-b656-15b701e4894c",
+          "valor": {
+            "valor_id": "35e25c52-aa9b-5572-b656-15b701e4894c"
+          }
         },
         {
           "name": "Talla",
-          "value_id": "52d4b91a-f829-c05e-d60e-31ada29b0513"
+          "value_id": "52d4b91a-f829-c05e-d60e-31ada29b0513",
+          "valor": {
+            "valor_id": "52d4b91a-f829-c05e-d60e-31ada29b0513"
+          }
         }
       ],
       "product_image_id": "eee7de29-60d6-564e-80e3-94083e039b68",
@@ -350,12 +572,36 @@
           "talla": "38",
           "talla_id": "ae3eba02-52e6-4a8a-d71f-231960bdd9a4",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "35e25c52-aa9b-5572-b656-15b701e4894c",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "ae3eba02-52e6-4a8a-d71f-231960bdd9a4"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "35e25c52-aa9b-5572-b656-15b701e4894c"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "ae3eba02-52e6-4a8a-d71f-231960bdd9a4"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-predator-ig7760-multicolor.jpg",
-          "image_id": "05b34bf5-930c-5286-898d-52dfe1dde67e"
+          "image_id": "05b34bf5-930c-5286-898d-52dfe1dde67e",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "35e25c52-aa9b-5572-b656-15b701e4894c",
+              "valor": {
+                "valor_id": "35e25c52-aa9b-5572-b656-15b701e4894c"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "ae3eba02-52e6-4a8a-d71f-231960bdd9a4",
+              "valor": {
+                "valor_id": "ae3eba02-52e6-4a8a-d71f-231960bdd9a4"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "864ea99c-a2d8-5906-b93f-ac5300fdfa3e",
@@ -366,12 +612,36 @@
           "talla": "40",
           "talla_id": "c90f8581-0fe2-5fd4-b08c-8b5d3f616399",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "35e25c52-aa9b-5572-b656-15b701e4894c",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "c90f8581-0fe2-5fd4-b08c-8b5d3f616399"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "35e25c52-aa9b-5572-b656-15b701e4894c"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "c90f8581-0fe2-5fd4-b08c-8b5d3f616399"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-predator-ig7760-multicolor.jpg",
-          "image_id": "cfb4b358-864a-5aff-b54f-fe583c0090f1"
+          "image_id": "cfb4b358-864a-5aff-b54f-fe583c0090f1",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "35e25c52-aa9b-5572-b656-15b701e4894c",
+              "valor": {
+                "valor_id": "35e25c52-aa9b-5572-b656-15b701e4894c"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "c90f8581-0fe2-5fd4-b08c-8b5d3f616399",
+              "valor": {
+                "valor_id": "c90f8581-0fe2-5fd4-b08c-8b5d3f616399"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "2cc6f948-5d34-5ed1-9bfc-c5ff9f39d63f",
@@ -382,12 +652,36 @@
           "talla": "42",
           "talla_id": "122e93d8-cd1a-4b0e-8224-859fcff6db25",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "35e25c52-aa9b-5572-b656-15b701e4894c",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "122e93d8-cd1a-4b0e-8224-859fcff6db25"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "35e25c52-aa9b-5572-b656-15b701e4894c"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "122e93d8-cd1a-4b0e-8224-859fcff6db25"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-predator-ig7760-multicolor.jpg",
-          "image_id": "2c25e18b-4079-5c83-bb7e-c055b3e4574b"
+          "image_id": "2c25e18b-4079-5c83-bb7e-c055b3e4574b",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "35e25c52-aa9b-5572-b656-15b701e4894c",
+              "valor": {
+                "valor_id": "35e25c52-aa9b-5572-b656-15b701e4894c"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "122e93d8-cd1a-4b0e-8224-859fcff6db25",
+              "valor": {
+                "valor_id": "122e93d8-cd1a-4b0e-8224-859fcff6db25"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "284276f3-e0ab-5ffb-a394-3664374aa09b",
@@ -398,12 +692,36 @@
           "talla": "43",
           "talla_id": "c636cd16-7146-52d9-a1a5-faab92c5ea42",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "35e25c52-aa9b-5572-b656-15b701e4894c",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "c636cd16-7146-52d9-a1a5-faab92c5ea42"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "35e25c52-aa9b-5572-b656-15b701e4894c"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "c636cd16-7146-52d9-a1a5-faab92c5ea42"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-predator-ig7760-multicolor.jpg",
-          "image_id": "b9ca8d56-ca96-5d84-afa9-4e2e1acdcfc6"
+          "image_id": "b9ca8d56-ca96-5d84-afa9-4e2e1acdcfc6",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "35e25c52-aa9b-5572-b656-15b701e4894c",
+              "valor": {
+                "valor_id": "35e25c52-aa9b-5572-b656-15b701e4894c"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "c636cd16-7146-52d9-a1a5-faab92c5ea42",
+              "valor": {
+                "valor_id": "c636cd16-7146-52d9-a1a5-faab92c5ea42"
+              },
+              "es_identificador": true
+            }
+          ]
         }
       ]
     },
@@ -443,12 +761,36 @@
           "talla": "EU 34-36",
           "talla_id": "6e8053e7-d856-5a20-9a0b-9a34d497def5",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "6e8053e7-d856-5a20-9a0b-9a34d497def5"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "6e8053e7-d856-5a20-9a0b-9a34d497def5"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-runxcushioned-jd9558-negro.jpg",
-          "image_id": "96a51418-ad4e-534f-94e3-0ec8c3658b00"
+          "image_id": "96a51418-ad4e-534f-94e3-0ec8c3658b00",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "6e8053e7-d856-5a20-9a0b-9a34d497def5",
+              "valor": {
+                "valor_id": "6e8053e7-d856-5a20-9a0b-9a34d497def5"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "b1d488a5-fba8-5fd4-90b7-b7440cd59a40",
@@ -459,12 +801,36 @@
           "talla": "EU 37-39",
           "talla_id": "c417b2a9-f655-57a5-976c-128a0b3c1527",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "c417b2a9-f655-57a5-976c-128a0b3c1527"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "c417b2a9-f655-57a5-976c-128a0b3c1527"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-runxcushioned-jd9558-negro.jpg",
-          "image_id": "a4ab37c8-9214-5cb7-b77b-6fe18c10baa6"
+          "image_id": "a4ab37c8-9214-5cb7-b77b-6fe18c10baa6",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "c417b2a9-f655-57a5-976c-128a0b3c1527",
+              "valor": {
+                "valor_id": "c417b2a9-f655-57a5-976c-128a0b3c1527"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "677f8fcc-caaf-5cc9-a060-c7756d5ab1c2",
@@ -475,12 +841,36 @@
           "talla": "EU 40-42",
           "talla_id": "20ead521-e596-521d-a057-7c41b52d0626",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "20ead521-e596-521d-a057-7c41b52d0626"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "20ead521-e596-521d-a057-7c41b52d0626"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-runxcushioned-jd9558-negro.jpg",
-          "image_id": "662b9aa0-4dd8-58b3-bf85-b9137f20d6cd"
+          "image_id": "662b9aa0-4dd8-58b3-bf85-b9137f20d6cd",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "20ead521-e596-521d-a057-7c41b52d0626",
+              "valor": {
+                "valor_id": "20ead521-e596-521d-a057-7c41b52d0626"
+              },
+              "es_identificador": true
+            }
+          ]
         }
       ]
     },
@@ -520,12 +910,36 @@
           "talla": "S",
           "talla_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-squadra-jg5832-negro.jpg",
-          "image_id": "1a261f12-9a3f-5a14-aa3c-7b8cba7deb24"
+          "image_id": "1a261f12-9a3f-5a14-aa3c-7b8cba7deb24",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
+              "valor": {
+                "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "ab8ae29e-84d5-58fb-b237-c07bc618386c",
@@ -536,12 +950,36 @@
           "talla": "M",
           "talla_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-squadra-jg5832-negro.jpg",
-          "image_id": "24eeabd2-32d2-5fe4-8ce4-d78ca0550072"
+          "image_id": "24eeabd2-32d2-5fe4-8ce4-d78ca0550072",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
+              "valor": {
+                "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "30723507-bc26-53e2-b3e1-e2a03124445d",
@@ -552,12 +990,36 @@
           "talla": "L",
           "talla_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-squadra-jg5832-negro.jpg",
-          "image_id": "6cd480d1-8d68-500a-82db-e4d3b852baa5"
+          "image_id": "6cd480d1-8d68-500a-82db-e4d3b852baa5",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
+              "valor": {
+                "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+              },
+              "es_identificador": true
+            }
+          ]
         }
       ]
     },
@@ -597,12 +1059,36 @@
           "talla": "S",
           "talla_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "931a4c7d-03d4-1ae2-bc95-817315fafcd6",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-squadra-jh3407-celeste.jpg",
-          "image_id": "9422cfe9-eb50-5db7-af0c-6632d6af00c8"
+          "image_id": "9422cfe9-eb50-5db7-af0c-6632d6af00c8",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6",
+              "valor": {
+                "valor_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
+              "valor": {
+                "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "62ca791d-dd40-5846-8105-3650730c08cf",
@@ -613,12 +1099,36 @@
           "talla": "M",
           "talla_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "931a4c7d-03d4-1ae2-bc95-817315fafcd6",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-squadra-jh3407-celeste.jpg",
-          "image_id": "ff838808-99a7-5464-bed8-badae3e18004"
+          "image_id": "ff838808-99a7-5464-bed8-badae3e18004",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6",
+              "valor": {
+                "valor_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
+              "valor": {
+                "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "161d02f4-1913-51c7-aa37-140c6fef4bca",
@@ -629,12 +1139,36 @@
           "talla": "L",
           "talla_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "931a4c7d-03d4-1ae2-bc95-817315fafcd6",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/adidas-squadra-jh3407-celeste.jpg",
-          "image_id": "8ed81f5d-d113-5755-97e2-9c9022688f2b"
+          "image_id": "8ed81f5d-d113-5755-97e2-9c9022688f2b",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6",
+              "valor": {
+                "valor_id": "931a4c7d-03d4-1ae2-bc95-817315fafcd6"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
+              "valor": {
+                "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+              },
+              "es_identificador": true
+            }
+          ]
         }
       ]
     },
@@ -664,11 +1198,17 @@
       "atributos_simple": [
         {
           "name": "Color",
-          "value_id": "35e25c52-aa9b-5572-b656-15b701e4894c"
+          "value_id": "35e25c52-aa9b-5572-b656-15b701e4894c",
+          "valor": {
+            "valor_id": "35e25c52-aa9b-5572-b656-15b701e4894c"
+          }
         },
         {
           "name": "Talla",
-          "value_id": "52d4b91a-f829-c05e-d60e-31ada29b0513"
+          "value_id": "52d4b91a-f829-c05e-d60e-31ada29b0513",
+          "valor": {
+            "valor_id": "52d4b91a-f829-c05e-d60e-31ada29b0513"
+          }
         }
       ],
       "product_image_id": "41546910-ce10-5f65-847f-e9f1cc6c9234",
@@ -717,12 +1257,36 @@
           "talla": "EU 34-38",
           "talla_id": "bac7a07c-2684-523f-aca4-761f1e15d128",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "bac7a07c-2684-523f-aca4-761f1e15d128"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "bac7a07c-2684-523f-aca4-761f1e15d128"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/nike-everyday-plus-fq0327-010-negro.jpg",
-          "image_id": "03e23bf5-03b1-5507-b22a-95d19e5f78a7"
+          "image_id": "03e23bf5-03b1-5507-b22a-95d19e5f78a7",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "bac7a07c-2684-523f-aca4-761f1e15d128",
+              "valor": {
+                "valor_id": "bac7a07c-2684-523f-aca4-761f1e15d128"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "7f8c7bf8-3086-5849-a21f-722bb13bff1c",
@@ -733,12 +1297,36 @@
           "talla": "EU 38-42",
           "talla_id": "0223e905-3700-5c92-87ac-f5a0615b2e96",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "0223e905-3700-5c92-87ac-f5a0615b2e96"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "0223e905-3700-5c92-87ac-f5a0615b2e96"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/nike-everyday-plus-fq0327-010-negro.jpg",
-          "image_id": "b309e132-91c5-5016-8de7-a04fb9d02d48"
+          "image_id": "b309e132-91c5-5016-8de7-a04fb9d02d48",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "0223e905-3700-5c92-87ac-f5a0615b2e96",
+              "valor": {
+                "valor_id": "0223e905-3700-5c92-87ac-f5a0615b2e96"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "73829aef-a02c-5555-82f1-03a495d44ced",
@@ -749,12 +1337,36 @@
           "talla": "EU 42-46",
           "talla_id": "0234fd28-6c7f-5203-bef5-733196f382a6",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "0234fd28-6c7f-5203-bef5-733196f382a6"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "0234fd28-6c7f-5203-bef5-733196f382a6"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/nike-everyday-plus-fq0327-010-negro.jpg",
-          "image_id": "8bc73870-fa30-5573-b61b-496d9b4a20c4"
+          "image_id": "8bc73870-fa30-5573-b61b-496d9b4a20c4",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "0234fd28-6c7f-5203-bef5-733196f382a6",
+              "valor": {
+                "valor_id": "0234fd28-6c7f-5203-bef5-733196f382a6"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "1c995251-cf8c-55e2-878a-ea83f9f4b351",
@@ -765,12 +1377,36 @@
           "talla": "EU 34-38",
           "talla_id": "bac7a07c-2684-523f-aca4-761f1e15d128",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "bac7a07c-2684-523f-aca4-761f1e15d128"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "bac7a07c-2684-523f-aca4-761f1e15d128"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/nike-everyday-plus-fq0327-100-blanco.jpg",
-          "image_id": "f3ce8b06-ef09-532f-a456-ebbe78403da2"
+          "image_id": "f3ce8b06-ef09-532f-a456-ebbe78403da2",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
+              "valor": {
+                "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "bac7a07c-2684-523f-aca4-761f1e15d128",
+              "valor": {
+                "valor_id": "bac7a07c-2684-523f-aca4-761f1e15d128"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "e8a0b20b-a6fd-5a78-9e6b-8199f32742c2",
@@ -781,12 +1417,36 @@
           "talla": "EU 38-42",
           "talla_id": "0223e905-3700-5c92-87ac-f5a0615b2e96",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "0223e905-3700-5c92-87ac-f5a0615b2e96"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "0223e905-3700-5c92-87ac-f5a0615b2e96"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/nike-everyday-plus-fq0327-100-blanco.jpg",
-          "image_id": "88f0bf4d-0ddb-589d-b043-19e2b0bd1a3e"
+          "image_id": "88f0bf4d-0ddb-589d-b043-19e2b0bd1a3e",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
+              "valor": {
+                "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "0223e905-3700-5c92-87ac-f5a0615b2e96",
+              "valor": {
+                "valor_id": "0223e905-3700-5c92-87ac-f5a0615b2e96"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "bc260f04-d0c1-57d6-862a-6d7ae44c74ff",
@@ -797,12 +1457,36 @@
           "talla": "EU 42-46",
           "talla_id": "0234fd28-6c7f-5203-bef5-733196f382a6",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "0234fd28-6c7f-5203-bef5-733196f382a6"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "0234fd28-6c7f-5203-bef5-733196f382a6"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/nike-everyday-plus-fq0327-100-blanco.jpg",
-          "image_id": "c3bf9b97-9bb2-5f34-b4c4-76c651155003"
+          "image_id": "c3bf9b97-9bb2-5f34-b4c4-76c651155003",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
+              "valor": {
+                "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "0234fd28-6c7f-5203-bef5-733196f382a6",
+              "valor": {
+                "valor_id": "0234fd28-6c7f-5203-bef5-733196f382a6"
+              },
+              "es_identificador": true
+            }
+          ]
         }
       ]
     },
@@ -842,12 +1526,36 @@
           "talla": "S",
           "talla_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/nike-park3-bv6855-010-negro.jpg",
-          "image_id": "67164748-ee3c-56ef-a5a7-bdb4ccb0490a"
+          "image_id": "67164748-ee3c-56ef-a5a7-bdb4ccb0490a",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
+              "valor": {
+                "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "4ef2fc98-fe62-5d4c-b050-5ad312c088e0",
@@ -858,12 +1566,36 @@
           "talla": "M",
           "talla_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/nike-park3-bv6855-010-negro.jpg",
-          "image_id": "61a6a770-a277-53ad-adc4-df045e6d3311"
+          "image_id": "61a6a770-a277-53ad-adc4-df045e6d3311",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
+              "valor": {
+                "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "df53883d-2875-5a71-afe8-1f4097e8b234",
@@ -874,12 +1606,36 @@
           "talla": "L",
           "talla_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/nike-park3-bv6855-010-negro.jpg",
-          "image_id": "16898a2b-7a4c-5b4e-8ca3-22320271898c"
+          "image_id": "16898a2b-7a4c-5b4e-8ca3-22320271898c",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
+              "valor": {
+                "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+              },
+              "es_identificador": true
+            }
+          ]
         }
       ]
     },
@@ -919,12 +1675,36 @@
           "talla": "XS",
           "talla_id": "6e7505c8-4ae3-5850-86b2-d01d0b40bace",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "6e7505c8-4ae3-5850-86b2-d01d0b40bace"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "6e7505c8-4ae3-5850-86b2-d01d0b40bace"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/nike-park3-bv6860-010-mujer.jpg",
-          "image_id": "f2fec536-fc2f-553f-8d3a-e208f118d3e4"
+          "image_id": "f2fec536-fc2f-553f-8d3a-e208f118d3e4",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "6e7505c8-4ae3-5850-86b2-d01d0b40bace",
+              "valor": {
+                "valor_id": "6e7505c8-4ae3-5850-86b2-d01d0b40bace"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "e3cd5843-307f-576a-b721-2f58d7df3fdc",
@@ -935,12 +1715,36 @@
           "talla": "S",
           "talla_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/nike-park3-bv6860-010-mujer.jpg",
-          "image_id": "35735ce1-9bfb-55fc-a91e-a754428b61d0"
+          "image_id": "35735ce1-9bfb-55fc-a91e-a754428b61d0",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
+              "valor": {
+                "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "a6a0d134-e4a9-58ba-b512-37076fc99a33",
@@ -951,12 +1755,36 @@
           "talla": "M",
           "talla_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/nike-park3-bv6860-010-mujer.jpg",
-          "image_id": "fbf8cd03-2b78-5654-8dc9-83e66b414158"
+          "image_id": "fbf8cd03-2b78-5654-8dc9-83e66b414158",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
+              "valor": {
+                "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "29cf5cee-af27-5da0-aaba-c8f4f6712101",
@@ -967,12 +1795,36 @@
           "talla": "L",
           "talla_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/nike-park3-bv6860-010-mujer.jpg",
-          "image_id": "0a1de623-eff4-5441-a66c-fcf64c100664"
+          "image_id": "0a1de623-eff4-5441-a66c-fcf64c100664",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
+              "valor": {
+                "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "909bf47b-9242-5955-b2ed-03adf2922580",
@@ -983,12 +1835,36 @@
           "talla": "XL",
           "talla_id": "353dbffe-8b38-5575-8f35-a7a8e42d8946",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "353dbffe-8b38-5575-8f35-a7a8e42d8946"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "353dbffe-8b38-5575-8f35-a7a8e42d8946"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/nike-park3-bv6860-010-mujer.jpg",
-          "image_id": "c4fb1ebb-8d8c-5d38-8f52-b573e172b41e"
+          "image_id": "c4fb1ebb-8d8c-5d38-8f52-b573e172b41e",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "353dbffe-8b38-5575-8f35-a7a8e42d8946",
+              "valor": {
+                "valor_id": "353dbffe-8b38-5575-8f35-a7a8e42d8946"
+              },
+              "es_identificador": true
+            }
+          ]
         }
       ]
     },
@@ -1028,12 +1904,36 @@
           "talla": "S",
           "talla_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/nike-park7-bv6708-010-negro.webp",
-          "image_id": "8f798315-d5ba-53ff-8def-8e6ee177fe17"
+          "image_id": "8f798315-d5ba-53ff-8def-8e6ee177fe17",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
+              "valor": {
+                "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "033875cd-b8de-50d6-bb3d-49e98e146178",
@@ -1044,12 +1944,36 @@
           "talla": "M",
           "talla_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/nike-park7-bv6708-010-negro.webp",
-          "image_id": "8f22f5a1-12a1-5975-af3b-92c3175729d3"
+          "image_id": "8f22f5a1-12a1-5975-af3b-92c3175729d3",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
+              "valor": {
+                "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "96945dfc-af18-5da8-8e6e-c49b8c673ed2",
@@ -1060,12 +1984,36 @@
           "talla": "L",
           "talla_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/nike-park7-bv6708-010-negro.webp",
-          "image_id": "602038d4-9c20-539c-8c06-aff08731cc9c"
+          "image_id": "602038d4-9c20-539c-8c06-aff08731cc9c",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
+              "valor": {
+                "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+              },
+              "es_identificador": true
+            }
+          ]
         }
       ]
     },
@@ -1105,12 +2053,36 @@
           "talla": "S",
           "talla_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/puma-cristal-782244-02-blanco.avif",
-          "image_id": "d54267c1-cbd7-5f7b-ae92-93b7b2b8f0e1"
+          "image_id": "d54267c1-cbd7-5f7b-ae92-93b7b2b8f0e1",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
+              "valor": {
+                "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
+              "valor": {
+                "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "d82aafc7-3257-5bc8-8093-c9139562e910",
@@ -1121,12 +2093,36 @@
           "talla": "M",
           "talla_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/puma-cristal-782244-02-blanco.avif",
-          "image_id": "400970a2-2ef9-5b97-909c-a20fecf71033"
+          "image_id": "400970a2-2ef9-5b97-909c-a20fecf71033",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
+              "valor": {
+                "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
+              "valor": {
+                "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "61600bf0-bb76-5b31-9c9b-1df55ddd3471",
@@ -1137,12 +2133,36 @@
           "talla": "L",
           "talla_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/puma-cristal-782244-02-blanco.avif",
-          "image_id": "7e428372-41b2-5658-a378-577352cb2390"
+          "image_id": "7e428372-41b2-5658-a378-577352cb2390",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea",
+              "valor": {
+                "valor_id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
+              "valor": {
+                "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+              },
+              "es_identificador": true
+            }
+          ]
         }
       ]
     },
@@ -1172,11 +2192,17 @@
       "atributos_simple": [
         {
           "name": "Color",
-          "value_id": "35e25c52-aa9b-5572-b656-15b701e4894c"
+          "value_id": "35e25c52-aa9b-5572-b656-15b701e4894c",
+          "valor": {
+            "valor_id": "35e25c52-aa9b-5572-b656-15b701e4894c"
+          }
         },
         {
           "name": "Talla",
-          "value_id": "52d4b91a-f829-c05e-d60e-31ada29b0513"
+          "value_id": "52d4b91a-f829-c05e-d60e-31ada29b0513",
+          "valor": {
+            "valor_id": "52d4b91a-f829-c05e-d60e-31ada29b0513"
+          }
         }
       ],
       "product_image_id": "c4cfffc0-7921-5b8c-ae21-15cddf1b7b9c",
@@ -1219,12 +2245,36 @@
           "talla": "S",
           "talla_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/ua-tech2-1326413-001-negro.avif",
-          "image_id": "90568783-e9df-5f83-a13e-2f73fbe5e400"
+          "image_id": "90568783-e9df-5f83-a13e-2f73fbe5e400",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "6787802a-f29f-5a1b-a495-1d034f1002b6",
+              "valor": {
+                "valor_id": "6787802a-f29f-5a1b-a495-1d034f1002b6"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "b271319c-457a-58c5-bbbf-62280abd0803",
@@ -1235,12 +2285,36 @@
           "talla": "M",
           "talla_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/ua-tech2-1326413-001-negro.avif",
-          "image_id": "8b1928f8-81ad-5648-b20c-ba4bb2c3dafd"
+          "image_id": "8b1928f8-81ad-5648-b20c-ba4bb2c3dafd",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3",
+              "valor": {
+                "valor_id": "f0ec53c9-fb28-7464-e308-a2c171d943a3"
+              },
+              "es_identificador": true
+            }
+          ]
         },
         {
           "id": "09875bf7-7cbd-5f6d-92e9-47d78e8763a6",
@@ -1251,12 +2325,36 @@
           "talla": "L",
           "talla_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
           "identifying_key": {
-            "acee6db1-ba1c-f020-caf8-f439b09556ff": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
-            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            "acee6db1-ba1c-f020-caf8-f439b09556ff": {
+              "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+            },
+            "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd": {
+              "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+            }
           },
           "estado": "BORRADOR",
           "url": "https://slzglmtiyrzygpkiuthf.supabase.co/storage/v1/object/public/catalog-products/ua-tech2-1326413-001-negro.avif",
-          "image_id": "7f0c9b9f-1d86-593e-9f10-8a8ac714dce1"
+          "image_id": "7f0c9b9f-1d86-593e-9f10-8a8ac714dce1",
+          "atributos_identificadores": [
+            {
+              "name": "Color",
+              "caracteristica_id": "acee6db1-ba1c-f020-caf8-f439b09556ff",
+              "value_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f",
+              "valor": {
+                "valor_id": "61174517-27e1-1c5f-253b-4f6f2daa8b3f"
+              },
+              "es_identificador": true
+            },
+            {
+              "name": "Talla",
+              "caracteristica_id": "fe3fe43d-f3a4-6fe7-4a2f-34e8bdfa0abd",
+              "value_id": "68e9a97e-7e35-5c46-aed9-046556f9387b",
+              "valor": {
+                "valor_id": "68e9a97e-7e35-5c46-aed9-046556f9387b"
+              },
+              "es_identificador": true
+            }
+          ]
         }
       ]
     }
@@ -1372,5 +2470,76 @@
     "sku_vendibles": 48,
     "imagenes": 18,
     "bloqueadas": 1
+  },
+  "correcciones": {
+    "jsonb_not_null": "Los atributos con valor_id guardan valor como objeto JSONB {\"valor_id\":\"UUID\"}; no se usa JSON null.",
+    "identifying_key": "Cada característica apunta a un objeto {\"valor_id\":\"UUID\"}, conforme a catalog.fn_assert_product(uuid).",
+    "nota_estado_taxonomia": "Se identificaron 11 IDs sin registro en los manifiestos de Taxonomía locales. No se considera probada su existencia/estado ACTIVO en el destino; el preflight de solo lectura debe devolver cero filas antes de una carga autorizada."
+  },
+  "validacion_taxonomia": {
+    "fuente_local": "scripts/seed/mcp/taxonomy/001_taxonomy_inka_athletics.manifest.json",
+    "referencias_lote": 36,
+    "encontradas_en_manifiestos_taxonomia": 25,
+    "ausentes_en_manifiestos_taxonomia": [
+      {
+        "tipo": "tipo_producto",
+        "nombre": "Short deportivo",
+        "id": "69eaf044-dfea-51e6-ad03-f752a73cd1c9"
+      },
+      {
+        "tipo": "tipo_producto",
+        "nombre": "Medias deportivas",
+        "id": "db4cefc7-9412-5c82-a91f-58b73a9909cd"
+      },
+      {
+        "tipo": "categoria",
+        "nombre": "medias",
+        "id": "3894c641-982c-5db5-a9d2-3897b16d9cb3"
+      },
+      {
+        "tipo": "valor_Color",
+        "nombre": "Blanco",
+        "id": "c0b1a113-b479-5f84-9fa3-0e6cb3a41fea"
+      },
+      {
+        "tipo": "valor_Color",
+        "nombre": "Multicolor",
+        "id": "35e25c52-aa9b-5572-b656-15b701e4894c"
+      },
+      {
+        "tipo": "valor_Talla",
+        "nombre": "EU 34-36",
+        "id": "6e8053e7-d856-5a20-9a0b-9a34d497def5"
+      },
+      {
+        "tipo": "valor_Talla",
+        "nombre": "EU 34-38",
+        "id": "bac7a07c-2684-523f-aca4-761f1e15d128"
+      },
+      {
+        "tipo": "valor_Talla",
+        "nombre": "EU 37-39",
+        "id": "c417b2a9-f655-57a5-976c-128a0b3c1527"
+      },
+      {
+        "tipo": "valor_Talla",
+        "nombre": "EU 38-42",
+        "id": "0223e905-3700-5c92-87ac-f5a0615b2e96"
+      },
+      {
+        "tipo": "valor_Talla",
+        "nombre": "EU 40-42",
+        "id": "20ead521-e596-521d-a057-7c41b52d0626"
+      },
+      {
+        "tipo": "valor_Talla",
+        "nombre": "EU 42-46",
+        "id": "0234fd28-6c7f-5203-bef5-733196f382a6"
+      }
+    ],
+    "estado_destino": "NO_VERIFICADO_EN_SUPABASE_COMPARTIDO",
+    "criterio_preflight": "001_preflight_readonly.sql debe devolver cero filas contra taxonomy.* del destino autorizado antes de ejecutar 003_carga_catalogo.sql",
+    "relaciones_tipo_caracteristica_lote": 10,
+    "criterio_relaciones": "001_preflight_readonly.sql debe devolver cero filas para las 10 relaciones tipo_producto_id/caracteristica_id activas usadas por los productos del lote."
   }
 }

@@ -1,12 +1,52 @@
-# DATA-002 — Evidencia
+# DATA-002 — Evidencia para reauditoría
 
-**PARTIAL / PREPARADO, NO EJECUTADO.** Solo lecturas Supabase, sin escrituras. Baseline: 5 productos, 6 variantes, 11 identities (7 vendibles), 0 imágenes de producto y 6 de variante.
+**Estado:** lote corregido y preparado; no ejecutado en Supabase compartido. El alcance del PR #125 incluye catalog-svc #44 y DATA-002 (#12). La carga no cambia datos históricos ni contratos.
 
-Productos preparados: 15; padres con variantes: 12; simples: 3; variantes: 45; SKU nuevos: 48; históricos vendibles preservados: 7. Storage: 18 objetos verificados; 17 asociados y 1 bloqueado (Manchester City). Owner Taxonomía (López), asignación de categoría; desbloqueo con categoría activa compatible asociada a Camiseta deportiva.
+## Correcciones de datos
 
-Se consultaron nombre, MIME, tamaño y URL; las 18 URLs cargaron como imágenes y se inspeccionaron visualmente. UUID v5 estables en manifiesto. SQL revisado estáticamente, no ejecutado; no actualiza/elimina ni inserta sku_identity. Validación local: JSON válido; matriz CSV con 18 filas de presentación; IDs, SKU, slugs y combinaciones Color/Talla sin duplicados; referencias de Taxonomía presentes en el manifiesto; 18 rutas de Storage y URL asociadas; SQL sin DML ajeno ni inserción a sku_identity. Integración autenticada, homologación y despliegue no realizados. Pruebas del servicio no aplican a preparación de datos.
+- Los 45 `identifying_key` ahora usan el contrato de `catalog.fn_assert_product(uuid)`: cada característica apunta a `{"valor_id":"UUID"}`.
+- Las 90 filas de `variant_attribute_values` y las 6 de `product_attribute_values` guardan `valor` como objeto JSONB no nulo `{"valor_id":"UUID"}`. La carga ya no contiene `null::jsonb`.
+- El estado de comparación embebido en el SQL y el manifiesto usan las mismas representaciones JSONB.
+- La carga permanece transaccional e idempotente; no inserta manualmente `sku_identity`, no elimina ni actualiza filas existentes, y una divergencia aborta.
 
-## SHA-256
+## Validación de Taxonomía
 
-- Manifiesto: SHA-256 `bf2ca33335543b863f2d92a9f2a8a70011a057711eaa71eaf3714e26b6faceb5`
-- SQL de carga: SHA-256 `7ad4ba71d7abb1854b35cb6c21d8f406e9a34cc8ca072a3f71fadb90657761b7`
+El preflight de solo lectura revisa 36 IDs (marcas, tipos, categorías, características y valores), valida que los valores pertenezcan a la característica esperada y comprueba 10 relaciones activas tipo/característica. Ambas consultas deben devolver cero filas antes de una carga autorizada.
+
+Comparé los IDs contra los artefactos locales de Taxonomía: 25 aparecen en esos manifiestos y 11 no aparecen. La lista de IDs ausentes está en `002_manifest_catalogo.json`. Como pediste no ejecutar nada en Supabase compartido, el estado real `ACTIVO` de esos IDs y de las 10 relaciones queda **sin comprobar**. El preflight agregado no se considera evidencia de estado hasta ejecutarse como lectura autorizada contra el destino real.
+
+## PostgreSQL descartable
+
+La suite E2E ahora crea Taxonomía de prueba dentro del PostgreSQL descartable de CI y ejecuta:
+
+1. Preflight activo sobre las referencias fixture.
+2. Primera ejecución del lote completo.
+3. Reejecución idéntica.
+4. Postcheck de 15 productos, 45 variantes, 90 atributos de variante, 6 atributos de producto, 48 identidades vendibles y 48 filas de imagen (45 de variante y 3 de producto).
+5. Conflicto intencional tras cambiar el payload de un producto; la carga debe abortar con `DATA-002 contenido diferente en catalog.products`.
+
+**CI PostgreSQL del commit corregido:** pendiente. Los resultados de la suite se completarán después de la ejecución real de GitHub Actions. En local, `npm run test:e2e -- --maxWorkers=1` dio 346 PASS y 43 omitidas por falta de Docker; ninguna de esas omisiones se cuenta como prueba PostgreSQL aprobada. El PostgreSQL local instalado carece de `share/postgres.bki`, así que no puede iniciar un servidor descartable aquí.
+
+## Evidencia de imágenes
+
+`005_matriz_productos_imagenes.csv` amplía las 18 presentaciones con URL comercial de fabricante, cantidad de filas de imagen asociadas y fecha/estado de inspección visual. Hay 17 imágenes asociadas (45 filas de variante y 3 de producto; 48 asociaciones en total) y una presentación Manchester City bloqueada por Taxonomía, sin filas de carga. La inspección visual y carga pública de URLs fue documentada el 2026-10-16; no se volvió a consultar Storage compartido durante esta revisión.
+
+## Comandos ejecutados en el workspace
+
+| Comando | Resultado real |
+|---|---|
+| `npm test -- --maxWorkers=1` | PASS — 44 archivos, 395 pruebas |
+| `npm run test:e2e -- --maxWorkers=1` | 346 PASS, 43 omitidas; no prueba PostgreSQL local |
+| `npm run typecheck` | PASS |
+| `npm run lint` | PASS |
+| `npm run format:check` | PASS |
+| `npm run build:all` | PASS |
+| `npm run build:catalog-svc` | PASS |
+| `git diff --check` | PASS |
+
+## SHA-256 del lote corregido
+
+- Manifiesto `002_manifest_catalogo.json`: `9e89065f9a0cc2f40f9fa0c1be3e89f162ceea5b4af685ea18b8186ffa9b639a`
+- SQL `003_carga_catalogo.sql`: `0531dafd1413e800f6d96739d5d234b388b22fb7ab3356915d4fd0cc4e059535`
+
+Estos hashes corresponden a los archivos corregidos que se adjuntan para reauditoría; no autorizan su ejecución en Supabase.

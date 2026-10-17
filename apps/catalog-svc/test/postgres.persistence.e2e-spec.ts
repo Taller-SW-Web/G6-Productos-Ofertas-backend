@@ -379,6 +379,181 @@ describe.skipIf(!dockerAvailable)(
       ).toHaveLength(1);
     });
 
+    it('validates the DATA-002 batch in disposable PostgreSQL', () => {
+      const catalogDirectory = resolve('scripts/seed/mcp/catalog');
+      const manifest = JSON.parse(
+        readFileSync(
+          join(catalogDirectory, '002_manifest_catalogo.json'),
+          'utf8',
+        ),
+      ) as {
+        taxonomy: {
+          brands: Record<string, string>;
+          types: Record<string, string>;
+          categories: Record<string, string>;
+          characteristics: Record<string, string>;
+          values: Record<string, Record<string, string>>;
+        };
+      };
+      const sqlLiteral = (value: string) =>
+        "'" + value.replaceAll("'", "''") + "'";
+      const rows = (values: string[]) => values.join(',\n');
+      const brandRows = Object.entries(manifest.taxonomy.brands).map(
+        ([name, id]) => `(${sqlLiteral(id)}, ${sqlLiteral(name)}, 'ACTIVO')`,
+      );
+      const typeRows = Object.entries(manifest.taxonomy.types).map(
+        ([name, id]) => `(${sqlLiteral(id)}, ${sqlLiteral(name)}, 'ACTIVO')`,
+      );
+      const categoryRows = Object.entries(manifest.taxonomy.categories).map(
+        ([name, id]) =>
+          `(${sqlLiteral(id)}, ${sqlLiteral(name)}, NULL, 'ACTIVO')`,
+      );
+      const characteristicRows = Object.entries(
+        manifest.taxonomy.characteristics,
+      ).map(
+        ([name, id]) => `(${sqlLiteral(id)}, ${sqlLiteral(name)}, 'ACTIVO')`,
+      );
+      const valueRows = Object.entries(manifest.taxonomy.values).flatMap(
+        ([characteristic, values]) =>
+          Object.entries(values).map(
+            ([name, id]) =>
+              `(${sqlLiteral(id)}, ${sqlLiteral(manifest.taxonomy.characteristics[characteristic]!)}, ${sqlLiteral(name)}, 'ACTIVO')`,
+          ),
+      );
+      const relationRows = Object.values(manifest.taxonomy.types).flatMap(
+        (typeId) =>
+          Object.values(manifest.taxonomy.characteristics).map(
+            (characteristicId) =>
+              `(${sqlLiteral(typeId)}, ${sqlLiteral(characteristicId)}, true, 'ACTIVO')`,
+          ),
+      );
+      const taxonomyFixture = `
+        CREATE SCHEMA taxonomy;
+        CREATE SCHEMA storage;
+        CREATE TYPE taxonomy.estado_entidad AS ENUM ('ACTIVO', 'INACTIVO');
+        CREATE TABLE taxonomy.brands (id uuid PRIMARY KEY, nombre text NOT NULL, estado taxonomy.estado_entidad NOT NULL);
+        CREATE TABLE taxonomy.product_types (id uuid PRIMARY KEY, nombre text NOT NULL, estado taxonomy.estado_entidad NOT NULL);
+        CREATE TABLE taxonomy.categories (id uuid PRIMARY KEY, nombre text NOT NULL, categoria_padre_id uuid, estado taxonomy.estado_entidad NOT NULL);
+        CREATE TABLE taxonomy.characteristics (id uuid PRIMARY KEY, nombre text NOT NULL, estado taxonomy.estado_entidad NOT NULL);
+        CREATE TABLE taxonomy.characteristic_values (id uuid PRIMARY KEY, caracteristica_id uuid NOT NULL, nombre text NOT NULL, estado taxonomy.estado_entidad NOT NULL);
+        CREATE TABLE taxonomy.product_type_characteristics (tipo_producto_id uuid NOT NULL, caracteristica_id uuid NOT NULL, obligatoria boolean NOT NULL, estado taxonomy.estado_entidad NOT NULL);
+        CREATE TABLE storage.objects (name text NOT NULL, mime_type text, metadata jsonb, bucket_id text NOT NULL);
+        INSERT INTO taxonomy.brands (id, nombre, estado) VALUES ${rows(brandRows)};
+        INSERT INTO taxonomy.product_types (id, nombre, estado) VALUES ${rows(typeRows)};
+        INSERT INTO taxonomy.categories (id, nombre, categoria_padre_id, estado) VALUES ${rows(categoryRows)};
+        INSERT INTO taxonomy.characteristics (id, nombre, estado) VALUES ${rows(characteristicRows)};
+        INSERT INTO taxonomy.characteristic_values (id, caracteristica_id, nombre, estado) VALUES ${rows(valueRows)};
+        INSERT INTO taxonomy.product_type_characteristics (tipo_producto_id, caracteristica_id, obligatoria, estado) VALUES ${rows(relationRows)};
+      `;
+      command(
+        'docker',
+        [
+          'exec',
+          '-i',
+          container,
+          'psql',
+          '-U',
+          'postgres',
+          '-v',
+          'ON_ERROR_STOP=1',
+        ],
+        taxonomyFixture,
+      );
+
+      const preflight = command(
+        'docker',
+        [
+          'exec',
+          '-i',
+          container,
+          'psql',
+          '-X',
+          '-At',
+          '-U',
+          'postgres',
+          '-v',
+          'ON_ERROR_STOP=1',
+        ],
+        readFileSync(
+          join(catalogDirectory, '001_preflight_readonly.sql'),
+          'utf8',
+        ),
+      );
+      expect(preflight).not.toContain('FALTA_O_INACTIVA');
+
+      const batch = readFileSync(
+        join(catalogDirectory, '003_carga_catalogo.sql'),
+        'utf8',
+      );
+      const executeBatch = () =>
+        command(
+          'docker',
+          [
+            'exec',
+            '-i',
+            container,
+            'psql',
+            '-X',
+            '-q',
+            '-U',
+            'postgres',
+            '-v',
+            'ON_ERROR_STOP=1',
+          ],
+          `SET ROLE po_catalog_owner;\n${batch}`,
+        );
+      executeBatch();
+      executeBatch();
+
+      const postcheck = command(
+        'docker',
+        [
+          'exec',
+          '-i',
+          container,
+          'psql',
+          '-X',
+          '-At',
+          '-U',
+          'postgres',
+          '-v',
+          'ON_ERROR_STOP=1',
+        ],
+        readFileSync(
+          join(catalogDirectory, '004_postcheck_readonly.sql'),
+          'utf8',
+        ),
+      );
+      expect(postcheck).toContain('15|45|90|6|48|45|3');
+
+      const conflict = spawnSync(
+        'docker',
+        [
+          'exec',
+          '-i',
+          container,
+          'psql',
+          '-X',
+          '-q',
+          '-U',
+          'postgres',
+          '-v',
+          'ON_ERROR_STOP=1',
+        ],
+        {
+          encoding: 'utf8',
+          input: `UPDATE catalog.products SET descripcion = 'different payload' WHERE id = '96c6972f-2bd2-5528-8028-5293fe719db9';\nSET ROLE po_catalog_owner;\n${batch}`,
+          timeout: 120000,
+          windowsHide: true,
+        },
+      );
+      expect(conflict.error).toBeUndefined();
+      expect(conflict.status).not.toBe(0);
+      expect(conflict.stderr).toContain(
+        'DATA-002 contenido diferente en catalog.products',
+      );
+    });
+
     it('enforces runtime ownership, denies cross-schema access, and closes its pool', async () => {
       const roles = await database.read((db) =>
         db.execute(sql`
