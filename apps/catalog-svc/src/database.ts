@@ -223,7 +223,7 @@ export class Database implements OnModuleDestroy {
         !row.usage ||
         row.owner_member
       ) {
-        throw new Error();
+        throw new CatalogPersistenceError('other');
       }
     });
   }
