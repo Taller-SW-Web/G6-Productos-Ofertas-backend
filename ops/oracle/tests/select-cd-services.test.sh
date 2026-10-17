@@ -18,18 +18,38 @@ source "$REGISTRY_SH"
 total_services="$(awk -F'|' '$1 !~ /^#/ && NF { count++ } END { print count+0 }' "$REGISTRY")"
 [[ "$total_services" == 9 ]] || { echo "FAIL: se esperaban 9 servicios, encontrados $total_services" >&2; exit 1; }
 
-# Los 4 autorizados están habilitados en el registro
-readonly -a EXPECTED_ENABLED=(api-gateway catalog-svc inventory-svc taxonomy-svc)
-# Los 5 deshabilitados
-readonly -a EXPECTED_DISABLED=(pricing-svc price-audit-svc promotions-svc combos-svc bulk-svc)
+# La decisión de infraestructura de Hito 3 habilita los nueve para dispatch
+# manual; la preparación runtime y autorización de liberación siguen siendo gates.
+readonly -a EXPECTED_ENABLED=(api-gateway bulk-svc catalog-svc combos-svc inventory-svc price-audit-svc pricing-svc promotions-svc taxonomy-svc)
 
 enabled_json="$(g6_enabled_services_json)"
-expected_json='["api-gateway","catalog-svc","inventory-svc","taxonomy-svc"]'
+expected_json='["api-gateway","bulk-svc","catalog-svc","combos-svc","inventory-svc","price-audit-svc","pricing-svc","promotions-svc","taxonomy-svc"]'
 [[ "$enabled_json" == "$expected_json" ]] || {
   echo "FAIL: servicios habilitados no coinciden. Obtenido: $enabled_json, Esperado: $expected_json" >&2
   exit 1
 }
-echo "PASS: los cuatro servicios autorizados están habilitados: $enabled_json"
+echo "PASS: los nueve servicios de Hito 3 están habilitados para dispatch manual: $enabled_json"
+
+# Los nombres, puertos, proyectos, contenedores, estados y runtime files son únicos.
+for field in 1 3 9 11 12 13; do
+  awk -F'|' -v field="$field" '
+    $1 !~ /^#/ && NF {
+      value=$field
+      if (value == "" || seen[value]++) invalid=1
+      count++
+    }
+    END { exit (invalid || count != 9) }
+  ' "$REGISTRY" || {
+    echo "FAIL: campo de registro duplicado o incompleto: $field" >&2
+    exit 1
+  }
+done
+g6_service_config api-gateway
+[[ "$G6_SERVICE_COMPOSE_FILE" == '/opt/g6-productos-ofertas/api-gateway/docker-compose.gateway.yml' ]] || {
+  echo "FAIL: api-gateway no usa su Compose dedicado para g6-edge" >&2
+  exit 1
+}
+echo "PASS: identidades/estado/runtime independientes y Compose dedicado de Gateway"
 
 # Para cada servicio habilitado, el dispatch manual selecciona exactamente un servicio
 for svc in "${EXPECTED_ENABLED[@]}"; do
@@ -40,23 +60,6 @@ for svc in "${EXPECTED_ENABLED[@]}"; do
   }
 done
 echo "PASS: cada servicio habilitado es seleccionado individualmente mediante dispatch manual"
-
-# Para cada servicio deshabilitado, el dispatch manual es rechazado con código 65
-for svc in "${EXPECTED_DISABLED[@]}"; do
-  set +e
-  output="$(bash "$SELECTOR" manual "$svc" 2>&1)"
-  status=$?
-  set -e
-  [[ "$status" == 65 ]] || {
-    echo "FAIL: servicio deshabilitado $svc no devolvió código 65 (obtenido $status): $output" >&2
-    exit 1
-  }
-  [[ "$output" =~ "Servicio registrado pero deshabilitado." ]] || {
-    echo "FAIL: mensaje inesperado para servicio deshabilitado: $output" >&2
-    exit 1
-  }
-done
-echo "PASS: los cinco servicios deshabilitados son rechazados con código 65"
 
 # Nombres inválidos son rechazados con código 64
 for invalid in "unknown-svc" "catalogo" "inventario" "catalog-svc;id" "../../etc" "" " "; do
