@@ -42,15 +42,69 @@ describe('Pricing configuration', () => {
       ).toThrow(InvalidPricingConfig);
     },
   );
-  it('rechaza activar demo en production antes de abrir Nest o conexiones', () => {
+  it.each([undefined, 'false'])(
+    'rechaza demo production sin confirmación true (%j)',
+    (confirmation) => {
+      expect(() =>
+        validateEnvironment({
+          ...valid,
+          NODE_ENV: 'production',
+          GATEWAY_DEMO_NO_AUTH_ENABLED: 'true',
+          PRICING_DEMO_PRODUCTION_CONFIRMED: confirmation,
+        }),
+      ).toThrow('requiere PRICING_DEMO_PRODUCTION_CONFIRMED=true');
+    },
+  );
+  it.each(['1', 'TRUE', '', ' true', 'yes'])(
+    'rechaza confirmación production inválida %j',
+    (confirmation) => {
+      expect(() =>
+        validateEnvironment({
+          ...valid,
+          PRICING_DEMO_PRODUCTION_CONFIRMED: confirmation,
+        }),
+      ).toThrow(InvalidPricingConfig);
+    },
+  );
+  it('production admite demo sin G7 solo con ambos flags y mantiene TLS obligatorio', () => {
+    const production = {
+      ...valid,
+      NODE_ENV: 'production',
+      DATABASE_URL: valid.DATABASE_URL + '?sslmode=verify-full',
+      GATEWAY_DEMO_NO_AUTH_ENABLED: 'true',
+      PRICING_DEMO_PRODUCTION_CONFIRMED: 'true',
+      AUTH_ISSUER: 'ignored-invalid',
+    };
+    const config = validateEnvironment(production);
+    expect(config.demoNoAuthEnabled).toBe(true);
+    expect(config.auth).toBeUndefined();
+    expect(config.databaseSsl).toMatchObject({
+      rejectUnauthorized: true,
+      checkServerIdentity,
+    });
     expect(() =>
-      validateEnvironment({
+      validateEnvironment({ ...production, DATABASE_URL: valid.DATABASE_URL }),
+    ).toThrow('sslmode=verify-full');
+  });
+  it.each([undefined, 'false'])(
+    'production conserva autenticación con demo %j aunque exista confirmación',
+    (demo) => {
+      const config = validateEnvironment({
         ...valid,
         NODE_ENV: 'production',
-        GATEWAY_DEMO_NO_AUTH_ENABLED: 'true',
-      }),
-    ).toThrow('no puede activarse en production');
-  });
+        DATABASE_URL: valid.DATABASE_URL + '?sslmode=verify-full',
+        GATEWAY_DEMO_NO_AUTH_ENABLED: demo,
+        PRICING_DEMO_PRODUCTION_CONFIRMED: 'true',
+        AUTH_ISSUER: 'https://identity.test',
+        AUTH_JWKS_URL: 'https://identity.test/jwks',
+      });
+      expect(config.demoNoAuthEnabled).not.toBe(true);
+      expect(config.auth).toEqual({
+        issuer: 'https://identity.test',
+        jwksUrl: 'https://identity.test/jwks',
+      });
+    },
+  );
   it('valida ambas URLs de identidad sin permitir secretos, fragmentos ni HTTP remoto', () => {
     expect(
       validateEnvironment({

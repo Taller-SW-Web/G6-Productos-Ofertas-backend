@@ -109,7 +109,10 @@ export class PricingRepository {
       async (tx) => {
         const scope =
           'productId' in target
-            ? eq(prices.productId, target.productId)
+            ? and(
+                eq(prices.productId, target.productId),
+                isNull(prices.channelId),
+              )
             : eq(prices.sku, target.sku);
         const [definition] = await tx
           .select({ id: prices.id })

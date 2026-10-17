@@ -231,6 +231,108 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
       }
     });
 
+    it('precio base pagina y cuenta solo programaciones globales; SKU conserva sus canales', async () => {
+      const productId = randomUUID();
+      const sku = 'channel-' + randomUUID();
+      await repository.transaction(async (tx) => {
+        for (const target of [{ productId }, { sku }]) {
+          for (const channelId of [null, 'MARKETPLACE', 'RETAIL']) {
+            const [price] = await tx
+              .insert(prices)
+              .values({ ...target, channelId, priceVersion: 2n })
+              .returning();
+            for (const version of [1n, 2n]) {
+              const [validity] = await tx
+                .insert(priceValidities)
+                .values({
+                  ...snapshot(price.id, version),
+                  validFrom: version === 1n ? from : boundary,
+                  validUntil: version === 1n ? boundary : null,
+                })
+                .returning();
+              await tx.insert(scheduledPrices).values({
+                priceId: price.id,
+                validityId: validity.id,
+                tipoPrecio: 'REGULAR',
+                importe: '99.99',
+              });
+            }
+          }
+        }
+      });
+      for (const pagina of [1, 2]) {
+        const result = await request(app!.getHttpServer())
+          .get(
+            `/api/v1/precios/productos/${productId}/programaciones?pagina=${pagina}&tamanio=1`,
+          )
+          .set('Authorization', `Bearer ${identity.token()}`)
+          .expect(200);
+        expect(result.body.meta).toEqual({
+          pagina,
+          tamanio: 1,
+          total: 2,
+          totalPaginas: 2,
+        });
+        expect(result.body.items).toHaveLength(1);
+        expect(result.body.items[0]).toMatchObject({
+          product_id: productId,
+          channelId: null,
+          priceVersion: pagina,
+        });
+      }
+      const skuResult = await request(app!.getHttpServer())
+        .get(`/api/v1/precios/skus/${sku}/programaciones?tamanio=1`)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .expect(200);
+      expect(skuResult.body.meta).toEqual({
+        pagina: 1,
+        tamanio: 1,
+        total: 6,
+        totalPaginas: 6,
+      });
+      const skuAll = await request(app!.getHttpServer())
+        .get(`/api/v1/precios/skus/${sku}/programaciones`)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .expect(200);
+      expect(
+        skuAll.body.items.map(
+          (item: { channelId: string | null }) => item.channelId,
+        ),
+      ).toEqual(expect.arrayContaining([null, 'MARKETPLACE', 'RETAIL']));
+    });
+
+    it('precio base devuelve 404 si solo hay definición por canal y 200 vacío si existe global', async () => {
+      const productId = randomUUID();
+      await repository.transaction(async (tx) => {
+        const { definition, validity } = await create(
+          tx,
+          { productId },
+          'RETAIL',
+        );
+        await tx.insert(scheduledPrices).values({
+          priceId: definition.id,
+          validityId: validity.id,
+          tipoPrecio: 'REGULAR',
+          importe: '99.99',
+        });
+      });
+      const path = `/api/v1/precios/productos/${productId}/programaciones`;
+      const missing = await request(app!.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .expect(404);
+      expect(missing.body.code).toBe('PRECIO_NO_ENCONTRADO');
+      await repository.transaction((tx) => create(tx, { productId }));
+      const empty = await request(app!.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .expect(200);
+      expect(empty.body).toEqual({
+        items: [],
+        meta: { pagina: 1, tamanio: 20, total: 0, totalPaginas: 0 },
+      });
+    });
+
     it.each(['productos', 'skus'])(
       'HTTP %s distingue definición inexistente de ausencia de programaciones',
       async (kind) => {

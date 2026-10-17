@@ -39,8 +39,11 @@ en modo autenticado. No se confía en headers de identidad.
 
 La corrección P0 autorizada de la auditoría incorpora la excepción explícita
 `GATEWAY_DEMO_NO_AUTH_ENABLED=true` en Pricing, compatible con el flag del
-Gateway. Por defecto está desactivada. Solo admite `development`/`test`;
-activarla en `production` hace fallar la configuración antes de arrancar.
+Gateway. Por defecto está desactivada. En `development`/`test` basta ese flag;
+en `production` también se exige `PRICING_DEMO_PRODUCTION_CONFIRMED=true`.
+Si falta esa segunda confirmación, falla la configuración antes de arrancar.
+La segunda confirmación por sí sola no activa demo y los valores inválidos
+de cualquiera de los flags se rechazan. TLS/PostgreSQL siguen obligatorios.
 En demo se ignoran Authorization y configuración de G7, sin llamadas JWKS,
 pero se mantienen validación/correlación, errores y persistencia reales.
 Readiness sigue comprobando PostgreSQL y devuelve 503 si falla. El flag debe
@@ -66,7 +69,9 @@ obligatorios del resumen. `rows` ya es opcional en `EstadoImportacionPrecio`
 del OpenAPI vigente. No se inventa paginación/campo/código ni se devuelve una
 lista truncada como si fuera completa. El reporte sigue pendiente de P-PRI-01.
 
-Las programaciones comprueban primero la definición dentro de la misma
+Las programaciones del precio base filtran `product_id` y `channel_id IS NULL`
+en existencia, conteo y página, usando el mismo `scope`. No mezclan canales.
+El filtro por SKU conserva su semántica anterior. Comprueban primero la definición dentro de la misma
 fotografía: definición inexistente devuelve 404 `PRECIO_NO_ENCONTRADO`;
 definición existente sin programaciones devuelve 200 con `items: []` y total 0.
 
@@ -158,7 +163,8 @@ homologación externa y despliegue: no ejecutados/acreditados en esta entrega.
 
 ## Correcciones para segunda auditoría de PR #132
 
-- P0: demo explícita sin G7, apagada por defecto y prohibida en producción;
+- P0 en `6c70a17`: demo explícita sin G7, apagada por defecto y entonces prohibida en producción
+  (restricción sustituida por la doble confirmación de la tercera auditoría);
   pruebas de configuración, provider en ambos modos y readiness con DB real.
 - P1 importaciones: proyección SQL explícita y detalle acotado sin alterar
   OpenAPI. Pruebas del SQL generado, límite 1.000/1.001 y resumen HTTP.
@@ -193,3 +199,44 @@ Resultados de esta revisión (Node 24.19.0, PostgreSQL 16.15 aislado):
 
 Estos resultados locales no se presentan como resultado del workflow remoto;
 su ejecución para el nuevo SHA queda identificada en PR #132.
+
+## Correcciones para tercera auditoría de PR #132
+
+Base de esta revisión: `6c70a17`. Solo los dos hallazgos solicitados:
+
+1. La configuración valida los dos flags estrictamente y permite demo en
+   `production` únicamente con ambas confirmaciones en `true`. Guard y readiness
+   usan la decisión ya validada; no dependen de G7 en demo confirmada. Se conserva
+   autenticación por defecto y con flag `false`, y se conserva TLS/PostgreSQL,
+   correlación y manejo de errores. Se prueba rechazo antes de crear Nest,
+   configuración de producción, flags inválidos, Authorization ignorado y
+   ausencia de llamadas G7 en demo, y readiness ante éxito/fallo de DB.
+2. `readSchedules` usa el filtro exacto producto/global para las tres consultas.
+   Las pruebas PostgreSQL cubren mezcla de global/Marketplace/Retail, páginas
+   y metadatos solo globales, global sin programaciones, solo canal con 404,
+   producto inexistente con 404 y regresión SKU con todos sus canales.
+
+No se modifican Compose, Gateway, Oracle, despliegues, CI, OpenAPI/AsyncAPI,
+CAS, locks, snapshots, Outbox ni reglas de vigencias. No se despliega ni activa
+el modo: el solicitante asume su activación y validación de exposición privada,
+aislamiento de datos y permisos mínimos. Los ocho issues siguen parciales y
+las dependencias P-PRI-01/P-PRI-02 y demás fronteras conservan sus owners y
+condiciones de desbloqueo. PR #132 pendiente de tercera auditoría, sin merge.
+
+Resultados y CI completa del nuevo SHA se registran en el mismo PR.
+
+Validación local de esta revisión, Node 24.19.0 y PostgreSQL 16.15 aislado:
+
+| Comando | Resultado |
+|---|---|
+| `npm test -- apps/pricing-svc` | PASS: 176 pruebas |
+| `PRICING_TEST_POSTGRES=1 npm run test:e2e -- apps/pricing-svc --reporter=verbose` | PASS: 31 pruebas, cero omitidas |
+| `npm run typecheck` y TypeScript estricto de Pricing/tests | PASS |
+| `npm run lint` | PASS |
+| `npm run format:check` | PASS tras normalizar formato del test |
+| `npm run build:pricing-svc` | PASS |
+| `git diff --check` | PASS |
+
+Producción confirmada se verifica en configuración, guard y readiness con
+dobles de DB en pruebas unitarias; las pruebas de consultas usan PostgreSQL
+real aislado en modo test. No acreditan despliegue ni exposición en Oracle.

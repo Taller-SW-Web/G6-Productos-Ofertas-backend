@@ -1,5 +1,7 @@
 import { PricingReadGuard } from './pricing-read.guard.js';
 import { SignedUser } from '../../test/signed-user.js';
+import { ExecutionContextHost } from '@nestjs/core/helpers/execution-context-host.js';
+import { validateEnvironment } from '../config/environment.js';
 
 describe('Pricing: autenticación de las consultas administrativas', () => {
   const identity = new SignedUser();
@@ -16,6 +18,46 @@ describe('Pricing: autenticación de las consultas administrativas', () => {
   });
   afterAll(() => identity.stop());
   afterEach(() => vi.restoreAllMocks());
+
+  it('production demo confirmada ignora Authorization/G7 pero conserva validación de correlación', async () => {
+    const config = validateEnvironment({
+      NODE_ENV: 'production',
+      PRICING_SVC_PORT: '3002',
+      DATABASE_URL:
+        'postgresql://pricing:fixture@localhost/fixture?sslmode=verify-full',
+      GATEWAY_DEMO_NO_AUTH_ENABLED: 'true',
+      PRICING_DEMO_PRODUCTION_CONFIRMED: 'true',
+    });
+    const verifier = new PricingReadGuard(config);
+    const remote = vi.spyOn(globalThis, 'fetch');
+    const context = (headers: Record<string, string>) =>
+      new ExecutionContextHost([
+        { headers },
+        { setHeader: vi.fn(), once: vi.fn() },
+      ]);
+    await expect(verifier.canActivate(context({}))).resolves.toBe(true);
+    await expect(
+      verifier.canActivate(context({ authorization: 'Bearer unused-invalid' })),
+    ).resolves.toBe(true);
+    await expect(
+      verifier.canActivate(context({ 'x-correlation-id': 'invalid' })),
+    ).rejects.toMatchObject({ status: 400, code: 'VALIDACION' });
+    expect(remote).not.toHaveBeenCalled();
+    const authenticated = new PricingReadGuard(
+      validateEnvironment({
+        NODE_ENV: 'production',
+        PRICING_SVC_PORT: '3002',
+        DATABASE_URL:
+          'postgresql://pricing:fixture@localhost/fixture?sslmode=verify-full',
+        GATEWAY_DEMO_NO_AUTH_ENABLED: 'false',
+        PRICING_DEMO_PRODUCTION_CONFIRMED: 'true',
+      }),
+    );
+    await expect(authenticated.canActivate(context({}))).rejects.toMatchObject({
+      status: 401,
+      code: 'TOKEN_INVALIDO',
+    });
+  });
 
   it('acepta la firma real y el rol canónico; el cache permite lecturas dentro de su TTL', async () => {
     await expect(guard.authorize(identity.token())).resolves.toBeUndefined();

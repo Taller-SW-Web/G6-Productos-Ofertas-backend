@@ -10,9 +10,8 @@ export class PricingReadiness {
   ) {}
 
   check(): Promise<boolean> {
-    const demo =
-      this.config.demoNoAuthEnabled && this.config.nodeEnv !== 'production';
-    if (!demo && !this.config.auth) return Promise.resolve(false);
+    if (!this.config.demoNoAuthEnabled && !this.config.auth)
+      return Promise.resolve(false);
     return this.database.check();
   }
 }

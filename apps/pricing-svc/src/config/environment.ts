@@ -27,12 +27,22 @@ export function validateEnvironment(env: NodeJS.ProcessEnv): PricingConfig {
     );
   }
   const demoFlag = env.GATEWAY_DEMO_NO_AUTH_ENABLED ?? 'false';
+  const productionConfirmed = env.PRICING_DEMO_PRODUCTION_CONFIRMED ?? 'false';
   if (
     !['true', 'false'].includes(demoFlag) ||
-    (demoFlag === 'true' && nodeEnv === 'production')
+    !['true', 'false'].includes(productionConfirmed)
   ) {
     throw new InvalidPricingConfig(
-      'GATEWAY_DEMO_NO_AUTH_ENABLED debe ser true/false y no puede activarse en production.',
+      'GATEWAY_DEMO_NO_AUTH_ENABLED y PRICING_DEMO_PRODUCTION_CONFIRMED deben ser true/false.',
+    );
+  }
+  if (
+    demoFlag === 'true' &&
+    nodeEnv === 'production' &&
+    productionConfirmed !== 'true'
+  ) {
+    throw new InvalidPricingConfig(
+      'Demo en production requiere PRICING_DEMO_PRODUCTION_CONFIRMED=true.',
     );
   }
   const demoNoAuthEnabled = demoFlag === 'true';
