@@ -9,6 +9,7 @@ const MESSAGES = new Set([
 const CONTEXTS = new Set([
   'Bootstrap',
   'PricingReadiness',
+  'PricingDatabase',
   'NestFactory',
   'NestApplication',
 ]);

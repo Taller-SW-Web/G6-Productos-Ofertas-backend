@@ -1,4 +1,4 @@
-# pricing-svc — estructura y configuración (#52)
+# pricing-svc — configuración y persistencia (#52, #53)
 
 Owner: Leonardo Vera, rama `vera`. Alcance operativo: `IMPLEMENTAR_AHORA`.
 
@@ -118,3 +118,123 @@ Fuente de CA: URL de producción publicada por
 [Supabase Studio](https://github.com/supabase/supabase/blob/7425d4930528931400fb3e656e860b1094cb224e/apps/studio/hooks/custom-content/custom-content.json).
 SHA-256 del certificado: `80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA`.
 La integración autenticada puntual no acredita homologación ni despliegue.
+
+## Persistencia Drizzle (#53)
+
+Alcance operativo: `IMPLEMENTAR_AHORA`, exclusivamente `apps/pricing-svc`.
+Prerrequisito #52: [PR #121 fusionado](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/121).
+Base de implementación: `79a03c02f82722c599a9963b7340c088eba8f5b4`, rama `vera`.
+
+`PricingDatabase` mantiene un único pool runtime para Drizzle y readiness,
+con cierre por el ciclo de Nest. Conserva TLS validado, límites y timeouts
+del bloque #52; fija `search_path=pg_catalog,pricing` y desactiva logging SQL.
+`PricingRepository` se inyecta/exporta desde el módulo. Consulta definiciones
+por producto **o** SKU y canal exacto (incluido global), y snapshots por definición.
+No resuelve herencia/fallback ni consulta Catálogo.
+
+`transaction(callback)` entrega un `PricingTransaction` tipado para insertar
+o actualizar snapshots, programación, lotes y mensajería dentro del mismo
+commit. El caller debe incluir el hecho Outbox y, cuando corresponda, Inbox
+en esa transacción. No hay publicación al broker ni eventos fabricados por
+triggers. La suite demuestra commit/rollback conjunto y CAS concurrente;
+el caso de uso deberá convertir cero filas actualizadas en `VERSION_CONFLICT`.
+Los errores DB se convierten en `PricingPersistenceError` con mensaje fijo y
+SQLSTATE cuando existe, sin SQL, parámetros, credenciales, detalle ni causa
+original. Los errores propios del callback conservan identidad tras rollback.
+
+### Mapping y fuente del DDL
+
+`src/persistence/pricing.schema.ts` mapea las siete tablas de
+[`datos/pricing/physical-model.md`](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/datos/pricing/physical-model.md):
+
+| Elemento | Tabla |
+|---|---|
+| Definición y versión | `pricing.prices` |
+| Snapshot monetario y vigencia | `pricing.price_validities` |
+| Programación vinculada a snapshot | `pricing.scheduled_prices` |
+| Lote local y filas durables | `pricing.bulk_price_jobs`, `pricing.bulk_price_rows` |
+| Mensajería transaccional | `pricing.outbox`, `pricing.inbox` |
+
+Versiones `bigint` permanecen `bigint` de JavaScript; importes `numeric(12,2)`
+permanecen strings decimales. El encoder monetario rechaza más de dos decimales,
+desbordes y valores no decimales antes del cast de PostgreSQL para evitar
+redondeo silencioso. Positividad, oferta, coherencia temporal y demás checks
+siguen en el SQL normativo.
+
+El mapping declara PK, UNIQUE (incluido NULLS NOT DISTINCT), FK internas,
+checks e índices. No genera/aplica DDL ni sustituye la exclusion GiST o los
+triggers diferidos de la migración oficial. No hay segundo historial de
+migraciones en backend. `test/fixtures/pricing.sql` es una copia de prueba del
+[SQL oficial](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/datos/pricing/migrations/0001_create_pricing.sql),
+sin cambios de contenido. SHA-256 con saltos LF:
+`7f440ffa401e8d56ecb2664060edb131505a16b8568843093a5047a6c13bc581`.
+La suite verifica ese checksum antes de ejecutarlo.
+
+Se consultaron Arquitectura §§7/9/16, Modelo Conceptual §5, SPEC/HU/FLOW-013,
+registro y matrices DEC-F e intermodular del mismo commit documental.
+Aplican DEC-F-001 (identificadores externos), 006 (autoridad, versión y vigencia),
+009 (Inbox/Outbox e identidad de transporte, sin prometer idempotencia de negocio
+completa) y 012 (fuentes/versionado/migraciones inmutables).
+OpenAPI `0.6.0-rc.1` y AsyncAPI `0.6.0-rc.2` siguen candidatos sin cambios.
+El payload genérico de los hechos no se concreta en este bloque.
+Referencias de implementación: [tipos PostgreSQL](https://orm.drizzle.team/docs/column-types/pg)
+y [transacciones Drizzle](https://orm.drizzle.team/docs/transactions).
+
+### Reproducción de pruebas aisladas
+
+Requiere Node compatible con `package.json`, dependencias instaladas y Docker
+activo con contenedores Linux. No requiere `.env`, credenciales compartidas,
+un proyecto Supabase ni una URL de base de datos externa.
+
+```powershell
+npm test -- apps/pricing-svc
+$env:PRICING_TEST_POSTGRES = '1'
+npm run test:e2e -- apps/pricing-svc --reporter=verbose --silent=false
+Remove-Item Env:PRICING_TEST_POSTGRES
+```
+
+La suite crea una instancia PostgreSQL por suite, no por test, con imagen fijada:
+`postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea`.
+Si falta localmente, Docker debe poder descargarla. Solo el puerto aleatorio de
+la fixture se publica en loopback; no se publican servicios internos ni broker.
+La preparación de roles/ACL y extensión ocurre exclusivamente en ese contenedor.
+Las operaciones del repositorio usan `pricing_app`, sin membresía owner.
+Al terminar se cierran conexiones y se elimina el contenedor con sus volúmenes.
+No se aceptan URLs externas para preparar fixtures, ni se escriben datos,
+credenciales, grants o policies de Supabase.
+
+Sin `PRICING_TEST_POSTGRES=1`, las 13 pruebas PostgreSQL se marcan omitidas;
+esa ejecución no acredita persistencia. Con la variable activa, falta de Docker,
+errores de fixture o de permisos hacen fallar la suite. El workflow compartido
+no se modifica en este issue; la evidencia local siguiente sí activa la suite.
+
+### Evidencia local del 2026-10-17
+
+Entorno: Windows, Node `24.19.0`, Vitest `4.1.11`, PostgreSQL `16.15` real en
+Docker. Sin conexión ni escritura a Supabase durante #53.
+
+| Comando | Resultado |
+|---|---|
+| `npm test -- apps/pricing-svc` | PASS: 71 unitarias |
+| `PRICING_TEST_POSTGRES=1 npm run test:e2e -- apps/pricing-svc` | PASS: 16 E2E, incluidas 13 PostgreSQL; sin omitidas |
+| `npm test` | PASS: 196 unitarias |
+| `PRICING_TEST_POSTGRES=1 npm run test:e2e` | PASS: 350 pruebas; 13 omitidas preexistentes de otras suites por entorno |
+| `npm run typecheck` | PASS |
+| TypeScript estricto de las nuevas pruebas de repositorio y E2E | PASS |
+| `npm run lint` | PASS |
+| `npm run format:check` | PASS |
+| `npm run build:pricing-svc` | PASS |
+| `git diff --check` | PASS |
+
+Las pruebas PostgreSQL comparan todas las columnas/tipos/nullabilidad y las tres
+FK internas; verifican UNIQUE, precisión monetaria, XOR de objetivo, intervalos,
+CAS con dos conexiones, coherencia de programación/lotes, deduplicación y
+rollback de precio/Inbox/Outbox, incluido fallo diferido en COMMIT. Se comprueban
+SELECT/INSERT/UPDATE efectivos por tabla y denegación de DELETE/TRUNCATE/DDL,
+UPDATE a Inbox, lectura de otro schema y SET ROLE al owner.
+
+Implementación interna y pruebas locales: completadas. Provider y readiness
+contra PostgreSQL aislado autenticado: comprobados. Integración compartida
+Supabase, homologación externa y despliegue de #53: no ejecutados. El cierre
+del issue requiere revisión/aceptación y PR fusionado según su definición de
+terminado. No se agregan endpoints, handlers, workers, parser ni resolver del #54.

@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { PricingReadiness } from './pricing-readiness.js';
+import { PricingDatabase } from '../persistence/pricing.database.js';
 import { validateEnvironment } from '../config/environment.js';
 
 vi.mock('pg', () => ({
@@ -14,12 +15,13 @@ vi.mock('pg', () => ({
 
 describe('PricingReadiness', () => {
   it('consulta únicamente Pricing, falla cerrado y libera el pool', async () => {
-    const readiness = new PricingReadiness({
+    const database = new PricingDatabase({
       nodeEnv: 'test',
       port: 3002,
       databaseUrl: 'postgresql://pricing:fixture@localhost/fixture',
       databaseSsl: false,
     });
+    const readiness = new PricingReadiness(database);
     const pool = vi.mocked(Pool).mock.instances.at(-1)!;
     expect(Pool).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -39,7 +41,7 @@ describe('PricingReadiness', () => {
       new Error('fixture-sensitive-value'),
     );
     expect(await readiness.check()).toBe(false);
-    await readiness.onApplicationShutdown();
+    await database.onApplicationShutdown();
     expect(pool.end).toHaveBeenCalledOnce();
     expect(pool.on).toHaveBeenCalledWith('error', expect.any(Function));
   });
@@ -51,7 +53,7 @@ describe('PricingReadiness', () => {
       DATABASE_URL:
         'postgresql://pricing:fixture@db.example.invalid/fixture?sslmode=verify-full',
     });
-    const readiness = new PricingReadiness(config);
+    const database = new PricingDatabase(config);
     expect(Pool).toHaveBeenLastCalledWith(
       expect.objectContaining({
         connectionString:
@@ -62,6 +64,6 @@ describe('PricingReadiness', () => {
         }),
       }),
     );
-    await readiness.onApplicationShutdown();
+    await database.onApplicationShutdown();
   });
 });
