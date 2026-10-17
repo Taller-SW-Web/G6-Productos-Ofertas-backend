@@ -1,6 +1,6 @@
 export const TAXONOMY_REPOSITORY = 'TAXONOMY_REPOSITORY';
 
-export type EstadoTaxonomia = 'ACTIVO' | 'INACTIVO';
+export type EstadoTaxonomia = 'ACTIVO' | 'INACTIVO' | 'PENDING_DEACTIVATION';
 
 export interface CategoriaRow {
   id: string;

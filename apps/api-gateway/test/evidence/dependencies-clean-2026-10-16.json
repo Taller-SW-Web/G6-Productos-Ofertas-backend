@@ -1,0 +1,47 @@
+{
+  "installation": {
+    "exitCode": 0,
+    "packages": 402,
+    "command": "npm ci --no-audit --no-fund"
+  },
+  "warning": "Existing tsconfck optional peer range targets TypeScript 5; npm ci and checks passed with locked TypeScript 6.0.3",
+  "checks": {
+    "focusedUnitTests": {
+      "passed": 145,
+      "exitCode": 0
+    },
+    "postgresCatalog": {
+      "passed": 4,
+      "exitCode": 0
+    },
+    "typecheck": "PASS",
+    "format": "PASS",
+    "buildAll": "PASS",
+    "focusedHttpTests": {
+      "exitCode": 0,
+      "passed": 304,
+      "skippedOptIn": 10
+    },
+    "lint": "PASS",
+    "postgresTaxonomy": {
+      "passed": 2,
+      "exitCode": 0
+    },
+    "gatewayPostgres": {
+      "passed": 4,
+      "exitCode": 0
+    }
+  },
+  "sourceAndLockMatch": true,
+  "environment": "Temporary clean npm ci; original node_modules preserved",
+  "workspace": "C:\\Users\\marec\\AppData\\Local\\Temp\\g6-int-asap-ci-38274a6173a2421dbd9fcb996cd06c6e",
+  "node": "24.19.0",
+  "packageJsonSha256": "9c443ebf61e04771403bd2420d9805d2a3faae0421a9b9dcbc8d366489896169",
+  "packageLockSha256": "9883771e19e593c1ff5b1ce947b0a0b6185692fce1555a6e8d17314ae53ee6aa",
+  "limits": [
+    "No database writes",
+    "Catalog positive real detail unavailable: zero active products and pending D-CAT-05/06",
+    "Not G1 E2E, homologation or deployment"
+  ],
+  "date": "2026-10-16T19:12:21.7713018Z"
+}

@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - castilla
   pull_request:
     branches:
       - master
@@ -93,7 +94,7 @@ jobs:
             bash -n "$file"
           done
           enabled="$(bash -c 'source ops/oracle/service-registry.sh; g6_enabled_services_json')"
-          test "$enabled" = '["inventory-svc"]'
+          test "$enabled" = '["api-gateway","catalog-svc","inventory-svc","taxonomy-svc"]'
           test "$(awk -F'|' '$1 !~ /^#/ && NF { count++ } END { print count+0 }' ops/oracle/services.psv)" = 9
 
       - name: Validate service port, environment and healthcheck consistency
@@ -134,19 +135,21 @@ jobs:
             <<< "$inventory_config" >/dev/null
           printf 'Consistencia de los nueve puertos/env/Compose/healthchecks validada; Inventario conserva puerto y healthcheck.\n'
 
-      - name: Build generic inventory and catalog service images
+      - name: Build generic service images for enabled Oracle CD services
         run: |
           set -euo pipefail
           docker build --file Dockerfile.service --build-arg SERVICE_NAME=inventory-svc --tag g6-service:inventory-svc-ci .
           docker build --file Dockerfile.service --build-arg SERVICE_NAME=catalog-svc --tag g6-service:catalog-svc-ci .
+          docker build --file Dockerfile.service --build-arg SERVICE_NAME=taxonomy-svc --tag g6-service:taxonomy-svc-ci .
+          docker build --file Dockerfile.service --build-arg SERVICE_NAME=api-gateway --tag g6-service:api-gateway-ci .
 
-      - name: Smoke test generic inventory and catalog service images
+      - name: Smoke test generic inventory and api-gateway images
         run: |
           set -euo pipefail
-          for service in inventory-svc catalog-svc; do
+          for service in inventory-svc api-gateway; do
             case "$service" in
               inventory-svc) port=3005; port_env=INVENTORY_SVC_PORT ;;
-              catalog-svc) port=3001; port_env=CATALOG_SVC_PORT ;;
+              api-gateway) port=3000; port_env=API_GATEWAY_PORT ;;
             esac
             name="${service}-generic-ci"
             trap 'docker rm --force "$name" >/dev/null 2>&1 || true' EXIT
@@ -199,20 +202,8 @@ jobs:
             console.log("inventory-svc process health passed; this does not verify Supabase readiness.");
           ' "$response"
 
-      - name: Smoke test compiled executable
-        run: |
-          node dist/apps/catalog-svc/main.js &
-          PID=$!
-          trap "kill $PID 2>/dev/null || true" EXIT
-          sleep 3
-          RESPONSE=$(curl -s http://localhost:3001/health)
-          echo "Health response: $RESPONSE"
-          node -e "
-            const res = JSON.parse(process.argv[1]);
-            if (res.status !== 'ok' || res.service !== 'catalog-svc') {
-              console.error('Smoke test failed invalid payload:', res);
-              process.exit(1);
-            }
-            console.log('Smoke test passed successfully.');
-          " "$RESPONSE"
-          kill $PID 2>/dev/null || true
+      - name: Reject compiled services without PostgreSQL configuration
+        run: node scripts/ci/invalid-startup.mjs
+
+      - name: Positive Marketplace containers with disposable PostgreSQL and TLS
+        run: bash scripts/ci/marketplace-docker.sh
