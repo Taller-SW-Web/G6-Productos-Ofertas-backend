@@ -7,6 +7,9 @@ readonly REGISTRY="$ROOT/ops/oracle/services.psv"
 readonly SELECTOR="$ROOT/ops/oracle/select-cd-services.sh"
 readonly REGISTRY_SH="$ROOT/ops/oracle/service-registry.sh"
 readonly AUTO_AUTH="$ROOT/ops/oracle/auto-release-authorization.psv"
+readonly SOURCE_VALIDATOR="$ROOT/ops/oracle/validate-cd-source.sh"
+
+bash "$ROOT/ops/oracle/tests/validate-cd-source.test.sh"
 
 echo "=== Verificando Registro de Servicios ==="
 # Versionado y formato del registro
@@ -112,9 +115,10 @@ grep -Fq "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/
   echo "FAIL: el disparador manual no está restringido a refs/heads/master" >&2
   exit 1
 }
-for guard in 'CI_EVENT" == push' 'CI_BRANCH" == master' 'CI_CONCLUSION" == success' 'CI_HEAD_REPOSITORY' 'CI_SHA' 'Skipping obsolete commit'; do
-  grep -Fq "$guard" "$WORKFLOW" || { echo "FAIL: falta validación de evento CI $guard" >&2; exit 1; }
+for guard in 'CI_EVENT:-' 'CI_BRANCH:-' 'CI_CONCLUSION:-' 'CI_HEAD_REPOSITORY' 'CI_SHA' 'Skipping obsolete commit'; do
+  grep -Fq "$guard" "$SOURCE_VALIDATOR" || { echo "FAIL: falta validación de evento CI $guard" >&2; exit 1; }
 done
+grep -Fq 'run: bash ops/oracle/validate-cd-source.sh' "$WORKFLOW" || { echo 'FAIL: workflow no ejecuta el validador probado'; exit 1; }
 grep -Fq 'tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd' "$WORKFLOW" || { echo 'FAIL: falta Tailscale OIDC'; exit 1; }
 grep -Fq 'tailscale ping --c 1 --timeout=20s "$ORACLE_HOST"' "$WORKFLOW" || { echo 'FAIL: ORACLE_HOST no se verifica como peer Tailscale'; exit 1; }
 grep -Fq 'id-token: write' "$WORKFLOW" || { echo 'FAIL: falta permiso OIDC'; exit 1; }
@@ -129,26 +133,26 @@ auto_output="$(bash "$SELECTOR" automatic example/g6-backend 2>&1)"
 echo "PASS: modo automatic devuelve [] mientras los nueve servicios están deshabilitados"
 
 # 3. CI fallida impide liberación
-grep -Fq 'gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch master --commit "$sha"' "$WORKFLOW" || {
+grep -Fq 'gh run list --repo "$repository" --workflow ci.yml --branch master --commit "$sha"' "$SOURCE_VALIDATOR" || {
   echo "FAIL: falta consulta de CI push exitoso en master" >&2
   exit 1
 }
-grep -Fq 'No successful CI push run was found for master commit' "$WORKFLOW" || {
+grep -Fq 'No successful CI push run was found for master commit' "$SOURCE_VALIDATOR" || {
   echo "FAIL: falta mensaje y aborto ante CI no exitosa" >&2
   exit 1
 }
 echo "PASS: commit sin CI push exitosa en master impide la liberación"
 
 # 4. SHA diferente al master vigente o inválido impide liberación
-grep -Fq 'repos/${GITHUB_REPOSITORY}/commits/master' "$WORKFLOW" || {
+grep -Fq 'repos/${repository}/commits/master' "$SOURCE_VALIDATOR" || {
   echo "FAIL: falta verificación de HEAD vigente de master" >&2
   exit 1
 }
-grep -Fq 'Skipping obsolete commit' "$WORKFLOW" || {
+grep -Fq 'Skipping obsolete commit' "$SOURCE_VALIDATOR" || {
   echo "FAIL: falta descarte de commit obsoleto" >&2
   exit 1
 }
-grep -Fq '[[ "$sha" =~ ^[0-9a-f]{40}$ ]]' "$WORKFLOW" || {
+grep -Fq '^[0-9a-f]{40}$' "$SOURCE_VALIDATOR" || {
   echo "FAIL: falta validación estricta de formato SHA de 40 caracteres" >&2
   exit 1
 }

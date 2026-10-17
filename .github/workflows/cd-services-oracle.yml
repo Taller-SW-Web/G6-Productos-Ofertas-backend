@@ -56,34 +56,7 @@ jobs:
           CI_SHA: ${{ github.event.workflow_run.head_sha }}
           CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           CI_HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
-        run: |
-          set -euo pipefail
-          if [[ "$TRIGGER_EVENT" == workflow_run ]]; then
-            [[ "$CI_NAME" == CI && "$CI_PATH" == .github/workflows/ci.yml ]] || { echo 'El workflow origen no es CI.' >&2; exit 1; }
-            [[ "$CI_EVENT" == push && "$CI_BRANCH" == master && "$CI_CONCLUSION" == success ]] || { echo 'Solo se acepta CI exitosa de push a master.' >&2; exit 1; }
-            [[ "${CI_HEAD_REPOSITORY,,}" == "${GITHUB_REPOSITORY,,}" ]] || { echo 'Se rechazan PRs y forks.' >&2; exit 1; }
-            [[ "$CI_SHA" =~ ^[0-9a-f]{40}$ && "$CI_RUN_ID" =~ ^[0-9]+$ ]] || { echo 'SHA o ID de ejecución CI inválido.' >&2; exit 1; }
-            run_data="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CI_RUN_ID}" --jq '[.name,.path,.event,.head_branch,.head_sha,.conclusion,.head_repository.full_name] | @tsv')"
-            expected_data="$(printf 'CI\t.github/workflows/ci.yml\tpush\tmaster\t%s\tsuccess\t%s' "$CI_SHA" "$GITHUB_REPOSITORY")"
-            [[ "${run_data,,}" == "${expected_data,,}" ]] || { echo 'La ejecución CI consultada no coincide con el evento recibido.' >&2; exit 1; }
-            sha="$CI_SHA"
-          elif [[ "$TRIGGER_EVENT" == workflow_dispatch ]]; then
-            sha="$GITHUB_SHA"
-            ci_success="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch master --commit "$sha" --json conclusion,event,headBranch --jq 'any(.[]; .conclusion == "success" and .event == "push" and .headBranch == "master")')"
-            [[ "$ci_success" == true ]] || { echo "No successful CI push run was found for master commit $sha." >&2; exit 1; }
-          else
-            echo 'Evento no permitido.' >&2
-            exit 1
-          fi
-          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
-          current="$(gh api "repos/${GITHUB_REPOSITORY}/commits/master" --jq .sha)"
-          if [[ "$sha" != "$current" ]]; then
-            echo "Skipping obsolete commit $sha; master is $current."
-            echo 'sha=' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "repository=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+        run: bash ops/oracle/validate-cd-source.sh
 
       - name: Checkout selected master commit
         if: steps.selection.outputs.sha != ''
