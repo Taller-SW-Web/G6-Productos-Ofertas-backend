@@ -90,10 +90,13 @@ jobs:
       - name: Test publication failure isolation
         run: bash ops/oracle/tests/publish-isolation.test.sh
 
+      - name: Test immutable GHCR image reuse guards
+        run: bash ops/oracle/tests/ensure-ghcr-sha-image.test.sh
+
       - name: Validate closed Oracle service registry
         run: |
           set -euo pipefail
-          for file in ops/oracle/service-registry.sh ops/oracle/deploy-g6-service.sh ops/oracle/deploy-inventory-svc.sh ops/oracle/build-service.sh ops/oracle/select-cd-services.sh ops/oracle/validate-cd-source.sh ops/oracle/github-deployment-api.sh ops/oracle/tests/deploy-g6-service.test.sh ops/oracle/tests/deploy-inventory-svc.test.sh ops/oracle/tests/select-cd-services.test.sh ops/oracle/tests/validate-cd-source.test.sh ops/oracle/tests/deployment-api.test.sh ops/oracle/tests/publish-isolation.test.sh; do
+          for file in ops/oracle/service-registry.sh ops/oracle/deploy-g6-service.sh ops/oracle/deploy-inventory-svc.sh ops/oracle/build-service.sh ops/oracle/select-cd-services.sh ops/oracle/validate-cd-source.sh ops/oracle/github-deployment-api.sh ops/oracle/verify-manual-release-provenance.sh ops/oracle/ensure-ghcr-sha-image.sh ops/oracle/tests/deploy-g6-service.test.sh ops/oracle/tests/deploy-inventory-svc.test.sh ops/oracle/tests/select-cd-services.test.sh ops/oracle/tests/validate-cd-source.test.sh ops/oracle/tests/deployment-api.test.sh ops/oracle/tests/publish-isolation.test.sh ops/oracle/tests/ensure-ghcr-sha-image.test.sh; do
             bash -n "$file"
           done
           enabled="$(bash -c 'source ops/oracle/service-registry.sh; g6_enabled_services_json')"

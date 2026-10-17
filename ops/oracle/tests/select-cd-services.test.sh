@@ -111,6 +111,13 @@ grep -Fq 'workflow_dispatch:' <<< "$workflow_on" || {
   echo "FAIL: la sección on: no declara workflow_dispatch" >&2
   exit 1
 }
+grep -Fq 'connectivity-check' "$WORKFLOW" || { echo 'FAIL: falta modo de conectividad'; exit 1; }
+grep -Fq "inputs.mode == 'connectivity-check'" "$WORKFLOW" || { echo 'FAIL: conectividad no tiene guard exclusivo'; exit 1; }
+grep -Fq 'tailscale ping --c 1 --timeout=20s 100.87.22.28' "$WORKFLOW" || { echo 'FAIL: falta ping Tailscale al host aprobado'; exit 1; }
+grep -Fq 'StrictHostKeyChecking=yes' "$WORKFLOW" || { echo 'FAIL: falta validación estricta SSH'; exit 1; }
+grep -Fq 'SHA256:dVru76PK60yqZRYHUVtNNPUSYLtbS6ZE24mF0S/BhGY' "$WORKFLOW" || { echo 'FAIL: falta fingerprint aprobado'; exit 1; }
+grep -Fq 'connectivity-probe' "$WORKFLOW" || { echo 'FAIL: falta probe inocuo'; exit 1; }
+grep -Fq "inputs.mode == 'deploy'" "$WORKFLOW" || { echo 'FAIL: despliegue no está separado del modo conectividad'; exit 1; }
 grep -Fq "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'" "$WORKFLOW" || {
   echo "FAIL: el disparador manual no está restringido a refs/heads/master" >&2
   exit 1

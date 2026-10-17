@@ -7,9 +7,17 @@ on:
     branches: [master]
   workflow_dispatch:
     inputs:
-      service:
-        description: Servicio registrado (solo los habilitados pueden desplegarse)
+      mode:
+        description: Operación manual del workflow
         required: true
+        type: choice
+        options:
+          - deploy
+          - connectivity-check
+        default: deploy
+      service:
+        description: Servicio registrado (obligatorio en modo deploy)
+        required: false
         type: choice
         options:
           - api-gateway
@@ -21,17 +29,108 @@ on:
           - pricing-svc
           - promotions-svc
           - taxonomy-svc
-        default: inventory-svc
 
 permissions:
   actions: read
   contents: read
 
 jobs:
+  connectivity_check:
+    name: Comprobar conectividad Tailscale y SSH restringido
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.mode == 'connectivity-check'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Validate connectivity configuration without exposing values
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_PRIVATE_KEY: ${{ secrets.ORACLE_SSH_PRIVATE_KEY }}
+          ORACLE_SSH_KNOWN_HOSTS: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
+          ORACLE_GHCR_USERNAME: ${{ secrets.ORACLE_GHCR_USERNAME }}
+          ORACLE_GHCR_TOKEN: ${{ secrets.ORACLE_GHCR_TOKEN }}
+          TS_OIDC_CLIENT_ID: ${{ vars.TS_OIDC_CLIENT_ID }}
+          TS_OIDC_AUDIENCE: ${{ vars.TS_OIDC_AUDIENCE }}
+        run: |
+          set -euo pipefail
+          for name in ORACLE_HOST ORACLE_USER ORACLE_SSH_PRIVATE_KEY ORACLE_SSH_KNOWN_HOSTS ORACLE_GHCR_USERNAME ORACLE_GHCR_TOKEN TS_OIDC_CLIENT_ID TS_OIDC_AUDIENCE; do
+            if [[ -z "${!name}" ]]; then echo "FAIL: falta configuración requerida ($name)." >&2; exit 1; fi
+          done
+          [[ "$ORACLE_HOST" == 100.87.22.28 && "$ORACLE_USER" == inventory-deploy ]] || { echo 'FAIL: host o usuario Oracle no coincide con la identidad aprobada.' >&2; exit 1; }
+          echo 'PASS: presencia de configuración y destino Oracle aprobados.'
+
+      - name: Join Tailscale using GitHub OIDC
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4
+        with:
+          oauth-client-id: ${{ vars.TS_OIDC_CLIENT_ID }}
+          audience: ${{ vars.TS_OIDC_AUDIENCE }}
+          tags: tag:g6-deploy-actions
+          version: 1.90.1
+
+      - name: Verify Oracle Tailscale reachability
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+        run: |
+          set -euo pipefail
+          tailscale ping --c 1 --timeout=20s 100.87.22.28 >/dev/null 2>&1 || { echo 'FAIL: Tailscale ping a Oracle.' >&2; exit 1; }
+          [[ "$ORACLE_HOST" == 100.87.22.28 ]] || { echo 'FAIL: host Oracle no coincide.' >&2; exit 1; }
+          echo 'PASS: Oracle responde como peer Tailscale.'
+
+      - name: Verify TCP port 22
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+        run: |
+          set -euo pipefail
+          timeout 10 bash -c 'exec 3<>/dev/tcp/$1/22' _ "$ORACLE_HOST" >/dev/null 2>&1 || { echo 'FAIL: conexión TCP/22 a Oracle.' >&2; exit 1; }
+          echo 'PASS: Oracle acepta TCP/22 desde Actions por Tailscale.'
+
+      - name: Verify ED25519 host identity and strict known_hosts
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_SSH_KNOWN_HOSTS: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$ORACLE_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          ssh-keygen -F "$ORACLE_HOST" -f ~/.ssh/known_hosts 2>/dev/null | awk '!/^#/ { print $2, $3 }' > /tmp/oracle-host-key
+          [[ -s /tmp/oracle-host-key ]] || { echo 'FAIL: ORACLE_SSH_KNOWN_HOSTS no contiene una clave para el host Oracle.' >&2; exit 1; }
+          fingerprint="$(ssh-keygen -lf /tmp/oracle-host-key -E sha256 | awk 'NR == 1 { print $2 }')"
+          [[ "$fingerprint" == SHA256:dVru76PK60yqZRYHUVtNNPUSYLtbS6ZE24mF0S/BhGY ]] || { echo 'FAIL: fingerprint ED25519 de Oracle no coincide.' >&2; exit 1; }
+          grep -q 'ssh-ed25519' /tmp/oracle-host-key || { echo 'FAIL: la clave del host no es ED25519.' >&2; exit 1; }
+          echo 'PASS: known_hosts estricto coincide con el fingerprint ED25519 esperado.'
+
+      - name: Authenticate and verify restricted command wrapper
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          ORACLE_SSH_PRIVATE_KEY: ${{ secrets.ORACLE_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$ORACLE_SSH_PRIVATE_KEY" > ~/.ssh/oracle_g6
+          chmod 600 ~/.ssh/oracle_g6
+          set +e
+          ssh -vv -i ~/.ssh/oracle_g6 -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -o HostKeyAlgorithms=ssh-ed25519 "$ORACLE_USER@$ORACLE_HOST" connectivity-probe \
+            >/tmp/oracle-ssh.out 2>/tmp/oracle-ssh.err
+          ssh_status=$?
+          set -e
+          if [[ "$ssh_status" == 255 ]] || ! grep -q 'Authenticated to ' /tmp/oracle-ssh.err; then
+            echo 'FAIL: autenticación SSH o verificación estricta del host.' >&2
+            exit 1
+          fi
+          if [[ "$ssh_status" == 0 ]] || ! grep -qi 'comando remoto no autorizado' /tmp/oracle-ssh.err /tmp/oracle-ssh.out; then
+            echo 'FAIL: el wrapper no rechazó connectivity-probe como comando no autorizado.' >&2
+            exit 1
+          fi
+          echo 'PASS: autenticación SSH válida; wrapper rechazó el comando inocuo como no autorizado.'
+
   prepare:
     name: Validar CI, autorización, selección y SHA de master
     if: >-
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.mode == 'deploy') ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'CI')
     runs-on: ubuntu-latest
     permissions:
@@ -83,14 +182,11 @@ jobs:
               row="$(awk -F'|' -v service="$service" '$1 == service { print $2 "\t" $3 "\t" $4 }' ops/oracle/auto-release-authorization.psv)"
               IFS=$'\t' read -r enabled manual_deployment_id readiness_evidence <<< "$row"
               [[ "$enabled" == true && "$manual_deployment_id" =~ ^[0-9]+$ && "$readiness_evidence" =~ ^https://[^[:space:]|]+$ ]] || { echo "Autorización incompleta para $service." >&2; exit 1; }
-              deployment="$(gh api "repos/${GITHUB_REPOSITORY}/deployments/${manual_deployment_id}" --jq '[.environment,.task,.sha] | @tsv')"
-              IFS=$'\t' read -r deployment_environment deployment_task deployment_sha <<< "$deployment"
-              [[ "$deployment_environment" == "g6-oracle-${service}" && "$deployment_task" == deploy && "$deployment_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "Deployment manual de referencia inválido para $service." >&2; exit 1; }
-              deployment_status="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/deployments/${manual_deployment_id}/statuses?per_page=100" --jq '.[] | [.created_at,.state] | @tsv' | sort | tail -n 1 | cut -f 2)"
-              [[ "$deployment_status" == success ]] || { echo "La liberación manual de $service no terminó en success." >&2; exit 1; }
+              bash ops/oracle/verify-manual-release-provenance.sh "$GITHUB_REPOSITORY" "$manual_deployment_id" "$service" "${{ github.event.workflow_run.head_sha }}"
               echo "Readiness/smoke aprobado para $service: referencia registrada."
             done < <(jq -r '.[]' <<< "$services")
           else
+            [[ -n "$REQUESTED_SERVICE" ]] || { echo 'Selecciona explícitamente un servicio para el modo deploy.' >&2; exit 1; }
             services="$(bash ops/oracle/select-cd-services.sh manual "$REQUESTED_SERVICE")"
           fi
           if [[ "$services" != '[]' ]]; then
@@ -102,7 +198,7 @@ jobs:
   release:
     name: Publicar y desplegar ${{ matrix.service }}
     needs: prepare
-    if: needs.prepare.outputs.sha != '' && needs.prepare.outputs.services != '[]'
+    if: needs.prepare.outputs.sha != '' && needs.prepare.outputs.services != '[]' && (github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'deploy'))
     strategy:
       fail-fast: false
       matrix:
@@ -225,25 +321,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Reject an existing immutable SHA tag
+      - name: Verify or reserve immutable SHA image
+        id: image
         if: steps.publish_freshness.outputs.publish == 'true'
-        env:
-          IMAGE_REF: ghcr.io/${{ needs.prepare.outputs.repository }}/${{ matrix.service }}:${{ needs.prepare.outputs.sha }}
         run: |
-          set -euo pipefail
-          inspect_error="$(mktemp)"
-          trap 'rm -f "$inspect_error"' EXIT
-          if docker manifest inspect "$IMAGE_REF" >/dev/null 2>"$inspect_error"; then
-            echo 'La etiqueta inmutable para este SHA ya existe; no se sobrescribe.' >&2
-            exit 1
-          fi
-          if ! grep -Eiq 'manifest unknown|no such manifest|not found|404' "$inspect_error"; then
-            echo 'No se pudo confirmar con seguridad que la etiqueta GHCR esté libre.' >&2
-            exit 1
-          fi
+          bash ops/oracle/ensure-ghcr-sha-image.sh "${{ needs.prepare.outputs.repository }}" "${{ matrix.service }}" "${{ needs.prepare.outputs.sha }}" "$GITHUB_OUTPUT"
 
       - name: Build and publish image tagged with the SHA
-        if: steps.publish_freshness.outputs.publish == 'true'
+        if: steps.publish_freshness.outputs.publish == 'true' && steps.image.outputs.exists == 'false'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -254,6 +339,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ needs.prepare.outputs.sha }}
+            org.opencontainers.image.title=${{ matrix.service }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
@@ -279,9 +365,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SERVICE_NAME: ${{ matrix.service }}
           IMAGE_SHA: ${{ needs.prepare.outputs.sha }}
+          TRIGGER_EVENT: ${{ github.event_name }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          deployment_id="$(bash ops/oracle/github-deployment-api.sh create "$GITHUB_REPOSITORY" "$SERVICE_NAME" "$IMAGE_SHA")"
+          deployment_id="$(bash ops/oracle/github-deployment-api.sh create "$GITHUB_REPOSITORY" "$SERVICE_NAME" "$IMAGE_SHA" "$TRIGGER_EVENT" "$WORKFLOW_RUN_ID")"
           echo "deployment_id=$deployment_id" >> "$GITHUB_OUTPUT"
 
       - name: Deploy image, check health and roll back on failure

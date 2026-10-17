@@ -35,7 +35,7 @@ while (($#)); do
 done
 deployments="$MOCK_STATE/deployments.tsv"
 if [[ "$method" == POST && "$endpoint" == repos/example/backend/deployments ]]; then
-  expected="{\"ref\":\"$EXPECT_SHA\",\"task\":\"deploy\",\"environment\":\"g6-oracle-inventory-svc\",\"auto_merge\":false,\"required_contexts\":[],\"production_environment\":true}"
+  expected="{\"ref\":\"$EXPECT_SHA\",\"task\":\"deploy\",\"environment\":\"g6-oracle-inventory-svc\",\"auto_merge\":false,\"required_contexts\":[],\"production_environment\":true,\"payload\":{\"trigger\":\"workflow_dispatch\",\"run_id\":\"77\"}}"
   [[ -n "$input" && "$jq" == .id && "$(cat "$input")" == "$expected" ]] || { echo 'payload de creación inválido' >&2; exit 2; }
   id=100
   printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$EXPECT_SHA" '2026-03-01T00:00:00Z' g6-oracle-inventory-svc deploy >> "$deployments"
@@ -49,12 +49,19 @@ elif [[ "$method" == POST && "$endpoint" =~ ^repos/example/backend/deployments/(
     failure) expected='El despliegue remoto no terminó correctamente; no se avanza el SHA exitoso.' ;;
     *) exit 2 ;;
   esac
-  [[ "$description" == "$expected" && -f "$MOCK_STATE/$id.statuses.tsv" ]] || { echo 'payload de estado inválido' >&2; exit 2; }
+[[ "$description" == "$expected" && -f "$MOCK_STATE/$id.statuses.tsv" ]] || { echo 'payload de estado inválido' >&2; exit 2; }
   status_id="$(($(wc -l < "$MOCK_STATE/$id.statuses.tsv") + 1000))"
   printf '%s\t%s\t%s\n' "$status_id" "$state" '2026-03-01T00:00:00Z' >> "$MOCK_STATE/$id.statuses.tsv"
 elif [[ "$method" == GET && "$endpoint" == repos/example/backend/deployments\?* ]]; then
   [[ "$endpoint" == *'environment=g6-oracle-inventory-svc'*'task=deploy'*'per_page=100'* ]] || { echo 'query de Deployments inválida' >&2; exit 2; }
   awk -F '\t' '$4 == "g6-oracle-inventory-svc" && $5 == "deploy" { print $1 "\t" $2 "\t" $3 }' "$deployments"
+elif [[ "$method" == GET && "$endpoint" =~ ^repos/example/backend/deployments/([0-9]+)$ ]]; then
+  id="${BASH_REMATCH[1]}"
+  [[ "$id" == 100 ]] || exit 2
+  printf 'g6-oracle-inventory-svc\tdeploy\t%s\t%s\t77\n' "$EXPECT_SHA" "${MOCK_TRIGGER:-workflow_dispatch}"
+elif [[ "$method" == GET && "$endpoint" =~ ^repos/example/backend/actions/runs/([0-9]+)$ ]]; then
+  [[ "${BASH_REMATCH[1]}" == 77 ]] || exit 2
+  printf 'CD servicios Oracle\t.github/workflows/cd-services-oracle.yml\tworkflow_dispatch\tmaster\t%s\tsuccess\texample/backend\n' "$EXPECT_SHA"
 elif [[ "$method" == GET && "$endpoint" =~ ^repos/example/backend/deployments/([0-9]+)/statuses\?per_page=100$ ]]; then
   id="${BASH_REMATCH[1]}"
   [[ -f "$MOCK_STATE/$id.statuses.tsv" ]] && cat "$MOCK_STATE/$id.statuses.tsv"
@@ -68,8 +75,8 @@ chmod +x "$MOCK_BIN/gh"
 cat > "$MOCK_BIN/jq" <<'MOCK_JQ'
 #!/usr/bin/env bash
 set -Eeuo pipefail
-[[ "$1" == -cn && "$2" == --arg && "$3" == ref && "$5" == --arg && "$6" == environment && "$8" == '{ref:$ref, task:"deploy", environment:$environment, auto_merge:false, required_contexts:[], production_environment:true}' ]] || exit 2
-printf '{"ref":"%s","task":"deploy","environment":"%s","auto_merge":false,"required_contexts":[],"production_environment":true}\n' "$4" "$7"
+[[ "$1" == -cn && "$2" == --arg && "$3" == ref && "$5" == --arg && "$6" == environment && "$8" == --arg && "$9" == trigger && "${11}" == --arg && "${12}" == run_id && "${14}" == '{ref:$ref, task:"deploy", environment:$environment, auto_merge:false, required_contexts:[], production_environment:true, payload:{trigger:$trigger,run_id:$run_id}}' ]] || exit 2
+printf '{"ref":"%s","task":"deploy","environment":"%s","auto_merge":false,"required_contexts":[],"production_environment":true,"payload":{"trigger":"%s","run_id":"%s"}}\n' "$4" "$7" "${10}" "${13}"
 MOCK_JQ
 chmod +x "$MOCK_BIN/jq"
 
@@ -85,13 +92,19 @@ readonly SHA="$(git -C "$REPO" rev-parse HEAD)"
 run_api() { env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" EXPECT_SHA="$SHA" bash "$ORACLE_DIR/github-deployment-api.sh" "$@"; }
 run_selector() { (cd "$REPO" && env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" bash "$ORACLE_DIR/select-cd-services.sh" manual inventory-svc); }
 
-deployment_id="$(run_api create example/backend inventory-svc "$SHA")"
+deployment_id="$(run_api create example/backend inventory-svc "$SHA" workflow_dispatch 77)"
 [[ "$deployment_id" == 100 ]]
 [[ "$(run_selector)" == '["inventory-svc"]' ]]
 run_api status example/backend "$deployment_id" success
+env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" EXPECT_SHA="$SHA" bash "$ROOT/ops/oracle/verify-manual-release-provenance.sh" example/backend "$deployment_id" inventory-svc "$SHA"
+if env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" EXPECT_SHA="$SHA" MOCK_TRIGGER=workflow_run bash "$ROOT/ops/oracle/verify-manual-release-provenance.sh" example/backend "$deployment_id" inventory-svc "$SHA" >/dev/null 2>&1; then
+  echo 'FAIL: un Deployment automático se aceptó como liberación manual.' >&2
+  exit 1
+fi
+echo 'PASS: procedencia workflow_run rechazada como evidencia de liberación manual.'
 printf 'PASS: mock API validó parámetros, creación, estados y lectura del baseline exitoso.\n'
 
-if run_api create example/backend pricing-svc "$SHA" >/dev/null 2>&1; then
+if run_api create example/backend pricing-svc "$SHA" workflow_dispatch 77 >/dev/null 2>&1; then
   echo 'FAIL: se permitió crear un Deployment para servicio deshabilitado.' >&2
   exit 1
 fi
