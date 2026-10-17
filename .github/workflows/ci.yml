@@ -272,3 +272,26 @@ jobs:
 
       - name: Positive Marketplace containers with disposable PostgreSQL and TLS
         run: bash scripts/ci/marketplace-docker.sh
+
+  taxonomy-integration:
+    name: Taxonomy integration on disposable PostgreSQL
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+          cache: 'npm'
+
+      - name: Install dependencies (clean)
+        run: npm ci
+
+      - name: Reject caller-supplied database URLs before Docker access
+        run: node --test scripts/ci/run-taxonomy-integration.test.mjs
+
+      - name: Taxonomy integration tests (must not be skipped)
+        run: node scripts/ci/run-taxonomy-integration.mjs

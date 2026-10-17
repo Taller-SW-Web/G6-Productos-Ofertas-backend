@@ -1,4 +1,4 @@
-import { Controller, Get, Inject } from '@nestjs/common';
+import { Controller, Get, HttpStatus, Inject } from '@nestjs/common';
 import { ProblemDetailsException } from '../errors/taxonomy.errors.js';
 import { TAXONOMY_READINESS } from './readiness.port.js';
 import type { TaxonomyReadinessIndicator } from './readiness.port.js';
@@ -28,19 +28,40 @@ export class ReadinessController {
   }
 
   private async ejecutarReadiness(): Promise<void> {
-    const ind = this.indicador as unknown as {
-      verificarReadiness?: () => Promise<void>;
-      readiness?: () => Promise<boolean>;
-    };
-    if (typeof ind.verificarReadiness === 'function') {
-      await ind.verificarReadiness();
-    } else if (typeof ind.readiness === 'function') {
-      const ok = await ind.readiness();
-      if (!ok) {
-        throw ProblemDetailsException.noDisponible(
-          'Fuente de datos de taxonomía no disponible.',
-        );
+    const ind = this.indicador as unknown as
+      | {
+          verificarReadiness?: () => Promise<void>;
+          readiness?: () => Promise<boolean>;
+        }
+      | null
+      | undefined;
+    try {
+      if (typeof ind?.verificarReadiness === 'function') {
+        await ind.verificarReadiness();
+        return;
       }
+      if (typeof ind?.readiness === 'function') {
+        const ok = await ind.readiness();
+        if (!ok) {
+          throw ProblemDetailsException.noDisponible(
+            'Fuente de datos de taxonomía no disponible.',
+          );
+        }
+        return;
+      }
+      throw ProblemDetailsException.noDisponible(
+        'Indicador de readiness de taxonomía no implementado.',
+      );
+    } catch (error) {
+      if (
+        error instanceof ProblemDetailsException &&
+        error.getStatus() === HttpStatus.SERVICE_UNAVAILABLE
+      ) {
+        throw error;
+      }
+      throw ProblemDetailsException.noDisponible(
+        'Fuente de datos de taxonomía no disponible.',
+      );
     }
   }
 }
