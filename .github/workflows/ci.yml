@@ -127,9 +127,20 @@ jobs:
                .services.service.environment[$port_env] == $port and
                .services.service.ports[0].host_ip == "127.0.0.1" and
                (.services.service.ports[0].published | tostring) == $port and
-               any(.services.service.volumes[]; .target == "/run/g6-certs/supabase-server-root.crt" and .read_only == true) and
-               ((.services.service.healthcheck.test | join(" ")) | contains("127.0.0.1:" + $port + "/health"))' \
+               any(.services.service.volumes[]; .target == "/run/g6-certs/supabase-server-root.crt" and .read_only == true)' \
               <<< "$config" >/dev/null
+            if [[ "$service" == api-gateway ]]; then
+              jq -e '.services.service.healthcheck.test == ["CMD", "node", "dist/apps/api-gateway/readiness.js"] and
+                .services.service.healthcheck.interval == "30s" and
+                .services.service.healthcheck.timeout == "15s" and
+                .services.service.healthcheck.start_period == "30s" and
+                .services.service.healthcheck.retries == 3' \
+                <<< "$config" >/dev/null
+            else
+              jq -e --arg port "$port" \
+                '((.services.service.healthcheck.test | join(" ")) | contains("127.0.0.1:" + $port + "/health"))' \
+                <<< "$config" >/dev/null
+            fi
             http_config="$(docker compose --file "$compose_file" --file ops/oracle/docker-compose.service.http.yml config --format json --no-env-resolution)"
             jq -e --arg alias "$image_name" \
               '.services.service.networks["g6-http"].aliases | index($alias) != null' \
@@ -184,6 +195,10 @@ jobs:
                 ;;
             esac
             name="${service}-generic-ci"
+            if [[ "$service" == api-gateway ]]; then
+              docker run --rm --entrypoint node "g6-service:${service}-ci" -e \
+                "require('node:fs').accessSync('/app/dist/apps/api-gateway/readiness.js')"
+            fi
             trap 'docker rm --force "$name" >/dev/null 2>&1 || true' EXIT
             runtime_env=()
             if [[ "$service" == pricing-svc ]]; then
