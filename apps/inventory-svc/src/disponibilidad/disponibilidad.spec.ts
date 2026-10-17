@@ -143,4 +143,94 @@ describe('DisponibilidadService — Consultas de Stock y D-INV-01', () => {
       expect(item2.reason_code).toBe('STOCK_INSUFICIENTE');
     });
   });
+
+  describe('Disponibilidad comercial informativa (GET /disponibilidad/comercial)', () => {
+    it('responde INDETERMINADO cuando no existe ruta única de cumplimiento', async () => {
+      const res = await disponibilidadService.consultarDisponibilidadComercial(
+        ['NIK-REV7-NEG-41'],
+        'MARKETPLACE',
+      );
+
+      expect(res.items).toEqual([
+        { sku: 'NIK-REV7-NEG-41', status: 'INDETERMINADO' },
+      ]);
+    });
+
+    it('proyecta únicamente sku y status desde la ubicación resuelta', async () => {
+      mockDb.commercialRoutes.push({
+        id: 'route-comercial',
+        channel_id: 'MARKETPLACE',
+        mode: 'ENVIO_DOMICILIO',
+        fulfillment_ref: 'LIMA_METROPOLITANA',
+        location_id: locLurin,
+        active: true,
+      });
+
+      const res = await disponibilidadService.consultarDisponibilidadComercial(
+        ['NIK-REV7-NEG-41', 'PUM-LIMIT-01', 'SKU-INEXISTENTE'],
+        'MARKETPLACE',
+      );
+
+      // Lurín: NIK 18 (DISPONIBLE), PUM 2 (STOCK_BAJO con umbral 5); sin saldo => AGOTADO.
+      expect(res.items).toEqual([
+        { sku: 'NIK-REV7-NEG-41', status: 'DISPONIBLE' },
+        { sku: 'PUM-LIMIT-01', status: 'STOCK_BAJO' },
+        { sku: 'SKU-INEXISTENTE', status: 'AGOTADO' },
+      ]);
+      for (const item of res.items) {
+        expect(Object.keys(item).sort()).toEqual(['sku', 'status']);
+      }
+    });
+
+    it('deduplica SKUs y respeta overrides de umbral por SKU', async () => {
+      mockDb.commercialRoutes.push({
+        id: 'route-comercial',
+        channel_id: 'MARKETPLACE',
+        mode: 'ENVIO_DOMICILIO',
+        fulfillment_ref: 'LIMA_METROPOLITANA',
+        location_id: locLurin,
+        active: true,
+      });
+      mockDb.thresholdOverrides.push({
+        id: 'th-nik',
+        sku_id: 'NIK-REV7-NEG-41',
+        location_id: null,
+        umbral_efectivo: 20,
+      });
+
+      const res = await disponibilidadService.consultarDisponibilidadComercial(
+        ['NIK-REV7-NEG-41', 'NIK-REV7-NEG-41'],
+        'MARKETPLACE',
+      );
+
+      expect(res.items).toEqual([
+        { sku: 'NIK-REV7-NEG-41', status: 'STOCK_BAJO' },
+      ]);
+    });
+
+    it('rechaza canales fuera del enum comercial', async () => {
+      await expect(
+        disponibilidadService.consultarDisponibilidadComercial(
+          ['NIK-REV7-NEG-41'],
+          'VENTAS' as never,
+        ),
+      ).rejects.toMatchObject({ problem: { code: 'VALIDACION' } });
+    });
+
+    it('rechaza listas vacías y mayores a 100 SKUs', async () => {
+      await expect(
+        disponibilidadService.consultarDisponibilidadComercial(
+          [],
+          'MARKETPLACE',
+        ),
+      ).rejects.toThrow();
+
+      await expect(
+        disponibilidadService.consultarDisponibilidadComercial(
+          Array.from({ length: 101 }, (_, i) => `SKU-${i}`),
+          'MARKETPLACE',
+        ),
+      ).rejects.toThrow();
+    });
+  });
 });

@@ -339,4 +339,121 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
       expect(res.body.status).toBe(409);
     });
   });
+
+  describe('Disponibilidad comercial y verificación D-INV-01 (Marketplace/Chatbot/Retail)', () => {
+    const marketplaceToken = createCryptographicJwt({
+      clientId: 'modulo-marketplace',
+      scope: 'inventario:disponibilidad:leer',
+    });
+    const chatbotToken = createCryptographicJwt({
+      clientId: 'modulo-chatbot',
+      scope: 'inventario:disponibilidad:leer',
+    });
+
+    beforeEach(() => {
+      mockDb.commercialRoutes.push({
+        id: randomUUID(),
+        channel_id: 'MARKETPLACE',
+        mode: 'ENVIO_DOMICILIO',
+        fulfillment_ref: 'REF-MP',
+        location_id: locLurin,
+        active: true,
+      });
+    });
+
+    it('GET proyecta solo sku y status sin cantidades ni ubicación', async () => {
+      const res = await request(app.getHttpServer())
+        .get(
+          `/api/v1/inventario/disponibilidad/comercial?skus=${sku},PUM-LIMIT-01&canal=MARKETPLACE`,
+        )
+        .set('Authorization', `Bearer ${marketplaceToken}`)
+        .expect(200);
+
+      expect(res.body.items).toEqual([
+        { sku: 'NIK-REV7-NEG-41', status: 'DISPONIBLE' },
+        { sku: 'PUM-LIMIT-01', status: 'STOCK_BAJO' },
+      ]);
+      for (const item of res.body.items) {
+        expect(Object.keys(item).sort()).toEqual(['sku', 'status']);
+      }
+    });
+
+    it('GET responde INDETERMINADO cuando no hay ruta única de cumplimiento', async () => {
+      mockDb.commercialRoutes = [];
+
+      const res = await request(app.getHttpServer())
+        .get(
+          `/api/v1/inventario/disponibilidad/comercial?skus=${sku}&canal=MARKETPLACE`,
+        )
+        .set('Authorization', `Bearer ${marketplaceToken}`)
+        .expect(200);
+
+      expect(res.body.items).toEqual([{ sku, status: 'INDETERMINADO' }]);
+    });
+
+    it('GET responde 400 VALIDACION cuando el canal no pertenece al enum', async () => {
+      const res = await request(app.getHttpServer())
+        .get(
+          `/api/v1/inventario/disponibilidad/comercial?skus=${sku}&canal=VENTAS`,
+        )
+        .set('Authorization', `Bearer ${marketplaceToken}`)
+        .expect(400);
+
+      expect(res.body.code).toBe('VALIDACION');
+    });
+
+    it('GET responde 403 SCOPE_INSUFICIENTE cuando el canal no corresponde al cliente', async () => {
+      const res = await request(app.getHttpServer())
+        .get(
+          `/api/v1/inventario/disponibilidad/comercial?skus=${sku}&canal=CHATBOT`,
+        )
+        .set('Authorization', `Bearer ${marketplaceToken}`)
+        .expect(403);
+
+      expect(res.body.code).toBe('SCOPE_INSUFICIENTE');
+    });
+
+    it('POST verificar responde 400 VALIDACION con channel_id fuera del enum', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/inventario/disponibilidad/comercial/verificar')
+        .set('Authorization', `Bearer ${marketplaceToken}`)
+        .send({
+          channel_id: 'VENTAS',
+          fulfillment: { mode: 'ENVIO_DOMICILIO', fulfillment_ref: 'REF-MP' },
+          lines: [{ sku, quantity: 1 }],
+        })
+        .expect(400);
+
+      expect(res.body.code).toBe('VALIDACION');
+    });
+
+    it('POST verificar responde 403 cuando el channel_id válido no corresponde al cliente', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/inventario/disponibilidad/comercial/verificar')
+        .set('Authorization', `Bearer ${chatbotToken}`)
+        .send({
+          channel_id: 'MARKETPLACE',
+          fulfillment: { mode: 'ENVIO_DOMICILIO', fulfillment_ref: 'REF-MP' },
+          lines: [{ sku, quantity: 1 }],
+        })
+        .expect(403);
+
+      expect(res.body.code).toBe('SCOPE_INSUFICIENTE');
+    });
+
+    it('POST verificar responde 200 no vinculante cuando el canal coincide', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/inventario/disponibilidad/comercial/verificar')
+        .set('Authorization', `Bearer ${marketplaceToken}`)
+        .send({
+          channel_id: 'MARKETPLACE',
+          fulfillment: { mode: 'ENVIO_DOMICILIO', fulfillment_ref: 'REF-MP' },
+          lines: [{ sku, quantity: 1 }],
+        })
+        .expect(200);
+
+      expect(res.body.binding).toBe(false);
+      expect(res.body.items[0].result).toBe('SUFICIENTE');
+    });
+  });
 });
