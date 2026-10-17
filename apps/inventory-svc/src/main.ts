@@ -3,6 +3,8 @@ import { resolve } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import { InventorySvcModule } from './inventory-svc.module.js';
 import { ProblemDetailsFilter } from './errors/problem-details.filter.js';
+import { loadInventoryConfig } from './config/inventory.config.js';
+import { SanitizedLogger } from './logging/sanitized-logger.js';
 
 function loadEnv(): void {
   const envPath = resolve(process.cwd(), '.env');
@@ -11,27 +13,26 @@ function loadEnv(): void {
   }
 }
 
-function resolvePort(): number {
-  const rawPort = process.env.INVENTORY_SVC_PORT ?? process.env.PORT ?? '3005';
-  const port = Number(rawPort);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(
-      '[' +
-        'inventory-svc' +
-        '] Puerto invalido: ' +
-        String(rawPort) +
-        '. Debe ser un entero entre 1 y 65535.',
-    );
-  }
-  return port;
-}
-
 async function bootstrap() {
+  const logger = new SanitizedLogger();
   loadEnv();
-  const port = resolvePort();
-  const app = await NestFactory.create(InventorySvcModule);
+
+  let config;
+  try {
+    config = loadInventoryConfig();
+  } catch (error) {
+    logger.error((error as Error).message, 'Bootstrap');
+    process.exit(1);
+  }
+
+  const app = await NestFactory.create(InventorySvcModule, { logger });
+  app.useLogger(logger);
   app.enableShutdownHooks();
   app.useGlobalFilters(new ProblemDetailsFilter());
-  await app.listen(port);
+  await app.listen(config.port);
+  logger.log(
+    `inventory-svc escuchando en el puerto ${config.port}`,
+    'Bootstrap',
+  );
 }
 await bootstrap();

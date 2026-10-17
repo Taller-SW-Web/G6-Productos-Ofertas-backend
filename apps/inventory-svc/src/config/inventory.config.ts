@@ -39,8 +39,12 @@ export function loadInventoryConfig(): InventoryConfig {
 
   const rawThreshold = process.env.DEFAULT_LOW_STOCK_THRESHOLD ?? '5';
   const thresholdNum = Number(rawThreshold);
-  const defaultLowStockThreshold =
-    Number.isInteger(thresholdNum) && thresholdNum >= 0 ? thresholdNum : 5;
+  if (!Number.isInteger(thresholdNum) || thresholdNum < 0) {
+    throw new Error(
+      `[inventory-svc] DEFAULT_LOW_STOCK_THRESHOLD inválido: "${rawThreshold}". Debe ser un entero >= 0.`,
+    );
+  }
+  const defaultLowStockThreshold = thresholdNum;
 
   const rawWorkerInterval = process.env.INVENTORY_WORKER_INTERVAL_MS ?? '5000';
   const workerIntervalMs = Number(rawWorkerInterval);
@@ -61,10 +65,26 @@ export function loadInventoryConfig(): InventoryConfig {
     );
   }
 
+  const rawPgPort = process.env.PGPORT;
+  let pgPort = 5432;
+  if (rawPgPort !== undefined && rawPgPort.trim() !== '') {
+    const parsedPgPort = Number(rawPgPort);
+    if (
+      !Number.isInteger(parsedPgPort) ||
+      parsedPgPort < 1 ||
+      parsedPgPort > 65535
+    ) {
+      throw new Error(
+        `[inventory-svc] PGPORT inválido: "${rawPgPort}". Debe ser un entero entre 1 y 65535.`,
+      );
+    }
+    pgPort = parsedPgPort;
+  }
+
   return {
     databaseUrl: process.env.DATABASE_URL,
     pgHost: process.env.PGHOST,
-    pgPort: process.env.PGPORT ? Number(process.env.PGPORT) : 5432,
+    pgPort,
     pgDatabase: process.env.PGDATABASE,
     pgUser: process.env.PGUSER,
     pgPassword: process.env.PGPASSWORD,

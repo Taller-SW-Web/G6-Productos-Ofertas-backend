@@ -5,7 +5,7 @@ Esta tabla describe las variables que lee actualmente `inventory-svc`. No contie
 | Variable | Requisito | Ejemplo seguro | Funcionalidad | Si falta | Owner |
 |---|---|---|---|---|---|
 | `DATABASE_URL` | Obligatoria para operar; alternativa a las variables `PG*` | `<URL PostgreSQL de runtime aprovisionada>` | Pool PostgreSQL, Drizzle, reservas, saldos, operaciones, Kardex y Outbox | El servicio inicia sin pool y las operaciones persistentes no están disponibles | Infraestructura G6 / Supabase |
-| `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` | Alternativa completa a `DATABASE_URL`; host, base, usuario y contraseña requeridos; puerto opcional (5432) | `<host privado>`, `5432`, `<base inventory>`, `<usuario runtime>`, `<secreto aprovisionado>` | Configura el pool PostgreSQL | Sin `DATABASE_URL` ni credenciales requeridas no hay conexión DB | Infraestructura G6 / Supabase |
+| `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` | Alternativa completa a `DATABASE_URL`; host, base, usuario y contraseña requeridos; puerto opcional (5432) | `<host privado>`, `5432`, `<base inventory>`, `<usuario runtime>`, `<secreto aprovisionado>` | Configura el pool PostgreSQL | Sin `DATABASE_URL` ni credenciales requeridas no hay conexión DB; si `PGPORT` está presente debe ser entero 1–65535, en caso contrario el arranque falla (fail-closed) | Infraestructura G6 / Supabase |
 | `PGSSLMODE` | Opcional | `require` | Modo SSL al crear conexión por parámetros `PG*`; `disable` desactiva SSL | El cliente aplica configuración SSL predeterminada | Infraestructura G6 |
 | `PGSSLROOTCERT` | Opcional | `<ruta del certificado CA montado>` | Certificado CA para validar PostgreSQL remoto | Se usa validación TLS predeterminada del cliente | Infraestructura G6 |
 | `RABBITMQ_URL` | Opcional para arranque; requerido para publicar eventos | `<URL RabbitMQ/vhost runtime aprovisionada>` | Worker de despacho Outbox | El worker conserva eventos en `PENDING` y reintenta cuando haya conexión configurada | Infraestructura G6 / owner RabbitMQ OCI |
@@ -15,9 +15,22 @@ Esta tabla describe las variables que lee actualmente `inventory-svc`. No contie
 | `INVENTORY_SVC_PORT` | Opcional | `3005` | Puerto HTTP del servicio; precede a `PORT` | Usa `PORT` o `3005` | Owner inventory-svc |
 | `PORT` | Opcional | `3005` | Puerto HTTP de respaldo | Usa `3005` | Plataforma de despliegue |
 | `RESERVATION_TTL_SECONDS` | Opcional | `900` | Duración de la reserva antes de expirar | Usa `900`; entero positivo | Owner inventory-svc / Ventas para acuerdo operativo |
-| `DEFAULT_LOW_STOCK_THRESHOLD` | Opcional | `5` | Umbral de disponibilidad baja por defecto | Usa `5` | Owner inventory-svc |
+| `DEFAULT_LOW_STOCK_THRESHOLD` | Opcional | `5` | Umbral de disponibilidad baja por defecto | Usa `5`; si está presente debe ser un entero >= 0, en caso contrario el arranque falla (fail-closed) | Owner inventory-svc |
 | `INVENTORY_WORKER_INTERVAL_MS` | Opcional | `5000` | Frecuencia de worker de expiración y Outbox (mínimo 250 ms) | Usa `5000` | Owner inventory-svc |
 | `INVENTORY_WORKER_BATCH_SIZE` | Opcional | `50` | Máximo de reservas/eventos por pasada (1–500) | Usa `50` | Owner inventory-svc |
+
+## Endpoints de salud y readiness
+
+- `GET /health` — **liveness** público. Responde `200` con `{ "status": "ok", "service": "inventory-svc" }` mientras el proceso esté vivo. No verifica dependencias.
+- `GET /health/readiness` — **readiness** público. Verifica únicamente dependencias propias del servicio:
+  - Responde `200` con `{ "status": "ready", "service": "inventory-svc" }` cuando PostgreSQL es alcanzable.
+  - Responde `503` con `{ "status": "not_ready", "service": "inventory-svc" }` cuando PostgreSQL no responde.
+  - El broker RabbitMQ es opcional: su ausencia conserva eventos `PENDING` en el Outbox y no marca el servicio como no listo.
+  - La respuesta nunca expone DSN, credenciales, rutas ni detalles internos.
+
+## Arranque fail-closed
+
+El servicio valida la configuración de arranque (`loadInventoryConfig`) antes de escuchar. Un valor inválido en `INVENTORY_SVC_PORT`/`PORT`, `RESERVATION_TTL_SECONDS`, `DEFAULT_LOW_STOCK_THRESHOLD`, `INVENTORY_WORKER_INTERVAL_MS`, `INVENTORY_WORKER_BATCH_SIZE` o `PGPORT` detiene el arranque con `exit(1)` en lugar de continuar con un valor por defecto silencioso.
 
 ## Variables exclusivas de pruebas aisladas
 
