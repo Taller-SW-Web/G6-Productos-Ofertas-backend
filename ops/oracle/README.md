@@ -1,6 +1,6 @@
 # CD de servicios G6 en Oracle Cloud
 
-El CD publica imágenes inmutables por SHA en GHCR y despliega mediante SSH restringido. El manifiesto declarativo `ops/oracle/services.psv`, leído sin ejecutarlo por `ops/oracle/service-registry.sh`, contiene exactamente los nueve componentes del monorepo, sus puertos, variables específicas de puerto, rutas, imágenes, contenedores, estados y archivos privados de runtime; **`api-gateway`, `catalog-svc`, `inventory-svc` y `taxonomy-svc` están habilitados para CD**. Los cinco servicios restantes (`pricing-svc`, `price-audit-svc`, `promotions-svc`, `combos-svc`, `bulk-svc`) se rechazan en el flujo manual y en el host Oracle hasta que se preparen y autoricen expresamente. Habilitar para CD no significa desplegar: no existen disparadores automáticos (`workflow_run`, `push` o merge a `master` no despliegan ningún servicio). El despliegue real ocurre exclusivamente mediante `workflow_dispatch` manual autorizado, individualmente por servicio sobre `master` con CI exitosa.
+El CD publica imágenes inmutables por SHA en GHCR y despliega mediante SSH restringido. El manifiesto declarativo `ops/oracle/services.psv`, leído sin ejecutarlo por `ops/oracle/service-registry.sh`, contiene exactamente los nueve componentes del monorepo, sus puertos, variables específicas de puerto, rutas, imágenes, contenedores, estados y archivos privados de runtime. Por la decisión de infraestructura registrada en [INFRA-002 (#8)](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/8), los nueve quedan admitidos por el dispatch manual tras integrar el PR de allowlist. Esta admisión no acredita configuración runtime ni readiness. No existen disparadores automáticos (`workflow_run`, `push` o merge a `master` no despliegan ningún servicio); el despliegue sigue siendo individual por servicio, con CI exitosa y autorización de liberación vigente.
 
 ## Estado y límites
 
@@ -13,7 +13,7 @@ El CD publica imágenes inmutables por SHA en GHCR y despliega mediante SSH rest
 
 ## Controles de GitHub Actions
 
-El workflow `CD servicios Oracle` se ejecuta **exclusivamente mediante `workflow_dispatch` manual** en la rama `master`. Se han eliminado los disparadores automáticos (`workflow_run`, `push`, `pull_request`): ningún push o merge a `master` inicia despliegues. El workflow exige un commit con CI exitoso en `master`, valida que el SHA indicado sea la punta de `master`, y rechaza cualquier SHA no autorizado o no probado. El selector en modo manual (`select-cd-services.sh manual <servicio>`) comprueba que el servicio solicitado exista en el registro y tenga `G6_SERVICE_ENABLED=true`; los cinco servicios deshabilitados (`pricing-svc`, `price-audit-svc`, `promotions-svc`, `combos-svc`, `bulk-svc`) y cualquier nombre no registrado son rechazados inmediatamente (códigos de salida 65 y 64 respectivamente). En modo automático, el selector devuelve `[]` de forma fail-safe.
+El workflow `CD servicios Oracle` se ejecuta **exclusivamente mediante `workflow_dispatch` manual** en la rama `master`. Se han eliminado los disparadores automáticos (`workflow_run`, `push`, `pull_request`): ningún push o merge a `master` inicia despliegues. El workflow exige un commit con CI exitoso en `master`, valida que el SHA indicado sea la punta de `master`, y rechaza cualquier SHA no autorizado o no probado. El selector manual comprueba que el servicio solicitado exista y esté habilitado; los nueve nombres cerrados son elegibles después de integrar el PR de allowlist. Cualquier nombre no registrado se rechaza con código 64. En modo automático, el selector devuelve `[]` de forma fail-safe; activar ese modo requiere un cambio posterior y no forma parte de esta preparación.
 
 Cada fila de la matriz es independiente y publica y despliega solo su servicio; un fallo de publicación no cancela las otras filas. Las filas usan `fail-fast: false` y un grupo de concurrencia común por repositorio y servicio para cada ejecución de CD. El ejecutor vuelve a serializar en Oracle mediante `flock` con un archivo dentro del directorio de estado propio del servicio; conserva el bloqueo durante despliegue y rollback, y falla cerrado si `flock` no está disponible. Así una operación no puede pisar sus archivos `active-image`/`previous-image` ni otro servicio. El job preparatorio tiene `actions: read`, `contents: read` y `deployments: read`; cada job de publicación tiene solo `contents: read`, `packages: write` y `deployments: write`. CI valida sintaxis y expresiones de todos los workflows con actionlint. Antes de enviar el token de GHCR, Actions valida presencia de secretos, host SSH mediante `known_hosts` y autenticación con la clave restringida. El host valida el servicio, el SHA, la imagen actual, el healthcheck de Docker y HTTP; si la versión nueva falla, restaura solo el servicio elegido.
 
@@ -34,7 +34,7 @@ GitHub Deployments utiliza entornos lógicos cerrados por servicio (`g6-oracle-<
 
 El selector `ops/oracle/select-cd-services.sh` en modo automático devuelve incondicionalmente `[]` de forma fail-safe. Se han eliminado todas las rutas de despliegue automático por push o merge a `master`. Un merge a `master` nunca desplegará ningún servicio.
 
-Para realizar un despliegue, el operador debe ejecutar explícitamente `workflow_dispatch` indicando un único servicio habilitado (`api-gateway`, `catalog-svc`, `inventory-svc` o `taxonomy-svc`). Cualquier intento de solicitar un servicio deshabilitado o no registrado es rechazado inmediatamente (códigos de salida 65 y 64 respectivamente).
+Para realizar un despliegue, el operador debe ejecutar explícitamente `workflow_dispatch` indicando un único servicio habilitado del registro. Cualquier nombre no registrado se rechaza inmediatamente (código 64). El registro de los nueve no autoriza por sí mismo su liberación: cada servicio necesita runtime completo, imagen/CI del mismo SHA, readiness funcional y autorización individual.
 
 ### Reconciliar GitHub con el estado real de Oracle
 
@@ -178,37 +178,13 @@ Confirma que el JSON de redes ya no incluya `g6-http`, que el health sea `health
 
 Para usar el soporte de #8, el Compose del Gateway debe declarar `g6-edge` y `g6-http` como redes externas y conectar el servicio Gateway a ambas; su alias estable en `g6-edge` será `g6-api-gateway`. Debe definir health/readiness y no publicar puertos 3000–3008 en interfaces públicas. Los servicios conectados a `g6-http` conservan sus puertos enlazados a loopback para el CD/operación local. El Caddyfile y su proxy al alias solo cambian en el alcance coordinado de #20/#110. Este contrato describe la unión de redes; no decide rutas, autenticación, scopes ni permisos de API. La configuración de salud/runtime debe ajustarse al código fusionado de #116 y al Compose que Axel prepara; los artefactos de #8 no editan esos archivos.
 
-## Servicios aún deshabilitados
+## Cobertura de nueve servicios y gates de liberación
 
-`bulk-svc`, `combos-svc`, `price-audit-svc`, `pricing-svc` y `promotions-svc` tienen valores cerrados de imagen, puerto, Compose, contenedor, proyecto y estado, pero `G6_SERVICE_ENABLED=false`. El workflow y el host los rechazan.
+La decisión registrada en INFRA-002 sustituye el criterio inicial de Inventory como único servicio habilitado. El cambio de allowlist se prepara en la rama `castilla` con pruebas y queda sujeto a revisión e integración antes de reemplazar `services.psv` en Oracle. La VM conserva hasta entonces el registro integrado de cuatro servicios.
 
-Habilitar uno requiere un cambio revisado al registro y preparación manual independiente de Oracle: directorio y Compose del servicio, archivo privado `/etc/g6-<servicio>/runtime.env` con permisos propios, permisos de solo lectura necesarios, healthcheck y red. El ejecutor se detiene si falta ese archivo. La plantilla genérica liga `PORT` y su variable específica a un mismo puerto `127.0.0.1`; no debe compartirse estado o archivo de secretos. No basta con cambiar `false` a `true` sin completar y comprobar ese entorno.
+Los nueve servicios comparten el Compose base para sus puertos loopback, healthcheck, CA PostgreSQL de solo lectura y configuración privada. Gateway usa un Compose dedicado que añade su alias exclusivo en `g6-edge`; el overlay HTTP añade `g6-http`. Inventory conserva su wrapper, Compose, puerto 3005, entorno y estado heredados.
 
-Transición reversible, solo tras aprobación operativa para esa activación:
-
-1. Prepara manualmente el Compose, ruta, entorno privado, permisos y healthcheck del servicio; valida el Compose con `config --quiet` y sin `up`/`pull`.
-2. Revisa un PR que solo cambie el `enabled` del servicio requerido a `true`; conserva los demás en `false`. Comprueba CI, que la versión del ejecutor siga compatible con el registro y que el filtro y dispatch manual aún validen el nombre cerrado.
-3. En Oracle, crea un directorio candidato root-only dentro de `/usr/local/lib/g6-productos-ofertas`, copia allí el `service-registry.sh` y `services.psv` revisados, y ejecuta `source <candidato>/service-registry.sh; g6_enabled_services_json`. Verifica la versión del ejecutor instalado con `env -u SSH_ORIGINAL_COMMAND /usr/local/lib/g6-productos-ofertas/deploy-g6-service --version`; compara checksum del candidato con el checkout aprobado.
-4. Respalda el `services.psv` instalado en `/var/backups/g6-productos-ofertas`, instala el candidato como `/usr/local/lib/g6-productos-ofertas/services.psv.new` y usa `mv --no-target-directory` dentro del mismo directorio para sustituirlo atómicamente. Verifica `g6_enabled_services_json` como administrador y exige exactamente los servicios autorizados.
-5. Si la verificación falla, instala el respaldo como `services.psv.restore` y restáuralo con `mv --no-target-directory`; compara el checksum restaurado. El wrapper y su comando SSH no cambian; no se despliega ni reinicia el servicio durante esta transición.
-6. La primera publicación/despliegue requiere una operación aprobada y separada. La instalación de archivos privilegiados no se automatiza en GitHub Actions.
-
-Secuencia atómica de activación tras revisar el PR y obtener aprobación operativa (sustituye `<ticket>` por un identificador real; no ejecutes este ejemplo en este lote):
-
-```bash
-sudo install --directory --owner root --group root --mode 0700 /usr/local/lib/g6-productos-ofertas/candidato
-sudo install --owner root --group root --mode 0644 ops/oracle/service-registry.sh /usr/local/lib/g6-productos-ofertas/candidato/service-registry.sh
-sudo install --owner root --group root --mode 0644 ops/oracle/services.psv /usr/local/lib/g6-productos-ofertas/candidato/services.psv
-sudo bash -c 'source /usr/local/lib/g6-productos-ofertas/candidato/service-registry.sh; g6_enabled_services_json'
-sudo cp --preserve=mode,ownership,timestamps /usr/local/lib/g6-productos-ofertas/services.psv /var/backups/g6-productos-ofertas/services.psv.before-<ticket>
-sudo install --owner root --group root --mode 0644 /usr/local/lib/g6-productos-ofertas/candidato/services.psv /usr/local/lib/g6-productos-ofertas/services.psv.new
-sudo mv --no-target-directory /usr/local/lib/g6-productos-ofertas/services.psv.new /usr/local/lib/g6-productos-ofertas/services.psv
-sudo bash -c 'source /usr/local/lib/g6-productos-ofertas/service-registry.sh; g6_enabled_services_json'
-```
-
-Comprueba el checksum del candidato contra el commit aprobado antes del `mv`; después, la lista debe contener únicamente los servicios autorizados. Si falla la validación posterior, restaura atómicamente el respaldo mediante `install` a `services.psv.restore` y `mv --no-target-directory`. Conserva el wrapper actual y no ejecutes un despliegue como prueba.
-
-Este lote mantiene los cinco componentes (`bulk-svc`, `combos-svc`, `price-audit-svc`, `pricing-svc`, `promotions-svc`) deshabilitados y habilita `api-gateway`, `catalog-svc`, `inventory-svc` y `taxonomy-svc` exclusivamente para despliegue manual autorizado.
+Directorio y estado son independientes por servicio. Si falta un archivo runtime o una credencial necesaria, el ejecutor falla cerrado y el servicio queda pendiente. Un `GET /health` solo acredita liveness. No publicar una versión sin verificar readiness funcional y autorización individual; el dispatch automático permanece desactivado.
 
 ## Secretos y operación del CD
 
@@ -222,6 +198,8 @@ El workflow conserva los nombres de secretos del PR #7. Deben provisionarse manu
 | `ORACLE_SSH_KNOWN_HOSTS` | Clave del host verificada fuera de banda  |
 | `ORACLE_GHCR_USERNAME`   | Usuario asociado al token de lectura GHCR |
 | `ORACLE_GHCR_TOKEN`      | PAT dedicado con `read:packages`          |
+
+La clave de despliegue está restringida a comandos forzados y sin forwarding/PTY, pero el workflow actual todavía no une los runners a Tailscale. Hasta que Marco confirme la tailnet, se configure una identidad/política de Actions aprobada y se valide el acceso por MagicDNS/IP privada, no ejecutar el dispatch de release ni permitir SSH público para los runners. El secreto `ORACLE_HOST` debe señalar el destino privado autorizado. No se inspeccionó su valor.
 
 El SSH debe aceptar únicamente el wrapper de despliegue mediante `authorized_keys`, sin PTY, forwarding ni shell interactiva. Conserva la ruta forzada existente:
 
