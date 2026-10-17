@@ -37,6 +37,12 @@ Checks ejecutados para esta ampliación: inbox unitario 22 PASS; suite general N
 
 Las prioridades 4 y 5 continúan delimitadas a preservar DATA-004 y esperar validación SKU/baseline y corrección de Castilla, respectivamente. El PR se actualizará con el SHA nuevo y su resultado real cuando se autorice su publicación y termine CI. No corresponde incorporar Frontend o rediseñar offline para satisfacer esta continuación.
 
+### Ejecución de la ampliación y corrección de observación del cierre
+
+El usuario autorizó expresamente el push de `95c69f1`, completado a `origin/taco`. El [job Inventory de esa ejecución](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/39038573412/job/117413258166) ejecutó 21 casos: **20 PASS, 1 FAIL, cero omitidos**. Inicialización, dedupe, replay, rechazo durable y recuperación del JSON inválido alcanzaron sus aserciones; el fallo fue la lectura inmediata de cierre del primer caso nuevo: `messageCount=0`, `consumerCount=1`, esperado `0/0` tras cerrar la conexión. No se presenta como CI verde.
+
+Se conserva la condición `messageCount=0 AND consumerCount=0` y se observa mediante el helper de espera acotada existente, máximo cinco segundos, al finalizar ambos casos nuevos. El canal que consulta la cola es distinto de la conexión que acaba de cerrarse; la hipótesis que se valida es una baja observada con retraso, no un nuevo comportamiento de negocio. No se suprime consumerCount, se eliminan casos, se repite el comando de negocio ni se modifica el shutdown productivo. El ajuste necesita una nueva ejecución real y un nuevo push autorizado; el resultado anterior no acredita el ajuste.
+
 ## Registro histórico de diagnóstico y autorizaciones
 
 ## Prioridad 1: resolución autorizada y publicada

@@ -1274,8 +1274,14 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
         await writer.close();
       }
       // Tras cerrar el canal, ningún mensaje confirmado debe reaparecer.
-      const state = await brokerChannel.checkQueue('po.inventory.q');
-      expect(state).toMatchObject({ messageCount: 0, consumerCount: 0 });
+      // El cierre de la conexión y la baja en la cola se observan por canales
+      // distintos; esperar ambas condiciones sin relajar ninguna aserción.
+      await viWaitFor(async () => {
+        expect(await brokerChannel.checkQueue('po.inventory.q')).toMatchObject({
+          messageCount: 0,
+          consumerCount: 0,
+        });
+      }, 5000);
     }, 30_000);
 
     it('retiene JSON inválido sin ACK y reanuda solo tras retirar el fixture defectuoso', async () => {
@@ -1341,10 +1347,12 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
         await consumer.onModuleDestroy();
         await writer.close();
       }
-      expect(await brokerChannel.checkQueue('po.inventory.q')).toMatchObject({
-        messageCount: 0,
-        consumerCount: 0,
-      });
+      await viWaitFor(async () => {
+        expect(await brokerChannel.checkQueue('po.inventory.q')).toMatchObject({
+          messageCount: 0,
+          consumerCount: 0,
+        });
+      }, 5000);
     }, 30_000);
   });
 
