@@ -7,10 +7,8 @@ import { CATALOG_POSTGRES_CONFIG, Database } from './database.js';
 import { PostgresCatalogRepository } from './postgres-catalog.repository.js';
 import { CommercialService } from './commercial.service.js';
 import { CommercialController } from './commercial.controller.js';
-import {
-  COMMERCIAL_ELIGIBILITY,
-  PendingCommercialEligibility,
-} from './commercial-eligibility.js';
+import { COMMERCIAL_ELIGIBILITY } from './commercial-eligibility.js';
+import { PostgresCommercialEligibility } from './postgres-commercial-eligibility.js';
 import {
   CATALOG_TAXONOMY_CONFIG,
   readTaxonomyConfig,
@@ -19,6 +17,7 @@ import { TaxonomyClient } from './taxonomy.client.js';
 import { ProblemFilter } from './problem.filter.js';
 import { CatalogConfig } from './config.js';
 import { CATALOG_DATABASE, ReadinessController } from './readiness.js';
+import { DEMO_PRICING, PricingClient } from './pricing.client.js';
 
 @Module({
   imports: [],
@@ -43,7 +42,10 @@ import { CATALOG_DATABASE, ReadinessController } from './readiness.js';
       }),
       inject: [CommercialReadinessController],
     },
-    { provide: COMMERCIAL_ELIGIBILITY, useClass: PendingCommercialEligibility },
+    {
+      provide: COMMERCIAL_ELIGIBILITY,
+      useClass: PostgresCommercialEligibility,
+    },
     { provide: APP_FILTER, useClass: ProblemFilter },
   ],
 })
@@ -55,6 +57,8 @@ export class AppModule {
         { provide: CatalogConfig, useValue: config },
         { provide: CATALOG_TAXONOMY_CONFIG, useValue: config.taxonomy },
         { provide: CATALOG_POSTGRES_CONFIG, useValue: config.database },
+        PricingClient,
+        { provide: DEMO_PRICING, useExisting: PricingClient },
       ],
     };
   }
