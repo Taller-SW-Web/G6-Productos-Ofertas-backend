@@ -32,6 +32,11 @@ export class TaxonomySvcModule {
         module: TaxonomySvcModule,
       };
     }
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'TaxonomySvcModule.forRoot con databaseUrl no está permitido en runtime productivo; use iniciarTaxonomySvc con Database y las garantías obligatorias de TLS e identidad.',
+      );
+    }
     return {
       module: TaxonomySvcModule,
       providers: [proveedorDeRepositorio(opciones.databaseUrl)],

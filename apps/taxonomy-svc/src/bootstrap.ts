@@ -4,7 +4,10 @@ import type { INestApplication, LoggerService } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { TaxonomySvcModule } from './taxonomy-svc.module.js';
 import { Database, readDatabaseConfig, parseDatabaseUrl } from './database.js';
-import { validarEntorno } from './config/environment.js';
+import {
+  validarEntorno,
+  ConfiguracionInvalidaError,
+} from './config/environment.js';
 import type { TaxonomyEnv } from './config/environment.js';
 import { SanitizedLogger } from './logging/sanitized-logger.js';
 
@@ -47,6 +50,11 @@ export async function crearAplicacion(
 ): Promise<AplicacionCreada> {
   const env = opciones.env ?? process.env;
   const configuracion = validarEntorno(env);
+  if (configuracion.nodeEnv === 'production') {
+    throw new ConfiguracionInvalidaError([
+      'crearAplicacion() no está permitido en runtime productivo; use iniciarTaxonomySvc con las garantías obligatorias de TLS e identidad.',
+    ]);
+  }
   const logger = new SanitizedLogger(opciones.logger);
   const app = await NestFactory.create(
     TaxonomySvcModule.forRoot({ databaseUrl: configuracion.databaseUrl }),

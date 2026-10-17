@@ -11,6 +11,11 @@ import { PostgresTaxonomyRepository } from '../postgres-taxonomy.repository.js';
 export function crearRepositorioDrizzle(
   databaseUrl: string,
 ): DrizzleTaxonomyRepository {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'crearRepositorioDrizzle no está permitido en runtime productivo; use iniciarTaxonomySvc con Database y las garantías obligatorias de TLS e identidad.',
+    );
+  }
   const pool = new Pool({
     connectionString: databaseUrl,
     max: 5,
@@ -24,6 +29,11 @@ export function crearRepositorioDrizzle(
 export function proveedorDeRepositorio(databaseUrl?: string): Provider {
   const url = databaseUrl?.trim();
   if (url) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'El repositorio Drizzle basado en databaseUrl no está permitido en runtime productivo; use iniciarTaxonomySvc con Database y las garantías obligatorias de TLS e identidad.',
+      );
+    }
     return {
       provide: TAXONOMY_REPOSITORY,
       useFactory: () => crearRepositorioDrizzle(url),

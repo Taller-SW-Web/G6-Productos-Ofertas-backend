@@ -104,4 +104,12 @@ describe('crearAplicacion — fail-closed (#34)', () => {
       await app.close();
     }
   });
+
+  it('rechaza crearAplicacion en entorno production para impedir el uso de la fábrica alternativa sin TLS e identidad', async () => {
+    await expect(
+      crearAplicacion({
+        env: { ...entornoValido(), NODE_ENV: 'production' },
+      }),
+    ).rejects.toThrow(ConfiguracionInvalidaError);
+  });
 });
