@@ -7,13 +7,26 @@ import {
 import { loadInventoryConfig } from '../config/inventory.config.js';
 import { OutboxPublisherService } from '../outbox/outbox-publisher.service.js';
 import { ReservationExpirationService } from '../reservations/reservation-expiration.service.js';
+import { SanitizedLogger } from '../logging/sanitized-logger.js';
 
 @Injectable()
 export class InventoryWorkersService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(InventoryWorkersService.name);
+  private readonly logger = new SanitizedLogger(
+    new Logger(InventoryWorkersService.name),
+  );
   private timer: NodeJS.Timeout | undefined;
   private running = false;
   private stopping = false;
+  private readonly metrics = {
+    cycles: 0,
+    expirationFailures: 0,
+    outboxFailures: 0,
+    lastDurationMs: 0,
+  };
+
+  getMetrics() {
+    return { ...this.metrics, running: this.running, stopping: this.stopping };
+  }
 
   constructor(
     private readonly expiration: ReservationExpirationService,
@@ -41,14 +54,30 @@ export class InventoryWorkersService implements OnModuleInit, OnModuleDestroy {
   private async runOnce(batchSize: number): Promise<void> {
     if (this.running || this.stopping) return;
     this.running = true;
+    const startedAt = Date.now();
+    this.metrics.cycles++;
     try {
-      await this.expiration.expirarReservasVencidas(batchSize);
-      await this.outbox.dispatchPending(batchSize);
-    } catch (error) {
-      this.logger.error(
-        `Fallo controlado en worker de Inventario: ${(error as Error).message}`,
-      );
+      try {
+        const result = await this.expiration.expirarReservasVencidas(batchSize);
+        this.metrics.expirationFailures += result.fallidas;
+      } catch (error) {
+        this.metrics.expirationFailures++;
+        this.logger.error({
+          event: 'inventory.worker.expiration_failed',
+          error,
+        });
+      }
+      try {
+        const result = await this.outbox.dispatchPending(batchSize);
+        this.metrics.outboxFailures +=
+          result.failed +
+          (result.reason && result.reason !== 'NOT_CONFIGURED' ? 1 : 0);
+      } catch (error) {
+        this.metrics.outboxFailures++;
+        this.logger.error({ event: 'inventory.worker.outbox_failed', error });
+      }
     } finally {
+      this.metrics.lastDurationMs = Date.now() - startedAt;
       this.running = false;
     }
   }

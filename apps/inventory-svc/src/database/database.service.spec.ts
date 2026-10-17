@@ -100,6 +100,30 @@ describe('DatabaseService — configuración y atomicidad (#97/#98)', () => {
     expect(client.release).toHaveBeenCalledTimes(1);
   });
 
+  it('configura límites de consulta y lock; readiness falla y se recupera según la consulta real', async () => {
+    await initialize();
+    expect(pg.Pool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectionTimeoutMillis: 5000,
+        statement_timeout: 15000,
+        lock_timeout: 5000,
+        query_timeout: 20000,
+      }),
+    );
+    pool.query
+      .mockRejectedValueOnce(new Error('ECONNRESET'))
+      .mockResolvedValueOnce({ rows: [{ value: 1 }] });
+    expect((await database.isHealthy()).healthy).toBe(false);
+    expect((await database.isHealthy()).healthy).toBe(true);
+    const errorHandler = pool.on.mock.calls.find(
+      ([event]) => event === 'error',
+    )?.[1];
+    expect(errorHandler).toBeTypeOf('function');
+    expect(() =>
+      errorHandler(new Error('idle connection closed')),
+    ).not.toThrow();
+  });
+
   it('revierte un fallo sin confirmar y siempre libera el cliente', async () => {
     await initialize();
     const failure = new Error('fallo simulado antes de guardar Outbox');

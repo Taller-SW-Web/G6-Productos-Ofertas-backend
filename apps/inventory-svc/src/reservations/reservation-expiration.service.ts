@@ -3,10 +3,13 @@ import { DatabaseService } from '../database/database.service.js';
 import { ReservationsService } from './reservations.service.js';
 import { RESERVATIONS_REPOSITORY } from '../repositories/interfaces/repository.tokens.js';
 import type { IReservationsRepository } from '../repositories/interfaces/reservations.repository.interface.js';
+import { SanitizedLogger } from '../logging/sanitized-logger.js';
 
 @Injectable()
 export class ReservationExpirationService {
-  private readonly logger = new Logger(ReservationExpirationService.name);
+  private readonly logger = new SanitizedLogger(
+    new Logger(ReservationExpirationService.name),
+  );
 
   constructor(
     private readonly databaseService: DatabaseService,
@@ -39,7 +42,7 @@ export class ReservationExpirationService {
       this.logger.warn(
         `Error al consultar reservas vencidas para expiración: ${(dbErr as Error).message}`,
       );
-      return { procesadas: 0, expiradas: 0, fallidas: 0 };
+      throw dbErr;
     }
 
     if (expiredCandidates.length === 0) {

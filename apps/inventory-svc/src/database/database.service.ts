@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import * as fs from 'node:fs';
 import pg from 'pg';
+import { SanitizedLogger } from '../logging/sanitized-logger.js';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import * as schema from '../drizzle/schema.js';
 import {
@@ -25,7 +26,9 @@ const { Pool } = pg;
 export class DatabaseService
   implements IDatabaseService, OnModuleInit, OnModuleDestroy
 {
-  private readonly logger = new Logger(DatabaseService.name);
+  private readonly logger = new SanitizedLogger(
+    new Logger(DatabaseService.name),
+  );
   private pool: pg.Pool | null = null;
   private drizzleDb: DrizzleDatabase | null = null;
   private isConnected = false;
@@ -100,6 +103,9 @@ export class DatabaseService
           max: 10,
           idleTimeoutMillis: 30000,
           connectionTimeoutMillis: 5000,
+          statement_timeout: 15000,
+          lock_timeout: 5000,
+          query_timeout: 20000,
         });
       } else if (
         config.pgHost &&
@@ -117,6 +123,9 @@ export class DatabaseService
           max: 10,
           idleTimeoutMillis: 30000,
           connectionTimeoutMillis: 5000,
+          statement_timeout: 15000,
+          lock_timeout: 5000,
+          query_timeout: 20000,
         });
       } else {
         this.logger.warn(
@@ -127,6 +136,10 @@ export class DatabaseService
 
       // Conectar Drizzle ORM a la instancia del pool PostgreSQL
       this.drizzleDb = drizzle(this.pool, { schema });
+      this.pool.on('error', (error: Error) => {
+        this.isConnected = false;
+        this.logger.error({ event: 'inventory.database.pool_error', error });
+      });
 
       // Configure default search_path to inventory on each new client
       this.pool.on('connect', (client) => {

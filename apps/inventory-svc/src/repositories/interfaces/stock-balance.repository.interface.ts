@@ -11,6 +11,12 @@ export interface StockBalanceEntity {
 }
 
 export interface IStockBalanceRepository {
+  /** Inicialización idempotente; nunca sustituye un saldo existente. */
+  initializeZero(
+    client: IDatabaseClient,
+    sku: string,
+    locationId: string,
+  ): Promise<boolean>;
   findBySkuAndLocationForUpdate(
     client: IDatabaseClient,
     sku: string,

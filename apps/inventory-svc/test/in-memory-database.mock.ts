@@ -3,6 +3,7 @@ import {
   IDatabaseService,
   QueryResult,
 } from '../src/database/database.interface.js';
+import type { InboxEntity } from '../src/repositories/interfaces/inbox.repository.interface.js';
 
 export interface LocationRow {
   id: string;
@@ -170,6 +171,7 @@ export class InMemoryDatabaseMock implements IDatabaseService {
   operations: OperationRow[] = [];
   kardex: KardexRow[] = [];
   outbox: OutboxRow[] = [];
+  inbox: InboxEntity[] = [];
   commercialRoutes: CommercialRouteRow[] = [];
   thresholdOverrides: ThresholdOverrideRow[] = [];
   incidencias: IncidenciaRow[] = [];
@@ -249,6 +251,7 @@ export class InMemoryDatabaseMock implements IDatabaseService {
     this.kardex = [];
     this.outbox = [];
     this.thresholdOverrides = [];
+    this.inbox = [];
     this.incidencias = [];
     this.traslados = [];
     this.trasladoRecepciones = [];
@@ -263,6 +266,7 @@ export class InMemoryDatabaseMock implements IDatabaseService {
       operations: JSON.parse(JSON.stringify(this.operations)),
       kardex: JSON.parse(JSON.stringify(this.kardex)),
       outbox: JSON.parse(JSON.stringify(this.outbox)),
+      inbox: structuredClone(this.inbox),
       commercialRoutes: JSON.parse(JSON.stringify(this.commercialRoutes)),
       thresholdOverrides: JSON.parse(JSON.stringify(this.thresholdOverrides)),
       incidencias: JSON.parse(JSON.stringify(this.incidencias)),
@@ -279,6 +283,7 @@ export class InMemoryDatabaseMock implements IDatabaseService {
     this.operations = snapshot.operations;
     this.kardex = snapshot.kardex;
     this.outbox = snapshot.outbox;
+    this.inbox = snapshot.inbox;
     this.commercialRoutes = snapshot.commercialRoutes;
     this.thresholdOverrides = snapshot.thresholdOverrides;
     this.incidencias = snapshot.incidencias;
@@ -860,6 +865,55 @@ export class InMemoryDatabaseMock implements IDatabaseService {
       target.estado = params?.[2];
       target.updated_at = new Date().toISOString();
       return { rows: [target] as any, rowCount: 1 };
+    }
+
+    if (s.startsWith('INSERT INTO INVENTORY.INBOX')) {
+      const existing = this.inbox.find((row) => row.message_id === params?.[0]);
+      if (existing) return { rows: [], rowCount: 0 };
+      const entry: InboxEntity = {
+        id: crypto.randomUUID(),
+        message_id: params?.[0],
+        message_type: params?.[1],
+        source: params?.[2],
+        payload: JSON.parse(params?.[3]),
+        status: 'RECEIVED',
+      };
+      this.inbox.push(entry);
+      return { rows: [entry] as T[], rowCount: 1 };
+    }
+    if (s.includes('FROM INVENTORY.INBOX')) {
+      const rows = this.inbox.filter((row) => row.message_id === params?.[0]);
+      return { rows: rows as T[], rowCount: rows.length };
+    }
+    if (s.startsWith('UPDATE INVENTORY.INBOX')) {
+      const entry = this.inbox.find((row) => row.message_id === params?.[0]);
+      if (!entry) return { rows: [], rowCount: 0 };
+      entry.status = 'PROCESSED';
+      entry.processed_at = new Date().toISOString();
+      return { rows: [], rowCount: 1 };
+    }
+    if (
+      s.startsWith('INSERT INTO INVENTORY.STOCK_BALANCE') &&
+      s.includes('DO NOTHING')
+    ) {
+      const [sku, location] = params ?? [];
+      if (
+        this.stockBalance.some(
+          (row) => row.sku_id === sku && row.location_id === location,
+        )
+      )
+        return { rows: [], rowCount: 0 };
+      const balance: StockBalanceRow = {
+        sku_id: sku,
+        location_id: location,
+        on_hand: 0,
+        reserved: 0,
+        blocked: 0,
+        available: 0,
+        stock_version: 0,
+      };
+      this.stockBalance.push(balance);
+      return { rows: [{ sku_id: sku }] as T[], rowCount: 1 };
     }
 
     // INSERT INTO stock_balance (upsert de acreditación por recepción)

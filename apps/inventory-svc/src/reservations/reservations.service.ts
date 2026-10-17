@@ -444,31 +444,15 @@ export class ReservationsService {
           // Evento de cambio de stock
           for (const item of groupedLines) {
             const bal = balanceMap.get(`${item.sku}:::${item.location_id}`)!;
-            const stockChangedPayload =
-              this.outboxService.createMessageEnvelope({
-                eventName: 'inventory.stock.changed',
-                kind: 'event',
-                operationId: dto.operation_id,
-                correlationId,
-                data: {
-                  sku: item.sku,
-                  location_id: item.location_id,
-                  on_hand: bal.on_hand,
-                  reserved: bal.reserved + item.quantity,
-                  available: Math.max(
-                    0,
-                    bal.on_hand - (bal.reserved + item.quantity) - bal.blocked,
-                  ),
-                },
-              });
-
-            await this.outboxService.enqueue(client, {
-              event_id: randomUUID(),
-              event_type: 'inventory.stock.changed',
-              aggregate_type: 'stock',
-              aggregate_id: item.sku,
-              correlation_id: correlationId,
-              payload: stockChangedPayload,
+            await this.outboxService.stockChanged(client, {
+              sku: item.sku,
+              location_id: item.location_id,
+              on_hand: bal.on_hand,
+              reserved: bal.reserved + item.quantity,
+              blocked: bal.blocked,
+              stock_version: bal.stock_version + 1,
+              operationId: dto.operation_id,
+              correlationId,
             });
           }
 
@@ -840,6 +824,16 @@ export class ReservationsService {
               }
 
               // Kardex de consumo definitivo
+              await this.outboxService.stockChanged(client, {
+                sku: line.sku_id,
+                location_id: line.location_id,
+                on_hand: newOnHand,
+                reserved: newReserved,
+                blocked,
+                stock_version: newVersion,
+                operationId: dto.operation_id,
+                correlationId,
+              });
               await this.kardexService.recordMovement(client, {
                 sku_id: line.sku_id,
                 location_id: line.location_id,
@@ -1317,6 +1311,16 @@ export class ReservationsService {
               }
 
               // Kardex de liberación
+              await this.outboxService.stockChanged(client, {
+                sku: line.sku_id,
+                location_id: line.location_id,
+                on_hand: onHand,
+                reserved: newReserved,
+                blocked,
+                stock_version: newVersion,
+                operationId: dto.operation_id,
+                correlationId,
+              });
               await this.kardexService.recordMovement(client, {
                 sku_id: line.sku_id,
                 location_id: line.location_id,
@@ -1486,6 +1490,7 @@ export class ReservationsService {
     orderId: string,
     correlationId: string,
   ): Promise<void> {
+    const expirationOperationId = randomUUID();
     const statusUpdated = await this.reservationsRepo.updateStatus(
       client,
       reservationPk,
@@ -1563,13 +1568,23 @@ export class ReservationsService {
         stock_version: newVersion,
         correlation_id: correlationId,
       });
+      await this.outboxService.stockChanged(client, {
+        sku: line.sku_id,
+        location_id: line.location_id,
+        on_hand: Number(bal.on_hand),
+        reserved: newReserved,
+        blocked: Number(bal.blocked),
+        stock_version: newVersion,
+        operationId: expirationOperationId,
+        correlationId,
+      });
     }
 
     // Outbox: inventory.reservation.expired
     const expiredPayload = this.outboxService.createMessageEnvelope({
       eventName: 'inventory.reservation.expired',
       kind: 'event',
-      operationId: randomUUID(),
+      operationId: expirationOperationId,
       correlationId,
       data: {
         order_id: orderId,

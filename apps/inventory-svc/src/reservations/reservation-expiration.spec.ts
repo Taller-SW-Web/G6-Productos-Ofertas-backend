@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { ReservationsService } from './reservations.service.js';
 import { ReservationExpirationService } from './reservation-expiration.service.js';
@@ -62,6 +62,20 @@ describe('ReservationExpirationService & Expiración Transaccional — Casos Obl
       reservationsService,
       reservationsRepo,
     );
+  });
+
+  it('una consulta fallida no informa falsamente que no hay reservas vencidas', async () => {
+    vi.spyOn(dbService, 'query').mockRejectedValueOnce(
+      new Error('DB no disponible'),
+    );
+    await expect(expirationService.expirarReservasVencidas()).rejects.toThrow(
+      'DB no disponible',
+    );
+    expect(await expirationService.expirarReservasVencidas()).toEqual({
+      procesadas: 0,
+      expiradas: 0,
+      fallidas: 0,
+    });
   });
 
   it('1. Caso obligatorio: expiración automática debe procesar reservas vencidas sin duplicar eventos', async () => {

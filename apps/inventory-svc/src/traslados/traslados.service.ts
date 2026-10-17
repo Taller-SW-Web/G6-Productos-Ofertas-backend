@@ -262,6 +262,12 @@ export class TrasladosService {
               correlation_id: correlationId,
             });
 
+            await this.outboxService.stockChanged(client, {
+              sku: traslado.sku_id,
+              ...after,
+              operationId: dto.operation_id,
+              correlationId,
+            });
             destinationBalance = await this.buildDisponibilidad(
               client,
               traslado.sku_id,
@@ -327,17 +333,6 @@ export class TrasladosService {
             correlation_id: correlationId,
           });
 
-          if (destinationBalance) {
-            await this.emitStockChanged(
-              client,
-              traslado.sku_id,
-              traslado.target_location_id,
-              destinationBalance,
-              dto.operation_id,
-              correlationId,
-            );
-          }
-
           return response;
         },
       );
@@ -399,37 +394,6 @@ export class TrasladosService {
       status,
       threshold,
     };
-  }
-
-  private async emitStockChanged(
-    client: IDatabaseClient,
-    sku: string,
-    locationId: string,
-    balance: DisponibilidadStock,
-    operationId: string,
-    correlationId: string,
-  ): Promise<void> {
-    const payload = this.outboxService.createMessageEnvelope({
-      eventName: 'inventory.stock.changed',
-      kind: 'event',
-      operationId,
-      correlationId,
-      data: {
-        sku,
-        location_id: locationId,
-        on_hand: balance.on_hand,
-        reserved: balance.reserved,
-        available: balance.available,
-      },
-    });
-    await this.outboxService.enqueue(client, {
-      event_id: randomUUID(),
-      event_type: 'inventory.stock.changed',
-      aggregate_type: 'stock',
-      aggregate_id: sku,
-      correlation_id: correlationId,
-      payload,
-    });
   }
 
   private handleExisting(

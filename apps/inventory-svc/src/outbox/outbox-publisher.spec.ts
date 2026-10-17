@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import {
   OutboxPublisherService,
@@ -13,6 +13,43 @@ describe('OutboxPublisherService — Publicación Confiable y Confirmación de B
   let mockDb: InMemoryDatabaseMock;
   let dbService: DatabaseService;
   let outboxRepo: DrizzleOutboxRepository;
+  afterEach(() => vi.useRealTimers());
+
+  it('un confirm que nunca llega vence, conserva PENDING y reintenta con el mismo message_id', async () => {
+    vi.useFakeTimers();
+    const eventId = randomUUID();
+    mockDb.outbox.push({
+      id: 'timeout',
+      event_id: eventId,
+      event_type: 'inventory.stock.changed',
+      aggregate_type: 'stock',
+      aggregate_id: 'SKU',
+      payload: { message_id: eventId, kind: 'event' },
+      status: 'PENDING',
+      created_at: new Date().toISOString(),
+    });
+    const publish = vi
+      .fn<IMessageBrokerPublisher['publish']>()
+      .mockImplementationOnce(() => new Promise(() => undefined))
+      .mockResolvedValue(true);
+    publisherService.setCustomPublisher({ publish });
+    const dispatching = publisherService.dispatchPending();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(await dispatching).toMatchObject({ dispatched: 0, failed: 1 });
+    expect(mockDb.outbox[0].status).toBe('PENDING');
+    expect(await publisherService.dispatchPending()).toMatchObject({
+      dispatched: 1,
+      failed: 0,
+    });
+    expect(mockDb.outbox[0].status).toBe('PUBLISHED');
+    expect(publish).toHaveBeenCalledTimes(2);
+    for (const call of publish.mock.calls)
+      expect(call[3]).toMatchObject({
+        messageId: eventId,
+        mandatory: true,
+        persistent: true,
+      });
+  });
 
   beforeEach(() => {
     mockDb = new InMemoryDatabaseMock();

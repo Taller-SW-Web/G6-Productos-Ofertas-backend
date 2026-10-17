@@ -353,28 +353,10 @@ export class ReintegrosService {
           });
 
           for (const item of results) {
-            const stockChangedPayload =
-              this.outboxService.createMessageEnvelope({
-                eventName: 'inventory.stock.changed',
-                kind: 'event',
-                operationId: dto.operation_id,
-                correlationId,
-                data: {
-                  sku: item.sku,
-                  location_id: item.location_id,
-                  on_hand: item.on_hand,
-                  reserved: item.reserved,
-                  available: item.available,
-                },
-              });
-
-            await this.outboxService.enqueue(client, {
-              event_id: randomUUID(),
-              event_type: 'inventory.stock.changed',
-              aggregate_type: 'stock',
-              aggregate_id: item.sku,
-              correlation_id: correlationId,
-              payload: stockChangedPayload,
+            await this.outboxService.stockChanged(client, {
+              ...item,
+              operationId: dto.operation_id,
+              correlationId,
             });
           }
 

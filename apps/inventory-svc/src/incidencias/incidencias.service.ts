@@ -684,26 +684,10 @@ export class IncidenciasService {
     response: IncidenciaInventarioResponse,
     correlationId: string,
   ): Promise<void> {
-    const payload = this.outboxService.createMessageEnvelope({
-      eventName: 'inventory.stock.changed',
-      kind: 'event',
+    await this.outboxService.stockChanged(client, {
+      ...response,
       operationId: response.operation_id,
       correlationId,
-      data: {
-        sku: response.sku,
-        location_id: response.location_id,
-        on_hand: response.on_hand,
-        reserved: response.reserved,
-        available: response.available,
-      },
-    });
-    await this.outboxService.enqueue(client, {
-      event_id: randomUUID(),
-      event_type: 'inventory.stock.changed',
-      aggregate_type: 'stock',
-      aggregate_id: response.sku,
-      correlation_id: correlationId,
-      payload,
     });
   }
 

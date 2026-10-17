@@ -17,6 +17,9 @@ import { UmbralesService } from './umbrales/umbrales.service.js';
 import { DashboardService } from './dashboard/dashboard.service.js';
 import { IncidenciasService } from './incidencias/incidencias.service.js';
 import { TrasladosService } from './traslados/traslados.service.js';
+import { InventoryCommandService } from './inbox/inventory-command.service.js';
+import { InventoryConsumerService } from './inbox/inventory-consumer.service.js';
+import { DrizzleInboxRepository } from './repositories/drizzle/drizzle-inbox.repository.js';
 
 import { DrizzleLocationsRepository } from './repositories/drizzle/drizzle-locations.repository.js';
 import { DrizzleCommercialRoutesRepository } from './repositories/drizzle/drizzle-commercial-routes.repository.js';
@@ -40,6 +43,7 @@ import {
   THRESHOLDS_REPOSITORY,
   INCIDENTS_REPOSITORY,
   TRASLADOS_REPOSITORY,
+  INBOX_REPOSITORY,
 } from './repositories/interfaces/repository.tokens.js';
 
 import { InventoryAuthGuard } from './auth/inventory-auth.guard.js';
@@ -72,6 +76,9 @@ import { InventoryWorkersService } from './workers/inventory-workers.service.js'
     InventoryAuthGuard,
     UserAuthGuard,
     InventoryWorkersService,
+    InventoryCommandService,
+    InventoryConsumerService,
+    { provide: INBOX_REPOSITORY, useClass: DrizzleInboxRepository },
     // Repositorios Drizzle vinculados a sus tokens de interfaz
     {
       provide: LOCATIONS_REPOSITORY,

@@ -1,5 +1,7 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import amqp from 'amqplib';
+import { deadline } from '../workers/deadline.js';
+import { SanitizedLogger } from '../logging/sanitized-logger.js';
 import { DatabaseService } from '../database/database.service.js';
 import { loadInventoryConfig } from '../config/inventory.config.js';
 import { OUTBOX_REPOSITORY } from '../repositories/interfaces/repository.tokens.js';
@@ -23,7 +25,9 @@ const PUBLISH_CONFIRM_TIMEOUT_MS = 3000;
 
 @Injectable()
 export class OutboxPublisherService {
-  private readonly logger = new Logger(OutboxPublisherService.name);
+  private readonly logger = new SanitizedLogger(
+    new Logger(OutboxPublisherService.name),
+  );
   private customPublisher: IMessageBrokerPublisher | null = null;
 
   constructor(
@@ -42,9 +46,13 @@ export class OutboxPublisherService {
    * Utiliza FOR UPDATE SKIP LOCKED dentro de una transacción para evitar publicaciones duplicadas
    * entre múltiples instancias o dispatchers concurrentes.
    */
-  async dispatchPending(
-    limit = 50,
-  ): Promise<{ dispatched: number; failed: number; skipped: boolean }> {
+  async dispatchPending(limit = 50): Promise<{
+    dispatched: number;
+    failed: number;
+    skipped: boolean;
+    reason?:
+      'NOT_CONFIGURED' | 'DEPENDENCY_UNAVAILABLE' | 'DATABASE_UNAVAILABLE';
+  }> {
     const config = loadInventoryConfig();
     const batchSize = Math.min(
       MAX_DISPATCH_BATCH_SIZE,
@@ -55,7 +63,12 @@ export class OutboxPublisherService {
       this.logger.debug(
         'RABBITMQ_URL no configurado; los eventos outbox permanecen durables en estado PENDING.',
       );
-      return { dispatched: 0, failed: 0, skipped: true };
+      return {
+        dispatched: 0,
+        failed: 0,
+        skipped: true,
+        reason: 'NOT_CONFIGURED',
+      };
     }
 
     let amqpConn: amqp.ChannelModel | null = null;
@@ -67,7 +80,19 @@ export class OutboxPublisherService {
         amqpConn = await amqp.connect(config.rabbitMqUrl, {
           timeout: BROKER_CONNECT_TIMEOUT_MS,
         });
-        confirmChannel = await amqpConn.createConfirmChannel();
+        amqpConn.on('error', (error: Error) =>
+          this.logger.error({
+            event: 'inventory.outbox.connection_error',
+            error,
+          }),
+        );
+        confirmChannel = await deadline(
+          amqpConn.createConfirmChannel(),
+          BROKER_CONNECT_TIMEOUT_MS,
+        );
+        confirmChannel.on('error', (error: Error) =>
+          this.logger.error({ event: 'inventory.outbox.channel_error', error }),
+        );
 
         // Escuchar devoluciones cuando un mensaje obligatorio no encuentra cola en el exchange
         confirmChannel.on('return', (returnedMsg) => {
@@ -95,7 +120,12 @@ export class OutboxPublisherService {
           this.logger.warn(
             `No fue posible consultar inventory.outbox con FOR UPDATE SKIP LOCKED: ${(dbErr as Error).message}`,
           );
-          return { dispatched: 0, failed: 0, skipped: true };
+          return {
+            dispatched: 0,
+            failed: 0,
+            skipped: true,
+            reason: 'DATABASE_UNAVAILABLE' as const,
+          };
         }
 
         if (pendingRows.length === 0) {
@@ -129,17 +159,16 @@ export class OutboxPublisherService {
             returnedMessageIds.delete(messageId);
 
             if (this.customPublisher) {
-              const publishedOk = await this.customPublisher.publish(
-                exchange,
-                routingKey,
-                content,
-                {
+              const publishedOk = await deadline(
+                this.customPublisher.publish(exchange, routingKey, content, {
                   messageId,
                   correlationId:
                     payload.correlation_id || row.correlation_id || undefined,
                   contentType: 'application/json',
                   mandatory: true,
-                },
+                  persistent: true,
+                }),
+                PUBLISH_CONFIRM_TIMEOUT_MS,
               );
               if (!publishedOk) {
                 throw new Error(
@@ -253,18 +282,23 @@ export class OutboxPublisherService {
       this.logger.warn(
         `Fallo de conexión RabbitMQ en OutboxPublisherService: ${(connErr as Error).message}. Frontera aislada sin afectar la persistencia interna.`,
       );
-      return { dispatched: 0, failed: 0, skipped: true };
+      return {
+        dispatched: 0,
+        failed: 0,
+        skipped: true,
+        reason: 'DEPENDENCY_UNAVAILABLE',
+      };
     } finally {
       if (confirmChannel) {
         try {
-          await confirmChannel.close();
+          await deadline(confirmChannel.close(), 3000);
         } catch {
           // Ignorar error al cerrar canal
         }
       }
       if (amqpConn) {
         try {
-          await amqpConn.close();
+          await deadline(amqpConn.close(), 3000);
         } catch {
           // Ignorar error al cerrar conexión
         }

@@ -12,6 +12,21 @@ import {
 export class DrizzleStockBalanceRepository implements IStockBalanceRepository {
   constructor(private readonly databaseService: DatabaseService) {}
 
+  async initializeZero(
+    client: IDatabaseClient,
+    sku: string,
+    locationId: string,
+  ): Promise<boolean> {
+    const result = await client.query(
+      `INSERT INTO inventory.stock_balance (sku_id, location_id, on_hand, reserved, blocked, stock_version)
+       VALUES ($1, $2, 0, 0, 0, 0)
+       ON CONFLICT (sku_id, location_id) DO NOTHING
+       RETURNING sku_id`,
+      [sku, locationId],
+    );
+    return result.rowCount === 1;
+  }
+
   async findBySkuAndLocationForUpdate(
     client: IDatabaseClient,
     sku: string,
