@@ -33,6 +33,10 @@ export function construirSentenciasDdl(
     `DO $do$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${ROL_PROPIETARIO}') THEN CREATE ROLE ${ROL_PROPIETARIO} LOGIN; END IF; END $do$;`,
     `DO $do$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${ROL_APP}') THEN CREATE ROLE ${ROL_APP} LOGIN; END IF; END $do$;`,
     `ALTER ROLE ${ROL_APP} WITH LOGIN PASSWORD '${PASSWORD_APP}'`,
+    'CREATE SCHEMA taxonomy_isolation_probe',
+    'CREATE TABLE taxonomy_isolation_probe.private_data (id uuid PRIMARY KEY DEFAULT gen_random_uuid())',
+    'REVOKE ALL ON SCHEMA taxonomy_isolation_probe FROM PUBLIC',
+    'REVOKE ALL ON ALL TABLES IN SCHEMA taxonomy_isolation_probe FROM PUBLIC',
     `CREATE SCHEMA taxonomy AUTHORIZATION ${ROL_PROPIETARIO}`,
     "CREATE TYPE taxonomy.estado_entidad AS ENUM ('ACTIVO', 'INACTIVO', 'PENDING_DEACTIVATION')",
     `CREATE TABLE taxonomy.categories (

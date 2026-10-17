@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import pg from 'pg';
 
-const MINIMO_PRUEBAS = 19;
+const MINIMO_PRUEBAS = 21;
 const ESPEC = 'apps/taxonomy-svc/test/persistencia-drizzle.e2e-spec.ts';
 const HARNESS_VARIABLE = 'TAXONOMY_TEST_HARNESS_ID';
 const ACK_VARIABLE = 'TAXONOMY_TEST_DB_ACK';

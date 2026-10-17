@@ -322,6 +322,36 @@ describeIntegracion(
       expect((error as { code?: string }).code).toBe('42501');
     });
 
+    it('el rol de aplicacion no puede leer datos de otro schema', async () => {
+      const error = await app
+        .query('SELECT id FROM taxonomy_isolation_probe.private_data')
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(Error);
+      expect((error as { code?: string }).code).toBe('42501');
+    });
+
+    it('la base aplica CHECK, UNIQUE y FK declaradas en el modelo Taxonomy', async () => {
+      const checkError = await app
+        .query(
+          "INSERT INTO taxonomy.categories (nombre, nivel, orden) VALUES ('Nivel invalido', 3, 0)",
+        )
+        .catch((e: unknown) => e);
+      expect((checkError as { code?: string }).code).toBe('23514');
+
+      const foreignKeyError = await app
+        .query(
+          "INSERT INTO taxonomy.categories (nombre, categoria_padre_id, nivel, orden) VALUES ('Padre inexistente', '12345678-1234-1234-1234-123456789012', 2, 0)",
+        )
+        .catch((e: unknown) => e);
+      expect((foreignKeyError as { code?: string }).code).toBe('23503');
+
+      const uniqueError = await app
+        .query("INSERT INTO taxonomy.brands (nombre) VALUES (' marathon ')")
+        .catch((e: unknown) => e);
+      expect((uniqueError as { code?: string }).code).toBe('23505');
+    });
+
     it('GET /api/v1/categorias sirve datos reales a traves del modulo', async () => {
       const moduleFixture = await Test.createTestingModule({
         imports: [TaxonomySvcModule.forRoot({ databaseUrl: urlApp })],
