@@ -23,6 +23,16 @@ import { KNOWN_CLIENTS } from '../auth/auth.constants.js';
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PG_INTEGER_MAX = 2_147_483_647;
+
+function isStockQuantity(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= PG_INTEGER_MAX
+  );
+}
 
 const MOTIVOS_REINTEGRO: readonly MotivoReintegroInventario[] = [
   'DEVOLUCION_ACEPTADA',
@@ -36,6 +46,7 @@ function durableReintegroReplay(
     operation_id: string;
     order_id: string;
     source_ref: string;
+    lines: ReintegroInventarioRequest['lines'];
   },
   correlationId: string,
 ): ReintegroInventarioResponse {
@@ -58,8 +69,44 @@ function durableReintegroReplay(
     result.operation_id !== expected.operation_id ||
     result.order_id !== expected.order_id ||
     result.source_ref !== expected.source_ref ||
-    !Array.isArray(result.lines)
+    !Array.isArray(result.lines) ||
+    typeof result.completed_at !== 'string' ||
+    !Number.isFinite(Date.parse(result.completed_at))
   ) {
+    throw ProblemDetailsException.idempotencyConflict(
+      'El resultado durable del reintegro es inconsistente',
+      correlationId,
+    );
+  }
+  const quantities = new Map<string, number>();
+  for (const line of expected.lines) {
+    const key = JSON.stringify([line.sku, line.location_id]);
+    quantities.set(key, (quantities.get(key) ?? 0) + line.quantity);
+  }
+  for (const line of result.lines) {
+    const key = line && JSON.stringify([line.sku, line.location_id]);
+    if (
+      !line ||
+      !key ||
+      !quantities.has(key) ||
+      line.quantity !== quantities.get(key) ||
+      !isStockQuantity(line.on_hand) ||
+      !isStockQuantity(line.reserved) ||
+      !isStockQuantity(line.blocked) ||
+      !isStockQuantity(line.available) ||
+      line.reserved + line.blocked > line.on_hand ||
+      line.available !== line.on_hand - line.reserved - line.blocked ||
+      !Number.isSafeInteger(line.stock_version) ||
+      line.stock_version < 0
+    ) {
+      throw ProblemDetailsException.idempotencyConflict(
+        'El resultado durable del reintegro es inconsistente',
+        correlationId,
+      );
+    }
+    quantities.delete(key);
+  }
+  if (quantities.size !== 0) {
     throw ProblemDetailsException.idempotencyConflict(
       'El resultado durable del reintegro es inconsistente',
       correlationId,
@@ -181,6 +228,7 @@ export class ReintegrosService {
             operation_id: dto.operation_id,
             order_id: dto.order_id,
             source_ref: dto.source_ref,
+            lines: dto.lines,
           },
           correlationId,
         );
@@ -218,6 +266,7 @@ export class ReintegrosService {
                   operation_id: dto.operation_id,
                   order_id: dto.order_id,
                   source_ref: dto.source_ref,
+                  lines: dto.lines,
                 },
                 correlationId,
               );
@@ -238,6 +287,12 @@ export class ReintegrosService {
             const existing = lineMap.get(key);
             if (existing) {
               existing.quantity += line.quantity;
+              if (existing.quantity > PG_INTEGER_MAX) {
+                throw ProblemDetailsException.cantidadInvalida(
+                  'La cantidad agrupada excede el rango de almacenamiento del inventario',
+                  correlationId,
+                );
+              }
             } else {
               lineMap.set(key, {
                 sku: line.sku,
@@ -285,6 +340,12 @@ export class ReintegrosService {
             const blocked = Number(bal.blocked);
             const newOnHand = onHand + item.quantity;
             const newVersion = Number(bal.stock_version) + 1;
+            if (newOnHand > PG_INTEGER_MAX) {
+              throw ProblemDetailsException.cantidadInvalida(
+                'El reintegro excede el saldo máximo de almacenamiento del inventario',
+                correlationId,
+              );
+            }
 
             const updatedCount = await this.stockBalanceRepo.updateStock(
               client,
@@ -392,6 +453,7 @@ export class ReintegrosService {
                 operation_id: dto.operation_id,
                 order_id: dto.order_id,
                 source_ref: dto.source_ref,
+                lines: dto.lines,
               },
               correlationId,
             );
@@ -475,10 +537,11 @@ export class ReintegrosService {
       if (
         typeof line.quantity !== 'number' ||
         !Number.isSafeInteger(line.quantity) ||
-        line.quantity <= 0
+        line.quantity <= 0 ||
+        line.quantity > PG_INTEGER_MAX
       ) {
         throw ProblemDetailsException.cantidadInvalida(
-          `Línea ${idx + 1}: quantity debe ser un entero positivo mayor a cero`,
+          `Línea ${idx + 1}: quantity debe ser un entero entre 1 y ${PG_INTEGER_MAX}`,
           correlationId,
         );
       }

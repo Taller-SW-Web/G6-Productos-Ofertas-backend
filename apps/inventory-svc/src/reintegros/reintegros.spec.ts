@@ -6,7 +6,10 @@ import { KardexService } from '../kardex/kardex.service.js';
 import { OutboxService } from '../outbox/outbox.service.js';
 import { DatabaseService } from '../database/database.service.js';
 import { InMemoryDatabaseMock } from '../../test/in-memory-database.mock.js';
-import { ReintegroInventarioRequest } from '../types/inventory.dto.js';
+import {
+  ReintegroInventarioRequest,
+  ReintegroInventarioResponse,
+} from '../types/inventory.dto.js';
 
 import { DrizzleStockBalanceRepository } from '../repositories/drizzle/drizzle-stock-balance.repository.js';
 import { DrizzleOperationsRepository } from '../repositories/drizzle/drizzle-operations.repository.js';
@@ -149,6 +152,197 @@ describe('ReintegrosService — Reintegro F3/Postventa (SPEC-015 §24.1)', () =>
     expect(res.lines[0].quantity).toBe(3);
     expect(res.lines[0].on_hand).toBe(21);
     expect(mockDb.kardex).toHaveLength(1);
+    expect(
+      await reintegrosService.reintegrarInventario(
+        dto,
+        undefined,
+        dto.operation_id,
+        'modulo-postventa',
+      ),
+    ).toEqual(res);
+  });
+
+  it.each([
+    [
+      'sin líneas',
+      (result: ReintegroInventarioResponse) => {
+        result.lines = [];
+      },
+    ],
+    [
+      'línea nula',
+      (result: ReintegroInventarioResponse) => {
+        Object.assign(result.lines, { 0: null });
+      },
+    ],
+    [
+      'SKU distinto',
+      (result: ReintegroInventarioResponse) => {
+        result.lines[0].sku = 'OTRO-SKU';
+      },
+    ],
+    [
+      'ubicación distinta',
+      (result: ReintegroInventarioResponse) => {
+        result.lines[0].location_id = locMiraflores;
+      },
+    ],
+    [
+      'cantidad distinta',
+      (result: ReintegroInventarioResponse) => {
+        result.lines[0].quantity += 1;
+      },
+    ],
+    [
+      'disponible inconsistente',
+      (result: ReintegroInventarioResponse) => {
+        result.lines[0].available += 1;
+      },
+    ],
+    [
+      'saldo negativo',
+      (result: ReintegroInventarioResponse) => {
+        result.lines[0].reserved = -1;
+      },
+    ],
+    [
+      'saldo desbordado',
+      (result: ReintegroInventarioResponse) => {
+        result.lines[0].on_hand = 2_147_483_648;
+      },
+    ],
+    [
+      'versión inválida',
+      (result: ReintegroInventarioResponse) => {
+        result.lines[0].stock_version = 1.5;
+      },
+    ],
+    [
+      'fecha inválida',
+      (result: ReintegroInventarioResponse) => {
+        result.completed_at = 'desconocida';
+      },
+    ],
+    [
+      'línea duplicada',
+      (result: ReintegroInventarioResponse) => {
+        result.lines.push({ ...result.lines[0] });
+      },
+    ],
+  ] as const)(
+    'rechaza el replay durable %s sin volver a aplicar stock',
+    async (_name, corrupt) => {
+      const dto = buildRequest();
+      const result = await reintegrosService.reintegrarInventario(
+        dto,
+        undefined,
+        dto.operation_id,
+        'modulo-postventa',
+      );
+      corrupt(result);
+      mockDb.operations[0].result_payload = JSON.stringify(result);
+      const before = structuredClone({
+        stock: mockDb.stockBalance,
+        operations: mockDb.operations,
+        kardex: mockDb.kardex,
+        outbox: mockDb.outbox,
+      });
+      await expect(
+        reintegrosService.reintegrarInventario(
+          dto,
+          undefined,
+          dto.operation_id,
+          'modulo-postventa',
+        ),
+      ).rejects.toMatchObject({ problem: { code: 'IDEMPOTENCY_CONFLICT' } });
+      expect({
+        stock: mockDb.stockBalance,
+        operations: mockDb.operations,
+        kardex: mockDb.kardex,
+        outbox: mockDb.outbox,
+      }).toEqual(before);
+    },
+  );
+
+  it.each([
+    ['cantidad fuera de integer', [2_147_483_648]],
+    ['suma agrupada fuera de integer', [2_147_483_647, 1]],
+    ['saldo resultante fuera de integer', [2_147_483_647]],
+  ] as const)('rechaza %s sin persistir efectos', async (_name, quantities) => {
+    const dto = buildRequest({
+      lines: quantities.map((quantity) => ({
+        sku,
+        quantity,
+        location_id: locLurin,
+      })),
+    });
+    const before = structuredClone(mockDb.stockBalance);
+    await expect(
+      reintegrosService.reintegrarInventario(
+        dto,
+        undefined,
+        dto.operation_id,
+        'modulo-postventa',
+      ),
+    ).rejects.toMatchObject({
+      problem: { status: 422, code: 'CANTIDAD_INVALIDA' },
+    });
+    expect(mockDb.stockBalance).toEqual(before);
+    expect(mockDb.operations).toHaveLength(0);
+    expect(mockDb.kardex).toHaveLength(0);
+    expect(mockDb.outbox).toHaveLength(0);
+  });
+
+  it('revierte también la primera ubicación si el segundo saldo desborda', async () => {
+    const locations = [locLurin, locMiraflores].sort((a, b) =>
+      a.localeCompare(b),
+    );
+    const overflowing = mockDb.stockBalance.find(
+      (row) => row.sku_id === sku && row.location_id === locations[1],
+    )!;
+    overflowing.on_hand = 2_147_483_647;
+    overflowing.available = 2_147_483_647;
+    const before = structuredClone(mockDb.stockBalance);
+    const dto = buildRequest({
+      lines: locations.map((location_id) => ({
+        sku,
+        quantity: 1,
+        location_id,
+      })),
+    });
+    await expect(
+      reintegrosService.reintegrarInventario(
+        dto,
+        undefined,
+        dto.operation_id,
+        'modulo-postventa',
+      ),
+    ).rejects.toMatchObject({ problem: { code: 'CANTIDAD_INVALIDA' } });
+    expect(mockDb.stockBalance).toEqual(before);
+    expect(mockDb.operations).toHaveLength(0);
+    expect(mockDb.kardex).toHaveLength(0);
+    expect(mockDb.outbox).toHaveLength(0);
+  });
+
+  it('acepta el límite de integer sin perder precisión', async () => {
+    const dto = buildRequest({
+      lines: [{ sku, quantity: 2_147_483_647 - 18, location_id: locLurin }],
+    });
+    const result = await reintegrosService.reintegrarInventario(
+      dto,
+      undefined,
+      dto.operation_id,
+      'modulo-postventa',
+    );
+    expect(result.lines[0].on_hand).toBe(2_147_483_647);
+    expect(
+      await reintegrosService.reintegrarInventario(
+        dto,
+        undefined,
+        dto.operation_id,
+        'modulo-postventa',
+      ),
+    ).toEqual(result);
   });
 
   it('responde 409 si la Idempotency-Key se reutiliza con otro operation_id', async () => {
