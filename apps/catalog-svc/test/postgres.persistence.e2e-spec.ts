@@ -512,6 +512,18 @@ describe.skipIf(!dockerAvailable)(
         join(catalogDirectory, '003_carga_catalogo.sql'),
         'utf8',
       );
+      const existingProductCount = command('docker', [
+        'exec',
+        '-i',
+        container,
+        'psql',
+        '-X',
+        '-At',
+        '-U',
+        'postgres',
+        '-c',
+        'SELECT count(*) FROM catalog.products',
+      ]);
       const expectPreflightToBlock = (
         mutation: string,
         restoration: string,
@@ -551,7 +563,7 @@ describe.skipIf(!dockerAvailable)(
             '-c',
             'SELECT count(*) FROM catalog.products',
           ]),
-        ).toBe('0');
+        ).toBe(existingProductCount);
         command(
           'docker',
           [
