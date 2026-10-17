@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { X509Certificate } from 'node:crypto';
 import { checkServerIdentity, type ConnectionOptions } from 'node:tls';
 
+export const PRICING_CONFIG = Symbol('PRICING_CONFIG');
+
 export interface PricingConfig {
   nodeEnv: 'development' | 'test' | 'production';
   port: number;
