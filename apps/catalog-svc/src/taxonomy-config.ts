@@ -1,6 +1,8 @@
 export const CATALOG_TAXONOMY_CONFIG = Symbol('CATALOG_TAXONOMY_CONFIG');
 
-export function readTaxonomyConfig(env: Record<string, string | undefined>) {
+export function readTaxonomyConfig(
+  env: Record<string, string | undefined> = process.env,
+) {
   let origin: string | undefined;
   if (env.CATALOG_TAXONOMY_URL !== undefined) {
     try {

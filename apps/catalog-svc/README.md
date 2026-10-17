@@ -3,7 +3,7 @@
 Rama personal `poma`. El PR #119 conserva el código comercial incorporado desde
 master; estas correcciones se limitan a configuración, arranque, observabilidad,
 readiness y sus pruebas. Las ediciones propias no cambian CI, contratos, otros servicios ni migraciones.
-La integraci�n solicitada de master conserva tambi�n los cambios ajenos tal como
+La integración solicitada de master conserva también los cambios ajenos tal como
 fueron publicados por sus owners.
 
 ## Contrato de configuración
@@ -12,6 +12,12 @@ El servicio usa exclusivamente el esquema PG. `CatalogConfig` llama al mismo
 validador que el proveedor `Database` y le inyecta una instantánea de configuración:
 el pool y la verificación de identidad no vuelven a leer variables distintas.
 `DATABASE_URL` no sustituye este contrato y no es un modo de conexión soportado.
+
+`CatalogConfig.taxonomy` es una instantánea inmutable validada e inyectada en
+`TaxonomyClient` mediante `CATALOG_TAXONOMY_CONFIG`. El cliente no consulta el
+entorno por request. Las herramientas existentes que lo construyen sin DI usan
+el mismo validador al crear la instantánea; una configuración inyectada siempre
+prevalece sobre el entorno, incluso si cambia después de validar.
 
 | Variable | Requisito y descripción |
 | --- | --- |
@@ -56,13 +62,22 @@ no sus valores. Bootstrap registra JSON sanitizado con `APPLICATION_STARTED` o
   para declarar el servicio ready. No se sustituye esa política por mocks.
 - El pool conserva su máximo de 4 conexiones y timeouts explícitos de 10 s. Los
   timeouts del pool no alargan el límite de respuesta HTTP de readiness.
-- `Database` vuelve a consultar identidad en cada sondeo; no reutiliza un éxito
-  anterior como evidencia de disponibilidad. Al cerrar Nest se cierra su pool.
+- Los sondeos concurrentes comparten una sola comprobación y un plazo de 2 s
+  desde su inicio. Al vencer, todos reciben 503. No se afirma cancelación PG:
+  la operación subyacente puede seguir hasta sus timeouts. Mientras drena,
+  nuevos sondeos reciben 503 inmediatamente sin iniciar más comprobaciones.
+  Un resultado tardío no se convierte en éxito cacheado.
+- Tras completar la comprobación, el próximo sondeo consulta identidad otra vez;
+  no reutiliza un éxito anterior. Al cerrar Nest se cierra su pool.
 - El sondeo CLI existente sigue en `node dist/apps/catalog-svc/readiness.js` y no
   se ejecuta al importar el controlador desde Nest o tests.
 
 Los logs JSON redactan secretos por clave, URLs, Bearer/JWT, objetos Error y los
-valores sensibles del entorno. Las requests generan o preservan correlación.
+valores sensibles del entorno. `X-Correlation-Id` usa UUID hexadecimal 8-4-4-4-12
+en bootstrap, controlador y filtro. Un UUID válido conserva exactamente su
+identidad, incluidas mayúsculas; si falta, se genera una sola identidad. Un valor
+inválido produce 400 `VALIDACION` con una nueva identidad UUID idéntica en la
+cabecera y el cuerpo problem. El filtro preserva la identidad ya establecida.
 No se comprueban brokers ni se hace fan-out a servicios ajenos al trabajo admitido.
 
 ## Ejecución y pruebas
@@ -85,7 +100,10 @@ git diff --check
 ```
 
 Las unitarias usan fixtures aislados para las invariantes de validación,
-identidad, pool compartido, sanitización y timeout. No acreditan integración real.
+identidad, pool compartido, sanitización y timeout. Cubren el origen de Taxonomía
+inyectado frente a un entorno distinto, construcción sin DI con el mismo
+validador, UUID válido/ausente/inválido y 100 sondeos concurrentes más otros 100
+tras el timeout sin acumular trabajo. No acreditan integración real.
 
 `test/runtime-postgres.e2e-spec.ts` ejecuta el entry point compilado con PostgreSQL
 17 descartable y TLS real cuando Docker está disponible. Comprueba arranque

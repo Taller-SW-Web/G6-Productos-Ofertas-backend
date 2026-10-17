@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import {
   CATALOG_TAXONOMY_CONFIG,
+  readTaxonomyConfig,
   type TaxonomyConfig,
 } from './taxonomy-config.js';
 import type { CommercialBrand } from './commercial.types.js';
@@ -16,7 +17,8 @@ function object(value: unknown): value is Record<string, unknown> {
 @Injectable()
 export class TaxonomyClient {
   constructor(
-    @Inject(CATALOG_TAXONOMY_CONFIG) private readonly config: TaxonomyConfig,
+    @Inject(CATALOG_TAXONOMY_CONFIG)
+    private readonly config: TaxonomyConfig = readTaxonomyConfig(),
   ) {}
 
   private async get(
