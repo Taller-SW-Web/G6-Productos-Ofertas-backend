@@ -29,6 +29,12 @@ async function bootstrap() {
   app.useLogger(logger);
   app.enableShutdownHooks();
   app.useGlobalFilters(new ProblemDetailsFilter());
+  if (config.commercialDemo.enabled) {
+    logger.warn(
+      'Excepción demo activa solo para consultarDisponibilidadComercial y verificarCantidadComercial desde las IPs configuradas del Gateway.',
+      'Bootstrap',
+    );
+  }
   await app.listen(config.port);
   logger.log(
     `inventory-svc escuchando en el puerto ${config.port}`,

@@ -41,6 +41,11 @@ import {
   AllowUserBearer,
 } from './auth/auth.decorators.js';
 import { INVENTORY_SCOPES, KNOWN_CLIENTS } from './auth/auth.constants.js';
+import {
+  AllowCommercialDemo,
+  isCommercialDemoRequest,
+  type CommercialRequest,
+} from './auth/commercial-demo.js';
 
 const CANAL_CLIENT_MAP: Record<string, string> = {
   MARKETPLACE: KNOWN_CLIENTS.MARKETPLACE,
@@ -72,6 +77,7 @@ function assertCanalDelCliente(
   canal: string | undefined,
   clientId: string | undefined,
   correlationId?: string,
+  commercialDemo = false,
 ): void {
   const expectedClient =
     typeof canal === 'string' && Object.hasOwn(CANAL_CLIENT_MAP, canal)
@@ -83,7 +89,7 @@ function assertCanalDelCliente(
       correlationId,
     );
   }
-  if (expectedClient !== clientId) {
+  if (!commercialDemo && expectedClient !== clientId) {
     throw ProblemDetailsException.scopeInsuficiente(
       `El canal '${canal}' no corresponde al cliente autenticado '${clientId ?? ''}'`,
       correlationId,
@@ -263,6 +269,7 @@ export class InventoryController {
   }
 
   @Get('disponibilidad/comercial')
+  @AllowCommercialDemo('consultarDisponibilidadComercial')
   @RequireScope(INVENTORY_SCOPES.DISPONIBILIDAD_LEER)
   @AllowedClients([
     KNOWN_CLIENTS.MARKETPLACE,
@@ -272,7 +279,7 @@ export class InventoryController {
   async consultarDisponibilidadComercial(
     @Query('skus') skusQuery: string | string[] | undefined,
     @Query('canal') canal: string | undefined,
-    @Req() req: any,
+    @Req() req: CommercialRequest,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<ConsultaDisponibilidadComercialResponse> {
     const skus = parseSkusQuery(skusQuery);
@@ -283,7 +290,12 @@ export class InventoryController {
       );
     }
 
-    assertCanalDelCliente(canal, req?.clientId, correlationId);
+    assertCanalDelCliente(
+      canal,
+      req.clientId,
+      correlationId,
+      isCommercialDemoRequest(req),
+    );
 
     return this.disponibilidadService.consultarDisponibilidadComercial(
       skus,
@@ -293,6 +305,7 @@ export class InventoryController {
   }
 
   @Post('disponibilidad/comercial/verificar')
+  @AllowCommercialDemo('verificarCantidadComercial')
   @HttpCode(HttpStatus.OK)
   @RequireScope(INVENTORY_SCOPES.DISPONIBILIDAD_LEER)
   @AllowedClients([
@@ -302,12 +315,15 @@ export class InventoryController {
   ])
   async verificarCantidadComercial(
     @Body() dto: VerificarCantidadComercialRequest,
-    @Req() req: any,
+    @Req() req: CommercialRequest,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<VerificarCantidadComercialResponse> {
-    const clientId = req?.clientId || req?.user?.client_id || req?.user?.sub;
-
-    assertCanalDelCliente(dto?.channel_id, clientId, correlationId);
+    assertCanalDelCliente(
+      dto?.channel_id,
+      req.clientId,
+      correlationId,
+      isCommercialDemoRequest(req),
+    );
 
     return this.disponibilidadService.verificarCantidadComercial(
       dto,

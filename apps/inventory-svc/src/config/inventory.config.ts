@@ -1,3 +1,5 @@
+import { isIP } from 'node:net';
+
 export interface InventoryConfig {
   databaseUrl?: string;
   pgHost?: string;
@@ -13,6 +15,42 @@ export interface InventoryConfig {
   defaultLowStockThreshold: number;
   workerIntervalMs: number;
   workerBatchSize: number;
+  commercialDemo: CommercialDemoConfig;
+}
+
+export interface CommercialDemoConfig {
+  enabled: boolean;
+  gatewayIps: readonly string[];
+}
+
+/** Normaliza IPv4, IPv6 y direcciones IPv4 mapeadas sin confiar en headers de proxy. */
+export function canonicalPeerIp(value: string | undefined): string | null {
+  if (!value || value.includes('%') || !isIP(value)) return null;
+  const address = isIP(value) === 4 ? `::ffff:${value}` : value;
+  return new URL(`http://[${address}]/`).hostname;
+}
+
+export function loadCommercialDemoConfig(): CommercialDemoConfig {
+  const flag = process.env.INVENTORY_DEMO_NO_AUTH_ENABLED ?? 'false';
+  if (flag !== 'true' && flag !== 'false') {
+    throw new Error(
+      '[inventory-svc] INVENTORY_DEMO_NO_AUTH_ENABLED debe ser true o false',
+    );
+  }
+  const rawIps = process.env.INVENTORY_DEMO_GATEWAY_IPS;
+  const gatewayIps =
+    rawIps === undefined
+      ? []
+      : rawIps.split(',').map((ip) => canonicalPeerIp(ip.trim()));
+  if (
+    gatewayIps.some((ip) => ip === null) ||
+    (flag === 'true' && gatewayIps.length === 0)
+  ) {
+    throw new Error(
+      '[inventory-svc] INVENTORY_DEMO_GATEWAY_IPS requiere IPs literales exactas del Gateway',
+    );
+  }
+  return { enabled: flag === 'true', gatewayIps: gatewayIps as string[] };
 }
 
 function integerSetting(
@@ -88,5 +126,6 @@ export function loadInventoryConfig(): InventoryConfig {
     defaultLowStockThreshold,
     workerIntervalMs,
     workerBatchSize,
+    commercialDemo: loadCommercialDemoConfig(),
   };
 }

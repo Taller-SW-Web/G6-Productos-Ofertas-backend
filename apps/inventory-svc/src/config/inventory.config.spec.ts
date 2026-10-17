@@ -12,6 +12,8 @@ const MANAGED_KEYS = [
   'PGHOST',
   'PGUSER',
   'DATABASE_URL',
+  'INVENTORY_DEMO_NO_AUTH_ENABLED',
+  'INVENTORY_DEMO_GATEWAY_IPS',
 ] as const;
 
 describe('loadInventoryConfig — configuración fail-closed', () => {

@@ -12,6 +12,8 @@ Esta tabla describe las variables que lee actualmente `inventory-svc`. No contie
 | `G7_JWT_PUBLIC_KEY` | Obligatoria para endpoints protegidos; acepta PEM | `<PEM público provisionado por Seguridad>` | Verificación local RS256 | Fallo cerrado: token rechazado por falta de clave confiable | Seguridad G7, provisionada por Infraestructura |
 | `JWT_PUBLIC_KEY` | Compatibilidad opcional; alternativa heredada a `G7_JWT_PUBLIC_KEY` | `<PEM público provisionado por Seguridad>` | Misma verificación RS256 cuando no está `G7_JWT_PUBLIC_KEY` | Sin ninguna clave configurada, endpoints protegidos rechazan tokens | Seguridad G7, provisionada por Infraestructura |
 | `G7_JWT_ISSUER` | Obligatoria para endpoints protegidos | `<issuer acordado y configurado por G7>` | Validación del claim `iss` | Fallo cerrado; token rechazado | Seguridad G7 |
+| `INVENTORY_DEMO_NO_AUTH_ENABLED` | Opcional; `false` por defecto | `false` | Excepción temporal solo para GET comercial y POST verificador, según #25/#100 | Conserva JWT y autorización productivos; valores distintos de `true`/`false` impiden arrancar | Taco / coordinación Gateway #107 |
+| `INVENTORY_DEMO_GATEWAY_IPS` | Obligatoria si la excepción anterior está activa | `<IP privada exacta del Gateway>` | IPs literales separadas por comas, verificadas contra el peer TCP; admite IPv4/IPv6 | Demo activa sin IPs válidas impide arrancar; no admite hosts, CIDR ni comodines | Infraestructura G6 / Marco |
 | `INVENTORY_SVC_PORT` | Opcional | `3005` | Puerto HTTP del servicio; precede a `PORT` | Usa `PORT` o `3005` | Owner inventory-svc |
 | `PORT` | Opcional | `3005` | Puerto HTTP de respaldo | Usa `3005` | Plataforma de despliegue |
 | `RESERVATION_TTL_SECONDS` | Opcional | `900` | Duración de la reserva antes de expirar | Usa `900`; entero positivo | Owner inventory-svc / Ventas para acuerdo operativo |
@@ -39,6 +41,18 @@ Los valores numéricos explícitos deben representar enteros decimales seguros; 
 Las rutas administrativas de Inventario requieren un JWT humano con firma RS256, `iss` igual a `G7_JWT_ISSUER`, `aud` que incluya `api-productos`, `sub` no vacío, `exp` futuro y rol `GESTOR_COMERCIAL`. Las capacidades locales de traslados se verifican adicionalmente. Un token `tipo=servicio` no habilita las rutas humanas aunque contenga un rol.
 
 `GET /api/v1/inventario/disponibilidad` admite esa vía humana y la vía técnica contractual de Ventas/Postventa. La vía técnica conserva sus scopes/allowlists y el guard de Inventario; Marketplace/Chatbot/Retail siguen limitados a consultas comerciales. Si hay saldos en varias ubicaciones, la consulta detallada exige `location_id` explícito. La consulta de operaciones sigue siendo exclusiva de Ventas y no admite JWT humano.
+
+## Excepción comercial para demo vía Gateway (#25/#100/#107)
+
+Con `INVENTORY_DEMO_NO_AUTH_ENABLED=true`, únicamente `consultarDisponibilidadComercial` (GET `/api/v1/inventario/disponibilidad/comercial`) y `verificarCantidadComercial` (POST de esa ruta más `/verificar`) admiten la excepción sin JWT cuando `request.socket.remoteAddress` pertenece a `INVENTORY_DEMO_GATEWAY_IPS`. El modo demo del Gateway se activa por separado con `GATEWAY_DEMO_NO_AUTH_ENABLED`; no habilita automáticamente Inventario. Ambos están apagados por defecto. Activar una variable de entorno en una prueba no demuestra activación ni autorización de exposición en runtime.
+
+La comparación normaliza IPv4, IPv6 y direcciones IPv4 mapeadas. No confía en `X-Forwarded-For`, `Forwarded`, `X-Real-IP`, `request.ip`, headers de modo demo ni en `trust proxy`. No se introdujeron headers ni tokens nuevos. La solicitud se marca internamente, conserva la validación del enum de canal y de los datos de negocio, y no recibe `user`, `sub`, `clientId`, roles ni scopes inventados. `canal`/`channel_id` es contexto comercial declarado, no identidad autenticada. Al apagar el flag, se restaura la correspondencia canal/cliente verificado y el JWT productivo existente.
+
+El guard de Inventario permanece instalado. La excepción se limita a esos dos handlers y sus métodos exactos; disponibilidad detallada, dashboard, umbrales, traslados, operaciones y todas las escrituras conservan sus requisitos de autorización. El soporte anónimo adicional requiere conciliar el alcance específico de #25/#100 con #107; no se deduce que el bypass del Gateway habilite automáticamente permisos upstream.
+
+Infraestructura debe mantener puertos de Inventario, PostgreSQL y RabbitMQ privados y configurar las IPs de salida reales del Gateway. Una IP permitida identifica el salto de red, no un proceso: otros procesos que compartan esa IP/NAT también pueden llegar a esa excepción. Los proxies compartidos, el puerto público de Inventario y el aislamiento de datos no se resuelven con CORS ni con esta allowlist. Las pruebas usan loopback y datos sintéticos en memoria; no acreditan firewall, aislamiento del entorno desplegado ni permisos mínimos de PostgreSQL/RabbitMQ.
+
+En la revisión `32153bffb35daa8761272c7b55fe23dc1df70007` del Gateway (PR #130, integrado en `master@6bf7ddb`), los códigos de error del POST verificador figuran vacíos en `CONTRACT_ROUTES`. La integración HTTP reproduce que 400/401/422/503 correctos de Inventario se convierten en 500 `ERROR_INTERNO`. El GET conserva sus errores. Marco, owner de #107, debe incorporar los `x-error-codes` del OpenAPI vigente al registro y revalidar. La prueba de caracterización documenta el defecto; no lo considera comportamiento aceptable ni acredita cierre de #25/#100.
 
 ## Mensajería, recuperación y límites locales
 

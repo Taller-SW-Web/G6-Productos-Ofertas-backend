@@ -12,6 +12,7 @@ import {
 } from './auth.constants.js';
 import { ProblemDetailsException } from '../errors/inventory.errors.js';
 import { UserAuthGuard } from './user-auth.guard.js';
+import { authorizeCommercialDemo } from './commercial-demo.js';
 
 export interface DecodedTokenPayload {
   sub?: string;
@@ -49,6 +50,7 @@ export class InventoryAuthGuard implements CanActivate {
   }
 
   canActivate(context: ExecutionContext): boolean {
+    if (authorizeCommercialDemo(context, this.reflector)) return true;
     const requiredScope = this.reflector.getAllAndOverride<string | undefined>(
       REQUIRED_SCOPE_KEY,
       [context.getHandler(), context.getClass()],
