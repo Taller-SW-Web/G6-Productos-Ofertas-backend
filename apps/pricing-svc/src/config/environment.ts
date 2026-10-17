@@ -10,6 +10,7 @@ export interface PricingConfig {
   databaseUrl: string;
   databaseSsl: false | ConnectionOptions;
   auth?: { issuer: string; jwksUrl: string };
+  demoNoAuthEnabled?: boolean;
 }
 
 export class InvalidPricingConfig extends Error {}
@@ -25,6 +26,16 @@ export function validateEnvironment(env: NodeJS.ProcessEnv): PricingConfig {
       'NODE_ENV debe ser development, test o production.',
     );
   }
+  const demoFlag = env.GATEWAY_DEMO_NO_AUTH_ENABLED ?? 'false';
+  if (
+    !['true', 'false'].includes(demoFlag) ||
+    (demoFlag === 'true' && nodeEnv === 'production')
+  ) {
+    throw new InvalidPricingConfig(
+      'GATEWAY_DEMO_NO_AUTH_ENABLED debe ser true/false y no puede activarse en production.',
+    );
+  }
+  const demoNoAuthEnabled = demoFlag === 'true';
   const rawPort = env.PRICING_SVC_PORT ?? env.PORT;
   const port = Number(rawPort);
   if (
@@ -116,7 +127,10 @@ export function validateEnvironment(env: NodeJS.ProcessEnv): PricingConfig {
   }
   url.search = '';
   let auth: PricingConfig['auth'];
-  if (env.AUTH_ISSUER !== undefined || env.AUTH_JWKS_URL !== undefined) {
+  if (
+    !demoNoAuthEnabled &&
+    (env.AUTH_ISSUER !== undefined || env.AUTH_JWKS_URL !== undefined)
+  ) {
     try {
       for (const value of [env.AUTH_ISSUER, env.AUTH_JWKS_URL]) {
         if (!value || value !== value.trim()) throw new Error();
@@ -147,5 +161,6 @@ export function validateEnvironment(env: NodeJS.ProcessEnv): PricingConfig {
     databaseUrl: url.toString(),
     databaseSsl,
     ...(auth ? { auth } : {}),
+    ...(demoNoAuthEnabled ? { demoNoAuthEnabled: true } : {}),
   };
 }

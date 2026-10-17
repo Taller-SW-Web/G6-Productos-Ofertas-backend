@@ -10,7 +10,10 @@ import {
   PricingDatabase,
   type PricingTransaction,
 } from '../src/persistence/pricing.database.js';
-import { PricingRepository } from '../src/persistence/pricing.repository.js';
+import {
+  PricingRepository,
+  MAX_INLINE_IMPORT_ROWS,
+} from '../src/persistence/pricing.repository.js';
 import { PricingPersistenceError } from '../src/persistence/persistence.error.js';
 import {
   prices,
@@ -226,14 +229,116 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
           priceVersion: 2,
         });
       }
-      const empty = await request(app!.getHttpServer())
-        .get(`/api/v1/precios/skus/unknown/programaciones`)
-        .set('Authorization', `Bearer ${identity.token()}`)
-        .expect(200);
-      expect(empty.body).toEqual({
-        items: [],
-        meta: { pagina: 1, tamanio: 20, total: 0, totalPaginas: 0 },
+    });
+
+    it.each(['productos', 'skus'])(
+      'HTTP %s distingue definición inexistente de ausencia de programaciones',
+      async (kind) => {
+        const key = randomUUID();
+        const path = `/api/v1/precios/${kind}/${key}/programaciones`;
+        const missing = await request(app!.getHttpServer())
+          .get(path)
+          .set('Authorization', `Bearer ${identity.token()}`)
+          .expect(404);
+        expect(missing.body).toMatchObject({
+          status: 404,
+          code: 'PRECIO_NO_ENCONTRADO',
+        });
+        expect(missing.headers['content-type']).toContain(
+          'application/problem+json',
+        );
+        await repository.transaction(async (tx) => {
+          const [price] = await tx
+            .insert(prices)
+            .values(kind === 'productos' ? { productId: key } : { sku: key })
+            .returning();
+          await tx.insert(priceValidities).values(snapshot(price.id));
+        });
+        const empty = await request(app!.getHttpServer())
+          .get(path)
+          .set('Authorization', `Bearer ${identity.token()}`)
+          .expect(200);
+        expect(empty.body).toEqual({
+          items: [],
+          meta: { pagina: 1, tamanio: 20, total: 0, totalPaginas: 0 },
+        });
+      },
+    );
+
+    it('demo explícita permite consultas sin Authorization/G7 y readiness sigue dependiendo de PostgreSQL', async () => {
+      const { definition } = await repository.transaction(async (tx) => {
+        const [definition] = await tx
+          .insert(prices)
+          .values({ productId: randomUUID() })
+          .returning();
+        await tx.insert(priceValidities).values({
+          ...snapshot(definition.id),
+          validFrom: new Date(Date.now() - 60000),
+        });
+        return { definition };
       });
+      const module = await Test.createTestingModule({
+        imports: [
+          PricingSvcModule.forRoot({
+            NODE_ENV: 'test',
+            PRICING_SVC_PORT: '3002',
+            DATABASE_URL: postgres.runtimeUrl,
+            PGSSLMODE: 'disable',
+            GATEWAY_DEMO_NO_AUTH_ENABLED: 'true',
+          }),
+        ],
+      }).compile();
+      const demoApp = module.createNestApplication();
+      const remote = vi.spyOn(globalThis, 'fetch');
+      try {
+        await demoApp.init();
+        const path = `/api/v1/precios/productos/${definition.productId}`;
+        await request(app!.getHttpServer()).get(path).expect(401);
+        const result = await request(demoApp.getHttpServer())
+          .get(path)
+          .expect(200);
+        expect(result.body).toMatchObject({
+          product_id: definition.productId,
+          precio_regular: 99.99,
+        });
+        await request(demoApp.getHttpServer())
+          .get(path)
+          .set('Authorization', 'Bearer unused-invalid-token')
+          .expect(200);
+        await request(demoApp.getHttpServer())
+          .get(`${path}/programaciones`)
+          .expect(200);
+        await request(demoApp.getHttpServer())
+          .get(path)
+          .set('X-Correlation-Id', 'invalid')
+          .expect(400);
+        await request(demoApp.getHttpServer()).get('/health/ready').expect(200);
+        expect(remote).not.toHaveBeenCalled();
+        await postgres.admin!.query(
+          'REVOKE SELECT ON pricing.prices FROM pricing_app',
+        );
+        try {
+          await request(demoApp.getHttpServer())
+            .get('/health/live')
+            .expect(200);
+          await request(demoApp.getHttpServer())
+            .get('/health/ready')
+            .expect(503);
+          const failed = await request(demoApp.getHttpServer())
+            .get(path)
+            .expect(503);
+          expect(failed.body.code).toBe('SERVICIO_NO_DISPONIBLE');
+        } finally {
+          await postgres.admin!.query(
+            'GRANT SELECT ON pricing.prices TO pricing_app',
+          );
+        }
+        await request(demoApp.getHttpServer()).get('/health/ready').expect(200);
+        await request(app!.getHttpServer()).get(path).expect(401);
+      } finally {
+        remote.mockRestore();
+        await demoApp.close();
+      }
     });
 
     it('HTTP consulta un lote persistido sin filtrar row_input, report_uri ni detalle libre', async () => {
@@ -271,11 +376,56 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
         rows: [{ row_id: '1', sku: '0001', status: 'PENDING' }],
       });
       expect(response.text).not.toMatch(/fixture-sensitive|private.invalid/);
+      const selected = await repository.readImport(job.id);
+      expect(Object.keys(selected!.rows![0]).sort()).toEqual([
+        'code',
+        'rowId',
+        'sku',
+        'status',
+      ]);
       const absent = await request(app!.getHttpServer())
         .get(`/api/v1/precios/importaciones/${randomUUID()}`)
         .set('Authorization', `Bearer ${identity.token()}`)
         .expect(404);
       expect(absent.body.code).toBe('LOTE_NO_ENCONTRADO');
+    });
+
+    it('importaciones grandes devuelven resumen contractual y jamás detalle truncado', async () => {
+      const job = await repository.transaction(async (tx) => {
+        const [job] = await tx
+          .insert(bulkPriceJobs)
+          .values({
+            allowPartial: false,
+            totalRows: MAX_INLINE_IMPORT_ROWS + 1,
+            correlationId: randomUUID(),
+          })
+          .returning();
+        await tx.execute(sql`INSERT INTO pricing.bulk_price_rows (batch_id,row_id,sku,row_input)
+          SELECT ${job.id}::uuid, value::text, 'SKU-' || value, jsonb_build_object('private',repeat('x',1024))
+          FROM generate_series(1,${MAX_INLINE_IMPORT_ROWS}) AS value`);
+        return job;
+      });
+      const boundary = await repository.readImport(job.id);
+      expect(boundary!.rows).toHaveLength(MAX_INLINE_IMPORT_ROWS);
+      await repository.transaction((tx) =>
+        tx
+          .insert(bulkPriceRows)
+          .values({ batchId: job.id, rowId: 'extra', rowInput: {} }),
+      );
+      const result = await repository.readImport(job.id);
+      expect(result!.rows).toBeUndefined();
+      const response = await request(app!.getHttpServer())
+        .get(`/api/v1/precios/importaciones/${job.id}`)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .expect(200);
+      expect(response.body).toEqual({
+        batch_id: job.id,
+        status: 'QUEUED',
+        allow_partial: false,
+        total_rows: MAX_INLINE_IMPORT_ROWS + 1,
+        completed_rows: 0,
+        failed_rows: 0,
+      });
     });
 
     it('HTTP niega acceso y parámetros inválidos antes de consultar datos', async () => {

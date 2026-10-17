@@ -13,6 +13,9 @@ import {
 } from './pricing.schema.js';
 import { rethrowPersistenceError } from './persistence.error.js';
 
+// rows es opcional en EstadoImportacionPrecio; nunca devolver detalle truncado.
+export const MAX_INLINE_IMPORT_ROWS = 1000;
+
 @Injectable()
 export class PricingRepository {
   constructor(
@@ -108,6 +111,12 @@ export class PricingRepository {
           'productId' in target
             ? eq(prices.productId, target.productId)
             : eq(prices.sku, target.sku);
+        const [definition] = await tx
+          .select({ id: prices.id })
+          .from(prices)
+          .where(scope)
+          .limit(1);
+        if (!definition) return undefined;
         const [total] = await tx
           .select({ value: count() })
           .from(scheduledPrices)
@@ -139,16 +148,32 @@ export class PricingRepository {
     return this.transaction(
       async (tx) => {
         const [job] = await tx
-          .select()
+          .select({
+            id: bulkPriceJobs.id,
+            status: bulkPriceJobs.status,
+            allowPartial: bulkPriceJobs.allowPartial,
+            totalRows: bulkPriceJobs.totalRows,
+            completedRows: bulkPriceJobs.completedRows,
+            failedRows: bulkPriceJobs.failedRows,
+          })
           .from(bulkPriceJobs)
           .where(eq(bulkPriceJobs.id, batchId));
         if (!job) return undefined;
         const rows = await tx
-          .select()
+          .select({
+            rowId: bulkPriceRows.rowId,
+            sku: bulkPriceRows.sku,
+            status: bulkPriceRows.status,
+            code: bulkPriceRows.code,
+          })
           .from(bulkPriceRows)
           .where(eq(bulkPriceRows.batchId, batchId))
-          .orderBy(asc(bulkPriceRows.rowId));
-        return { job, rows };
+          .orderBy(asc(bulkPriceRows.rowId))
+          .limit(MAX_INLINE_IMPORT_ROWS + 1);
+        return {
+          job,
+          rows: rows.length > MAX_INLINE_IMPORT_ROWS ? undefined : rows,
+        };
       },
       { isolationLevel: 'repeatable read', accessMode: 'read only' },
     );

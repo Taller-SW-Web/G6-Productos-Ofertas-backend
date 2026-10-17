@@ -87,4 +87,22 @@ describe('PricingReadiness', () => {
     );
     await database.onApplicationShutdown();
   });
+
+  it('en demo sin G7 comprueba PostgreSQL y conserva el fallo cerrado de DB', async () => {
+    const config = validateEnvironment({
+      NODE_ENV: 'test',
+      PRICING_SVC_PORT: '3002',
+      DATABASE_URL: 'postgresql://pricing:fixture@localhost/fixture',
+      GATEWAY_DEMO_NO_AUTH_ENABLED: 'true',
+    });
+    const database = new PricingDatabase(config);
+    const readiness = new PricingReadiness(database, config);
+    const pool = vi.mocked(Pool).mock.instances.at(-1)!;
+    vi.mocked(pool.query).mockImplementationOnce(async () => ({ rows: [] }));
+    expect(await readiness.check()).toBe(true);
+    expect(pool.query).toHaveBeenCalledOnce();
+    vi.mocked(pool.query).mockRejectedValueOnce(new Error('DB unavailable'));
+    expect(await readiness.check()).toBe(false);
+    await database.onApplicationShutdown();
+  });
 });

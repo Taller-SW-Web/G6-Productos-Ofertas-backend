@@ -58,6 +58,11 @@ jobs:
       - name: End-to-end tests
         run: npm run test:e2e
 
+      - name: Pricing provider and persistence tests (isolated PostgreSQL)
+        env:
+          PRICING_TEST_POSTGRES: '1'
+        run: npm run test:e2e -- apps/pricing-svc --reporter=verbose
+
       - name: Build individual representative application (catalog-svc)
         run: npm run build:catalog-svc
 

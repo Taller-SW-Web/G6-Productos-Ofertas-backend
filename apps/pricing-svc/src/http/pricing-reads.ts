@@ -62,6 +62,7 @@ export class PricingReads {
     tamanio: number,
   ) {
     const result = await this.repository.readSchedules(target, pagina, tamanio);
+    if (!result) throw new PricingHttpError(404, 'PRECIO_NO_ENCONTRADO');
     const now = new Date();
     return {
       items: result.items.map(({ schedule, validity, definition }) => ({
@@ -99,14 +100,22 @@ export class PricingReads {
       completed_rows: job.completedRows,
       failed_rows: job.failedRows,
       // No exponer row_input, actor, report_uri ni detalles libres persistidos.
-      rows: rows.map((row) => ({
-        row_id: row.rowId,
-        sku: row.sku,
-        status: row.status,
-        ...(row.code
-          ? { code: importCodes.has(row.code) ? row.code : 'ERROR_INTERNO' }
-          : {}),
-      })),
+      ...(rows === undefined
+        ? {}
+        : {
+            rows: rows.map((row) => ({
+              row_id: row.rowId,
+              sku: row.sku,
+              status: row.status,
+              ...(row.code
+                ? {
+                    code: importCodes.has(row.code)
+                      ? row.code
+                      : 'ERROR_INTERNO',
+                  }
+                : {}),
+            })),
+          }),
     };
   }
 }

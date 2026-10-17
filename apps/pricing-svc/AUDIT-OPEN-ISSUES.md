@@ -1,6 +1,7 @@
 # Entrega interna de Pricing para auditoría
 
-Rama `vera`, base `8dbb44b`, 2026-10-17. Owner: Leonardo Vera.
+Rama `vera`, entrega inicial `9e29481`, revisión de auditoría del 2026-10-17.
+Owner: Leonardo Vera. PR #132 abierto para nueva auditoría, sin merge autorizado.
 Alcance confirmado por el solicitante: trabajar lo interno; las definiciones
 normativas pendientes corresponden a auditoría. Estado global: **PARTIAL**.
 
@@ -29,12 +30,22 @@ o despliegue se deduce de implementación interna ni de estas pruebas locales.
 | `GET /api/v1/precios/skus/{sku}/programaciones` | `listarProgramacionesPrecioSku` |
 | `GET /api/v1/precios/importaciones/{batchId}` | `obtenerImportacionPrecios` |
 
-El prefijo coincide con `originalUrl` reenviado por Gateway. Son operaciones
-administrativas `userBearer`; exigen RS256, issuer configurado, clave RSA de
+El prefijo coincide con `originalUrl` reenviado por Gateway. Por defecto son
+operaciones administrativas `userBearer`; exigen RS256, issuer configurado, clave RSA de
 2048 bits mínimo, `tipo=acceso`, `sub` UUID, `iat/exp/nbf`, `jti` y rol
 `GESTOR_COMERCIAL`. Sin token: 401; rol insuficiente: 403; JWKS/config ausente
-o no disponible: 503. Sin configuración de identidad, readiness devuelve 503.
-No hay bypass de demo ni confianza en headers de identidad.
+o no disponible: 503. Sin configuración de identidad, readiness devuelve 503
+en modo autenticado. No se confía en headers de identidad.
+
+La corrección P0 autorizada de la auditoría incorpora la excepción explícita
+`GATEWAY_DEMO_NO_AUTH_ENABLED=true` en Pricing, compatible con el flag del
+Gateway. Por defecto está desactivada. Solo admite `development`/`test`;
+activarla en `production` hace fallar la configuración antes de arrancar.
+En demo se ignoran Authorization y configuración de G7, sin llamadas JWKS,
+pero se mantienen validación/correlación, errores y persistencia reales.
+Readiness sigue comprobando PostgreSQL y devuelve 503 si falla. El flag debe
+inyectarse explícitamente en ambos procesos de demo; no modifica infraestructura.
+Con el flag ausente/`false` se restaura la autenticación anterior.
 
 Ambas URLs de identidad se configuran juntas con HTTPS, sin credenciales,
 fragmentos ni redirects. Solo `NODE_ENV=test` admite HTTP loopback para JWKS
@@ -47,6 +58,17 @@ de definición para CAS; programación: versión de su snapshot. Programar no
 adelanta el precio vigente. Una versión bigint no representable exactamente
 en JSON se rechaza sin redondeo. El lote omite `row_input`, actor, URI privada
 y detalle libre; limita los códigos por fila a los normativos aplicables.
+`readImport` selecciona únicamente campos necesarios del resumen y de las
+filas (`row_id`, `sku`, `status`, `code`), sin recuperar `row_input` ni detalle
+libre de PostgreSQL. La consulta tiene `LIMIT 1001`: hasta 1.000 filas devuelve
+el detalle completo; si hay más, omite `rows` y conserva todos los campos
+obligatorios del resumen. `rows` ya es opcional en `EstadoImportacionPrecio`
+del OpenAPI vigente. No se inventa paginación/campo/código ni se devuelve una
+lista truncada como si fuera completa. El reporte sigue pendiente de P-PRI-01.
+
+Las programaciones comprueban primero la definición dentro de la misma
+fotografía: definición inexistente devuelve 404 `PRECIO_NO_ENCONTRADO`;
+definición existente sin programaciones devuelve 200 con `items: []` y total 0.
 
 DB/permisos/timeouts producen 503, sin simular precio ausente ni filtrar SQL o
 credenciales. Correlación UUID generada/conservada; valor inválido devuelve
@@ -77,7 +99,7 @@ Outbox persistido no demuestra publicación, ACK, consumer ni homologación.
 | Leonardo Vera + Marco/arquitectura | Archivo, prevalidación, admisión y reporte | Formato/cabeceras/versionado y política de prevalidación/reporte publicados (P-PRI-01). |
 | Gabriel Poma/Catálogo + Marco/arquitectura | Herencia, estado y elegibilidad por SKU | Contrato ejecutable que entregue contexto autoritativo por SKU; búsqueda comercial por texto no garantiza ese lookup. |
 | Gabriel Poma / #12 | DATA-003 | Publicación, IDs/versiones y elegibilidad confirmados; reauditar matriz existente. |
-| Marco Castilla / Gateway #107/#109 | Mutaciones autenticadas y demo | Introspección conectada y frontera privada acordada. Gateway actual rechaza introspección pendiente; modo demo elimina Authorization y no autentica este provider. |
+| Marco Castilla / Gateway #107/#109 | Mutaciones autenticadas y stack demo | Introspección de mutaciones conectada y stack privado verificado. La compatibilidad sin Authorization está corregida localmente; no acredita despliegue ni recorrido real Gateway→Pricing. |
 | Leonardo Vera / Frontend #38 + Marco / Frontend #45 | #59/#60 | Adaptadores de feature, cliente compartido y stack real coordinados. |
 | Marco/infraestructura + Leonardo Vera | Transporte #57 | Cliente AMQP autorizado en el monorepo y broker/topología de pruebas. No hay cliente AMQP instalado; dependencias globales exigen autorización expresa del issue. |
 
@@ -107,7 +129,7 @@ npm run build:pricing-svc
 git diff --check
 ```
 
-Resultados locales finales (Node 24.19.0):
+Resultados de la entrega inicial `9e29481` (Node 24.19.0):
 
 | Comando | Resultado |
 |---|---|
@@ -133,3 +155,41 @@ Se conservan las pruebas; las ejecuciones fallidas no se reportan como PASS.
 
 Implementación interna: parcial comprobada. Integración autenticada compartida,
 homologación externa y despliegue: no ejecutados/acreditados en esta entrega.
+
+## Correcciones para segunda auditoría de PR #132
+
+- P0: demo explícita sin G7, apagada por defecto y prohibida en producción;
+  pruebas de configuración, provider en ambos modos y readiness con DB real.
+- P1 importaciones: proyección SQL explícita y detalle acotado sin alterar
+  OpenAPI. Pruebas del SQL generado, límite 1.000/1.001 y resumen HTTP.
+- P1 programaciones: 404 frente a 200 vacío, probado para producto y SKU.
+- P1 CI: `.github/workflows/ci.yml` incorpora un paso con
+  `PRICING_TEST_POSTGRES=1` y `npm run test:e2e -- apps/pricing-svc --reporter=verbose`.
+  Reutiliza una instancia Docker por suite con imagen fijada, rol runtime,
+  SQL con checksum, puerto aleatorio loopback y limpieza al cerrar. Fallo de
+  Docker/fixture hace fallar la suite. No utiliza `.env`, URLs ni credenciales
+  compartidas/Supabase. Se conservan todos los pasos y pruebas existentes.
+- La modificación acotada de CI está autorizada expresamente por esta auditoría.
+  No se toca CAS, locks, snapshots, Outbox, otros servicios, frontend ni contratos.
+- P-PRI-01/P-PRI-02 y estados parciales de los ocho issues se conservan.
+
+El nuevo SHA y resultados locales/CI se registran en el mismo PR; merge pendiente
+de autorización expresa tras la nueva auditoría.
+
+Resultados de esta revisión (Node 24.19.0, PostgreSQL 16.15 aislado):
+
+| Comando | Resultado |
+|---|---|
+| `npm test -- apps/pricing-svc` | PASS: 163 |
+| `PRICING_TEST_POSTGRES=1 npm run test:e2e -- apps/pricing-svc --reporter=verbose` | PASS: 29, cero omitidas |
+| `npm test` | PASS: 288 |
+| `PRICING_TEST_POSTGRES=1 npm run test:e2e` | PASS: 363; 13 omitidas preexistentes de otras suites |
+| `npm run typecheck` y TypeScript estricto de todo Pricing/tests | PASS |
+| `npm run lint` | PASS |
+| `npm run format:check` | PASS tras corregir formato del test |
+| `npm run build:pricing-svc` | PASS |
+| `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -shellcheck=` | PASS |
+| `git diff --check` | PASS |
+
+Estos resultados locales no se presentan como resultado del workflow remoto;
+su ejecución para el nuevo SHA queda identificada en PR #132.

@@ -13,6 +13,44 @@ const valid = {
 };
 
 describe('Pricing configuration', () => {
+  it('demo es explícita, desactivada por defecto y sin dependencia de G7', () => {
+    expect(validateEnvironment(valid).demoNoAuthEnabled).not.toBe(true);
+    expect(
+      validateEnvironment({ ...valid, GATEWAY_DEMO_NO_AUTH_ENABLED: 'false' })
+        .demoNoAuthEnabled,
+    ).not.toBe(true);
+    const demo = validateEnvironment({
+      ...valid,
+      GATEWAY_DEMO_NO_AUTH_ENABLED: 'true',
+      AUTH_ISSUER: 'invalid-unused',
+    });
+    expect(demo.demoNoAuthEnabled).toBe(true);
+    expect(demo.auth).toBeUndefined();
+    expect(
+      validateEnvironment({
+        ...valid,
+        NODE_ENV: 'development',
+        GATEWAY_DEMO_NO_AUTH_ENABLED: 'true',
+      }).demoNoAuthEnabled,
+    ).toBe(true);
+  });
+  it.each(['1', 'TRUE', '', ' true', 'yes'])(
+    'rechaza flag demo inválido %j',
+    (flag) => {
+      expect(() =>
+        validateEnvironment({ ...valid, GATEWAY_DEMO_NO_AUTH_ENABLED: flag }),
+      ).toThrow(InvalidPricingConfig);
+    },
+  );
+  it('rechaza activar demo en production antes de abrir Nest o conexiones', () => {
+    expect(() =>
+      validateEnvironment({
+        ...valid,
+        NODE_ENV: 'production',
+        GATEWAY_DEMO_NO_AUTH_ENABLED: 'true',
+      }),
+    ).toThrow('no puede activarse en production');
+  });
   it('valida ambas URLs de identidad sin permitir secretos, fragmentos ni HTTP remoto', () => {
     expect(
       validateEnvironment({

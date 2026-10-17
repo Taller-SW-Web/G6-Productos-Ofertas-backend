@@ -59,6 +59,8 @@ export class PricingReadGuard implements CanActivate {
       (typeof correlation !== 'string' || !uuid.test(correlation))
     )
       throw new PricingHttpError(400, 'VALIDACION');
+    if (this.config.demoNoAuthEnabled && this.config.nodeEnv !== 'production')
+      return true;
     const bearer = /^Bearer ([^\s]+)$/i.exec(
       request.headers.authorization ?? '',
     );
