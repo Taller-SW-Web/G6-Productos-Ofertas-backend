@@ -370,6 +370,10 @@ describe('HU CA-09: intervalos [inicio, fin), programación y estados', () => {
     ).toBe('CANCELLED');
     expect(scheduledStatus('ACTIVE', snapshot(), at(50))).toBe('ACTIVE');
   });
+  it('revierte ACTIVE a SCHEDULED cuando la fecha aún precede validFrom', () => {
+    const validity = snapshot({ validFrom: at(3), validUntil: at(4) });
+    expect(scheduledStatus('ACTIVE', validity, at(2))).toBe('SCHEDULED');
+  });
   it('los errores no adjuntan importes ni contexto sensible', () => {
     try {
       cents('secret-fixture');

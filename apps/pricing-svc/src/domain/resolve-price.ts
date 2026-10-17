@@ -9,18 +9,19 @@ import {
 // Contexto de Catálogo recibido por el caller; sin JOIN ni proyección autoritativa.
 export function resolvePrice(
   definitions: readonly PriceDefinition[],
-  context: { productId: string; sku: string; isVariant: boolean },
+  context: { productId: string; sku?: string | null; isVariant: boolean },
   channelId: string | null,
   at: Date,
 ) {
   requireRule(Number.isFinite(at.getTime()), 'VALIDACION');
+  const sku = context.sku ?? '';
   requireRule(
-    context.productId.length > 0 && context.sku.length > 0,
+    context.productId.length > 0 && (!context.isVariant || sku.length > 0),
     'SCOPE_PRECIO_INVALIDO',
   );
   const targets = context.isVariant
     ? [
-        { productId: null, sku: context.sku },
+        { productId: null, sku },
         { productId: context.productId, sku: null },
       ]
     : [{ productId: context.productId, sku: null }];

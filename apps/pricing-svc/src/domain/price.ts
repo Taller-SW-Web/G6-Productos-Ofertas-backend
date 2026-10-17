@@ -372,7 +372,5 @@ export function scheduledStatus(
   if (current === 'HISTORICAL') return current;
   if (validity.validUntil !== null && now >= validity.validUntil)
     return 'HISTORICAL';
-  return current === 'ACTIVE' || now >= validity.validFrom
-    ? 'ACTIVE'
-    : 'SCHEDULED';
+  return now >= validity.validFrom ? 'ACTIVE' : 'SCHEDULED';
 }

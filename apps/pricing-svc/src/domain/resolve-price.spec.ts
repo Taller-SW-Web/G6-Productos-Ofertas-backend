@@ -27,6 +27,29 @@ const override: PriceDefinition = {
 };
 
 describe('SPEC §2 / HU CA-06–07 / DEC-F-001,006: resolución pura', () => {
+  it('producto simple se resuelve por productId sin requerir SKU', () => {
+    expect(
+      resolvePrice(
+        [product],
+        { productId: 'product', isVariant: false },
+        null,
+        from,
+      ),
+    ).toMatchObject({ definition: product, origen: 'PRODUCTO' });
+  });
+  it('variante requiere SKU y lo usa para buscar el override', () => {
+    expect(() =>
+      resolvePrice(
+        [product],
+        { productId: 'product', isVariant: true },
+        null,
+        from,
+      ),
+    ).toThrow('SCOPE_PRECIO_INVALIDO');
+    expect(
+      resolvePrice([override, product], context, null, from).definition,
+    ).toBe(override);
+  });
   it('simple hereda producto incluso si se le entrega un override de SKU', () => {
     expect(
       resolvePrice(
