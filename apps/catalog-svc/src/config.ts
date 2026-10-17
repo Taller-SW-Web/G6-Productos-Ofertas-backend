@@ -2,6 +2,14 @@ import { readPostgresSettings, type PostgresSettings } from './database.js';
 import { readTaxonomyConfig, type TaxonomyConfig } from './taxonomy-config.js';
 import { readHttpConfig } from './http-config.js';
 import {
+  readCatalogAmqpConfig,
+  type CatalogAmqpSettings,
+} from './catalog-amqp.js';
+import {
+  preparationTimeout,
+  type CatalogPreparationConfig,
+} from './catalog-messages.js';
+import {
   readCatalogSecurityConfig,
   type CatalogSecurityConfig,
 } from './catalog-auth.js';
@@ -15,6 +23,8 @@ export class CatalogConfig {
   readonly database: PostgresSettings;
   readonly taxonomy: TaxonomyConfig;
   readonly security?: CatalogSecurityConfig;
+  readonly amqp: CatalogAmqpSettings;
+  readonly preparation: CatalogPreparationConfig;
 
   constructor(env: Record<string, string | undefined>) {
     const errors: string[] = [];
@@ -57,6 +67,16 @@ export class CatalogConfig {
         'SECURITY_ISSUER, SECURITY_DISCOVERY_URL y SECURITY_JWKS_URL deben configurarse juntos y ser válidos.',
       );
     }
+    let amqp: CatalogAmqpSettings = {},
+      preparation: CatalogPreparationConfig = {};
+    try {
+      amqp = { connection: readCatalogAmqpConfig(env) };
+      preparation = { timeoutMs: preparationTimeout(env) };
+    } catch {
+      errors.push(
+        'Configuración de mensajería/preparación de Catálogo inválida.',
+      );
+    }
     if (errors.length || !http || !database || !taxonomy) {
       throw new Error(
         'Configuracion de catalog-svc invalida: ' + errors.join(' '),
@@ -68,6 +88,8 @@ export class CatalogConfig {
     this.database = database;
     this.taxonomy = taxonomy;
     this.security = security;
+    this.amqp = Object.freeze(amqp);
+    this.preparation = Object.freeze(preparation);
     Object.freeze(this);
   }
 }

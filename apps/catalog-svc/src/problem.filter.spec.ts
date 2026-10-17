@@ -1,4 +1,4 @@
-import type { ArgumentsHost } from '@nestjs/common';
+import { HttpException, type ArgumentsHost } from '@nestjs/common';
 import { CatalogPersistenceError } from './database-errors.js';
 import { ProblemFilter } from './problem.filter.js';
 
@@ -24,6 +24,26 @@ describe('ProblemFilter persistence status mapping', () => {
     new ProblemFilter().catch(error, host);
     return response;
   }
+
+  it.each([
+    [409, 'VERSION_CONFLICT'],
+    [409, 'SKU_DUPLICADO'],
+    [409, 'COMBINACION_DUPLICADA'],
+    [409, 'PREPARACION_NO_REINTENTABLE'],
+    [422, 'DATOS_INCOMPLETOS'],
+    [422, 'PERFIL_FISICO_INVALIDO'],
+    [422, 'TIPO_PRODUCTO_INVALIDO'],
+  ])('preserves contractual mutation error %s %s', (status, code) => {
+    const response = responseFor(
+      new HttpException({ code, secret: 'must-not-leak' }, Number(status)),
+    );
+    expect(response.json).toHaveBeenCalledWith(
+      expect.objectContaining({ status, code }),
+    );
+    expect(JSON.stringify(response.json.mock.calls[0])).not.toContain(
+      'must-not-leak',
+    );
+  });
 
   it.each([
     ['unique', 500, 'ERROR_INTERNO'],

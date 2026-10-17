@@ -10,13 +10,21 @@ import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
-import { sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
+import { CatalogMutationService } from '../src/catalog-mutation.service.js';
+import type { CatalogMasterClient } from '../src/catalog-master.client.js';
+import { CatalogMessageService } from '../src/catalog-message.service.js';
+import { CatalogQueryRepository } from '../src/catalog-query.repository.js';
+import { activeAttempt, parseCatalogMessage } from '../src/catalog-messages.js';
+import type { Attribute } from '../src/commercial.types.js';
 import { CatalogPersistenceError } from '../src/database-errors.js';
 import { Database, readPostgresSettings } from '../src/database.js';
 import { CatalogTransactionManager } from '../src/catalog-transaction.js';
 import { PostgresCatalogWriteRepository } from '../src/postgres-catalog-write.repository.js';
 import {
   products,
+  activationChecks,
+  outbox,
   skuIdentity,
   skuPhysicalProfiles,
 } from '../src/catalog.schema.js';
@@ -673,6 +681,499 @@ describe.skipIf(!dockerAvailable)(
       expect(conflict.stderr).toContain(
         'DATA-002 contenido diferente en catalog.products',
       );
+    });
+
+    // These provider tests use authoritative master fixtures, never shared Taxonomy or Supabase writes.
+    function mutationService() {
+      return new CatalogMutationService(
+        transactions,
+        repository,
+        {
+          masters: async () => undefined,
+          attributes: async (_type: string, values: Attribute[]) => values,
+        } as unknown as CatalogMasterClient,
+        {
+          resolve: async (_input, id) => ({
+            slug: 'fixture-' + id,
+            moneda: 'PEN',
+          }),
+        },
+      );
+    }
+    const actor = {
+      authorization: 'Bearer isolated-master-fixture',
+      correlationId: randomUUID(),
+    };
+    const fullProfile = {
+      pesoKg: 1.5,
+      dimensionesCm: { largo: 10, ancho: 20, alto: 30 },
+    };
+    function createRequest(hasVariants = false) {
+      return {
+        nombre: 'Mutation fixture',
+        descripcion: 'Disposable',
+        categoriaId: 'category-fixture',
+        tipoProductoId: 'type-fixture',
+        marcaId: 'brand-fixture',
+        skuBase: '000-' + randomUUID(),
+        tieneVariantes: hasVariants,
+        precioBaseInicial: 20,
+        imagenes: [{ url: 'https://example.test/product' }],
+        ...(hasVariants ? {} : { perfilFisico: fullProfile }),
+      };
+    }
+    async function requested(productId: string) {
+      return database.read((db) =>
+        db
+          .select()
+          .from(outbox)
+          .where(
+            and(
+              sql`${outbox.payload}->>'product_id' = ${productId}`,
+              sql`${outbox.event_name} IN ('pricing.product.initialization.requested','inventory.sku.initialization.requested')`,
+            ),
+          ),
+      );
+    }
+    function resultFor(row: typeof outbox.$inferSelect, rejected = false) {
+      const pricing = row.event_name.startsWith('pricing.');
+      return parseCatalogMessage({
+        message_id: randomUUID(),
+        schema_version: 1,
+        occurred_at: new Date().toISOString(),
+        correlation_id: row.correlation_id,
+        operation_id: row.operation_id,
+        causation_id: row.message_id,
+        producer: pricing ? 'pricing-svc' : 'inventory-svc',
+        kind: 'result',
+        name: row.event_name.replace(
+          'requested',
+          rejected ? 'rejected' : 'completed',
+        ),
+        data: {
+          product_id: row.payload.product_id,
+          ...(pricing
+            ? { sku_base: row.payload.sku_base }
+            : {
+                sku: row.payload.sku,
+                variant_id: row.payload.variant_id ?? null,
+              }),
+          status: rejected ? 'REJECTED' : pricing ? 'READY' : 'INITIALIZED',
+          completed_at: new Date().toISOString(),
+          code: rejected ? 'FIXTURE_REJECTED' : null,
+        },
+      });
+    }
+    async function complete(
+      productId: string,
+      dependency?: 'pricing' | 'inventory',
+    ) {
+      const messages = new CatalogMessageService(database);
+      for (const row of await requested(productId))
+        if (!dependency || row.event_name.startsWith(dependency + '.'))
+          await messages.consume(resultFor(row));
+    }
+    it('creates simple and variant products atomically with the correct preparation and Outbox intents', async () => {
+      const service = mutationService(),
+        body = createRequest(),
+        simple = await service.createProduct(body, actor);
+      expect(simple).toMatchObject({
+        status: 'BORRADOR',
+        sku_base: body.skuBase,
+        pricing_preparado: false,
+        inventario_inicializado: false,
+      });
+      expect(
+        (await requested(simple.product_id)).map((r) => r.event_name).sort(),
+      ).toEqual([
+        'inventory.sku.initialization.requested',
+        'pricing.product.initialization.requested',
+      ]);
+      await expect(service.createProduct(body, actor)).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'SKU_DUPLICADO' },
+      });
+      const parent = await service.createProduct(createRequest(true), actor);
+      expect(
+        (await requested(parent.product_id)).map((r) => r.event_name),
+      ).toEqual(['pricing.product.initialization.requested']);
+      const variantInput = {
+        sku: '000-V-' + randomUUID(),
+        atributosIdentificadores: [
+          {
+            caracteristica_id: 'size',
+            nombre: 'Size',
+            valor_id: 'M',
+            valor: 'M',
+          },
+        ],
+        imagenUrl: 'https://example.test/variant',
+        perfilFisico: fullProfile,
+      };
+      const child = await service.createVariant(
+        parent.product_id,
+        variantInput,
+        actor,
+      );
+      expect(child).toMatchObject({
+        sku: variantInput.sku,
+        status: 'BORRADOR',
+      });
+      const rows = await requested(parent.product_id);
+      expect(
+        rows.filter((r) => r.event_name.startsWith('pricing.')),
+      ).toHaveLength(1);
+      expect(
+        rows.filter(
+          (r) =>
+            r.payload.variant_id === child.variant_id &&
+            r.event_name.startsWith('inventory.'),
+        ),
+      ).toHaveLength(1);
+      await expect(
+        service.createVariant(
+          parent.product_id,
+          { ...variantInput, sku: 'new-' + randomUUID() },
+          actor,
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'COMBINACION_DUPLICADA' },
+      });
+      await expect(
+        service.createVariant(simple.product_id, variantInput, actor),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'PRODUCTO_NO_ADMITE_VARIANTES' },
+      });
+    });
+    it('validates completed preparation and rolls back invalid active edits including versions', async () => {
+      const service = mutationService(),
+        product = await service.createProduct(createRequest(), actor);
+      await expect(
+        service.state(product.product_id, undefined, 'activate', {}, actor),
+      ).rejects.toMatchObject({ status: 422 });
+      await complete(product.product_id);
+      expect(
+        await service.state(
+          product.product_id,
+          undefined,
+          'activate',
+          { catalogVersion: 0 },
+          actor,
+        ),
+      ).toMatchObject({ status: 'ACTIVO', catalog_version: 1 });
+      await expect(
+        service.update(
+          product.product_id,
+          undefined,
+          { catalogVersion: 0, nombre: 'stale' },
+          actor,
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'VERSION_CONFLICT' },
+      });
+      await expect(
+        service.update(
+          product.product_id,
+          undefined,
+          { perfilFisico: null, catalogVersion: 1 },
+          actor,
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      const [persisted] = await database.read((db) =>
+        db.select().from(products).where(eq(products.id, product.product_id)),
+      );
+      expect(persisted).toMatchObject({
+        estado: 'ACTIVO',
+        catalog_version: 1n,
+        nombre: 'Mutation fixture',
+      });
+      expect(
+        await service.update(
+          product.product_id,
+          undefined,
+          { descripcion: 'Valid edit', catalogVersion: 1 },
+          actor,
+        ),
+      ).toMatchObject({ status: 'ACTIVO', catalog_version: 2 });
+    });
+    it('serializes last-variant deactivation and preserves independent parent/child reactivation', async () => {
+      const service = mutationService(),
+        parent = await service.createProduct(createRequest(true), actor);
+      const child = await service.createVariant(
+        parent.product_id,
+        {
+          sku: '000-V-' + randomUUID(),
+          atributosIdentificadores: [
+            {
+              caracteristica_id: 'size',
+              nombre: 'Size',
+              valor_id: 'L',
+              valor: 'L',
+            },
+          ],
+          imagenUrl: 'https://example.test/variant',
+          perfilFisico: fullProfile,
+        },
+        actor,
+      );
+      await complete(parent.product_id, 'inventory');
+      expect(
+        await service.state(
+          parent.product_id,
+          child.variant_id,
+          'activate',
+          undefined,
+          actor,
+        ),
+      ).toMatchObject({ status: 'ACTIVA' });
+      await expect(
+        service.state(parent.product_id, undefined, 'activate', {}, actor),
+      ).rejects.toMatchObject({ status: 422 });
+      await complete(parent.product_id, 'pricing');
+      await service.state(parent.product_id, undefined, 'activate', {}, actor);
+      await service.state(
+        parent.product_id,
+        child.variant_id,
+        'deactivate',
+        undefined,
+        actor,
+      );
+      const snapshot = await transactions.run(async (tx) =>
+        repository.aggregate(
+          tx,
+          (await repository.lockProduct(tx, parent.product_id))!,
+        ),
+      );
+      expect(snapshot.estado).toBe('INACTIVO');
+      expect(snapshot.children[0]?.estado).toBe('INACTIVA');
+      const events = await database.read((db) =>
+        db
+          .select()
+          .from(outbox)
+          .where(sql`${outbox.payload}->>'product_id' = ${parent.product_id}`),
+      );
+      expect(
+        events.filter((e) => e.event_name.endsWith('.deactivated')),
+      ).toHaveLength(2);
+      await service.state(
+        parent.product_id,
+        child.variant_id,
+        'deactivate',
+        undefined,
+        actor,
+      );
+      await service.state(
+        parent.product_id,
+        child.variant_id,
+        'reactivate',
+        undefined,
+        actor,
+      );
+      const [stillInactive] = await database.read((db) =>
+        db.select().from(products).where(eq(products.id, parent.product_id)),
+      );
+      expect(stillInactive.estado).toBe('INACTIVO');
+      await service.state(
+        parent.product_id,
+        undefined,
+        'reactivate',
+        {},
+        actor,
+      );
+      const deactivated = await service.state(
+        parent.product_id,
+        undefined,
+        'deactivate',
+        {},
+        actor,
+      );
+      expect(deactivated).toMatchObject({
+        status: 'INACTIVO',
+        variants: [expect.objectContaining({ status: 'ACTIVA' })],
+      });
+    });
+    it('admits only one manual retry, rejects stale results and keeps COMPLETED terminal with Inbox dedupe', async () => {
+      vi.stubEnv('CATALOG_PREPARATION_TIMEOUT_MS', '1');
+      try {
+        const service = mutationService(),
+          product = await service.createProduct(createRequest(), actor),
+          messages = new CatalogMessageService(database);
+        const original = (await requested(product.product_id)).find((r) =>
+          r.event_name.startsWith('inventory.'),
+        )!;
+        await database.read((db) =>
+          db
+            .update(outbox)
+            .set({ published_at: new Date(Date.now() - 10000) })
+            .where(eq(outbox.id, original.id)),
+        );
+        const attempts = await Promise.allSettled([
+          service.retry(
+            product.product_id,
+            undefined,
+            { dependencia: 'INVENTARIO' },
+            actor,
+          ),
+          service.retry(
+            product.product_id,
+            undefined,
+            { dependencia: 'INVENTARIO' },
+            actor,
+          ),
+        ]);
+        expect(attempts.filter((a) => a.status === 'fulfilled')).toHaveLength(
+          1,
+        );
+        expect(attempts.find((a) => a.status === 'rejected')).toMatchObject({
+          reason: {
+            status: 409,
+            response: { code: 'PREPARACION_NO_REINTENTABLE' },
+          },
+        });
+        const active = activeAttempt(
+          (await requested(product.product_id)).filter(
+            (r) => r.operation_id === original.operation_id,
+          ),
+        )!;
+        expect(active.message_id).not.toBe(original.message_id);
+        expect(active.operation_id).toBe(original.operation_id);
+        expect(await messages.consume(resultFor(original))).toBe('STALE');
+        const success = resultFor(active);
+        expect(await messages.consume(success)).toBe('APPLIED');
+        expect(await messages.consume(success)).toBe('DUPLICATE');
+        expect(await messages.consume(resultFor(active, true))).toBe(
+          'TERMINAL',
+        );
+        const [check] = await database.read((db) =>
+          db
+            .select()
+            .from(activationChecks)
+            .where(eq(activationChecks.operation_id, original.operation_id!)),
+        );
+        expect(check.state).toBe('COMPLETED');
+        await expect(
+          service.retry(
+            product.product_id,
+            undefined,
+            { dependencia: 'INVENTARIO' },
+            actor,
+          ),
+        ).rejects.toMatchObject({ status: 409 });
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+    it('keeps Outbox pending without confirm and permits parallel relays without claiming one row twice', async () => {
+      const service = mutationService(),
+        product = await service.createProduct(createRequest(), actor),
+        messages = new CatalogMessageService(database);
+      // Other tests leave pending records intentionally; a failed relay must preserve its selected immutable envelope.
+      expect(
+        await messages.relayOne({
+          publish: async () => {
+            throw new Error('fixture unconfirmed');
+          },
+        }),
+      ).toBe('PENDING');
+      const seen = new Set<string>();
+      const publish = async (
+        message: import('../src/catalog-messages.js').CatalogEnvelope,
+      ) => {
+        expect(seen.has(message.message_id)).toBe(false);
+        seen.add(message.message_id);
+      };
+      await Promise.all([
+        messages.relayOne({ publish }),
+        messages.relayOne({ publish }),
+      ]);
+      expect(seen.size).toBe(2);
+      expect((await requested(product.product_id)).length).toBe(2);
+    });
+
+    it('reads contractual preparation, variants and physical SKU data from the committed aggregate', async () => {
+      const service = mutationService(),
+        simpleBody = createRequest(),
+        simple = await service.createProduct(simpleBody, actor);
+      await complete(simple.product_id);
+      await service.state(simple.product_id, undefined, 'activate', {}, actor);
+      const parentBody = createRequest(true),
+        parent = await service.createProduct(parentBody, actor);
+      const child = await service.createVariant(
+        parent.product_id,
+        {
+          sku: '000-' + randomUUID(),
+          atributosIdentificadores: [
+            {
+              caracteristica_id: 'size',
+              nombre: 'Size',
+              valor_id: 'S',
+              valor: 'S',
+            },
+          ],
+          imagenUrl: 'https://example.test/variant',
+          perfilFisico: fullProfile,
+        },
+        actor,
+      );
+      await complete(parent.product_id);
+      await service.state(
+        parent.product_id,
+        child.variant_id,
+        'activate',
+        undefined,
+        actor,
+      );
+      await service.state(parent.product_id, undefined, 'activate', {}, actor);
+      const queries = new CatalogQueryRepository(database, {
+        timeoutMs: 60000,
+      });
+      const physical = await queries.physicalData([
+        simpleBody.skuBase,
+        parentBody.skuBase,
+        child.sku,
+        'missing',
+      ]);
+      expect(physical.noEncontrados).toEqual([parentBody.skuBase, 'missing']);
+      expect(physical.productos).toEqual([
+        expect.objectContaining({
+          sku: simpleBody.skuBase,
+          estado: 'ACTIVO',
+          pesoKg: 1.5,
+          dimensionesCm: { largo: 10, ancho: 20, alto: 30 },
+        }),
+        expect.objectContaining({ sku: child.sku, estado: 'ACTIVO' }),
+      ]);
+      expect(await queries.productPreparation(parent.product_id)).toMatchObject(
+        {
+          inventario: null,
+          pricing: { status: 'COMPLETED', manual_retry_allowed: false },
+          variantes: [
+            {
+              inventario: { status: 'COMPLETED', manual_retry_allowed: false },
+            },
+          ],
+        },
+      );
+      expect(
+        await queries.listVariants(parent.product_id, 1, 20, 'ACTIVA'),
+      ).toMatchObject({
+        items: [
+          { variant_id: child.variant_id, sku: child.sku, status: 'ACTIVA' },
+        ],
+        meta: { pagina: 1, tamanio: 20, total: 1, totalPaginas: 1 },
+      });
+      expect(
+        await queries.findVariant(parent.product_id, child.variant_id),
+      ).toMatchObject({
+        variant_id: child.variant_id,
+        physical_profile: { sku: child.sku },
+      });
+      expect(
+        await queries.findVariant(simple.product_id, child.variant_id),
+      ).toBeNull();
     });
 
     it('enforces runtime ownership, denies cross-schema access, and closes its pool', async () => {

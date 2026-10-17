@@ -1,8 +1,13 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { and, asc, eq, inArray, or, sql } from 'drizzle-orm';
 import { Database, type CatalogTransaction } from './database.js';
 import {
   activationChecks,
+  outbox,
   products,
   skuIdentity,
   skuPhysicalProfiles,
@@ -18,6 +23,14 @@ import type {
   PreparationDependency,
   VariantPage,
 } from './catalog-query.types.js';
+import {
+  activeAttempt,
+  manualRetryAllowed,
+  preparationTimeout,
+  CATALOG_PREPARATION_CONFIG,
+  type CatalogPreparationConfig,
+  UnresolvedCatalogAttempt,
+} from './catalog-messages.js';
 
 type VariantRow = {
   variant_id: string;
@@ -41,7 +54,13 @@ function numericValues(values: (string | null)[]): number[] | null {
 
 @Injectable()
 export class CatalogQueryRepository {
-  constructor(private readonly database: Database) {}
+  constructor(
+    private readonly database: Database,
+    @Inject(CATALOG_PREPARATION_CONFIG)
+    private readonly preparation: CatalogPreparationConfig = {
+      timeoutMs: preparationTimeout(),
+    },
+  ) {}
 
   physicalData(skus: readonly string[]): Promise<{
     productos: PhysicalSkuData[];
@@ -300,77 +319,113 @@ export class CatalogQueryRepository {
   }
 
   productPreparation(productId: string): Promise<ProductPreparation | null> {
-    return this.database.read((db) =>
-      db.transaction(
-        async (tx) => {
-          const [product] = await tx
-            .select({
-              product_id: products.id,
-              sku_base: products.sku_base,
-              tiene_variantes: products.tiene_variantes,
-            })
-            .from(products)
-            .where(sql`${products.id}::text = ${productId}`)
-            .limit(1);
-          if (!product) return null;
-          const children = product.tiene_variantes
-            ? await tx
-                .select({ variant_id: variants.id, sku: variants.sku })
-                .from(variants)
-                .where(eq(variants.product_id, product.product_id))
-                .orderBy(asc(variants.id))
-            : [];
-          const checks = await tx
-            .select({
-              sku: activationChecks.sku,
-              dependency: activationChecks.dependency,
-              state: activationChecks.state,
-              resultPayload: activationChecks.result_payload,
-            })
-            .from(activationChecks)
-            .where(eq(activationChecks.product_id, product.product_id));
-          const byKey = new Map(
-            checks.map((check) => [check.dependency + '\0' + check.sku, check]),
-          );
-          const dependency = (
-            kind: 'PRICING' | 'INVENTORY',
-            sku: string,
-          ): PreparationDependency => {
-            const check = byKey.get(kind + '\0' + sku);
-            if (
-              !check ||
-              !['PENDING', 'COMPLETED', 'REJECTED'].includes(check.state)
-            )
-              throw new ServiceUnavailableException();
-            const result = check.resultPayload;
-            const code =
-              recordValue(result) && typeof result.code === 'string'
-                ? result.code
-                : null;
-            return {
-              status: check.state as PreparationDependency['status'],
-              // Manual retry becomes available only after its authorization and
-              // anti-TOCTOU write flow are implemented in the following block.
-              manual_retry_allowed: false,
-              ...(code !== null ? { code } : {}),
+    return this.database
+      .read((db) =>
+        db.transaction(
+          async (tx) => {
+            const [product] = await tx
+              .select({
+                product_id: products.id,
+                sku_base: products.sku_base,
+                tiene_variantes: products.tiene_variantes,
+              })
+              .from(products)
+              .where(sql`${products.id}::text = ${productId}`)
+              .limit(1);
+            if (!product) return null;
+            const children = product.tiene_variantes
+              ? await tx
+                  .select({ variant_id: variants.id, sku: variants.sku })
+                  .from(variants)
+                  .where(eq(variants.product_id, product.product_id))
+                  .orderBy(asc(variants.id))
+              : [];
+            const checks = await tx
+              .select({
+                sku: activationChecks.sku,
+                dependency: activationChecks.dependency,
+                state: activationChecks.state,
+                resultPayload: activationChecks.result_payload,
+                operationId: activationChecks.operation_id,
+              })
+              .from(activationChecks)
+              .where(eq(activationChecks.product_id, product.product_id));
+            const requests = checks.length
+              ? await tx
+                  .select()
+                  .from(outbox)
+                  .where(
+                    inArray(
+                      outbox.operation_id,
+                      checks.map((c) => c.operationId),
+                    ),
+                  )
+              : [];
+            const timeout = this.preparation.timeoutMs;
+            const byKey = new Map(
+              checks.map((check) => [
+                check.dependency + '\0' + check.sku,
+                check,
+              ]),
+            );
+            const dependency = (
+              kind: 'PRICING' | 'INVENTORY',
+              sku: string,
+            ): PreparationDependency => {
+              const check = byKey.get(kind + '\0' + sku);
+              if (
+                !check ||
+                !['PENDING', 'COMPLETED', 'REJECTED'].includes(check.state)
+              )
+                throw new ServiceUnavailableException();
+              const result = check.resultPayload;
+              const code =
+                recordValue(result) && typeof result.code === 'string'
+                  ? result.code
+                  : null;
+              return {
+                status: check.state as PreparationDependency['status'],
+                manual_retry_allowed:
+                  check.state === 'PENDING' &&
+                  timeout !== undefined &&
+                  manualRetryAllowed(
+                    check.state,
+                    activeAttempt(
+                      requests.filter(
+                        (r) =>
+                          r.operation_id === check.operationId &&
+                          r.event_name ===
+                            (kind === 'PRICING'
+                              ? 'pricing.product.initialization.requested'
+                              : 'inventory.sku.initialization.requested'),
+                      ),
+                    ),
+                    timeout,
+                  ),
+                code,
+              };
             };
-          };
-          return {
-            product_id: product.product_id,
-            tiene_variantes: product.tiene_variantes,
-            pricing: dependency('PRICING', product.sku_base),
-            inventario: product.tiene_variantes
-              ? null
-              : dependency('INVENTORY', product.sku_base),
-            variantes: children.map((child) => ({
-              variant_id: child.variant_id,
-              sku: child.sku,
-              inventario: dependency('INVENTORY', child.sku),
-            })),
-          };
-        },
-        { isolationLevel: 'repeatable read', accessMode: 'read only' },
-      ),
-    );
+            return {
+              product_id: product.product_id,
+              tiene_variantes: product.tiene_variantes,
+              pricing: dependency('PRICING', product.sku_base),
+              inventario: product.tiene_variantes
+                ? null
+                : dependency('INVENTORY', product.sku_base),
+              variantes: children.map((child) => ({
+                variant_id: child.variant_id,
+                sku: child.sku,
+                inventario: dependency('INVENTORY', child.sku),
+              })),
+            };
+          },
+          { isolationLevel: 'repeatable read', accessMode: 'read only' },
+        ),
+      )
+      .catch((error: unknown) => {
+        if (error instanceof UnresolvedCatalogAttempt)
+          throw new ServiceUnavailableException();
+        throw error;
+      });
   }
 }
