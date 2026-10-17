@@ -1130,8 +1130,11 @@ export class ReservationsService {
           correlationId,
         );
       }
-      throw ProblemDetailsException.reservaExpirada(
-        'La reserva está expirada',
+      // El contrato de liberación no enumera RESERVA_EXPIRADA en su 409;
+      // una reserva expirada no está activa, por lo que se responde
+      // RESERVA_NO_ACTIVA.
+      throw ProblemDetailsException.reservaNoActiva(
+        'La reserva está expirada y no admite liberación',
         correlationId,
       );
     }
@@ -1377,8 +1380,8 @@ export class ReservationsService {
           },
         );
       if (expiredAfterLockRelease) {
-        throw ProblemDetailsException.reservaExpirada(
-          'La reserva está expirada',
+        throw ProblemDetailsException.reservaNoActiva(
+          'La reserva está expirada y no admite liberación',
           correlationId,
         );
       }
