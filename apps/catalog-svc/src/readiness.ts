@@ -7,6 +7,10 @@ import {
 } from '@nestjs/common';
 import { pathToFileURL } from 'node:url';
 import type { CommercialEligibilityPolicy } from './commercial-eligibility.js';
+import {
+  CATALOG_READ_DEMO,
+  type CatalogReadDemo,
+} from './catalog-read-demo.js';
 
 export const CATALOG_DATABASE = Symbol('CATALOG_DATABASE');
 
@@ -58,7 +62,6 @@ export class ReadinessController {
       throw new ServiceUnavailableException({
         status: 'not_ready',
         service: 'catalog-svc',
-        dependencies: { database: 'unavailable' },
       });
     }
   }
@@ -98,7 +101,19 @@ async function runReadinessProbe(): Promise<void> {
   try {
     await app.get(Database).verifyIdentity();
     database = 'ready';
-    if (config.marketplaceDemoPreview) {
+    if (app.get<CatalogReadDemo>(CATALOG_READ_DEMO).enabled) {
+      await app.get(repository.PostgresCatalogRepository).listCandidates(
+        {
+          canal: 'MARKETPLACE',
+          pagina: 1,
+          tamanio: 1,
+          orden: 'NOMBRE_ASC',
+        },
+        undefined,
+        true,
+      );
+      eligibilityStatus = 'not_evaluated_demo';
+    } else if (config.marketplaceDemoPreview) {
       await app.get(repository.PostgresCatalogRepository).checkDemoReadAccess();
       demoCatalogRead = true;
       await app.get(PricingClient).checkReady();
@@ -134,7 +149,9 @@ async function runReadinessProbe(): Promise<void> {
       status,
       database,
       eligibility: eligibilityStatus,
-      ...(config.marketplaceDemoPreview ? { pricing: pricingStatus } : {}),
+      ...(config.marketplaceDemoPreview && !config.readDemo.enabled
+        ? { pricing: pricingStatus }
+        : {}),
     }) + '\n',
   );
   if (status !== 'ready') process.exitCode = 1;

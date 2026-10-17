@@ -1,5 +1,7 @@
 # catalog-svc — configuración y readiness (#43)
 
+Demo interna de consulta real aprobada el 2026-10-17: [alcance, evidencias y liberación pendiente](DEMO-READ-ONLY.md).
+
 Rama personal `poma`. El PR #119 conserva el código comercial incorporado desde
 master; estas correcciones se limitan a configuración, arranque, observabilidad,
 readiness y sus pruebas. Las ediciones propias no cambian CI, contratos, otros servicios ni migraciones.
@@ -80,6 +82,34 @@ inválido produce 400 `VALIDACION` con una nueva identidad UUID idéntica en la
 cabecera y el cuerpo problem. El filtro preserva la identidad ya establecida.
 No se comprueban brokers ni se hace fan-out a servicios ajenos al trabajo admitido.
 
+## Persistencia Drizzle de Catálogo
+
+`src/catalog.schema.ts` mapea las 13 tablas de `catalog` y conserva los enums
+nativos, constraints declarativos, defaults y relaciones de la migración oficial
+`datos/catalog-svc/migrations/0001_create_catalog.sql` del repositorio de Docs.
+La copia de solo lectura bajo `test/fixtures/` permite preparar PostgreSQL
+desechable en la suite; no es una migración ejecutable del servicio ni sustituye
+el historial oficial.
+
+`Database` mantiene un único pool, usa la configuración validada por
+`CatalogConfig` y crea Drizzle con el esquema de Catálogo. Los repositorios de
+lectura/escritura y `CatalogTransactionManager` reutilizan ese provider. Los
+métodos de escritura reciben la transacción del agregado en vez de abrir pools
+o transacciones paralelas. Una transacción de escritura agrupa los cambios
+locales; PostgreSQL conserva la aplicación de UNIQUE/FK/CHECK y los triggers
+diferidos existentes. Los errores se exponen mediante `CatalogPersistenceError`
+con una categoría interna segura;
+el SQL, los parámetros y el texto del driver no se incluyen en mensajes.
+
+Las cinco pruebas de persistencia y la prueba adicional del lote DATA-002 en
+`postgres.persistence.e2e-spec.ts` usan PostgreSQL 17 efímero con TLS, role
+`catalog_app` y un schema ajeno de comprobación. En CI son seis pruebas en
+total: cinco de persistencia y una de validación DATA-002. En local,
+la suite se omite si Docker u OpenSSL no están disponibles. En CI, la suite falla
+explícitamente en esas condiciones y no acepta una omisión como resultado
+aprobado. La cobertura incluye persistencia, rollback/constraints, permisos y
+violaciones NOT NULL. La suite no usa ni escribe en Supabase.
+
 ## Ejecución y pruebas
 
 Desde la raíz, con configuración PG propia suministrada de forma segura:
@@ -119,7 +149,57 @@ para aprobar este PR. El SHA, enlace al run y resultados reales se registran en
 la descripción del PR #119 después de completar CI. No inferir despliegue,
 homologación externa ni aceptación de otros módulos a partir de esos resultados.
 
-## Fuentes
+## Bloques 1 y 2: consultas, mutaciones y mensajería
+
+El detalle por operación, evidencia, autorizaciones y pendientes está en
+[AUDIT-BLOCKS-1-2.md](AUDIT-BLOCKS-1-2.md). Incluye los ocho operationIds de
+consulta y los doce de mutación. El estado integral es PARTIAL; las políticas
+comerciales/barcode y algunos handlers GenericData siguen aislados.
+
+Las altas usan PEN y slug estable de nombre normalizado seguido del UUID completo,
+según aprobación expresa del owner. Las variantes requieren SKU explícito por
+ahora; omitirlo no genera una identidad comercial arbitraria.
+
+Configuración adicional (suministrar secretos fuera del repositorio):
+
+- `RABBITMQ_URL`: AMQP(S), usuario/contraseña y vhost `g6-productos-ofertas`.
+  Si no se configura, el transporte no arranca y los mensajes quedan en Outbox.
+- `CATALOG_AMQP_PRODUCER_USERS`: objeto JSON que asocia `pricing-svc`,
+  `inventory-svc`, `taxonomy-svc` y `bulk-svc` a usuarios broker distintos entre sí
+  y del usuario Catálogo. Se valida `user_id` de RabbitMQ; requiere permisos
+  acordados de infraestructura, no un header de productor sin autenticar.
+- `CATALOG_PREPARATION_TIMEOUT_MS`: entero positivo aprobado para permitir
+  recuperación manual de PENDING vencido después de published_at. Si se omite,
+  ese reintento no se habilita. REJECTED necesita política de recuperación por
+  código; COMPLETED siempre es terminal.
+
+El runtime no declara recursos en RabbitMQ. Usa la topología aprovisionada;
+confirms, alternate exchange y entrega al consumidor son evidencias diferentes.
+Las suites PostgreSQL y RabbitMQ crean una instancia desechable por suite;
+necesitan Docker y, para PostgreSQL TLS, OpenSSL. Nunca apuntarlas a servicios
+compartidos. La suite HTTP aísla casos de uso y no acredita integración real.
+
+## Auditoría correctiva y bloque 3
+
+[AUDIT-BLOCK-3.md](AUDIT-BLOCK-3.md) registra la causa del smoke Marketplace,
+las correcciones autorizadas, observabilidad, pruebas de fallos y la matriz de
+integración real. Los logs HTTP omiten URL/query/body/headers; los indicadores
+internos cuentan señales de transporte/Inbox/Outbox sin crear una API pública.
+La cancelación remota del consumidor dispara reconexión; el shutdown tiene un
+plazo de cinco segundos para cerrar transporte y drenar entregas, sin afirmar
+cancelación de transacciones en curso.
+
+`gateway-catalog.provider.e2e-spec.ts` ejecuta Gateway y Catálogo reales en
+loopback: acredita la incompatibilidad demo/Bearer mediante 401, no CRUD React.
+`postgres.persistence.e2e-spec.ts` agrega JOINT-01 (PostgreSQL TLS + RabbitMQ +
+Outbox/Inbox reales), timeout/rollback y saturación de pool. Son 15 casos en esa
+suite, con una instancia de cada infraestructura; no apuntan a Supabase.
+
+La configuración adicional SECURITY_* y la CA del smoke, junto al discovery del
+emisor efímero de CI, se modifican con autorización expresa. No se desactiva JWT,
+no se cambia la aserción 400 y no se inventa una política de confianza demo.
+
+## Fuentes históricas
 
 - [Issue #43](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/43).
 - [Arquitectura §§7, 23–25](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/master/arquitectura/Arquitectura.md).

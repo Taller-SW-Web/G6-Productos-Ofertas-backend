@@ -32,6 +32,29 @@ afterAll(() => {
 });
 
 describe('CatalogConfig PG contract', () => {
+  it('captures messaging and timeout configuration once and rejects malformed settings', () => {
+    const config = new CatalogConfig({
+      ...validEnv(),
+      CATALOG_PREPARATION_TIMEOUT_MS: '60000',
+    });
+    expect(config.preparation.timeoutMs).toBe(60000);
+    expect(config.amqp.connection).toBeUndefined();
+    expect(Object.isFrozen(config.preparation)).toBe(true);
+    expect(
+      () =>
+        new CatalogConfig({
+          ...validEnv(),
+          CATALOG_PREPARATION_TIMEOUT_MS: '-1',
+        }),
+    ).toThrow();
+    expect(
+      () =>
+        new CatalogConfig({
+          ...validEnv(),
+          RABBITMQ_URL: 'amqp://user:fixture@localhost/',
+        }),
+    ).toThrow();
+  });
   it.each(['session', 'direct'])(
     'accepts %s with strict TLS and typed configuration',
     (mode) => {

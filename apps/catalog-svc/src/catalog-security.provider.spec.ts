@@ -1,0 +1,165 @@
+import { createServer, type Server } from 'node:http';
+import { once } from 'node:events';
+import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
+import { Test } from '@nestjs/testing';
+import type { INestApplication } from '@nestjs/common';
+import request from 'supertest';
+import { AppModule } from './app.module.js';
+import {
+  CATALOG_SECURITY_CONFIG,
+  type CatalogSecurityConfig,
+} from './catalog-auth.js';
+import { CATALOG_AMQP_SETTINGS } from './catalog-amqp.js';
+
+/** HTTP provider regression: actual controller, guard, crypto, discovery/JWKS,
+ * parser and fail-closed eligibility. No PostgreSQL or React/Gateway E2E claim. */
+describe('Marketplace provider security and invalid pagination regression', () => {
+  let issuer: Server,
+    origin: string,
+    app: INestApplication,
+    unconfigured: INestApplication;
+  const pair = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const key = {
+    ...pair.publicKey.export({ format: 'jwk' }),
+    kid: 'provider',
+    alg: 'RS256',
+    use: 'sig',
+  };
+  const encode = (v: unknown) =>
+    Buffer.from(JSON.stringify(v)).toString('base64url');
+  function token(overrides: Record<string, unknown> = {}) {
+    const now = Math.floor(Date.now() / 1000),
+      body =
+        encode({ alg: 'RS256', kid: 'provider' }) +
+        '.' +
+        encode({
+          iss: origin,
+          sub: 'modulo-marketplace',
+          tipo: 'servicio',
+          aud: ['api-productos'],
+          scope: 'catalogo:leer',
+          iat: now,
+          exp: now + 600,
+          jti: randomUUID(),
+          ...overrides,
+        });
+    return (
+      body +
+      '.' +
+      sign('RSA-SHA256', Buffer.from(body), pair.privateKey).toString(
+        'base64url',
+      )
+    );
+  }
+  async function create(config?: CatalogSecurityConfig) {
+    const module = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(CATALOG_SECURITY_CONFIG)
+      .useValue(config)
+      .overrideProvider(CATALOG_AMQP_SETTINGS)
+      .useValue({})
+      .compile();
+    const server = module.createNestApplication({ logger: false });
+    await server.init();
+    return server;
+  }
+  beforeAll(async () => {
+    issuer = createServer((req, res) => {
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/discovery')
+        res.end(JSON.stringify({ issuer: origin, jwks_uri: origin + '/keys' }));
+      else if (req.url === '/keys') res.end(JSON.stringify({ keys: [key] }));
+      else {
+        res.statusCode = 404;
+        res.end('{}');
+      }
+    });
+    issuer.listen(0, '127.0.0.1');
+    await once(issuer, 'listening');
+    const address = issuer.address();
+    if (!address || typeof address === 'string') throw new Error();
+    origin = 'http://127.0.0.1:' + address.port;
+    app = await create({
+      issuer: origin,
+      discoveryUrl: origin + '/discovery',
+      jwksUrl: origin + '/keys',
+    });
+    unconfigured = await create();
+  });
+  afterAll(async () => {
+    await app?.close();
+    await unconfigured?.close();
+    await new Promise<void>((resolve) => issuer.close(() => resolve()));
+  });
+  const path = '/api/v1/productos?canal=MARKETPLACE&pagina=0';
+  it('reproduces 503 when Catalog has no security configuration, before parsing pagination', async () => {
+    const result = await request(unconfigured.getHttpServer())
+      .get(path)
+      .auth(token(), { type: 'bearer' })
+      .expect(503);
+    expect(result.body.code).toBe('SERVICIO_NO_DISPONIBLE');
+  });
+  it('returns contractual 400 with a correctly authenticated token and stable correlation', async () => {
+    const id = randomUUID();
+    const result = await request(app.getHttpServer())
+      .get(path)
+      .auth(token(), { type: 'bearer' })
+      .set('X-Correlation-Id', id)
+      .expect(400);
+    expect(result.body).toMatchObject({
+      code: 'VALIDACION',
+      correlationId: id,
+    });
+    expect(result.headers['x-correlation-id']).toBe(id);
+  });
+  it('returns VALIDACION for malformed JSON without leaking the parser body', async () => {
+    const result = await request(app.getHttpServer())
+      .post('/api/v1/productos')
+      .auth(
+        token({
+          tipo: 'acceso',
+          sub: randomUUID(),
+          roles: ['GESTOR_COMERCIAL'],
+        }),
+        { type: 'bearer' },
+      )
+      .set('Content-Type', 'application/json')
+      .send('{"private":"broken')
+      .expect(400);
+    expect(result.body.code).toBe('VALIDACION');
+    expect(JSON.stringify(result.body)).not.toContain('private');
+  });
+  it('keeps 401 without Authorization (including demo upstream), expired JWT and invalid signature', async () => {
+    for (const bearer of [
+      undefined,
+      token({ exp: 1 }),
+      token().slice(0, -12) + 'bad-signature',
+    ]) {
+      const call = request(app.getHttpServer()).get(path);
+      if (bearer) call.auth(bearer, { type: 'bearer' });
+      expect((await call.expect(401)).body.code).toBe('TOKEN_INVALIDO');
+    }
+  });
+  it('keeps scope/client/audience 403 ahead of validation, and valid commercial reads fail closed at eligibility', async () => {
+    for (const claims of [
+      { scope: 'invalid' },
+      { sub: 'modulo-ventas' },
+      { aud: ['other-api'] },
+    ])
+      expect(
+        (
+          await request(app.getHttpServer())
+            .get(path)
+            .auth(token(claims), { type: 'bearer' })
+            .expect(403)
+        ).body.code,
+      ).toBe('SCOPE_INSUFICIENTE');
+    expect(
+      (
+        await request(app.getHttpServer())
+          .get('/api/v1/productos?canal=MARKETPLACE&pagina=1')
+          .auth(token(), { type: 'bearer' })
+          .expect(503)
+      ).body.code,
+    ).toBe('SERVICIO_NO_DISPONIBLE');
+  });
+});

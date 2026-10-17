@@ -13,6 +13,7 @@ export interface GatewaySettings {
   readonly jwksUrl?: string;
   readonly publicOperations: readonly string[];
   readonly demoNoAuthEnabled: boolean;
+  readonly readOnlyDemoEnabled?: boolean;
 }
 
 export function readGatewayPort(env: Readonly<NodeJS.ProcessEnv>): number {
@@ -88,6 +89,8 @@ export function readGatewaySettings(
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000)
       throw new Error();
     const demoNoAuthEnabled = env.GATEWAY_DEMO_NO_AUTH_ENABLED ?? 'false';
+    const readOnlyDemoEnabled = env.G6_READ_ONLY_DEMO_ENABLED ?? 'false';
+    if (!['true', 'false'].includes(readOnlyDemoEnabled)) throw new Error();
     if (!['true', 'false'].includes(demoNoAuthEnabled)) throw new Error();
     if (demoNoAuthEnabled !== 'true') {
       if (!!env.AUTH_ISSUER !== !!env.AUTH_JWKS_URL) throw new Error();
@@ -125,6 +128,7 @@ export function readGatewaySettings(
       jwksUrl: env.AUTH_JWKS_URL,
       publicOperations: Object.freeze(publicOperations),
       demoNoAuthEnabled: demoNoAuthEnabled === 'true',
+      readOnlyDemoEnabled: readOnlyDemoEnabled === 'true',
     });
   } catch {
     throw new Error(

@@ -8,6 +8,7 @@ import { AppModule } from './app.module.js';
 import { CatalogConfig } from './config.js';
 import { SanitizedLogger } from './sanitized-logger.js';
 import { Database } from './database.js';
+import { catalogRequestLog } from './catalog-telemetry.js';
 
 export async function createApplication(
   env: Record<string, string | undefined> = process.env,
@@ -34,6 +35,7 @@ export async function createApplication(
     logger,
     abortOnError: false,
   });
+  app.use(catalogRequestLog(logger));
   app.use((req: Request, res: Response, next: NextFunction) => {
     const supplied = req.get('X-Correlation-Id');
     const id = correlationId(supplied);
