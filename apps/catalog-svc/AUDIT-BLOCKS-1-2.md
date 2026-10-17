@@ -1,5 +1,11 @@
 # Auditoría del bloque 1 e implementación del bloque 2
 
+> Nota posterior: el usuario autorizó después publicar `1fa3bae` y ampliar el PR
+> #125 a todos los bloques. Su apartado D conserva la decisión de entrega local
+> previa; ya no describe el estado remoto actual. El run `39031944960` ejecutó
+> 12/12 PG y 5/5 RabbitMQ, y falló después en el smoke Marketplace. La auditoría
+> correctiva y la evidencia nueva están en [AUDIT-BLOCK-3.md](AUDIT-BLOCK-3.md).
+
 Fecha: 2026-10-17. Rama personal: `poma`. Owner: GabrielPGu.
 Estado global: **PARTIAL**. Este informe acredita código y ejecuciones locales;
 no acredita integración autenticada entre servicios, homologación ni despliegue.

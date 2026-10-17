@@ -177,7 +177,27 @@ Las suites PostgreSQL y RabbitMQ crean una instancia desechable por suite;
 necesitan Docker y, para PostgreSQL TLS, OpenSSL. Nunca apuntarlas a servicios
 compartidos. La suite HTTP aísla casos de uso y no acredita integración real.
 
-## Fuentes históricas del runtime
+## Auditoría correctiva y bloque 3
+
+[AUDIT-BLOCK-3.md](AUDIT-BLOCK-3.md) registra la causa del smoke Marketplace,
+las correcciones autorizadas, observabilidad, pruebas de fallos y la matriz de
+integración real. Los logs HTTP omiten URL/query/body/headers; los indicadores
+internos cuentan señales de transporte/Inbox/Outbox sin crear una API pública.
+La cancelación remota del consumidor dispara reconexión; el shutdown tiene un
+plazo de cinco segundos para cerrar transporte y drenar entregas, sin afirmar
+cancelación de transacciones en curso.
+
+`gateway-catalog.provider.e2e-spec.ts` ejecuta Gateway y Catálogo reales en
+loopback: acredita la incompatibilidad demo/Bearer mediante 401, no CRUD React.
+`postgres.persistence.e2e-spec.ts` agrega JOINT-01 (PostgreSQL TLS + RabbitMQ +
+Outbox/Inbox reales), timeout/rollback y saturación de pool. Son 15 casos en esa
+suite, con una instancia de cada infraestructura; no apuntan a Supabase.
+
+La configuración adicional SECURITY_* y la CA del smoke, junto al discovery del
+emisor efímero de CI, se modifican con autorización expresa. No se desactiva JWT,
+no se cambia la aserción 400 y no se inventa una política de confianza demo.
+
+## Fuentes históricas
 
 - [Issue #43](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/43).
 - [Arquitectura §§7, 23–25](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/master/arquitectura/Arquitectura.md).
