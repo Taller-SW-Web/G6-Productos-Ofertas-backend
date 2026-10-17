@@ -14,6 +14,7 @@ RUN bash ops/oracle/build-service.sh "$SERVICE_NAME"
 FROM node:24.15.0-alpine@sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f AS runtime
 
 ENV NODE_ENV=production
+ENV CATALOG_SVC_HOST=0.0.0.0 TAXONOMY_SVC_HOST=0.0.0.0
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force

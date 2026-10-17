@@ -1,5 +1,10 @@
 # Revisión de Promotions después del Gateway #116
 
+Esta es la evidencia histórica de la primera sincronización y del CI
+38987198632, SHA `eac3b1e8c233817f28e9b5a4e3145116094c6bc1`.
+La revisión posterior al merge de #117 se registra por separado en
+[`REVISION-POST-117-2026-10-16.md`](REVISION-POST-117-2026-10-16.md).
+
 Fecha: 16/10/2026, America/Lima. Rama única: `cueva`.
 Base anterior de cueva: `77b4ce51f441b1c49e07f88ecae3619d2479d598`.
 Master integrado: `5bb832b103f9cca4d0967fecde26c1ebccd05944`.

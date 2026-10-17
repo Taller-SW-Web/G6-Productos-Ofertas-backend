@@ -42,9 +42,10 @@ sin campos, eventos, códigos de negocio ni endpoints nuevos.
 ## Composición real y fronteras pendientes
 
 Los providers Nest registran `CouponCommandProcessor`, `CouponCommandDeliveryHandler`
-y `CouponOutbox` usando `pg ^8.23.1` (resuelto a 8.23.1) y `amqplib@0.10.9`.
-La sincronización autorizada con `master` del 2026-10-16 conserva también
-`drizzle-orm ^0.45.4` y `@types/pg ^8.23.1`, junto con las demás dependencias
+y `CouponOutbox` usando `pg 8.23.1` y `amqplib 0.10.9`.
+La segunda sincronización autorizada con `master` del 2026-10-16, posterior
+al PR #117 (`9cd6edc`), conserva sus pins exactos: `pg 8.23.1`,
+`drizzle-orm 0.45.4` y `@types/pg 8.23.1`, junto con las demás dependencias
 actuales de `master`; el lockfile se regenera sin cambiar sus versiones resueltas.
 Esta instrucción sustituye el pin histórico de `pg@8.16.3` autorizado antes para
 #33. PostgreSQL usa el CA local y
@@ -92,7 +93,9 @@ No se declara cerrado #33.
 
 ## Pruebas reproducibles
 
-Validación actual sobre el árbol sincronizado: ver
+Validación actual sobre el árbol sincronizado después de #117: ver
+[`REVISION-POST-117-2026-10-16.md`](REVISION-POST-117-2026-10-16.md).
+La primera sincronización se conserva como antecedente en
 [`REVISION-MASTER-2026-10-16.md`](REVISION-MASTER-2026-10-16.md).
 El smoke incluye ahora dos operaciones distintas de restauración con distinta
 fecha de cancelación y replay por mensaje. Comprueba en PostgreSQL que la

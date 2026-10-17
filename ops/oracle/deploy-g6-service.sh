@@ -5,8 +5,10 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=service-registry.sh
 source "${SCRIPT_DIR}/service-registry.sh"
 
-readonly G6_DEPLOY_EXECUTOR_VERSION=3
+readonly G6_DEPLOY_EXECUTOR_VERSION=4
 readonly G6_SUPPORTED_SERVICE_REGISTRY_VERSION=2
+readonly G6_HTTP_GENERIC_OVERLAY="/opt/g6-productos-ofertas/shared/docker-compose.service.http.yml"
+readonly G6_HTTP_INVENTORY_OVERLAY="/opt/g6-productos-ofertas/inventory/docker-compose.inventory.http.yml"
 
 fail() {
   printf 'G6 deployment: %s\n' "$1" >&2
@@ -48,16 +50,95 @@ IFS= read -r GHCR_USERNAME || fail 'falta usuario GHCR en stdin'
 IFS= read -r GHCR_TOKEN || fail 'falta token GHCR en stdin'
 [[ -n "$GHCR_USERNAME" && -n "$GHCR_TOKEN" ]] || fail 'credenciales GHCR vacías'
 
+g6_http_member_expected_alias() {
+  local requested_container="$1" service enabled project compose_unit
+  local member_kind
+  while IFS='|' read -r service enabled _ _ _ _ _ _ project compose_unit _ _ _; do
+    [[ -n "$service" && "$service" != \#* ]] || continue
+    if [[ "$enabled" == true && "g6-${service}" == "$requested_container" ]]; then
+      member_kind=other
+      [[ "$compose_unit" == service && "$service" != inventory-svc ]] && member_kind=generic
+      printf '%s|%s|%s|%s\n' "$service" "$member_kind" "$project" "$compose_unit"
+      return 0
+    fi
+  done < "$G6_SERVICE_REGISTRY"
+  return 1
+}
+
+g6_validate_http_network() {
+  local target_alias="$1" target_container="$2" contract members member aliases alias previous member_metadata expected_alias member_kind expected_project expected_compose_unit identity actual_project actual_compose_unit alias_found
+  local driver scope internal attachable ingress config_only ipam_driver ipam_configs options_count
+  local -A seen_aliases=()
+  local -A generic_members=()
+
+  contract="$(docker network inspect --format \
+    '{{.Driver}}|{{.Scope}}|{{.Internal}}|{{.Attachable}}|{{.Ingress}}|{{.ConfigOnly}}|{{.IPAM.Driver}}|{{len .IPAM.Config}}|{{len .Options}}' \
+    g6-http 2>/dev/null)" || fail 'no se pudo inspeccionar g6-http; no se descargó ni cambió el servicio'
+  IFS='|' read -r driver scope internal attachable ingress config_only ipam_driver ipam_configs options_count <<< "$contract"
+  [[ "$driver" == bridge && "$scope" == local && "$internal" == false &&
+    "$attachable" == false && "$ingress" == false && "$config_only" == false &&
+    "$ipam_driver" == default && "$ipam_configs" =~ ^[1-9][0-9]*$ && "$options_count" == 0 ]] ||
+    fail 'g6-http no coincide con bridge local, no-internal y configuración IPAM predeterminada; no se descargó ni cambió el servicio'
+
+  members="$(docker network inspect --format \
+    '{{range $id, $container := .Containers}}{{$container.Name}}{{"\n"}}{{end}}' \
+    g6-http 2>/dev/null)" || fail 'no se pudieron inspeccionar los miembros de g6-http; no se descargó ni cambió el servicio'
+  while IFS= read -r member; do
+    [[ -n "$member" ]] || continue
+    member_metadata="$(g6_http_member_expected_alias "$member")" ||
+      fail "g6-http contiene un miembro no habilitado: ${member}; no se descargó ni cambió el servicio"
+    IFS='|' read -r expected_alias member_kind expected_project expected_compose_unit <<< "$member_metadata"
+    generic_members["$member"]="$member_kind"
+    identity="$(docker inspect --format \
+      '{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.project"}}' \
+      "$member" 2>/dev/null)" || fail "no se pudo identificar el proyecto Compose de ${member}; no se descargó ni cambió el servicio"
+    IFS='|' read -r actual_compose_unit actual_project <<< "$identity"
+    [[ "$actual_compose_unit" == "$expected_compose_unit" && "$actual_project" == "$expected_project" ]] ||
+      fail "g6-http contiene un miembro ajeno al proyecto Compose registrado: ${member}; no se descargó ni cambió el servicio"
+    alias_found=false
+    aliases="$(docker inspect --format \
+      '{{range $name, $network := .NetworkSettings.Networks}}{{if eq $name "g6-http"}}{{range $network.Aliases}}{{.}}{{"\n"}}{{end}}{{end}}{{end}}' \
+      "$member" 2>/dev/null)" || fail "no se pudieron validar aliases del miembro ${member}; no se descargó ni cambió el servicio"
+    while IFS= read -r alias; do
+      [[ -n "$alias" ]] || continue
+      [[ "$alias" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$ ]] ||
+        fail "g6-http contiene un alias no reconocido en ${member}; no se descargó ni cambió el servicio"
+      [[ "$alias" != "$expected_alias" ]] || alias_found=true
+      previous="${seen_aliases[$alias]:-}"
+      if [[ -n "$previous" && "$previous" != "$member" ]]; then
+        [[ "$alias" == service && "$member_kind" == generic && "${generic_members[$previous]:-other}" == generic ]] ||
+          fail "g6-http tiene el alias ${alias} duplicado entre ${previous} y ${member}; no se descargó ni cambió el servicio"
+      fi
+      seen_aliases["$alias"]="$member"
+      if [[ "$alias" == "$target_alias" && "$member" != "$target_container" ]]; then
+        fail "el alias ${target_alias} de g6-http ya pertenece a ${member}; no se descargó ni cambió el servicio"
+      fi
+    done <<< "$aliases"
+    [[ "$alias_found" == true ]] ||
+      fail "g6-http no contiene el alias canónico ${expected_alias} para ${member}; no se descargó ni cambió el servicio"
+  done <<< "$members"
+}
+
 if [[ "$SERVICE_NAME" == inventory-svc ]]; then
   readonly RUNTIME_ENV_FILE="$G6_SERVICE_ENV_FILE"
   [[ -f "$G6_SERVICE_COMPOSE_FILE" ]] || fail "no existe ${G6_SERVICE_COMPOSE_FILE}"
   [[ -r "$RUNTIME_ENV_FILE" ]] || fail "no se puede leer ${RUNTIME_ENV_FILE}"
   grep -Eq "^[[:space:]]*DATABASE_URL[[:space:]]*=[[:space:]]*('[^']+'|\"[^\"]+\"|[^[:space:]#'\"]+)" "$RUNTIME_ENV_FILE" ||
     fail "DATABASE_URL no está definido en ${RUNTIME_ENV_FILE}"
+  if [[ -e "$G6_HTTP_INVENTORY_OVERLAY" ]]; then
+    [[ -f "$G6_HTTP_INVENTORY_OVERLAY" && -r "$G6_HTTP_INVENTORY_OVERLAY" ]] ||
+      fail 'la configuración opcional g6-http de Inventory no es un archivo legible'
+    g6_validate_http_network "$G6_SERVICE_IMAGE_NAME" "$G6_SERVICE_CONTAINER"
+  fi
 else
   [[ -f "$G6_SERVICE_COMPOSE_FILE" ]] || fail "no existe ${G6_SERVICE_COMPOSE_FILE}"
   [[ -f "$G6_SERVICE_ENV_FILE" && -r "$G6_SERVICE_ENV_FILE" ]] ||
     fail "no se puede leer la configuración privada ${G6_SERVICE_ENV_FILE}"
+  if [[ -e "$G6_HTTP_GENERIC_OVERLAY" ]]; then
+    [[ -f "$G6_HTTP_GENERIC_OVERLAY" && -r "$G6_HTTP_GENERIC_OVERLAY" ]] ||
+      fail 'la configuración opcional g6-http no es un archivo legible'
+    g6_validate_http_network "$G6_SERVICE_IMAGE_NAME" "$G6_SERVICE_CONTAINER"
+  fi
 fi
 
 mkdir -p "$G6_SERVICE_STATE_DIR"
@@ -90,16 +171,20 @@ compose() {
   local image="$1"
   shift
   if [[ "$SERVICE_NAME" == inventory-svc ]]; then
+    local -a compose_files=(--file "$G6_SERVICE_COMPOSE_FILE")
+    [[ ! -f "$G6_HTTP_INVENTORY_OVERLAY" ]] || compose_files+=(--file "$G6_HTTP_INVENTORY_OVERLAY")
     env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
       DOCKER_CONFIG="$DOCKER_CONFIG" INVENTORY_IMAGE="$image" \
-      docker compose --file "$G6_SERVICE_COMPOSE_FILE" --project-name "$G6_SERVICE_COMPOSE_PROJECT" "$@" "$G6_SERVICE_COMPOSE_UNIT"
+      docker compose "${compose_files[@]}" --project-name "$G6_SERVICE_COMPOSE_PROJECT" "$@" "$G6_SERVICE_COMPOSE_UNIT"
   else
+    local -a compose_files=(--file "$G6_SERVICE_COMPOSE_FILE")
+    [[ ! -f "$G6_HTTP_GENERIC_OVERLAY" ]] || compose_files+=(--file "$G6_HTTP_GENERIC_OVERLAY")
     env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
       DOCKER_CONFIG="$DOCKER_CONFIG" G6_SERVICE_IMAGE="$image" \
       G6_SERVICE_PORT="$G6_SERVICE_PORT" G6_SERVICE_PORT_ENV="$G6_SERVICE_PORT_ENV" \
-      G6_SERVICE_CONTAINER="$G6_SERVICE_CONTAINER" \
+      G6_SERVICE_CONTAINER="$G6_SERVICE_CONTAINER" G6_SERVICE_IMAGE_NAME="$G6_SERVICE_IMAGE_NAME" \
       G6_SERVICE_ENV_FILE="$G6_SERVICE_ENV_FILE" \
-      docker compose --file "$G6_SERVICE_COMPOSE_FILE" --project-name "$G6_SERVICE_COMPOSE_PROJECT" "$@" "$G6_SERVICE_COMPOSE_UNIT"
+      docker compose "${compose_files[@]}" --project-name "$G6_SERVICE_COMPOSE_PROJECT" "$@" "$G6_SERVICE_COMPOSE_UNIT"
   fi
 }
 

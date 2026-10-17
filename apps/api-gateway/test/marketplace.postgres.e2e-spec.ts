@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
@@ -30,20 +31,18 @@ async function unusedPort(): Promise<number> {
 async function start(
   service: 'taxonomy' | 'catalog',
   port: number,
+  extra: NodeJS.ProcessEnv = {},
 ): Promise<ChildProcess> {
-  const runtime = marketplaceRuntime(service, process.env);
-  const child = spawn(
-    process.execPath,
-    ['--env-file=' + runtime.envFile, runtime.entrypoint],
-    {
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        [service.toUpperCase() + '_SVC_PORT']: String(port),
-      },
+  const { envFile, entrypoint } = marketplaceRuntime(service, process.env);
+  const child = spawn(process.execPath, ['--env-file=' + envFile, entrypoint], {
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      ...extra,
+      [service.toUpperCase() + '_SVC_PORT']: String(port),
     },
-  );
+  });
   child.stdout?.resume();
   child.stderr?.resume();
   try {
@@ -82,11 +81,15 @@ describe.skipIf(process.env.G6_HTTP_POSTGRES_INTEGRATION !== '1')(
     let catalog: ChildProcess | undefined;
     let app: INestApplication;
     let signed: ReturnType<typeof createSignedIdentity>;
+    let taxonomyUrl: string;
     beforeAll(async () => {
       const taxonomyPort = await unusedPort(),
         catalogPort = await unusedPort();
+      taxonomyUrl = 'http://127.0.0.1:' + taxonomyPort;
       taxonomy = await start('taxonomy', taxonomyPort);
-      catalog = await start('catalog', catalogPort);
+      catalog = await start('catalog', catalogPort, {
+        CATALOG_TAXONOMY_URL: 'http://127.0.0.1:' + taxonomyPort,
+      });
       const settings = readGatewaySettings({
         GATEWAY_TAXONOMY_SVC_URL: 'http://127.0.0.1:' + taxonomyPort,
         GATEWAY_CATALOG_SVC_URL: 'http://127.0.0.1:' + catalogPort,
@@ -141,6 +144,18 @@ describe.skipIf(process.env.G6_HTTP_POSTGRES_INTEGRATION !== '1')(
         expect(response.body.code === 'SERVICIO_NO_DISPONIBLE').toBe(true);
       }
     });
+    it('uses the compiled Catalog client against real Taxonomy HTTP and PostgreSQL', async () => {
+      const { stdout } = await promisify(execFile)(
+        process.execPath,
+        [
+          'scripts/ci/catalog-taxonomy-readonly.mjs',
+          taxonomyUrl,
+          marketplaceRuntime('catalog', process.env).entrypoint,
+        ],
+        { timeout: 15000, windowsHide: true },
+      );
+      expect(stdout).toContain('PASS: cliente Catalog');
+    }, 20000);
     it('rejects signed authentication/authorization negatives on all three GETs', async () => {
       for (const path of [
         '/api/v1/categorias',
