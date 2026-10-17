@@ -287,6 +287,7 @@ export class ReservationsService {
                 fingerprint,
                 correlationId,
                 'STOCK_INSUFICIENTE',
+                verifiedClientId,
               );
             }
 
