@@ -14,11 +14,7 @@ services:
     ports:
       - '127.0.0.1:${G6_SERVICE_PORT}:${G6_SERVICE_PORT}'
     healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - "fetch('http://127.0.0.1:${G6_SERVICE_PORT}/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      test: [CMD, node, dist/apps/api-gateway/readiness.js]
       interval: 30s
       timeout: 3s
       start_period: 10s
