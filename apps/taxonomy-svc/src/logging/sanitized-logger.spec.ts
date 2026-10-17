@@ -98,6 +98,43 @@ describe('sanitizar (#34)', () => {
     expect(resultado).toContain('Authorization: Bearer ***');
   });
 
+  it('enmascara el encabezado Authorization: Basic', () => {
+    const resultado = sanitizar(
+      `Authorization: Basic dXN1YXJpbzpjcmVkZW5jaWFs`,
+    ) as string;
+
+    expect(resultado).toBe('Authorization: Basic ***');
+  });
+
+  it('enmascara Authorization con Basic en minúsculas sin alterar el esquema', () => {
+    const resultado = sanitizar(
+      `authorization=basic b3RybzpjcmVkZW5jaWFs`,
+    ) as string;
+
+    expect(resultado).toBe('authorization=basic ***');
+  });
+
+  it('enmascara claves con sufijos y prefijos sensibles en JSON', () => {
+    const json = JSON.stringify({
+      client_secret: CLAVE_FALSA,
+      access_token: CLAVE_FALSA,
+      refresh_token: CLAVE_FALSA,
+      api_key: CLAVE_FALSA,
+      my_secret_value: CLAVE_FALSA,
+      usuario: 'taxonomy_dev_login',
+    });
+
+    const resultado = sanitizar(json) as string;
+
+    expect(resultado).not.toContain(CLAVE_FALSA);
+    expect(resultado).toContain('"client_secret":"***"');
+    expect(resultado).toContain('"access_token":"***"');
+    expect(resultado).toContain('"refresh_token":"***"');
+    expect(resultado).toContain('"api_key":"***"');
+    expect(resultado).toContain('"my_secret_value":"***"');
+    expect(resultado).toContain('"usuario":"taxonomy_dev_login"');
+  });
+
   it('enmascara secretos dentro de un JSON serializado', () => {
     const json = JSON.stringify({
       token: CLAVE_FALSA,
@@ -178,5 +215,22 @@ describe('SanitizedLogger (#34)', () => {
     const mensajeJson = String(sink.registros[1][0]);
     expect(mensajeJson).toContain('"token":"***"');
     expect(mensajeJson).toContain('"secret":"***"');
+  });
+
+  it('enmascara Authorization Basic y claves JSON compuestas al registrar', () => {
+    const sink = new SinkCapturador();
+    const logger = new SanitizedLogger(sink);
+
+    logger.warn(`Authorization: Basic ${CLAVE_FALSA}`);
+    logger.error(
+      JSON.stringify({ client_secret: CLAVE_FALSA, api_key: CLAVE_FALSA }),
+    );
+
+    const volcado = sink.volcado();
+    expect(volcado).not.toContain(CLAVE_FALSA);
+    expect(volcado).toContain('Authorization: Basic ***');
+    const mensajeJson = String(sink.registros[1][0]);
+    expect(mensajeJson).toContain('"client_secret":"***"');
+    expect(mensajeJson).toContain('"api_key":"***"');
   });
 });

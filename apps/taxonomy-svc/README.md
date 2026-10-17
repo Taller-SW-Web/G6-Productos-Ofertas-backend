@@ -16,7 +16,11 @@ El servicio valida la configuración en el arranque y falla cerrado (`fail-close
 ## Endpoints operativos
 
 - `GET /health`: liveness estático; responde `200` sin consultar dependencias.
-- `GET /health/readiness`: readiness; verifica acceso de lectura real a `taxonomy.categories` y `taxonomy.brands` (`SELECT 1 ... LIMIT 1`). Responde `200` solo si ambas tablas son accesibles, o `503` (problem+json, `SERVICIO_NO_DISPONIBLE`) si la conexión falla, hay permisos denegados (`42501`) o alguna tabla falla.
+- `GET /health/readiness`: readiness; verifica acceso de lectura real con dos consultas Drizzle ORM independientes (sin concatenar SQL), cada una con `WHERE estado = 'ACTIVO' LIMIT 1`:
+  - `taxonomy.categories`: selecciona `id`, `nombre`, `categoria_padre_id`, `estado`.
+  - `taxonomy.brands`: selecciona `id`, `nombre`, `descripcion`, `pais_origen_iso`, `logo_url`, `estado`.
+
+  Responde `200` solo si ambas consultas resuelven, o `503` (problem+json, `SERVICIO_NO_DISPONIBLE`) ante cualquier error: conexión fallida, permisos denegados (`42501`) sobre la tabla o sobre la columna `logo_url`, o tabla/columna ausente.
 
 ## Persistencia
 

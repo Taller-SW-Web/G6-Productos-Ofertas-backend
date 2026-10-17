@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { OnApplicationShutdown } from '@nestjs/common';
 import { ProblemDetailsException } from '../errors/taxonomy.errors.js';
@@ -146,8 +146,29 @@ export class DrizzleTaxonomyRepository
 
   async verificarReadiness(): Promise<void> {
     try {
-      await this.db.execute(sql`select 1 from ${categorias} limit 1`);
-      await this.db.execute(sql`select 1 from ${marcas} limit 1`);
+      await this.db
+        .select({
+          id: categorias.id,
+          nombre: categorias.nombre,
+          categoria_padre_id: categorias.categoriaPadreId,
+          estado: categorias.estado,
+        })
+        .from(categorias)
+        .where(eq(categorias.estado, 'ACTIVO'))
+        .limit(1);
+
+      await this.db
+        .select({
+          id: marcas.id,
+          nombre: marcas.nombre,
+          descripcion: marcas.descripcion,
+          pais_origen_iso: marcas.paisOrigenIso,
+          logo_url: marcas.logoUrl,
+          estado: marcas.estado,
+        })
+        .from(marcas)
+        .where(eq(marcas.estado, 'ACTIVO'))
+        .limit(1);
     } catch {
       throw ProblemDetailsException.noDisponible(DETALLE_NO_DISPONIBLE);
     }

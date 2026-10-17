@@ -3,10 +3,16 @@ import { ConsoleLogger, LoggerService } from '@nestjs/common';
 const CLAVES_SENSIBLES =
   /(password|passwd|secret|token|key|pgpassword|authorization|cookie|credential|database[_-]?url|dsn)/i;
 
-const AUTORIZACION = /(authorization\s*[:=]\s*)(bearer\s+)?([^\s,;&"'\\]+)/gi;
+const AUTORIZACION =
+  /(authorization\s*[:=]\s*)((?:bearer|basic)\s+)?([^\s,;&"'\\]+)/gi;
 
-const JSON_SENSIBLE =
-  /("(?:password|passwd|pwd|secret|token|access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|authorization|credential|credentials|database[_-]?url|dsn|pgpassword)"\s*:\s*")((?:[^"\\]|\\.)*)(")/gi;
+const CLAVES_SENSIBLES_JSON =
+  'password|passwd|pwd|secret|token|api[_-]?key|apikey|authorization|credential|credentials|database[_-]?url|dsn|pgpassword';
+
+const JSON_SENSIBLE = new RegExp(
+  `("(?:[^"\\\\]*(?:${CLAVES_SENSIBLES_JSON})[^"\\\\]*)"\\s*:\\s*")((?:[^"\\\\]|\\\\.)*)(")`,
+  'gi',
+);
 
 const PAR_CLAVE_VALOR =
   /([A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|key|credential|dsn|pgpassword)[A-Za-z0-9_.-]*\s*[=:]\s*)([^\s,;&]+)/gi;

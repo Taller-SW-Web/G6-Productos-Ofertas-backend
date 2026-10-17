@@ -40,6 +40,16 @@ describeIntegracion(
     let repo: DrizzleTaxonomyRepository;
     let urlApp: string;
 
+    async function levantarAppNest(): Promise<INestApplication<App>> {
+      const moduleFixture = await Test.createTestingModule({
+        imports: [TaxonomySvcModule.forRoot({ databaseUrl: urlApp })],
+      }).compile();
+      const creada: INestApplication<App> =
+        moduleFixture.createNestApplication();
+      await creada.init();
+      return creada;
+    }
+
     beforeAll(async () => {
       const urlBase = URL_BASE as string;
       urlApp = urlConRol(urlBase, ROL_APP, PASSWORD_APP);
@@ -152,6 +162,62 @@ describeIntegracion(
 
     it('verificarReadiness resuelve contra la base viva', async () => {
       await expect(repo.verificarReadiness()).resolves.toBeUndefined();
+    });
+
+    describe('readiness contra PostgreSQL real y permisos', () => {
+      it('responde 200 cuando el rol puede leer las columnas requeridas', async () => {
+        const appNest = await levantarAppNest();
+        try {
+          await request(appNest.getHttpServer())
+            .get('/health/readiness')
+            .expect(HttpStatus.OK);
+        } finally {
+          await appNest.close();
+        }
+      });
+
+      it('responde 503 si se revoca SELECT sobre taxonomy.brands', async () => {
+        await admin.query(`REVOKE SELECT ON taxonomy.brands FROM ${ROL_APP}`);
+        const appNest = await levantarAppNest();
+        try {
+          await request(appNest.getHttpServer())
+            .get('/health/readiness')
+            .expect(HttpStatus.SERVICE_UNAVAILABLE);
+        } finally {
+          await appNest.close();
+          await admin.query(`GRANT SELECT ON taxonomy.brands TO ${ROL_APP}`);
+        }
+      });
+
+      it('responde 503 si se revoca SELECT sobre la columna logo_url', async () => {
+        await admin.query(`REVOKE SELECT ON taxonomy.brands FROM ${ROL_APP}`);
+        await admin.query(
+          `GRANT SELECT (id, nombre, descripcion, pais_origen_iso, estado) ON taxonomy.brands TO ${ROL_APP}`,
+        );
+        const appNest = await levantarAppNest();
+        try {
+          await request(appNest.getHttpServer())
+            .get('/health/readiness')
+            .expect(HttpStatus.SERVICE_UNAVAILABLE);
+        } finally {
+          await appNest.close();
+          await admin.query(
+            `REVOKE SELECT (id, nombre, descripcion, pais_origen_iso, estado) ON taxonomy.brands FROM ${ROL_APP}`,
+          );
+          await admin.query(`GRANT SELECT ON taxonomy.brands TO ${ROL_APP}`);
+        }
+      });
+
+      it('vuelve a responder 200 al restaurar los permisos', async () => {
+        const appNest = await levantarAppNest();
+        try {
+          await request(appNest.getHttpServer())
+            .get('/health/readiness')
+            .expect(HttpStatus.OK);
+        } finally {
+          await appNest.close();
+        }
+      });
     });
 
     it('traduce la indisponibilidad de la base a 503', async () => {
