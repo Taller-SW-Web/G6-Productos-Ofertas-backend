@@ -238,3 +238,90 @@ contra PostgreSQL aislado autenticado: comprobados. Integración compartida
 Supabase, homologación externa y despliegue de #53: no ejecutados. El cierre
 del issue requiere revisión/aceptación y PR fusionado según su definición de
 terminado. No se agregan endpoints, handlers, workers, parser ni resolver del #54.
+
+## Reglas puras del dominio (#54)
+
+Prerrequisito #53: [PR #127 fusionado](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/127)
+en `9866ff26a8ff542b802ae39775db2e0326c623fb`. Base de trabajo en `vera`:
+`41815e8998230973b4c4e55abeb58001a10023c1`. El issue #53 sigue abierto;
+no se altera su estado administrativo.
+
+`src/domain/` contiene funciones puras, sin Nest, SQL, red ni estado global.
+Reciben contexto y reloj explícitos y devuelven decisiones/planes; no producen
+escrituras ni publicaciones. Sus interfaces son internas, no nuevos DTOs de red.
+Importes permanecen strings y se comparan en centavos `bigint`, dentro de
+`numeric(12,2)`; versiones conservan precisión hasta el límite bigint de PostgreSQL.
+
+| Fuente normativa | Regla y prueba |
+|---|---|
+| SPEC-013 §3; HU CA-02–04 | `initializeProduct`: producto/global, `ALTA_PRODUCTO`, versión 1, `CREACION`, anterior/variación nulos; precio/contexto/fecha inválidos se rechazan. `sku_base` no crea override. |
+| SPEC §5; FLOW §4.3; HU CA-08 | `changePrice`: versión esperada obligatoria, incremento unitario, oferta conservar/establecer/eliminar y `RETIRO_OFERTA`, motivo/actor; rechazos por CAS, importe, oferta y ausencia de vigencia. |
+| SPEC §5; HU CA-09; modelo físico §§10/15 | Intervalos `[inicio,fin)`, adyacencia válida, solapamiento rechazado, canceladas excluidas. La programación exige inicio estrictamente futuro y asigna versión sin exigirla al cliente. |
+| SPEC §2; HU CA-06–07; DEC-F-001/006 | `resolvePrice`: simple usa producto; variante busca override y después producto. Dentro de cada objetivo, canal específico y después global para la fecha solicitada. Sin precios sintéticos; conserva versión/origen del snapshot histórico. |
+| SPEC §6; HU CA-10; modelo físico §§7/10 | `importDecision`: política parcial por fila o ninguna fila confirmable si falla alguna y `allow_partial=false`; estados y contadores coherentes, incluido lote vacío. Sin promesa de atomicidad remota. |
+| DEC-F-009; modelo físico §§14/15 | Replay de inicialización compara contenido semántico y devuelve la aceptación anterior suministrada por el caller; contenido distinto da conflicto. Estados terminales no reviven; repetir resultado de fila es idempotente. |
+
+Edición cierra la vigencia efectiva en el instante del cambio y conserva su fin
+original en el nuevo snapshot, respetando futuras programaciones. Programación
+cierra la vigencia abierta anterior; no recorta automáticamente intervalos
+finitos que se solapen ni inventa restauración al finalizar una oferta.
+Un cambio en el mismo instante de inicio se rechaza por solapamiento, evitando
+un intervalo histórico vacío incompatible con el modelo físico.
+
+La prueba PostgreSQL nueva aplica planes de inicialización, edición y
+programación al repositorio real: versiones 1/2/3, cierres de intervalos,
+actor/oferta, rechazo CAS y Outbox en la misma transacción. Su helper de
+aplicación y payload vacío son **solo fixtures de prueba**, no un caso de uso
+runtime ni un payload de negocio acordado.
+
+### Fronteras y estados de evidencia
+
+- `IMPLEMENTAR_AHORA`: decisiones internas de dominio y pruebas, terminadas.
+- HTTP/mutaciones autenticadas: conexión a casos de uso, transacciones,
+  locks/CAS y DTOs corresponde a #55/#56; no implementada aquí.
+- Inbox/Outbox y relay: el caller debe cargar la aceptación por `operation_id`
+  con control transaccional, persistir efecto/resultado/Outbox juntos y publicar
+  después de COMMIT. Replay puro no es un ledger durable ni protege concurrencia
+  por sí solo. La entrega real corresponde a #57.
+- `BLOQUEADO_ESPECÍFICO`: concretar payload productivo de `pricing.price.changed`
+  y archivo de importación. Owner: Leonardo Vera con Marco/arquitectura y
+  consumidores para el evento; Leonardo Vera con Marco para formato/prevalidación.
+  Desbloqueo: definición normativa verificable del payload y formato/política,
+  respectivamente (P-PRI-01/02 del modelo físico). No se inventan campos de
+  `GenericData` ni cabeceras CSV. No bloquea las reglas puras ya definidas.
+  No hay cambios contractuales que comunicar/homologar.
+
+Se consultó el repositorio **oficial remoto** `G6-Productos-Ofertas-docs`, master
+`c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b`: SPEC/HU/FLOW-013,
+Arquitectura §16, modelo físico de Pricing, registro DEC-F, matriz de trazabilidad
+y matriz intermodular. Aplican DEC-F-001/006/009/012; OpenAPI `0.6.0-rc.1`
+y AsyncAPI `0.6.0-rc.2` candidatos, sin cambios ni aceptación externa atribuida.
+
+### Evidencia local del 2026-10-17 (#54)
+
+Node `24.19.0` (runtime temporal, sin cambiar dependencias), Vitest `4.1.11`,
+PostgreSQL `16.15` en el contenedor aislado descrito en #53. Sin acceso a
+Supabase, cambios de credenciales, grants/policies compartidos ni migraciones.
+
+| Comando | Resultado |
+|---|---|
+| `npm test -- apps/pricing-svc` | PASS: 131 unitarias, 60 nuevas de dominio |
+| `PRICING_TEST_POSTGRES=1 npm run test:e2e -- apps/pricing-svc --reporter=verbose --silent=false` | PASS: 17 E2E, 14 PostgreSQL; cero omitidas |
+| `npm test` | PASS: 256 unitarias |
+| `PRICING_TEST_POSTGRES=1 npm run test:e2e` | PASS en repetición: 351 aprobadas, 13 omitidas preexistentes de otras suites |
+| `npm run typecheck` | PASS |
+| TypeScript estricto de las tres suites de dominio y E2E | PASS, con `tsc --ignoreConfig --noEmit` y opciones estrictas equivalentes |
+| `npm run lint`, `npm run format:check`, `npm run build:pricing-svc` | PASS |
+| `git diff --check` | PASS |
+
+La primera regresión E2E general tuvo `read ECONNRESET` en la prueba de
+multipart/autorización de `api-gateway`; repetir el mismo comando sin cambios
+pasó. No se modificaron pruebas ni código del gateway. El primer comando
+TypeScript explícito requirió `--ignoreConfig` por TS5112 de TypeScript 6;
+la ejecución corregida pasó sin errores de tipos.
+
+Implementación interna y pruebas locales: comprobadas. Provider autenticado
+aislado: comprobado. Contrato/provider HTTP y mensajería de negocio, integración
+compartida autenticada, homologación externa y despliegue: no acreditados aquí.
+HU CA-03/05 requieren flujo y publicación reales posteriores; Outbox local no
+acredita entrega al broker. No se cierra #54 automáticamente.

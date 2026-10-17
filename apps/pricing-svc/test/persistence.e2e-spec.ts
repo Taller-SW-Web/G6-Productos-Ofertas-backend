@@ -23,6 +23,12 @@ import {
   pricingSchema,
 } from '../src/persistence/pricing.schema.js';
 import { IsolatedPostgres } from './isolated-postgres.js';
+import {
+  changePrice,
+  initializeProduct,
+  schedulePrice,
+  type PriceDefinition,
+} from '../src/domain/price.js';
 
 describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
   'Pricing Drizzle / PostgreSQL aislado (#53)',
@@ -517,6 +523,98 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
         ).rejects.toMatchObject({ sqlState: '42501' });
       }
       expect(await database.check()).toBe(true);
+    });
+
+    it('#54: planes de dominio persisten con CAS, histórico, programación y Outbox local', async () => {
+      const productId = randomUUID();
+      const initial = initializeProduct(
+        {
+          productId,
+          skuBase: '000123',
+          precioRegular: '100.00',
+          currency: 'PEN',
+          channelId: null,
+          motivoCambio: 'ALTA_PRODUCTO',
+        },
+        from,
+      ).definition;
+      const priceId = await repository.transaction(async (tx) => {
+        const [row] = await tx.insert(prices).values({ productId }).returning();
+        await tx
+          .insert(priceValidities)
+          .values({ ...initial.validities[0], priceId: row.id });
+        await tx.insert(outbox).values(event());
+        return row.id;
+      });
+      async function persistPlan(plan: PriceDefinition, expected: bigint) {
+        await repository.transaction(async (tx) => {
+          const rows = await tx
+            .update(prices)
+            .set({ priceVersion: plan.priceVersion })
+            .where(
+              and(eq(prices.id, priceId), eq(prices.priceVersion, expected)),
+            )
+            .returning();
+          if (rows.length !== 1) throw new Error('VERSION_CONFLICT');
+          for (const validity of plan.validities) {
+            if (validity.priceVersion === plan.priceVersion) {
+              await tx.insert(priceValidities).values({ ...validity, priceId });
+            } else {
+              await tx
+                .update(priceValidities)
+                .set({ validUntil: validity.validUntil })
+                .where(
+                  and(
+                    eq(priceValidities.priceId, priceId),
+                    eq(priceValidities.priceVersion, validity.priceVersion),
+                  ),
+                );
+            }
+          }
+          // Solo fixture de persistencia; no concreta el GenericData de producción.
+          await tx.insert(outbox).values(event());
+        });
+      }
+      const changed = changePrice(
+        initial,
+        {
+          precioRegular: '120.00',
+          accionPrecioOferta: 'CONSERVAR',
+          currency: 'PEN',
+          motivoCambio: 'fixture-update',
+          usuarioId: 'fixture-actor',
+        },
+        1n,
+        new Date('2030-02-01T00:00:00Z'),
+      ).definition;
+      await persistPlan(changed, 1n);
+      const scheduled = schedulePrice(
+        changed,
+        {
+          tipoPrecio: 'OFERTA',
+          importe: '90.00',
+          currency: 'PEN',
+          motivoCambio: 'fixture-schedule',
+          usuarioId: 'fixture-actor',
+          validFrom: boundary,
+          validUntil: null,
+        },
+        new Date('2030-03-01T00:00:00Z'),
+      );
+      await persistPlan(scheduled, 2n);
+      const stored = await repository.findValidities(priceId);
+      expect(stored.map((row) => row.priceVersion)).toEqual([1n, 2n, 3n]);
+      expect(stored[0].validUntil).toEqual(changed.validities[0].validUntil);
+      expect(stored[1].validUntil).toEqual(boundary);
+      expect(stored[2]).toMatchObject({
+        precioRegular: '120.00',
+        precioOferta: '90.00',
+        usuarioId: 'fixture-actor',
+      });
+      await expect(persistPlan(scheduled, 2n)).rejects.toThrow(
+        'VERSION_CONFLICT',
+      );
+      expect(await repository.findValidities(priceId)).toHaveLength(3);
     });
 
     it('un error real DB queda sanitizado y el pool continúa operativo', async () => {
