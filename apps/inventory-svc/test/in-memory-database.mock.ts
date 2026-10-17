@@ -114,6 +114,54 @@ export interface ThresholdOverrideRow {
   umbral_efectivo: number;
 }
 
+export interface IncidenciaRow {
+  id: string;
+  incidencia_id: string;
+  sku_id: string;
+  location_id: string;
+  external_incident_id?: string | null;
+  act_ref?: string | null;
+  estado: 'ABIERTA' | 'RESUELTA' | 'TRASLADO_PENDIENTE';
+  tipo_resolucion?: string | null;
+  cantidad_bloqueada: number;
+  idempotency_key: string;
+  correlation_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  resolved_at?: string | null;
+}
+
+export interface TrasladoRow {
+  id: string;
+  traslado_id: string;
+  source_incident_id?: string | null;
+  sku_id: string;
+  source_location_id: string;
+  target_location_id: string;
+  quantity_shipped: number;
+  quantity_received: number;
+  missing_quantity?: number | null;
+  estado:
+    | 'EN_TRANSITO'
+    | 'RECIBIDO_PARCIAL'
+    | 'COMPLETADO'
+    | 'COMPLETADO_CON_DISCREPANCIA';
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface TrasladoRecepcionRow {
+  id: string;
+  recepcion_id: string;
+  traslado_id: string;
+  cantidad_recibida: number;
+  disposicion: string;
+  es_recepcion_final: boolean;
+  sub_gestor: string;
+  idempotency_key: string;
+  received_at: string;
+}
+
 export class InMemoryDatabaseMock implements IDatabaseService {
   locations: LocationRow[] = [];
   stockBalance: StockBalanceRow[] = [];
@@ -124,6 +172,9 @@ export class InMemoryDatabaseMock implements IDatabaseService {
   outbox: OutboxRow[] = [];
   commercialRoutes: CommercialRouteRow[] = [];
   thresholdOverrides: ThresholdOverrideRow[] = [];
+  incidencias: IncidenciaRow[] = [];
+  traslados: TrasladoRow[] = [];
+  trasladoRecepciones: TrasladoRecepcionRow[] = [];
 
   private rowLocks = new Map<string, Promise<void>>();
   private lockResolvers = new Map<string, () => void>();
@@ -198,6 +249,9 @@ export class InMemoryDatabaseMock implements IDatabaseService {
     this.kardex = [];
     this.outbox = [];
     this.thresholdOverrides = [];
+    this.incidencias = [];
+    this.traslados = [];
+    this.trasladoRecepciones = [];
   }
 
   private cloneState() {
@@ -211,6 +265,9 @@ export class InMemoryDatabaseMock implements IDatabaseService {
       outbox: JSON.parse(JSON.stringify(this.outbox)),
       commercialRoutes: JSON.parse(JSON.stringify(this.commercialRoutes)),
       thresholdOverrides: JSON.parse(JSON.stringify(this.thresholdOverrides)),
+      incidencias: JSON.parse(JSON.stringify(this.incidencias)),
+      traslados: JSON.parse(JSON.stringify(this.traslados)),
+      trasladoRecepciones: JSON.parse(JSON.stringify(this.trasladoRecepciones)),
     };
   }
 
@@ -224,6 +281,9 @@ export class InMemoryDatabaseMock implements IDatabaseService {
     this.outbox = snapshot.outbox;
     this.commercialRoutes = snapshot.commercialRoutes;
     this.thresholdOverrides = snapshot.thresholdOverrides;
+    this.incidencias = snapshot.incidencias;
+    this.traslados = snapshot.traslados;
+    this.trasladoRecepciones = snapshot.trasladoRecepciones;
   }
 
   private async acquireRowLock(key: string): Promise<void> {
@@ -245,6 +305,23 @@ export class InMemoryDatabaseMock implements IDatabaseService {
       this.rowLocks.delete(key);
       resolver();
     }
+  }
+
+  private filterTraslados(sql: string, params?: any[]): TrasladoRow[] {
+    let rows = [...this.traslados];
+    let idx = 0;
+    if (sql.includes('ESTADO = $')) {
+      const estado = params?.[idx++];
+      rows = rows.filter((t) => t.estado === estado);
+    }
+    if (sql.includes('TARGET_LOCATION_ID = $')) {
+      const loc = params?.[idx++];
+      rows = rows.filter((t) => t.target_location_id === loc);
+    }
+    return rows.sort((a, b) => {
+      const c = String(a.created_at).localeCompare(String(b.created_at));
+      return c !== 0 ? c : a.traslado_id.localeCompare(b.traslado_id);
+    });
   }
 
   async transaction<T>(
@@ -361,6 +438,18 @@ export class InMemoryDatabaseMock implements IDatabaseService {
 
     // SELECT from inventory_operations
     if (s.includes('FROM INVENTORY.INVENTORY_OPERATIONS')) {
+      if (s.includes("RESULT_PAYLOAD->>'INCIDENCIA_ID' = $1")) {
+        const incidenciaId = params?.[0];
+        const rows = this.operations.filter(
+          (o) =>
+            o.operation_type === 'INCIDENCIA_BLOQUEO' &&
+            o.result_payload?.incidencia_id === incidenciaId,
+        );
+        return {
+          rows: rows.slice(0, 1) as any,
+          rowCount: Math.min(rows.length, 1),
+        };
+      }
       if (s.includes('WHERE OPERATION_ID = $1 OR IDEMPOTENCY_KEY = $2')) {
         const opId = params?.[0];
         const key = params?.[1];
@@ -460,6 +549,78 @@ export class InMemoryDatabaseMock implements IDatabaseService {
         rows: this.stockBalance as any,
         rowCount: this.stockBalance.length,
       };
+    }
+
+    // SELECT from incidencias
+    if (s.startsWith('SELECT') && s.includes('FROM INVENTORY.INCIDENCIAS')) {
+      if (s.includes('WHERE IDEMPOTENCY_KEY = $1')) {
+        const key = params?.[0];
+        const rows = this.incidencias.filter((i) => i.idempotency_key === key);
+        return {
+          rows: rows.slice(0, 1) as any,
+          rowCount: Math.min(rows.length, 1),
+        };
+      }
+      if (s.includes('WHERE INCIDENCIA_ID = $1')) {
+        const incidenciaId = params?.[0];
+        const rows = this.incidencias.filter(
+          (i) => i.incidencia_id === incidenciaId,
+        );
+        return {
+          rows: rows.slice(0, 1) as any,
+          rowCount: Math.min(rows.length, 1),
+        };
+      }
+      return {
+        rows: this.incidencias as any,
+        rowCount: this.incidencias.length,
+      };
+    }
+
+    // SELECT from traslados
+    if (s.startsWith('SELECT') && s.includes('FROM INVENTORY.TRASLADOS')) {
+      if (s.includes('COUNT(*)')) {
+        const filtered = this.filterTraslados(s, params);
+        return { rows: [{ total: filtered.length }] as any, rowCount: 1 };
+      }
+      if (
+        s.includes('WHERE TRASLADO_ID = $1') ||
+        s.includes('WHERE TRASLADO_ID = $1 FOR UPDATE')
+      ) {
+        const trasladoId = params?.[0];
+        const rows = this.traslados.filter((t) => t.traslado_id === trasladoId);
+        return {
+          rows: rows.slice(0, 1) as any,
+          rowCount: Math.min(rows.length, 1),
+        };
+      }
+    }
+
+    // SELECT from traslado_recepciones
+    if (
+      s.startsWith('SELECT') &&
+      s.includes('FROM INVENTORY.TRASLADO_RECEPCIONES')
+    ) {
+      if (s.includes('WHERE RECEPCION_ID = $1')) {
+        const recepcionId = params?.[0];
+        const rows = this.trasladoRecepciones.filter(
+          (r) => r.recepcion_id === recepcionId,
+        );
+        return {
+          rows: rows.slice(0, 1) as any,
+          rowCount: Math.min(rows.length, 1),
+        };
+      }
+      if (s.includes('WHERE IDEMPOTENCY_KEY = $1')) {
+        const key = params?.[0];
+        const rows = this.trasladoRecepciones.filter(
+          (r) => r.idempotency_key === key,
+        );
+        return {
+          rows: rows.slice(0, 1) as any,
+          rowCount: Math.min(rows.length, 1),
+        };
+      }
     }
 
     // SELECT from outbox
@@ -600,6 +761,64 @@ export class InMemoryDatabaseMock implements IDatabaseService {
       return { rows: [], rowCount: removed };
     }
 
+    // INSERT INTO incidencias
+    if (s.startsWith('INSERT INTO INVENTORY.INCIDENCIAS')) {
+      const now = new Date().toISOString();
+      const row: IncidenciaRow = {
+        id: 'inc-' + Math.random().toString(36).substring(2),
+        incidencia_id: params?.[0],
+        sku_id: params?.[1],
+        location_id: params?.[2],
+        external_incident_id: params?.[3] ?? null,
+        act_ref: null,
+        estado: 'ABIERTA',
+        tipo_resolucion: null,
+        cantidad_bloqueada: Number(params?.[4]),
+        idempotency_key: params?.[5],
+        correlation_id: params?.[6] ?? null,
+        created_at: now,
+        updated_at: now,
+        resolved_at: null,
+      };
+      this.incidencias.push(row);
+      return { rows: [row] as any, rowCount: 1 };
+    }
+
+    // UPDATE incidencias
+    if (s.startsWith('UPDATE INVENTORY.INCIDENCIAS')) {
+      const id = params?.[3];
+      const target = this.incidencias.find((i) => i.id === id);
+      if (!target) return { rows: [], rowCount: 0 };
+      const now = new Date().toISOString();
+      target.estado = params?.[0];
+      target.tipo_resolucion = params?.[1] ?? null;
+      target.act_ref = params?.[2] ?? null;
+      target.resolved_at = now;
+      target.updated_at = now;
+      return { rows: [target] as any, rowCount: 1 };
+    }
+
+    // INSERT INTO traslados
+    if (s.startsWith('INSERT INTO INVENTORY.TRASLADOS')) {
+      const now = new Date().toISOString();
+      const row: TrasladoRow = {
+        id: 'traslado-' + Math.random().toString(36).substring(2),
+        traslado_id: params?.[0],
+        source_incident_id: params?.[1] ?? null,
+        sku_id: params?.[2],
+        source_location_id: params?.[3],
+        target_location_id: params?.[4],
+        quantity_shipped: Number(params?.[5]),
+        quantity_received: 0,
+        missing_quantity: null,
+        estado: 'EN_TRANSITO',
+        created_at: now,
+        updated_at: now,
+      };
+      this.traslados.push(row);
+      return { rows: [row] as any, rowCount: 1 };
+    }
+
     // UPDATE stock_balance
     if (s.startsWith('UPDATE INVENTORY.STOCK_BALANCE')) {
       if (s.includes('SET RESERVED = $1, STOCK_VERSION = $2')) {
@@ -640,23 +859,30 @@ export class InMemoryDatabaseMock implements IDatabaseService {
         }
         return { rows: [], rowCount: 1 };
       }
-      if (s.includes('SET STOCK_VERSION = $3, ON_HAND = $4')) {
+      if (s.includes('SET STOCK_VERSION = $3')) {
         const sku = params?.[0];
         const loc = params?.[1];
         const newVersion = Number(params?.[2]);
-        const newOnHand = Number(params?.[3]);
         const target = this.stockBalance.find(
           (b) => b.sku_id === sku && b.location_id === loc,
         );
+        let p = 3;
+        if (s.includes('ON_HAND = $4')) {
+          if (target) target.on_hand = Number(params?.[p]);
+          p++;
+        }
+        if (s.includes('BLOCKED = $4') || s.includes('BLOCKED = $5')) {
+          if (target) target.blocked = Number(params?.[p]);
+          p++;
+        }
         if (target) {
-          target.on_hand = newOnHand;
           target.stock_version = newVersion;
           target.available = Math.max(
             0,
             target.on_hand - target.reserved - target.blocked,
           );
         }
-        return { rows: [], rowCount: 1 };
+        return { rows: [], rowCount: target ? 1 : 0 };
       }
     }
 

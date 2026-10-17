@@ -18,6 +18,9 @@ export const INVENTORY_SCOPES = {
   OPERACIONES_LEER: 'inventario:operaciones:leer',
   DISPONIBILIDAD_LEER: 'inventario:disponibilidad:leer',
   REINTEGRAR: 'inventario:reintegrar',
+  INCIDENCIAS_REPORTAR: 'inventario:incidencias:reportar',
+  INCIDENCIAS_RESOLVER: 'inventario:incidencias:resolver',
+  CONCILIAR_OFFLINE: 'inventario:conciliar-offline',
 } as const;
 
 export const KNOWN_CLIENTS = {

@@ -15,6 +15,7 @@ import { DisponibilidadService } from './disponibilidad/disponibilidad.service.j
 import { ReintegrosService } from './reintegros/reintegros.service.js';
 import { UmbralesService } from './umbrales/umbrales.service.js';
 import { DashboardService } from './dashboard/dashboard.service.js';
+import { IncidenciasService } from './incidencias/incidencias.service.js';
 
 import { DrizzleLocationsRepository } from './repositories/drizzle/drizzle-locations.repository.js';
 import { DrizzleCommercialRoutesRepository } from './repositories/drizzle/drizzle-commercial-routes.repository.js';
@@ -24,6 +25,8 @@ import { DrizzleOperationsRepository } from './repositories/drizzle/drizzle-oper
 import { DrizzleKardexRepository } from './repositories/drizzle/drizzle-kardex.repository.js';
 import { DrizzleOutboxRepository } from './repositories/drizzle/drizzle-outbox.repository.js';
 import { DrizzleThresholdsRepository } from './repositories/drizzle/drizzle-thresholds.repository.js';
+import { DrizzleIncidentsRepository } from './repositories/drizzle/drizzle-incidents.repository.js';
+import { DrizzleTrasladosRepository } from './repositories/drizzle/drizzle-traslados.repository.js';
 
 import {
   LOCATIONS_REPOSITORY,
@@ -34,6 +37,8 @@ import {
   KARDEX_REPOSITORY,
   OUTBOX_REPOSITORY,
   THRESHOLDS_REPOSITORY,
+  INCIDENTS_REPOSITORY,
+  TRASLADOS_REPOSITORY,
 } from './repositories/interfaces/repository.tokens.js';
 
 import { InventoryAuthGuard } from './auth/inventory-auth.guard.js';
@@ -61,6 +66,7 @@ import { InventoryWorkersService } from './workers/inventory-workers.service.js'
     ReintegrosService,
     UmbralesService,
     DashboardService,
+    IncidenciasService,
     InventoryAuthGuard,
     UserAuthGuard,
     InventoryWorkersService,
@@ -97,6 +103,14 @@ import { InventoryWorkersService } from './workers/inventory-workers.service.js'
       provide: THRESHOLDS_REPOSITORY,
       useClass: DrizzleThresholdsRepository,
     },
+    {
+      provide: INCIDENTS_REPOSITORY,
+      useClass: DrizzleIncidentsRepository,
+    },
+    {
+      provide: TRASLADOS_REPOSITORY,
+      useClass: DrizzleTrasladosRepository,
+    },
     // Compatibilidad directa de clases
     DrizzleLocationsRepository,
     DrizzleCommercialRoutesRepository,
@@ -106,6 +120,8 @@ import { InventoryWorkersService } from './workers/inventory-workers.service.js'
     DrizzleKardexRepository,
     DrizzleOutboxRepository,
     DrizzleThresholdsRepository,
+    DrizzleIncidentsRepository,
+    DrizzleTrasladosRepository,
   ],
   exports: [
     DatabaseService,
@@ -120,6 +136,7 @@ import { InventoryWorkersService } from './workers/inventory-workers.service.js'
     ReintegrosService,
     UmbralesService,
     DashboardService,
+    IncidenciasService,
     InventoryAuthGuard,
     UserAuthGuard,
     LOCATIONS_REPOSITORY,
@@ -130,6 +147,8 @@ import { InventoryWorkersService } from './workers/inventory-workers.service.js'
     KARDEX_REPOSITORY,
     OUTBOX_REPOSITORY,
     THRESHOLDS_REPOSITORY,
+    INCIDENTS_REPOSITORY,
+    TRASLADOS_REPOSITORY,
     DrizzleLocationsRepository,
     DrizzleCommercialRoutesRepository,
     DrizzleStockBalanceRepository,
@@ -138,6 +157,8 @@ import { InventoryWorkersService } from './workers/inventory-workers.service.js'
     DrizzleKardexRepository,
     DrizzleOutboxRepository,
     DrizzleThresholdsRepository,
+    DrizzleIncidentsRepository,
+    DrizzleTrasladosRepository,
   ],
 })
 export class InventorySvcModule {}

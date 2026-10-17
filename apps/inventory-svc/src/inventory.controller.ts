@@ -15,6 +15,7 @@ import { ReservationsService } from './reservations/reservations.service.js';
 import { OperationsService } from './operations/operations.service.js';
 import { DisponibilidadService } from './disponibilidad/disponibilidad.service.js';
 import { ReintegrosService } from './reintegros/reintegros.service.js';
+import { IncidenciasService } from './incidencias/incidencias.service.js';
 import {
   CrearReservaRequest,
   OperacionReservaRequest,
@@ -28,6 +29,9 @@ import {
   VerificarCantidadComercialResponse,
   ReintegroInventarioRequest,
   ReintegroInventarioResponse,
+  CrearIncidenciaInventarioRequest,
+  IncidenciaInventarioResponse,
+  ResolverIncidenciaInventarioRequest,
 } from './types/inventory.dto.js';
 import { ProblemDetailsException } from './errors/inventory.errors.js';
 import { InventoryAuthGuard } from './auth/inventory-auth.guard.js';
@@ -88,6 +92,7 @@ export class InventoryController {
     private readonly operationsService: OperationsService,
     private readonly disponibilidadService: DisponibilidadService,
     private readonly reintegrosService: ReintegrosService,
+    private readonly incidenciasService: IncidenciasService,
   ) {}
 
   @Post('reservas')
@@ -299,6 +304,46 @@ export class InventoryController {
     return this.disponibilidadService.verificarCantidadComercial(
       dto,
       correlationId,
+    );
+  }
+
+  @Post('incidencias')
+  @HttpCode(HttpStatus.CREATED)
+  @RequireScope(INVENTORY_SCOPES.INCIDENCIAS_REPORTAR)
+  @AllowedClients([KNOWN_CLIENTS.RETAIL])
+  async reportarIncidencia(
+    @Body() dto: CrearIncidenciaInventarioRequest,
+    @Req() req: any,
+    @Headers('x-correlation-id') correlationId?: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ): Promise<IncidenciaInventarioResponse> {
+    const clientId = req?.clientId;
+    return this.incidenciasService.reportarIncidencia(
+      dto,
+      correlationId,
+      idempotencyKey,
+      clientId,
+    );
+  }
+
+  @Post('incidencias/:incidenciaId/resolver')
+  @HttpCode(HttpStatus.OK)
+  @RequireScope(INVENTORY_SCOPES.INCIDENCIAS_RESOLVER)
+  @AllowedClients([KNOWN_CLIENTS.RETAIL])
+  async resolverIncidencia(
+    @Param('incidenciaId') incidenciaId: string,
+    @Body() dto: ResolverIncidenciaInventarioRequest,
+    @Req() req: any,
+    @Headers('x-correlation-id') correlationId?: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ): Promise<IncidenciaInventarioResponse> {
+    const clientId = req?.clientId;
+    return this.incidenciasService.resolverIncidencia(
+      incidenciaId,
+      dto,
+      correlationId,
+      idempotencyKey,
+      clientId,
     );
   }
 }

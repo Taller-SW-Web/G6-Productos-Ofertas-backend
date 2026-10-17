@@ -41,6 +41,16 @@ export interface IOperationsRepository {
     client?: IDatabaseClient,
   ): Promise<OperationEntity | null>;
 
+  /**
+   * Recupera la operación INCIDENCIA_BLOQUEO cuyo resultado referencia la
+   * incidencia indicada. Necesario porque `inventory.incidencias` no persiste el
+   * tipo físico reportado y la respuesta de resolución debe informarlo.
+   */
+  findIncidenciaBloqueoByIncidenciaId(
+    incidenciaId: string,
+    client?: IDatabaseClient,
+  ): Promise<OperationEntity | null>;
+
   create(
     client: IDatabaseClient,
     op: {

@@ -88,6 +88,28 @@ export class DrizzleOperationsRepository implements IOperationsRepository {
     return this.mapRow(res.rows[0]);
   }
 
+  async findIncidenciaBloqueoByIncidenciaId(
+    incidenciaId: string,
+    client?: IDatabaseClient,
+  ): Promise<OperationEntity | null> {
+    const sql = `
+      SELECT id, operation_type, idempotency_key, intention, status,
+             order_id, reservation_id, result_code, operation_id, client_id,
+             request_fingerprint, request_payload, result_payload,
+             accepted_at, applied_at, correlation_id
+      FROM inventory.inventory_operations
+      WHERE operation_type = 'INCIDENCIA_BLOQUEO'
+        AND result_payload->>'incidencia_id' = $1
+      LIMIT 1
+    `;
+    const res = client
+      ? await client.query(sql, [incidenciaId])
+      : await this.databaseService.query(sql, [incidenciaId]);
+
+    if (res.rows.length === 0) return null;
+    return this.mapRow(res.rows[0]);
+  }
+
   async create(
     client: IDatabaseClient,
     op: {
