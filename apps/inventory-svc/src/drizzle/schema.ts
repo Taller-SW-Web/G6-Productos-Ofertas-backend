@@ -56,6 +56,29 @@ export const inboxStatusEnum = inventorySchema.enum('inbox_status', [
   'PROCESSED',
 ]);
 
+export const incidenciaEstadoEnum = inventorySchema.enum('incidencia_estado', [
+  'ABIERTA',
+  'RESUELTA',
+  'TRASLADO_PENDIENTE',
+]);
+
+export const tipoResolucionIncidenciaEnum = inventorySchema.enum(
+  'tipo_resolucion_incidencia',
+  ['REHABILITADO', 'MERMA', 'FALTANTE_CONFIRMADO', 'TRASLADO_ALMACEN_CENTRAL'],
+);
+
+export const trasladoEstadoEnum = inventorySchema.enum('traslado_estado', [
+  'EN_TRANSITO',
+  'RECIBIDO_PARCIAL',
+  'COMPLETADO',
+  'COMPLETADO_CON_DISCREPANCIA',
+]);
+
+export const disposicionRecepcionTrasladoEnum = inventorySchema.enum(
+  'disposicion_recepcion_traslado',
+  ['REINGRESAR_DISPONIBLE', 'REINGRESAR_BLOQUEADO', 'CONFIRMAR_MERMA'],
+);
+
 // 1. locations
 export const locations = inventorySchema.table('locations', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -274,3 +297,126 @@ export const stockThresholdOverride = inventorySchema.table(
       .notNull(),
   },
 );
+
+// 10. incidencias
+export const incidencias = inventorySchema.table('incidencias', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  incidencia_id: uuid('incidencia_id').notNull().unique(),
+  sku_id: text('sku_id').notNull(),
+  location_id: uuid('location_id')
+    .notNull()
+    .references(() => locations.id, { onDelete: 'restrict' }),
+  external_incident_id: text('external_incident_id'),
+  act_ref: text('act_ref'),
+  estado: incidenciaEstadoEnum('estado').default('ABIERTA').notNull(),
+  tipo_resolucion: tipoResolucionIncidenciaEnum('tipo_resolucion'),
+  cantidad_bloqueada: integer('cantidad_bloqueada').notNull(),
+  idempotency_key: text('idempotency_key').notNull().unique(),
+  correlation_id: uuid('correlation_id'),
+  created_at: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updated_at: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  resolved_at: timestamp('resolved_at', { withTimezone: true }),
+});
+
+// 11. traslados
+export const traslados = inventorySchema.table(
+  'traslados',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    traslado_id: uuid('traslado_id').notNull().unique(),
+    source_incident_id: uuid('source_incident_id'),
+    sku_id: text('sku_id').notNull(),
+    source_location_id: uuid('source_location_id')
+      .notNull()
+      .references(() => locations.id, { onDelete: 'restrict' }),
+    target_location_id: uuid('target_location_id')
+      .notNull()
+      .references(() => locations.id, { onDelete: 'restrict' }),
+    quantity_shipped: integer('quantity_shipped').notNull(),
+    quantity_received: integer('quantity_received').default(0).notNull(),
+    missing_quantity: integer('missing_quantity'),
+    estado: trasladoEstadoEnum('estado').default('EN_TRANSITO').notNull(),
+    created_at: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updated_at: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    uniqueIndex('ix_traslado_por_incidencia')
+      .on(t.source_incident_id)
+      .where(sql`${t.source_incident_id} IS NOT NULL`),
+  ],
+);
+
+// 12. traslado_recepciones
+export const trasladoRecepciones = inventorySchema.table(
+  'traslado_recepciones',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    recepcion_id: uuid('recepcion_id').notNull().unique(),
+    traslado_id: uuid('traslado_id')
+      .notNull()
+      .references(() => traslados.id, { onDelete: 'cascade' }),
+    cantidad_recibida: integer('cantidad_recibida').notNull(),
+    disposicion: disposicionRecepcionTrasladoEnum('disposicion').notNull(),
+    es_recepcion_final: boolean('es_recepcion_final').default(false).notNull(),
+    sub_gestor: text('sub_gestor').notNull(),
+    idempotency_key: text('idempotency_key').notNull().unique(),
+    received_at: timestamp('received_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+);
+
+// 13. inventory_config
+export const inventoryConfig = inventorySchema.table('inventory_config', {
+  key: text('key').primaryKey(),
+  value: jsonb('value').notNull(),
+  description: text('description'),
+  updated_at: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+// 14. dashboard_projection
+export const dashboardProjection = inventorySchema.table(
+  'dashboard_projection',
+  {
+    sku_id: text('sku_id').notNull(),
+    location_id: uuid('location_id')
+      .notNull()
+      .references(() => locations.id, { onDelete: 'restrict' }),
+    on_hand: integer('on_hand').notNull(),
+    reserved: integer('reserved').notNull(),
+    blocked: integer('blocked').notNull(),
+    available: integer('available').generatedAlwaysAs(
+      sql`GREATEST(0, on_hand - reserved - blocked)`,
+    ),
+    status: stockStatusEnum('status').notNull(),
+    umbral_efectivo: integer('umbral_efectivo').notNull(),
+    updated_at: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.sku_id, t.location_id] })],
+);
+
+// 15. inbox
+export const inbox = inventorySchema.table('inbox', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  message_id: uuid('message_id').notNull().unique(),
+  message_type: text('message_type').notNull(),
+  source: text('source').notNull(),
+  payload: jsonb('payload').notNull(),
+  status: inboxStatusEnum('status').default('RECEIVED').notNull(),
+  processed_at: timestamp('processed_at', { withTimezone: true }),
+  created_at: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
