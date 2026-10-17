@@ -124,6 +124,9 @@ validate_compose_files() {
   grep -Fq 'host_ip: 127.0.0.1' <<< "$config" || fail 'Inventory dejó de publicar solo en loopback'
   grep -Fq 'http://127.0.0.1:3005/health' <<< "$config" || fail 'Inventory dejó de verificar /health'
   grep -Fq -- '- inventory-svc' <<< "$config" || fail 'alias DNS de Inventory inesperado'
+  grep -Fq 'source: /etc/g6-postgres/supabase-server-root.crt' <<< "$config" || fail 'Inventory no monta la CA PostgreSQL esperada'
+  grep -Fq 'target: /run/g6-certs/supabase-server-root.crt' <<< "$config" || fail 'ruta de destino de la CA PostgreSQL inesperada'
+  grep -Fq 'read_only: true' <<< "$config" || fail 'el montaje de CA PostgreSQL de Inventory no es de solo lectura'
 
   local required_var variable_name env_assignment
   local -a compose_env

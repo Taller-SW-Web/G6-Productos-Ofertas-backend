@@ -120,3 +120,48 @@ La revisión del código de los nueve servicios no identificó consumidores/prod
 4. Proveer y validar config de Gateway según interfaces integradas y servicios realmente listos; mantener Caddy en su estado actual hasta que Gateway tenga health, readiness y HTTPS verificables.
 5. Obtener autorización de liberación por cada servicio con SHA/CI aprobado, runtime completo, imagen disponible, readiness funcional y rollback revisado. La autorización general de infraestructura no sirve como autorización de despliegue.
 6. El agente B puede activar CD automático solo después de acordar y revisar explícitamente ese cambio. Esta misión no lo habilitó.
+
+## Continuación PostgreSQL y revisión de exposición (2026-10-17 03:04 UTC / 2026-10-16 22:04 Lima)
+
+Esta sección supersede los estados PostgreSQL anteriores que indicaban credenciales pendientes para Catalog/Taxonomy. No modifica la auditoría base `G6-ORACLE-20261017T011831Z`.
+
+### Decisión de Marco sobre credenciales
+
+Marco decidió conservar las ocho credenciales `_dev_login` existentes para Hito 3. No se cambiaron contraseñas, roles ni permisos PostgreSQL, no se crearon usuarios y no se ejecutaron migraciones ni consultas de escritura. El riesgo de exposición no se considera resuelto: el resultado de una comprobación incluyó líneas de credenciales en la salida de herramientas de esta conversación.
+
+Alcance observado de la exposición:
+
+- **Ubicación confirmada:** salida stdout de la herramienta del agente registrada en el transcript de esta conversación/tarea. La salida fue recibida desde una sesión SSH iniciada por PowerShell; no se encontró en el historial PSReadLine local. No se creó deliberadamente un archivo con esa salida ni se redirigió a archivos o a la salida de Actions. El transcript de la conversación puede ser visible para quienes tengan acceso a esta tarea; no se pudo inspeccionar ni purgar la retención interna de la plataforma.
+- **Repositorio/GitHub público:** se revisaron 880 blobs alcanzables en las refs Git locales después de actualizar refs remotas; no hubo coincidencias exactas con los ocho valores actuales. Ningún `.env.local`/`runtime.env` aparece entre los archivos del PR #122. Los comentarios de PR están vacíos, no hay revisiones, no hay artefactos del run CI y los logs revisados no contienen patrones de URI PostgreSQL, asignación `PGPASSWORD`/`DATABASE_URL` ni nombres de los roles runtime. En comentarios de los issues #8, #20, #110 y #111 no se detectaron formatos comunes de credenciales. No se encontró una copia pública en esos recursos.
+- **Límites:** estas comprobaciones cubren las refs descargadas, el PR/CI identificado y los comentarios indicados; no prueban acceso o retención de plataformas fuera de esta inspección ni permiten afirmar que nadie con acceso al transcript haya visto la salida. No borrar evidencia de auditoría. Marco decidió no rotar; el riesgo residual permanece abierto.
+
+### Runtimes PostgreSQL instalados
+
+Operación en Oracle completada a partir de los ocho archivos `.env.local` ubicados en `C:\Users\marec\Desktop\G6-PostgresRuntime-Privado` (el nombre real de los archivos no era `.env.example`). No se copiaron al repositorio ni se imprimieron sus valores durante la instalación. Se validó el mapeo de endpoint de Session Pooler (`aws-0-sa-east-1.pooler.supabase.com:5432`), usuario con formato de rol más project ref, rol esperado, esquema, base y `verify-full`. `PGSSLROOTCERT` apunta a `/run/g6-certs/supabase-server-root.crt`.
+
+Los ocho archivos están en sus rutas registradas `/etc/g6-<servicio>/runtime.env`, modo 0640, root y grupo de servicio. Inventory conserva el `DATABASE_URL` existente byte por byte y recibió las claves PG adicionales. Antes de modificarlo se creó `/var/backups/g6-productos-ofertas/postgres-runtime-20261017T025648Z/inventory.runtime.env.pre`; el checksum coincide con el respaldo. La CA host continúa como `/etc/g6-postgres/supabase-server-root.crt`, modo 0444.
+
+La conexión PostgreSQL desde el host Oracle se observó entre `2026-10-17T02:56:48Z` y `2026-10-17T02:58:26Z` (`2026-10-16T21:56:48-05:00` a `21:58:26-05:00`). Para los ocho roles hubo TCP PASS y consultas de solo lectura que confirmaron autenticación, identidad esperada, `USAGE` del esquema y ausencia de `SUPERUSER`, `BYPASSRLS`, `CREATEROLE`, `CREATEDB` y membresía al owner. Se observaron permisos SELECT/INSERT/UPDATE/DELETE sobre tablas existentes: catalog 14, taxonomy 13, pricing 8, price_audit 5, promotions 14, inventory 16, combos 6 y bulk 8; `CREATE` de esquema fue false para todos. Las conexiones `psql` se abrieron forzando `sslmode=verify-full` con la CA host, por lo que TLS/hostname se consideran PASS histórico. Una salida intermedia clasificó incorrectamente el booleano textual de `pg_stat_ssl` y mostró TLS FAIL; el resultado se corrigió al constatar que la propia sesión `psql` conectó con `verify-full`. No se repitieron pruebas con secretos después de conocer la exposición.
+
+| Servicio | Configuración | TCP | TLS verify-full | Autenticación | Rol | Permisos | Readiness funcional |
+|---|---|---|---|---|---|---|---|
+| catalog-svc | PASS | PASS | PASS histórico | PASS histórico | PASS histórico | PASS histórico | NO_VERIFICADO; integración PostgreSQL implementada, servicio no desplegado |
+| taxonomy-svc | PASS | PASS | PASS histórico | PASS histórico | PASS histórico | PASS histórico | NO_VERIFICADO; integración PostgreSQL implementada, servicio no desplegado |
+| pricing-svc | PASS | PASS | PASS histórico | PASS histórico | PASS histórico | PASS histórico | NO_VERIFICADO; conexión PostgreSQL no implementada en el código revisado |
+| price-audit-svc | PASS | PASS | PASS histórico | PASS histórico | PASS histórico | PASS histórico | NO_VERIFICADO; conexión PostgreSQL no implementada en el código revisado |
+| promotions-svc | PASS | PASS | PASS histórico | PASS histórico | PASS histórico | PASS histórico | NO_VERIFICADO; conexión PostgreSQL no implementada en el código revisado |
+| inventory-svc | PASS | PASS | PASS histórico | PASS histórico | PASS histórico | PASS histórico | NO_VERIFICADO; conexión PostgreSQL no implementada en el código revisado |
+| combos-svc | PASS | PASS | PASS histórico | PASS histórico | PASS histórico | PASS histórico | NO_VERIFICADO; conexión PostgreSQL no implementada en el código revisado |
+| bulk-svc | PASS | PASS | PASS histórico | PASS histórico | PASS histórico | PASS histórico | NO_VERIFICADO; conexión PostgreSQL no implementada en el código revisado |
+
+Los estados PASS son evidencia histórica de host, previa a cualquier futura modificación de credenciales y no prueban conexión desde contenedor. Ningún microservicio se declara funcional o listo para liberar.
+
+### PR #122 y estado operativo actual
+
+- A `2026-10-17T03:04Z`, PR #122 sigue draft, abierto, sin aprobación ni revisión registrada, head `0ec8bcd3fea2f5d227ddd75762d4ecb2c4b53b61`, base `950fd20499d67c6f265dcde4a40971f4c4fb6180`. El run CI `38995257656` terminó SUCCESS; su job pasó y ejecutó `Simulate generic Oracle deployment, isolation and rollback` (step 17), no fue omitido. No se hizo merge.
+- La inspección técnica detectó que Inventory usa su Compose legado `/opt/g6-productos-ofertas/inventory/docker-compose.inventory.yml` y su overlay HTTP opcional; no usa el Compose genérico que ahora monta la CA. El overlay Inventory versionado solo conecta `g6-http`, no monta `/etc/g6-postgres/supabase-server-root.crt` como `/run/g6-certs/supabase-server-root.crt:ro`. Se intentó registrar `REQUEST_CHANGES`, pero la integración GitHub devolvió 403 `Resource not accessible by integration`; no se publicó review ni comentario. La brecha queda pendiente de corrección y CI antes de aprobar/instalar Compose.
+- Corrección PR #122: el overlay HTTP de Inventory ahora añade el montaje CA indicado como solo lectura, y las comprobaciones de CI/deploy test inspeccionan la configuración Compose efectiva, incluyendo ruta fuente/destino y `read_only=true`, además de preservar alias `g6-http`, healthcheck y puerto heredado. Cambio preparado en esta rama para revisión; queda pendiente la CI Linux del nuevo commit y la aprobación/instalación posterior. Oracle no fue modificada por esta corrección.
+- Tailscale ahora reporta `BackendState=Running` y dos direcciones en Oracle (observado `2026-10-17T03:04:57Z`). No se eligió una tailnet durante esta operación. Sigue sin probarse acceso SSH privado desde un runner: el workflow actual no conecta Actions a Tailscale y no se modificó el CD.
+- En Oracle siguen activos solo `g6-caddy` y `g6-po-rabbitmq-1`; no hay contenedores G6 de aplicación. No se modificaron Caddy, RabbitMQ ni el CD, ni se instaló el Compose candidato aún no aprobado/integrado.
+
+Acciones pendientes: (1) Marco revisa la brecha de montaje CA de Inventory y aprueba/integra PR #122 cuando quede corregido; (2) instalar en Oracle desde el SHA exacto integrado los Compose/registro/ejecutor y comprobar hashes; (3) preparar integración de Actions por Tailscale y validar SSH privado; (4) configurar upstreams reales del Gateway y luego coordinar el cambio de Caddy; (5) autorizar cada despliegue manual por separado tras CI de master, runtime, readiness funcional y rollback; (6) el agente B gestiona cualquier habilitación de CD automático. La decisión de no rotar se respeta y el incidente conserva riesgo residual pendiente de la evaluación de acceso al transcript.

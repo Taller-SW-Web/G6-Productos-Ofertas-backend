@@ -145,15 +145,19 @@ jobs:
           grep -Fq "127.0.0.1:${G6_SERVICE_PORT}/health" Dockerfile.inventory-svc
           export INVENTORY_IMAGE="ghcr.io/taller-sw-web/g6-productos-ofertas-backend/inventory-svc:0123456789012345678901234567890123456789"
           sed "s|/etc/g6-inventory/runtime.env|${runtime_env}|" docker-compose.inventory.yml > "$inventory_compose"
-          inventory_config="$(docker compose --file "$inventory_compose" config --format json --no-env-resolution)"
+          inventory_config="$(docker compose --file "$inventory_compose" --file ops/oracle/docker-compose.inventory.http.yml config --format json --no-env-resolution)"
           jq -e --arg port "$G6_SERVICE_PORT" --arg port_env "$G6_SERVICE_PORT_ENV" \
+            --arg ca_source "/etc/g6-postgres/supabase-server-root.crt" \
+            --arg ca_target "/run/g6-certs/supabase-server-root.crt" \
             '.services["inventory-svc"].environment.PORT == $port and
              .services["inventory-svc"].environment[$port_env] == $port and
              .services["inventory-svc"].ports[0].host_ip == "127.0.0.1" and
              (.services["inventory-svc"].ports[0].published | tostring) == $port and
-             ((.services["inventory-svc"].healthcheck.test | join(" ")) | contains("127.0.0.1:" + $port + "/health"))' \
+             ((.services["inventory-svc"].healthcheck.test | join(" ")) | contains("127.0.0.1:" + $port + "/health")) and
+             any(.services["inventory-svc"].volumes[]; .source == $ca_source and .target == $ca_target and .read_only == true) and
+             (.services["inventory-svc"].networks["g6-http"].aliases | index("inventory-svc") != null)' \
             <<< "$inventory_config" >/dev/null
-          printf 'Consistencia de los nueve puertos/env/Compose/healthchecks validada; Inventario conserva puerto y healthcheck.\n'
+          printf 'Consistencia de los nueve puertos/env/Compose/healthchecks validada; Inventory conserva puerto, healthcheck, alias g6-http y montaje CA read-only.\n'
 
       - name: Build generic service images for all Oracle CD services
         run: |
