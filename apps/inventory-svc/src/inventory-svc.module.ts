@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { InventorySvcController } from './inventory-svc.controller.js';
 import { InventoryController } from './inventory.controller.js';
+import { InventoryAdminController } from './inventory-admin.controller.js';
 import { InventorySvcService } from './inventory-svc.service.js';
 import { DatabaseService } from './database/database.service.js';
 import { IdempotencyService } from './idempotency/idempotency.service.js';
@@ -12,6 +13,8 @@ import { ReservationExpirationService } from './reservations/reservation-expirat
 import { OperationsService } from './operations/operations.service.js';
 import { DisponibilidadService } from './disponibilidad/disponibilidad.service.js';
 import { ReintegrosService } from './reintegros/reintegros.service.js';
+import { UmbralesService } from './umbrales/umbrales.service.js';
+import { DashboardService } from './dashboard/dashboard.service.js';
 
 import { DrizzleLocationsRepository } from './repositories/drizzle/drizzle-locations.repository.js';
 import { DrizzleCommercialRoutesRepository } from './repositories/drizzle/drizzle-commercial-routes.repository.js';
@@ -20,6 +23,7 @@ import { DrizzleReservationsRepository } from './repositories/drizzle/drizzle-re
 import { DrizzleOperationsRepository } from './repositories/drizzle/drizzle-operations.repository.js';
 import { DrizzleKardexRepository } from './repositories/drizzle/drizzle-kardex.repository.js';
 import { DrizzleOutboxRepository } from './repositories/drizzle/drizzle-outbox.repository.js';
+import { DrizzleThresholdsRepository } from './repositories/drizzle/drizzle-thresholds.repository.js';
 
 import {
   LOCATIONS_REPOSITORY,
@@ -29,14 +33,20 @@ import {
   OPERATIONS_REPOSITORY,
   KARDEX_REPOSITORY,
   OUTBOX_REPOSITORY,
+  THRESHOLDS_REPOSITORY,
 } from './repositories/interfaces/repository.tokens.js';
 
 import { InventoryAuthGuard } from './auth/inventory-auth.guard.js';
+import { UserAuthGuard } from './auth/user-auth.guard.js';
 import { InventoryWorkersService } from './workers/inventory-workers.service.js';
 
 @Module({
   imports: [],
-  controllers: [InventorySvcController, InventoryController],
+  controllers: [
+    InventorySvcController,
+    InventoryController,
+    InventoryAdminController,
+  ],
   providers: [
     InventorySvcService,
     DatabaseService,
@@ -49,7 +59,10 @@ import { InventoryWorkersService } from './workers/inventory-workers.service.js'
     OperationsService,
     DisponibilidadService,
     ReintegrosService,
+    UmbralesService,
+    DashboardService,
     InventoryAuthGuard,
+    UserAuthGuard,
     InventoryWorkersService,
     // Repositorios Drizzle vinculados a sus tokens de interfaz
     {
@@ -80,6 +93,10 @@ import { InventoryWorkersService } from './workers/inventory-workers.service.js'
       provide: OUTBOX_REPOSITORY,
       useClass: DrizzleOutboxRepository,
     },
+    {
+      provide: THRESHOLDS_REPOSITORY,
+      useClass: DrizzleThresholdsRepository,
+    },
     // Compatibilidad directa de clases
     DrizzleLocationsRepository,
     DrizzleCommercialRoutesRepository,
@@ -88,6 +105,7 @@ import { InventoryWorkersService } from './workers/inventory-workers.service.js'
     DrizzleOperationsRepository,
     DrizzleKardexRepository,
     DrizzleOutboxRepository,
+    DrizzleThresholdsRepository,
   ],
   exports: [
     DatabaseService,
@@ -100,7 +118,10 @@ import { InventoryWorkersService } from './workers/inventory-workers.service.js'
     OperationsService,
     DisponibilidadService,
     ReintegrosService,
+    UmbralesService,
+    DashboardService,
     InventoryAuthGuard,
+    UserAuthGuard,
     LOCATIONS_REPOSITORY,
     COMMERCIAL_ROUTES_REPOSITORY,
     STOCK_BALANCE_REPOSITORY,
@@ -108,6 +129,7 @@ import { InventoryWorkersService } from './workers/inventory-workers.service.js'
     OPERATIONS_REPOSITORY,
     KARDEX_REPOSITORY,
     OUTBOX_REPOSITORY,
+    THRESHOLDS_REPOSITORY,
     DrizzleLocationsRepository,
     DrizzleCommercialRoutesRepository,
     DrizzleStockBalanceRepository,
@@ -115,6 +137,7 @@ import { InventoryWorkersService } from './workers/inventory-workers.service.js'
     DrizzleOperationsRepository,
     DrizzleKardexRepository,
     DrizzleOutboxRepository,
+    DrizzleThresholdsRepository,
   ],
 })
 export class InventorySvcModule {}

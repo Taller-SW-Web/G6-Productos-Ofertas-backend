@@ -193,6 +193,45 @@ export class DrizzleStockBalanceRepository implements IStockBalanceRepository {
     }));
   }
 
+  async findByFilters(
+    filters: { sku?: string; locationId?: string },
+    client?: IDatabaseClient,
+  ): Promise<StockBalanceEntity[]> {
+    const conditions: string[] = [];
+    const params: any[] = [];
+    if (filters.sku) {
+      params.push(filters.sku);
+      conditions.push(`sku_id = $${params.length}`);
+    }
+    if (filters.locationId) {
+      params.push(filters.locationId);
+      conditions.push(`location_id = $${params.length}`);
+    }
+    const where =
+      conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const sql = `
+      SELECT sku_id, location_id, on_hand, reserved, blocked, available, stock_version
+      FROM inventory.stock_balance
+      ${where}
+      ORDER BY sku_id ASC, location_id ASC
+    `;
+    const res = client
+      ? await client.query(sql, params)
+      : await this.databaseService.query(sql, params);
+
+    return res.rows.map((row: any) => ({
+      sku_id: row.sku_id,
+      location_id: row.location_id,
+      on_hand: Number(row.on_hand),
+      reserved: Number(row.reserved),
+      blocked: Number(row.blocked),
+      available: Number(
+        row.available ?? row.on_hand - row.reserved - row.blocked,
+      ),
+      stock_version: Number(row.stock_version),
+    }));
+  }
+
   async findThresholdOverrides(
     client?: IDatabaseClient,
   ): Promise<Array<{ sku_id: string | null; umbral_efectivo: number }>> {

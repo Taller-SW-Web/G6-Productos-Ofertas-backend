@@ -1,5 +1,6 @@
 export const REQUIRED_SCOPE_KEY = 'required_scope';
 export const ALLOWED_CLIENTS_KEY = 'allowed_clients';
+export const REQUIRED_CAPABILITY_KEY = 'required_capability';
 
 export const EXPECTED_AUDIENCE = 'api-productos';
 export const EXPECTED_ALGORITHM = 'RS256';
@@ -25,4 +26,14 @@ export const KNOWN_CLIENTS = {
   MARKETPLACE: 'modulo-marketplace',
   CHATBOT: 'modulo-chatbot',
   RETAIL: 'modulo-retail',
+} as const;
+
+/**
+ * Capacidades locales de operador (userBearer) declaradas por OpenAPI con
+ * `x-required-local-capability`. El claim exacto lo emite Seguridad y Usuarios
+ * (G7); este servicio lo valida contra `capabilities`/`roles`/`scope(s)`.
+ */
+export const INVENTORY_CAPABILITIES = {
+  TRASLADOS_LEER: 'INVENTARIO_TRASLADOS_LEER',
+  TRASLADOS_RECIBIR: 'INVENTARIO_TRASLADOS_RECIBIR',
 } as const;

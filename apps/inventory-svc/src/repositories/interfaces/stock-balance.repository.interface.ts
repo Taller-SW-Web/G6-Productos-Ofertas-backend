@@ -35,6 +35,11 @@ export interface IStockBalanceRepository {
     client?: IDatabaseClient,
   ): Promise<StockBalanceEntity[]>;
 
+  findByFilters(
+    filters: { sku?: string; locationId?: string },
+    client?: IDatabaseClient,
+  ): Promise<StockBalanceEntity[]>;
+
   findThresholdOverrides(
     client?: IDatabaseClient,
   ): Promise<Array<{ sku_id: string | null; umbral_efectivo: number }>>;

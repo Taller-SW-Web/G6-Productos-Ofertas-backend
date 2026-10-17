@@ -336,7 +336,23 @@ export class InMemoryDatabaseMock implements IDatabaseService {
     }
 
     // SELECT from stock_threshold_override
-    if (s.includes('FROM INVENTORY.STOCK_THRESHOLD_OVERRIDE')) {
+    if (
+      s.startsWith('SELECT') &&
+      s.includes('FROM INVENTORY.STOCK_THRESHOLD_OVERRIDE')
+    ) {
+      if (s.includes('WHERE SKU_ID IS NULL AND LOCATION_ID IS NULL')) {
+        const rows = this.thresholdOverrides.filter(
+          (t) => t.sku_id === null || t.sku_id === undefined,
+        );
+        const limited = rows.slice(0, 1);
+        return { rows: limited as any, rowCount: limited.length };
+      }
+      if (s.includes('WHERE SKU_ID IS NOT NULL')) {
+        const rows = this.thresholdOverrides
+          .filter((t) => t.sku_id !== null && t.sku_id !== undefined)
+          .sort((a, b) => String(a.sku_id).localeCompare(String(b.sku_id)));
+        return { rows: rows as any, rowCount: rows.length };
+      }
       return {
         rows: this.thresholdOverrides as any,
         rowCount: this.thresholdOverrides.length,
@@ -412,7 +428,7 @@ export class InMemoryDatabaseMock implements IDatabaseService {
     }
 
     // SELECT from stock_balance
-    if (s.includes('FROM INVENTORY.STOCK_BALANCE')) {
+    if (s.startsWith('SELECT') && s.includes('FROM INVENTORY.STOCK_BALANCE')) {
       if (s.includes('WHERE SKU_ID = ANY($1)')) {
         const skus: string[] = params?.[0] || [];
         const loc = params?.[1];
@@ -430,6 +446,20 @@ export class InMemoryDatabaseMock implements IDatabaseService {
         );
         return { rows: rows as any, rowCount: rows.length };
       }
+      if (s.includes('WHERE SKU_ID = $1')) {
+        const sku = params?.[0];
+        const rows = this.stockBalance.filter((b) => b.sku_id === sku);
+        return { rows: rows as any, rowCount: rows.length };
+      }
+      if (s.includes('WHERE LOCATION_ID = $1')) {
+        const loc = params?.[0];
+        const rows = this.stockBalance.filter((b) => b.location_id === loc);
+        return { rows: rows as any, rowCount: rows.length };
+      }
+      return {
+        rows: this.stockBalance as any,
+        rowCount: this.stockBalance.length,
+      };
     }
 
     // SELECT from outbox
@@ -511,6 +541,63 @@ export class InMemoryDatabaseMock implements IDatabaseService {
       };
       this.reservationLines.push(row);
       return { rows: [row] as any, rowCount: 1 };
+    }
+
+    // UPDATE / INSERT / DELETE stock_threshold_override
+    if (s.startsWith('UPDATE INVENTORY.STOCK_THRESHOLD_OVERRIDE')) {
+      if (s.includes('WHERE SKU_ID IS NULL AND LOCATION_ID IS NULL')) {
+        const target = this.thresholdOverrides.find(
+          (t) => t.sku_id === null || t.sku_id === undefined,
+        );
+        if (!target) return { rows: [], rowCount: 0 };
+        target.umbral_efectivo = Number(params?.[0]);
+        return { rows: [], rowCount: 1 };
+      }
+      if (s.includes('WHERE SKU_ID = $2 AND LOCATION_ID IS NULL')) {
+        const umbral = Number(params?.[0]);
+        const sku = params?.[1];
+        const target = this.thresholdOverrides.find(
+          (t) => t.sku_id === sku && (t.location_id ?? null) === null,
+        );
+        if (!target) return { rows: [], rowCount: 0 };
+        target.umbral_efectivo = umbral;
+        return { rows: [], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    }
+
+    if (s.startsWith('INSERT INTO INVENTORY.STOCK_THRESHOLD_OVERRIDE')) {
+      if (s.includes('VALUES (NULL, NULL, $1)')) {
+        const row: ThresholdOverrideRow = {
+          id: 'threshold-' + Math.random().toString(36).substring(2),
+          sku_id: null,
+          location_id: null,
+          umbral_efectivo: Number(params?.[0]),
+        };
+        this.thresholdOverrides.push(row);
+        return { rows: [row] as any, rowCount: 1 };
+      }
+      if (s.includes('VALUES ($1, NULL, $2)')) {
+        const row: ThresholdOverrideRow = {
+          id: 'threshold-' + Math.random().toString(36).substring(2),
+          sku_id: params?.[0],
+          location_id: null,
+          umbral_efectivo: Number(params?.[1]),
+        };
+        this.thresholdOverrides.push(row);
+        return { rows: [row] as any, rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    }
+
+    if (s.startsWith('DELETE FROM INVENTORY.STOCK_THRESHOLD_OVERRIDE')) {
+      const sku = params?.[0];
+      const before = this.thresholdOverrides.length;
+      this.thresholdOverrides = this.thresholdOverrides.filter(
+        (t) => !(t.sku_id === sku && (t.location_id ?? null) === null),
+      );
+      const removed = before - this.thresholdOverrides.length;
+      return { rows: [], rowCount: removed };
     }
 
     // UPDATE stock_balance
