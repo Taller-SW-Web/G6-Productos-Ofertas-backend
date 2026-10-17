@@ -3,7 +3,7 @@ import { DynamicModule, Module } from '@nestjs/common';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { APP_FILTER } from '@nestjs/core';
-import { Database } from './database.js';
+import { CATALOG_POSTGRES_CONFIG, Database } from './database.js';
 import { PostgresCatalogRepository } from './postgres-catalog.repository.js';
 import { CommercialService } from './commercial.service.js';
 import { CommercialController } from './commercial.controller.js';
@@ -14,7 +14,6 @@ import {
 import { TaxonomyClient } from './taxonomy.client.js';
 import { ProblemFilter } from './problem.filter.js';
 import { CatalogConfig } from './config.js';
-import { PostgresReadiness } from './postgres-readiness.js';
 import { CATALOG_DATABASE, ReadinessController } from './readiness.js';
 
 @Module({
@@ -46,16 +45,7 @@ export class AppModule {
       module: AppModule,
       providers: [
         { provide: CatalogConfig, useValue: config },
-        {
-          provide: CATALOG_DATABASE,
-          useFactory: (commercial: CommercialReadinessController) => ({
-            check: async () => {
-              await new PostgresReadiness(config).check();
-              await commercial.ready();
-            },
-          }),
-          inject: [CommercialReadinessController],
-        },
+        { provide: CATALOG_POSTGRES_CONFIG, useValue: config.database },
       ],
     };
   }

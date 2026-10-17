@@ -3,37 +3,74 @@ import { mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-export const validEnv = {
+const directory = mkdtempSync(join(tmpdir(), 'catalog-config-'));
+const certificate = join(directory, 'fixture.crt');
+const validEnv = () => ({
   NODE_ENV: 'test',
   CATALOG_SVC_PORT: '3001',
-  DATABASE_URL:
-    'postgresql://catalog_app:fixture-secret@localhost:5432/postgres',
-};
+  PGHOST: 'localhost',
+  PGPORT: '5432',
+  PGDATABASE: 'postgres',
+  PGUSER: 'catalog_app',
+  PGPASSWORD: 'fixture-secret',
+  PGSSLMODE: 'verify-full',
+  PGSSLROOTCERT: certificate,
+  G6_CONNECTION_MODE: 'direct',
+  G6_DATABASE_SCHEMA: 'catalog',
+  G6_EXPECTED_ROLE: 'catalog_app',
+});
 
-describe('CatalogConfig', () => {
-  it('accepts and freezes typed configuration', () => {
-    const config = new CatalogConfig(validEnv);
-    expect(config.port).toBe(3001);
-    expect(config.environment).toBe('test');
-    expect(Object.isFrozen(config)).toBe(true);
-  });
+beforeAll(() =>
+  writeFileSync(
+    certificate,
+    '-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----',
+  ),
+);
+afterAll(() => {
+  unlinkSync(certificate);
+  rmdirSync(directory);
+});
+
+describe('CatalogConfig PG contract', () => {
+  it.each(['session', 'direct'])(
+    'accepts %s with strict TLS and typed configuration',
+    (mode) => {
+      const config = new CatalogConfig({
+        ...validEnv(),
+        G6_CONNECTION_MODE: mode,
+      });
+      expect(config.port).toBe(3001);
+      expect(config.host).toBe('127.0.0.1');
+      expect(config.database).toMatchObject({
+        mode,
+        expectedRole: 'catalog_app',
+        database: 'postgres',
+      });
+      expect(config.database.pool.ssl).toMatchObject({
+        rejectUnauthorized: true,
+        servername: 'localhost',
+      });
+      expect(Object.isFrozen(config)).toBe(true);
+      expect(Object.isFrozen(config.database)).toBe(true);
+    },
+  );
 
   it('uses PORT only when the service port is absent', () => {
     expect(
       new CatalogConfig({
-        ...validEnv,
+        ...validEnv(),
         CATALOG_SVC_PORT: undefined,
         PORT: '4000',
       }).port,
     ).toBe(4000);
-    expect(new CatalogConfig({ ...validEnv, PORT: '4000' }).port).toBe(3001);
+    expect(new CatalogConfig({ ...validEnv(), PORT: '4000' }).port).toBe(3001);
   });
 
-  it.each(['NODE_ENV', 'CATALOG_SVC_PORT', 'DATABASE_URL'])(
-    'rejects missing %s',
+  it.each(Object.keys(validEnv()))(
+    'rejects missing %s before startup',
     (key) => {
       expect(
-        () => new CatalogConfig({ ...validEnv, [key]: undefined }),
+        () => new CatalogConfig({ ...validEnv(), [key]: undefined }),
       ).toThrow(key);
     },
   );
@@ -42,112 +79,59 @@ describe('CatalogConfig', () => {
     'rejects malformed port %s',
     (port) => {
       expect(
-        () => new CatalogConfig({ ...validEnv, CATALOG_SVC_PORT: port }),
+        () => new CatalogConfig({ ...validEnv(), CATALOG_SVC_PORT: port }),
       ).toThrow('CATALOG_SVC_PORT');
     },
   );
 
   it.each([
-    '',
-    'https://localhost/db',
-    'postgres://localhost',
-    'postgres://localhost:99999/db',
-    'postgres://local host/db',
-  ])('rejects malformed database URL', (url) => {
-    expect(() => new CatalogConfig({ ...validEnv, DATABASE_URL: url })).toThrow(
-      'DATABASE_URL',
+    ['PGSSLMODE', 'disable'],
+    ['G6_CONNECTION_MODE', 'transaction'],
+    ['G6_DATABASE_SCHEMA', 'taxonomy'],
+    ['G6_EXPECTED_ROLE', 'postgres'],
+    ['PGUSER', 'taxonomy_app'],
+    ['PGPORT', '1e3'],
+    ['PGHOST', 'invalid host'],
+    ['G6_CONNECT_HOST', 'invalid host'],
+    ['PGSSLROOTCERT', 'relative.crt'],
+    ['PGSSLROOTCERT', join(tmpdir(), 'catalog-missing-fixture.crt')],
+    ['CATALOG_SVC_HOST', 'invalid-host'],
+    ['CATALOG_TAXONOMY_URL', 'https://user:private-secret@example.test'],
+  ])('rejects invalid %s without exposing values', (key, value) => {
+    expect(() => new CatalogConfig({ ...validEnv(), [key]: value })).toThrow(
+      key,
     );
   });
 
-  it('rejects an unknown environment without echoing values', () => {
+  it('does not accept DATABASE_URL instead of the PG schema', () => {
     expect(
       () =>
         new CatalogConfig({
-          NODE_ENV: 'private-secret',
-          CATALOG_SVC_PORT: 'private-secret',
-          DATABASE_URL: 'private-secret',
+          NODE_ENV: 'test',
+          CATALOG_SVC_PORT: '3001',
+          DATABASE_URL:
+            'postgres://catalog_app:private-secret@localhost/catalog',
         }),
-    ).toThrow(/NODE_ENV/);
+    ).toThrow('PGHOST');
+  });
+
+  it('preserves host override and expected role without relying on later environment changes', () => {
+    const env = { ...validEnv(), G6_CONNECT_HOST: '127.0.0.2' };
+    const config = new CatalogConfig(env);
+    env.G6_CONNECT_HOST = '127.0.0.3';
+    env.G6_EXPECTED_ROLE = 'catalog_dev_login';
+    expect(config.database.pool.host).toBe('127.0.0.2');
+    expect(config.database.expectedRole).toBe('catalog_app');
+  });
+
+  it('rejects an unknown environment and does not echo secret values', () => {
+    expect(
+      () => new CatalogConfig({ ...validEnv(), NODE_ENV: 'private-secret' }),
+    ).toThrow('NODE_ENV');
     try {
       new CatalogConfig({ DATABASE_URL: 'private-secret' });
     } catch (error) {
       expect(String(error)).not.toContain('private-secret');
     }
-  });
-});
-
-describe('Session Pooler configuration', () => {
-  let directory: string;
-  let certificate: string;
-  beforeAll(() => {
-    directory = mkdtempSync(join(tmpdir(), 'catalog-config-'));
-    certificate = join(directory, 'fixture.crt');
-    writeFileSync(certificate, 'public-certificate-fixture');
-  });
-  afterAll(() => {
-    unlinkSync(certificate);
-    rmdirSync(directory);
-  });
-  const pgEnv = () => ({
-    NODE_ENV: 'test',
-    CATALOG_SVC_PORT: '3001',
-    PGHOST: 'localhost',
-    PGPORT: '5432',
-    PGDATABASE: 'postgres',
-    PGUSER: 'catalog_dev_login',
-    PGPASSWORD: 'fixture-secret',
-    PGSSLMODE: 'verify-full',
-    PGSSLROOTCERT: certificate,
-    G6_CONNECTION_MODE: 'session',
-    G6_DATABASE_SCHEMA: 'catalog',
-  });
-
-  it('accepts PG variables with an explicit CA and own schema', () => {
-    const config = new CatalogConfig(pgEnv());
-    expect(config.database).toMatchObject({
-      mode: 'session',
-      port: 5432,
-      ca: 'public-certificate-fixture',
-    });
-    expect(Object.isFrozen(config.database)).toBe(true);
-  });
-
-  it.each([
-    'PGHOST',
-    'PGPORT',
-    'PGDATABASE',
-    'PGUSER',
-    'PGPASSWORD',
-    'PGSSLMODE',
-    'PGSSLROOTCERT',
-    'G6_CONNECTION_MODE',
-    'G6_DATABASE_SCHEMA',
-  ])('rejects missing %s', (key) => {
-    expect(() => new CatalogConfig({ ...pgEnv(), [key]: undefined })).toThrow(
-      key,
-    );
-  });
-
-  it.each([
-    ['PGSSLMODE', 'disable'],
-    ['G6_CONNECTION_MODE', 'transaction'],
-    ['G6_DATABASE_SCHEMA', 'taxonomy'],
-    ['PGPORT', '1e3'],
-    ['PGHOST', 'invalid host'],
-    ['PGSSLROOTCERT', 'relative.crt'],
-    ['PGSSLROOTCERT', join(tmpdir(), 'catalog-missing-fixture.crt')],
-  ])('rejects invalid %s without exposing values', (key, value) => {
-    expect(() => new CatalogConfig({ ...pgEnv(), [key]: value })).toThrow(key);
-  });
-
-  it('does not fall back to DATABASE_URL for partial PG settings', () => {
-    expect(
-      () =>
-        new CatalogConfig({
-          ...validEnv,
-          PGSSLMODE: 'disable',
-          PGPASSWORD: 'fixture-secret',
-        }),
-    ).toThrow('PGHOST');
   });
 });

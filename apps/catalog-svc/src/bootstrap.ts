@@ -7,7 +7,6 @@ import { AppModule } from './app.module.js';
 import { CatalogConfig } from './config.js';
 import { SanitizedLogger } from './sanitized-logger.js';
 import { Database } from './database.js';
-import { readHttpConfig } from './http-config.js';
 
 export async function createApplication(
   env: Record<string, string | undefined> = process.env,
@@ -18,14 +17,7 @@ export async function createApplication(
       /password|secret|token|key|credential|url|dsn/i.test(key),
     )
     .flatMap(([, value]) => (value ? [value] : []));
-  const database =
-    config.database.mode === 'url'
-      ? new URL(config.database.connectionString)
-      : config.database;
-  const credentials =
-    'username' in database
-      ? [database.username, database.password]
-      : [database.user, database.password];
+  const credentials = [config.database.user, config.database.password];
   for (const credential of credentials) {
     if (credential) {
       secrets.push(credential);
@@ -67,8 +59,7 @@ export async function startCatalog() {
     const { app, config } = await createApplication();
     try {
       await app.get(Database).verifyIdentity();
-      const { host } = readHttpConfig(process.env);
-      await app.listen(config.port, host);
+      await app.listen(config.port, config.host);
       new SanitizedLogger(config.environment).log({
         code: 'APPLICATION_STARTED',
       });

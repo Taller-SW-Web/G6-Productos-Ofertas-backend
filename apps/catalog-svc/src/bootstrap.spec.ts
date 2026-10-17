@@ -4,15 +4,39 @@ import request from 'supertest';
 import { Test } from '@nestjs/testing';
 import { AppModule } from './app.module.js';
 import { CatalogConfig } from './config.js';
-import { PostgresReadiness } from './postgres-readiness.js';
+import { CATALOG_POSTGRES_CONFIG, Database } from './database.js';
+import { mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { ReadinessController as CommercialReadinessController } from './readiness.controller.js';
 import { CATALOG_DATABASE, type CatalogDatabase } from './readiness.js';
 
+const directory = mkdtempSync(join(tmpdir(), 'catalog-bootstrap-'));
+const certificate = join(directory, 'fixture.crt');
 const env = {
   NODE_ENV: 'test',
   CATALOG_SVC_PORT: '3001',
-  DATABASE_URL: 'postgres://catalog_app:fixture-secret@localhost/catalog',
+  PGHOST: 'localhost',
+  PGPORT: '5432',
+  PGDATABASE: 'postgres',
+  PGUSER: 'catalog_app',
+  PGPASSWORD: 'fixture-secret',
+  PGSSLMODE: 'verify-full',
+  PGSSLROOTCERT: certificate,
+  G6_DATABASE_SCHEMA: 'catalog',
+  G6_EXPECTED_ROLE: 'catalog_app',
+  G6_CONNECTION_MODE: 'direct',
 };
+beforeAll(() =>
+  writeFileSync(
+    certificate,
+    '-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----',
+  ),
+);
+afterAll(() => {
+  unlinkSync(certificate);
+  rmdirSync(directory);
+});
 
 describe('bootstrap configuration', () => {
   afterEach(() => vi.restoreAllMocks());
@@ -51,11 +75,12 @@ describe('readiness after integrating master', () => {
     'requires both database and commercial checks (failure: %s)',
     async (failure) => {
       const database = vi
-        .spyOn(PostgresReadiness.prototype, 'check')
+        .spyOn(Database.prototype, 'verifyIdentity')
         .mockResolvedValue(undefined);
-      const commercial = vi
-        .fn()
-        .mockResolvedValue({ status: 'ready', service: 'catalog-svc' });
+      const commercial = vi.fn().mockImplementation(async () => {
+        await database();
+        return { status: 'ready', service: 'catalog-svc' };
+      });
       if (failure === 'database')
         database.mockRejectedValue(new Error('fixture-database-failure'));
       if (failure === 'commercial')
@@ -68,13 +93,16 @@ describe('readiness after integrating master', () => {
         .compile();
       try {
         const readiness = module.get<CatalogDatabase>(CATALOG_DATABASE);
+        expect(module.get(CATALOG_POSTGRES_CONFIG)).toBe(
+          module.get(CatalogConfig).database,
+        );
         if (failure === 'none')
           await expect(readiness.check()).resolves.toBeUndefined();
         else await expect(readiness.check()).rejects.toThrow();
-        expect(database).toHaveBeenCalledOnce();
-        expect(commercial).toHaveBeenCalledTimes(
-          failure === 'database' ? 0 : 1,
+        expect(database).toHaveBeenCalledTimes(
+          failure === 'commercial' ? 0 : 1,
         );
+        expect(commercial).toHaveBeenCalledOnce();
       } finally {
         await module.close();
       }
