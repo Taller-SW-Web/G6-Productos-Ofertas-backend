@@ -6,9 +6,14 @@ import {
   UnauthorizedException,
   ForbiddenException,
   SetMetadata,
+  Optional,
   type ExecutionContext,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import {
+  CATALOG_READ_DEMO,
+  type CatalogReadDemo,
+} from './catalog-read-demo.js';
 import { createPublicKey, verify as verifySignature } from 'node:crypto';
 import type { JsonWebKey, KeyObject } from 'node:crypto';
 import type { Request } from 'express';
@@ -91,6 +96,7 @@ export type CatalogPrincipal =
     };
 
 export interface CatalogAuthPolicy {
+  demoRead?: boolean;
   identity: 'user' | 'service' | 'either';
   scope?: string;
   allowedClients?: readonly string[];
@@ -363,6 +369,9 @@ export class CatalogAuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly verifier: CatalogTokenVerifier,
+    @Optional()
+    @Inject(CATALOG_READ_DEMO)
+    private readonly readDemo: CatalogReadDemo = { enabled: false },
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -374,8 +383,18 @@ export class CatalogAuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<
       Request & {
         catalogPrincipal?: CatalogPrincipal;
+        catalogDemoRead?: boolean;
       }
     >();
+    if (this.readDemo.enabled) {
+      if (request.method === 'GET' && policy.demoRead) {
+        request.catalogDemoRead = true;
+        // An anonymous read is not a fabricated human/service identity.
+        return true;
+      }
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method))
+        throw new ForbiddenException({ code: 'SCOPE_INSUFICIENTE' });
+    }
     const authorization = request.headers.authorization;
     const match =
       typeof authorization === 'string' &&

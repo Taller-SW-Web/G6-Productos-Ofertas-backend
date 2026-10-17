@@ -33,6 +33,7 @@ export class CatalogQueryController {
 
   @Get(':productoId')
   @RequireCatalogIdentity({
+    demoRead: true,
     identity: 'either',
     scope: 'catalogo:leer',
     allowedClients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],

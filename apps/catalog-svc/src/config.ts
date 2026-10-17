@@ -2,6 +2,10 @@ import { readPostgresSettings, type PostgresSettings } from './database.js';
 import { readTaxonomyConfig, type TaxonomyConfig } from './taxonomy-config.js';
 import { readHttpConfig } from './http-config.js';
 import {
+  readCatalogReadDemo,
+  type CatalogReadDemo,
+} from './catalog-read-demo.js';
+import {
   readCatalogAmqpConfig,
   type CatalogAmqpSettings,
 } from './catalog-amqp.js';
@@ -25,8 +29,10 @@ export class CatalogConfig {
   readonly security?: CatalogSecurityConfig;
   readonly amqp: CatalogAmqpSettings;
   readonly preparation: CatalogPreparationConfig;
+  readonly readDemo: CatalogReadDemo;
 
   constructor(env: Record<string, string | undefined>) {
+    this.readDemo = readCatalogReadDemo(env);
     const errors: string[] = [];
     const environment = env.NODE_ENV;
     if (!['development', 'test', 'production'].includes(environment ?? '')) {

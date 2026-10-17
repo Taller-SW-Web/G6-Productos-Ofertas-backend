@@ -28,6 +28,7 @@ import {
 } from '../src/database.js';
 import { CatalogTransactionManager } from '../src/catalog-transaction.js';
 import { PostgresCatalogWriteRepository } from '../src/postgres-catalog-write.repository.js';
+import { PostgresCatalogRepository } from '../src/postgres-catalog.repository.js';
 import {
   products,
   activationChecks,
@@ -262,6 +263,73 @@ describe.skipIf(!dockerAvailable)(
         tiene_variantes: false,
       };
     }
+
+    it('reads internal demo drafts and their actual variant photos without exposing them through the ordinary active-only query', async () => {
+      const marker = 'DEMO-READ-' + randomUUID();
+      const parent = await transactions.run(async (tx) => {
+        const row = await repository.insertProduct(tx, {
+          ...productInput(marker),
+          nombre: marker,
+          tiene_variantes: true,
+        });
+        const child = await repository.insertVariant(tx, {
+          product_id: row.id,
+          sku: marker + '-M',
+          identifying_key: { size: { valor_id: 'M' } },
+        });
+        await repository.insertVariantImage(tx, {
+          variant_id: child.id,
+          url: 'https://example.test/demo-variant.jpg',
+          posicion: 0,
+        });
+        await repository.insertVariantAttribute(tx, {
+          variant_id: child.id,
+          caracteristica_id: 'size',
+          nombre_snapshot: 'Size',
+          valor_id: 'M',
+          valor: 'M',
+          es_identificador: true,
+        });
+        return row;
+      });
+      const reads = new PostgresCatalogRepository(database);
+      const query = {
+        canal: 'MARKETPLACE' as const,
+        q: marker,
+        pagina: 1,
+        tamanio: 20,
+        orden: 'NOMBRE_ASC' as const,
+      };
+      expect((await reads.listCandidates(query)).items).toHaveLength(0);
+      const page = await reads.listCandidates(
+        { ...query, estado: 'BORRADOR' },
+        undefined,
+        true,
+      );
+      expect(page.total).toBe(1);
+      expect(page.items[0]).toMatchObject({
+        product_id: parent.id,
+        images: ['https://example.test/demo-variant.jpg'],
+      });
+      expect(
+        await reads.findCandidateByProductId(
+          parent.id,
+          undefined,
+          'MARKETPLACE',
+          true,
+        ),
+      ).toMatchObject({
+        product_id: parent.id,
+        images: ['https://example.test/demo-variant.jpg'],
+      });
+      expect(
+        await reads.findCandidateByProductId(
+          parent.id,
+          { productIds: [parent.id], variantIds: [] },
+          'MARKETPLACE',
+        ),
+      ).toBeNull();
+    });
 
     it('JOINT-01: commits aggregate/Outbox, transports requested/results through a real broker, deduplicates Inbox and reconnects', async () => {
       // Seed an internal BORRADOR coordination fixture, not a mocked HTTP or Taxonomy flow.

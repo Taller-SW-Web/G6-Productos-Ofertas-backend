@@ -29,6 +29,7 @@ export class CommercialController {
   }
   @Get()
   @RequireCatalogIdentity({
+    demoRead: true,
     identity: 'either',
     scope: 'catalogo:leer',
     allowedClients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
@@ -36,18 +37,24 @@ export class CommercialController {
   list(
     @Query() query: Record<string, unknown>,
     @Headers('x-correlation-id') correlationId?: string,
-    @Req() request?: Request & { catalogPrincipal?: CatalogPrincipal },
+    @Req()
+    request?: Request & {
+      catalogPrincipal?: CatalogPrincipal;
+      catalogDemoRead?: boolean;
+    },
   ) {
     this.validateCorrelation(correlationId);
     if (
       query.estado !== undefined &&
+      !request?.catalogDemoRead &&
       (request?.catalogPrincipal?.kind !== 'user' ||
         !request.catalogPrincipal.roles.includes('GESTOR_COMERCIAL'))
     )
       throw new ForbiddenException();
     const administrativeState =
-      request?.catalogPrincipal?.kind === 'user' &&
-      request.catalogPrincipal.roles.includes('GESTOR_COMERCIAL');
+      request?.catalogDemoRead ||
+      (request?.catalogPrincipal?.kind === 'user' &&
+        request.catalogPrincipal.roles.includes('GESTOR_COMERCIAL'));
     return this.service.list(
       parseProductQuery(query),
       correlationId,
@@ -60,6 +67,7 @@ export class CommercialController {
   }
   @Get('por-slug/:slug')
   @RequireCatalogIdentity({
+    demoRead: true,
     identity: 'either',
     scope: 'catalogo:leer',
     allowedClients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],

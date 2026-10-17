@@ -1,5 +1,7 @@
 # catalog-svc — configuración y readiness (#43)
 
+Demo interna de consulta real aprobada el 2026-10-17: [alcance, evidencias y liberación pendiente](DEMO-READ-ONLY.md).
+
 Rama personal `poma`. El PR #119 conserva el código comercial incorporado desde
 master; estas correcciones se limitan a configuración, arranque, observabilidad,
 readiness y sus pruebas. Las ediciones propias no cambian CI, contratos, otros servicios ni migraciones.

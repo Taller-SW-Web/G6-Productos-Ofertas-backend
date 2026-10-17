@@ -32,6 +32,7 @@ import {
 import { approvedCatalogProductPolicy } from './catalog-product.policy.js';
 import { CatalogMasterClient } from './catalog-master.client.js';
 import { CatalogTelemetry } from './catalog-telemetry.js';
+import { CATALOG_READ_DEMO, readCatalogReadDemo } from './catalog-read-demo.js';
 import { CatalogMessageService } from './catalog-message.service.js';
 import {
   CATALOG_AMQP_SETTINGS,
@@ -87,6 +88,7 @@ import {
     TaxonomyClient,
     CatalogTokenVerifier,
     CatalogAuthGuard,
+    { provide: CATALOG_READ_DEMO, useFactory: () => readCatalogReadDemo() },
     {
       provide: CATALOG_SECURITY_CONFIG,
       useFactory: () => readCatalogSecurityConfig(process.env),
@@ -120,6 +122,7 @@ export class AppModule {
         { provide: CATALOG_AMQP_SETTINGS, useValue: config.amqp },
         { provide: CATALOG_PREPARATION_CONFIG, useValue: config.preparation },
         { provide: CATALOG_POSTGRES_CONFIG, useValue: config.database },
+        { provide: CATALOG_READ_DEMO, useValue: config.readDemo },
       ],
     };
   }

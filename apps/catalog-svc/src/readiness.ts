@@ -7,6 +7,10 @@ import {
 } from '@nestjs/common';
 import { pathToFileURL } from 'node:url';
 import type { CommercialEligibilityPolicy } from './commercial-eligibility.js';
+import {
+  CATALOG_READ_DEMO,
+  type CatalogReadDemo,
+} from './catalog-read-demo.js';
 
 export const CATALOG_DATABASE = Symbol('CATALOG_DATABASE');
 
@@ -83,6 +87,7 @@ async function runReadinessProbe(): Promise<void> {
   });
   let database = 'not_ready';
   let status = 'not_ready';
+  let demo = false;
   try {
     await app.get(Database).verifyIdentity();
     await app.get(repository.PostgresCatalogRepository).listCandidates({
@@ -92,9 +97,11 @@ async function runReadinessProbe(): Promise<void> {
       orden: 'NOMBRE_ASC',
     });
     database = 'ready';
-    await app
-      .get<CommercialEligibilityPolicy>(eligibility.COMMERCIAL_ELIGIBILITY)
-      .resolve('MARKETPLACE');
+    demo = app.get<CatalogReadDemo>(CATALOG_READ_DEMO).enabled;
+    if (!demo)
+      await app
+        .get<CommercialEligibilityPolicy>(eligibility.COMMERCIAL_ELIGIBILITY)
+        .resolve('MARKETPLACE');
     status = 'ready';
   } catch {
     status = 'not_ready';
@@ -106,7 +113,11 @@ async function runReadinessProbe(): Promise<void> {
       service: 'catalog-svc',
       status,
       database,
-      eligibility: status === 'ready' ? 'ready' : 'unverified',
+      eligibility: demo
+        ? 'not_evaluated_demo'
+        : status === 'ready'
+          ? 'ready'
+          : 'unverified',
     }) + '\n',
   );
   if (status !== 'ready') process.exitCode = 1;
