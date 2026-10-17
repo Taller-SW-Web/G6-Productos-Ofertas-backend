@@ -336,9 +336,9 @@ describe.skipIf(!dockerAvailable)(
       ).rejects.toMatchObject({ failure: 'check' });
       const notNullError = await transactions
         .run(async (tx) => {
-          await tx.execute(
-            sql`UPDATE ${products} SET ${products.nombre} = ${null} WHERE ${products.id} = ${parent.id}`,
-          );
+          await tx.execute(sql`
+            UPDATE catalog.products SET nombre = ${null} WHERE id = ${parent.id}
+          `);
         })
         .catch((error: unknown) => error);
       expect(notNullError).toMatchObject({
