@@ -60,9 +60,16 @@ elif [[ "$method" == GET && "$endpoint" =~ ^repos/example/backend/deployments/([
   [[ "$id" == 100 ]] || exit 2
   printf 'g6-oracle-inventory-svc\tdeploy\t%s\t%s\t77\n' "$EXPECT_SHA" "${MOCK_TRIGGER:-workflow_dispatch}"
 elif [[ "$method" == GET && "$endpoint" =~ ^repos/example/backend/actions/runs/([0-9]+)$ ]]; then
-  [[ "${BASH_REMATCH[1]}" == 77 ]] || exit 2
-  printf 'CD servicios Oracle\t.github/workflows/cd-services-oracle.yml\t%s\t%s\t%s\t%s\texample/backend\n' \
-    "${MOCK_RUN_EVENT:-workflow_dispatch}" "${MOCK_RUN_BRANCH:-master}" "${MOCK_RUN_SHA:-$EXPECT_SHA}" "${MOCK_RUN_CONCLUSION:-success}"
+  case "${BASH_REMATCH[1]}" in
+    77)
+      printf 'CD servicios Oracle\t.github/workflows/cd-services-oracle.yml\t%s\t%s\t%s\t%s\texample/backend\n' \
+        "${MOCK_RUN_EVENT:-workflow_dispatch}" "${MOCK_RUN_BRANCH:-master}" "${MOCK_RUN_SHA:-$EXPECT_SHA}" "${MOCK_RUN_CONCLUSION:-success}"
+      ;;
+    88) printf 'CI\t.github/workflows/ci.yml\tpush\tmaster\t%s\tsuccess\texample/backend\n' "$MOCK_AUTO_SHA" ;;
+    *) exit 2 ;;
+  esac
+elif [[ "$method" == GET && "$endpoint" == repos/example/backend/commits/master ]]; then
+  printf '%s\n' "$MOCK_AUTO_SHA"
 elif [[ "$method" == GET && "$endpoint" =~ ^repos/example/backend/deployments/([0-9]+)/statuses\?per_page=100$ ]]; then
   id="${BASH_REMATCH[1]}"
   if [[ -n "${MOCK_STATUS_OVERRIDE:-}" ]]; then
@@ -103,6 +110,14 @@ deployment_id="$(run_api create example/backend inventory-svc "$SHA_A" workflow_
 [[ "$deployment_id" == 100 ]]
 [[ "$(run_selector)" == '["inventory-svc"]' ]]
 run_api status example/backend "$deployment_id" success
+auto_output="$TEMP_ROOT/automatic-selection"
+: > "$auto_output"
+env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" EXPECT_SHA="$SHA_A" MOCK_AUTO_SHA="$SHA_B" \
+  GITHUB_REPOSITORY=example/backend GITHUB_REF=refs/heads/master GITHUB_SHA="$SHA_B" GITHUB_OUTPUT="$auto_output" \
+  TRIGGER_EVENT=workflow_run CI_RUN_ID=88 CI_NAME=CI CI_PATH=.github/workflows/ci.yml CI_EVENT=push \
+  CI_BRANCH=master CI_SHA="$SHA_B" CI_CONCLUSION=success CI_HEAD_REPOSITORY=example/backend \
+  bash "$ROOT/ops/oracle/validate-cd-source.sh"
+grep -qx "sha=$SHA_B" "$auto_output"
 env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" EXPECT_SHA="$SHA_A" bash "$ROOT/ops/oracle/verify-manual-release-provenance.sh" example/backend "$deployment_id" inventory-svc https://github.com/example/backend/actions/runs/77/readiness
 if env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" EXPECT_SHA="$SHA_A" MOCK_TRIGGER=workflow_run bash "$ROOT/ops/oracle/verify-manual-release-provenance.sh" example/backend "$deployment_id" inventory-svc https://github.com/example/backend/actions/runs/77/readiness >/dev/null 2>&1; then
   echo 'FAIL: un Deployment automático se aceptó como liberación manual.' >&2
