@@ -1,7 +1,10 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { loadInventoryConfig } from '../config/inventory.config.js';
 import {
+  CanalComercial,
   ConsultaDisponibilidadResponse,
+  ConsultaDisponibilidadComercialResponse,
+  DisponibilidadComercial,
   DisponibilidadStock,
   EstadoStock,
   VerificarCantidadComercialRequest,
@@ -23,6 +26,12 @@ const VALID_FULFILLMENT_MODES = [
   'ENVIO_DOMICILIO',
   'RETIRO_TIENDA',
   'VENTA_TIENDA',
+];
+
+const CANALES_COMERCIALES: readonly CanalComercial[] = [
+  'MARKETPLACE',
+  'CHATBOT',
+  'RETAIL',
 ];
 
 @Injectable()
@@ -93,13 +102,6 @@ export class DisponibilidadService {
 
       const threshold = skuThresholdMap.get(row.sku_id) ?? globalThreshold;
 
-      let status: EstadoStock = 'DISPONIBLE';
-      if (available === 0) {
-        status = 'AGOTADO';
-      } else if (available <= threshold) {
-        status = 'STOCK_BAJO';
-      }
-
       return {
         sku: row.sku_id,
         location_id: row.location_id,
@@ -107,12 +109,120 @@ export class DisponibilidadService {
         reserved,
         blocked,
         available,
-        status,
+        status: this.clasificarEstado(available, threshold),
         threshold,
       };
     });
 
     return { items };
+  }
+
+  /**
+   * Proyección comercial informativa (GET /api/v1/inventario/disponibilidad/comercial).
+   * No expone cantidades ni ubicación interna. Conforme a D-INV-01: si no existe
+   * una ruta de cumplimiento única y ejecutable, el estado es INDETERMINADO
+   * (nunca AGOTADO por ausencia de ruta).
+   */
+  async consultarDisponibilidadComercial(
+    skus: string[],
+    canal: CanalComercial,
+    correlationId?: string,
+  ): Promise<ConsultaDisponibilidadComercialResponse> {
+    if (!CANALES_COMERCIALES.includes(canal)) {
+      throw ProblemDetailsException.validation(
+        `El parámetro canal '${canal}' no pertenece a ${CANALES_COMERCIALES.join(', ')}`,
+        correlationId,
+      );
+    }
+    if (!Array.isArray(skus) || skus.length === 0) {
+      throw ProblemDetailsException.validation(
+        'El parámetro skus es obligatorio y debe contener al menos un elemento',
+        correlationId,
+      );
+    }
+    if (skus.length > 100) {
+      throw ProblemDetailsException.validation(
+        'El parámetro skus no puede exceder 100 elementos',
+        correlationId,
+      );
+    }
+
+    const uniqueSkus = [...new Set(skus)];
+
+    // D-INV-01: una sola ubicación física elegible por canal de cumplimiento.
+    const targetLocationId =
+      await this.commercialRoutesRepository.findActiveByChannel(canal);
+
+    if (!targetLocationId) {
+      const items: DisponibilidadComercial[] = uniqueSkus.map((sku) => ({
+        sku,
+        status: 'INDETERMINADO',
+      }));
+      return { items };
+    }
+
+    const { globalThreshold, skuThresholdMap } =
+      await this.resolverUmbralesEfectivos();
+
+    const balances = await this.stockBalanceRepository.findBySkus(
+      uniqueSkus,
+      targetLocationId,
+    );
+    const balanceBySku = new Map(balances.map((row) => [row.sku_id, row]));
+
+    const items: DisponibilidadComercial[] = uniqueSkus.map((sku) => {
+      const row = balanceBySku.get(sku);
+      if (!row) {
+        return { sku, status: 'AGOTADO' };
+      }
+      const available = Math.max(
+        0,
+        Number(row.on_hand) - Number(row.reserved) - Number(row.blocked),
+      );
+      const threshold = skuThresholdMap.get(sku) ?? globalThreshold;
+      return { sku, status: this.clasificarEstado(available, threshold) };
+    });
+
+    return { items };
+  }
+
+  /**
+   * Resuelve el umbral efectivo global y por SKU a partir de los overrides
+   * persistidos y del umbral por defecto configurado.
+   */
+  private async resolverUmbralesEfectivos(): Promise<{
+    globalThreshold: number;
+    skuThresholdMap: Map<string, number>;
+  }> {
+    const defaultThreshold = loadInventoryConfig().defaultLowStockThreshold;
+    const thresholdOverrides =
+      await this.stockBalanceRepository.findThresholdOverrides();
+
+    let globalThreshold = defaultThreshold;
+    const skuThresholdMap = new Map<string, number>();
+
+    for (const row of thresholdOverrides) {
+      if (row.sku_id === null) {
+        globalThreshold = Number(row.umbral_efectivo);
+      } else {
+        skuThresholdMap.set(row.sku_id, Number(row.umbral_efectivo));
+      }
+    }
+
+    return { globalThreshold, skuThresholdMap };
+  }
+
+  /**
+   * Clasifica el estado de stock a partir de las unidades disponibles y el umbral.
+   */
+  private clasificarEstado(available: number, threshold: number): EstadoStock {
+    if (available === 0) {
+      return 'AGOTADO';
+    }
+    if (available <= threshold) {
+      return 'STOCK_BAJO';
+    }
+    return 'DISPONIBLE';
   }
 
   /**

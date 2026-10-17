@@ -21,6 +21,8 @@ import {
   OperacionInventarioAceptada,
   ConsultaOperacionInventario,
   ConsultaDisponibilidadResponse,
+  ConsultaDisponibilidadComercialResponse,
+  CanalComercial,
   VerificarCantidadComercialRequest,
   VerificarCantidadComercialResponse,
 } from './types/inventory.dto.js';
@@ -28,6 +30,52 @@ import { ProblemDetailsException } from './errors/inventory.errors.js';
 import { InventoryAuthGuard } from './auth/inventory-auth.guard.js';
 import { RequireScope, AllowedClients } from './auth/auth.decorators.js';
 import { INVENTORY_SCOPES, KNOWN_CLIENTS } from './auth/auth.constants.js';
+
+const CANAL_CLIENT_MAP: Record<string, string> = {
+  MARKETPLACE: KNOWN_CLIENTS.MARKETPLACE,
+  CHATBOT: KNOWN_CLIENTS.CHATBOT,
+  RETAIL: KNOWN_CLIENTS.RETAIL,
+};
+
+function parseSkusQuery(skusQuery?: string | string[]): string[] {
+  if (typeof skusQuery === 'string') {
+    return skusQuery
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+  if (Array.isArray(skusQuery)) {
+    return skusQuery
+      .flatMap((s) => s.split(','))
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+  return [];
+}
+
+/**
+ * Conforme a CanalComercial: un canal fuera del enum es 400 VALIDACION; un canal
+ * válido que no corresponde al client_id autenticado es 403 SCOPE_INSUFICIENTE.
+ */
+function assertCanalDelCliente(
+  canal: string | undefined,
+  clientId: string | undefined,
+  correlationId?: string,
+): void {
+  const expectedClient = canal ? CANAL_CLIENT_MAP[canal] : undefined;
+  if (!expectedClient) {
+    throw ProblemDetailsException.validation(
+      `El canal '${canal ?? ''}' debe ser MARKETPLACE, CHATBOT o RETAIL`,
+      correlationId,
+    );
+  }
+  if (expectedClient !== clientId) {
+    throw ProblemDetailsException.scopeInsuficiente(
+      `El canal '${canal}' no corresponde al cliente autenticado '${clientId ?? ''}'`,
+      correlationId,
+    );
+  }
+}
 
 @Controller('api/v1/inventario')
 @UseGuards(InventoryAuthGuard)
@@ -156,18 +204,7 @@ export class InventoryController {
     @Query('location_id') locationId?: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<ConsultaDisponibilidadResponse> {
-    let skus: string[] = [];
-    if (typeof skusQuery === 'string') {
-      skus = skusQuery
-        .split(',')
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-    } else if (Array.isArray(skusQuery)) {
-      skus = skusQuery
-        .flatMap((s) => s.split(','))
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-    }
+    const skus = parseSkusQuery(skusQuery);
 
     if (skus.length === 0) {
       throw ProblemDetailsException.validation(
@@ -183,7 +220,38 @@ export class InventoryController {
     );
   }
 
+  @Get('disponibilidad/comercial')
+  @RequireScope(INVENTORY_SCOPES.DISPONIBILIDAD_LEER)
+  @AllowedClients([
+    KNOWN_CLIENTS.MARKETPLACE,
+    KNOWN_CLIENTS.CHATBOT,
+    KNOWN_CLIENTS.RETAIL,
+  ])
+  async consultarDisponibilidadComercial(
+    @Query('skus') skusQuery: string | string[] | undefined,
+    @Query('canal') canal: string | undefined,
+    @Req() req: any,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<ConsultaDisponibilidadComercialResponse> {
+    const skus = parseSkusQuery(skusQuery);
+    if (skus.length === 0) {
+      throw ProblemDetailsException.validation(
+        'El parámetro de consulta skus es obligatorio (ej. ?skus=SKU-1,SKU-2)',
+        correlationId,
+      );
+    }
+
+    assertCanalDelCliente(canal, req?.clientId, correlationId);
+
+    return this.disponibilidadService.consultarDisponibilidadComercial(
+      skus,
+      canal as CanalComercial,
+      correlationId,
+    );
+  }
+
   @Post('disponibilidad/comercial/verificar')
+  @HttpCode(HttpStatus.OK)
   @RequireScope(INVENTORY_SCOPES.DISPONIBILIDAD_LEER)
   @AllowedClients([
     KNOWN_CLIENTS.MARKETPLACE,
@@ -197,18 +265,7 @@ export class InventoryController {
   ): Promise<VerificarCantidadComercialResponse> {
     const clientId = req?.clientId || req?.user?.client_id || req?.user?.sub;
 
-    const channelClientMap: Record<string, string> = {
-      MARKETPLACE: KNOWN_CLIENTS.MARKETPLACE,
-      CHATBOT: KNOWN_CLIENTS.CHATBOT,
-      RETAIL: KNOWN_CLIENTS.RETAIL,
-    };
-
-    if (!dto?.channel_id || channelClientMap[dto.channel_id] !== clientId) {
-      throw ProblemDetailsException.scopeInsuficiente(
-        `El canal '${dto?.channel_id ?? 'desconocido'}' no corresponde al cliente autenticado '${clientId}'`,
-        correlationId,
-      );
-    }
+    assertCanalDelCliente(dto?.channel_id, clientId, correlationId);
 
     return this.disponibilidadService.verificarCantidadComercial(
       dto,

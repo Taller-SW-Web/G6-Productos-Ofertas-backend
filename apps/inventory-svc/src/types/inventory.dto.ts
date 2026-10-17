@@ -1,6 +1,11 @@
 export type Canal = 'MARKETPLACE' | 'CHATBOT' | 'RETAIL' | 'VENTAS';
 
+export type CanalComercial = 'MARKETPLACE' | 'CHATBOT' | 'RETAIL';
+
 export type EstadoStock = 'AGOTADO' | 'STOCK_BAJO' | 'DISPONIBLE';
+
+export type EstadoComercial =
+  'DISPONIBLE' | 'STOCK_BAJO' | 'AGOTADO' | 'INDETERMINADO';
 
 export type OperacionInventarioTipo =
   | 'RESERVAR'
@@ -72,6 +77,15 @@ export interface DisponibilidadStock {
 
 export interface ConsultaDisponibilidadResponse {
   items: DisponibilidadStock[];
+}
+
+export interface DisponibilidadComercial {
+  sku: string;
+  status: EstadoComercial;
+}
+
+export interface ConsultaDisponibilidadComercialResponse {
+  items: DisponibilidadComercial[];
 }
 
 export class VerificarCantidadComercialLinea {
