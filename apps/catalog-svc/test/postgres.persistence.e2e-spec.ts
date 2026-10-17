@@ -432,7 +432,13 @@ describe.skipIf(!dockerAvailable)(
             has_table_privilege(current_user, format('catalog.%I', table_name), 'INSERT') AS can_insert,
             has_table_privilege(current_user, format('catalog.%I', table_name), 'UPDATE') AS can_update,
             has_table_privilege(current_user, format('catalog.%I', table_name), 'DELETE') AS can_delete
-          FROM unnest(${schemaTables}::text[]) AS tables(table_name)
+          FROM (VALUES
+            ('products'), ('variants'), ('sku_identity'), ('product_images'),
+            ('variant_images'), ('product_attribute_values'),
+            ('variant_attribute_values'), ('product_identifying_characteristics'),
+            ('sku_physical_profiles'), ('activation_checks'), ('master_barriers'),
+            ('outbox'), ('inbox')
+          ) AS tables(table_name)
         `),
       );
       expect(grants.rows).toHaveLength(schemaTables.length);
