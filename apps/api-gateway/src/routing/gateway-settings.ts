@@ -12,6 +12,7 @@ export interface GatewaySettings {
   readonly issuer?: string;
   readonly jwksUrl?: string;
   readonly publicOperations: readonly string[];
+  readonly demoNoAuthEnabled: boolean;
 }
 
 export function readGatewayPort(env: Readonly<NodeJS.ProcessEnv>): number {
@@ -86,18 +87,22 @@ export function readGatewaySettings(
     const timeoutMs = Number(env.GATEWAY_TIMEOUT_MS ?? '5000');
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000)
       throw new Error();
-    if (!!env.AUTH_ISSUER !== !!env.AUTH_JWKS_URL) throw new Error();
-    for (const value of [env.AUTH_ISSUER, env.AUTH_JWKS_URL]) {
-      if (!value) continue;
-      const url = new URL(value);
-      if (
-        url.protocol !== 'https:' ||
-        url.username ||
-        url.password ||
-        url.search ||
-        url.hash
-      )
-        throw new Error();
+    const demoNoAuthEnabled = env.GATEWAY_DEMO_NO_AUTH_ENABLED ?? 'false';
+    if (!['true', 'false'].includes(demoNoAuthEnabled)) throw new Error();
+    if (demoNoAuthEnabled !== 'true') {
+      if (!!env.AUTH_ISSUER !== !!env.AUTH_JWKS_URL) throw new Error();
+      for (const value of [env.AUTH_ISSUER, env.AUTH_JWKS_URL]) {
+        if (!value) continue;
+        const url = new URL(value);
+        if (
+          url.protocol !== 'https:' ||
+          url.username ||
+          url.password ||
+          url.search ||
+          url.hash
+        )
+          throw new Error();
+      }
     }
     const publicOperations = (env.GATEWAY_PUBLIC_OPERATION_IDS ?? '')
       .split(',')
@@ -119,6 +124,7 @@ export function readGatewaySettings(
       issuer: env.AUTH_ISSUER,
       jwksUrl: env.AUTH_JWKS_URL,
       publicOperations: Object.freeze(publicOperations),
+      demoNoAuthEnabled: demoNoAuthEnabled === 'true',
     });
   } catch {
     throw new Error(

@@ -11,6 +11,7 @@ import type {
   FilaMarcaDb,
   TaxonomyDb,
 } from './drizzle-taxonomy.repository.js';
+import { categorias, marcas } from './taxonomy.schema.js';
 
 function dbFalso(parcial: Record<string, unknown>): TaxonomyDb {
   return parcial as unknown as TaxonomyDb;
@@ -21,6 +22,29 @@ function dbQueDevuelveFilas(filas: unknown[]): TaxonomyDb {
     select: () => ({
       from: () => ({
         where: () => Promise.resolve(filas),
+      }),
+    }),
+  });
+}
+
+interface ConsultaReadiness {
+  columnas: string[];
+  tabla: unknown;
+}
+
+function dbReadiness(
+  capturas: ConsultaReadiness[],
+  error?: unknown,
+): TaxonomyDb {
+  return dbFalso({
+    select: (columnas: Record<string, unknown>) => ({
+      from: (tabla: unknown) => ({
+        where: () => ({
+          limit: () => {
+            capturas.push({ columnas: Object.keys(columnas), tabla });
+            return error ? Promise.reject(error) : Promise.resolve([]);
+          },
+        }),
       }),
     }),
   });
@@ -183,17 +207,90 @@ describe('DrizzleTaxonomyRepository (#35)', () => {
   });
 
   describe('readiness', () => {
-    it('resuelve cuando la base responde', async () => {
-      const repo = new DrizzleTaxonomyRepository(
-        dbFalso({ execute: () => Promise.resolve(undefined) }),
-      );
+    it('consulta columnas explícitas de taxonomy.categories y taxonomy.brands', async () => {
+      const capturas: ConsultaReadiness[] = [];
+      const repo = new DrizzleTaxonomyRepository(dbReadiness(capturas));
 
       await expect(repo.verificarReadiness()).resolves.toBeUndefined();
+
+      expect(capturas).toHaveLength(2);
+      expect(capturas[0].tabla).toBe(categorias);
+      expect(capturas[0].columnas).toEqual([
+        'id',
+        'nombre',
+        'categoria_padre_id',
+        'orden',
+        'estado',
+      ]);
+      expect(capturas[1].tabla).toBe(marcas);
+      expect(capturas[1].columnas).toEqual([
+        'id',
+        'nombre',
+        'descripcion',
+        'pais_origen_iso',
+        'logo_url',
+        'estado',
+      ]);
     });
 
     it('responde 503 cuando la base no responde', async () => {
       const repo = new DrizzleTaxonomyRepository(
-        dbFalso({ execute: () => Promise.reject({ code: '57P03' }) }),
+        dbReadiness([], { code: '57P03' }),
+      );
+
+      const error = await repo.verificarReadiness().catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ProblemDetailsException);
+      expect((error as ProblemDetailsException).getStatus()).toBe(
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    });
+
+    it('responde 503 si el usuario no tiene permisos de lectura (42501)', async () => {
+      const repo = new DrizzleTaxonomyRepository(
+        dbReadiness([], {
+          code: '42501',
+          message: 'permission denied for table categories',
+        }),
+      );
+
+      const error = await repo.verificarReadiness().catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ProblemDetailsException);
+      expect((error as ProblemDetailsException).getStatus()).toBe(
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+      expect((error as ProblemDetailsException).problem.code).toBe(
+        'SERVICIO_NO_DISPONIBLE',
+      );
+    });
+
+    it('responde 503 si falta la columna logo_url en taxonomy.brands', async () => {
+      const capturas: ConsultaReadiness[] = [];
+      const repo = new DrizzleTaxonomyRepository(
+        dbReadiness(capturas, {
+          code: '42703',
+          message: 'column brands.logo_url does not exist',
+        }),
+      );
+
+      const error = await repo.verificarReadiness().catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ProblemDetailsException);
+      expect((error as ProblemDetailsException).getStatus()).toBe(
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+      expect((error as ProblemDetailsException).problem.code).toBe(
+        'SERVICIO_NO_DISPONIBLE',
+      );
+    });
+
+    it('responde 503 cuando una tabla de taxonomía falla', async () => {
+      const repo = new DrizzleTaxonomyRepository(
+        dbReadiness([], {
+          code: '42P01',
+          message: 'relation "taxonomy.categories" does not exist',
+        }),
       );
 
       const error = await repo.verificarReadiness().catch((e: unknown) => e);

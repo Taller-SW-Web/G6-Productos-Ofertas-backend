@@ -98,8 +98,11 @@ describe('crearAplicacion — fail-closed (#34)', () => {
       expect(env.port).toBe(3006);
       const logs = sink.volcado();
       expect(logs.length).toBeGreaterThan(0);
+      expect(logs).toContain('test');
+      expect(logs).toContain('3006');
       expect(logs).not.toContain(CLAVE_FALSA);
-      expect(logs).toContain('***');
+      expect(logs).not.toContain('DATABASE_URL');
+      expect(logs).not.toContain('postgresql://');
     } finally {
       await app.close();
     }

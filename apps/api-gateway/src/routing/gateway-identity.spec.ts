@@ -155,8 +155,48 @@ describe('Gateway identity from G6/G7 contracts', () => {
     await expect(identity.authorize(product, undefined)).rejects.toMatchObject({
       status: 401,
     });
+    const categories = CONTRACT_ROUTES.find(
+      (route) => route.operationId === 'listarCategorias',
+    )!;
+    await expect(
+      identity.authorize(categories, undefined),
+    ).rejects.toMatchObject({
+      status: 401,
+    });
     await expect(
       identity.authorize(product, `Bearer ${signed.token()}`),
     ).rejects.toMatchObject({ status: 503 });
+  });
+  it('bypasses all JWT checks for every contract operation only in demo mode', async () => {
+    const demoIdentity = new GatewayIdentity({
+      ...settings,
+      issuer: undefined,
+      jwksUrl: undefined,
+      demoNoAuthEnabled: true,
+    });
+    for (const route of CONTRACT_ROUTES) {
+      await expect(
+        demoIdentity.authorize(route, undefined),
+      ).resolves.toBeUndefined();
+      await expect(
+        demoIdentity.authorize(route, 'Bearer malformed-secret-token'),
+      ).resolves.toBeUndefined();
+    }
+    expect(CONTRACT_ROUTES.some((route) => route.method !== 'GET')).toBe(true);
+  });
+  it('restores JWT and authorization checks when demo mode is disabled', async () => {
+    const identity = new GatewayIdentity({
+      ...settings,
+      demoNoAuthEnabled: false,
+    });
+    const categories = CONTRACT_ROUTES.find(
+      (route) => route.operationId === 'listarCategorias',
+    )!;
+    await expect(
+      identity.authorize(categories, undefined),
+    ).rejects.toMatchObject({ status: 401, code: 'TOKEN_INVALIDO' });
+    await expect(
+      identity.authorize(product, `Bearer ${signed.token()}`),
+    ).rejects.toMatchObject({ status: 503, code: 'SERVICIO_NO_DISPONIBLE' });
   });
 });

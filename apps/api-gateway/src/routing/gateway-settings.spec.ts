@@ -66,6 +66,43 @@ describe('Gateway route boundaries and configuration', () => {
         .publicOperations,
     ).toEqual(['obtenerSeoPorSlug']);
   });
+  it('keeps no-auth demo mode disabled unless explicitly enabled', () => {
+    expect(readGatewaySettings({}).demoNoAuthEnabled).toBe(false);
+    expect(
+      readGatewaySettings({ GATEWAY_DEMO_NO_AUTH_ENABLED: 'true' })
+        .demoNoAuthEnabled,
+    ).toBe(true);
+    expect(
+      readGatewaySettings({ GATEWAY_DEMO_NO_AUTH_ENABLED: 'false' })
+        .demoNoAuthEnabled,
+    ).toBe(false);
+    expect(() =>
+      readGatewaySettings({ GATEWAY_DEMO_NO_AUTH_ENABLED: 'yes' }),
+    ).toThrow('Invalid Gateway configuration');
+  });
+  it('does not require issuer or JWKS when no-auth demo mode is enabled', () => {
+    expect(
+      readGatewaySettings({ GATEWAY_DEMO_NO_AUTH_ENABLED: 'true' }),
+    ).toMatchObject({
+      demoNoAuthEnabled: true,
+      issuer: undefined,
+      jwksUrl: undefined,
+    });
+    expect(
+      readGatewaySettings({
+        GATEWAY_DEMO_NO_AUTH_ENABLED: 'true',
+        AUTH_ISSUER: 'not-an-issuer',
+      }).demoNoAuthEnabled,
+    ).toBe(true);
+  });
+  it('does not allow the environment public allowlist to expose protected operations in demo mode', () => {
+    expect(() =>
+      readGatewaySettings({
+        GATEWAY_DEMO_NO_AUTH_ENABLED: 'true',
+        GATEWAY_PUBLIC_OPERATION_IDS: 'listarProductos',
+      }),
+    ).toThrow('Invalid Gateway configuration');
+  });
   it('uses static paths before parameter paths and matches the exact method', () => {
     expect(
       matchContractRoute('GET', '/api/v1/promociones/administracion')

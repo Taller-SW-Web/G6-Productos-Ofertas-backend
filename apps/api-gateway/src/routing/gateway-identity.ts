@@ -153,6 +153,7 @@ export class GatewayIdentity {
     route: ContractRoute,
     authorization: string | undefined,
   ): Promise<void> {
+    if (this.settings.demoNoAuthEnabled) return;
     if (!route.security.length) {
       if (!this.settings.publicOperations.includes(route.operationId))
         throw new GatewayFailure(403, 'SCOPE_INSUFICIENTE');
