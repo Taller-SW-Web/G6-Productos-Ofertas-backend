@@ -300,6 +300,79 @@ describe('ReservationsService — Ciclo Completo G5 (Confirmación y Liberación
     });
   });
 
+  describe('Solicitud de reserva — rechazo durable idempotente (POST /api/v1/inventario/reservas)', () => {
+    const skuSinSaldo = 'SKU-SIN-SALDO-01';
+
+    it('reintenta el mismo rechazo por SKU sin saldo sin conflicto de idempotencia', async () => {
+      const orderId = 'PED-REJECT-REPLAY';
+      const operationId = randomUUID();
+      const dto = {
+        order_id: orderId,
+        operation_id: operationId,
+        channel_id: 'MARKETPLACE' as const,
+        lines: [{ sku: skuSinSaldo, quantity: 1, location_id: locLurin }],
+      };
+
+      const first = await reservationsService.solicitarReserva(
+        dto,
+        undefined,
+        operationId,
+        'modulo-ventas',
+      );
+      expect(first.status).toBe('ACCEPTED');
+
+      const rejected = mockDb.operations.find(
+        (op) => op.operation_id === operationId,
+      )!;
+      expect(rejected.status).toBe('RECHAZADO');
+      expect(rejected.result_code).toBe('STOCK_INSUFICIENTE');
+      expect(rejected.client_id).toBe('modulo-ventas');
+
+      const outboxCount = mockDb.outbox.length;
+
+      // Reintento idéntico: mismo resultado durable, sin nuevos efectos
+      const second = await reservationsService.solicitarReserva(
+        dto,
+        undefined,
+        operationId,
+        'modulo-ventas',
+      );
+      expect(second).toEqual(first);
+      expect(mockDb.operations).toHaveLength(1);
+      expect(mockDb.outbox).toHaveLength(outboxCount);
+      expect(mockDb.kardex).toHaveLength(0);
+    });
+
+    it('responde 409 al reutilizar la identidad del rechazo con otro payload', async () => {
+      const operationId = randomUUID();
+      const dto = {
+        order_id: 'PED-REJECT-CONFLICT',
+        operation_id: operationId,
+        channel_id: 'MARKETPLACE' as const,
+        lines: [{ sku: skuSinSaldo, quantity: 1, location_id: locLurin }],
+      };
+
+      await reservationsService.solicitarReserva(
+        dto,
+        undefined,
+        operationId,
+        'modulo-ventas',
+      );
+
+      await expect(
+        reservationsService.solicitarReserva(
+          {
+            ...dto,
+            lines: [{ sku: skuSinSaldo, quantity: 5, location_id: locLurin }],
+          },
+          undefined,
+          operationId,
+          'modulo-ventas',
+        ),
+      ).rejects.toMatchObject({ problem: { code: 'IDEMPOTENCY_CONFLICT' } });
+    });
+  });
+
   describe('Liberación de reserva (POST /api/v1/inventario/reservas/{reservaId}/liberar)', () => {
     it('rechaza un order_id distinto antes de cambiar saldo, estado, Kardex u Outbox', async () => {
       const orderId = 'PED-RELEASE-IDENTITY';
