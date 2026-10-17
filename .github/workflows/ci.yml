@@ -130,7 +130,11 @@ jobs:
                any(.services.service.volumes[]; .target == "/run/g6-certs/supabase-server-root.crt" and .read_only == true)' \
               <<< "$config" >/dev/null
             if [[ "$service" == api-gateway ]]; then
-              jq -e '.services.service.healthcheck.test == ["CMD", "node", "dist/apps/api-gateway/readiness.js"]' \
+              jq -e '.services.service.healthcheck.test == ["CMD", "node", "dist/apps/api-gateway/readiness.js"] and
+                .services.service.healthcheck.interval == "30s" and
+                .services.service.healthcheck.timeout == "15s" and
+                .services.service.healthcheck.start_period == "30s" and
+                .services.service.healthcheck.retries == 3' \
                 <<< "$config" >/dev/null
             else
               jq -e --arg port "$port" \

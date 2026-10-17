@@ -16,8 +16,8 @@ services:
     healthcheck:
       test: [CMD, node, dist/apps/api-gateway/readiness.js]
       interval: 30s
-      timeout: 3s
-      start_period: 10s
+      timeout: 15s
+      start_period: 30s
       retries: 3
     networks:
       default: {}
