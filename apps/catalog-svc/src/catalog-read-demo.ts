@@ -2,6 +2,9 @@
  * This does not grant commercial eligibility, invent a principal or permit writes.
  */
 export const CATALOG_READ_DEMO = Symbol('CATALOG_READ_DEMO');
+export const CATALOG_MARKETPLACE_PREVIEW = Symbol(
+  'CATALOG_MARKETPLACE_PREVIEW',
+);
 export interface CatalogReadDemo {
   readonly enabled: boolean;
 }

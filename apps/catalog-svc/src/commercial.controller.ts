@@ -29,6 +29,7 @@ export class CommercialController {
   }
   @Get()
   @RequireCatalogIdentity({
+    marketplacePreviewRead: true,
     demoRead: true,
     identity: 'either',
     scope: 'catalogo:leer',
@@ -41,12 +42,14 @@ export class CommercialController {
     request?: Request & {
       catalogPrincipal?: CatalogPrincipal;
       catalogDemoRead?: boolean;
+      catalogDemoPreview?: boolean;
     },
   ) {
     this.validateCorrelation(correlationId);
     if (
       query.estado !== undefined &&
       !request?.catalogDemoRead &&
+      !request?.catalogDemoPreview &&
       (request?.catalogPrincipal?.kind !== 'user' ||
         !request.catalogPrincipal.roles.includes('GESTOR_COMERCIAL'))
     )
@@ -67,6 +70,7 @@ export class CommercialController {
   }
   @Get('por-slug/:slug')
   @RequireCatalogIdentity({
+    marketplacePreviewRead: true,
     demoRead: true,
     identity: 'either',
     scope: 'catalogo:leer',

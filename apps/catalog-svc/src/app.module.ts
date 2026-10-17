@@ -9,10 +9,8 @@ import { PostgresCatalogWriteRepository } from './postgres-catalog-write.reposit
 import { CatalogTransactionManager } from './catalog-transaction.js';
 import { CommercialService } from './commercial.service.js';
 import { CommercialController } from './commercial.controller.js';
-import {
-  COMMERCIAL_ELIGIBILITY,
-  PendingCommercialEligibility,
-} from './commercial-eligibility.js';
+import { COMMERCIAL_ELIGIBILITY } from './commercial-eligibility.js';
+import { PostgresCommercialEligibility } from './postgres-commercial-eligibility.js';
 import {
   CATALOG_TAXONOMY_CONFIG,
   readTaxonomyConfig,
@@ -32,7 +30,11 @@ import {
 import { approvedCatalogProductPolicy } from './catalog-product.policy.js';
 import { CatalogMasterClient } from './catalog-master.client.js';
 import { CatalogTelemetry } from './catalog-telemetry.js';
-import { CATALOG_READ_DEMO, readCatalogReadDemo } from './catalog-read-demo.js';
+import {
+  CATALOG_READ_DEMO,
+  CATALOG_MARKETPLACE_PREVIEW,
+  readCatalogReadDemo,
+} from './catalog-read-demo.js';
 import { CatalogMessageService } from './catalog-message.service.js';
 import {
   CATALOG_AMQP_SETTINGS,
@@ -49,6 +51,7 @@ import {
   CatalogTokenVerifier,
   readCatalogSecurityConfig,
 } from './catalog-auth.js';
+import { DEMO_PRICING, PricingClient } from './pricing.client.js';
 
 @Module({
   imports: [],
@@ -90,6 +93,11 @@ import {
     CatalogAuthGuard,
     { provide: CATALOG_READ_DEMO, useFactory: () => readCatalogReadDemo() },
     {
+      provide: CATALOG_MARKETPLACE_PREVIEW,
+      useFactory: () =>
+        process.env.CATALOG_MARKETPLACE_DEMO_PREVIEW_ENABLED === 'true',
+    },
+    {
       provide: CATALOG_SECURITY_CONFIG,
       useFactory: () => readCatalogSecurityConfig(process.env),
     },
@@ -107,7 +115,10 @@ import {
       }),
       inject: [CommercialReadinessController],
     },
-    { provide: COMMERCIAL_ELIGIBILITY, useClass: PendingCommercialEligibility },
+    {
+      provide: COMMERCIAL_ELIGIBILITY,
+      useClass: PostgresCommercialEligibility,
+    },
     { provide: APP_FILTER, useClass: ProblemFilter },
   ],
 })
@@ -123,6 +134,12 @@ export class AppModule {
         { provide: CATALOG_PREPARATION_CONFIG, useValue: config.preparation },
         { provide: CATALOG_POSTGRES_CONFIG, useValue: config.database },
         { provide: CATALOG_READ_DEMO, useValue: config.readDemo },
+        {
+          provide: CATALOG_MARKETPLACE_PREVIEW,
+          useValue: config.marketplaceDemoPreview,
+        },
+        PricingClient,
+        { provide: DEMO_PRICING, useExisting: PricingClient },
       ],
     };
   }

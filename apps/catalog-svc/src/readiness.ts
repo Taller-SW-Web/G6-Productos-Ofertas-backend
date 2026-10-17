@@ -72,39 +72,74 @@ async function runReadinessProbe(): Promise<void> {
     { NestFactory },
     { AppModule },
     { Database },
+    { CatalogConfig },
+    { PricingClient },
     eligibility,
     repository,
   ] = await Promise.all([
     import('@nestjs/core'),
     import('./app.module.js'),
     import('./database.js'),
+    import('./config.js'),
+    import('./pricing.client.js'),
     import('./commercial-eligibility.js'),
     import('./postgres-catalog.repository.js'),
   ]);
-  const app = await NestFactory.createApplicationContext(AppModule, {
-    logger: false,
-    abortOnError: false,
-  });
+  const config = new CatalogConfig(process.env);
+  const app = await NestFactory.createApplicationContext(
+    AppModule.forRoot(config),
+    {
+      logger: false,
+      abortOnError: false,
+    },
+  );
   let database = 'not_ready';
   let status = 'not_ready';
-  let demo = false;
+  let eligibilityStatus = 'unverified';
+  let pricingStatus = 'not_checked';
+  let demoCatalogRead = false;
   try {
     await app.get(Database).verifyIdentity();
-    await app.get(repository.PostgresCatalogRepository).listCandidates({
-      canal: 'MARKETPLACE',
-      pagina: 1,
-      tamanio: 1,
-      orden: 'NOMBRE_ASC',
-    });
     database = 'ready';
-    demo = app.get<CatalogReadDemo>(CATALOG_READ_DEMO).enabled;
-    if (!demo)
+    if (app.get<CatalogReadDemo>(CATALOG_READ_DEMO).enabled) {
+      await app.get(repository.PostgresCatalogRepository).listCandidates(
+        {
+          canal: 'MARKETPLACE',
+          pagina: 1,
+          tamanio: 1,
+          orden: 'NOMBRE_ASC',
+        },
+        undefined,
+        true,
+      );
+      eligibilityStatus = 'not_evaluated_demo';
+    } else if (config.marketplaceDemoPreview) {
+      await app.get(repository.PostgresCatalogRepository).checkDemoReadAccess();
+      demoCatalogRead = true;
+      await app.get(PricingClient).checkReady();
+      pricingStatus = 'ready';
+      eligibilityStatus = 'not_required_demo';
+    } else {
+      await app.get(repository.PostgresCatalogRepository).listCandidates({
+        canal: 'MARKETPLACE',
+        pagina: 1,
+        tamanio: 1,
+        orden: 'NOMBRE_ASC',
+      });
       await app
         .get<CommercialEligibilityPolicy>(eligibility.COMMERCIAL_ELIGIBILITY)
         .resolve('MARKETPLACE');
+      eligibilityStatus = 'ready';
+    }
     status = 'ready';
   } catch {
     status = 'not_ready';
+    if (
+      config.marketplaceDemoPreview &&
+      database === 'ready' &&
+      demoCatalogRead
+    )
+      pricingStatus = 'unavailable';
   } finally {
     await app.close();
   }
@@ -113,11 +148,10 @@ async function runReadinessProbe(): Promise<void> {
       service: 'catalog-svc',
       status,
       database,
-      eligibility: demo
-        ? 'not_evaluated_demo'
-        : status === 'ready'
-          ? 'ready'
-          : 'unverified',
+      eligibility: eligibilityStatus,
+      ...(config.marketplaceDemoPreview && !config.readDemo.enabled
+        ? { pricing: pricingStatus }
+        : {}),
     }) + '\n',
   );
   if (status !== 'ready') process.exitCode = 1;

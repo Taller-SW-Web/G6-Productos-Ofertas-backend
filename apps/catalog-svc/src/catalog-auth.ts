@@ -12,6 +12,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import {
   CATALOG_READ_DEMO,
+  CATALOG_MARKETPLACE_PREVIEW,
   type CatalogReadDemo,
 } from './catalog-read-demo.js';
 import { createPublicKey, verify as verifySignature } from 'node:crypto';
@@ -96,6 +97,7 @@ export type CatalogPrincipal =
     };
 
 export interface CatalogAuthPolicy {
+  marketplacePreviewRead?: boolean;
   demoRead?: boolean;
   identity: 'user' | 'service' | 'either';
   scope?: string;
@@ -372,6 +374,9 @@ export class CatalogAuthGuard implements CanActivate {
     @Optional()
     @Inject(CATALOG_READ_DEMO)
     private readonly readDemo: CatalogReadDemo = { enabled: false },
+    @Optional()
+    @Inject(CATALOG_MARKETPLACE_PREVIEW)
+    private readonly marketplacePreview = false,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -384,6 +389,7 @@ export class CatalogAuthGuard implements CanActivate {
       Request & {
         catalogPrincipal?: CatalogPrincipal;
         catalogDemoRead?: boolean;
+        catalogDemoPreview?: boolean;
       }
     >();
     if (this.readDemo.enabled) {
@@ -394,6 +400,15 @@ export class CatalogAuthGuard implements CanActivate {
       }
       if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method))
         throw new ForbiddenException({ code: 'SCOPE_INSUFICIENTE' });
+    }
+    if (
+      this.marketplacePreview &&
+      request.method === 'GET' &&
+      policy.marketplacePreviewRead &&
+      request.query.canal === 'MARKETPLACE'
+    ) {
+      request.catalogDemoPreview = true;
+      return true;
     }
     const authorization = request.headers.authorization;
     const match =

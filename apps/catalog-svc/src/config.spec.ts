@@ -158,6 +158,38 @@ describe('CatalogConfig PG contract', () => {
     expect(Object.isFrozen(config.taxonomy)).toBe(true);
   });
 
+  it('keeps demo preview disabled by default and validates its explicit flag and private Pricing origin', () => {
+    expect(new CatalogConfig(validEnv()).marketplaceDemoPreview).toBe(false);
+    expect(
+      () =>
+        new CatalogConfig({
+          ...validEnv(),
+          CATALOG_MARKETPLACE_DEMO_PREVIEW_ENABLED: 'yes',
+        }),
+    ).toThrow('CATALOG_MARKETPLACE_DEMO_PREVIEW_ENABLED');
+    expect(
+      () =>
+        new CatalogConfig({
+          ...validEnv(),
+          CATALOG_MARKETPLACE_DEMO_PREVIEW_ENABLED: 'true',
+        }),
+    ).toThrow('CATALOG_PRICING_URL');
+    const config = new CatalogConfig({
+      ...validEnv(),
+      CATALOG_MARKETPLACE_DEMO_PREVIEW_ENABLED: 'true',
+      CATALOG_PRICING_URL: 'http://pricing-svc:3002',
+    });
+    expect(config.marketplaceDemoPreview).toBe(true);
+    expect(config.pricingOrigin).toBe('http://pricing-svc:3002');
+    expect(
+      () =>
+        new CatalogConfig({
+          ...validEnv(),
+          CATALOG_PRICING_URL: 'https://pricing.example.test',
+        }),
+    ).toThrow('CATALOG_PRICING_URL');
+  });
+
   it('rejects an unknown environment and does not echo secret values', () => {
     expect(
       () => new CatalogConfig({ ...validEnv(), NODE_ENV: 'private-secret' }),

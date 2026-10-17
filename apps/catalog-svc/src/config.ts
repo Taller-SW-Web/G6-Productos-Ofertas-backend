@@ -30,6 +30,8 @@ export class CatalogConfig {
   readonly amqp: CatalogAmqpSettings;
   readonly preparation: CatalogPreparationConfig;
   readonly readDemo: CatalogReadDemo;
+  readonly marketplaceDemoPreview: boolean;
+  readonly pricingOrigin?: string;
 
   constructor(env: Record<string, string | undefined>) {
     this.readDemo = readCatalogReadDemo(env);
@@ -83,6 +85,37 @@ export class CatalogConfig {
         'Configuración de mensajería/preparación de Catálogo inválida.',
       );
     }
+    const preview = env.CATALOG_MARKETPLACE_DEMO_PREVIEW_ENABLED;
+    if (preview !== undefined && !['true', 'false'].includes(preview)) {
+      errors.push(
+        'CATALOG_MARKETPLACE_DEMO_PREVIEW_ENABLED debe ser true o false.',
+      );
+    }
+    let pricingOrigin: string | undefined;
+    if (env.CATALOG_PRICING_URL !== undefined) {
+      try {
+        const url = new URL(env.CATALOG_PRICING_URL);
+        if (
+          url.protocol !== 'http:' ||
+          url.hostname !== 'pricing-svc' ||
+          url.port !== '3002' ||
+          url.username ||
+          url.password ||
+          url.pathname !== '/' ||
+          url.search ||
+          url.hash
+        )
+          throw new Error();
+        pricingOrigin = url.origin;
+      } catch {
+        errors.push(
+          'CATALOG_PRICING_URL debe usar el origen privado pricing-svc:3002.',
+        );
+      }
+    }
+    if (preview === 'true' && !pricingOrigin) {
+      errors.push('CATALOG_PRICING_URL es obligatorio para la demo.');
+    }
     if (errors.length || !http || !database || !taxonomy) {
       throw new Error(
         'Configuracion de catalog-svc invalida: ' + errors.join(' '),
@@ -96,6 +129,8 @@ export class CatalogConfig {
     this.security = security;
     this.amqp = Object.freeze(amqp);
     this.preparation = Object.freeze(preparation);
+    this.marketplaceDemoPreview = preview === 'true';
+    this.pricingOrigin = pricingOrigin;
     Object.freeze(this);
   }
 }
