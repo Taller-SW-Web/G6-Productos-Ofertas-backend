@@ -99,8 +99,10 @@ diferidos existentes. Los errores se exponen mediante `CatalogPersistenceError`
 con una categoría interna segura;
 el SQL, los parámetros y el texto del driver no se incluyen en mensajes.
 
-Las cinco pruebas de `postgres.persistence.e2e-spec.ts` usan PostgreSQL 17
-efímero con TLS, role `catalog_app` y un schema ajeno de comprobación. En local,
+Las cinco pruebas de persistencia y la prueba adicional del lote DATA-002 en
+`postgres.persistence.e2e-spec.ts` usan PostgreSQL 17 efímero con TLS, role
+`catalog_app` y un schema ajeno de comprobación. En CI son seis pruebas en
+total: cinco de persistencia y una de validación DATA-002. En local,
 la suite se omite si Docker u OpenSSL no están disponibles. En CI, la suite falla
 explícitamente en esas condiciones y no acepta una omisión como resultado
 aprobado. La cobertura incluye persistencia, rollback/constraints, permisos y
