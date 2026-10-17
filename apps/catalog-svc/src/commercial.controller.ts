@@ -1,16 +1,26 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Controller,
   Get,
   Headers,
   Param,
   Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { CommercialService } from './commercial.service.js';
 import { isCorrelationId } from './correlation.js';
 import { parseProductQuery } from './catalog-query.js';
+import {
+  CatalogAuthGuard,
+  RequireCatalogIdentity,
+  type CatalogPrincipal,
+} from './catalog-auth.js';
 
 @Controller('api/v1/productos')
+@UseGuards(CatalogAuthGuard)
 export class CommercialController {
   constructor(private readonly service: CommercialService) {}
   private validateCorrelation(value?: string): void {
@@ -18,14 +28,38 @@ export class CommercialController {
       throw new BadRequestException();
   }
   @Get()
+  @RequireCatalogIdentity({
+    identity: 'either',
+    scope: 'catalogo:leer',
+    allowedClients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
+  })
   list(
     @Query() query: Record<string, unknown>,
     @Headers('x-correlation-id') correlationId?: string,
+    @Req() request?: Request & { catalogPrincipal?: CatalogPrincipal },
   ) {
     this.validateCorrelation(correlationId);
-    return this.service.list(parseProductQuery(query), correlationId);
+    if (
+      query.estado !== undefined &&
+      (request?.catalogPrincipal?.kind !== 'user' ||
+        !request.catalogPrincipal.roles.includes('GESTOR_COMERCIAL'))
+    )
+      throw new ForbiddenException();
+    const administrativeState =
+      request?.catalogPrincipal?.kind === 'user' &&
+      request.catalogPrincipal.roles.includes('GESTOR_COMERCIAL');
+    return this.service.list(
+      parseProductQuery(query),
+      correlationId,
+      administrativeState,
+    );
   }
   @Get('por-slug/:slug')
+  @RequireCatalogIdentity({
+    identity: 'either',
+    scope: 'catalogo:leer',
+    allowedClients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
+  })
   detail(
     @Param('slug') slug: string,
     @Query() query: Record<string, unknown>,

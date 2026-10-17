@@ -1,0 +1,100 @@
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { CatalogAuthGuard, RequireCatalogIdentity } from './catalog-auth.js';
+import { CatalogQueryService } from './catalog-query.service.js';
+import { isCorrelationId } from './correlation.js';
+
+@Controller('api/v1/productos')
+@UseGuards(CatalogAuthGuard)
+export class CatalogQueryController {
+  constructor(private readonly service: CatalogQueryService) {}
+
+  private validateCorrelation(value?: string): void {
+    if (value !== undefined && !isCorrelationId(value))
+      throw new BadRequestException();
+  }
+
+  @Get(':productoId')
+  @RequireCatalogIdentity({
+    identity: 'either',
+    scope: 'catalogo:leer',
+    allowedClients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
+  })
+  product(
+    @Param('productoId') productId: string,
+    @Query('canal') channel: string | undefined,
+    @Headers('x-correlation-id') correlationId?: string,
+  ) {
+    this.validateCorrelation(correlationId);
+    return this.service.product(productId, channel, correlationId);
+  }
+
+  @Post('datos-fisicos/consulta')
+  @RequireCatalogIdentity({
+    identity: 'service',
+    scope: 'productos:fisicos:leer',
+    allowedClients: ['modulo-despacho'],
+  })
+  physicalData(
+    @Body() body: unknown,
+    @Headers('x-correlation-id') correlationId?: string,
+  ) {
+    this.validateCorrelation(correlationId);
+    return this.service.physicalData(body);
+  }
+
+  @Get(':productoId/preparacion')
+  @RequireCatalogIdentity({ identity: 'user', roles: ['GESTOR_COMERCIAL'] })
+  preparation(
+    @Param('productoId') productId: string,
+    @Headers('x-correlation-id') correlationId?: string,
+  ) {
+    this.validateCorrelation(correlationId);
+    return this.service.preparation(productId);
+  }
+
+  @Get(':productoId/variantes')
+  @RequireCatalogIdentity({ identity: 'user', roles: ['GESTOR_COMERCIAL'] })
+  variants(
+    @Param('productoId') productId: string,
+    @Query() query: Record<string, unknown>,
+    @Headers('x-correlation-id') correlationId?: string,
+  ) {
+    this.validateCorrelation(correlationId);
+    return this.service.variants(productId, query);
+  }
+
+  @Get(':productoId/variantes/:variantId')
+  @RequireCatalogIdentity({ identity: 'user', roles: ['GESTOR_COMERCIAL'] })
+  variant(
+    @Param('productoId') productId: string,
+    @Param('variantId') variantId: string,
+    @Headers('x-correlation-id') correlationId?: string,
+  ) {
+    this.validateCorrelation(correlationId);
+    return this.service.variant(productId, variantId);
+  }
+
+  @Post('codigos-barras/resolver')
+  @RequireCatalogIdentity({
+    identity: 'service',
+    scope: 'catalogo:leer',
+    allowedClients: ['modulo-retail'],
+  })
+  resolveBarcode(
+    @Body() body: unknown,
+    @Headers('x-correlation-id') correlationId?: string,
+  ) {
+    this.validateCorrelation(correlationId);
+    return this.service.resolveBarcode(body);
+  }
+}

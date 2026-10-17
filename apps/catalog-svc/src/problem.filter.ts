@@ -28,16 +28,28 @@ export class ProblemFilter implements ExceptionFilter {
     const supplied =
       typeof body === 'object' && 'code' in body ? body.code : undefined;
     const code =
-      status === 404
-        ? 'PRODUCTO_NO_ENCONTRADO'
-        : status === 422 &&
-            ['CATEGORIA_INVALIDA', 'MARCA_INVALIDA'].includes(String(supplied))
-          ? String(supplied)
-          : status === 400
-            ? 'VALIDACION'
-            : status === 503
-              ? 'SERVICIO_NO_DISPONIBLE'
-              : 'ERROR_INTERNO';
+      status === 401
+        ? 'TOKEN_INVALIDO'
+        : status === 403
+          ? 'SCOPE_INSUFICIENTE'
+          : status === 404
+            ? ['PRODUCTO_NO_ENCONTRADO', 'VARIANTE_NO_ENCONTRADA'].includes(
+                String(supplied),
+              )
+              ? String(supplied)
+              : 'PRODUCTO_NO_ENCONTRADO'
+            : status === 422 &&
+                [
+                  'CATEGORIA_INVALIDA',
+                  'MARCA_INVALIDA',
+                  'SKU_INVALIDO',
+                ].includes(String(supplied))
+              ? String(supplied)
+              : status === 400
+                ? 'VALIDACION'
+                : status === 503
+                  ? 'SERVICIO_NO_DISPONIBLE'
+                  : 'ERROR_INTERNO';
     const established = response.getHeader('X-Correlation-Id');
     const id = correlationId(
       isCorrelationId(established)

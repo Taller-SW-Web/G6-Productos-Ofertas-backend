@@ -1,6 +1,10 @@
 import { readPostgresSettings, type PostgresSettings } from './database.js';
 import { readTaxonomyConfig, type TaxonomyConfig } from './taxonomy-config.js';
 import { readHttpConfig } from './http-config.js';
+import {
+  readCatalogSecurityConfig,
+  type CatalogSecurityConfig,
+} from './catalog-auth.js';
 
 export type Environment = 'development' | 'test' | 'production';
 
@@ -10,6 +14,7 @@ export class CatalogConfig {
   readonly host: string;
   readonly database: PostgresSettings;
   readonly taxonomy: TaxonomyConfig;
+  readonly security?: CatalogSecurityConfig;
 
   constructor(env: Record<string, string | undefined>) {
     const errors: string[] = [];
@@ -44,6 +49,14 @@ export class CatalogConfig {
         'CATALOG_TAXONOMY_URL debe ser un origen HTTP(S) sin credenciales.',
       );
     }
+    let security: CatalogSecurityConfig | undefined;
+    try {
+      security = readCatalogSecurityConfig(env);
+    } catch {
+      errors.push(
+        'SECURITY_ISSUER, SECURITY_DISCOVERY_URL y SECURITY_JWKS_URL deben configurarse juntos y ser válidos.',
+      );
+    }
     if (errors.length || !http || !database || !taxonomy) {
       throw new Error(
         'Configuracion de catalog-svc invalida: ' + errors.join(' '),
@@ -54,6 +67,7 @@ export class CatalogConfig {
     this.host = http.host;
     this.database = database;
     this.taxonomy = taxonomy;
+    this.security = security;
     Object.freeze(this);
   }
 }

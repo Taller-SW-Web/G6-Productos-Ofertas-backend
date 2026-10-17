@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module.js';
 import { PostgresCatalogRepository } from '../src/postgres-catalog.repository.js';
 import { COMMERCIAL_ELIGIBILITY } from '../src/commercial-eligibility.js';
 import { TaxonomyClient } from '../src/taxonomy.client.js';
+import { CatalogAuthGuard } from '../src/catalog-auth.js';
 
 describe('Catalog commercial boundary (isolated fixtures, not PostgreSQL evidence)', () => {
   let app: INestApplication;
@@ -25,6 +26,8 @@ describe('Catalog commercial boundary (isolated fixtures, not PostgreSQL evidenc
   const repository = { listCandidates: vi.fn(), findCandidateBySlug: vi.fn() };
   async function start(approvedFixture = false) {
     const builder = Test.createTestingModule({ imports: [AppModule] })
+      .overrideGuard(CatalogAuthGuard)
+      .useValue({ canActivate: () => true })
       .overrideProvider(PostgresCatalogRepository)
       .useValue(repository)
       .overrideProvider(TaxonomyClient)

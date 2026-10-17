@@ -56,8 +56,7 @@ export class PostgresCatalogRepository {
     query: ProductQuery,
     selection?: EligibilitySelection,
   ): SQL | undefined {
-    const conditions: SQL[] = [eq(products.estado, 'ACTIVO')];
-    if (query.estado && query.estado !== 'ACTIVO') conditions.push(sql`false`);
+    const conditions: SQL[] = [eq(products.estado, query.estado ?? 'ACTIVO')];
     if (query.q !== undefined) {
       const literal = query.q.replace(/[\\%_]/g, '\\$&');
       conditions.push(
@@ -71,7 +70,10 @@ export class PostgresCatalogRepository {
       conditions.push(eq(products.categoria_id, query.categoriaId));
     if (query.marcaId !== undefined)
       conditions.push(eq(products.marca_id, query.marcaId));
-    if (selection) {
+    if (
+      selection &&
+      (query.estado === undefined || query.estado === 'ACTIVO')
+    ) {
       conditions.push(inArray(products.id, [...selection.productIds]));
       conditions.push(
         or(
@@ -151,6 +153,7 @@ export class PostgresCatalogRepository {
   async findCandidateBySlug(
     slug: string,
     selection?: EligibilitySelection,
+    canal: ProductQuery['canal'] = 'MARKETPLACE',
   ): Promise<(ProductSummary & { variants: CommercialVariant[] }) | null> {
     return this.database.read((db) =>
       db.transaction(
@@ -163,7 +166,7 @@ export class PostgresCatalogRepository {
                 eq(products.slug, slug),
                 this.where(
                   {
-                    canal: 'MARKETPLACE',
+                    canal,
                     pagina: 1,
                     tamanio: 1,
                     orden: 'NOMBRE_ASC',
@@ -236,6 +239,97 @@ export class PostgresCatalogRepository {
             images: images.map((i) => i.url),
             attributes,
             variants: result,
+          };
+        },
+        { isolationLevel: 'repeatable read', accessMode: 'read only' },
+      ),
+    );
+  }
+
+  async findCandidateByProductId(
+    productId: string,
+    selection: EligibilitySelection,
+    canal: ProductQuery['canal'],
+  ): Promise<(ProductSummary & { variants: CommercialVariant[] }) | null> {
+    return this.database.read((db) =>
+      db.transaction(
+        async (tx) => {
+          const [row] = await tx
+            .select(projection)
+            .from(products)
+            .where(
+              and(
+                sql`${products.id}::text = ${productId}`,
+                this.where(
+                  {
+                    canal,
+                    pagina: 1,
+                    tamanio: 1,
+                    orden: 'NOMBRE_ASC',
+                  },
+                  selection,
+                ),
+              ),
+            )
+            .limit(1);
+          if (!row) return null;
+          const images = await tx
+            .select({ url: productImages.url })
+            .from(productImages)
+            .where(eq(productImages.product_id, row.product_id))
+            .orderBy(asc(productImages.posicion), asc(productImages.id));
+          const attributes: Attribute[] = await tx
+            .select(attributeProjection)
+            .from(productAttributes)
+            .where(eq(productAttributes.product_id, row.product_id))
+            .orderBy(asc(productAttributes.caracteristica_id));
+          const children = row.tiene_variantes
+            ? await tx
+                .select({ variant_id: variants.id, sku: variants.sku })
+                .from(variants)
+                .where(
+                  and(
+                    eq(variants.product_id, row.product_id),
+                    eq(variants.estado, 'ACTIVA'),
+                    inArray(variants.id, [...selection.variantIds]),
+                  ),
+                )
+                .orderBy(asc(variants.id))
+            : [];
+          const commercialVariants: CommercialVariant[] = [];
+          for (const child of children) {
+            const values = await tx
+              .select({
+                caracteristica_id: variantAttributes.caracteristica_id,
+                nombre: variantAttributes.nombre_snapshot,
+                valor_id: variantAttributes.valor_id,
+                valor: variantAttributes.valor,
+                identifying: variantAttributes.es_identificador,
+              })
+              .from(variantAttributes)
+              .where(eq(variantAttributes.variant_id, child.variant_id))
+              .orderBy(asc(variantAttributes.caracteristica_id));
+            const gallery = await tx
+              .select({ url: variantImages.url })
+              .from(variantImages)
+              .where(eq(variantImages.variant_id, child.variant_id))
+              .orderBy(asc(variantImages.posicion), asc(variantImages.id));
+            const project = (identifying: boolean): Attribute[] =>
+              values
+                .filter((value) => value.identifying === identifying)
+                .map(({ identifying: _internal, ...attribute }) => attribute);
+            commercialVariants.push({
+              ...child,
+              identifying_attributes: project(true),
+              non_identifying_attributes: project(false),
+              images: gallery.map((image) => image.url),
+            });
+          }
+          return {
+            ...row,
+            images: images.map((image) => image.url),
+            attributes,
+            variants: commercialVariants,
           };
         },
         { isolationLevel: 'repeatable read', accessMode: 'read only' },
