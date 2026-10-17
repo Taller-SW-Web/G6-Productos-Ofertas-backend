@@ -1,6 +1,6 @@
 # CD de servicios G6 en Oracle Cloud
 
-El CD publica imágenes inmutables por SHA en GHCR y despliega mediante SSH restringido. El manifiesto declarativo `ops/oracle/services.psv`, leído sin ejecutarlo por `ops/oracle/service-registry.sh`, contiene exactamente los nueve componentes del monorepo, sus puertos, variables específicas de puerto, rutas, imágenes, contenedores, estados y archivos privados de runtime. Por la decisión de infraestructura registrada en [INFRA-002 (#8)](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/8), los nueve quedan admitidos por el dispatch manual tras integrar el PR de allowlist. Esta admisión no acredita configuración runtime ni readiness. No existen disparadores automáticos (`workflow_run`, `push` o merge a `master` no despliegan ningún servicio); el despliegue sigue siendo individual por servicio, con CI exitosa y autorización de liberación vigente.
+El CD publica imágenes etiquetadas por SHA en GHCR y despliega mediante SSH restringido. El workflow rechaza una etiqueta existente para no sobrescribirla; la concurrencia serializa los intentos por servicio. El manifiesto declarativo `ops/oracle/services.psv`, leído sin ejecutarlo por `ops/oracle/service-registry.sh`, contiene los nueve componentes del monorepo, sus puertos, rutas, imágenes, contenedores, estados y archivos privados de runtime. El PR #122 ya está integrado. La allowlist manual y la autorización automática son independientes: `ops/oracle/auto-release-authorization.psv` comienza con los nueve servicios deshabilitados y exige el ID de una liberación manual exitosa más una referencia de evidencia readiness/smoke funcional. Un nombre en `services.psv` nunca habilita despliegue automático.
 
 ## Estado y límites
 
@@ -13,9 +13,9 @@ El CD publica imágenes inmutables por SHA en GHCR y despliega mediante SSH rest
 
 ## Controles de GitHub Actions
 
-El workflow `CD servicios Oracle` se ejecuta **exclusivamente mediante `workflow_dispatch` manual** en la rama `master`. Se han eliminado los disparadores automáticos (`workflow_run`, `push`, `pull_request`): ningún push o merge a `master` inicia despliegues. El workflow exige un commit con CI exitoso en `master`, valida que el SHA indicado sea la punta de `master`, y rechaza cualquier SHA no autorizado o no probado. El selector manual comprueba que el servicio solicitado exista y esté habilitado; los nueve nombres cerrados son elegibles después de integrar el PR de allowlist. Cualquier nombre no registrado se rechaza con código 64. En modo automático, el selector devuelve `[]` de forma fail-safe; activar ese modo requiere un cambio posterior y no forma parte de esta preparación.
+El workflow conserva `workflow_dispatch` manual en `master` y añade `workflow_run` después de completar CI. El camino automático acepta exclusivamente el workflow `.github/workflows/ci.yml`, evento `push`, rama `master`, conclusión `success`, repositorio fuente igual al repositorio base y SHA de 40 caracteres que siga siendo la punta de `master`. Rechaza PRs, forks, otras ramas, otros workflows, fallos/cancelaciones y SHAs antiguos. El job de publicación vuelve a comprobar la punta antes de SSH. El selector manual sigue consultando `services.psv`; el automático consulta solo `auto-release-authorization.psv`.
 
-Cada fila de la matriz es independiente y publica y despliega solo su servicio; un fallo de publicación no cancela las otras filas. Las filas usan `fail-fast: false` y un grupo de concurrencia común por repositorio y servicio para cada ejecución de CD. El ejecutor vuelve a serializar en Oracle mediante `flock` con un archivo dentro del directorio de estado propio del servicio; conserva el bloqueo durante despliegue y rollback, y falla cerrado si `flock` no está disponible. Así una operación no puede pisar sus archivos `active-image`/`previous-image` ni otro servicio. El job preparatorio tiene `actions: read`, `contents: read` y `deployments: read`; cada job de publicación tiene solo `contents: read`, `packages: write` y `deployments: write`. CI valida sintaxis y expresiones de todos los workflows con actionlint. Antes de enviar el token de GHCR, Actions valida presencia de secretos, host SSH mediante `known_hosts` y autenticación con la clave restringida. El host valida el servicio, el SHA, la imagen actual, el healthcheck de Docker y HTTP; si la versión nueva falla, restaura solo el servicio elegido.
+Cada fila de la matriz es independiente y publica y despliega solo su servicio; un fallo de publicación no cancela las otras filas. Las filas usan `fail-fast: false` y un grupo de concurrencia común por repositorio y servicio para cada ejecución de CD. El ejecutor vuelve a serializar en Oracle mediante `flock` con un archivo dentro del directorio de estado propio del servicio; conserva el bloqueo durante despliegue y rollback, y falla cerrado si `flock` no está disponible. Así una operación no puede pisar sus archivos `active-image`/`previous-image` ni otro servicio. El job preparatorio tiene `actions: read`, `contents: read` y `deployments: read`; el job de publicación tiene `contents: read`, `packages: write`, `deployments: write` y `id-token: write`. Antes de publicar, Actions valida la presencia de secretos/variables, conecta el runner efímero a Tailscale mediante OIDC, exige que `ORACLE_HOST` sea un peer de la tailnet y verifica `known_hosts` y la clave SSH restringida. El host valida el servicio, el SHA, la imagen actual, el healthcheck de Docker y HTTP; si la versión nueva falla, restaura solo el servicio elegido.
 
 ## Historial de despliegue y recuperación
 
@@ -27,12 +27,12 @@ GitHub Deployments utiliza entornos lógicos cerrados por servicio (`g6-oracle-<
 
 **Aclaración normativa de auditoría:**
 - **Los revisores de GitHub Environments no están configurados como gate del job en el workflow actual.** El job `release` no declara la directiva `environment:` en el YAML de GitHub Actions; por tanto, el workflow no se pausa en Actions a la espera de aprobaciones interactivas de revisores en la interfaz web de GitHub.
-- La protección contra liberaciones no autorizadas se garantiza mediante el disparador **exclusivamente manual** (`workflow_dispatch`), la verificación obligatoria de pertenencia a `master`, el requisito de CI push exitosa previa en `master`, y el rechazo en el selector de cualquier servicio no habilitado en el registro.
+- El acceso SSH desde Actions requiere un runner efímero conectado a Tailscale mediante GitHub OIDC. El paso Tailscale está limitado a `tag:g6-deploy-actions`; el permiso de red debe conceder únicamente TCP/22 al nodo Oracle etiquetado. El OIDC se usa únicamente en el job de publicación/despliegue, con `id-token: write` limitado a ese job.
 - No se debe documentar ni asumir que existe un gate activo de revisores obligatorios en Actions sin que exista la directiva correspondiente en el workflow.
 
-### Despliegue exclusivamente manual y desactivación del modo automático
+### Despliegue manual conservado y modo automático desactivado
 
-El selector `ops/oracle/select-cd-services.sh` en modo automático devuelve incondicionalmente `[]` de forma fail-safe. Se han eliminado todas las rutas de despliegue automático por push o merge a `master`. Un merge a `master` nunca desplegará ningún servicio.
+La tabla automática mantiene todos los componentes en `false`. Para habilitar uno en el futuro, una revisión aprobada debe registrar el ID de su Deployment manual exitoso y una URL HTTPS de evidencia readiness o smoke funcional aprobada. El workflow vuelve a consultar GitHub y exige que el Deployment referenciado pertenezca al entorno del servicio, sea tipo `deploy` y tenga su estado más reciente `success`. `/health` por sí solo no es evidencia suficiente. Mientras no haya filas autorizadas, `workflow_run` termina con selección `[]` y no crea imágenes ni Deployments.
 
 Para realizar un despliegue, el operador debe ejecutar explícitamente `workflow_dispatch` indicando un único servicio habilitado del registro. Cualquier nombre no registrado se rechaza inmediatamente (código 64). El registro de los nueve no autoriza por sí mismo su liberación: cada servicio necesita runtime completo, imagen/CI del mismo SHA, readiness funcional y autorización individual.
 
@@ -199,7 +199,43 @@ El workflow conserva los nombres de secretos del PR #7. Deben provisionarse manu
 | `ORACLE_GHCR_USERNAME`   | Usuario asociado al token de lectura GHCR |
 | `ORACLE_GHCR_TOKEN`      | PAT dedicado con `read:packages`          |
 
-La clave de despliegue está restringida a comandos forzados y sin forwarding/PTY, pero el workflow actual todavía no une los runners a Tailscale. Hasta que Marco confirme la tailnet, se configure una identidad/política de Actions aprobada y se valide el acceso por MagicDNS/IP privada, no ejecutar el dispatch de release ni permitir SSH público para los runners. El secreto `ORACLE_HOST` debe señalar el destino privado autorizado. No se inspeccionó su valor.
+### Tailscale, OIDC y política mínima
+
+La configuración de confianza debe prepararla un Owner/Admin/Network Admin de Tailscale en Admin Console → Trust credentials → Credential → OpenID Connect:
+
+| Campo | Valor/restricción |
+| --- | --- |
+| Issuer | `https://token.actions.githubusercontent.com` |
+| Subject | `repo:Taller-SW-Web/G6-Productos-Ofertas-backend:ref:refs/heads/master` |
+| Claims adicionales | `repository=Taller-SW-Web/G6-Productos-Ofertas-backend`, `event_name=workflow_*`, `workflow_ref=Taller-SW-Web/G6-Productos-Ofertas-backend/.github/workflows/cd-services-oracle.yml@refs/heads/master` |
+| Tags permitidos | Solo `tag:g6-deploy-actions` |
+| Scope | `auth_keys` con permiso de escritura; no conceder `devices:core` ni otros scopes |
+
+Guardar el Client ID y Audience no secretos como variables Actions `TS_OIDC_CLIENT_ID` y `TS_OIDC_AUDIENCE`. No crear ni guardar un OAuth client secret ni auth key para este flujo. Integrar con la política existente de la tailnet (sin reemplazar reglas ajenas) estos propietarios y grant mínimo:
+
+```json
+"tagOwners": {
+  "tag:g6-deploy-actions": ["autogroup:admin"],
+  "tag:g6-oracle": ["autogroup:admin"]
+},
+"grants": [
+  {
+    "src": ["tag:g6-deploy-actions"],
+    "dst": ["tag:g6-oracle"],
+    "ip": ["tcp:22"]
+  }
+]
+```
+
+El administrador debe etiquetar Oracle con `tag:g6-oracle` y confirmar por separado que las reglas existentes no amplían el acceso efectivo. Verificar que la política permite al job contactar el endpoint OIDC público durante el intercambio. Oracle debe mantener SSH restringido al comando forzado y sin forwarding/PTY; Actions usa el Tailscale IP/MagicDNS privado, sin abrir SSH público para sus runners.
+
+El comodín `workflow_*` cubre los dos eventos preservados, `workflow_run` y `workflow_dispatch`; el `workflow_ref` limita la identidad a este archivo. El issuer, subject, audience y claims deben confirmarse en el admin de Tailscale con un token de prueba del propio workflow; los claims estándar de GitHub pueden variar si se cambia el disparador o se añade un Environment. Tailscale documenta federación OIDC y `auth_keys` de escritura para esta acción en [Workload identity federation](https://tailscale.com/docs/features/workload-identity-federation) y [tailscale/github-action](https://github.com/tailscale/github-action).
+
+### Secretos existentes de Oracle
+
+GitHub muestra creados los seis nombres `ORACLE_*` exigidos por el workflow. GitHub no permite recuperar sus valores, así que no se han leído ni impreso. Antes de probar el probe SSH, el administrador debe verificar en secreto que `ORACLE_HOST` es la IP Tailscale o MagicDNS de Oracle y que `ORACLE_SSH_KNOWN_HOSTS` contiene la clave host verificada fuera de banda para ese mismo nombre. `ORACLE_USER` debe resolver al usuario restringido esperado; `ORACLE_SSH_PRIVATE_KEY` debe corresponder a su clave autorizada. Confirmar además que `ORACLE_GHCR_TOKEN` es PAT classic con solo `read:packages` y acceso al paquete. `ORACLE_GHCR_USERNAME` debe ser el dueño de ese PAT. No volver a imprimir ni copiar los valores.
+
+El `GITHUB_TOKEN` del job publica con `packages: write`; el PAT enviado por stdin al host necesita solo `read:packages`. El ejecutor existente conserva las verificaciones y rollback del servicio seleccionado.
 
 El SSH debe aceptar únicamente el wrapper de despliegue mediante `authorized_keys`, sin PTY, forwarding ni shell interactiva. Conserva la ruta forzada existente:
 
