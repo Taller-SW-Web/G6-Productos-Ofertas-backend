@@ -379,6 +379,302 @@ describe.skipIf(!dockerAvailable)(
       ).toHaveLength(1);
     });
 
+    it('validates the DATA-002 batch in disposable PostgreSQL', () => {
+      const catalogDirectory = resolve('scripts/seed/mcp/catalog');
+      const manifest = JSON.parse(
+        readFileSync(
+          join(catalogDirectory, '002_manifest_catalogo.json'),
+          'utf8',
+        ),
+      ) as {
+        taxonomy: {
+          brands: Record<string, string>;
+          types: Record<string, string>;
+          categories: Record<string, string>;
+          characteristics: Record<string, string>;
+          values: Record<string, Record<string, string>>;
+        };
+      };
+      const sqlLiteral = (value: string) =>
+        "'" + value.replaceAll("'", "''") + "'";
+      const rows = (values: string[]) => values.join(',\n');
+      const brandRows = Object.entries(manifest.taxonomy.brands).map(
+        ([name, id]) => `(${sqlLiteral(id)}, ${sqlLiteral(name)}, 'ACTIVO')`,
+      );
+      const typeRows = Object.entries(manifest.taxonomy.types).map(
+        ([name, id]) => `(${sqlLiteral(id)}, ${sqlLiteral(name)}, 'ACTIVO')`,
+      );
+      const categoryRows = Object.entries(manifest.taxonomy.categories).map(
+        ([name, id]) =>
+          `(${sqlLiteral(id)}, ${sqlLiteral(name)}, NULL, 'ACTIVO')`,
+      );
+      const characteristicRows = Object.entries(
+        manifest.taxonomy.characteristics,
+      ).map(
+        ([name, id]) => `(${sqlLiteral(id)}, ${sqlLiteral(name)}, 'ACTIVO')`,
+      );
+      const valueRows = Object.entries(manifest.taxonomy.values).flatMap(
+        ([characteristic, values]) =>
+          Object.entries(values).map(
+            ([name, id]) =>
+              `(${sqlLiteral(id)}, ${sqlLiteral(manifest.taxonomy.characteristics[characteristic]!)}, ${sqlLiteral(name)}, 'ACTIVO')`,
+          ),
+      );
+      const relationRows = Object.values(manifest.taxonomy.types).flatMap(
+        (typeId) =>
+          Object.values(manifest.taxonomy.characteristics).map(
+            (characteristicId) =>
+              `(${sqlLiteral(typeId)}, ${sqlLiteral(characteristicId)}, true, 'ACTIVO')`,
+          ),
+      );
+      const taxonomyFixture = `
+        CREATE SCHEMA taxonomy;
+        CREATE SCHEMA storage;
+        CREATE TYPE taxonomy.estado_entidad AS ENUM ('ACTIVO', 'INACTIVO');
+        CREATE TABLE taxonomy.brands (id uuid PRIMARY KEY, nombre text NOT NULL, estado taxonomy.estado_entidad NOT NULL);
+        CREATE TABLE taxonomy.product_types (id uuid PRIMARY KEY, nombre text NOT NULL, estado taxonomy.estado_entidad NOT NULL);
+        CREATE TABLE taxonomy.categories (id uuid PRIMARY KEY, nombre text NOT NULL, categoria_padre_id uuid, estado taxonomy.estado_entidad NOT NULL);
+        CREATE TABLE taxonomy.characteristics (id uuid PRIMARY KEY, nombre text NOT NULL, estado taxonomy.estado_entidad NOT NULL);
+        CREATE TABLE taxonomy.characteristic_values (id uuid PRIMARY KEY, caracteristica_id uuid NOT NULL, nombre text NOT NULL, estado taxonomy.estado_entidad NOT NULL);
+        CREATE TABLE taxonomy.product_type_characteristics (tipo_producto_id uuid NOT NULL, caracteristica_id uuid NOT NULL, obligatoria boolean NOT NULL, estado taxonomy.estado_entidad NOT NULL);
+        CREATE TABLE storage.objects (name text NOT NULL, mime_type text, metadata jsonb, bucket_id text NOT NULL);
+        INSERT INTO taxonomy.brands (id, nombre, estado) VALUES ${rows(brandRows)};
+        INSERT INTO taxonomy.product_types (id, nombre, estado) VALUES ${rows(typeRows)};
+        INSERT INTO taxonomy.categories (id, nombre, categoria_padre_id, estado) VALUES ${rows(categoryRows)};
+        INSERT INTO taxonomy.characteristics (id, nombre, estado) VALUES ${rows(characteristicRows)};
+        INSERT INTO taxonomy.characteristic_values (id, caracteristica_id, nombre, estado) VALUES ${rows(valueRows)};
+        INSERT INTO taxonomy.product_type_characteristics (tipo_producto_id, caracteristica_id, obligatoria, estado) VALUES ${rows(relationRows)};
+        GRANT USAGE ON SCHEMA taxonomy TO po_catalog_owner;
+        GRANT SELECT ON ALL TABLES IN SCHEMA taxonomy TO po_catalog_owner;
+      `;
+      command(
+        'docker',
+        [
+          'exec',
+          '-i',
+          container,
+          'psql',
+          '-U',
+          'postgres',
+          '-v',
+          'ON_ERROR_STOP=1',
+        ],
+        taxonomyFixture,
+      );
+
+      const preflightSql = readFileSync(
+        join(catalogDirectory, '001_preflight_readonly.sql'),
+        'utf8',
+      );
+      const runSql = (input: string) =>
+        spawnSync(
+          'docker',
+          [
+            'exec',
+            '-i',
+            container,
+            'psql',
+            '-X',
+            '-q',
+            '-U',
+            'postgres',
+            '-v',
+            'ON_ERROR_STOP=1',
+          ],
+          {
+            encoding: 'utf8',
+            input,
+            timeout: 120000,
+            windowsHide: true,
+          },
+        );
+      const preflight = command(
+        'docker',
+        [
+          'exec',
+          '-i',
+          container,
+          'psql',
+          '-X',
+          '-At',
+          '-U',
+          'postgres',
+          '-v',
+          'ON_ERROR_STOP=1',
+        ],
+        preflightSql,
+      );
+      expect(preflight).not.toMatch(
+        /FALTA_INACTIVA_O_CARACTERISTICA_INCORRECTA|RELACION_FALTA_O_INACTIVA|DATA002_PREFLIGHT_BLOCKED/,
+      );
+
+      const batch = readFileSync(
+        join(catalogDirectory, '003_carga_catalogo.sql'),
+        'utf8',
+      );
+      const existingProductCount = command('docker', [
+        'exec',
+        '-i',
+        container,
+        'psql',
+        '-X',
+        '-At',
+        '-U',
+        'postgres',
+        '-c',
+        'SELECT count(*) FROM catalog.products',
+      ]);
+      const expectPreflightToBlock = (
+        mutation: string,
+        restoration: string,
+      ) => {
+        command(
+          'docker',
+          [
+            'exec',
+            '-i',
+            container,
+            'psql',
+            '-X',
+            '-q',
+            '-U',
+            'postgres',
+            '-v',
+            'ON_ERROR_STOP=1',
+          ],
+          mutation,
+        );
+        for (const sqlText of [preflightSql, batch]) {
+          const result = runSql(sqlText);
+          expect(result.error).toBeUndefined();
+          expect(result.status).not.toBe(0);
+          expect(result.stderr).toContain('DATA002_PREFLIGHT_BLOCKED');
+        }
+        expect(
+          command('docker', [
+            'exec',
+            '-i',
+            container,
+            'psql',
+            '-X',
+            '-At',
+            '-U',
+            'postgres',
+            '-c',
+            'SELECT count(*) FROM catalog.products',
+          ]),
+        ).toBe(existingProductCount);
+        command(
+          'docker',
+          [
+            'exec',
+            '-i',
+            container,
+            'psql',
+            '-X',
+            '-q',
+            '-U',
+            'postgres',
+            '-v',
+            'ON_ERROR_STOP=1',
+          ],
+          restoration,
+        );
+      };
+      const brandEntry = Object.entries(manifest.taxonomy.brands).find(
+        ([, id]) => id === 'd05cc621-2d16-faa3-f620-19fb3173737c',
+      );
+      expect(brandEntry).toBeDefined();
+      expectPreflightToBlock(
+        "DELETE FROM taxonomy.brands WHERE id = 'd05cc621-2d16-faa3-f620-19fb3173737c';",
+        `INSERT INTO taxonomy.brands (id, nombre, estado) VALUES (${sqlLiteral(brandEntry![1])}, ${sqlLiteral(brandEntry![0])}, 'ACTIVO');`,
+      );
+      expectPreflightToBlock(
+        "UPDATE taxonomy.product_types SET estado = 'INACTIVO' WHERE id = 'b023a151-d69f-ff9a-483a-678eefe6842e';",
+        "UPDATE taxonomy.product_types SET estado = 'ACTIVO' WHERE id = 'b023a151-d69f-ff9a-483a-678eefe6842e';",
+      );
+      expectPreflightToBlock(
+        "UPDATE taxonomy.product_type_characteristics SET estado = 'INACTIVO' WHERE tipo_producto_id = 'b023a151-d69f-ff9a-483a-678eefe6842e' AND caracteristica_id = 'acee6db1-ba1c-f020-caf8-f439b09556ff';",
+        "UPDATE taxonomy.product_type_characteristics SET estado = 'ACTIVO' WHERE tipo_producto_id = 'b023a151-d69f-ff9a-483a-678eefe6842e' AND caracteristica_id = 'acee6db1-ba1c-f020-caf8-f439b09556ff';",
+      );
+      const executeBatch = () =>
+        command(
+          'docker',
+          [
+            'exec',
+            '-i',
+            container,
+            'psql',
+            '-X',
+            '-q',
+            '-U',
+            'postgres',
+            '-v',
+            'ON_ERROR_STOP=1',
+          ],
+          `SET ROLE po_catalog_owner;\n${batch}`,
+        );
+      executeBatch();
+      executeBatch();
+
+      const postcheck = command(
+        'docker',
+        [
+          'exec',
+          '-i',
+          container,
+          'psql',
+          '-X',
+          '-At',
+          '-F',
+          '|',
+          '-U',
+          'postgres',
+          '-v',
+          'ON_ERROR_STOP=1',
+        ],
+        readFileSync(
+          join(catalogDirectory, '004_postcheck_readonly.sql'),
+          'utf8',
+        ),
+      );
+      const postcheckRows = postcheck
+        .split(/\r?\n/)
+        .filter((row) => row.length > 0);
+      expect(postcheckRows).toHaveLength(12);
+      expect(postcheckRows.every((row) => row.endsWith('|PASS'))).toBe(true);
+      expect(postcheckRows).toContain('productos|15|15|PASS');
+      expect(postcheckRows).toContain('variantes|45|45|PASS');
+      expect(postcheckRows).toContain('payloads_jsonb_validos|0|0|PASS');
+
+      const conflict = spawnSync(
+        'docker',
+        [
+          'exec',
+          '-i',
+          container,
+          'psql',
+          '-X',
+          '-q',
+          '-U',
+          'postgres',
+          '-v',
+          'ON_ERROR_STOP=1',
+        ],
+        {
+          encoding: 'utf8',
+          input: `UPDATE catalog.products SET descripcion = 'different payload' WHERE id = '96c6972f-2bd2-5528-8028-5293fe719db9';\nSET ROLE po_catalog_owner;\n${batch}`,
+          timeout: 120000,
+          windowsHide: true,
+        },
+      );
+      expect(conflict.error).toBeUndefined();
+      expect(conflict.status).not.toBe(0);
+      expect(conflict.stderr).toContain(
+        'DATA-002 contenido diferente en catalog.products',
+      );
+    });
+
     it('enforces runtime ownership, denies cross-schema access, and closes its pool', async () => {
       const roles = await database.read((db) =>
         db.execute(sql`
