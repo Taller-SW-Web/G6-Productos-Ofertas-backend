@@ -69,14 +69,21 @@ export async function startCatalog() {
       await app.get(Database).verifyIdentity();
       const { host } = readHttpConfig(process.env);
       await app.listen(config.port, host);
+      new SanitizedLogger(config.environment).log({
+        code: 'APPLICATION_STARTED',
+      });
     } catch {
       await app.close();
       throw new Error('Listen failed');
     }
   } catch {
-    new SanitizedLogger('bootstrap').error(
-      'catalog-svc no pudo iniciar; verificar configuracion y disponibilidad del puerto.',
-    );
+    new SanitizedLogger('bootstrap', [], (line) =>
+      process.stderr.write(line + '\n'),
+    ).error({
+      code: 'APPLICATION_START_FAILED',
+      message:
+        'catalog-svc no pudo iniciar; verificar configuracion y disponibilidad del puerto.',
+    });
     process.exitCode = 1;
   }
 }

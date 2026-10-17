@@ -161,7 +161,11 @@ se modificó la configuración compartida.
 - Catálogo: 115 unitarias PASS; 9 e2e PASS y 4 de PostgreSQL omitidas por su opt-in.
 - General: 284 unitarias PASS; 344 e2e PASS y 20 omitidas en 4 suites de integración
   que requieren variables/entornos explícitos. No se desactivaron pruebas.
-- Build de Catálogo, typecheck general, lint, format y whitespace: PASS.
+- Build de Catálogo y `build:all`, typecheck general, lint, format y whitespace: PASS.
+- Se conservan los códigos `APPLICATION_STARTED` y `APPLICATION_START_FAILED`
+  de `master` mediante logging sanitizado; los fallos se escriben en stderr.
+  El smoke de arranque sin configuración pasó para Catálogo y Taxonomía en un
+  directorio aislado, sin cargar el archivo privado local.
 - CLI de readiness sin configuración: salida JSON `not_ready`, código 1 esperado;
   sin ejecutar automáticamente el CLI al importar el controlador.
 - Comprobación real de solo lectura tras el merge: nuestro sondeo PostgreSQL y
