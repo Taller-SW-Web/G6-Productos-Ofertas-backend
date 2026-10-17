@@ -88,6 +88,41 @@ describe('sanitizar (#34)', () => {
 
     expect(() => sanitizar(profundo)).not.toThrow();
   });
+
+  it('enmascara el encabezado Authorization: Bearer', () => {
+    const resultado = sanitizar(
+      `Authorization: Bearer eyJhbGciOi.${CLAVE_FALSA}`,
+    ) as string;
+
+    expect(resultado).not.toContain(CLAVE_FALSA);
+    expect(resultado).toContain('Authorization: Bearer ***');
+  });
+
+  it('enmascara secretos dentro de un JSON serializado', () => {
+    const json = JSON.stringify({
+      token: CLAVE_FALSA,
+      secret: CLAVE_FALSA,
+      authorization: `Bearer ${CLAVE_FALSA}`,
+      usuario: 'taxonomy_dev_login',
+    });
+
+    const resultado = sanitizar(json) as string;
+
+    expect(resultado).not.toContain(CLAVE_FALSA);
+    expect(resultado).toContain('"token":"***"');
+    expect(resultado).toContain('"secret":"***"');
+    expect(resultado).toContain('"authorization":"***"');
+    expect(resultado).toContain('"usuario":"taxonomy_dev_login"');
+  });
+
+  it('enmascara credenciales en una URL de conexión postgres', () => {
+    const resultado = sanitizar(
+      `postgres://usuario:${CLAVE_FALSA}@host:5432/taxonomy`,
+    ) as string;
+
+    expect(resultado).not.toContain(CLAVE_FALSA);
+    expect(resultado).toContain('postgres://usuario:***@host:5432/taxonomy');
+  });
 });
 
 describe('SanitizedLogger (#34)', () => {
@@ -128,5 +163,20 @@ describe('SanitizedLogger (#34)', () => {
 
     expect(sink.registros).toHaveLength(5);
     expect(sink.volcado()).not.toContain(CLAVE_FALSA);
+  });
+
+  it('enmascara Authorization Bearer y JSON serializado al registrar', () => {
+    const sink = new SinkCapturador();
+    const logger = new SanitizedLogger(sink);
+
+    logger.warn(`Authorization: Bearer ${CLAVE_FALSA}`);
+    logger.error(JSON.stringify({ token: CLAVE_FALSA, secret: CLAVE_FALSA }));
+
+    const volcado = sink.volcado();
+    expect(volcado).not.toContain(CLAVE_FALSA);
+    expect(volcado).toContain('Authorization: Bearer ***');
+    const mensajeJson = String(sink.registros[1][0]);
+    expect(mensajeJson).toContain('"token":"***"');
+    expect(mensajeJson).toContain('"secret":"***"');
   });
 });

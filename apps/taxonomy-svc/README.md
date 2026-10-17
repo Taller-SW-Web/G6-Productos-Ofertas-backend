@@ -16,7 +16,7 @@ El servicio valida la configuración en el arranque y falla cerrado (`fail-close
 ## Endpoints operativos
 
 - `GET /health`: liveness estático; responde `200` sin consultar dependencias.
-- `GET /health/readiness`: readiness; responde `200` solo cuando la fuente de datos de taxonomía está disponible, o `503` (problem+json, `SERVICIO_NO_DISPONIBLE`) en caso contrario.
+- `GET /health/readiness`: readiness; verifica acceso de lectura real a `taxonomy.categories` y `taxonomy.brands` (`SELECT 1 ... LIMIT 1`). Responde `200` solo si ambas tablas son accesibles, o `503` (problem+json, `SERVICIO_NO_DISPONIBLE`) si la conexión falla, hay permisos denegados (`42501`) o alguna tabla falla.
 
 ## Persistencia
 

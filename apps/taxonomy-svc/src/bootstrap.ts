@@ -38,7 +38,6 @@ export async function crearAplicacion(
   logger.log('Configuracion de arranque validada', {
     entorno: configuracion.nodeEnv,
     puerto: configuracion.port,
-    DATABASE_URL: configuracion.databaseUrl,
   });
   return { app, env: configuracion };
 }

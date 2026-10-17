@@ -14,6 +14,7 @@ export class RepositorioPrueba
   falla = false;
   listo = true;
   detalleFallo = 'conexion con el esquema taxonomy rechazada';
+  errorTablas: (Error & { code?: string }) | null = null;
 
   async findCategoriasActivas(): Promise<CategoriaRow[]> {
     if (this.falla) {
@@ -30,6 +31,11 @@ export class RepositorioPrueba
   }
 
   async verificarReadiness(): Promise<void> {
+    if (this.errorTablas) {
+      throw ProblemDetailsException.noDisponible(
+        'Base de datos de taxonomia no disponible.',
+      );
+    }
     if (!this.listo) {
       throw ProblemDetailsException.noDisponible(
         'Fuente de datos de taxonomía no disponible.',

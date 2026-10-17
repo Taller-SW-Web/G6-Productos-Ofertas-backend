@@ -1,4 +1,6 @@
 import { HttpStatus } from '@nestjs/common';
+import type { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import { ProblemDetailsException } from '../errors/taxonomy.errors.js';
 import {
   DrizzleTaxonomyRepository,
@@ -183,17 +185,69 @@ describe('DrizzleTaxonomyRepository (#35)', () => {
   });
 
   describe('readiness', () => {
-    it('resuelve cuando la base responde', async () => {
+    it('consulta explícitamente taxonomy.categories y taxonomy.brands', async () => {
+      const sentencias: string[] = [];
+      const dialecto = new PgDialect();
       const repo = new DrizzleTaxonomyRepository(
-        dbFalso({ execute: () => Promise.resolve(undefined) }),
+        dbFalso({
+          execute: (consulta: SQL) => {
+            sentencias.push(dialecto.sqlToQuery(consulta).sql);
+            return Promise.resolve(undefined);
+          },
+        }),
       );
 
       await expect(repo.verificarReadiness()).resolves.toBeUndefined();
+
+      expect(sentencias).toHaveLength(2);
+      expect(sentencias[0]).toContain('"taxonomy"."categories"');
+      expect(sentencias[1]).toContain('"taxonomy"."brands"');
     });
 
     it('responde 503 cuando la base no responde', async () => {
       const repo = new DrizzleTaxonomyRepository(
         dbFalso({ execute: () => Promise.reject({ code: '57P03' }) }),
+      );
+
+      const error = await repo.verificarReadiness().catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ProblemDetailsException);
+      expect((error as ProblemDetailsException).getStatus()).toBe(
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    });
+
+    it('responde 503 si el usuario no tiene permisos de lectura (42501)', async () => {
+      const repo = new DrizzleTaxonomyRepository(
+        dbFalso({
+          execute: () =>
+            Promise.reject({
+              code: '42501',
+              message: 'permission denied for table categories',
+            }),
+        }),
+      );
+
+      const error = await repo.verificarReadiness().catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ProblemDetailsException);
+      expect((error as ProblemDetailsException).getStatus()).toBe(
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+      expect((error as ProblemDetailsException).problem.code).toBe(
+        'SERVICIO_NO_DISPONIBLE',
+      );
+    });
+
+    it('responde 503 cuando una tabla de taxonomía falla', async () => {
+      const repo = new DrizzleTaxonomyRepository(
+        dbFalso({
+          execute: () =>
+            Promise.reject({
+              code: '42P01',
+              message: 'relation "taxonomy.categories" does not exist',
+            }),
+        }),
       );
 
       const error = await repo.verificarReadiness().catch((e: unknown) => e);

@@ -146,7 +146,8 @@ export class DrizzleTaxonomyRepository
 
   async verificarReadiness(): Promise<void> {
     try {
-      await this.db.execute(sql`select 1`);
+      await this.db.execute(sql`select 1 from ${categorias} limit 1`);
+      await this.db.execute(sql`select 1 from ${marcas} limit 1`);
     } catch {
       throw ProblemDetailsException.noDisponible(DETALLE_NO_DISPONIBLE);
     }

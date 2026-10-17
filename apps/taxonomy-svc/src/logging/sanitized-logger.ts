@@ -3,8 +3,13 @@ import { ConsoleLogger, LoggerService } from '@nestjs/common';
 const CLAVES_SENSIBLES =
   /(password|passwd|secret|token|key|pgpassword|authorization|cookie|credential|database[_-]?url|dsn)/i;
 
+const AUTORIZACION = /(authorization\s*[:=]\s*)(bearer\s+)?([^\s,;&"'\\]+)/gi;
+
+const JSON_SENSIBLE =
+  /("(?:password|passwd|pwd|secret|token|access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|authorization|credential|credentials|database[_-]?url|dsn|pgpassword)"\s*:\s*")((?:[^"\\]|\\.)*)(")/gi;
+
 const PAR_CLAVE_VALOR =
-  /([A-Za-z0-9_.-]*(?:password|passwd|secret|token|key|authorization|credential|dsn)[A-Za-z0-9_.-]*\s*[=:]\s*)([^\s,;&]+)/gi;
+  /([A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|key|credential|dsn|pgpassword)[A-Za-z0-9_.-]*\s*[=:]\s*)([^\s,;&]+)/gi;
 
 const CREDENCIALES_EN_URL = /(:\/\/[^/@\s:]+:)[^@/\s]+(@)/g;
 
@@ -17,8 +22,11 @@ function esObjetoPlano(valor: unknown): valor is Record<string, unknown> {
 }
 
 function sanitizarTexto(texto: string): string {
-  const sinClaves = texto.replace(PAR_CLAVE_VALOR, `$1${MASCARA}`);
-  return sinClaves.replace(CREDENCIALES_EN_URL, `$1${MASCARA}$2`);
+  return texto
+    .replace(AUTORIZACION, `$1$2${MASCARA}`)
+    .replace(JSON_SENSIBLE, `$1${MASCARA}$3`)
+    .replace(PAR_CLAVE_VALOR, `$1${MASCARA}`)
+    .replace(CREDENCIALES_EN_URL, `$1${MASCARA}$2`);
 }
 
 export function sanitizar(valor: unknown, profundidad = 0): unknown {
