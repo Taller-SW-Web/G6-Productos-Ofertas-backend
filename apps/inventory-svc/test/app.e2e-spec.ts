@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
+import { vi } from 'vitest';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { randomUUID } from 'node:crypto';
@@ -63,6 +64,31 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
       status: 'ok',
       service: 'inventory-svc',
     });
+  });
+
+  it('/health/readiness (GET) es público y responde ready sin exponer secretos', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/health/readiness')
+      .expect(200);
+
+    expect(res.body).toEqual({ status: 'ready', service: 'inventory-svc' });
+    const serialized = JSON.stringify(res.body);
+    expect(serialized).not.toMatch(
+      /postgres|password|pgpassword|rabbitmq|bearer|-----BEGIN/i,
+    );
+  });
+
+  it('/health/readiness (GET) responde 503 not_ready cuando la base no responde', async () => {
+    vi.spyOn(mockDb, 'isHealthy').mockResolvedValue({
+      healthy: false,
+      error: 'database unreachable',
+    });
+
+    const res = await request(app.getHttpServer())
+      .get('/health/readiness')
+      .expect(503);
+
+    expect(res.body).toEqual({ status: 'not_ready', service: 'inventory-svc' });
   });
 
   describe('Seguridad HTTP y Control de Acceso (Frontera P0)', () => {
