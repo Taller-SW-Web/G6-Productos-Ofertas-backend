@@ -23,6 +23,9 @@ import { OutboxPublisherService } from '../src/outbox/outbox-publisher.service.j
 import { ReservationExpirationService } from '../src/reservations/reservation-expiration.service.js';
 import { ReservationsService } from '../src/reservations/reservations.service.js';
 import { InventoryWorkersService } from '../src/workers/inventory-workers.service.js';
+import { InventoryCommandService } from '../src/inbox/inventory-command.service.js';
+import { InventoryConsumerService } from '../src/inbox/inventory-consumer.service.js';
+import { DrizzleInboxRepository } from '../src/repositories/drizzle/drizzle-inbox.repository.js';
 import { DrizzleCommercialRoutesRepository } from '../src/repositories/drizzle/drizzle-commercial-routes.repository.js';
 import { DrizzleKardexRepository } from '../src/repositories/drizzle/drizzle-kardex.repository.js';
 import { DrizzleLocationsRepository } from '../src/repositories/drizzle/drizzle-locations.repository.js';
@@ -64,6 +67,8 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
   let locationId: string;
   const exchangeEvents = 'po.events.x';
   const exchangeResults = 'po.results.x';
+  const exchangeCommands = 'po.commands.x';
+  const initializationKey = 'inventory.sku.initialization.requested';
   const queue = `inventory-it-${randomUUID()}`;
   const runId = randomUUID().replaceAll('-', '').slice(0, 12);
   const dockerLabel = `inventory.integration.run=${runId}`;
@@ -309,6 +314,19 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
     await brokerChannel.assertExchange(exchangeResults, 'topic', {
       durable: true,
     });
+    // Topología exclusiva del vhost efímero; no configura retry/DLX productivo.
+    await brokerChannel.assertExchange(exchangeCommands, 'topic', {
+      durable: true,
+    });
+    await brokerChannel.assertQueue('po.inventory.q', {
+      durable: true,
+      arguments: { 'x-queue-type': 'quorum' },
+    });
+    await brokerChannel.bindQueue(
+      'po.inventory.q',
+      exchangeCommands,
+      initializationKey,
+    );
     await brokerChannel.assertQueue(queue, {
       durable: false,
       exclusive: true,
@@ -394,7 +412,6 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
     process.env.INVENTORY_DEMO_NO_AUTH_ENABLED = 'false';
     InventoryAuthGuard.setTrustedPublicKey(TEST_PUBLIC_KEY);
     try {
-      await brokerChannel.assertQueue('po.inventory.q', { durable: true });
       const module = await Test.createTestingModule({
         imports: [InventorySvcModule],
       })
@@ -1114,6 +1131,221 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
       brokerChannel.ack(msg);
     }
     expect(found).toBe(true);
+  });
+
+  describe('Consumer real — ACK durable, deduplicación y recuperación (#102/#103)', () => {
+    function initializationCommand(defaultLocation = locationId) {
+      return {
+        message_id: randomUUID(),
+        operation_id: randomUUID(),
+        correlation_id: randomUUID(),
+        schema_version: 2,
+        occurred_at: new Date().toISOString(),
+        producer: 'catalog-svc',
+        kind: 'command',
+        name: initializationKey,
+        data: {
+          sku: `sku-consumer-${randomUUID()}`,
+          product_id: `product-${randomUUID()}`,
+          default_location_id: defaultLocation,
+        },
+      };
+    }
+
+    function realConsumer() {
+      return new InventoryConsumerService(
+        new InventoryCommandService(
+          database,
+          new IdempotencyService(),
+          outboxService,
+          new DrizzleInboxRepository(database),
+          operationsRepo,
+          new DrizzleLocationsRepository(database),
+          stockRepo,
+        ),
+      );
+    }
+
+    async function publishCommand(
+      writer: amqp.ConfirmChannel,
+      content: Buffer,
+      messageId: string,
+    ): Promise<void> {
+      await new Promise<void>((resolve, reject) => {
+        writer.publish(
+          exchangeCommands,
+          initializationKey,
+          content,
+          { persistent: true, mandatory: true, messageId },
+          (error: Error | null) => (error ? reject(error) : resolve()),
+        );
+      });
+    }
+
+    it('consume, confirma duplicados y rechazos durables sin duplicar saldo ni operación', async () => {
+      const consumer = realConsumer();
+      const writer = await broker.createConfirmChannel();
+      const first = initializationCommand();
+      const replay = { ...first, message_id: randomUUID() };
+      const rejected = initializationCommand(randomUUID());
+      try {
+        expect(
+          (await brokerChannel.checkQueue('po.inventory.q')).messageCount,
+        ).toBe(0);
+        await consumer.start();
+        expect(consumer.getMetrics().connected).toBe(true);
+        for (const [index, command] of [
+          first,
+          first,
+          replay,
+          rejected,
+        ].entries()) {
+          await publishCommand(
+            writer,
+            Buffer.from(JSON.stringify(command)),
+            command.message_id,
+          );
+          await viWaitFor(async () => {
+            expect(consumer.getMetrics().acknowledged).toBe(index + 1);
+          }, 5000);
+        }
+        expect(consumer.getMetrics()).toMatchObject({
+          received: 4,
+          acknowledged: 4,
+          duplicates: 1,
+          rejected: 1,
+          failures: 0,
+          paused: false,
+        });
+        const inbox = await database.query<{
+          message_id: string;
+          status: string;
+        }>(
+          `SELECT message_id,status FROM inventory.inbox WHERE message_id=ANY($1::uuid[])`,
+          [[first.message_id, replay.message_id, rejected.message_id]],
+        );
+        expect(inbox.rows).toHaveLength(3);
+        expect(inbox.rows.every((row) => row.status === 'PROCESSED')).toBe(
+          true,
+        );
+        const operations = await database.query<{
+          operation_id: string;
+          status: string;
+          result_code: string | null;
+        }>(
+          `SELECT operation_id,status,result_code FROM inventory.inventory_operations WHERE operation_id=ANY($1::uuid[])`,
+          [[first.operation_id, rejected.operation_id]],
+        );
+        expect(operations.rows).toHaveLength(2);
+        expect(operations.rows).toContainEqual({
+          operation_id: first.operation_id,
+          status: 'APLICADO',
+          result_code: null,
+        });
+        expect(operations.rows).toContainEqual({
+          operation_id: rejected.operation_id,
+          status: 'RECHAZADO',
+          result_code: 'UBICACION_NO_ENCONTRADA',
+        });
+        expect(
+          await stockRepo.findBySkus([first.data.sku], locationId),
+        ).toMatchObject([
+          { on_hand: 0, reserved: 0, blocked: 0, stock_version: 0 },
+        ]);
+        expect(await stockRepo.findBySkus([rejected.data.sku])).toHaveLength(0);
+        const events = await database.query<{
+          event_type: string;
+          count: string;
+        }>(
+          `SELECT event_type,count(*)::text AS count FROM inventory.outbox WHERE aggregate_id=$1 GROUP BY event_type`,
+          [first.data.sku],
+        );
+        expect(events.rows).toHaveLength(2);
+        expect(events.rows).toContainEqual({
+          event_type: 'inventory.stock.changed',
+          count: '1',
+        });
+        expect(events.rows).toContainEqual({
+          event_type: 'inventory.sku.initialization.completed',
+          count: '2',
+        });
+      } finally {
+        await consumer.onModuleDestroy();
+        await writer.close();
+      }
+      // Tras cerrar el canal, ningún mensaje confirmado debe reaparecer.
+      const state = await brokerChannel.checkQueue('po.inventory.q');
+      expect(state).toMatchObject({ messageCount: 0, consumerCount: 0 });
+    }, 30_000);
+
+    it('retiene JSON inválido sin ACK y reanuda solo tras retirar el fixture defectuoso', async () => {
+      const consumer = realConsumer();
+      const writer = await broker.createConfirmChannel();
+      const invalidId = randomUUID();
+      const invalid = Buffer.from('fixture-sintetico-json-invalido');
+      try {
+        expect(
+          (await brokerChannel.checkQueue('po.inventory.q')).messageCount,
+        ).toBe(0);
+        await consumer.start();
+        await publishCommand(writer, invalid, invalidId);
+        await viWaitFor(async () => {
+          expect(consumer.getMetrics()).toMatchObject({
+            paused: true,
+            pauseReason: 'INVALID_MESSAGE',
+            acknowledged: 0,
+            failures: 1,
+          });
+          expect(
+            await brokerChannel.checkQueue('po.inventory.q'),
+          ).toMatchObject({
+            consumerCount: 0,
+            messageCount: 1,
+          });
+        }, 5000);
+        const pending = await brokerChannel.get('po.inventory.q', {
+          noAck: false,
+        });
+        expect(pending).not.toBe(false);
+        if (!pending) throw new Error('El broker perdió el fixture sin ACK');
+        expect(pending.properties.messageId).toBe(invalidId);
+        expect(pending.fields.redelivered).toBe(true);
+        expect(pending.content.equals(invalid)).toBe(true);
+        const persisted = await database.query<{ count: string }>(
+          `SELECT count(*)::text AS count FROM inventory.inbox WHERE message_id=$1`,
+          [invalidId],
+        );
+        expect(persisted.rows[0].count).toBe('0');
+        // Retirada explícita del fixture corrupto en el vhost propio; no es una
+        // política de descarte, retry o recuperación para mensajes productivos.
+        brokerChannel.ack(pending);
+        await consumer.resume();
+        const next = initializationCommand();
+        await publishCommand(
+          writer,
+          Buffer.from(JSON.stringify(next)),
+          next.message_id,
+        );
+        await viWaitFor(async () => {
+          expect(consumer.getMetrics()).toMatchObject({
+            received: 2,
+            acknowledged: 1,
+            paused: false,
+            failures: 1,
+          });
+        }, 5000);
+        expect(
+          await stockRepo.findBySkus([next.data.sku], locationId),
+        ).toHaveLength(1);
+      } finally {
+        await consumer.onModuleDestroy();
+        await writer.close();
+      }
+      expect(await brokerChannel.checkQueue('po.inventory.q')).toMatchObject({
+        messageCount: 0,
+        consumerCount: 0,
+      });
+    }, 30_000);
   });
 
   describe('BACK-02 — reconciliación del modelo físico y permisos en PostgreSQL aislado', () => {
