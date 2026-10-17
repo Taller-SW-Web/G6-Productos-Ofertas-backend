@@ -113,6 +113,46 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
     }
   }
 
+  function diagnoseOwnedResources(secrets: string[]): void {
+    for (const container of [pgContainer, rabbitContainer]) {
+      try {
+        const labels = JSON.parse(
+          docker(['inspect', '--format', '{{json .Config.Labels}}', container]),
+        ) as Record<string, string>;
+        if (labels['inventory.integration.run'] !== runId) continue;
+        const state = docker([
+          'inspect',
+          '--format',
+          '{{.State.Status}} exit={{.State.ExitCode}}',
+          container,
+        ]);
+        const logs = docker(['logs', '--tail', '40', container]);
+        const safeLogs = logs
+          .split('\n')
+          .map((line) => {
+            if (
+              /password|cookie|credential|secret|amqps?:\/\/|postgres(?:ql)?:\/\//i.test(
+                line,
+              )
+            )
+              return '[REDACTED]';
+            return secrets.reduce(
+              (safe, secret) => safe.replaceAll(secret, '[REDACTED]'),
+              line,
+            );
+          })
+          .join('\n');
+        console.error(
+          `[inventory integration] ${container}: ${state}\n${safeLogs}`,
+        );
+      } catch {
+        console.error(
+          '[inventory integration] No se pudo consultar el recurso efímero propio.',
+        );
+      }
+    }
+  }
+
   beforeAll(async () => {
     const password = randomBytes(24).toString('hex');
     const rabbitPassword = randomBytes(24).toString('hex');
@@ -152,6 +192,10 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
         'RABBITMQ_DEFAULT_USER=inventory_test',
         '-e',
         `RABBITMQ_DEFAULT_PASS=${rabbitPassword}`,
+        '-e',
+        'RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=+S 2:2 +SDcpu 1 +SDio 1',
+        '-e',
+        'RABBITMQ_CTL_ERL_ARGS=+S 1:1 +SDcpu 1 +SDio 1',
         'rabbitmq:3.13-management-alpine',
       ]);
       const pgPort = docker(['port', pgContainer, '5432/tcp'])
@@ -244,6 +288,7 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
       broker = await amqp.connect(rabbitUrl);
       brokerChannel = await broker.createChannel();
     } catch (error) {
+      diagnoseOwnedResources([password, rabbitPassword]);
       cleanupOwnedResources();
       throw error;
     }

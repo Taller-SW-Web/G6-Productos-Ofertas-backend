@@ -79,3 +79,11 @@ La revisión automática rechazó el primer intento de push de `89c24d3` por exi
 | 6         | `dist/inventory-audit-tools/PR_10_DESCRIPCION.md`                                               | Dos intentos API de actualización devuelven 403                                                                            | BLOQUEADO_PERMISOS: texto listo; no publicado                                               |
 
 Corte del informe: preparación del commit del job/test real autorizado; resultados posteriores deben verificarse en Actions por su SHA y se comunican al cerrar la sesión. La propuesta YAML ya se incorporó al workflow y no se conserva una segunda copia inactiva. El test pendiente se incorpora con las correcciones autorizadas y mantiene las siete pruebas BACK-02. Estado general: **PARTIAL**, condicionado a CI real y a las dependencias externas descritas; no constituye aprobación para merge a master ni despliegue.
+
+## Primera ejecución real y corrección del aprovisionamiento
+
+El job Inventory de [run 39035349324](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/39035349324/job/117403925824), asociado a `46a4786`, falló antes de ejecutar sus 19 casos: `rabbitmq-diagnostics -q check_running` no acreditó arranque dentro del plazo. No fue un PASS con pruebas omitidas: el job terminó en FAILURE.
+
+Se acotaron los schedulers Erlang del broker efímero y sus CLI mediante RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS/RABBITMQ_CTL_ERL_ARGS, opciones documentadas por [RabbitMQ](https://www.rabbitmq.com/docs/configure). Se añadió diagnóstico de estado/logs de contenedores propios antes del cleanup, con filtrado de credenciales y sin inspección de entornos. Es un ajuste del fixture aislado; no cambia producción, topología compartida, payloads ni política de retry/DLX. La causa exacta del primer timeout no se da por demostrada sin diagnóstico adicional.
+
+Typecheck de la suite real, Prettier, lint y diff-check pasan tras este ajuste. La repetición en CI es necesaria para validar el aprovisionamiento y después las invariantes reales. Los permisos de GitHub App para editar el PR devolvieron 403; la autenticación Git existente se verificó en modo lectura como MiguelTacoZavala, sin mostrar ni guardar credenciales. El resultado de la actualización final del PR se informará al cerrar.
