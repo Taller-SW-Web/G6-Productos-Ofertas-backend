@@ -165,26 +165,29 @@ describeIntegracion(
     });
 
     describe('readiness contra PostgreSQL real y permisos', () => {
+      let appNest: INestApplication<App>;
+
+      beforeAll(async () => {
+        appNest = await levantarAppNest();
+      }, 30_000);
+
+      afterAll(async () => {
+        await appNest?.close();
+      }, 30_000);
+
       it('responde 200 cuando el rol puede leer las columnas requeridas', async () => {
-        const appNest = await levantarAppNest();
-        try {
-          await request(appNest.getHttpServer())
-            .get('/health/readiness')
-            .expect(HttpStatus.OK);
-        } finally {
-          await appNest.close();
-        }
+        await request(appNest.getHttpServer())
+          .get('/health/readiness')
+          .expect(HttpStatus.OK);
       });
 
       it('responde 503 si se revoca SELECT sobre taxonomy.brands', async () => {
         await admin.query(`REVOKE SELECT ON taxonomy.brands FROM ${ROL_APP}`);
-        const appNest = await levantarAppNest();
         try {
           await request(appNest.getHttpServer())
             .get('/health/readiness')
             .expect(HttpStatus.SERVICE_UNAVAILABLE);
         } finally {
-          await appNest.close();
           await admin.query(`GRANT SELECT ON taxonomy.brands TO ${ROL_APP}`);
         }
       });
@@ -194,13 +197,11 @@ describeIntegracion(
         await admin.query(
           `GRANT SELECT (id, nombre, descripcion, pais_origen_iso, estado) ON taxonomy.brands TO ${ROL_APP}`,
         );
-        const appNest = await levantarAppNest();
         try {
           await request(appNest.getHttpServer())
             .get('/health/readiness')
             .expect(HttpStatus.SERVICE_UNAVAILABLE);
         } finally {
-          await appNest.close();
           await admin.query(
             `REVOKE SELECT (id, nombre, descripcion, pais_origen_iso, estado) ON taxonomy.brands FROM ${ROL_APP}`,
           );
@@ -209,14 +210,9 @@ describeIntegracion(
       });
 
       it('vuelve a responder 200 al restaurar los permisos', async () => {
-        const appNest = await levantarAppNest();
-        try {
-          await request(appNest.getHttpServer())
-            .get('/health/readiness')
-            .expect(HttpStatus.OK);
-        } finally {
-          await appNest.close();
-        }
+        await request(appNest.getHttpServer())
+          .get('/health/readiness')
+          .expect(HttpStatus.OK);
       });
     });
 
