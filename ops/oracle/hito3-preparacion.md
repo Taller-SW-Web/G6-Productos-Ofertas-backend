@@ -28,6 +28,20 @@ La infraestructura base está parcialmente preparada para nueve componentes. La 
 - PostgreSQL sigue sin prueba de conectividad/autenticación/rol/permisos: no se proporcionaron credenciales runtime para Catalog/Taxonomy. La CA permanece en host como root:root 0444 y aún no está montada en containers.
 - Tailscale continúa `NeedsLogin` y no tiene IP. Se requiere que Marco identifique/confirme la tailnet aprobada y autentique/apruebe el nodo Oracle desde esa tailnet; la autenticación no se ejecutó. Luego el administrador del repositorio debe provisionar la integración de Actions con identidad tagged/ephemeral autorizada y cambiar el destino SSH al MagicDNS/IP privada. Mantener cerrado el acceso de runners por SSH público.
 
+### Configuración PostgreSQL requerida, sin secretos
+
+- `catalog-svc` usa `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGSSLMODE=verify-full`, `PGSSLROOTCERT=/run/g6-certs/supabase-server-root.crt`, `G6_DATABASE_SCHEMA=catalog`, `G6_EXPECTED_ROLE` (`catalog_dev_login` o `catalog_app`) y `G6_CONNECTION_MODE` (`session` o `direct`). `G6_CONNECT_HOST` es opcional para el endpoint de transporte; TLS valida el nombre de `PGHOST`.
+- `taxonomy-svc` recibe estos datos por `DATABASE_URL` (`sslmode=verify-full`, `sslrootcert=/run/g6-certs/supabase-server-root.crt`, `currentSchema=taxonomy`) y runtime `G6_EXPECTED_ROLE` (`taxonomy_dev_login` o `taxonomy_app`) más `G6_CONNECTION_MODE` (`session` o `direct`).
+- En ambos casos el código valida certificado y hostname y luego `verifyIdentity()` comprueba usuario/base/schema, que el rol no tenga superuser/BYPASSRLS/CREATEROLE/CREATEDB y que no sea miembro del owner del schema. Esta validación runtime no se pudo ejecutar porque faltan credenciales y endpoint aprobados. No pedir ni pegar contraseñas en el chat; el operador debe cargarlas directamente en los archivos privados protegidos y coordinar solo el resultado sanitizado.
+
+### Acceso privado para GitHub Actions
+
+El repositorio tiene los seis secretos `ORACLE_HOST`, `ORACLE_USER`, `ORACLE_SSH_PRIVATE_KEY`, `ORACLE_SSH_KNOWN_HOSTS`, `ORACLE_GHCR_USERNAME` y `ORACLE_GHCR_TOKEN`; la lista no incluye integración Tailscale. No se inspeccionaron sus valores. El workflow actual aún no incorpora un cliente Tailscale; por tanto, no usar su dispatch para desplegar hasta completar el acceso privado y cambiar `ORACLE_HOST` a MagicDNS/IP privada. No permitir runners por SSH público.
+
+Acción humana requerida: Marco debe identificar/confirmar la tailnet autorizada; el administrador/owner de esa tailnet debe autenticar y aprobar el nodo Oracle (por ejemplo, iniciando `sudo tailscale up`, abriendo el enlace de autenticación en la cuenta organizacional correcta y aprobando el dispositivo en Admin Console). Después, Marco/el administrador de GitHub debe configurar la federación/OAuth de Actions, un tag y una política ACL/SSH de mínimo acceso compatibles con esa tailnet, provisionar la autenticación de Actions sin poner claves en Git, y probar `connectivity-probe` por el nombre privado. No se eligió tailnet, tag ni política en esta misión.
+
+Referencias operativas actuales: [Tailscale: configurar servidores](https://tailscale.com/kb/1245/set-up-servers), [Tailscale GitHub Action](https://tailscale.com/docs/integrations/github/github-action) y [conectar workflows de GitHub con infraestructura privada](https://tailscale.com/kb/1586/secure-github-runners).
+
 ### Estado operativo de los nueve componentes
 
 `PREPARADO` significa infraestructura host/directorios/Compose genérico comprobados; no acredita readiness funcional. Ninguno está listo para liberar o desplegado.

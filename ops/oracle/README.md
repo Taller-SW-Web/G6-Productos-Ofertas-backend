@@ -199,6 +199,8 @@ El workflow conserva los nombres de secretos del PR #7. Deben provisionarse manu
 | `ORACLE_GHCR_USERNAME`   | Usuario asociado al token de lectura GHCR |
 | `ORACLE_GHCR_TOKEN`      | PAT dedicado con `read:packages`          |
 
+La clave de despliegue está restringida a comandos forzados y sin forwarding/PTY, pero el workflow actual todavía no une los runners a Tailscale. Hasta que Marco confirme la tailnet, se configure una identidad/política de Actions aprobada y se valide el acceso por MagicDNS/IP privada, no ejecutar el dispatch de release ni permitir SSH público para los runners. El secreto `ORACLE_HOST` debe señalar el destino privado autorizado. No se inspeccionó su valor.
+
 El SSH debe aceptar únicamente el wrapper de despliegue mediante `authorized_keys`, sin PTY, forwarding ni shell interactiva. Conserva la ruta forzada existente:
 
 ```text
