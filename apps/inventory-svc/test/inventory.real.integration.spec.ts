@@ -1147,7 +1147,7 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
     it('publica los enums del modelo con sus etiquetas exactas', async () => {
       const res = await database.query<{ typname: string; labels: string[] }>(
         `SELECT t.typname AS typname,
-                array_agg(e.enumlabel ORDER BY e.enumsortorder) AS labels
+                array_agg(e.enumlabel::text ORDER BY e.enumsortorder) AS labels
            FROM pg_type t
            JOIN pg_enum e ON e.enumtypid = t.oid
            JOIN pg_namespace n ON n.oid = t.typnamespace
