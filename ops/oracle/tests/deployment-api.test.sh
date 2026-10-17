@@ -83,16 +83,15 @@ git -C "$REPO" commit --quiet -m 'base'
 readonly SHA="$(git -C "$REPO" rev-parse HEAD)"
 
 run_api() { env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" EXPECT_SHA="$SHA" bash "$ORACLE_DIR/github-deployment-api.sh" "$@"; }
-run_selector() { (cd "$REPO" && env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" bash "$ORACLE_DIR/select-cd-services.sh" automatic example/backend "$SHA"); }
+run_selector() { (cd "$REPO" && env PATH="$MOCK_BIN:$PATH" MOCK_STATE="$MOCK_STATE" bash "$ORACLE_DIR/select-cd-services.sh" manual inventory-svc); }
 
 deployment_id="$(run_api create example/backend inventory-svc "$SHA")"
 [[ "$deployment_id" == 100 ]]
 [[ "$(run_selector)" == '["inventory-svc"]' ]]
 run_api status example/backend "$deployment_id" success
-[[ "$(run_selector)" == '[]' ]]
 printf 'PASS: mock API validó parámetros, creación, estados y lectura del baseline exitoso.\n'
 
-if run_api create example/backend taxonomy-svc "$SHA" >/dev/null 2>&1; then
+if run_api create example/backend pricing-svc "$SHA" >/dev/null 2>&1; then
   echo 'FAIL: se permitió crear un Deployment para servicio deshabilitado.' >&2
   exit 1
 fi

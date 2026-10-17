@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { TAXONOMY_REPOSITORY } from './taxonomy.repository.js';
+import { ProblemDetailsException } from './errors/taxonomy.errors.js';
 import type {
   CategoriaRow,
   EstadoTaxonomia,
@@ -26,6 +27,9 @@ export interface MarcaDto {
 }
 
 function mapEstado(estado: EstadoTaxonomia): EstadoEntidad {
+  if (estado === 'PENDING_DEACTIVATION') {
+    throw ProblemDetailsException.noDisponible();
+  }
   return estado === 'INACTIVO' ? 'INACTIVA' : 'ACTIVA';
 }
 

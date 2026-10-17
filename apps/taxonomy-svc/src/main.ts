@@ -12,6 +12,12 @@ async function arrancar(): Promise<void> {
         ? error.message
         : 'Fallo al iniciar taxonomy-svc.';
     logger.error(detalle, 'Bootstrap');
+    process.stderr.write(
+      JSON.stringify({
+        service: 'taxonomy-svc',
+        code: 'APPLICATION_START_FAILED',
+      }) + '\n',
+    );
     process.exit(1);
   }
 }
