@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { ReservationsService } from './reservations.service.js';
 import { IdempotencyService } from '../idempotency/idempotency.service.js';
@@ -20,6 +20,7 @@ describe('ReservationsService — Ciclo Completo G5 (Confirmación y Liberación
   let reservationsService: ReservationsService;
   let mockDb: InMemoryDatabaseMock;
   let dbService: DatabaseService;
+  let reservationsRepo: DrizzleReservationsRepository;
 
   const locLurin = '9129b578-631e-1735-8427-b683fb524380';
   const sku = 'NIK-REV7-NEG-41'; // on_hand = 18
@@ -35,7 +36,7 @@ describe('ReservationsService — Ciclo Completo G5 (Confirmación y Liberación
     const outboxRepo = new DrizzleOutboxRepository(dbService);
     const outboxService = new OutboxService(outboxRepo);
 
-    const reservationsRepo = new DrizzleReservationsRepository(dbService);
+    reservationsRepo = new DrizzleReservationsRepository(dbService);
     const stockBalanceRepo = new DrizzleStockBalanceRepository(dbService);
     const operationsRepo = new DrizzleOperationsRepository(dbService);
     const locationsRepo = new DrizzleLocationsRepository(dbService);
@@ -56,7 +57,59 @@ describe('ReservationsService — Ciclo Completo G5 (Confirmación y Liberación
     );
   });
 
+  afterEach(() => vi.restoreAllMocks());
+
   describe('Confirmación de reserva (POST /api/v1/inventario/reservas/{reservaId}/confirmar)', () => {
+    it('conserva RESERVA_EXPIRADA si el worker expira entre la lectura y el bloqueo', async () => {
+      const reserveId = randomUUID();
+      const orderId = 'PED-EXPIRACION-ENTRE-LECTURAS';
+      await reservationsService.solicitarReserva(
+        {
+          order_id: orderId,
+          operation_id: reserveId,
+          channel_id: 'MARKETPLACE',
+          lines: [{ sku, quantity: 2, location_id: locLurin }],
+        },
+        undefined,
+        reserveId,
+      );
+      const reservation = mockDb.reservations[0];
+      const staleRead = { ...reservation };
+      reservation.expires_at = new Date(Date.now() - 60_000).toISOString();
+      expect(
+        await reservationsService.expirarReservaDurable(
+          reservation.reservation_id,
+        ),
+      ).toBe(true);
+      const before = structuredClone({
+        stock: mockDb.stockBalance,
+        reservations: mockDb.reservations,
+        operations: mockDb.operations,
+        kardex: mockDb.kardex,
+        outbox: mockDb.outbox,
+      });
+      // Primera lectura obsoleta; la lectura con bloqueo ve la expiración durable.
+      vi.spyOn(reservationsRepo, 'findByReservationId').mockResolvedValueOnce(
+        staleRead,
+      );
+      await expect(
+        reservationsService.confirmarReserva(
+          reservation.reservation_id,
+          { order_id: orderId, operation_id: randomUUID() },
+          undefined,
+          randomUUID(),
+        ),
+      ).rejects.toMatchObject({
+        problem: { status: 409, code: 'RESERVA_EXPIRADA' },
+      });
+      expect({
+        stock: mockDb.stockBalance,
+        reservations: mockDb.reservations,
+        operations: mockDb.operations,
+        kardex: mockDb.kardex,
+        outbox: mockDb.outbox,
+      }).toEqual(before);
+    });
     it('rechaza un order_id distinto antes de cambiar saldo, estado, Kardex u Outbox', async () => {
       const orderId = 'PED-CONFIRM-IDENTITY';
       const operationId = randomUUID();

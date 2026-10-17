@@ -708,6 +708,12 @@ export class ReservationsService {
               );
             }
 
+            if (reserva.status === 'EXPIRADA') {
+              throw ProblemDetailsException.reservaExpirada(
+                'La reserva ha expirado',
+                correlationId,
+              );
+            }
             if (reserva.status !== 'ACTIVA') {
               throw ProblemDetailsException.reservaNoActiva(
                 `La reserva no está activa (estado actual: ${reserva.status})`,
