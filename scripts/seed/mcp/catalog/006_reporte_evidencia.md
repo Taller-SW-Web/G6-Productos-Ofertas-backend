@@ -25,7 +25,7 @@ La suite E2E ahora crea Taxonomía de prueba dentro del PostgreSQL descartable d
 4. Postcheck de 15 productos, 45 variantes, 90 atributos de variante, 6 atributos de producto, 48 identidades vendibles y 48 filas de imagen (45 de variante y 3 de producto).
 5. Conflicto intencional tras cambiar el payload de un producto; la carga debe abortar con `DATA-002 contenido diferente en catalog.products`.
 
-**CI PostgreSQL del commit corregido:** pendiente. Los resultados de la suite se completarán después de la ejecución real de GitHub Actions. En local, `npm run test:e2e -- --maxWorkers=1` dio 346 PASS y 43 omitidas por falta de Docker; ninguna de esas omisiones se cuenta como prueba PostgreSQL aprobada. El PostgreSQL local instalado carece de `share/postgres.bki`, así que no puede iniciar un servidor descartable aquí.
+**CI PostgreSQL del commit de código `cb538e4e54fcdfd0b5fab18be4d81bacb7ac1974`:** [run #139](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/39013214247) terminó `success`. En los logs, `apps/catalog-svc/test/postgres.persistence.e2e-spec.ts` aparece con **6/6 pruebas aprobadas**, incluida `validates the DATA-002 batch in disposable PostgreSQL`; no se omitió ninguna prueba de esa suite. El E2E total fue 356 PASS y 33 omitidas de otras suites (incluidas suites PostgreSQL read-only ajenas al alcance); no se cuentan esas omisiones como PASS. La suite persistencia ejecutó preflight, primera carga, repetición idéntica, postcheck y conflicto de contenido en PostgreSQL descartable de CI. En local, `npm run test:e2e -- --maxWorkers=1` dio 346 PASS y 43 omitidas por falta de Docker. El PostgreSQL local instalado carece de `share/postgres.bki`, así que no puede iniciar un servidor descartable aquí.
 
 ## Evidencia de imágenes
 
@@ -43,6 +43,10 @@ La suite E2E ahora crea Taxonomía de prueba dentro del PostgreSQL descartable d
 | `npm run build:all` | PASS |
 | `npm run build:catalog-svc` | PASS |
 | `git diff --check` | PASS |
+
+## Evidencia CI del SHA final
+
+El commit de código indicado arriba pasó el run #139 enlazado; sus logs demuestran la ejecución de las seis pruebas PostgreSQL de persistencia y la validación DATA-002. El commit posterior que actualiza este reporte solo agrega el enlace y el resultado de esa ejecución; su propia verificación CI queda enlazada en la descripción actualizada del PR #125.
 
 ## SHA-256 del lote corregido
 
