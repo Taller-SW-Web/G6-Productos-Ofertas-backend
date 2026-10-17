@@ -1,0 +1,105 @@
+{
+  "artifact_version": 2,
+  "issue": "https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/13",
+  "owner": "Leonardo Vera",
+  "branch": "vera",
+  "backend_base_sha": "5bb832b103f9cca4d0967fecde26c1ebccd05944",
+  "operational_status": "IMPLEMENTAR_PARCIAL",
+  "result": "PARTIAL",
+  "scenario": "Inka Athletics",
+  "classification": "demo",
+  "synthetic": true,
+  "project": {
+    "organization": "mrcastilla8's Org",
+    "organization_id": "dqnklswllanhjwhenita",
+    "name": "Modulo de Productos y Ofertas",
+    "id": "slzglmtiyrzygpkiuthf",
+    "environment": "shared; clasificacion exacta pendiente, no destino apply autorizado"
+  },
+  "normative_sources": {
+    "repository": "https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs",
+    "ref": "c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b",
+    "agents_dec_f_ref": "942bf7322eb388fe5b0fcc9c5a565152e1099139",
+    "decisions": [
+      "DEC-F-006",
+      "DEC-F-009",
+      "DEC-F-012"
+    ],
+    "paths": [
+      "arquitectura/Arquitectura.md",
+      "arquitectura/decisiones/REGISTRO_DEC_F.md",
+      "arquitectura/decisiones/MATRIZ_TRAZABILIDAD_DEC_F.md",
+      "integraciones/MATRIZ_INTERMODULAR_BACKEND.md",
+      "datos/pricing/physical-model.md",
+      "datos/pricing/migrations/0001_create_pricing.sql",
+      "requisitos/specs/SPEC-013-gestion-precios-individuales-masivos.md",
+      "contratos/http/openapi.yaml",
+      "contratos/eventos/asyncapi.yaml",
+      "datos/catalog-svc/physical-model.md",
+      "datos/catalog-svc/migrations/0001_create_catalog.sql"
+    ],
+    "contract_version": "0.6.0-rc.1"
+  },
+  "execution": {
+    "mode": "READ_ONLY",
+    "pricing_role": "po_pricing_seed",
+    "catalog_role": "postgres",
+    "individual_seed_login": "NO ACREDITADO",
+    "local_checks": "node --test scripts/seed/mcp/pricing/verify.test.mjs",
+    "write_rollback": "NO EJECUTADO",
+    "persistence": "NO EJECUTADO",
+    "authenticated_http_integration": "NO EJECUTADO",
+    "external_homologation": "NO ACREDITADO; no requerida para preparar datos demo internos",
+    "deployment": "NO EJECUTADO",
+    "commit": "Publicado en PR #118; historia de vera sustituida por commit limpio sobre backend_base_sha. SHA final consultable en el head del PR.",
+    "push": "Rama vera publicada; esta correccion reemplaza su historial remoto con lease sobre 8a8ab5a8d5a5a5f9c2524fa08c60663c72717b6d."
+  },
+  "reconciliation": {
+    "preserved_prices": 5,
+    "preserved_validities": 5,
+    "effective_validities": 5,
+    "pricing_conflicts": 0,
+    "published_sellable_skus": 0,
+    "variants_without_identity": 0,
+    "matrix_rows": 11,
+    "potential_sellable_skus": 7,
+    "non_sellable_base_skus": 4,
+    "sku_identities": 11
+  },
+  "write_batch": {
+    "rows": [],
+    "new_prices": 0,
+    "new_validities": 0,
+    "new_scheduled_prices": 0,
+    "insertion_order": [],
+    "reason": "Todas las referencias conocidas heredan precios base existentes. No hay SKU publicado ni precio faltante aprobado; no proponer escrituras ni backfills historicos."
+  },
+  "dependencies": [
+    {
+      "owner": "Gabriel Poma / catalog / DATA-002 #12",
+      "operation": "Validar matriz contra SKU publicados y habilitar consumo comercial",
+      "unblock": "Publicar productos ACTIVO y variantes ACTIVA con sus IDs/versiones y elegibilidad comercial. Las 11 identidades ya existen; para variantes product_id es NULL y el padre se resuelve por variants.product_id. Reauditar desde Pricing sin modificar Catalogo."
+    },
+    {
+      "owner": "Marco Castilla y Leonardo Vera",
+      "operation": "Solo un eventual lote nuevo si DATA-002 publica referencias sin precio",
+      "unblock": "Preparar contenido y SHA-256 nuevos, confirmar entorno/destino exacto, conformidad de Vera y autorizacion explicita de Marco para ensayo y persistencia conforme #13/#1."
+    }
+  ],
+  "sha256": {
+    "001_pricing_audit.sql": "3c2ceb61c89b076c1502f425f999167e039a86e6103f883a1e3946c256c8b529",
+    "002_catalog_references.sql": "58190f468af325218a944d276186174cddbe2589c949f9a06b49edc17fb01b0b",
+    "003_price_matrix.json": "d622ae28733b438eb9236f2c3dc7a9ebd82e0bfb195ec945a2df4cc987f236a2",
+    "004_read_only_evidence.json": "49dd6a70de8ee5d365b55eb9eeb771b3cd8fb51d3dd4ba6c026e187a476c4259",
+    "verify.test.mjs": "c0e4c22f7dac9f5acfb889340540ccc444c0bc6f6d263870cab945e1bf065696",
+    ".gitattributes": "a79691a93b46e49ce460c26ef22afcc03d6eca1e63bf2edbc20e96159510f6c9"
+  },
+  "pull_request": "https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/118",
+  "history_cleanup": {
+    "scope": "Solo vera, sin ramas nuevas ni cambios en master",
+    "method": "Commit limpio del arbol revisado sobre la base existente, actualizacion remota con force-with-lease explicito.",
+    "excluded_path": ".env",
+    "credential_rotation": "NO VERIFICADA; a cargo del owner de credenciales",
+    "github_cached_refs": "La purga de commits antiguos por SHA y referencias internas requiere gestion con GitHub Support."
+  }
+}
