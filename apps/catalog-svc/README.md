@@ -80,6 +80,30 @@ inválido produce 400 `VALIDACION` con una nueva identidad UUID idéntica en la
 cabecera y el cuerpo problem. El filtro preserva la identidad ya establecida.
 No se comprueban brokers ni se hace fan-out a servicios ajenos al trabajo admitido.
 
+## Persistencia Drizzle de Catálogo
+
+`src/catalog.schema.ts` mapea las 13 tablas de `catalog` y conserva los enums
+nativos, constraints declarativos, defaults y relaciones de la migración oficial
+`datos/catalog-svc/migrations/0001_create_catalog.sql` del repositorio de Docs.
+La copia de solo lectura bajo `test/fixtures/` permite preparar PostgreSQL
+desechable en la suite; no es una migración ejecutable del servicio ni sustituye
+el historial oficial.
+
+`Database` mantiene un único pool, usa la configuración validada por
+`CatalogConfig` y crea Drizzle con el esquema de Catálogo. Los repositorios de
+lectura/escritura y `CatalogTransactionManager` reutilizan ese provider. Los
+métodos de escritura reciben la transacción del agregado en vez de abrir pools
+o transacciones paralelas. Una transacción de escritura agrupa los cambios
+locales; PostgreSQL conserva la aplicación de UNIQUE/FK/CHECK y los triggers
+diferidos existentes. Los errores se exponen mediante `CatalogPersistenceError`
+con una categoría interna segura;
+el SQL, los parámetros y el texto del driver no se incluyen en mensajes.
+
+Las pruebas de `postgres.persistence.e2e-spec.ts` usan una instancia efímera de
+PostgreSQL 17 con TLS, role `catalog_app` y un schema ajeno de comprobación. Se
+omiten si Docker u OpenSSL no están disponibles; un resultado omitido no cuenta
+como integración PostgreSQL aprobada. Esta suite no usa ni escribe en Supabase.
+
 ## Ejecución y pruebas
 
 Desde la raíz, con configuración PG propia suministrada de forma segura:

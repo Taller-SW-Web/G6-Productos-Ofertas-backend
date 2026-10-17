@@ -5,6 +5,8 @@ import { AppService } from './app.service.js';
 import { APP_FILTER } from '@nestjs/core';
 import { CATALOG_POSTGRES_CONFIG, Database } from './database.js';
 import { PostgresCatalogRepository } from './postgres-catalog.repository.js';
+import { PostgresCatalogWriteRepository } from './postgres-catalog-write.repository.js';
+import { CatalogTransactionManager } from './catalog-transaction.js';
 import { CommercialService } from './commercial.service.js';
 import { CommercialController } from './commercial.controller.js';
 import {
@@ -26,7 +28,9 @@ import { CATALOG_DATABASE, ReadinessController } from './readiness.js';
   providers: [
     AppService,
     Database,
+    CatalogTransactionManager,
     PostgresCatalogRepository,
+    PostgresCatalogWriteRepository,
     CommercialService,
     TaxonomyClient,
     {
