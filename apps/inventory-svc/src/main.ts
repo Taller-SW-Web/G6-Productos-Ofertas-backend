@@ -35,7 +35,9 @@ async function bootstrap() {
       'Bootstrap',
     );
   }
-  await app.listen(config.port);
+  // Configuración validada previamente; conserva la precedencia del registro Oracle.
+  const port = process.env.INVENTORY_SVC_PORT ?? process.env.PORT ?? '3005';
+  await app.listen(Number(port));
   logger.log(
     `inventory-svc escuchando en el puerto ${config.port}`,
     'Bootstrap',

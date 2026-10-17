@@ -1,0 +1,17 @@
+# Opt-in overlay for Inventory after g6-http has been prepared.
+# The legacy Compose, project, command, loopback port, env file and healthcheck
+# remain in docker-compose.inventory.yml.
+services:
+  inventory-svc:
+    volumes:
+      - /etc/g6-postgres/supabase-server-root.crt:/run/g6-certs/supabase-server-root.crt:ro
+    networks:
+      default: {}
+      g6-http:
+        aliases:
+          - inventory-svc
+
+networks:
+  g6-http:
+    external: true
+    name: g6-http

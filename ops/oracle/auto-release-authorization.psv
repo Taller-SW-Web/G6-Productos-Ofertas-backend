@@ -1,0 +1,11 @@
+#auto-release-authorization-version=1
+# service|enabled|manual_release_deployment_id|readiness_or_functional_smoke_evidence_url
+api-gateway|false||
+bulk-svc|false||
+catalog-svc|false||
+combos-svc|false||
+inventory-svc|false||
+price-audit-svc|false||
+pricing-svc|false||
+promotions-svc|false||
+taxonomy-svc|false||

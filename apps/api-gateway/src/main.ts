@@ -1,34 +1,30 @@
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import { ApiGatewayModule } from './api-gateway.module.js';
-
-function loadEnv(): void {
-  const envPath = resolve(process.cwd(), '.env');
-  if (existsSync(envPath) && typeof process.loadEnvFile === 'function') {
-    process.loadEnvFile(envPath);
-  }
-}
-
-function resolvePort(): number {
-  const rawPort = process.env.API_GATEWAY_PORT ?? process.env.PORT ?? '3000';
-  const port = Number(rawPort);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(
-      '[' +
-        'api-gateway' +
-        '] Puerto invalido: ' +
-        String(rawPort) +
-        '. Debe ser un entero entre 1 y 65535.',
-    );
-  }
-  return port;
-}
+import {
+  readGatewayEnvironment,
+  readGatewayPort,
+} from './routing/gateway-settings.js';
 
 async function bootstrap() {
-  loadEnv();
-  const port = resolvePort();
-  const app = await NestFactory.create(ApiGatewayModule);
+  const port = readGatewayPort(readGatewayEnvironment());
+  const app = await NestFactory.create(ApiGatewayModule, {
+    bodyParser: false,
+    logger: false,
+    abortOnError: false,
+  });
+  app.enableShutdownHooks();
   await app.listen(port);
+  process.stdout.write(
+    JSON.stringify({ service: 'api-gateway', code: 'APPLICATION_STARTED' }) +
+      '\n',
+  );
 }
-await bootstrap();
+await bootstrap().catch(() => {
+  process.stderr.write(
+    JSON.stringify({
+      service: 'api-gateway',
+      code: 'APPLICATION_START_FAILED',
+    }) + '\n',
+  );
+  process.exitCode = 1;
+});
