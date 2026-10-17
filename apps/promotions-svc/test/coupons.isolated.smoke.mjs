@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CouponCommandProcessor } from '../../../dist/apps/promotions-svc/coupons/coupon-transactions.js';
 import { CouponOutbox } from '../../../dist/apps/promotions-svc/coupons/coupon-outbox.js';
@@ -160,6 +160,7 @@ try {
       ['DEMO_RESTORE', 'RESTAURAR_EN_CANCELACION', 20, null],
       ['DEMO_KEEP', 'NO_RESTAURAR', 20, null],
       ['DEMO_LAST', 'RESTAURAR_EN_CANCELACION', 1, null],
+      ['DEMO_RESTORE_ONCE', 'RESTAURAR_EN_CANCELACION', 1, null],
       ['DEMO_CUSTOMER', 'RESTAURAR_EN_CANCELACION', 20, 1],
     ]) {
       const id = randomUUID();
@@ -308,6 +309,87 @@ try {
   );
   checks.push(
     'restoration, repeated restoration, no-restore policy, no consumption and unknown reference',
+  );
+
+  // A distinct operation must not rewrite history or free an already reused slot.
+  const originalUse = command('DEMO_RESTORE_ONCE');
+  await processor.process(originalUse, 'modulo-ventas');
+  const firstRestoration = restore(originalUse);
+  const firstRestorationResult = await processor.process(
+    firstRestoration,
+    'modulo-ventas',
+  );
+  assert.equal(firstRestorationResult.data.outcome, 'RESTORED');
+  const restoredHistory = async () =>
+    (
+      await admin.query(
+        `SELECT id,coupon_id,consumed_at,restored_at,created_at,updated_at
+         FROM promotions.coupon_uses WHERE order_id=$1`,
+        [originalUse.data.order_id],
+      )
+    ).rows;
+  const historyAfterFirst = await restoredHistory();
+  assert.equal(historyAfterFirst.length, 1);
+  assert.equal(
+    historyAfterFirst[0].restored_at.toISOString(),
+    '2026-10-16T13:00:00.000Z',
+  );
+  assert.deepEqual(
+    await processor.process(
+      { ...firstRestoration, message_id: randomUUID() },
+      'modulo-ventas',
+    ),
+    firstRestorationResult,
+  );
+  // The first restoration permits exactly one replacement consumption.
+  assert.match(
+    (await processor.process(command('DEMO_RESTORE_ONCE'), 'modulo-ventas'))
+      .name,
+    /consumption.completed$/,
+  );
+  assert.equal(
+    (await processor.process(command('DEMO_RESTORE_ONCE'), 'modulo-ventas'))
+      .data.result_code,
+    'COUPON_GLOBAL_LIMIT',
+  );
+  const secondRestoration = restore(originalUse);
+  secondRestoration.data.cancelled_at = '2026-10-16T14:00:00Z';
+  assert.notEqual(
+    secondRestoration.operation_id,
+    firstRestoration.operation_id,
+  );
+  const secondRestorationResult = await processor.process(
+    secondRestoration,
+    'modulo-ventas',
+  );
+  assert.equal(secondRestorationResult.data.outcome, 'RESTORED');
+  assert.deepEqual(
+    await processor.process(
+      { ...secondRestoration, message_id: randomUUID() },
+      'modulo-ventas',
+    ),
+    secondRestorationResult,
+  );
+  assert.deepEqual(await restoredHistory(), historyAfterFirst);
+  assert.equal(
+    (await processor.process(command('DEMO_RESTORE_ONCE'), 'modulo-ventas'))
+      .data.result_code,
+    'COUPON_GLOBAL_LIMIT',
+  );
+  assert.deepEqual(
+    (
+      await admin.query(
+        `SELECT count(*)::int AS total,
+                count(*) FILTER (WHERE restored_at IS NULL)::int AS active,
+                count(*) FILTER (WHERE restored_at IS NOT NULL)::int AS restored
+         FROM promotions.coupon_uses WHERE coupon_id=$1`,
+        [historyAfterFirst[0].coupon_id],
+      )
+    ).rows[0],
+    { total: 2, active: 1, restored: 1 },
+  );
+  checks.push(
+    'distinct restoration operations and redeliveries preserve restored_at/history and release the last slot only once',
   );
 
   const ambiguous = command();
@@ -591,8 +673,28 @@ try {
         environment: 'DISPOSABLE_LOCAL_ONLY',
         checks,
         migrations: 'official 0001–0004 unchanged',
-        source_commit: 'c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b',
-        working_tree: 'LOCAL_UNPUBLISHED',
+        source_commit: execFileSync('git', ['rev-parse', 'HEAD'], {
+          encoding: 'utf8',
+          windowsHide: true,
+        }).trim(),
+        normative_commit: 'c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b',
+        working_tree: execFileSync(
+          'git',
+          [
+            'status',
+            '--porcelain',
+            '--untracked-files=no',
+            '--',
+            'apps/promotions-svc/src',
+            'apps/promotions-svc/test',
+            'package.json',
+            'package-lock.json',
+          ],
+          { encoding: 'utf8', windowsHide: true },
+        ).trim()
+          ? 'MODIFIED'
+          : 'CLEAN',
+        captured_at: new Date().toISOString(),
         postgres_version: (await admin.query('SHOW server_version')).rows[0]
           .server_version,
         images: ['postgres:17-alpine', 'rabbitmq:4.1-alpine'].map((image) => ({

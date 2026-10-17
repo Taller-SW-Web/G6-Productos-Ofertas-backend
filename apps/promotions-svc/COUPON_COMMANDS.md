@@ -42,9 +42,12 @@ sin campos, eventos, códigos de negocio ni endpoints nuevos.
 ## Composición real y fronteras pendientes
 
 Los providers Nest registran `CouponCommandProcessor`, `CouponCommandDeliveryHandler`
-y `CouponOutbox` usando `pg@8.16.3` y `amqplib@0.10.9`. El usuario autorizó
-expresamente esos dos cambios compartidos en package.json/package-lock.json el
-2026-10-16; no se cambian otras dependencias. PostgreSQL usa el CA local y
+y `CouponOutbox` usando `pg ^8.23.1` (resuelto a 8.23.1) y `amqplib@0.10.9`.
+La sincronización autorizada con `master` del 2026-10-16 conserva también
+`drizzle-orm ^0.45.4` y `@types/pg ^8.23.1`, junto con las demás dependencias
+actuales de `master`; el lockfile se regenera sin cambiar sus versiones resueltas.
+Esta instrucción sustituye el pin histórico de `pg@8.16.3` autorizado antes para
+#33. PostgreSQL usa el CA local y
 `rejectUnauthorized=true`; no se utiliza el login administrativo. Las conexiones
 son diferidas hasta su uso y el cierre de Nest libera pool/conexión.
 
@@ -88,6 +91,16 @@ evidencia autenticada externa, homologación y despliegue no acreditados.
 No se declara cerrado #33.
 
 ## Pruebas reproducibles
+
+Validación actual sobre el árbol sincronizado: ver
+[`REVISION-MASTER-2026-10-16.md`](REVISION-MASTER-2026-10-16.md).
+El smoke incluye ahora dos operaciones distintas de restauración con distinta
+fecha de cancelación y replay por mensaje. Comprueba en PostgreSQL que la
+segunda operación no cambia `restored_at`, `updated_at` ni la identidad/historia
+del uso; después de reutilizar el último cupo una vez, otro consumo sigue
+rechazado con `COUPON_GLOBAL_LIMIT`. Al final hay exactamente dos usos históricos,
+uno activo y uno restituido. El reporte identifica el SHA Backend ejecutado y
+el estado del árbol, separados del commit normativo de Docs.
 
 Resultado local histórico previo a las correcciones: 58 unitarias y 5 HTTP de Promotions PASS;
 96 unitarias y 155 HTTP del árbol completo PASS; typecheck, lint, formato,

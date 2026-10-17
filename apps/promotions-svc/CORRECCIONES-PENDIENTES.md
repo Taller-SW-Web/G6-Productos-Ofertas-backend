@@ -1,5 +1,15 @@
 # Correcciones locales de Promotions y DATA — 16/10/2026
 
+## Revisión vigente después de sincronizar master
+
+Ver [`REVISION-MASTER-2026-10-16.md`](REVISION-MASTER-2026-10-16.md) para los
+resultados nuevos, la regresión de restauración y los pendientes de #33/#70/#15/#112.
+La sincronización y la actualización de dependencias fueron autorizadas
+expresamente en la revisión posterior a #116. Los resultados siguientes se
+conservan como antecedentes; no sustituyen la validación del SHA final.
+
+## Antecedentes de la entrega anterior
+
 Rama: `cueva`. Base publicada: `86030ab67f263fefee41ee6bb18578877767fb08`.
 Las pruebas siguientes se ejecutaron sobre cambios locales antes de su
 publicación. El merge de #116 fue confirmado el 16/10/2026 a las 16:31:53

@@ -1,7 +1,7 @@
 {
   "result": "PASS",
   "scope": "DISPOSABLE_LOCAL_ONLY",
-  "captured_at": "2026-10-16T20:11:36.963Z",
+  "captured_at": "2026-10-17T00:33:35.767Z",
   "postgres_version": "17.11",
   "postgres_image": "sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
   "normative_commit": "c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b",

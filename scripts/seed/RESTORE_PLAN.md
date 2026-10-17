@@ -1,5 +1,18 @@
 # DATA-BACK-01 / #112: plan de restauración demo
 
+## Revalidación del 16/10/2026 sobre master sincronizado
+
+Ver [`REVISION-MASTER-2026-10-16.md`](../../apps/promotions-svc/REVISION-MASTER-2026-10-16.md).
+El validador y las pruebas offline pasaron nuevamente: dry-run, tres hashes
+verificados, cero entradas aprobadas y cero SQL/persistencia. No se cambian el
+plan ni los fixtures. El inventario de abajo describe la consulta histórica.
+En `master` `5bb832b103f9cca4d0967fecde26c1ebccd05944` ahora existe además
+`mcp/taxonomy/001_taxonomy_inka_athletics.manifest.json` con SQL y matriz de su
+owner. Su presencia no acredita aprobación exacta para restore ni ejecución.
+La reconciliación de ese candidato corresponde a López/Marco; no se ejecuta,
+duplica ni incorpora automáticamente. La restauración persistente conserva la
+condición de aprobación de contenido/hash, tablas y destino por Marco y owners.
+
 Owner: Axel Cueva, rama `cueva`. Fecha: 2026-10-16, America/Lima.
 Alcance: inventario, plan/ledger versionados y dry-run; sin SQL ejecutado ni
 escritura compartida. Se reutilizan runner, registry, manifiesto y evidencia de

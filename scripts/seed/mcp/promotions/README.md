@@ -1,5 +1,12 @@
 # DATA-005: preparación de maestros de Inka Athletics
 
+Revalidación sobre `cueva` sincronizada con `master` (16/10/2026):
+[`REVISION-MASTER-2026-10-16.md`](../../../../apps/promotions-svc/REVISION-MASTER-2026-10-16.md).
+Las 31 pruebas offline de seed/DATA/restore y el ensayo PostgreSQL descartable
+pasaron. `test/evidence/isolated-2026-10-16.json` registra la ejecución nueva.
+Se mantienen los bindings reales incompletos, las filas inactivas, cero
+persistencia compartida y el bloqueo específico del rol seed por locks de triggers.
+
 Issue #15. Owner: Axel Cueva. Rama `cueva`. Fecha: 2026-10-16, America/Lima.
 Estado: `IMPLEMENTAR_PARCIAL`. Modo real: lectura MCP y diseño; sin ensayo ni
 persistencia compartidos. La ampliación local de preparación y pruebas se
