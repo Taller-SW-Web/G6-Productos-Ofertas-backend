@@ -99,6 +99,20 @@ describe('Taxonomy invariants (#36)', () => {
           code: 'CATEGORIA_CON_SUBCATEGORIAS_ACTIVAS',
         }),
       );
+      expect(() =>
+        validarBajaCategoria('root', [
+          raiz,
+          {
+            id: 'child',
+            categoriaPadreId: 'root',
+            estado: 'PENDING_DEACTIVATION',
+          },
+        ]),
+      ).toThrow(
+        expect.objectContaining({
+          code: 'CATEGORIA_CON_SUBCATEGORIAS_ACTIVAS',
+        }),
+      );
       expect(() => validarBajaCategoria('root', [raiz])).not.toThrow();
     });
 

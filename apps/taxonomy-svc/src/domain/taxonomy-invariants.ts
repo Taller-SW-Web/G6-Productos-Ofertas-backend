@@ -124,7 +124,8 @@ export function validarBajaCategoria(
     conflicto('CATEGORIA_NO_ENCONTRADA', 'La categoría no existe.');
   }
   const tieneHijosActivos = categorias.some(
-    (item) => item.categoriaPadreId === categoriaId && item.estado === 'ACTIVO',
+    (item) =>
+      item.categoriaPadreId === categoriaId && item.estado !== 'INACTIVO',
   );
   if (tieneHijosActivos) {
     conflicto(
@@ -340,7 +341,7 @@ export function validarNuevaAsociacionTipoCaracteristica(
       asociacion.estado === 'ACTIVO',
   );
   if (
-    activas.some(
+    asociaciones.some(
       (asociacion) => asociacion.caracteristicaId === caracteristica.id,
     )
   ) {
@@ -420,22 +421,48 @@ export function eliminarLogicamente(estado: EstadoMaestro): EstadoMaestro {
 export function mapearConflictoUnicoTaxonomy(
   error: unknown,
 ): TaxonomyInvariantError | undefined {
-  if (typeof error !== 'object' || error === null) return undefined;
-  const dato = error as { code?: unknown; constraint?: unknown };
-  if (dato.code !== '23505' || typeof dato.constraint !== 'string') {
-    return undefined;
-  }
-  if (dato.constraint === 'uq_category_seo_slug') {
+  const uniqueViolation = buscarViolacionUnica(error);
+  if (!uniqueViolation) return undefined;
+  if (uniqueViolation.constraint === 'uq_category_seo_slug') {
     return new TaxonomyInvariantError(
       'SLUG_DUPLICADO',
       'El slug confirmado dejó de estar disponible.',
     );
   }
-  if (dato.constraint === 'uq_brands_nombre_normalizado') {
+  if (uniqueViolation.constraint === 'uq_brands_nombre_normalizado') {
     return new TaxonomyInvariantError(
       'MARCA_DUPLICADA',
       'Ya existe una marca con ese nombre.',
     );
+  }
+  return undefined;
+}
+
+function buscarViolacionUnica(
+  error: unknown,
+  profundidad = 0,
+): { constraint: string } | undefined {
+  if (typeof error !== 'object' || error === null || profundidad > 3) {
+    return undefined;
+  }
+  const dato = error as {
+    code?: unknown;
+    constraint?: unknown;
+    cause?: unknown;
+    errors?: unknown;
+  };
+  if (dato.code === '23505' && typeof dato.constraint === 'string') {
+    return { constraint: dato.constraint };
+  }
+  if (dato.cause) {
+    const causa = buscarViolacionUnica(dato.cause, profundidad + 1);
+    if (causa) return causa;
+  }
+  if (Array.isArray(dato.errors)) {
+    for (const nested of dato.errors) {
+      const causa = buscarViolacionUnica(nested, profundidad + 1);
+      if (causa) return causa;
+    }
   }
   return undefined;
 }

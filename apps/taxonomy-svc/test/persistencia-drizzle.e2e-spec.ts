@@ -1,19 +1,31 @@
+import { randomUUID } from 'node:crypto';
 import { HttpStatus } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { ProblemDetailsException } from './../src/errors/taxonomy.errors.js';
+import { TaxonomyInvariantError } from './../src/domain/taxonomy-invariants.js';
 import { crearRepositorioDrizzle } from './../src/persistence/persistence.providers.js';
 import {
+  categorySeo,
+  categorias,
+  characteristicValues,
+  characteristics,
   esquemaTaxonomia,
   marcas,
+  productTypeCharacteristics,
+  productTypes,
+  outbox,
 } from './../src/persistence/taxonomy.schema.js';
 import type { TaxonomyDb } from './../src/persistence/drizzle-taxonomy.repository.js';
 import type { DrizzleTaxonomyRepository } from './../src/persistence/drizzle-taxonomy.repository.js';
+import { TaxonomyWriteRepository } from './../src/persistence/taxonomy-write.repository.js';
+import { TaxonomyWriteService } from './../src/taxonomy-write.service.js';
 import {
   PostgresTaxonomyRepository,
   type TaxonomyDataSource,
@@ -31,6 +43,10 @@ import {
 
 const URL_BASE = process.env.TAXONOMY_TEST_DATABASE_URL?.trim();
 const describeIntegracion = URL_BASE ? describe : describe.skip;
+
+function codigoDe(error: unknown): string | undefined {
+  return error instanceof TaxonomyInvariantError ? error.code : undefined;
+}
 
 function urlConRol(base: string, usuario: string, password: string): string {
   const url = new URL(base);
@@ -57,6 +73,7 @@ describeIntegracion(
     let app: Pool;
     let dbApp: TaxonomyDb;
     let repo: DrizzleTaxonomyRepository;
+    let writes: TaxonomyWriteRepository;
     let urlApp: string;
     let acreditacion: AcreditacionInstanciaEfimera;
 
@@ -84,6 +101,7 @@ describeIntegracion(
       app = new Pool({ connectionString: urlApp });
       dbApp = drizzle(app, { schema: esquemaTaxonomia });
       repo = crearRepositorioDrizzle(urlApp);
+      writes = new TaxonomyWriteRepository(repo);
     });
 
     afterAll(async () => {
@@ -352,6 +370,435 @@ describeIntegracion(
       expect((uniqueError as { code?: string }).code).toBe('23505');
     });
 
+    it('persiste categorías solo con slug confirmado y serializa carreras de slug', async () => {
+      const slug = `categoria-${randomUUID().replaceAll('-', '')}`;
+      const creada = await writes.crearCategoria({
+        nombre: 'Categoría de integración',
+        slugConfirmado: slug,
+      });
+      expect(creada.slug).toBe(slug);
+      expect(creada.estado).toBe('ACTIVO');
+      expect(
+        await dbApp
+          .select({ slug: categorySeo.slug })
+          .from(categorySeo)
+          .where(eq(categorySeo.categoriaId, creada.categoriaId)),
+      ).toEqual([{ slug }]);
+
+      const carreraSlug = `carrera-${randomUUID().replaceAll('-', '')}`;
+      const creaciones = await Promise.allSettled([
+        writes.crearCategoria({
+          nombre: 'Carrera A',
+          slugConfirmado: carreraSlug,
+        }),
+        writes.crearCategoria({
+          nombre: 'Carrera B',
+          slugConfirmado: carreraSlug,
+        }),
+      ]);
+      expect(
+        creaciones.filter((resultado) => resultado.status === 'fulfilled'),
+      ).toHaveLength(1);
+      const rechazo = creaciones.find(
+        (resultado) => resultado.status === 'rejected',
+      );
+      expect(rechazo?.status).toBe('rejected');
+      if (rechazo?.status === 'rejected') {
+        expect(codigoDe(rechazo.reason)).toBe('SLUG_DUPLICADO');
+      }
+
+      const duplicados = await dbApp
+        .select({ slug: categorySeo.slug })
+        .from(categorySeo)
+        .where(eq(categorySeo.slug, carreraSlug));
+      expect(duplicados).toHaveLength(1);
+    });
+
+    it('impide el tercer nivel y las reubicaciones que crean ciclos o exceden profundidad', async () => {
+      const depthError = await writes
+        .crearCategoria({
+          nombre: 'Tercer nivel rechazado',
+          categoriaPadreId: '22222222-2222-4222-8222-222222222222',
+          slugConfirmado: `tercer-nivel-${randomUUID().replaceAll('-', '')}`,
+        })
+        .catch((error: unknown) => error);
+      expect(codigoDe(depthError)).toBe('PROFUNDIDAD_CATEGORIA_EXCEDIDA');
+
+      const root = await writes.crearCategoria({
+        nombre: 'Raíz cíclica',
+        slugConfirmado: `raiz-${randomUUID().replaceAll('-', '')}`,
+      });
+      const child = await writes.crearCategoria({
+        nombre: 'Hija cíclica',
+        categoriaPadreId: root.categoriaId,
+        slugConfirmado: `hija-${randomUUID().replaceAll('-', '')}`,
+      });
+      const cycleError = await writes
+        .reubicarCategoria(root.categoriaId, child.categoriaId, root.version)
+        .catch((error: unknown) => error);
+      expect(codigoDe(cycleError)).toBe('CATEGORIA_INVALIDA');
+      const rootPersistida = await dbApp
+        .select({ parent: categorias.categoriaPadreId })
+        .from(categorias)
+        .where(eq(categorias.id, root.categoriaId));
+      expect(rootPersistida[0]?.parent).toBeNull();
+    });
+
+    it('mantiene unicidad normalizada de marca ante inactivas y carreras concurrentes', async () => {
+      const nombreArchivado = `Archivada ${randomUUID()}`;
+      const marca = await writes.crearMarca({ nombre: nombreArchivado });
+      await admin.query(
+        "UPDATE taxonomy.brands SET estado = 'INACTIVO' WHERE id = $1",
+        [marca.marcaId],
+      );
+      const duplicada = await writes
+        .crearMarca({
+          nombre: `  ${nombreArchivado.toLocaleUpperCase('es')}  `,
+        })
+        .catch((error: unknown) => error);
+      expect(codigoDe(duplicada)).toBe('MARCA_DUPLICADA');
+
+      const nombreCarrera = `Concurrente ${randomUUID()}`;
+      const creaciones = await Promise.allSettled([
+        writes.crearMarca({ nombre: nombreCarrera }),
+        writes.crearMarca({ nombre: nombreCarrera.toLocaleUpperCase('es') }),
+      ]);
+      expect(
+        creaciones.filter((resultado) => resultado.status === 'fulfilled'),
+      ).toHaveLength(1);
+      const rechazo = creaciones.find(
+        (resultado) => resultado.status === 'rejected',
+      );
+      expect(rechazo?.status).toBe('rejected');
+      if (rechazo?.status === 'rejected') {
+        expect(codigoDe(rechazo.reason)).toBe('MARCA_DUPLICADA');
+      }
+    });
+
+    it('resuelve el servicio de escritura del módulo y devuelve Problem Details contractual', async () => {
+      const moduleFixture = await Test.createTestingModule({
+        imports: [TaxonomySvcModule.forRoot({ databaseUrl: urlApp })],
+      }).compile();
+      const appNest: INestApplication<App> =
+        moduleFixture.createNestApplication();
+      await appNest.init();
+      const writeService = appNest.get(TaxonomyWriteService);
+      const nombre = `Problem brand ${randomUUID()}`;
+
+      try {
+        await writeService.crearMarca({ nombre });
+        const error = await writeService
+          .crearMarca({ nombre: nombre.toLocaleUpperCase('es') })
+          .catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(ProblemDetailsException);
+        expect((error as ProblemDetailsException).problem).toMatchObject({
+          status: HttpStatus.CONFLICT,
+          code: 'MARCA_DUPLICADA',
+        });
+      } finally {
+        await appNest.close();
+      }
+    });
+
+    it('persiste bajas lógicas seguras, restaura en rechazo/timeout y reactiva hijo tras padre', async () => {
+      const correlationId = randomUUID();
+      const marca = await writes.crearMarca({
+        nombre: `Baja segura ${randomUUID()}`,
+      });
+      const bajaMarca = await writes.solicitarBajaMarca(
+        marca.marcaId,
+        correlationId,
+      );
+      expect(bajaMarca.status).toBe('PENDING_DEACTIVATION');
+      const comando = await dbApp
+        .select({ event: outbox.eventName, kind: outbox.kind })
+        .from(outbox)
+        .where(eq(outbox.operationId, bajaMarca.operation_id));
+      expect(comando).toEqual([
+        {
+          event: 'taxonomy.master.deactivation.check.requested',
+          kind: 'command',
+        },
+      ]);
+      await writes.procesarResultadoBajaMarca(
+        bajaMarca.operation_id,
+        'HAS_ACTIVE_PRODUCTS',
+        correlationId,
+      );
+      const marcaTrasRechazo = await dbApp
+        .select({ estado: marcas.estado })
+        .from(marcas)
+        .where(eq(marcas.id, marca.marcaId));
+      expect(marcaTrasRechazo[0]?.estado).toBe('ACTIVO');
+
+      const bajaFinal = await writes.solicitarBajaMarca(
+        marca.marcaId,
+        correlationId,
+      );
+      await writes.procesarResultadoBajaMarca(
+        bajaFinal.operation_id,
+        'CLEAR',
+        correlationId,
+      );
+      const marcaBorradaLogicamente = await dbApp
+        .select({ id: marcas.id, estado: marcas.estado })
+        .from(marcas)
+        .where(eq(marcas.id, marca.marcaId));
+      expect(marcaBorradaLogicamente).toEqual([
+        { id: marca.marcaId, estado: 'INACTIVO' },
+      ]);
+      expect(await writes.reactivarMarca(marca.marcaId)).toMatchObject({
+        estado: 'ACTIVO',
+      });
+
+      const padre = await writes.crearCategoria({
+        nombre: 'Padre reactivación',
+        slugConfirmado: `padre-${randomUUID().replaceAll('-', '')}`,
+      });
+      const hija = await writes.crearCategoria({
+        nombre: 'Hija reactivación',
+        categoriaPadreId: padre.categoriaId,
+        slugConfirmado: `hija-${randomUUID().replaceAll('-', '')}`,
+      });
+      const bajaPadreConHijaActiva = await writes
+        .solicitarBajaCategoria(padre.categoriaId, correlationId)
+        .catch((error: unknown) => error);
+      expect(codigoDe(bajaPadreConHijaActiva)).toBe(
+        'CATEGORIA_CON_SUBCATEGORIAS_ACTIVAS',
+      );
+      const bajaHija = await writes.solicitarBajaCategoria(
+        hija.categoriaId,
+        correlationId,
+      );
+      await writes.procesarResultadoBajaCategoria(
+        bajaHija.operation_id,
+        'CLEAR',
+        correlationId,
+      );
+      const bajaPadre = await writes.solicitarBajaCategoria(
+        padre.categoriaId,
+        correlationId,
+      );
+      await writes.procesarResultadoBajaCategoria(
+        bajaPadre.operation_id,
+        'CLEAR',
+        correlationId,
+      );
+      const hijoAntesDePadre = await writes
+        .reactivarCategoria(hija.categoriaId)
+        .catch((error: unknown) => error);
+      expect(codigoDe(hijoAntesDePadre)).toBe('CATEGORIA_PADRE_INACTIVA');
+      await writes.reactivarCategoria(padre.categoriaId);
+      await expect(
+        writes.reactivarCategoria(hija.categoriaId),
+      ).resolves.toMatchObject({
+        estado: 'ACTIVO',
+      });
+    });
+
+    it('conecta tipo inmutable, valores LISTA y obligatoriedad a las tablas correctas', async () => {
+      const numericError = await writes
+        .crearCaracteristica({ nombre: 'Peso sin unidad', tipo: 'NUMERO' })
+        .catch((error: unknown) => error);
+      expect(codigoDe(numericError)).toBe('VALOR_NUMERICO_INVALIDO');
+
+      const numerica = await writes.crearCaracteristica({
+        nombre: `Peso ${randomUUID()}`,
+        tipo: 'NUMERO',
+        unidadMedida: 'kg',
+      });
+      const typeError = await writes
+        .actualizarCaracteristica(numerica.id, { tipo: 'LISTA' })
+        .catch((error: unknown) => error);
+      expect(codigoDe(typeError)).toBe('TIPO_CARACTERISTICA_INMUTABLE');
+      const persistedNumerica = await dbApp
+        .select({ tipo: characteristics.tipo })
+        .from(characteristics)
+        .where(eq(characteristics.id, numerica.id));
+      expect(persistedNumerica[0]?.tipo).toBe('NUMERO');
+
+      const lista = await writes.crearCaracteristica({
+        nombre: `Color ${randomUUID()}`,
+        tipo: 'LISTA',
+      });
+      const value = await writes.crearValorPermitido(lista.id, 'Rojo');
+      const duplicateValue = await writes
+        .crearValorPermitido(lista.id, ' rojo ')
+        .catch((error: unknown) => error);
+      expect(codigoDe(duplicateValue)).toBe('VALIDACION');
+      const valueTimeoutCorrelation = randomUUID();
+      const valueDeactivate = await writes.solicitarBajaValorPermitido(
+        lista.id,
+        value.id,
+        valueTimeoutCorrelation,
+      );
+      await writes.procesarResultadoBajaValorPermitido(
+        valueDeactivate.operation_id,
+        'TIMEOUT',
+        valueTimeoutCorrelation,
+      );
+      const valueAfterTimeout = await dbApp
+        .select({ estado: characteristicValues.estado })
+        .from(characteristicValues)
+        .where(eq(characteristicValues.id, value.id));
+      expect(valueAfterTimeout[0]?.estado).toBe('ACTIVO');
+      const valueCorrelationId = randomUUID();
+      const valueDeactivateFinal = await writes.solicitarBajaValorPermitido(
+        lista.id,
+        value.id,
+        valueCorrelationId,
+      );
+      await writes.procesarResultadoBajaValorPermitido(
+        valueDeactivateFinal.operation_id,
+        'CLEAR',
+        valueCorrelationId,
+      );
+      const valueAfterLogicalDelete = await dbApp
+        .select({
+          id: characteristicValues.id,
+          estado: characteristicValues.estado,
+        })
+        .from(characteristicValues)
+        .where(eq(characteristicValues.id, value.id));
+      expect(valueAfterLogicalDelete).toEqual([
+        { id: value.id, estado: 'INACTIVO' },
+      ]);
+      await expect(
+        writes.reactivarValorPermitido(lista.id, value.id),
+      ).resolves.toMatchObject({ id: value.id, estado: 'ACTIVO' });
+
+      const tipo = await writes.crearTipoProducto({
+        nombre: `Tipo ${randomUUID()}`,
+      });
+      const asociacion = await writes.asociarCaracteristica({
+        tipoProductoId: tipo.id,
+        caracteristicaId: lista.id,
+        obligatoria: true,
+        schemaVersion: tipo.schemaVersion,
+        correlationId: randomUUID(),
+      });
+      expect(asociacion.obligatoria).toBe(true);
+      expect(asociacion.schemaVersion).toBe(tipo.schemaVersion + 1);
+      const persistedAssociation = await dbApp
+        .select({
+          id: productTypeCharacteristics.id,
+          obligatoria: productTypeCharacteristics.obligatoria,
+        })
+        .from(productTypeCharacteristics)
+        .where(eq(productTypeCharacteristics.id, asociacion.id));
+      expect(persistedAssociation).toEqual([
+        { id: asociacion.id, obligatoria: true },
+      ]);
+      const actualizada = await writes.actualizarAsociacionCaracteristica(
+        tipo.id,
+        lista.id,
+        false,
+        asociacion.schemaVersion,
+        randomUUID(),
+      );
+      expect(actualizada.obligatoria).toBe(false);
+      expect(actualizada.schemaVersion).toBe(asociacion.schemaVersion + 1);
+      const event = await dbApp
+        .select({ name: outbox.eventName, payload: outbox.payload })
+        .from(outbox)
+        .where(eq(outbox.eventName, 'taxonomy.product-type-schema.changed'));
+      expect(
+        event.some(
+          (message) => message.payload.data.change_type === 'ASSOCIATED',
+        ),
+      ).toBe(true);
+      expect(
+        event.some(
+          (message) => message.payload.data.change_type === 'REQUIRED_CHANGED',
+        ),
+      ).toBe(true);
+    });
+
+    it('aplica el límite de 50 opciones LISTA contra filas PostgreSQL existentes', async () => {
+      const lista = await writes.crearCaracteristica({
+        nombre: `Talla ${randomUUID()}`,
+        tipo: 'LISTA',
+      });
+      await dbApp.insert(characteristicValues).values(
+        Array.from({ length: 50 }, (_, indice) => ({
+          caracteristicaId: lista.id,
+          nombre: `Opción ${indice + 1}`,
+          estado: 'ACTIVO' as const,
+        })),
+      );
+
+      const error = await writes
+        .crearValorPermitido(lista.id, 'Opción adicional')
+        .catch((caught: unknown) => caught);
+      expect(codigoDe(error)).toBe('VALOR_LISTA_LIMITE_EXCEDIDO');
+      const activos = await dbApp
+        .select({ id: characteristicValues.id })
+        .from(characteristicValues)
+        .where(
+          and(
+            eq(characteristicValues.caracteristicaId, lista.id),
+            eq(characteristicValues.estado, 'ACTIVO'),
+          ),
+        );
+      expect(activos).toHaveLength(50);
+    });
+
+    it('serializa 20 asociaciones y persiste required solo en la asociación', async () => {
+      const tipo = await writes.crearTipoProducto({
+        nombre: `Deportivo ${randomUUID()}`,
+      });
+      const caracteristicas = await dbApp
+        .insert(characteristics)
+        .values(
+          Array.from({ length: 21 }, (_, indice) => ({
+            nombre: `Campo ${indice}-${randomUUID()}`,
+            tipo: 'TEXTO' as const,
+            unidadMedida: null,
+            estado: 'ACTIVO' as const,
+          })),
+        )
+        .returning({ id: characteristics.id });
+      const operaciones = await Promise.allSettled(
+        caracteristicas.map((caracteristica, indice) =>
+          writes.asociarCaracteristica({
+            tipoProductoId: tipo.id,
+            caracteristicaId: caracteristica.id,
+            obligatoria: indice % 2 === 0,
+          }),
+        ),
+      );
+      expect(
+        operaciones.filter((resultado) => resultado.status === 'fulfilled'),
+      ).toHaveLength(20);
+      const fallidas = operaciones.filter(
+        (resultado) => resultado.status === 'rejected',
+      );
+      expect(fallidas).toHaveLength(1);
+      if (fallidas[0]?.status === 'rejected') {
+        expect(codigoDe(fallidas[0].reason)).toBe(
+          'LIMITE_CARACTERISTICAS_EXCEDIDO',
+        );
+      }
+
+      const persistidas = await dbApp
+        .select({ id: productTypeCharacteristics.id })
+        .from(productTypeCharacteristics)
+        .where(eq(productTypeCharacteristics.tipoProductoId, tipo.id));
+      const tipoPersistido = await dbApp
+        .select({ version: productTypes.schemaVersion })
+        .from(productTypes)
+        .where(eq(productTypes.id, tipo.id));
+      expect(persistidas).toHaveLength(20);
+      expect(tipoPersistido[0]?.version).toBe(21);
+      const columnasCaracteristica = await admin.query<{ column_name: string }>(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_schema = 'taxonomy' AND table_name = 'characteristics'`,
+      );
+      expect(
+        columnasCaracteristica.rows.map((fila) => fila.column_name),
+      ).not.toContain('obligatoria');
+    });
+
     it('GET /api/v1/categorias sirve datos reales a traves del modulo', async () => {
       const moduleFixture = await Test.createTestingModule({
         imports: [TaxonomySvcModule.forRoot({ databaseUrl: urlApp })],
@@ -365,11 +812,12 @@ describeIntegracion(
           .get('/api/v1/categorias')
           .expect(200);
 
-        expect(
-          categorias.body.categories
-            .map((c: { name: string }) => c.name)
-            .sort(),
-        ).toEqual(['Calzado', 'Zapatillas']);
+        const nombres = categorias.body.categories.map(
+          (c: { name: string }) => c.name,
+        );
+        expect(nombres).toEqual(
+          expect.arrayContaining(['Calzado', 'Zapatillas']),
+        );
 
         await request(appNest.getHttpServer())
           .get('/health/readiness')
