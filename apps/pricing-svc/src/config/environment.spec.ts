@@ -1,0 +1,204 @@
+import { InvalidPricingConfig, validateEnvironment } from './environment.js';
+import { writeFileSync, unlinkSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { checkServerIdentity, rootCertificates } from 'node:tls';
+import { Client } from 'pg';
+
+const valid = {
+  NODE_ENV: 'test',
+  PRICING_SVC_PORT: '3002',
+  DATABASE_URL: 'postgresql://pricing:fixture-password@127.0.0.1:5432/fixture',
+};
+
+describe('Pricing configuration', () => {
+  it('acepta configuración válida y prioriza el puerto propio', () => {
+    expect(validateEnvironment({ ...valid, PORT: '3000' })).toEqual({
+      nodeEnv: 'test',
+      port: 3002,
+      databaseUrl: valid.DATABASE_URL,
+      databaseSsl: false,
+    });
+    expect(
+      validateEnvironment({
+        ...valid,
+        PRICING_SVC_PORT: undefined,
+        PORT: '4002',
+      }).port,
+    ).toBe(4002);
+  });
+
+  it.each(['NODE_ENV', 'PRICING_SVC_PORT', 'DATABASE_URL'])(
+    'rechaza %s ausente o vacía',
+    (name) => {
+      for (const value of [undefined, '', ' ']) {
+        expect(() => validateEnvironment({ ...valid, [name]: value })).toThrow(
+          InvalidPricingConfig,
+        );
+      }
+    },
+  );
+
+  it.each([
+    '0',
+    '65536',
+    '-1',
+    '1.2',
+    'NaN',
+    '3e3',
+    '0xbb8',
+    ' 3002',
+    'fixture-secret',
+  ])('rechaza puerto %s sin exponer su valor', (port) => {
+    expect(() =>
+      validateEnvironment({ ...valid, PRICING_SVC_PORT: port, PORT: '3000' }),
+    ).toThrow('PRICING_SVC_PORT (o PORT) debe ser un entero entre 1 y 65535.');
+  });
+
+  it.each([
+    'fixture-secret',
+    'https://user:fixture-secret@host/db',
+    'postgresql:///db',
+    'postgresql://user:fixture-secret@host',
+    'postgresql://host/db',
+    'postgresql://user@host:0/db',
+    'postgresql://user@host:65536/db',
+    'postgresql://user@host:abc/db',
+    'postgresql://user@host/db#fixture-secret',
+    'postgresql://user@host/ ',
+  ])('rechaza una URL malformada sin reflejar credenciales (%#)', (url) => {
+    expect(() => validateEnvironment({ ...valid, DATABASE_URL: url })).toThrow(
+      'DATABASE_URL debe incluir host, usuario y base PostgreSQL válidos.',
+    );
+  });
+
+  it('rechaza un entorno desconocido sin reflejarlo', () => {
+    expect(() =>
+      validateEnvironment({ ...valid, NODE_ENV: 'fixture-secret' }),
+    ).toThrow('NODE_ENV debe ser development, test o production.');
+  });
+
+  describe('TLS fail-closed', () => {
+    const remoteUrl = 'postgresql://pricing:fixture@db.example.invalid/fixture';
+    const caPath = join(tmpdir(), `pricing-ca-${randomUUID()}.crt`);
+    beforeAll(() => writeFileSync(caPath, rootCertificates[0]));
+    afterAll(() => unlinkSync(caPath));
+
+    it.each([
+      undefined,
+      'disable',
+      'allow',
+      'prefer',
+      'require',
+      'verify-ca',
+      'no-verify',
+      '',
+    ])('rechaza producción sin verify-full (%s)', (mode) => {
+      const url =
+        mode === undefined ? remoteUrl : `${remoteUrl}?sslmode=${mode}`;
+      expect(() =>
+        validateEnvironment({
+          ...valid,
+          NODE_ENV: 'production',
+          DATABASE_URL: url,
+        }),
+      ).toThrow('sslmode=verify-full');
+    });
+
+    it('solo permite texto plano en localhost fuera de producción', () => {
+      expect(
+        validateEnvironment({
+          ...valid,
+          DATABASE_URL: `${valid.DATABASE_URL}?sslmode=disable`,
+        }).databaseSsl,
+      ).toBe(false);
+      expect(() =>
+        validateEnvironment({ ...valid, NODE_ENV: 'production' }),
+      ).toThrow('sslmode=verify-full');
+      expect(() =>
+        validateEnvironment({ ...valid, DATABASE_URL: remoteUrl }),
+      ).toThrow('sslmode=verify-full');
+    });
+
+    it('conserva CA, certificado y hostname verificados después del parser de pg', () => {
+      const config = validateEnvironment({
+        ...valid,
+        NODE_ENV: 'production',
+        DATABASE_URL: `${remoteUrl}?sslmode=verify-full&sslrootcert=${encodeURIComponent(caPath)}`,
+      });
+      expect(config.databaseUrl).toBe(remoteUrl);
+      expect(config.databaseSsl).toEqual({
+        rejectUnauthorized: true,
+        checkServerIdentity,
+        ca: rootCertificates[0],
+      });
+      const client = new Client({
+        connectionString: config.databaseUrl,
+        ssl: config.databaseSsl,
+      });
+      expect(client.ssl).toEqual(config.databaseSsl);
+    });
+
+    it('admite verify-full con las CA de confianza de Node o PGSSLROOTCERT', () => {
+      expect(
+        validateEnvironment({
+          ...valid,
+          NODE_ENV: 'production',
+          DATABASE_URL: remoteUrl,
+          PGSSLMODE: 'verify-full',
+        }).databaseSsl,
+      ).toEqual({ rejectUnauthorized: true, checkServerIdentity });
+      expect(
+        validateEnvironment({
+          ...valid,
+          NODE_ENV: 'production',
+          DATABASE_URL: `${remoteUrl}?sslmode=verify-full`,
+          PGSSLROOTCERT: caPath,
+        }).databaseSsl,
+      ).toHaveProperty('ca', rootCertificates[0]);
+    });
+
+    it.each([
+      'ssl=0',
+      'ssl=no-verify',
+      'sslmode=verify-full&sslmode=disable',
+      'host=localhost',
+      'uselibpqcompat=true',
+      'sslcert=fixture',
+    ])('impide sobrescribir la configuración validada (%s)', (query) => {
+      expect(() =>
+        validateEnvironment({
+          ...valid,
+          NODE_ENV: 'production',
+          DATABASE_URL: `${remoteUrl}?${query}`,
+        }),
+      ).toThrow(InvalidPricingConfig);
+    });
+
+    it('rechaza CA ilegible/malformada y TLS global desactivado sin reflejar valores', () => {
+      const secure = {
+        ...valid,
+        NODE_ENV: 'production',
+        DATABASE_URL: `${remoteUrl}?sslmode=verify-full`,
+      };
+      expect(() =>
+        validateEnvironment({
+          ...secure,
+          PGSSLROOTCERT: 'arbitrary-unknown-value',
+        }),
+      ).toThrow('CA legible');
+      writeFileSync(caPath, 'arbitrary-unknown-value');
+      try {
+        expect(() =>
+          validateEnvironment({ ...secure, PGSSLROOTCERT: caPath }),
+        ).toThrow('CA legible');
+      } finally {
+        writeFileSync(caPath, rootCertificates[0]);
+      }
+      expect(() =>
+        validateEnvironment({ ...secure, NODE_TLS_REJECT_UNAUTHORIZED: '0' }),
+      ).toThrow('TLS global');
+    });
+  });
+});

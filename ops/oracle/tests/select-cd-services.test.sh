@@ -6,6 +6,10 @@ readonly WORKFLOW="$ROOT/.github/workflows/cd-services-oracle.yml"
 readonly REGISTRY="$ROOT/ops/oracle/services.psv"
 readonly SELECTOR="$ROOT/ops/oracle/select-cd-services.sh"
 readonly REGISTRY_SH="$ROOT/ops/oracle/service-registry.sh"
+readonly AUTO_AUTH="$ROOT/ops/oracle/auto-release-authorization.psv"
+readonly SOURCE_VALIDATOR="$ROOT/ops/oracle/validate-cd-source.sh"
+
+bash "$ROOT/ops/oracle/tests/validate-cd-source.test.sh"
 
 echo "=== Verificando Registro de Servicios ==="
 # Versionado y formato del registro
@@ -61,6 +65,26 @@ for svc in "${EXPECTED_ENABLED[@]}"; do
 done
 echo "PASS: cada servicio habilitado es seleccionado individualmente mediante dispatch manual"
 
+# El selector automático usa autorización independiente, inicialmente vacía.
+[[ "$(head -n 1 "$AUTO_AUTH")" == '#auto-release-authorization-version=1' ]]
+[[ "$(awk -F'|' '$1 !~ /^#/ && NF && $2 == "false" { n++ } END { print n+0 }' "$AUTO_AUTH")" == 9 ]]
+auto_output="$(bash "$SELECTOR" automatic example/g6-backend)"
+[[ "$auto_output" == '[]' ]] || { echo "FAIL: el auto CD inicial no está vacío: $auto_output" >&2; exit 1; }
+
+temp_dir="$(mktemp -d)"
+trap 'rm -rf "$temp_dir"' EXIT
+cp "$REGISTRY" "$REGISTRY_SH" "$SELECTOR" "$AUTO_AUTH" "$temp_dir/"
+sed -i 's/^catalog-svc|false||$/catalog-svc|true|12345|https:\/\/github.com\/example\/g6-backend\/actions\/runs\/67890/' "$temp_dir/auto-release-authorization.psv"
+single_auto="$(bash "$temp_dir/select-cd-services.sh" automatic example/g6-backend)"
+[[ "$single_auto" == '["catalog-svc"]' ]] || { echo "FAIL: la autorización individual no aisló catalog-svc: $single_auto" >&2; exit 1; }
+sed -i 's#catalog-svc|true|12345|https://github.com/example/g6-backend/actions/runs/67890#catalog-svc|true|12345|#' "$temp_dir/auto-release-authorization.psv"
+set +e
+bash "$temp_dir/select-cd-services.sh" automatic example/g6-backend >/dev/null 2>&1
+auto_missing_evidence_status=$?
+set -e
+[[ "$auto_missing_evidence_status" == 65 ]] || { echo 'FAIL: la autorización sin evidencia readiness/smoke no se rechazó.' >&2; exit 1; }
+echo 'PASS: autorización automática individual requiere liberación manual y evidencia readiness/smoke'
+
 # Nombres inválidos son rechazados con código 64
 for invalid in "unknown-svc" "catalogo" "inventario" "catalog-svc;id" "../../etc" "" " "; do
   set +e
@@ -75,64 +99,89 @@ done
 echo "PASS: nombres inválidos o no registrados son rechazados con código 64"
 
 echo "=== Verificando Seguridad del CD Oracle ==="
-# 1. Ausencia de triggers automáticos: Push y Merge a master NO inician despliegue
-# El bloque on: solo debe contener workflow_dispatch
+# 1. Trigger automático solo a través de workflow_run de CI; conserva dispatch manual
 workflow_on="$(sed -n '/^on:/,/^[a-z]/p' "$WORKFLOW" | head -n -1)"
-if grep -Eq '^[[:space:]]*workflow_run:' <<< "$workflow_on"; then
-  echo "FAIL: la sección on: contiene disparador workflow_run automático" >&2
-  exit 1
-fi
-if grep -Eq '^[[:space:]]*push:' <<< "$workflow_on"; then
-  echo "FAIL: la sección on: contiene disparador push" >&2
-  exit 1
-fi
 if grep -Eq '^[[:space:]]*pull_request:' <<< "$workflow_on"; then
-  echo "FAIL: la sección on: contiene disparador pull_request" >&2
+  echo "FAIL: el CD no debe dispararse directamente en pull_request" >&2
   exit 1
 fi
+grep -Fq 'workflow_run:' <<< "$workflow_on" || { echo 'FAIL: falta workflow_run'; exit 1; }
+grep -Fq 'workflows: [CI]' <<< "$workflow_on" || { echo 'FAIL: workflow_run no está limitado a CI'; exit 1; }
 grep -Fq 'workflow_dispatch:' <<< "$workflow_on" || {
   echo "FAIL: la sección on: no declara workflow_dispatch" >&2
   exit 1
 }
+grep -Fq 'connectivity-check' "$WORKFLOW" || { echo 'FAIL: falta modo de conectividad'; exit 1; }
+grep -Fq "inputs.mode == 'connectivity-check'" "$WORKFLOW" || { echo 'FAIL: conectividad no tiene guard exclusivo'; exit 1; }
+grep -Fq 'ping: 100.87.22.28' "$WORKFLOW" || { echo 'FAIL: falta el ping oficial del action al host aprobado'; exit 1; }
+release_ping_line="$(grep -nF 'ping: ${{ secrets.ORACLE_HOST }}' "$WORKFLOW" | cut -d: -f1)"
+release_action_line="$(grep -n 'name: Join Tailscale using GitHub OIDC' "$WORKFLOW" | tail -n 1 | cut -d: -f1)"
+release_ssh_line="$(grep -n 'name: Verify restricted SSH authentication from GitHub Actions' "$WORKFLOW" | cut -d: -f1)"
+[[ -n "$release_ping_line" && -n "$release_action_line" && -n "$release_ssh_line" && "$release_action_line" -lt "$release_ping_line" && "$release_ping_line" -lt "$release_ssh_line" ]] || { echo 'FAIL: release no espera ping oficial después de Tailscale y antes de SSH'; exit 1; }
+[[ "$(grep -Fc 'ping: ${{ secrets.ORACLE_HOST }}' "$WORKFLOW")" -eq 1 ]] || { echo 'FAIL: se esperaba exactamente un ping oficial dinámico para release'; exit 1; }
+if grep -Eq 'tailscale ping --c 1 --timeout=20s' "$WORKFLOW"; then
+  echo 'FAIL: release conserva ping inmediato redundante' >&2
+  exit 1
+fi
+grep -Fq 'continue-on-error: true' "$WORKFLOW" || { echo 'FAIL: no se ejecutaría el diagnóstico si falla el ping oficial'; exit 1; }
+grep -Fq 'FAIL: Oracle no es visible como peer' "$WORKFLOW" || { echo 'FAIL: falta diagnóstico de peer no visible'; exit 1; }
+grep -Fq 'timeout TCP/22' "$WORKFLOW" || { echo 'FAIL: falta diagnóstico de timeout/restricción TCP'; exit 1; }
+if grep -Fq 'tailscale ping --c 1 --timeout=20s 100.87.22.28' "$WORKFLOW"; then
+  echo 'FAIL: permanece el ping inmediato que falló en #47.' >&2
+  exit 1
+fi
+checkout_line="$(grep -n 'name: Checkout trusted master source before validation' "$WORKFLOW" | cut -d: -f1)"
+validator_line="$(grep -n 'name: Validate CI run and select fresh master commit' "$WORKFLOW" | cut -d: -f1)"
+[[ -n "$checkout_line" && "$checkout_line" -lt "$validator_line" ]] || { echo 'FAIL: el validador se ejecuta antes del checkout confiable.'; exit 1; }
+grep -Fq 'ref: refs/heads/master' "$WORKFLOW" || { echo 'FAIL: no se fija el checkout de validación a master'; exit 1; }
+grep -Fq 'persist-credentials: false' "$WORKFLOW" || { echo 'FAIL: checkout de validación conserva credenciales'; exit 1; }
+grep -Fq 'StrictHostKeyChecking=yes' "$WORKFLOW" || { echo 'FAIL: falta validación estricta SSH'; exit 1; }
+grep -Fq 'SHA256:dVru76PK60yqZRYHUVtNNPUSYLtbS6ZE24mF0S/BhGY' "$WORKFLOW" || { echo 'FAIL: falta fingerprint aprobado'; exit 1; }
+grep -Fq 'connectivity-probe' "$WORKFLOW" || { echo 'FAIL: falta probe inocuo'; exit 1; }
+grep -Fq "inputs.mode == 'deploy'" "$WORKFLOW" || { echo 'FAIL: despliegue no está separado del modo conectividad'; exit 1; }
 grep -Fq "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'" "$WORKFLOW" || {
-  echo "FAIL: prepare job no restringe a workflow_dispatch en refs/heads/master" >&2
+  echo "FAIL: el disparador manual no está restringido a refs/heads/master" >&2
   exit 1
 }
-echo "PASS: CD Oracle carece de workflow_run, push o merge; exclusivo workflow_dispatch en master"
+for guard in 'CI_EVENT:-' 'CI_BRANCH:-' 'CI_CONCLUSION:-' 'CI_HEAD_REPOSITORY' 'CI_SHA' 'Skipping obsolete commit'; do
+  grep -Fq "$guard" "$SOURCE_VALIDATOR" || { echo "FAIL: falta validación de evento CI $guard" >&2; exit 1; }
+done
+grep -Fq 'run: bash ops/oracle/validate-cd-source.sh' "$WORKFLOW" || { echo 'FAIL: workflow no ejecuta el validador probado'; exit 1; }
+grep -Fq 'tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd' "$WORKFLOW" || { echo 'FAIL: falta Tailscale OIDC'; exit 1; }
+grep -Fq 'id-token: write' "$WORKFLOW" || { echo 'FAIL: falta permiso OIDC'; exit 1; }
+grep -Fq "needs.prepare.outputs.services != '[]'" "$WORKFLOW" || { echo 'FAIL: release no requiere servicios seleccionados'; exit 1; }
+echo "PASS: workflow_run validado y workflow_dispatch manual preservado; Tailscale usa OIDC"
 
 # 2. Invocación en modo automatic devuelve lista vacía [] y rechaza despliegues automáticos
-auto_output="$(bash "$SELECTOR" automatic 2>&1)"
+auto_output="$(bash "$SELECTOR" automatic example/g6-backend 2>&1)"
 [[ "$auto_output" =~ "[]" ]] || {
   echo "FAIL: modo automatic no devolvió []: $auto_output" >&2
   exit 1
 }
-[[ "$auto_output" =~ "Despliegues automáticos deshabilitados" ]] || {
-  echo "FAIL: modo automatic no informó que los despliegues automáticos están deshabilitados" >&2
-  exit 1
-}
-echo "PASS: selector en modo automatic devuelve [] e informa deshabilitación"
+[[ "$auto_output" == '[]' ]] || { echo 'FAIL: con los nueve flags false, automatic debe ser un no-op'; exit 1; }
+echo "PASS: modo automatic devuelve [] mientras los nueve servicios están deshabilitados"
 
 # 3. CI fallida impide liberación
-grep -Fq 'gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch master --commit "$sha"' "$WORKFLOW" || {
+grep -Fq 'gh run list --repo "$repository" --workflow ci.yml --branch master --commit "$sha"' "$SOURCE_VALIDATOR" || {
   echo "FAIL: falta consulta de CI push exitoso en master" >&2
   exit 1
 }
-grep -Fq 'No successful CI push run was found for master commit' "$WORKFLOW" || {
+grep -Fq 'No successful CI push run was found for master commit' "$SOURCE_VALIDATOR" || {
   echo "FAIL: falta mensaje y aborto ante CI no exitosa" >&2
   exit 1
 }
 echo "PASS: commit sin CI push exitosa en master impide la liberación"
 
 # 4. SHA diferente al master vigente o inválido impide liberación
-grep -Fq 'repos/${GITHUB_REPOSITORY}/commits/master' "$WORKFLOW" || {
+grep -Fq 'repos/${repository}/commits/master' "$SOURCE_VALIDATOR" || {
   echo "FAIL: falta verificación de HEAD vigente de master" >&2
   exit 1
 }
-grep -Fq 'Skipping obsolete commit' "$WORKFLOW" || {
+grep -Fq 'Skipping obsolete commit' "$SOURCE_VALIDATOR" || {
   echo "FAIL: falta descarte de commit obsoleto" >&2
   exit 1
 }
-grep -Fq '[[ "$sha" =~ ^[0-9a-f]{40}$ ]]' "$WORKFLOW" || {
+grep -Fq '^[0-9a-f]{40}$' "$SOURCE_VALIDATOR" || {
   echo "FAIL: falta validación estricta de formato SHA de 40 caracteres" >&2
   exit 1
 }
@@ -147,16 +196,19 @@ grep -Fq 'Validate deployment secrets' "$WORKFLOW" || {
   echo "FAIL: falta paso Validate deployment secrets" >&2
   exit 1
 }
-for secret in ORACLE_HOST ORACLE_USER ORACLE_SSH_PRIVATE_KEY ORACLE_SSH_KNOWN_HOSTS ORACLE_GHCR_USERNAME ORACLE_GHCR_TOKEN; do
+for secret in ORACLE_HOST ORACLE_USER ORACLE_SSH_PRIVATE_KEY ORACLE_SSH_KNOWN_HOSTS ORACLE_GHCR_USERNAME ORACLE_GHCR_TOKEN TS_OIDC_CLIENT_ID TS_OIDC_AUDIENCE; do
   grep -Fq "$secret" "$WORKFLOW" || {
     echo "FAIL: secreto obligatorio $secret ausente en validación" >&2
     exit 1
   }
 done
-grep -Fq 'Required GitHub Secret $name is not configured; Oracle CD is not activated.' "$WORKFLOW" || {
+grep -Fq 'Required GitHub secret/variable $name is not configured; Oracle CD stopped before publication.' "$WORKFLOW" || {
   echo "FAIL: falta mensaje de salida segura ante secretos faltantes" >&2
   exit 1
 }
+validation_line="$(grep -n 'name: Validate deployment secrets and Tailscale variables' "$WORKFLOW" | cut -d: -f1)"
+publish_line="$(grep -n 'name: Build and publish image tagged with the SHA' "$WORKFLOW" | cut -d: -f1)"
+((validation_line < publish_line)) || { echo 'FAIL: se publicaría antes de validar secretos/OIDC.' >&2; exit 1; }
 echo "PASS: ejecución fail-closed garantizada si faltan secretos"
 
 # 6. Controles SSH, Deployments API y Rollback
