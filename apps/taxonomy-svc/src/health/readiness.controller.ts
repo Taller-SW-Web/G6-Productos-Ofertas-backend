@@ -28,19 +28,28 @@ export class ReadinessController {
   }
 
   private async ejecutarReadiness(): Promise<void> {
-    const ind = this.indicador as unknown as {
-      verificarReadiness?: () => Promise<void>;
-      readiness?: () => Promise<boolean>;
-    };
-    if (typeof ind.verificarReadiness === 'function') {
+    const ind = this.indicador as unknown as
+      | {
+          verificarReadiness?: () => Promise<void>;
+          readiness?: () => Promise<boolean>;
+        }
+      | null
+      | undefined;
+    if (typeof ind?.verificarReadiness === 'function') {
       await ind.verificarReadiness();
-    } else if (typeof ind.readiness === 'function') {
+      return;
+    }
+    if (typeof ind?.readiness === 'function') {
       const ok = await ind.readiness();
       if (!ok) {
         throw ProblemDetailsException.noDisponible(
           'Fuente de datos de taxonomía no disponible.',
         );
       }
+      return;
     }
+    throw ProblemDetailsException.noDisponible(
+      'Indicador de readiness de taxonomía no implementado.',
+    );
   }
 }

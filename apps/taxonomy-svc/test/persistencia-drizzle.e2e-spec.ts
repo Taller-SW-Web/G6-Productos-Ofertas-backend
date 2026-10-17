@@ -2,6 +2,7 @@ import { HttpStatus } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { drizzle } from 'drizzle-orm/node-postgres';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import request from 'supertest';
 import type { App } from 'supertest/types';
@@ -13,10 +14,17 @@ import {
 } from './../src/persistence/taxonomy.schema.js';
 import type { TaxonomyDb } from './../src/persistence/drizzle-taxonomy.repository.js';
 import type { DrizzleTaxonomyRepository } from './../src/persistence/drizzle-taxonomy.repository.js';
+import {
+  PostgresTaxonomyRepository,
+  type TaxonomyDataSource,
+} from './../src/postgres-taxonomy.repository.js';
+import { TAXONOMY_REPOSITORY } from './../src/taxonomy.repository.js';
 import { TaxonomySvcModule } from './../src/taxonomy-svc.module.js';
+import { AcreditacionBaseDesechable } from './postgres-isolation.js';
 import {
   PASSWORD_APP,
   ROL_APP,
+  construirSentenciaDropDdl,
   construirSentenciasDdl,
   construirSentenciasSemilla,
 } from './ddl-taxonomy-prueba.js';
@@ -31,6 +39,17 @@ function urlConRol(base: string, usuario: string, password: string): string {
   return url.toString();
 }
 
+function adaptadorRuntime(pool: Pool): TaxonomyDataSource {
+  let db: NodePgDatabase | undefined;
+  return {
+    read: <T>(consulta: (conexion: NodePgDatabase) => Promise<T>) => {
+      db ??= drizzle(pool);
+      return consulta(db);
+    },
+    verifyIdentity: () => Promise.resolve(),
+  };
+}
+
 describeIntegracion(
   'Persistencia Drizzle contra Postgres aislado (#35)',
   () => {
@@ -39,6 +58,7 @@ describeIntegracion(
     let dbApp: TaxonomyDb;
     let repo: DrizzleTaxonomyRepository;
     let urlApp: string;
+    let acreditacion: AcreditacionBaseDesechable;
 
     async function levantarAppNest(): Promise<INestApplication<App>> {
       const moduleFixture = await Test.createTestingModule({
@@ -51,10 +71,11 @@ describeIntegracion(
     }
 
     beforeAll(async () => {
-      const urlBase = URL_BASE as string;
+      acreditacion = AcreditacionBaseDesechable.acreditar(URL_BASE);
+      const urlBase = acreditacion.connectionString;
       urlApp = urlConRol(urlBase, ROL_APP, PASSWORD_APP);
       admin = new Pool({ connectionString: urlBase });
-      for (const sentencia of construirSentenciasDdl()) {
+      for (const sentencia of construirSentenciasDdl(acreditacion)) {
         await admin.query(sentencia);
       }
       for (const sentencia of construirSentenciasSemilla()) {
@@ -66,10 +87,35 @@ describeIntegracion(
     });
 
     afterAll(async () => {
-      await repo?.onApplicationShutdown();
-      await app?.end();
-      await admin?.query('DROP SCHEMA IF EXISTS taxonomy CASCADE');
-      await admin?.end();
+      try {
+        await repo?.onApplicationShutdown();
+      } catch {
+        /* cierre defensivo */
+      }
+      try {
+        await app?.end();
+      } catch {
+        /* cierre defensivo */
+      }
+      try {
+        await admin?.query(
+          `GRANT SELECT ON ALL TABLES IN SCHEMA taxonomy TO ${ROL_APP}`,
+        );
+      } catch {
+        /* restauración defensiva si el esquema existe */
+      }
+      try {
+        if (acreditacion) {
+          await admin?.query(construirSentenciaDropDdl(acreditacion));
+        }
+      } catch {
+        /* limpieza defensiva */
+      }
+      try {
+        await admin?.end();
+      } catch {
+        /* limpieza defensiva */
+      }
     });
 
     it('findCategoriasActivas devuelve solo ACTIVO con el mapeo esperado', async () => {
@@ -235,6 +281,17 @@ describeIntegracion(
       }
     });
 
+    it('onApplicationShutdown cierra el pool y deja de atender consultas', async () => {
+      const repoEfimero = crearRepositorioDrizzle(urlApp);
+
+      await expect(repoEfimero.verificarReadiness()).resolves.toBeUndefined();
+      await repoEfimero.onApplicationShutdown();
+
+      await expect(repoEfimero.verificarReadiness()).rejects.toBeInstanceOf(
+        ProblemDetailsException,
+      );
+    });
+
     it('el rol de aplicacion no puede crear objetos en el esquema', async () => {
       const error = await app
         .query('CREATE TABLE taxonomy.permiso_denegado (id int)')
@@ -269,6 +326,78 @@ describeIntegracion(
       } finally {
         await appNest.close();
       }
+    });
+
+    describe('repositorio de runtime (PostgresTaxonomyRepository)', () => {
+      let poolRuntime: Pool;
+      let repoRuntime: PostgresTaxonomyRepository;
+
+      beforeAll(() => {
+        poolRuntime = new Pool({ connectionString: urlApp });
+        repoRuntime = new PostgresTaxonomyRepository(
+          adaptadorRuntime(poolRuntime),
+        );
+      });
+
+      afterAll(async () => {
+        try {
+          await poolRuntime?.end();
+        } catch {
+          /* cierre defensivo */
+        }
+      });
+
+      it('ejecuta consultas reales y devuelve solo filas ACTIVO', async () => {
+        const categorias = await repoRuntime.findCategoriasActivas();
+        expect(categorias.map((c) => c.nombre)).toEqual(
+          expect.arrayContaining(['Calzado', 'Zapatillas']),
+        );
+        expect(categorias.every((c) => c.estado === 'ACTIVO')).toBe(true);
+
+        const marcasActivas = await repoRuntime.findMarcasActivas();
+        const nombresMarcas = marcasActivas.map((m) => m.nombre);
+        expect(nombresMarcas).toContain('Marathon');
+        expect(nombresMarcas).not.toContain('Retirada');
+        expect(marcasActivas.every((m) => m.estado === 'ACTIVO')).toBe(true);
+      });
+
+      it('readiness es verdadero contra la base viva', async () => {
+        await expect(repoRuntime.readiness()).resolves.toBe(true);
+        await expect(repoRuntime.verificarReadiness()).resolves.toBeUndefined();
+      });
+
+      it('traduce permisos denegados a 503 vía HTTP y se recupera', async () => {
+        const moduleFixture = await Test.createTestingModule({
+          imports: [TaxonomySvcModule],
+        })
+          .overrideProvider(TAXONOMY_REPOSITORY)
+          .useValue(repoRuntime)
+          .compile();
+        const appRuntime: INestApplication<App> =
+          moduleFixture.createNestApplication();
+        await appRuntime.init();
+
+        try {
+          await request(appRuntime.getHttpServer())
+            .get('/health/readiness')
+            .expect(HttpStatus.OK);
+
+          await admin.query(`REVOKE SELECT ON taxonomy.brands FROM ${ROL_APP}`);
+          try {
+            await request(appRuntime.getHttpServer())
+              .get('/health/readiness')
+              .expect(HttpStatus.SERVICE_UNAVAILABLE);
+          } finally {
+            await admin.query(`GRANT SELECT ON taxonomy.brands TO ${ROL_APP}`);
+          }
+
+          await request(appRuntime.getHttpServer())
+            .get('/health/readiness')
+            .expect(HttpStatus.OK);
+        } finally {
+          await appRuntime.close();
+        }
+      });
     });
   },
 );

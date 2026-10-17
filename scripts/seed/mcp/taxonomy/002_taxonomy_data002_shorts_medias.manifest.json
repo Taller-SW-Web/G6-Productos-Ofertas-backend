@@ -28,6 +28,12 @@
     "fuente_estado": "Supabase taxonomy (lectura): 7 categorias, 3 marcas, 2 caracteristicas, 15 characteristic_values, 4 product_types, 8 relaciones ptc, 3 category_seo, 1 runtime_setting.",
     "no_persistido": true
   },
+  "estado_carga": {
+    "persistido": false,
+    "motivo": "El lote se mantiene SIN ejecutar contra la base compartida (Supabase) hasta autorizacion expresa; solo se verifico en motor aislado.",
+    "limitacion_global_talla": "La caracteristica 'Talla' es global y compartida entre tipos de producto (calzado numerico vs. ropa alfabetico). Evitar combinaciones invalidas (p. ej. una prenda con talla 42) requiere validacion por tipo de producto y NO un cambio unilateral del modelo de datos.",
+    "coordinacion_poma": "Catalogo (owner: Poma) debe validar el mapeo producto -> maestro y las combinaciones validas de talla por tipo de producto antes de cualquier carga persistente."
+  },
   "idempotencia": {
     "estrategia": "Verificacion de contenido previa + INSERT ... ON CONFLICT DO NOTHING con id reproducible + verificacion posterior",
     "conflicto": "Si una fila con la misma clave natural existe con otro id/contenido -> RAISE EXCEPTION y se detiene la carga (no sobrescribe)",
