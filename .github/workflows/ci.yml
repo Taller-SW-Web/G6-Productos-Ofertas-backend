@@ -153,14 +153,24 @@ jobs:
             esac
             name="${service}-generic-ci"
             trap 'docker rm --force "$name" >/dev/null 2>&1 || true' EXIT
+            runtime_env=()
+            if [[ "$service" == pricing-svc ]]; then
+              # Fixture aislada: liveness no necesita una base disponible.
+              runtime_env+=(--env 'DATABASE_URL=postgresql://pricing:ci-fixture@127.0.0.1:1/pricing?sslmode=verify-full')
+            fi
             docker run --detach --name "$name" --publish "127.0.0.1::${port}" \
-              --env "PORT=${port}" --env "${port_env}=${port}" "g6-service:${service}-ci" >/dev/null
+              --env "PORT=${port}" --env "${port_env}=${port}" "${runtime_env[@]}" "g6-service:${service}-ci" >/dev/null
             host_port="$(docker port "$name" "${port}/tcp" | awk -F: '{print $NF}')"
             response=''
             for attempt in {1..30}; do
               if response="$(curl --fail --silent "http://127.0.0.1:${host_port}/health")"; then break; fi
               sleep 2
             done
+            if [[ -z "$response" ]]; then
+              printf 'FAIL: %s no respondió /health con HTTP 200.\n' "$service" >&2
+              docker inspect --format 'status={{.State.Status}} exit={{.State.ExitCode}}' "$name" >&2
+              exit 1
+            fi
             node -e '
               const payload = JSON.parse(process.argv[1]);
               if (payload.status !== "ok" || payload.service !== process.argv[2]) {
@@ -168,6 +178,14 @@ jobs:
                 process.exit(1);
               }
             ' "$response" "$service"
+            if [[ "$service" == pricing-svc ]]; then
+              readiness_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${host_port}/health/ready")"
+              if [[ "$readiness_status" != 503 ]]; then
+                printf 'FAIL: pricing-svc debe responder readiness=503 con la base de fixture inaccesible.\n' >&2
+                exit 1
+              fi
+              printf 'PASS: pricing-svc mantiene liveness=200 y readiness=503 con PostgreSQL inaccesible.\n'
+            fi
             healthy=''
             for attempt in {1..30}; do
               healthy="$(docker inspect --format '{{.State.Health.Status}}' "$name")"
