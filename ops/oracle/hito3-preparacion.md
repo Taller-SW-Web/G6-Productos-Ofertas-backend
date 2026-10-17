@@ -17,6 +17,33 @@ La infraestructura base está parcialmente preparada para nueve componentes. La 
 | G. Publicación manual | PENDIENTE | No hay autorización de liberación individual para ningún servicio. No se ejecutó CD ni migraciones. |
 | H. Entrega a agente B | PENDIENTE | No activar CD automático hasta completar los gates indicados al final. |
 
+## Actualización de continuación (2026-10-17 02:25 UTC / 2026-10-16 21:25 Lima)
+
+- Las dos ejecuciones CI del PR #122 sobre `7672b4711e7680196cf59be5d4209a77175b4a0d` terminaron SUCCESS. El log confirma que `ops/oracle/tests/deploy-g6-service.test.sh` se ejecutó, y que sus comprobaciones de rollback/aislamiento reportaron PASS. La suite no fue omitida.
+- `master` avanzó a `950fd20499d67c6f265dcde4a40971f4c4fb6180` (PR #118). Se sincronizó `castilla` mediante merge no destructivo en `b2fb417cebbffeabd055310d8ec41e4ffbc5aae7`; no se hizo rebase. PR #122 permanece draft, sin review decision/aprobación. Las CI del nuevo head están pendientes/en curso en esta actualización.
+- Oracle sigue en Docker 29.9.0 / Compose 5.6.0, ejecutor `ejecutor=4 registro=2`, con allowlist integrada de cuatro servicios. Caddy está running; RabbitMQ está healthy; no hay contenedores de aplicación. `g6-http` permanece vacía, `g6-edge` tiene solo `g6-caddy`, y `g6-po_g6_backend` tiene solo `g6-po-rabbitmq-1`. Esto confirma separación de redes, pero no prueba conectividad DNS/HTTP entre aplicaciones que aún no están desplegadas.
+- Los ocho directorios nuevos `/etc/g6-<servicio>` y `/var/lib/g6-productos-ofertas/<servicio>` existen con modos 0750 y 0700 respectivamente. API Gateway, Catalog y Taxonomy no tienen `runtime.env`; los otros cinco archivos preparados son 0640 y vacíos. Inventory mantiene `/etc/g6-inventory/runtime.env` (root:g6-inventory-deploy, 0640) y `/var/lib/g6-inventory` (inventory-deploy:g6-inventory-deploy, 0700), sin leer el contenido runtime.
+- En el host, `docker compose config --quiet` pasó para el Compose genérico instalado aplicado a los ocho servicios no-Inventory, y para el Compose/overlay instalado de Inventory. El Compose genérico instalado no incluye todavía el montaje CA de solo lectura, y el registro sigue apuntando Gateway al Compose genérico heredado. El Compose dedicado Gateway (`g6-edge` + overlay `g6-http`) del PR no se instaló antes de aprobación/integración; su compatibilidad se validó en CI Linux del commit anterior. No ejecutar Gateway hasta instalarlo desde el commit integrado y configurar upstreams listos.
+- SHA-256 observados en Oracle a `2026-10-17 02:25:09 UTC`: ejecutor v4 `f06b0fb48ed4d08a26114beeae339aea809ba3b762880907168b7281dd6acd40`; `service-registry.sh` `ab95405450a9b4f9f5527381d444c7de6fa58ddc64afb12ae7fbe9aa3dab4a30`; allowlist integrada `services.psv` `259e53249ffd0764231f4bf5a96a85c061b1464895ec095df61b4cae9b0bba57`; Compose genérico instalado `bb2fdefa5f25744aa7f7d7c151d42a80559fb689bdfd1ba0a35da13299551180`; overlay genérico `6f404818256f6fb4639faf64466f4400845190c2f07cd950cd7928075dbeb5fe`; Compose Inventory `1fec0615e1c229c5bcbe41a02eceda2feaedf2d14e46454d12774ac4e4250879`; overlay Inventory `6658c2157b9bdf246ff1607f7bc1338f973e5f28486b3cc0e4ee89b1b0b9b50c`. Estos hashes confirman que el registro de nueve y el Compose candidate siguen pendientes en Oracle.
+- PostgreSQL sigue sin prueba de conectividad/autenticación/rol/permisos: no se proporcionaron credenciales runtime para Catalog/Taxonomy. La CA permanece en host como root:root 0444 y aún no está montada en containers.
+- Tailscale continúa `NeedsLogin` y no tiene IP. Se requiere que Marco identifique/confirme la tailnet aprobada y autentique/apruebe el nodo Oracle desde esa tailnet; la autenticación no se ejecutó. Luego el administrador del repositorio debe provisionar la integración de Actions con identidad tagged/ephemeral autorizada y cambiar el destino SSH al MagicDNS/IP privada. Mantener cerrado el acceso de runners por SSH público.
+
+### Estado operativo de los nueve componentes
+
+`PREPARADO` significa infraestructura host/directorios/Compose genérico comprobados; no acredita readiness funcional. Ninguno está listo para liberar o desplegado.
+
+| Servicio | Estado | Pendiente específico |
+|---|---|---|
+| api-gateway | INFRAESTRUCTURA_PREPARADA | PR integrado, Compose dedicado/CA, upstreams reales, health/readiness y Caddy. |
+| catalog-svc | INFRAESTRUCTURA_PREPARADA | PR integrado, credential PostgreSQL mínimo privilegio, TLS verify-full y prueba de rol/permisos. |
+| pricing-svc | INFRAESTRUCTURA_PREPARADA | Readiness funcional; `/health` solo acredita liveness. |
+| price-audit-svc | INFRAESTRUCTURA_PREPARADA | Readiness funcional; `/health` solo acredita liveness. |
+| promotions-svc | INFRAESTRUCTURA_PREPARADA | Readiness funcional; `/health` solo acredita liveness. |
+| inventory-svc | INFRAESTRUCTURA_PREPARADA | Configuración heredada preservada; readiness funcional no acreditada. |
+| taxonomy-svc | INFRAESTRUCTURA_PREPARADA | PR integrado, credential PostgreSQL mínimo privilegio, TLS verify-full y prueba de rol/permisos. |
+| combos-svc | INFRAESTRUCTURA_PREPARADA | Readiness funcional; `/health` solo acredita liveness. |
+| bulk-svc | INFRAESTRUCTURA_PREPARADA | Readiness funcional; `/health` solo acredita liveness. |
+
 ## Registro de operaciones en Oracle
 
 Tiempos de las operaciones de Oracle entre `2026-10-17 01:58 UTC` y `2026-10-17 02:13 UTC` (Lima: `2026-10-16 20:58`–`21:13`, UTC−5). Las horas exactas de respaldo y autorización se conservaron en sus metadatos y en el issue #8.
