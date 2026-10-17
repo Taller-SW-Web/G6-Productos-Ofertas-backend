@@ -17,6 +17,7 @@ import { TaxonomyClient } from './taxonomy.client.js';
 import { ProblemFilter } from './problem.filter.js';
 import { CatalogConfig } from './config.js';
 import { CATALOG_DATABASE, ReadinessController } from './readiness.js';
+import { DEMO_PRICING, PricingClient } from './pricing.client.js';
 
 @Module({
   imports: [],
@@ -56,6 +57,8 @@ export class AppModule {
         { provide: CatalogConfig, useValue: config },
         { provide: CATALOG_TAXONOMY_CONFIG, useValue: config.taxonomy },
         { provide: CATALOG_POSTGRES_CONFIG, useValue: config.database },
+        PricingClient,
+        { provide: DEMO_PRICING, useExisting: PricingClient },
       ],
     };
   }
