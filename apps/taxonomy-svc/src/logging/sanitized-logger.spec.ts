@@ -106,6 +106,19 @@ describe('sanitizar (#34)', () => {
     expect(resultado).toBe('Authorization: Basic ***');
   });
 
+  it('enmascara Cookie y Set-Cookie cuando aparecen como texto libre', () => {
+    const valorCookie = 'session=valor-cookie-privado; theme=dark';
+    const valorSetCookie = 'sid=valor-set-cookie-privado; HttpOnly; Secure';
+    const resultado = sanitizar(
+      `response headers: Cookie: ${valorCookie}\nSet-Cookie: ${valorSetCookie}`,
+    ) as string;
+
+    expect(resultado).not.toContain('valor-cookie-privado');
+    expect(resultado).not.toContain('valor-set-cookie-privado');
+    expect(resultado).toContain('Cookie: ***');
+    expect(resultado).toContain('Set-Cookie: ***');
+  });
+
   it('enmascara Authorization con Basic en minúsculas sin alterar el esquema', () => {
     const resultado = sanitizar(
       `authorization=basic b3RybzpjcmVkZW5jaWFs`,
@@ -232,5 +245,21 @@ describe('SanitizedLogger (#34)', () => {
     const mensajeJson = String(sink.registros[1][0]);
     expect(mensajeJson).toContain('"client_secret":"***"');
     expect(mensajeJson).toContain('"api_key":"***"');
+  });
+
+  it('no registra valores Cookie o Set-Cookie recibidos como texto libre', () => {
+    const sink = new SinkCapturador();
+    const logger = new SanitizedLogger(sink);
+    const valorCookie = 'sid=valor-cookie-privado';
+    const valorSetCookie = 'refresh=valor-set-cookie-privado; HttpOnly';
+
+    logger.warn(`Cookie: ${valorCookie}`);
+    logger.error(`Set-Cookie: ${valorSetCookie}`);
+
+    const volcado = sink.volcado();
+    expect(volcado).not.toContain('valor-cookie-privado');
+    expect(volcado).not.toContain('valor-set-cookie-privado');
+    expect(volcado).toContain('Cookie: ***');
+    expect(volcado).toContain('Set-Cookie: ***');
   });
 });

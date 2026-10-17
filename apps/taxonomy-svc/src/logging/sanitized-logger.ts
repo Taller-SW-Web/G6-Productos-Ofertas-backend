@@ -6,8 +6,10 @@ const CLAVES_SENSIBLES =
 const AUTORIZACION =
   /(authorization\s*[:=]\s*)((?:bearer|basic)\s+)?([^\s,;&"'\\]+)/gi;
 
+const ENCABEZADOS_COOKIE = /((?:set-cookie|cookie)\s*[:=]\s*)([^\r\n]*)/gi;
+
 const CLAVES_SENSIBLES_JSON =
-  'password|passwd|pwd|secret|token|api[_-]?key|apikey|authorization|credential|credentials|database[_-]?url|dsn|pgpassword';
+  'password|passwd|pwd|secret|token|api[_-]?key|apikey|authorization|cookie|set-cookie|credential|credentials|database[_-]?url|dsn|pgpassword';
 
 const JSON_SENSIBLE = new RegExp(
   `("(?:[^"\\\\]*(?:${CLAVES_SENSIBLES_JSON})[^"\\\\]*)"\\s*:\\s*")((?:[^"\\\\]|\\\\.)*)(")`,
@@ -30,6 +32,7 @@ function esObjetoPlano(valor: unknown): valor is Record<string, unknown> {
 function sanitizarTexto(texto: string): string {
   return texto
     .replace(AUTORIZACION, `$1$2${MASCARA}`)
+    .replace(ENCABEZADOS_COOKIE, `$1${MASCARA}`)
     .replace(JSON_SENSIBLE, `$1${MASCARA}$3`)
     .replace(PAR_CLAVE_VALOR, `$1${MASCARA}`)
     .replace(CREDENCIALES_EN_URL, `$1${MASCARA}$2`);
