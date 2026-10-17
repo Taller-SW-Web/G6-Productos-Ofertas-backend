@@ -233,6 +233,7 @@ jobs:
     env:
       TAXONOMY_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/taxonomy_test
       TAXONOMY_TEST_DB_ACK: desechable-aislado
+      TAXONOMY_TEST_DB_EPHEMERAL: '1'
 
     steps:
       - name: Checkout repository

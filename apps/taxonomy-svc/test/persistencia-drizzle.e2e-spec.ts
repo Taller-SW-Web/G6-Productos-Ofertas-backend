@@ -20,7 +20,7 @@ import {
 } from './../src/postgres-taxonomy.repository.js';
 import { TAXONOMY_REPOSITORY } from './../src/taxonomy.repository.js';
 import { TaxonomySvcModule } from './../src/taxonomy-svc.module.js';
-import { AcreditacionBaseDesechable } from './postgres-isolation.js';
+import { AcreditacionInstanciaEfimera } from './postgres-isolation.js';
 import {
   PASSWORD_APP,
   ROL_APP,
@@ -58,7 +58,7 @@ describeIntegracion(
     let dbApp: TaxonomyDb;
     let repo: DrizzleTaxonomyRepository;
     let urlApp: string;
-    let acreditacion: AcreditacionBaseDesechable;
+    let acreditacion: AcreditacionInstanciaEfimera;
 
     async function levantarAppNest(): Promise<INestApplication<App>> {
       const moduleFixture = await Test.createTestingModule({
@@ -71,7 +71,7 @@ describeIntegracion(
     }
 
     beforeAll(async () => {
-      acreditacion = AcreditacionBaseDesechable.acreditar(URL_BASE);
+      acreditacion = await AcreditacionInstanciaEfimera.acreditar(URL_BASE);
       const urlBase = acreditacion.connectionString;
       urlApp = urlConRol(urlBase, ROL_APP, PASSWORD_APP);
       admin = new Pool({ connectionString: urlBase });

@@ -1,5 +1,5 @@
 import {
-  AcreditacionBaseDesechable,
+  AcreditacionInstanciaEfimera,
   BaseNoAisladaError,
 } from './postgres-isolation.js';
 
@@ -9,23 +9,23 @@ export const PASSWORD_APP = 'taxonomy_app_prueba';
 
 const SENTENCIA_DROP = 'DROP SCHEMA IF EXISTS taxonomy CASCADE';
 
-function exigirAcreditacion(acreditacion: AcreditacionBaseDesechable): void {
-  if (!(acreditacion instanceof AcreditacionBaseDesechable)) {
+function exigirAcreditacion(acreditacion: AcreditacionInstanciaEfimera): void {
+  if (!(acreditacion instanceof AcreditacionInstanciaEfimera)) {
     throw new BaseNoAisladaError(
-      'DDL destructivo sin acreditación de base desechable.',
+      'DDL destructivo sin acreditación de instancia efímera verificada en vivo.',
     );
   }
 }
 
 export function construirSentenciaDropDdl(
-  acreditacion: AcreditacionBaseDesechable,
+  acreditacion: AcreditacionInstanciaEfimera,
 ): string {
   exigirAcreditacion(acreditacion);
   return SENTENCIA_DROP;
 }
 
 export function construirSentenciasDdl(
-  acreditacion: AcreditacionBaseDesechable,
+  acreditacion: AcreditacionInstanciaEfimera,
 ): string[] {
   exigirAcreditacion(acreditacion);
   return [
