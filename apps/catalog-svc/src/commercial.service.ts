@@ -4,6 +4,7 @@ import {
   HttpException,
   ServiceUnavailableException,
   Optional,
+  BadRequestException,
 } from '@nestjs/common';
 import { CatalogConfig } from './config.js';
 import { DEMO_PRICING, type CurrentProductPrice } from './pricing.client.js';
@@ -74,6 +75,8 @@ export class CommercialService {
       throw new ServiceUnavailableException();
     }
     if (this.demoEnabled(query)) {
+      if (query.estado !== undefined)
+        throw new BadRequestException('estado no está disponible en preview');
       if (query.categoriaId !== undefined)
         await this.taxonomy.category(query.categoriaId, correlationId);
       if (query.marcaId !== undefined)

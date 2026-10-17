@@ -145,6 +145,7 @@ describe.skipIf(process.env.G6_READONLY_INTEGRATION !== 'catalog')(
       expect(demoRows.length).toBeLessThanOrEqual(
         Number(observed.products_with_images),
       );
+      expect(demoRows.length).toBe(Number(observed.products_with_images));
       process.stdout.write(
         JSON.stringify({
           evidence: 'catalog-demo-readonly-observation',

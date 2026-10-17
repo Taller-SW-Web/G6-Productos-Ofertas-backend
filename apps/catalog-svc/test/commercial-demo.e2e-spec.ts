@@ -193,6 +193,16 @@ describe('Marketplace demo preview (HTTP fixtures; Pricing is mocked)', () => {
     expect(pricing.currentPrice).not.toHaveBeenCalled();
   });
 
+  it('rejects estado in preview instead of returning drafts as matching ACTIVO', async () => {
+    await start();
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/productos?canal=MARKETPLACE&estado=ACTIVO')
+      .expect(400);
+    expect(response.body.statusCode).toBe(400);
+    expect(repository.listDemoCandidates).not.toHaveBeenCalled();
+    expect(pricing.currentPrice).not.toHaveBeenCalled();
+  });
+
   it('maps Pricing outage to 503 and missing detail price to 404', async () => {
     await start();
     pricing.currentPrice.mockRejectedValueOnce(

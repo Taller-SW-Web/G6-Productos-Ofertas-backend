@@ -35,7 +35,35 @@ function validDate(value: unknown): value is string {
 export class PricingClient {
   constructor(private readonly config: CatalogConfig) {}
 
-  async currentPrice(productId: string): Promise<CurrentProductPrice | null> {
+  private async readJson(response: Response): Promise<unknown> {
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > 64 * 1024) throw new Error();
+        chunks.push(value);
+      }
+    } finally {
+      await reader.cancel();
+    }
+    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+  }
+
+  async checkReady(): Promise<void> {
+    // One read through the actual Pricing operation verifies route, guard and DB
+    // without walking the demo catalog or manufacturing a price.
+    await this.currentPrice('00000000-0000-4000-8000-000000000000', 1000);
+  }
+
+  async currentPrice(
+    productId: string,
+    timeoutMs = 2500,
+  ): Promise<CurrentProductPrice | null> {
     try {
       if (!this.config.pricingOrigin) throw new Error();
       const response = await fetch(
@@ -43,10 +71,17 @@ export class PricingClient {
           `/api/v1/precios/productos/${encodeURIComponent(productId)}`,
           this.config.pricingOrigin,
         ),
-        { redirect: 'manual', signal: AbortSignal.timeout(2500) },
+        { redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) },
       );
       if (response.status === 404) {
-        await response.body?.cancel();
+        if (
+          response.headers.get('content-type')?.split(';')[0] !==
+          'application/problem+json'
+        )
+          throw new Error();
+        const failure = await this.readJson(response);
+        if (!record(failure) || failure.code !== 'PRECIO_NO_ENCONTRADO')
+          throw new Error();
         return null;
       }
       if (
@@ -55,23 +90,7 @@ export class PricingClient {
           'application/json'
       )
         throw new Error();
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error();
-      const chunks: Uint8Array[] = [];
-      let size = 0;
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          size += value.byteLength;
-          if (size > 64 * 1024) throw new Error();
-          chunks.push(value);
-        }
-      } finally {
-        await reader.cancel();
-      }
-      const raw = Buffer.concat(chunks).toString('utf8');
-      const body: unknown = JSON.parse(raw);
+      const body = await this.readJson(response);
       const now = Date.now();
       if (
         !record(body) ||

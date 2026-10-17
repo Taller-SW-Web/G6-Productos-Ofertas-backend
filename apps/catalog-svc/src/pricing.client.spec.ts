@@ -45,8 +45,43 @@ describe('PricingClient (mock HTTP responses)', () => {
   });
 
   it('treats a Pricing 404 as no price', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 404 }));
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 'PRECIO_NO_ENCONTRADO', status: 404 }),
+        {
+          status: 404,
+          headers: { 'content-type': 'application/problem+json' },
+        },
+      ),
+    );
     await expect(client.currentPrice(productId)).resolves.toBeNull();
+  });
+
+  it('does not treat an unregistered Pricing route as a missing product price', async () => {
+    fetchMock.mockResolvedValue(
+      new Response('<html>not found</html>', {
+        status: 404,
+        headers: { 'content-type': 'text/html' },
+      }),
+    );
+    await expect(client.currentPrice(productId)).rejects.toMatchObject({
+      status: 503,
+    });
+  });
+
+  it('checks Pricing readiness with one operation request', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: 'PRECIO_NO_ENCONTRADO', status: 404 }),
+        {
+          status: 404,
+          headers: { 'content-type': 'application/problem+json' },
+        },
+      ),
+    );
+    await expect(client.checkReady()).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: 'manual' });
   });
 
   it.each([
