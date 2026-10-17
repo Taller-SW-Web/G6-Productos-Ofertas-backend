@@ -1,0 +1,14 @@
+# Opt-in overlay for generic services after g6-http has been prepared.
+# The base Compose remains deployable before the external network exists.
+services:
+  service:
+    networks:
+      default: {}
+      g6-http:
+        aliases:
+          - ${G6_SERVICE_IMAGE_NAME:?G6_SERVICE_IMAGE_NAME es obligatorio}
+
+networks:
+  g6-http:
+    external: true
+    name: g6-http

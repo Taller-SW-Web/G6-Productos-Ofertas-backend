@@ -56,8 +56,18 @@ La conexión exige CA y verificación del hostname en modo Session Pooler; los
 timeouts de conexión y consulta son de 1 s, dentro del límite HTTP de 2 s. La
 conexión se cierra en éxito o error; un éxito previo no se conserva como caché.
 
-Importar el módulo sin configuración mantiene el indicador explícitamente no
-configurado y responde 503. Los adaptadores simulados solo existen en tests.
+Tras integrar `master`, el indicador combina nuestro sondeo PostgreSQL con el
+readiness comercial entrante: identidad del pool, consulta y política de
+elegibilidad. Una base disponible no basta para declarar disponibles las nuevas
+operaciones comerciales. La política pendiente de `master` conserva el 503 hasta
+contar con una fuente válida; no se reemplaza por un éxito ficticio. Los errores
+HTTP usan el filtro de problemas contractual incorporado desde `master`.
+Los adaptadores simulados solo existen en tests.
+
+El arranque conserva la validación tipada y los logs sanitizados y añade la
+verificación de identidad y el host HTTP de `master`. El sondeo CLI entrante se
+conserva en `node dist/apps/catalog-svc/readiness.js`; solo se ejecuta al invocarlo
+directamente, sin efectos secundarios al importar el controlador.
 
 No se verifica RabbitMQ: este bloque no admite comandos, publica eventos ni
 inicia consumers. Al conectar esas capacidades habrá que comprobar su broker.
@@ -103,9 +113,12 @@ en Supabase, no ejecutan migraciones ni necesitan servicios cloud.
 logging, documentación y pruebas. La autorización expresa para `pg` y sus tipos
 resolvió la dependencia de archivos compartidos. Sin bloqueos externos del #43.
 
-Base local: `24227527c632be4f3b8de612954328904ea57de0`. La comparación remota inicial
-mostró `master` 26 commits por delante de `poma`, incluidos cambios de Taxonomía y
-dependencias. No se sincronizaron ramas ni se copiaron cambios ajenos.
+Base original del #43: `24227527c632be4f3b8de612954328904ea57de0`; implementación
+original: `b9194bc6d341e5ca9dba28cac51dca0a6ce8af35`. Posteriormente el usuario
+autorizó expresamente integrar `origin/master` `9cd6edcef6039ebdf9f1f94c9e991b0358ffc9de`
+en `poma` mediante merge. Se conservan las capacidades de ambas ramas sin rebase
+ni force push. Drizzle y las operaciones comerciales proceden de `master`, no son
+desarrollo nuevo del #43. Los archivos privados locales permanecen excluidos.
 
 La comprobación autenticada de solo lectura al Session Pooler pasó el 2026-10-16
 (America/Lima): `/health`, `/health/live` y `/health/ready` respondieron 200 usando
@@ -118,7 +131,7 @@ de revisión, aceptación y fusión del PR.
 También se verificó el camino de fallo con el driver real apuntando a un puerto
 local inaccesible: `/health/ready` respondió 503 y `/health/live` siguió en 200.
 
-## Validación local ejecutada
+## Validación original del #43
 
 Entorno: Node `v24.16.0`, npm `11.13.0`; tests automatizados con fixtures locales.
 La comprobación de lectura real descrita arriba se ejecutó por separado.
@@ -142,3 +155,20 @@ Los primeros intentos de Vitest en sandbox fallaron con `EPERM` al renombrar la
 caché temporal, antes de ejecutar pruebas. Las ejecuciones posteriores fuera del
 sandbox pasaron. El aviso de Vite sobre `vite-tsconfig-paths` es preexistente y no
 se modificó la configuración compartida.
+
+## Validación tras integrar master
+
+- Catálogo: 115 unitarias PASS; 9 e2e PASS y 4 de PostgreSQL omitidas por su opt-in.
+- General: 284 unitarias PASS; 344 e2e PASS y 20 omitidas en 4 suites de integración
+  que requieren variables/entornos explícitos. No se desactivaron pruebas.
+- Build de Catálogo, typecheck general, lint, format y whitespace: PASS.
+- CLI de readiness sin configuración: salida JSON `not_ready`, código 1 esperado;
+  sin ejecutar automáticamente el CLI al importar el controlador.
+- Comprobación real de solo lectura tras el merge: nuestro sondeo PostgreSQL y
+  la verificación de identidad de `master` pasan; liveness 200. Readiness comercial
+  devuelve 503 `SERVICIO_NO_DISPONIBLE`, conservando el cierre de la política de
+  elegibilidad pendiente de `master`.
+- Se compararon los archivos privados por hash: `.env.local` y CA local intactos.
+  Configuración, logger, liveness y sondeo PostgreSQL originales se conservan.
+  Se adaptaron módulo, bootstrap y su prueba, readiness, prueba HTTP y README para
+  conectar ambas implementaciones; sin cambios manuales a otros microservicios.

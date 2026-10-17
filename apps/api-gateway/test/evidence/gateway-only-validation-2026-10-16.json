@@ -1,0 +1,136 @@
+{
+  "captured_at": "2026-10-16T20:56:57.383Z",
+  "node": "v24.21.0",
+  "scope": "Gateway only; Promotions, DATA and shared manifests match master",
+  "base_commit": "24227527c632be4f3b8de612954328904ea57de0",
+  "approved_gateway_source": "68c96a77ab8c77b1f218d6283de7e1f4efa45e4f",
+  "excluded_issues": [
+    33,
+    70,
+    15,
+    112
+  ],
+  "source_files_verified": 165,
+  "package_json_sha256": "1be253974f8db7a59720028186c778f44422e1a0a7821f1392b1012b4aa38191",
+  "package_lock_sha256": "28af1357e621bfb81b140489e9e2accf72d8ce6c774b77e11e8c120a1ac7ca7e",
+  "checks": [
+    {
+      "name": "clean-install",
+      "command": "npm ci --no-audit --no-fund",
+      "exit_code": 0,
+      "result": "PASS",
+      "summary": [
+        "added 343 packages in 13s"
+      ]
+    },
+    {
+      "name": "focused-unit",
+      "command": "npm test -- apps/api-gateway --maxWorkers=1",
+      "exit_code": 0,
+      "result": "PASS",
+      "summary": [
+        " Test Files  6 passed (6)",
+        "      Tests  59 passed (59)",
+        "   Duration  4.37s (transform 341ms, setup 0ms, import 2.31s, tests 441ms, environment 1ms)"
+      ]
+    },
+    {
+      "name": "focused-http",
+      "command": "npm run test:e2e -- apps/api-gateway --maxWorkers=1",
+      "exit_code": 0,
+      "result": "PASS",
+      "summary": [
+        " Test Files  3 passed | 1 skipped (4)",
+        "      Tests  312 passed | 4 skipped (316)",
+        "   Duration  9.05s (transform 378ms, setup 0ms, import 3.69s, tests 4.33s, environment 1ms)"
+      ]
+    },
+    {
+      "name": "all-unit",
+      "command": "npm test -- --maxWorkers=1",
+      "exit_code": 0,
+      "result": "PASS",
+      "summary": [
+        " Test Files  14 passed (14)",
+        "      Tests  67 passed (67)",
+        "   Duration  12.73s (transform 581ms, setup 0ms, import 7.18s, tests 1.99s, environment 1ms)"
+      ]
+    },
+    {
+      "name": "all-http",
+      "command": "npm run test:e2e -- --maxWorkers=1",
+      "exit_code": 0,
+      "result": "PASS",
+      "summary": [
+        " Test Files  11 passed | 1 skipped (12)",
+        "      Tests  320 passed | 4 skipped (324)",
+        "   Duration  17.34s (transform 667ms, setup 0ms, import 8.70s, tests 5.75s, environment 1ms)"
+      ]
+    },
+    {
+      "name": "typecheck",
+      "command": "npm run typecheck",
+      "exit_code": 0,
+      "result": "PASS",
+      "summary": []
+    },
+    {
+      "name": "lint",
+      "command": "npm run lint",
+      "exit_code": 0,
+      "result": "PASS",
+      "summary": []
+    },
+    {
+      "name": "format",
+      "command": "npm run format:check",
+      "exit_code": 0,
+      "result": "PASS",
+      "summary": [
+        "All matched files use Prettier code style!"
+      ]
+    },
+    {
+      "name": "build",
+      "command": "npm run build",
+      "exit_code": 0,
+      "result": "PASS",
+      "summary": []
+    },
+    {
+      "name": "build-all",
+      "command": "npm run build:all",
+      "exit_code": 0,
+      "result": "PASS",
+      "summary": []
+    },
+    {
+      "name": "seed-runner",
+      "command": "node --test scripts/seed/run.test.mjs",
+      "exit_code": 0,
+      "result": "PASS",
+      "summary": [
+        "ℹ tests 14",
+        "ℹ pass 14",
+        "ℹ fail 0",
+        "ℹ skipped 0"
+      ]
+    },
+    {
+      "name": "gateway-readiness",
+      "command": "node apps/api-gateway/test/readiness.smoke.mjs",
+      "exit_code": 0,
+      "result": "PASS",
+      "summary": []
+    },
+    {
+      "name": "baseline-promotions",
+      "result": "PASS",
+      "detail": "Compiled baseline starts and returns health 200; no deferred coupon/readiness code or direct database/broker dependencies in clean publication."
+    }
+  ],
+  "pending": {
+    "real_postgres_cases": 4,
+    "external_marketplace_smoke": "NO_EJECUTADO_MISSING_AUTHORIZED_CONFIGURATION"
+  }
+}

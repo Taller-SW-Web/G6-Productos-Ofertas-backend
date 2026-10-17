@@ -1,0 +1,109 @@
+{
+  "service": "catalog",
+  "date": "2026-10-16T18:27:21.896Z",
+  "node": "v24.19.0",
+  "probeSha256": "0c08e87abaa9159f6616abe81dff07509755dbbb8428486ca73f258b9bb69942",
+  "checks": {
+    "configuration": "PASS",
+    "authentication": "PASS",
+    "tlsCaHostname": "PASS",
+    "ownSchema": "PASS",
+    "select": "PASS",
+    "isolation": "PASS",
+    "tlsWrongHostnameRejected": "PASS"
+  },
+  "file": "C:\\Users\\marec\\Desktop\\G6-PostgresRuntime-Privado\\catalog\\.env.local",
+  "caPath": "C:\\Users\\marec\\AppData\\Local\\G6\\PostgresRuntime\\supabase-server-root.crt",
+  "identityChecks": {
+    "expectedRole": true,
+    "expectedDatabase": true,
+    "serverDefaultReadOnly": false,
+    "nonAdministrative": true,
+    "ownerMembershipDenied": true
+  },
+  "runtimeIdentity": "catalog_dev_login",
+  "select": [
+    {
+      "table": "catalog.products",
+      "result": "PASS"
+    },
+    {
+      "table": "catalog.variants",
+      "result": "PASS"
+    },
+    {
+      "table": "catalog.sku_identity",
+      "result": "PASS"
+    },
+    {
+      "table": "catalog.product_images",
+      "result": "PASS"
+    },
+    {
+      "table": "catalog.variant_images",
+      "result": "PASS"
+    },
+    {
+      "table": "catalog.product_attribute_values",
+      "result": "PASS"
+    },
+    {
+      "table": "catalog.variant_attribute_values",
+      "result": "PASS"
+    },
+    {
+      "table": "catalog.product_identifying_characteristics",
+      "result": "PASS"
+    },
+    {
+      "table": "catalog.sku_physical_profiles",
+      "result": "PASS"
+    },
+    {
+      "table": "catalog.activation_checks",
+      "result": "PASS"
+    },
+    {
+      "table": "catalog.master_barriers",
+      "result": "PASS"
+    }
+  ],
+  "isolation": [
+    {
+      "schema": "taxonomy",
+      "usageDenied": true,
+      "selectDenied": true
+    },
+    {
+      "schema": "pricing",
+      "usageDenied": true,
+      "selectDenied": true
+    },
+    {
+      "schema": "price_audit",
+      "usageDenied": true,
+      "selectDenied": true
+    },
+    {
+      "schema": "promotions",
+      "usageDenied": true,
+      "selectDenied": true
+    },
+    {
+      "schema": "combos",
+      "usageDenied": true,
+      "selectDenied": true
+    },
+    {
+      "schema": "inventory",
+      "usageDenied": true,
+      "selectDenied": true
+    },
+    {
+      "schema": "bulk",
+      "usageDenied": true,
+      "selectDenied": true
+    }
+  ],
+  "result": "PASS_READONLY_DRIZZLE"
+}

@@ -5,6 +5,8 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { pathToFileURL } from 'node:url';
+import type { CommercialEligibilityPolicy } from './commercial-eligibility.js';
 
 export const CATALOG_DATABASE = Symbol('CATALOG_DATABASE');
 
@@ -50,4 +52,66 @@ export class ReadinessController {
       clearTimeout(timer);
     }
   }
+}
+
+async function runReadinessProbe(): Promise<void> {
+  const [
+    { NestFactory },
+    { AppModule },
+    { Database },
+    eligibility,
+    repository,
+  ] = await Promise.all([
+    import('@nestjs/core'),
+    import('./app.module.js'),
+    import('./database.js'),
+    import('./commercial-eligibility.js'),
+    import('./postgres-catalog.repository.js'),
+  ]);
+  const app = await NestFactory.createApplicationContext(AppModule, {
+    logger: false,
+    abortOnError: false,
+  });
+  let database = 'not_ready';
+  let status = 'not_ready';
+  try {
+    await app.get(Database).verifyIdentity();
+    await app.get(repository.PostgresCatalogRepository).listCandidates({
+      canal: 'MARKETPLACE',
+      pagina: 1,
+      tamanio: 1,
+      orden: 'NOMBRE_ASC',
+    });
+    database = 'ready';
+    await app
+      .get<CommercialEligibilityPolicy>(eligibility.COMMERCIAL_ELIGIBILITY)
+      .resolve('MARKETPLACE');
+    status = 'ready';
+  } catch {
+    status = 'not_ready';
+  } finally {
+    await app.close();
+  }
+  process.stdout.write(
+    JSON.stringify({
+      service: 'catalog-svc',
+      status,
+      database,
+      eligibility: status === 'ready' ? 'ready' : 'unverified',
+    }) + '\n',
+  );
+  if (status !== 'ready') process.exitCode = 1;
+}
+
+// Finish evaluating this module before the CLI imports AppModule, which imports it.
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  void runReadinessProbe().catch(() => {
+    process.stdout.write(
+      JSON.stringify({ service: 'catalog-svc', status: 'not_ready' }) + '\n',
+    );
+    process.exitCode = 1;
+  });
 }

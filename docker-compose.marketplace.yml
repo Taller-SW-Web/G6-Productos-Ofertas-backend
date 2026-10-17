@@ -1,0 +1,74 @@
+# Archivos privados y CA se inyectan desde fuera del repositorio.
+services:
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        SERVICE_NAME: api-gateway
+    env_file:
+      - ${G6_GATEWAY_ENV_FILE:?Archivo privado requerido}
+    environment:
+      PORT: '3000'
+      API_GATEWAY_PORT: '3000'
+      GATEWAY_TAXONOMY_SVC_URL: http://taxonomy-svc:3006
+      GATEWAY_CATALOG_SVC_URL: http://catalog-svc:3001
+      GATEWAY_TAXONOMY_SVC_READINESS_PATH: /health/ready
+      GATEWAY_CATALOG_SVC_READINESS_PATH: /health/ready
+    ports:
+      - '127.0.0.1:${G6_GATEWAY_HOST_PORT:-3000}:3000'
+    networks: [services]
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      taxonomy-svc:
+        condition: service_healthy
+      catalog-svc:
+        condition: service_healthy
+  taxonomy-svc:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        SERVICE_NAME: taxonomy-svc
+    env_file:
+      - ${G6_TAXONOMY_ENV_FILE:?Archivo privado requerido}
+    environment:
+      PORT: '3006'
+      TAXONOMY_SVC_PORT: '3006'
+      TAXONOMY_SVC_HOST: 0.0.0.0
+      PGSSLROOTCERT: /run/certs/postgres-ca.crt
+    volumes:
+      - ${G6_TAXONOMY_CA_FILE:?CA requerida}:/run/certs/postgres-ca.crt:ro
+    networks: [services, database-access]
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  catalog-svc:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        SERVICE_NAME: catalog-svc
+    env_file:
+      - ${G6_CATALOG_ENV_FILE:?Archivo privado requerido}
+    environment:
+      PORT: '3001'
+      CATALOG_SVC_PORT: '3001'
+      CATALOG_SVC_HOST: 0.0.0.0
+      CATALOG_TAXONOMY_URL: http://taxonomy-svc:3006
+      PGSSLROOTCERT: /run/certs/postgres-ca.crt
+    volumes:
+      - ${G6_CATALOG_CA_FILE:?CA requerida}:/run/certs/postgres-ca.crt:ro
+    networks: [services, database-access]
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+networks:
+  services:
+    internal: true
+  database-access: {}

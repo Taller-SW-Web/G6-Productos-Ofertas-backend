@@ -6,6 +6,8 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
 import { CatalogConfig } from './config.js';
 import { SanitizedLogger } from './sanitized-logger.js';
+import { Database } from './database.js';
+import { readHttpConfig } from './http-config.js';
 
 export async function createApplication(
   env: Record<string, string | undefined> = process.env,
@@ -64,7 +66,9 @@ export async function startCatalog() {
     if (existsSync(rootEnvPath)) process.loadEnvFile(rootEnvPath);
     const { app, config } = await createApplication();
     try {
-      await app.listen(config.port);
+      await app.get(Database).verifyIdentity();
+      const { host } = readHttpConfig(process.env);
+      await app.listen(config.port, host);
     } catch {
       await app.close();
       throw new Error('Listen failed');

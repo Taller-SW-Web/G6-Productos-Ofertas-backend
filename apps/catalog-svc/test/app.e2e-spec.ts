@@ -25,14 +25,13 @@ describe('AppController (e2e)', () => {
   });
 
   it('/health/live remains alive while readiness is unavailable', async () => {
-    await request(app.getHttpServer())
+    const unavailable = await request(app.getHttpServer())
       .get('/health/ready')
-      .expect(503)
-      .expect({
-        status: 'not_ready',
-        service: 'catalog-svc',
-        dependencies: { database: 'unavailable' },
-      });
+      .expect(503);
+    expect(unavailable.body).toMatchObject({
+      status: 503,
+      code: 'SERVICIO_NO_DISPONIBLE',
+    });
     await request(app.getHttpServer()).get('/health/live').expect(200).expect({
       status: 'ok',
       service: 'catalog-svc',

@@ -1,6 +1,12 @@
 import { NestFactory } from '@nestjs/core';
 import { createApplication } from './bootstrap.js';
 import request from 'supertest';
+import { Test } from '@nestjs/testing';
+import { AppModule } from './app.module.js';
+import { CatalogConfig } from './config.js';
+import { PostgresReadiness } from './postgres-readiness.js';
+import { ReadinessController as CommercialReadinessController } from './readiness.controller.js';
+import { CATALOG_DATABASE, type CatalogDatabase } from './readiness.js';
 
 const env = {
   NODE_ENV: 'test',
@@ -36,4 +42,42 @@ describe('bootstrap configuration', () => {
       await app.close();
     }
   });
+});
+
+describe('readiness after integrating master', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each(['none', 'database', 'commercial'] as const)(
+    'requires both database and commercial checks (failure: %s)',
+    async (failure) => {
+      const database = vi
+        .spyOn(PostgresReadiness.prototype, 'check')
+        .mockResolvedValue(undefined);
+      const commercial = vi
+        .fn()
+        .mockResolvedValue({ status: 'ready', service: 'catalog-svc' });
+      if (failure === 'database')
+        database.mockRejectedValue(new Error('fixture-database-failure'));
+      if (failure === 'commercial')
+        commercial.mockRejectedValue(new Error('fixture-commercial-failure'));
+      const module = await Test.createTestingModule({
+        imports: [AppModule.forRoot(new CatalogConfig(env))],
+      })
+        .overrideProvider(CommercialReadinessController)
+        .useValue({ ready: commercial })
+        .compile();
+      try {
+        const readiness = module.get<CatalogDatabase>(CATALOG_DATABASE);
+        if (failure === 'none')
+          await expect(readiness.check()).resolves.toBeUndefined();
+        else await expect(readiness.check()).rejects.toThrow();
+        expect(database).toHaveBeenCalledOnce();
+        expect(commercial).toHaveBeenCalledTimes(
+          failure === 'database' ? 0 : 1,
+        );
+      } finally {
+        await module.close();
+      }
+    },
+  );
 });

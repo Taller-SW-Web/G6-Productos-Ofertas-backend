@@ -1,9 +1,6 @@
 name: CD servicios Oracle
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
   workflow_dispatch:
     inputs:
       service:
@@ -29,14 +26,7 @@ permissions:
 jobs:
   prepare:
     name: Validar CI, selección y SHA de master
-    if: >-
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.repository.full_name == github.repository &&
-       github.event.workflow_run.head_repository.full_name == github.repository &&
-       github.event.workflow_run.head_branch == 'master' &&
-       github.event.workflow_run.conclusion == 'success') ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -51,18 +41,13 @@ jobs:
         id: selection
         env:
           GH_TOKEN: ${{ github.token }}
-          WORKFLOW_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == workflow_run ]]; then
-            sha="$WORKFLOW_HEAD_SHA"
-          else
-            sha="$GITHUB_SHA"
-            ci_success="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch master --commit "$sha" --json conclusion,event,headBranch --jq 'any(.[]; .conclusion == "success" and .event == "push" and .headBranch == "master")')"
-            if [[ "$ci_success" != true ]]; then
-              echo "No successful CI push run was found for master commit $sha." >&2
-              exit 1
-            fi
+          sha="$GITHUB_SHA"
+          ci_success="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch master --commit "$sha" --json conclusion,event,headBranch --jq 'any(.[]; .conclusion == "success" and .event == "push" and .headBranch == "master")')"
+          if [[ "$ci_success" != true ]]; then
+            echo "No successful CI push run was found for master commit $sha." >&2
+            exit 1
           fi
           [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
           current="$(gh api "repos/${GITHUB_REPOSITORY}/commits/master" --jq .sha)"
@@ -74,29 +59,22 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "repository=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout selected master commit and deployment history
+      - name: Checkout selected master commit
         if: steps.selection.outputs.sha != ''
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.selection.outputs.sha }}
           fetch-depth: 0
 
-      - name: Select services with pending changes or validate manual selection
+      - name: Validate manual service selection
         id: targets
         if: steps.selection.outputs.sha != ''
         env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT_NAME: ${{ github.event_name }}
           REQUESTED_SERVICE: ${{ inputs.service }}
-          SELECTED_SHA: ${{ steps.selection.outputs.sha }}
         run: |
           set -euo pipefail
-          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
-            services="$(bash ops/oracle/select-cd-services.sh manual "$REQUESTED_SERVICE")"
-          else
-            services="$(bash ops/oracle/select-cd-services.sh automatic "$GITHUB_REPOSITORY" "$SELECTED_SHA")"
-          fi
-          echo "Servicios seleccionados: $services"
+          services="$(bash ops/oracle/select-cd-services.sh manual "$REQUESTED_SERVICE")"
+          echo "Servicio seleccionado: $services"
           echo "services=$services" >> "$GITHUB_OUTPUT"
 
   release:
