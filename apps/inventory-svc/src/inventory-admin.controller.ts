@@ -1,25 +1,34 @@
 import {
   Controller,
   Get,
+  Post,
   Put,
   Delete,
   Body,
   Param,
   Query,
   Headers,
+  Req,
   HttpCode,
   HttpStatus,
   UseGuards,
 } from '@nestjs/common';
 import { UmbralesService } from './umbrales/umbrales.service.js';
 import { DashboardService } from './dashboard/dashboard.service.js';
+import { TrasladosService } from './traslados/traslados.service.js';
 import {
   DashboardInventario,
+  ListadoTrasladosInventario,
+  RecepcionTrasladoInventarioRequest,
+  RecepcionTrasladoInventarioResponse,
+  TrasladoInventario,
   UmbralGlobalRequest,
   UmbralInventario,
   UmbralSkuRequest,
 } from './types/inventory.dto.js';
 import { UserAuthGuard } from './auth/user-auth.guard.js';
+import { RequireCapability } from './auth/auth.decorators.js';
+import { INVENTORY_CAPABILITIES } from './auth/auth.constants.js';
 
 /**
  * Endpoints `userBearer` (operador humano) del bounded context de Inventario:
@@ -31,6 +40,7 @@ export class InventoryAdminController {
   constructor(
     private readonly umbralesService: UmbralesService,
     private readonly dashboardService: DashboardService,
+    private readonly trasladosService: TrasladosService,
   ) {}
 
   @Get('umbrales')
@@ -87,6 +97,50 @@ export class InventoryAdminController {
     return this.dashboardService.obtenerDashboard(
       { productoId, categoriaId, marcaId, sku, locationId },
       correlationId,
+    );
+  }
+
+  @Get('traslados')
+  @RequireCapability(INVENTORY_CAPABILITIES.TRASLADOS_LEER)
+  async listarTraslados(
+    @Query('estado') estado?: string,
+    @Query('target_location_id') targetLocationId?: string,
+    @Query('pagina') pagina?: string,
+    @Query('tamanio') tamanio?: string,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<ListadoTrasladosInventario> {
+    return this.trasladosService.listarTraslados(
+      { estado, target_location_id: targetLocationId, pagina, tamanio },
+      correlationId,
+    );
+  }
+
+  @Get('traslados/:trasladoId')
+  @RequireCapability(INVENTORY_CAPABILITIES.TRASLADOS_LEER)
+  async obtenerTraslado(
+    @Param('trasladoId') trasladoId: string,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<TrasladoInventario> {
+    return this.trasladosService.obtenerTraslado(trasladoId, correlationId);
+  }
+
+  @Post('traslados/:trasladoId/recepciones')
+  @HttpCode(HttpStatus.OK)
+  @RequireCapability(INVENTORY_CAPABILITIES.TRASLADOS_RECIBIR)
+  async registrarRecepcion(
+    @Param('trasladoId') trasladoId: string,
+    @Body() dto: RecepcionTrasladoInventarioRequest,
+    @Req() req: any,
+    @Headers('x-correlation-id') correlationId?: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ): Promise<RecepcionTrasladoInventarioResponse> {
+    const subGestor = req?.user?.sub;
+    return this.trasladosService.registrarRecepcion(
+      trasladoId,
+      dto,
+      correlationId,
+      idempotencyKey,
+      subGestor,
     );
   }
 }

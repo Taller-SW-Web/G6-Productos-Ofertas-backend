@@ -594,6 +594,11 @@ export class InMemoryDatabaseMock implements IDatabaseService {
           rowCount: Math.min(rows.length, 1),
         };
       }
+      const filtered = this.filterTraslados(s, params);
+      const limit = Number(params?.[params.length - 2] ?? 20);
+      const offset = Number(params?.[params.length - 1] ?? 0);
+      const page = filtered.slice(offset, offset + limit);
+      return { rows: page as any, rowCount: page.length };
     }
 
     // SELECT from traslado_recepciones
@@ -817,6 +822,70 @@ export class InMemoryDatabaseMock implements IDatabaseService {
       };
       this.traslados.push(row);
       return { rows: [row] as any, rowCount: 1 };
+    }
+
+    // INSERT INTO traslado_recepciones
+    if (s.startsWith('INSERT INTO INVENTORY.TRASLADO_RECEPCIONES')) {
+      const row: TrasladoRecepcionRow = {
+        id: 'recepcion-' + Math.random().toString(36).substring(2),
+        recepcion_id: params?.[0],
+        traslado_id: params?.[1],
+        cantidad_recibida: Number(params?.[2]),
+        disposicion: params?.[3],
+        es_recepcion_final: Boolean(params?.[4]),
+        sub_gestor: params?.[5],
+        idempotency_key: params?.[6],
+        received_at: params?.[7],
+      };
+      this.trasladoRecepciones.push(row);
+      return { rows: [row] as any, rowCount: 1 };
+    }
+
+    // UPDATE traslados
+    if (s.startsWith('UPDATE INVENTORY.TRASLADOS')) {
+      const id = params?.[3];
+      const target = this.traslados.find((t) => t.id === id);
+      if (!target) return { rows: [], rowCount: 0 };
+      target.quantity_received = Number(params?.[0]);
+      target.missing_quantity = params?.[1] ?? null;
+      target.estado = params?.[2];
+      target.updated_at = new Date().toISOString();
+      return { rows: [target] as any, rowCount: 1 };
+    }
+
+    // INSERT INTO stock_balance (upsert de acreditación por recepción)
+    if (
+      s.startsWith('INSERT INTO INVENTORY.STOCK_BALANCE') &&
+      s.includes('ON CONFLICT')
+    ) {
+      const sku = params?.[0];
+      const loc = params?.[1];
+      const onHandDelta = Number(params?.[2]);
+      const blockedDelta = Number(params?.[3]);
+      let target = this.stockBalance.find(
+        (b) => b.sku_id === sku && b.location_id === loc,
+      );
+      if (target) {
+        target.on_hand += onHandDelta;
+        target.blocked += blockedDelta;
+        target.stock_version += 1;
+      } else {
+        target = {
+          sku_id: sku,
+          location_id: loc,
+          on_hand: onHandDelta,
+          reserved: 0,
+          blocked: blockedDelta,
+          available: 0,
+          stock_version: 1,
+        };
+        this.stockBalance.push(target);
+      }
+      target.available = Math.max(
+        0,
+        target.on_hand - target.reserved - target.blocked,
+      );
+      return { rows: [target] as any, rowCount: 1 };
     }
 
     // UPDATE stock_balance

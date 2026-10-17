@@ -16,6 +16,7 @@ import { ReintegrosService } from './reintegros/reintegros.service.js';
 import { UmbralesService } from './umbrales/umbrales.service.js';
 import { DashboardService } from './dashboard/dashboard.service.js';
 import { IncidenciasService } from './incidencias/incidencias.service.js';
+import { TrasladosService } from './traslados/traslados.service.js';
 
 import { DrizzleLocationsRepository } from './repositories/drizzle/drizzle-locations.repository.js';
 import { DrizzleCommercialRoutesRepository } from './repositories/drizzle/drizzle-commercial-routes.repository.js';
@@ -67,6 +68,7 @@ import { InventoryWorkersService } from './workers/inventory-workers.service.js'
     UmbralesService,
     DashboardService,
     IncidenciasService,
+    TrasladosService,
     InventoryAuthGuard,
     UserAuthGuard,
     InventoryWorkersService,
@@ -137,6 +139,7 @@ import { InventoryWorkersService } from './workers/inventory-workers.service.js'
     UmbralesService,
     DashboardService,
     IncidenciasService,
+    TrasladosService,
     InventoryAuthGuard,
     UserAuthGuard,
     LOCATIONS_REPOSITORY,

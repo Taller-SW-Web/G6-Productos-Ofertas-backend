@@ -29,6 +29,18 @@ export interface IStockBalanceRepository {
     },
   ): Promise<number>;
 
+  /**
+   * Acredita unidades al destino de un traslado creando el saldo si el SKU aún
+   * no existía en esa ubicación (la recepción puede preceder a la primera
+   * existencia física). Devuelve el saldo resultante.
+   */
+  upsertOnHandDelta(
+    client: IDatabaseClient,
+    sku: string,
+    locationId: string,
+    delta: { on_hand: number; blocked: number },
+  ): Promise<StockBalanceEntity>;
+
   findBySkus(
     skus: string[],
     locationId?: string,

@@ -131,6 +131,40 @@ export class DrizzleStockBalanceRepository implements IStockBalanceRepository {
     return res.rowCount;
   }
 
+  async upsertOnHandDelta(
+    client: IDatabaseClient,
+    sku: string,
+    locationId: string,
+    delta: { on_hand: number; blocked: number },
+  ): Promise<StockBalanceEntity> {
+    const sql = `
+      INSERT INTO inventory.stock_balance (
+        sku_id, location_id, on_hand, reserved, blocked, stock_version
+      ) VALUES ($1, $2, $3, 0, $4, 1)
+      ON CONFLICT (sku_id, location_id) DO UPDATE
+        SET on_hand = inventory.stock_balance.on_hand + EXCLUDED.on_hand,
+            blocked = inventory.stock_balance.blocked + EXCLUDED.blocked,
+            stock_version = inventory.stock_balance.stock_version + 1
+      RETURNING sku_id, location_id, on_hand, reserved, blocked, available, stock_version
+    `;
+    const res = await client.query(sql, [
+      sku,
+      locationId,
+      delta.on_hand,
+      delta.blocked,
+    ]);
+    const row = res.rows[0];
+    return {
+      sku_id: row.sku_id,
+      location_id: row.location_id,
+      on_hand: Number(row.on_hand),
+      reserved: Number(row.reserved),
+      blocked: Number(row.blocked),
+      available: Number(row.available),
+      stock_version: Number(row.stock_version),
+    };
+  }
+
   async findBySkus(
     skus: string[],
     locationId?: string,
