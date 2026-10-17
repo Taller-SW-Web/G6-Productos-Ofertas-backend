@@ -71,29 +71,45 @@ export class ProblemDetailsFilter implements ExceptionFilter {
         .json(body);
     }
 
-    const err = exception as Error;
-    const rawMessage = err?.message || '';
-    // Sanitizar mensaje para evitar fugas de detalles internos, sintaxis o SQL de PostgreSQL
-    const isSensitive =
-      /select|update|insert|delete|from|table|relation|column|constraint|duplicate key|syntax error|pg_|schema|connection/i.test(
-        rawMessage,
-      );
-    const detail =
-      isSensitive || !rawMessage
-        ? 'Ha ocurrido un error interno en el servicio'
-        : rawMessage;
+    // Errores técnicos nunca se reflejan al consumidor, incluso si no contienen
+    // palabras SQL. Los códigos conocidos de indisponibilidad conservan el 503 contractual.
+    const unavailable =
+      exception instanceof Error &&
+      'code' in exception &&
+      typeof exception.code === 'string' &&
+      [
+        'ECONNREFUSED',
+        'ECONNRESET',
+        'ETIMEDOUT',
+        '08000',
+        '08001',
+        '08003',
+        '08006',
+        '57P01',
+        '57P02',
+        '57P03',
+        '53300',
+      ].includes(exception.code);
 
     const body: ProblemDetailsBody = {
-      type: '/errores/error-interno',
-      title: 'Error interno del servidor',
-      status: HttpStatus.INTERNAL_SERVER_ERROR,
-      code: 'ERROR_INTERNO',
-      detail,
+      type: unavailable
+        ? '/errores/servicio-no-disponible'
+        : '/errores/error-interno',
+      title: unavailable
+        ? 'Servicio no disponible'
+        : 'Error interno del servidor',
+      status: unavailable
+        ? HttpStatus.SERVICE_UNAVAILABLE
+        : HttpStatus.INTERNAL_SERVER_ERROR,
+      code: unavailable ? 'SERVICIO_NO_DISPONIBLE' : 'ERROR_INTERNO',
+      detail: unavailable
+        ? 'Una dependencia del servicio no está disponible temporalmente'
+        : 'Ha ocurrido un error interno en el servicio',
       correlationId: correlationIdHeader,
     };
 
     return response
-      .status(HttpStatus.INTERNAL_SERVER_ERROR)
+      .status(body.status)
       .header('Content-Type', 'application/problem+json')
       .json(body);
   }

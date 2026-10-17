@@ -54,11 +54,10 @@ describe('DisponibilidadService — Consultas de Stock y D-INV-01', () => {
         stock_version: 1,
       });
 
-      const res = await disponibilidadService.consultarDisponibilidad([
-        'NIK-REV7-NEG-41',
-        'SKU-ZERO',
-        'SKU-LOW',
-      ]);
+      const res = await disponibilidadService.consultarDisponibilidad(
+        ['NIK-REV7-NEG-41', 'SKU-ZERO', 'SKU-LOW'],
+        locLurin,
+      );
 
       expect(res.items).toBeDefined();
       expect(res.items.length).toBeGreaterThanOrEqual(3);

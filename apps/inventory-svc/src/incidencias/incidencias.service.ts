@@ -748,7 +748,10 @@ export class IncidenciasService {
         correlationId,
       );
     }
-    if (!dto.operation_id || !UUID_REGEX.test(dto.operation_id)) {
+    if (
+      typeof dto.operation_id !== 'string' ||
+      !UUID_REGEX.test(dto.operation_id)
+    ) {
       throw ProblemDetailsException.validation(
         'operation_id debe ser un UUID válido',
         correlationId,
@@ -777,7 +780,7 @@ export class IncidenciasService {
     }
     if (
       typeof dto.quantity !== 'number' ||
-      !Number.isInteger(dto.quantity) ||
+      !Number.isSafeInteger(dto.quantity) ||
       dto.quantity < 1
     ) {
       throw ProblemDetailsException.cantidadInvalida(
@@ -823,7 +826,10 @@ export class IncidenciasService {
         correlationId,
       );
     }
-    if (!dto.operation_id || !UUID_REGEX.test(dto.operation_id)) {
+    if (
+      typeof dto.operation_id !== 'string' ||
+      !UUID_REGEX.test(dto.operation_id)
+    ) {
       throw ProblemDetailsException.validation(
         'operation_id debe ser un UUID válido',
         correlationId,

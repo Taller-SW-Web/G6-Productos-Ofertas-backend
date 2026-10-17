@@ -179,7 +179,9 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
   describe('Corte Funcional Autenticado', () => {
     it('/api/v1/inventario/disponibilidad (GET)', async () => {
       const res = await request(app.getHttpServer())
-        .get(`/api/v1/inventario/disponibilidad?skus=${sku}`)
+        .get(
+          `/api/v1/inventario/disponibilidad?skus=${sku}&location_id=${locLurin}`,
+        )
         .set('Authorization', `Bearer ${validToken}`)
         .expect(200);
 
@@ -651,7 +653,9 @@ describe('InventorySvc E2E — Corte funcional G5 y Seguridad', () => {
 
     it('habilita a Postventa la consulta informativa de disponibilidad', async () => {
       const res = await request(app.getHttpServer())
-        .get(`/api/v1/inventario/disponibilidad?skus=${sku}`)
+        .get(
+          `/api/v1/inventario/disponibilidad?skus=${sku}&location_id=${locLurin}`,
+        )
         .set('Authorization', `Bearer ${postventaToken}`)
         .expect(200);
 

@@ -38,6 +38,18 @@ export class DashboardService {
     correlationId?: string,
   ): Promise<DashboardInventario> {
     if (
+      filtros.locationId !== undefined &&
+      (typeof filtros.locationId !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          filtros.locationId,
+        ))
+    ) {
+      throw ProblemDetailsException.validation(
+        'locationId debe ser un UUID válido',
+        correlationId,
+      );
+    }
+    if (
       filtros.productoId !== undefined ||
       filtros.categoriaId !== undefined ||
       filtros.marcaId !== undefined

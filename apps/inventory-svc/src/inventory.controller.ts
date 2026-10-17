@@ -35,7 +35,11 @@ import {
 } from './types/inventory.dto.js';
 import { ProblemDetailsException } from './errors/inventory.errors.js';
 import { InventoryAuthGuard } from './auth/inventory-auth.guard.js';
-import { RequireScope, AllowedClients } from './auth/auth.decorators.js';
+import {
+  RequireScope,
+  AllowedClients,
+  AllowUserBearer,
+} from './auth/auth.decorators.js';
 import { INVENTORY_SCOPES, KNOWN_CLIENTS } from './auth/auth.constants.js';
 
 const CANAL_CLIENT_MAP: Record<string, string> = {
@@ -234,6 +238,7 @@ export class InventoryController {
   }
 
   @Get('disponibilidad')
+  @AllowUserBearer()
   @RequireScope(INVENTORY_SCOPES.DISPONIBILIDAD_LEER)
   @AllowedClients([KNOWN_CLIENTS.VENTAS, KNOWN_CLIENTS.POSTVENTA])
   async consultarDisponibilidad(

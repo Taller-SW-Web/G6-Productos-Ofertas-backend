@@ -8,8 +8,10 @@ import {
   getConfiguredIssuer,
   EXPECTED_ALGORITHM,
   EXPECTED_TOKEN_TYPE,
+  ALLOW_USER_BEARER_KEY,
 } from './auth.constants.js';
 import { ProblemDetailsException } from '../errors/inventory.errors.js';
+import { UserAuthGuard } from './user-auth.guard.js';
 
 export interface DecodedTokenPayload {
   sub?: string;
@@ -86,15 +88,25 @@ export class InventoryAuthGuard implements CanActivate {
     // Verificación criptográfica con material de confianza de G7
     const payload = this.verifyAndDecodeToken(rawToken, correlationId);
 
+    const allowUserBearer = this.reflector.getAllAndOverride<boolean>(
+      ALLOW_USER_BEARER_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    if (allowUserBearer && payload.tipo !== EXPECTED_TOKEN_TYPE) {
+      // El guard global permanece activo; la vía humana valida firma, issuer,
+      // expiración, audience, identidad y rol antes de autorizar la lectura.
+      return new UserAuthGuard(this.reflector).canActivate(context);
+    }
+
     // 1. Verificación de expiración (exp)
-    if (typeof payload.exp !== 'number') {
+    if (typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) {
       throw ProblemDetailsException.tokenInvalido(
         'Token JWT no contiene claim exp válido',
         correlationId,
       );
     }
     const nowSec = Math.floor(Date.now() / 1000);
-    if (nowSec > payload.exp) {
+    if (nowSec >= payload.exp) {
       throw ProblemDetailsException.tokenInvalido(
         'Token JWT expirado',
         correlationId,
@@ -201,6 +213,8 @@ export class InventoryAuthGuard implements CanActivate {
     let header: { alg?: string; typ?: string };
     try {
       header = JSON.parse(Buffer.from(headerB64, 'base64url').toString('utf8'));
+      if (!header || typeof header !== 'object' || Array.isArray(header))
+        throw new Error('header inválido');
     } catch {
       throw ProblemDetailsException.tokenInvalido(
         'Header de token JWT inválido',
@@ -248,7 +262,12 @@ export class InventoryAuthGuard implements CanActivate {
 
     // Decodificar payload
     try {
-      return JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+      const payload: unknown = JSON.parse(
+        Buffer.from(payloadB64, 'base64url').toString('utf8'),
+      );
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload))
+        throw new Error('payload inválido');
+      return payload as DecodedTokenPayload;
     } catch {
       throw ProblemDetailsException.tokenInvalido(
         'No se pudo decodificar el payload del token JWT',

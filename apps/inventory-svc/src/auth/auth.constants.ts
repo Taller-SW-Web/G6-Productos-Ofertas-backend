@@ -1,6 +1,7 @@
 export const REQUIRED_SCOPE_KEY = 'required_scope';
 export const ALLOWED_CLIENTS_KEY = 'allowed_clients';
 export const REQUIRED_CAPABILITY_KEY = 'required_capability';
+export const ALLOW_USER_BEARER_KEY = 'allow_user_bearer';
 
 export const EXPECTED_AUDIENCE = 'api-productos';
 export const EXPECTED_ALGORITHM = 'RS256';

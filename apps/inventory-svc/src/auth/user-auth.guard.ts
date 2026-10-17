@@ -53,6 +53,16 @@ export class UserAuthGuard implements CanActivate {
       correlationId,
     );
 
+    if (
+      !Array.isArray(payload.roles) ||
+      !payload.roles.includes('GESTOR_COMERCIAL')
+    ) {
+      throw ProblemDetailsException.scopeInsuficiente(
+        'La operación requiere el rol GESTOR_COMERCIAL',
+        correlationId,
+      );
+    }
+
     if (requiredCapability) {
       const granted = this.collectCapabilities(payload);
       if (!granted.has(requiredCapability)) {

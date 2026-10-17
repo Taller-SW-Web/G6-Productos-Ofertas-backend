@@ -34,6 +34,12 @@ El servicio valida la configuración de arranque (`loadInventoryConfig`) antes d
 
 Los valores numéricos explícitos deben representar enteros decimales seguros; una cadena vacía o solo espacios es inválida, incluso para `PGPORT`. Los valores predeterminados se aplican únicamente cuando la variable está ausente. El intervalo del worker admite de 250 a 2147483647 ms para evitar el desbordamiento del temporizador. Los errores identifican la variable y el rango sin imprimir su valor. Cuando no se usa `DATABASE_URL`, deben estar presentes `PGHOST`, `PGDATABASE`, `PGUSER` y `PGPASSWORD`; el servicio no sustituye una base ausente por `postgres` ni una contraseña ausente por una cadena vacía.
 
+## Acceso humano y técnico
+
+Las rutas administrativas de Inventario requieren un JWT humano con firma RS256, `iss` igual a `G7_JWT_ISSUER`, `aud` que incluya `api-productos`, `sub` no vacío, `exp` futuro y rol `GESTOR_COMERCIAL`. Las capacidades locales de traslados se verifican adicionalmente. Un token `tipo=servicio` no habilita las rutas humanas aunque contenga un rol.
+
+`GET /api/v1/inventario/disponibilidad` admite esa vía humana y la vía técnica contractual de Ventas/Postventa. La vía técnica conserva sus scopes/allowlists y el guard de Inventario; Marketplace/Chatbot/Retail siguen limitados a consultas comerciales. Si hay saldos en varias ubicaciones, la consulta detallada exige `location_id` explícito. La consulta de operaciones sigue siendo exclusiva de Ventas y no admite JWT humano.
+
 ## Variables exclusivas de pruebas aisladas
 
 La suite real se habilita con `INVENTORY_REAL_INTEGRATION=1`. No requiere ni consume URLs de prueba o runtime configuradas manualmente: aprovisiona PostgreSQL y RabbitMQ efímeros mediante Docker, genera credenciales aleatorias por ejecución, publica puertos dinámicos ligados a loopback y crea un vhost de pruebas. La suite conserva la etiqueta única de ejecución y solo elimina los contenedores, volúmenes y red que tengan esa etiqueta. Necesita Docker CLI con acceso a un daemon activo y capacidad para descargar las imágenes si aún no están disponibles. Sin la variable de activación, Vitest omite estos casos; activados sin Docker operativo, fallan durante el aprovisionamiento.

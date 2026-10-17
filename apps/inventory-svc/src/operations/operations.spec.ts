@@ -109,4 +109,70 @@ describe('OperationsService — Consulta Durable de Operaciones G5', () => {
       expect(pde.problem.code).toBe('VALIDACION');
     }
   });
+
+  it.each([
+    { status: 'RECIBIDO', result_code: null, expected: 'ACCEPTED' },
+    { status: 'APLICADO', result_code: null, expected: 'COMPLETED' },
+    {
+      status: 'RECHAZADO',
+      result_code: 'STOCK_INSUFICIENTE',
+      expected: 'REJECTED',
+    },
+    {
+      status: 'REQUIRES_REVIEW',
+      result_code: null,
+      expected: 'REQUIRES_REVIEW',
+    },
+  ])(
+    'consulta $status sin mutar ni confundirlo con otro estado',
+    async ({ status, result_code, expected }) => {
+      const operationId = randomUUID();
+      mockDb.operations.push({
+        id: randomUUID(),
+        operation_id: operationId,
+        order_id: 'PED-OPACO-001',
+        operation_type: 'RESERVA',
+        status,
+        result_code,
+        idempotency_key: randomUUID(),
+        intention: 'reservar',
+        accepted_at: new Date().toISOString(),
+      });
+      const before = structuredClone(mockDb.operations);
+      const result = await operationsService.consultarOperacion(operationId);
+      expect(result.status).toBe(expected);
+      expect(result.order_id).toBe('PED-OPACO-001');
+      expect(result).not.toHaveProperty('on_hand');
+      expect(mockDb.operations).toEqual(before);
+    },
+  );
+
+  it.each([
+    { status: 'RECHAZADO', result_code: null },
+    { status: 'RECHAZADO', result_code: '   ' },
+    { accepted_at: 'fecha-no-valida' },
+    { applied_at: 'fecha-no-valida' },
+    { order_id: '   ' },
+  ])(
+    'no emite una respuesta contractual inválida para una operación histórica: %j',
+    async (override) => {
+      const operationId = randomUUID();
+      mockDb.operations.push({
+        id: randomUUID(),
+        operation_id: operationId,
+        order_id: 'PED-HISTORICO',
+        operation_type: 'RESERVA',
+        status: 'APLICADO',
+        idempotency_key: randomUUID(),
+        intention: 'reservar',
+        accepted_at: new Date().toISOString(),
+        ...override,
+      });
+      await expect(
+        operationsService.consultarOperacion(operationId),
+      ).rejects.toMatchObject({
+        problem: { status: 404, code: 'OPERACION_INVENTARIO_NO_ENCONTRADA' },
+      });
+    },
+  );
 });

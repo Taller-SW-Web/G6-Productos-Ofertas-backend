@@ -53,6 +53,12 @@ export class OperationsService {
         op.reservation_id,
       );
       if (res?.expires_at) {
+        if (!Number.isFinite(Date.parse(res.expires_at))) {
+          throw ProblemDetailsException.operacionNoEncontrada(
+            'El resultado histórico no contiene un vencimiento válido',
+            correlationId,
+          );
+        }
         expiresAt = new Date(res.expires_at).toISOString();
       }
     }
@@ -79,8 +85,11 @@ export class OperationsService {
       !operationType ||
       !status ||
       !op.operation_id ||
-      !op.order_id ||
-      !op.accepted_at
+      !op.order_id?.trim() ||
+      !op.accepted_at ||
+      !Number.isFinite(Date.parse(op.accepted_at)) ||
+      (op.applied_at != null && !Number.isFinite(Date.parse(op.applied_at))) ||
+      (status === 'REJECTED' && !op.result_code?.trim())
     ) {
       throw ProblemDetailsException.operacionNoEncontrada(
         'La operación histórica no contiene un resultado durable suficiente para reproducirse',

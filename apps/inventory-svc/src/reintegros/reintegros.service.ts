@@ -428,13 +428,16 @@ export class ReintegrosService {
     dto: ReintegroInventarioRequest,
     correlationId: string,
   ): void {
-    if (!dto || typeof dto !== 'object') {
+    if (!dto || typeof dto !== 'object' || Array.isArray(dto)) {
       throw ProblemDetailsException.validation(
         'El cuerpo de la solicitud no puede estar vacío',
         correlationId,
       );
     }
-    if (!dto.operation_id || !UUID_REGEX.test(dto.operation_id)) {
+    if (
+      typeof dto.operation_id !== 'string' ||
+      !UUID_REGEX.test(dto.operation_id)
+    ) {
       throw ProblemDetailsException.validation(
         'operation_id debe ser un UUID válido',
         correlationId,
@@ -475,6 +478,9 @@ export class ReintegrosService {
 
     for (const [idx, line] of dto.lines.entries()) {
       if (
+        !line ||
+        typeof line !== 'object' ||
+        Array.isArray(line) ||
         !line.sku ||
         typeof line.sku !== 'string' ||
         line.sku.trim().length === 0
@@ -486,7 +492,7 @@ export class ReintegrosService {
       }
       if (
         typeof line.quantity !== 'number' ||
-        !Number.isInteger(line.quantity) ||
+        !Number.isSafeInteger(line.quantity) ||
         line.quantity <= 0
       ) {
         throw ProblemDetailsException.cantidadInvalida(

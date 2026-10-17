@@ -82,6 +82,17 @@ export class TrasladosService {
       );
     }
 
+    if (
+      filtros.target_location_id !== undefined &&
+      (typeof filtros.target_location_id !== 'string' ||
+        !UUID_REGEX.test(filtros.target_location_id))
+    ) {
+      throw ProblemDetailsException.validation(
+        'target_location_id debe ser un UUID válido',
+        correlationId,
+      );
+    }
+
     const { items, total } = await this.trasladosRepo.list({
       estado: filtros.estado,
       targetLocationId: filtros.target_location_id,
@@ -531,7 +542,7 @@ export class TrasladosService {
   ): number {
     if (value === undefined || value === null || value === '') return 1;
     const n = Number(value);
-    if (!Number.isInteger(n) || n < 1) {
+    if (!Number.isSafeInteger(n) || n < 1) {
       throw ProblemDetailsException.validation(
         'pagina debe ser un entero mayor o igual a 1',
         correlationId,
@@ -584,7 +595,10 @@ export class TrasladosService {
         correlationId,
       );
     }
-    if (!dto.operation_id || !UUID_REGEX.test(dto.operation_id)) {
+    if (
+      typeof dto.operation_id !== 'string' ||
+      !UUID_REGEX.test(dto.operation_id)
+    ) {
       throw ProblemDetailsException.validation(
         'operation_id debe ser un UUID válido',
         correlationId,
@@ -592,7 +606,7 @@ export class TrasladosService {
     }
     if (
       typeof dto.received_quantity !== 'number' ||
-      !Number.isInteger(dto.received_quantity) ||
+      !Number.isSafeInteger(dto.received_quantity) ||
       dto.received_quantity < 1
     ) {
       throw ProblemDetailsException.cantidadRecibidaExcedeTraslado(

@@ -1,6 +1,7 @@
 import { createVerify } from 'node:crypto';
 import { ProblemDetailsException } from '../errors/inventory.errors.js';
 import { InventoryAuthGuard } from './inventory-auth.guard.js';
+import { getConfiguredIssuer, EXPECTED_TOKEN_TYPE } from './auth.constants.js';
 
 export interface UserTokenPayload {
   sub?: string;
@@ -47,6 +48,8 @@ export function verifyUserBearerToken(
   let header: { alg?: string; typ?: string };
   try {
     header = JSON.parse(Buffer.from(headerB64, 'base64url').toString('utf8'));
+    if (!header || typeof header !== 'object' || Array.isArray(header))
+      throw new Error('header inválido');
   } catch {
     throw ProblemDetailsException.tokenInvalido(
       'Header de token JWT inválido',
@@ -93,6 +96,8 @@ export function verifyUserBearerToken(
   let payload: UserTokenPayload;
   try {
     payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload))
+      throw new Error('payload inválido');
   } catch {
     throw ProblemDetailsException.tokenInvalido(
       'No se pudo decodificar el payload del token JWT',
@@ -100,14 +105,32 @@ export function verifyUserBearerToken(
     );
   }
 
-  if (typeof payload.exp !== 'number') {
+  const expectedIssuer = getConfiguredIssuer();
+  if (!expectedIssuer || payload.iss !== expectedIssuer) {
+    throw ProblemDetailsException.tokenInvalido(
+      'Issuer humano ausente, incorrecto o no configurado en G7',
+      correlationId,
+    );
+  }
+  if (
+    payload.tipo === EXPECTED_TOKEN_TYPE ||
+    typeof payload.sub !== 'string' ||
+    !payload.sub.trim()
+  ) {
+    throw ProblemDetailsException.tokenInvalido(
+      'Se requiere identidad humana válida para esta operación',
+      correlationId,
+    );
+  }
+
+  if (typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) {
     throw ProblemDetailsException.tokenInvalido(
       'Token JWT no contiene claim exp válido',
       correlationId,
     );
   }
   const nowSec = Math.floor(Date.now() / 1000);
-  if (nowSec > payload.exp) {
+  if (nowSec >= payload.exp) {
     throw ProblemDetailsException.tokenInvalido(
       'Token JWT expirado',
       correlationId,

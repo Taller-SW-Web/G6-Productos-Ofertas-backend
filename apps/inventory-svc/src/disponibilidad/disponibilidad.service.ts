@@ -63,7 +63,10 @@ export class DisponibilidadService {
         correlationId,
       );
     }
-    if (locationId && !UUID_REGEX.test(locationId)) {
+    if (
+      locationId !== undefined &&
+      (typeof locationId !== 'string' || !UUID_REGEX.test(locationId))
+    ) {
       throw ProblemDetailsException.validation(
         'location_id debe ser un UUID válido',
         correlationId,
@@ -93,6 +96,16 @@ export class DisponibilidadService {
       skus,
       locationId,
     );
+
+    if (
+      locationId === undefined &&
+      new Set(balances.map((row) => row.location_id)).size > 1
+    ) {
+      throw ProblemDetailsException.validation(
+        'Debe especificar location_id cuando hay más de una ubicación de inventario',
+        correlationId,
+      );
+    }
 
     const items: DisponibilidadStock[] = balances.map((row) => {
       const onHand = Number(row.on_hand);

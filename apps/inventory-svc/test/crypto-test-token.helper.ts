@@ -25,6 +25,8 @@ export interface CreateCryptographicTokenOptions {
   tipo?: string;
   scope?: string;
   scopes?: string[];
+  roles?: string[];
+  capabilities?: string[];
   exp?: number;
   iat?: number;
   alg?: string;
@@ -62,6 +64,8 @@ export function createCryptographicJwt(
   if (options.scopes) {
     payload.scopes = options.scopes;
   }
+  if (options.roles) payload.roles = options.roles;
+  if (options.capabilities) payload.capabilities = options.capabilities;
 
   const toBase64Url = (obj: Record<string, unknown>): string =>
     Buffer.from(JSON.stringify(obj)).toString('base64url');
