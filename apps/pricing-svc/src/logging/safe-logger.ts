@@ -27,6 +27,31 @@ export class SafeLogger implements LoggerService {
     }),
   ) {}
 
+  http(correlationId: string, status: number, durationMs: number): void {
+    this.destination.log({
+      service: 'pricing-svc',
+      environment: controlled(
+        this.environment,
+        new Set(['development', 'test', 'production', 'unknown']),
+      ),
+      message: 'Consulta HTTP de Pricing finalizada.',
+      correlation_id:
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          correlationId,
+        )
+          ? correlationId
+          : '[REDACTED]',
+      status:
+        Number.isInteger(status) && status >= 100 && status <= 599
+          ? status
+          : 500,
+      duration_ms:
+        Number.isFinite(durationMs) && durationMs >= 0
+          ? Math.round(durationMs)
+          : 0,
+    });
+  }
+
   private write(
     level: 'log' | 'error' | 'warn' | 'debug' | 'verbose' | 'fatal',
     message: unknown,

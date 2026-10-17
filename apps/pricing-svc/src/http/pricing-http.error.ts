@@ -1,0 +1,44 @@
+import {
+  Catch,
+  type ArgumentsHost,
+  type ExceptionFilter,
+} from '@nestjs/common';
+import type { Response } from 'express';
+import { PricingPersistenceError } from '../persistence/persistence.error.js';
+import { PriceRuleError } from '../domain/price.js';
+
+export class PricingHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+  ) {
+    super(code);
+  }
+}
+
+@Catch()
+export class PricingHttpFilter implements ExceptionFilter {
+  catch(error: unknown, host: ArgumentsHost): void {
+    const response = host.switchToHttp().getResponse<Response>();
+    const failure =
+      error instanceof PricingHttpError
+        ? error
+        : error instanceof PricingPersistenceError
+          ? new PricingHttpError(503, 'SERVICIO_NO_DISPONIBLE')
+          : error instanceof PriceRuleError
+            ? new PricingHttpError(
+                error.code === 'PRECIO_NO_ENCONTRADO' ? 404 : 400,
+                error.code,
+              )
+            : new PricingHttpError(500, 'ERROR_INTERNO');
+    response
+      .status(failure.status)
+      .type('application/problem+json')
+      .json({
+        title: failure.code,
+        status: failure.status,
+        code: failure.code,
+        correlationId: response.getHeader('X-Correlation-Id'),
+      });
+  }
+}
