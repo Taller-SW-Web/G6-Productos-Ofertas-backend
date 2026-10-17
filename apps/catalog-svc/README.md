@@ -147,7 +147,37 @@ para aprobar este PR. El SHA, enlace al run y resultados reales se registran en
 la descripción del PR #119 después de completar CI. No inferir despliegue,
 homologación externa ni aceptación de otros módulos a partir de esos resultados.
 
-## Fuentes
+## Bloques 1 y 2: consultas, mutaciones y mensajería
+
+El detalle por operación, evidencia, autorizaciones y pendientes está en
+[AUDIT-BLOCKS-1-2.md](AUDIT-BLOCKS-1-2.md). Incluye los ocho operationIds de
+consulta y los doce de mutación. El estado integral es PARTIAL; las políticas
+comerciales/barcode y algunos handlers GenericData siguen aislados.
+
+Las altas usan PEN y slug estable de nombre normalizado seguido del UUID completo,
+según aprobación expresa del owner. Las variantes requieren SKU explícito por
+ahora; omitirlo no genera una identidad comercial arbitraria.
+
+Configuración adicional (suministrar secretos fuera del repositorio):
+
+- `RABBITMQ_URL`: AMQP(S), usuario/contraseña y vhost `g6-productos-ofertas`.
+  Si no se configura, el transporte no arranca y los mensajes quedan en Outbox.
+- `CATALOG_AMQP_PRODUCER_USERS`: objeto JSON que asocia `pricing-svc`,
+  `inventory-svc`, `taxonomy-svc` y `bulk-svc` a usuarios broker distintos entre sí
+  y del usuario Catálogo. Se valida `user_id` de RabbitMQ; requiere permisos
+  acordados de infraestructura, no un header de productor sin autenticar.
+- `CATALOG_PREPARATION_TIMEOUT_MS`: entero positivo aprobado para permitir
+  recuperación manual de PENDING vencido después de published_at. Si se omite,
+  ese reintento no se habilita. REJECTED necesita política de recuperación por
+  código; COMPLETED siempre es terminal.
+
+El runtime no declara recursos en RabbitMQ. Usa la topología aprovisionada;
+confirms, alternate exchange y entrega al consumidor son evidencias diferentes.
+Las suites PostgreSQL y RabbitMQ crean una instancia desechable por suite;
+necesitan Docker y, para PostgreSQL TLS, OpenSSL. Nunca apuntarlas a servicios
+compartidos. La suite HTTP aísla casos de uso y no acredita integración real.
+
+## Fuentes históricas del runtime
 
 - [Issue #43](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/43).
 - [Arquitectura §§7, 23–25](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/master/arquitectura/Arquitectura.md).
