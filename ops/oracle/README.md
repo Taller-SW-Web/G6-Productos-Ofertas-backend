@@ -1,5 +1,23 @@
 # CD de servicios G6 en Oracle Cloud
 
+> **Entrada para agentes:** antes de programar, seguir [`GUIA_DEVTEAM.md`](GUIA_DEVTEAM.md), leer [`CONTRATO_DESPLIEGUE.md`](CONTRATO_DESPLIEGUE.md) y la ficha del servicio asignado en [`servicios/`](servicios/). Este índice separa las reglas de desarrollo de los procedimientos de operación.
+
+## Navegación rápida
+
+| Necesidad | Documento |
+|---|---|
+| Estado de la VM (corte 19-oct-2026) | [`ESTADO_ACTUAL.md`](ESTADO_ACTUAL.md) |
+| Preparar un servicio desde desarrollo | [`GUIA_DEVTEAM.md`](GUIA_DEVTEAM.md) |
+| Requisitos comunes para build y runtime | [`CONTRATO_DESPLIEGUE.md`](CONTRATO_DESPLIEGUE.md) |
+| Brechas específicas por servicio | [`servicios/`](servicios/) |
+| Redes y dependencias | [`MATRIZ_DEPENDENCIAS.md`](MATRIZ_DEPENDENCIAS.md) |
+| RabbitMQ | [`RABBITMQ_COMPATIBILIDAD.md`](RABBITMQ_COMPATIBILIDAD.md) |
+| Gates y formato de entrega | [`CHECKLIST_PREDEPLOY.md`](CHECKLIST_PREDEPLOY.md) |
+| Procedimientos CD, operación y rollback | Secciones posteriores de este README y scripts enlazados |
+| Evidencia histórica | [`auditorias/README.md`](auditorias/README.md) |
+
+El estado operativo es una observación fechada, no una garantía de que la VM siga igual. Preparar una imagen no autoriza un despliegue: selección y autorización se rigen por `services.psv`, `auto-release-authorization.psv` y los procedimientos de liberación.
+
 > **Estado operativo vigente:** consultar [ESTADO_ACTUAL.md](ESTADO_ACTUAL.md), sustentado por la auditoría SSH del 19 de octubre de 2026. Los reportes fechados dentro de `auditorias/` permanecen como evidencia histórica de su fecha de observación.
 
 El CD publica imágenes etiquetadas por SHA en GHCR y despliega mediante SSH restringido. Si una etiqueta SHA ya existe, solo se reutiliza cuando coinciden el paquete del servicio, el repositorio fuente y la revisión; una imagen no verificable falla cerrada y nunca se sobrescribe. La concurrencia serializa los intentos por servicio. El manifiesto declarativo `ops/oracle/services.psv`, leído sin ejecutarlo por `ops/oracle/service-registry.sh`, contiene los nueve componentes del monorepo, sus puertos, rutas, imágenes, contenedores, estados y archivos privados de runtime. El PR #122 ya está integrado. La allowlist manual y la autorización automática son independientes: `ops/oracle/auto-release-authorization.psv` comienza con los nueve servicios deshabilitados y exige el ID de una liberación manual exitosa más una referencia de evidencia readiness/smoke funcional. Un nombre en `services.psv` nunca habilita despliegue automático.

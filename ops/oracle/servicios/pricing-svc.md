@@ -1,0 +1,41 @@
+# Ficha — pricing-svc
+
+## A. Identidad
+
+Owner Vera; rama `vera` (snapshot `3071a1a5687f4bdcf78cc7e561aa91e4e2550483`, confirmar commit exacto de código antes de entrega). Puerto 3002 / `PRICING_SVC_PORT`; PostgreSQL propio, schema contractual a verificar en las migraciones de la revisión. Proyecto/contenedor `g6-pricing-svc`; generic Compose; runtime `/etc/g6-pricing-svc/runtime.env`; estado `/var/lib/g6-productos-ofertas/pricing-svc`. Oracle al 19-oct: healthy, `/health/ready` 200, sin GET de negocio exitoso. `master` referencia `9205eb455c4965a82ccb9fc4714cf976e4c059b0`.
+
+## B. Configuración runtime
+
+| Variable | Requisito / origen | Validación |
+|---|---|---|
+| `NODE_ENV`, `PORT`, `PRICING_SVC_PORT` | NODE_ENV/puertos los inyecta Compose | `config/environment.ts`, `verifyEnvironment`; port entero y válido |
+| `DATABASE_URL` | requerida; Marco/DB owner suministra URL con credencial | URL Postgres válida, `sslmode=verify-full` fuera de pruebas locales; únicos parámetros permitidos `sslmode`, `sslrootcert` |
+| `PGSSLMODE`, `PGSSLROOTCERT` | TLS/CA; ruta CA Compose `/run/g6-certs/supabase-server-root.crt` | ssl verify-full, CA parse X509; TLS global no puede deshabilitarse |
+| `AUTH_ISSUER`,`AUTH_JWKS_URL` | auth pareada si se configura según código/contrato | HTTPS URL; valores runtime, no compartir token/secret |
+| `GATEWAY_DEMO_NO_AUTH_ENABLED` | default false; demo controlada | producción true exige `PRICING_DEMO_PRODUCTION_CONFIRMED=true`; no habilitar por defecto |
+| `PRICING_DEMO_PRODUCTION_CONFIRMED` | solo guard explícito de demo | bool |
+| `NODE_TLS_REJECT_UNAUTHORIZED` | no debe ser `0` | rechazado si TLS global desactivado |
+
+## C. Dependencias
+
+PostgreSQL verificado mediante `PricingDatabase.check`; CA/TLS obligatorio. Servicio conectado `g6-http`, alias `pricing-svc`; AMQP no demostrado por backend master ni auditoría. Gateway upstream solo con ruta autorizada. Catalog demo puede requerir Pricing según `CATALOG_PRICING_URL`.
+
+## D. HTTP / seguridad
+
+Contrato OpenAPI docs `origin/master` SHA `c36bd9a...`, versión `0.6.0-rc.1`; código `pricing-read.controller.ts` implementa GET `/api/v1/precios/productos/{productoId}`, `/api/v1/precios/productos/{productoId}/programaciones`, `/api/v1/precios/skus/{sku}/programaciones`, `/api/v1/precios/importaciones/{batchId}`. Corroborar paridad y auth contra OpenAPI antes declarar completas. `/health/ready` prueba DB; `/health` liveness. JWT/scope como contrato. CI confirma liveness con base inaccesible/readiness 503 y test integración PostgreSQL desechable; Oracle tuvo readiness 200 pero sin smoke negocio.
+
+## E. RabbitMQ
+
+No se confirma publisher/consumer activo por master/corte Oracle. Consultar AsyncAPI antes de sumar; no deducir eventos de la responsabilidad de Pricing. Ver [matriz](../RABBITMQ_COMPATIBILIDAD.md).
+
+## F. Persistencia
+
+PostgreSQL con TLS verify-full. Registrar schema/rol/migraciones exactos desde la migración del SHA elegido; sin arranque con DDL. La CI incluye pruebas provider/persistence con PostgreSQL aislado.
+
+## G. Pruebas y aceptación
+
+`npm run build:pricing-svc`; `npm test -- apps/pricing-svc`; `npm run test:e2e -- apps/pricing-svc --reporter=verbose` (CI usa `PRICING_TEST_POSTGRES=1`); `npm run typecheck`; `npm run lint`; `bash ops/oracle/build-service.sh pricing-svc`; imagen/Compose genéricos; PostgreSQL con TLS, readiness y GET autorizado sobre fixture conocida. No usar Oracle para pruebas destructivas.
+
+## H. Bloqueos y entrega
+
+Vera debe asociar GET contractual a test DB real/fixture y capturar smoke de negocio; verificar rol/schema exactos. Gateway/Auth smoke y aprobación por Marco. No declarar readiness 200 como flujo comercial probado.
