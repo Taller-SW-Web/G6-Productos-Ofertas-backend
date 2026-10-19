@@ -1,5 +1,7 @@
 # CD de servicios G6 en Oracle Cloud
 
+> **Estado operativo vigente:** consultar [ESTADO_ACTUAL.md](ESTADO_ACTUAL.md), sustentado por la auditoría SSH del 19 de octubre de 2026. Los reportes fechados dentro de `auditorias/` permanecen como evidencia histórica de su fecha de observación.
+
 El CD publica imágenes etiquetadas por SHA en GHCR y despliega mediante SSH restringido. Si una etiqueta SHA ya existe, solo se reutiliza cuando coinciden el paquete del servicio, el repositorio fuente y la revisión; una imagen no verificable falla cerrada y nunca se sobrescribe. La concurrencia serializa los intentos por servicio. El manifiesto declarativo `ops/oracle/services.psv`, leído sin ejecutarlo por `ops/oracle/service-registry.sh`, contiene los nueve componentes del monorepo, sus puertos, rutas, imágenes, contenedores, estados y archivos privados de runtime. El PR #122 ya está integrado. La allowlist manual y la autorización automática son independientes: `ops/oracle/auto-release-authorization.psv` comienza con los nueve servicios deshabilitados y exige el ID de una liberación manual exitosa más una referencia de evidencia readiness/smoke funcional. Un nombre en `services.psv` nunca habilita despliegue automático.
 
 ## Estado y límites
