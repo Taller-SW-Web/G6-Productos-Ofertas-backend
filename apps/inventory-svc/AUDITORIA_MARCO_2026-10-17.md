@@ -138,3 +138,53 @@ La repetición en `01b5619` mostró RabbitMQ terminado con exit=1 y fallo de arr
 La descripción y el título del PR #10 ya se actualizaron mediante la autenticación Git de MiguelTacoZavala, verificada previamente, conservando draft=true y state=open. Solo se transmitió la credencial al API oficial de GitHub en memoria; no se imprimió ni se guardó. La descripción debe quedar con el último SHA publicado y el resultado real de CI al finalizar.
 
 La ejecución de `ef4277a`, [run 39036025929](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/39036025929/job/117405844709), acreditó el arranque del broker y ejecutó los 19 casos: 18 PASS, incluido HTTP→PostgreSQL→RabbitMQ, y un fallo de representación en la consulta de enums BACK-02. `pg_enum.enumlabel` es de tipo `name` ([PostgreSQL 17](https://www.postgresql.org/docs/17/catalog-pg-enum.html)); su agregado name[] se recibió como texto. Se convierte cada etiqueta a text antes de array_agg para obtener text[] sin cambiar etiquetas, orden ni aserciones. La repetición completa real sigue siendo obligatoria; no se omite el caso fallido ni se modifica el modelo físico.
+
+## Corte 2026-10-18 — CI real del HEAD publicado y avance de master
+
+Verificación del recurso remoto (consulta de solo lectura a la API de GitHub, sin
+modificar issues, PRs ni ramas):
+
+| Comprobación | Resultado verificado |
+| --- | --- |
+| CI del HEAD publicado `843725bf709c3ea4b9811b8d5c59097a773f26ba` | **SUCCESS** — [run 39038902601](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/39038902601): tres jobs aprobados (validación general, Inventory integration, Taxonomy integration) |
+| Job Inventory (PostgreSQL 17 + RabbitMQ 3.13 efímeros, Node 24.15.0/Ubuntu) | **21 casos ejecutados, 21 aprobados, cero omitidos**, incluido el cierre del consumer observado hasta cinco segundos con `messageCount=0 AND consumerCount=0` |
+| PR #10 | `OPEN`/`DRAFT`, `mergeable=true`, `mergeable_state=clean`, head `843725b` |
+
+El ajuste de `843725b` (espera acotada de la baja del consumidor) y la corrección
+de la lectura de etiquetas enum (`ce624d0`, etiquetas convertidas a `text[]`
+antes de `array_agg`, sin cambiar valores ni orden) quedan **validados en CI
+real**. Los 19 casos de `8b91345` pasan a ser 21 aprobados en `843725b`. Esta
+evidencia acredita la suite real de Inventory con DB y broker reales efímeros;
+**no** acredita grants G7, consumidor G5, recorrido React→Gateway ni despliegue.
+
+Master avanzó de `2970df9` a `9205eb455c4965a82ccb9fc4714cf976e4c059b0` por el
+[PR #134](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/134)
+(rama `castilla`). Ese cambio **acota el bypass demo del Gateway** a tres GET de
+Catálogo (`listarCategorias`, `listarProductos` y `obtenerProductoPorSlug` con
+`canal=MARKETPLACE`); las escrituras y el resto de operaciones vuelven a exigir
+JWT en Gateway. Consecuencia para Inventory:
+
+- El acceso demo sin JWT de G7 a las operaciones de Inventory (`#25`/`#100`)
+  **vuelve a depender de una resolución de Marco en #107**, no de `taco`.
+- No se amplió ni se desactivó ningún control del servicio; se mantiene la
+  excepción interna acotada a GET comercial y POST verificador desde el peer
+  Gateway configurado.
+- El defecto de propagación de errores del POST verificador (400/401/422/503 →
+  500) sigue sin corregir en `master`; se conserva la caracterización local como
+  evidencia del defecto, no de su corrección.
+
+Existe un único cambio local sin commit: `test/inventory.real.integration.spec.ts`
+queda **fuera de la entrega** y sin modificar en este corte (su versión
+publicada en `843725b` es la validada por CI).
+
+### Documentación incorporada en este corte
+
+- `apps/inventory-svc/README.md` (nuevo): superficie HTTP por `operationId`,
+  eventos AsyncAPI producidos/consumidos, invariantes, comandos de prueba,
+  suite real y matriz de los 13 issues con dependencias externas
+  (owner · operación · condición de desbloqueo).
+- Este apartado en `AUDITORIA_MARCO_2026-10-17.md`.
+
+No se modificaron contratos, migraciones, Gateway, Frontend ni datos de otros
+contextos. Los trece issues de Taco siguen OPEN; implementación interna,
+aceptación, homologación y despliegue son estados distintos.
