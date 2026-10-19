@@ -2,14 +2,14 @@
 
 ## A. Identidad
 
-Owner Vera; rama `vera` (`3071a1a5687f4bdcf78cc7e561aa91e4e2550483` snapshot consultado). Puerto 3003 / `PRICE_AUDIT_SVC_PORT`. Schema: no determinado en implementación actual; no inventar. Proyecto/contenedor `g6-price-audit-svc`; generic Compose; `/etc/g6-price-audit-svc/runtime.env`; estado `/var/lib/g6-productos-ofertas/price-audit-svc`. Oracle 19-oct: no desplegado. master SHA ref `9205eb455c4965a82ccb9fc4714cf976e4c059b0`; servicio actual scaffold/health sin evidencia de persistencia ni endpoints de negocio; rama personal a validar.
+Owner Vera; `origin/vera` HEAD `48afbf7a6845db4aaba6b58eb336396fa0e85ea7` (sin CI exacto; predecessor `3071a1a5687f4bdcf78cc7e561aa91e4e2550483` tuvo CI verde). Puerto 3003 / `PRICE_AUDIT_SVC_PORT`. Schema físico `price_audit` existe; repositorio no acreditado en HEAD. Proyecto/contenedor `g6-price-audit-svc`; Compose genérico; `/etc/g6-price-audit-svc/runtime.env`; Oracle no desplegado al corte.
 
 ## B. Configuración runtime
 
 | Variable | Estado | Consumidor / validación |
 |---|---|---|
-| `NODE_ENV`,`PORT`,`PRICE_AUDIT_SVC_PORT` | Compose injecta production/3003/alias port; requerida | `apps/price-audit-svc/src/main.ts`; specific port precede PORT (confirmar código del SHA) |
-| Variables PostgreSQL / AMQP / auth | No consta configuración en master scaffold consultado | No añadir hasta Issue, contrato y parser reales. Compose monta CA ro aunque no prueba uso DB. |
+| `NODE_ENV`,`PORT`,`PRICE_AUDIT_SVC_PORT` | Compose fija production y puertos a 3003; Dockerfile genérico también fija production | `main.ts` lee puerto específico con fallback `PORT` |
+| Variables PostgreSQL / AMQP / auth | No consumidas por el scaffold de este HEAD | No añadir hasta implementación/parser aprobados. La CA montada no prueba uso DB. |
 
 ## C. Dependencias
 

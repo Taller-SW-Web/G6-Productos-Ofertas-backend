@@ -2,25 +2,26 @@
 
 ## A. Identidad
 
-Owner Taco; rama `taco` snapshot `01b5619160364951b620fbc8aa8494a0386cd82a` pendiente. Puerto 3005 / `INVENTORY_SVC_PORT`; schema/role deben cotejarse con migrations/DB contract de SHA, no se infieren aquí. Proyecto `g6-inventory`, Compose legado `docker-compose.inventory.yml`, unidad `inventory-svc`, contenedor `g6-inventory-svc`; runtime `/etc/g6-inventory/runtime.env`; estado `/var/lib/g6-inventory`. Oracle 19-oct no desplegado. master `9205eb455c4965a82ccb9fc4714cf976e4c059b0` no implica código de `taco` ya integrado.
+Owner Taco; HEAD contrastado `origin/taco` `b02615841f63ea3249d9ad16a0cf32f4ea2b20c2`, pendiente. Puerto 3005 / `INVENTORY_SVC_PORT`; schema físico `inventory` (ver [esquemas](../SUPABASE_ESQUEMAS.md)); configuración candidata DB debe verificarse contra provider antes de runtime. Proyecto `g6-inventory`, Compose `docker-compose.inventory.yml`, contenedor `g6-inventory-svc`; runtime `/etc/g6-inventory/runtime.env`; estado `/var/lib/g6-inventory`. No desplegado al corte Oracle 19-oct.
 
 ## B. Configuración runtime
 
 | Variable | Requisito / secreto | Código de rama / bootstrap |
 |---|---|---|
 | `PORT`,`INVENTORY_SVC_PORT` | puerto Compose 3005; no secreto | `src/config/inventory.config.ts`, integer 1–65535 |
-| `DATABASE_URL` | opcional parser field; si se usa credencial secreta | inventory config; validar modo final/mutua exclusión con PG* antes deploy |
-| `PGHOST`,`PGPORT`,`PGDATABASE`,`PGUSER`,`PGPASSWORD`,`PGSSLMODE`,`PGSSLROOTCERT` | DB params; contraseña secreta, CA path | `inventory.config.ts`; port validado, TLS y obligatoriedad deben verificarse en provider/startup del SHA |
-| `RABBITMQ_URL` | AMQP candidate; secreto | config field; no conexión Oracle desde red HTTP |
+| `DATABASE_URL` | campo opcional de config; provider candidato acepta URL o campos PG, reglas exclusivas no demostradas por config sola | runtime.env; URL contiene credenciales | Verificar comportamiento exacto del provider en este SHA antes de liberar |
+| `PGHOST`,`PGDATABASE`,`PGUSER`,`PGPASSWORD`,`PGSSLMODE`,`PGSSLROOTCERT` | opcionales en parser de config; DB provider necesita configuración utilizable; contraseña secreta y CA path | runtime.env, no copiar valores | `inventory.config.ts` lee campos; no demuestra conectividad ni TLS real |
+| `PGPORT` | opcional; default 5432 y entero 1–65535 | Compose no lo inyecta; runtime.env si cambia | `inventory.config.ts` |
+| `RABBITMQ_URL` | opcional para bootstrap; requerida para flujo AMQP | runtime.env; secreto | config candidata; conexión al broker no verificada ni autorizada |
 | `RESERVATION_TTL_SECONDS` | default 900, >=1 | integer validated |
 | `DEFAULT_LOW_STOCK_THRESHOLD` | default 5, >=0 | integer validated |
 | `INVENTORY_WORKER_INTERVAL_MS` | default 5000, rango 250..2147483647 | integer validated |
 | `INVENTORY_WORKER_BATCH_SIZE` | default 50, 1..500 | integer validated |
 | `INVENTORY_DEMO_NO_AUTH_ENABLED` | default false; excepción puntual solo dos operaciones | `loadCommercialDemoConfig`; boolean |
 | `INVENTORY_DEMO_GATEWAY_IPS` | requerido si demo true, IPs literales | config canonicaliza IP, rechaza inválidas |
-| `G7_JWT_ISSUER`,`G7_JWT_PUBLIC_KEY`/`JWT_PUBLIC_KEY` | identificar fuente exacta en snapshot antes de runtime | no inventar aliases; valores identidad pública/privada según implementación, secreto si clave privada (no se presume) |
+| `G7_JWT_ISSUER`,`G7_JWT_PUBLIC_KEY`/`JWT_PUBLIC_KEY` | no son leídas por `inventory.config.ts`; confirmar otro consumidor antes de provisionar | no inferir aliases ni secreto | no acreditadas por config en HEAD `b0261584` |
 
-Compose legado inyecta NODE_ENV/puerto por el ejecutor y monta CA en overlay HTTP; variables aplicación por runtime file privado.
+Dockerfile propio fija `NODE_ENV=production` y `EXPOSE 3005`. Compose de producción inyecta `NODE_ENV`, `PORT=3005`, `INVENTORY_SVC_PORT=3005` y monta la CA de solo lectura en el overlay HTTP. Los valores de negocio/DB/demo deben venir de `/etc/g6-inventory/runtime.env`.
 
 ## C. Dependencias
 
@@ -32,7 +33,7 @@ OpenAPI oficial rc.1 lista availability, reservation, consume/release, threshold
 
 ## E. RabbitMQ
 
-Branch `taco` contiene Outbox/Inbox pero exactos exchanges/queues/routing keys se deben cotejar con AsyncAPI antes liberar. Broker Oracle tiene `po.inventario.q` y usuario `g6_inventario` read queue/write eventos/results; no equivale a conectividad ni nombres del código. Retry/DLX bloqueado.
+Branch `taco` consume `po.inventory.q`; el outbox elige `po.events.x` o `po.results.x` y usa `row.event_type` como routing key. La topología observada es `po.inventario.q`, `po.eventos.x` y `po.resultados.x`: incompatibilidad bloquea el deploy AMQP. Ver matriz común.
 
 ## F. Persistencia
 

@@ -2,18 +2,22 @@
 
 ## A. Identidad
 
-Owner Cueva; rama `cueva` snapshot `3f42e0e474071a13eb1b3120819d142cfeda4a95`, pendiente. Puerto 3004 / `PROMOTIONS_SVC_PORT`; schema `promotions` en código candidato. Proyecto/contenedor `g6-promotions-svc`; generic Compose; runtime `/etc/g6-promotions-svc/runtime.env`; estado `/var/lib/g6-productos-ofertas/promotions-svc`. Oracle 19-oct no desplegado. Master SHA referencia `9205eb455c4965a82ccb9fc4714cf976e4c059b0`; no presentar branch como merged.
+Owner Cueva; HEAD contrastado `origin/cueva` `3f42e0e474071a13eb1b3120819d142cfeda4a95`, pendiente. Puerto 3004 / `PROMOTIONS_SVC_PORT`; schema candidato `promotions`. Proyecto/contenedor `g6-promotions-svc`; Compose genérico; runtime `/etc/g6-promotions-svc/runtime.env`; estado `/var/lib/g6-productos-ofertas/promotions-svc`. No desplegado al corte Oracle 19-oct.
 
 ## B. Configuración runtime
 
 | Variable | Estado / uso | Fuente / validación |
 |---|---|---|
-| `NODE_ENV`,`PORT`,`PROMOTIONS_SVC_PORT` | Compose producción/3004 | main/bootstrap de SHA actual; confirmar parser |
-| `PGHOST`,`PGPORT`,`PGDATABASE`,`PGUSER`,`PGPASSWORD`,`PGSSLMODE`,`PGSSLROOTCERT` | candidate `cueva` PostgreSQL | runtime privado; PGPASSWORD secreto; parser/bootstrap branch pendiente; TLS verify-full/CA antes release |
-| `G6_DATABASE_SCHEMA`,`G6_EXPECTED_ROLE`,`DATABASE_URL` | consultar config real rama antes usar; no generalizar nombres fuera de source | no introducir valores hasta contrato DB/runtime aprobado |
-| `RABBITMQ_URL` | branch `cueva` candidate | secreto; config and reachability not verified; block pending topology reconciliation |
+| `NODE_ENV` | `development` por defecto, debe ser `production` para release | Compose define production; Dockerfile genérico define production | Compose sobrescribe la imagen |
+| `PROMOTIONS_SVC_PORT`,`PORT` | precedence específica; default 3004, entero 1–65535 | Compose fija ambas a 3004 | parser de servicio |
+| `PGHOST`,`PGPORT`,`PGDATABASE`,`PGUSER`,`PGPASSWORD` | todas obligatorias; `PGPASSWORD` secreto | `/etc/g6-promotions-svc/runtime.env` | config exige valores utilizables |
+| `PGSSLMODE`,`PGSSLROOTCERT` | obligatorias; modo literal `verify-full`, CA absoluta legible X.509 | runtime.env + CA montada | no hay downgrade TLS |
+| `G6_DATABASE_SCHEMA`,`G6_CONNECTION_MODE` | obligatorias: `promotions` y `session` | runtime.env | no omitir ni sustituir por `DATABASE_URL` |
+| `RABBITMQ_URL` | obligatoria aunque probes y coupon runtime estén apagados; amqp/amqps sin query/fragment | runtime.env; sensible | configuración obligatoria, pero conectividad Oracle no verificada |
+| `PROMOTIONS_DEPENDENCY_PROBES_ENABLED` | opcional, default `false`, solo `true`/`false`; true habilita comprobaciones reales bajo demanda | runtime.env | probes no crean topology/consumer |
+| `PROMOTIONS_COUPON_RUNTIME_ENABLED` | opcional, default `false`, solo boolean; true requiere adaptadores/condiciones de #33 | runtime.env | flag no reemplaza configuración obligatoria |
 
-Compose monta CA de solo lectura e inyecta NODE_ENV/puerto; resto runtime privado. No consta validación de producción desde Oracle.
+Dockerfile genérico define `NODE_ENV=production`, host bind 0.0.0.0 y `/health` de contenedor. Compose inyecta NODE_ENV/PORT/puerto específico y monta CA read-only. Todas las variables de aplicación requeridas y flags opcionales proceden de runtime.env; no consta runtime Promotions desplegado.
 
 ## C. Dependencias
 
@@ -25,7 +29,7 @@ OpenAPI official rc.1 define promociones/cupones/recomendaciones. Current branch
 
 ## E. RabbitMQ
 
-Branch `cueva` usa `po.commands.x`/`po.results.x`; test/código observa `po.events.x` y `inventory.stock.changed`; Oracle usa names españoles. Usuario físico `g6_promociones` tiene lectura `po.promociones.q`, escritura `po.resultados.x`, sin configure; el nombre del consumer candidate no coincide. Retry/DLX no aprobado. Acceso requiere permiso broker y red privada autorizados; ver [RABBITMQ_COMPATIBILIDAD.md](../RABBITMQ_COMPATIBILIDAD.md).
+Branch Cueva consume `po.promotions.q`, publica comandos candidate en `po.commands.x` con routing keys `promotions.coupon.consumption.requested` y `promotions.coupon.restoration.requested`, y resultados en `po.results.x`. La topología física usa `po.promociones.q`, `po.comandos.x`, `po.resultados.x`; ACL observada del usuario de servicio no permite publicar en el exchange inglés. Bloqueo de deploy AMQP; consultar [matriz](../RABBITMQ_COMPATIBILIDAD.md).
 
 ## F. Persistencia
 

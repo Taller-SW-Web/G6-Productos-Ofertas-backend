@@ -1,30 +1,22 @@
-# Compatibilidad RabbitMQ — nombres y bloqueos
+# Compatibilidad RabbitMQ: contrato, topología y candidatos
 
-## Fuentes y estados
+## Estados que no se deben mezclar
 
-- **Físico:** observación Oracle 2026-10-19, RabbitMQ 4.2.9, vhost `g6-productos-ofertas`: cuatro exchanges (`po.comandos.x`, `po.eventos.x`, `po.resultados.x`, `po.sin-ruta.x`), 11 colas quorum (incluye `po.catalogo.q`, `po.inventario.q`, `po.promociones.q`, `po.auditoria-precios.q`) y 57 bindings; cero conexiones/consumidores. Sin retry/DLX ni policies. No se cambió el broker.
-- **AsyncAPI oficial consultado:** docs `origin/master` SHA `c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b`, versión `0.6.0-rc.2`, `contratos/eventos/asyncapi.yaml`. Es candidato contractual publicado en el repositorio; no consta homologación externa. Su `channels` usa exchanges `po.events.x`/`po.results.x`; descripción/topología candidata menciona exchanges/colas ingleses y retry/DLX.
-- **Docs working tree local:** branch `docs/rabbitmq-adopcion-retry-dlx` dirty, AsyncAPI candidato rc.3 con nombres base españoles y retry/DLX pendientes; no es `origin/master`, no se cita como norma aprobada ni se cambia desde este trabajo.
-- **Backend master:** no se encontró el cliente AMQP desplegado como implementación consolidada para esos servicios; la auditoría backend del 19-oct tampoco halló los nombres ingleses en `apps/` ni `ops/` de `castilla`.
-- **Ramas personales:** `poma` (Catalog), `taco` (Inventory), `cueva` (Promotions) son snapshots no fusionados; sus nombres no prevalecen sobre el contrato o la topología física.
+- **Contrato oficial consultado:** AsyncAPI `0.6.0-rc.2` de docs `origin/master` SHA `c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b`. Es el contrato publicado en el repo; no consta homologación externa.
+- **Topología física observada:** auditoría Oracle `2026-10-19 22:32:52 UTC`, RabbitMQ 4.2.9, vhost `g6-productos-ofertas`: exchanges `po.comandos.x` (topic), `po.eventos.x` (topic), `po.resultados.x` (topic), `po.sin-ruta.x` (fanout); 11 colas, 57 bindings, cero mensajes, consumidores y conexiones. Broker aislado; no hay ruta autorizada desde las redes de aplicación. No existe retry/DLX.
+- **Código candidato:** ramas personales indicadas abajo, no equivalen a contrato homologado ni a despliegue.
 
-## Comparación resumida
+## Nombres exactos y bloqueo
 
-| Rol / recurso | Oracle físico | AsyncAPI `origin/master` rc.2 | Backend master/`castilla` | Rama personal | Permiso/estado y acción |
-|---|---|---|---|---|---|
-| Exchanges base | `po.comandos.x`, `po.eventos.x`, `po.resultados.x`, `po.sin-ruta.x` | nombres base ingleses, según canales `po.events.x`, `po.results.x`; comandos/topología candidatos `po.commands.x` | sin cliente activo confirmado por búsqueda auditada | Catalog `poma`: English `po.retry.x`/`po.dlx.x`; Promotions `cueva`: `po.commands.x`/`po.results.x`; Inventory `taco`: verificar snapshot | Discrepancia de nombres; owner AsyncAPI/topología y Marco deben resolver antes de integrar clientes. No renombrar unilateralmente. |
-| Catalog queue | `po.catalogo.q` | `po.catalog.q` | sin consumidor confirmado | `poma`: rama pendiente, no declarar homóloga | Read permitido a usuario `g6_catalogo` físicamente listado; la implementación pendiente debe solicitar confirmación del permiso/credencial y nombre antes de activar. |
-| Inventory queue | `po.inventario.q` | `po.inventory.q` según contrato candidato | sin consumidor confirmado | `taco` usa outbox/inbox; nombres/routing exactos requieren inspección del código y comparación por el owner | Read/write según usuario `g6_inventario` y exchanges físicos; no asumir match del código. Bloqueado hasta reconciliar nombres y red. |
-| Promotions queue | `po.promociones.q` | `po.promotions.q` candidato | no consumidor confirmado | `cueva`: comandos y resultados ingleses; test observa `po.events.x` | Usuario `g6_promociones` tiene read en cola física, write solo `po.resultados.x`; inglés no coincide. Gate específico pendiente. |
-| Price audit | `po.auditoria-precios.q` | `po.price-audit.q` candidato | servicio no desplegado | `vera` branch contiene scaffold, no evidencia de publisher/consumer activo | Usuario físico read-only; confirmar necesidad/rol con contrato antes de configurar. |
-| Retry/DLX | No existe; no policies | rc.2 describe retry/DLQ inglés (`po.retry.x`, `po.dlx.x`, queues `.retry`/`.dlq`) y una guía en docs puede contener inconsistencias | No existe topología runtime | `poma` referencia `po.retry.x`/`po.dlx.x` | **BLOQUEADO**. No aprobar, crear, inferir argumentos, nombres, TTL, ACK/requeue ni permisos hasta decisión/contrato reconciliado y autorización de broker. |
+| Flujo | Contrato/topología candidate | Físico observado | Código candidato y estado |
+|---|---|---|---|
+| Exchanges base | AsyncAPI usa `po.commands.x`, `po.events.x`, `po.results.x`; documenta candidatos de unrouted/retry/DLQ. | `po.comandos.x`, `po.eventos.x`, `po.resultados.x`, `po.sin-ruta.x`. | Catalog Poma publica en exchanges ingleses seleccionados por tipo (`command`/`event`/`result`); Inventory Taco publica en `po.events.x` o `po.results.x`; Promotions Cueva publica comandos en `po.commands.x` y resultados en `po.results.x`. **Bloqueo de deploy:** incompatibles con los nombres físicos/permisos actuales. |
+| Cola Catalog | AsyncAPI menciona `po.catalog.q`; topología física declara `po.catalogo.q`. | `po.catalogo.q`; usuario físico `g6_catalogo` lee esa cola. | Catalog Poma consume `po.catalog.q`; no coincide con la cola física. Bloqueo para conectar/consumir. |
+| Cola Inventory | AsyncAPI/código candidate `po.inventory.q`. | `po.inventario.q`; usuario físico `g6_inventario` lee esa cola. | Inventory Taco consume `po.inventory.q`; no coincide con la cola física. Bloqueo para conectar/consumir. |
+| Cola Promotions | Código candidate `po.promotions.q`; la cola contractual y física española difieren. | `po.promociones.q`; usuario `g6_promociones` la lee y puede escribir solo `po.resultados.x`. | Promotions Cueva hace `checkQueue`/consume en `po.promotions.q`, publica `po.results.x`. Tanto cola como permiso de publicación chocan con la topología/ACL observada. Bloqueo. |
+| Cola Price Audit | AsyncAPI/topología deben cotejarse con el path/evento aplicable; no inferir consumo por existir cola. | `po.auditoria-precios.q`; usuario físico `g6_auditoria_precios` con lectura observada. | HEAD Vera no implementa productor/consumidor. Ninguna conexión habilitada. |
+| Cola Taxonomy | La topología contractual candidata debe fijar queue y bindings. | `po.taxonomia.q`; el usuario físico `g6_taxonomia` tiene lectura y permisos de escritura en exchanges físicos base. | HEAD Lopez no registra productor/consumidor AMQP. |
+| Retry / DLQ | La documentación candidata usa nombres ingleses, incluidos `po.retry.x`, `po.dlx.x` y colas `.retry`/`.dlq`; revisar AsyncAPI exacta antes de aceptar. | No existen exchanges, colas ni policies retry/DLX. | Catalog Poma referencia `po.retry.x`/`po.dlx.x`; bloqueado. No inventar TTL, bindings, requeue, ACK ni permisos. |
+| Routing keys | AsyncAPI define nombres de mensajes; verificar versión y payload exactos por operación. | 57 bindings observados, pero no hacen compatibles por sí solos nombres/routing candidate. | Catalog publica la propiedad `message.name` como routing key; ejemplos de código: `pricing.product.initialization.requested`, `inventory.sku.initialization.requested`, `catalog.product.deactivated`. Inventory utiliza `row.event_type` como routing key. Promotions comandos: `promotions.coupon.consumption.requested`, `promotions.coupon.restoration.requested`; resultados candidate: `promotions.coupon.consumption.completed/rejected` y `promotions.coupon.restoration.completed/rejected`. No habilitar hasta correspondencia con canales, bindings y permisos acordados. |
 
-Las filas no enumeran valores de routing keys no inspeccionados. Para cada evento, consultar AsyncAPI del SHA citado y código exacto de rama antes de implementar. La documentación local docs pendiente puede ser material para resolver la discrepancia, nunca evidencia de homologación.
-
-## Requisitos de desbloqueo AMQP
-
-1. Owner contractual reconcilia names, bindings, retry/DLX y versión ejecutable; Marco confirma estado interno y solicita homologación externa cuando afecte consumidor/interface compartida.
-2. Owner/Seguridad confirma usuario/vhost/permisos mínimos y entrega secretos por canal runtime privado; no añadir configure permission al servicio si no es necesario.
-3. Marco/owner de plataforma aprueba mecanismo de red privada entre contenedores sin publicar 5672; actualmente no está documentado ni habilitado.
-4. Prueba aislada de producer/consumer, redelivery/ACK/idempotencia y failover/deduplicación aplicables; evidencia SHA y versión de topología.
-5. Solo tras gates y autorización individual, planificar operación del broker separada. Este documento no es orden de cambio.
+Los nombres físicos no son alias de los nombres ingleses. No se ha verificado conectividad de contenedor al broker; permisos enumerados en la auditoría describen ACL físicas, no autorización para adaptarlas. Una diferencia de exchange/queue/routing key, falta de permisos o falta de red que impida conectar/publicar/consumir es **bloqueo de deploy del flujo AMQP**. Mantener desplegables los flujos HTTP/DB independientes cuando el servicio lo permita. Marco/owner de contrato debe obtener la reconciliación y autorización aplicables antes de cambiar broker o interfaces compartidas.

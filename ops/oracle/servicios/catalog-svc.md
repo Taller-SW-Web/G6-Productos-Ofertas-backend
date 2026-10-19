@@ -2,14 +2,14 @@
 
 ## A. Identidad
 
-Owner Poma; rama `poma` (snapshot consultado `570bf025afabf956f94cbac8fe2589aa197cabac`, no fusionado). Puerto 3001 / `CATALOG_SVC_PORT`. Schema `catalog`. Proyecto/contenedor `g6-catalog-svc`; generic Compose; `/etc/g6-catalog-svc/runtime.env`; estado `/var/lib/g6-productos-ofertas/catalog-svc`. Oracle 19-oct: desplegado/healthy, `/health/ready` 503; no GET comercial exitoso confirmado. `master` ref `9205eb455c4965a82ccb9fc4714cf976e4c059b0`; revisar su código distinto de rama pendiente `apps/catalog-svc/`.
+Owner Poma; HEAD de `origin/poma` contrastado: `a81f2d5fa735d7353b5df0ec0f095abac489e5d3` (pendiente, no integrado). Puerto 3001 / `CATALOG_SVC_PORT`. Schema `catalog`. Proyecto/contenedor `g6-catalog-svc`; Compose genérico; `/etc/g6-catalog-svc/runtime.env`; estado `/var/lib/g6-productos-ofertas/catalog-svc`. En Oracle al corte 19-oct estaba desplegado y Docker healthy, pero `/health/ready` devolvía 503. Esa readiness general es independiente de las respuestas de demo descritas abajo.
 
 ## B. Configuración runtime
 
 | Variable | Uso | Fuente/secreto | Consumidor / validación |
 |---|---|---|---|
 | `NODE_ENV`, `PORT`, `CATALOG_SVC_PORT` | Compose pone production y puerto | Compose | `config.ts`, `http-config.ts`; puerto requerido/validado |
-| `CATALOG_SVC_HOST` | bind host | runtime; no secreto | `http-config.ts`, default 127.0.0.1; para Docker debe ser accesible dentro de contenedor, validar con owner |
+| `CATALOG_SVC_HOST` | bind host; opcional | Dockerfile genérico define `CATALOG_SVC_HOST=0.0.0.0`; runtime solo si se sobrescribe | `http-config.ts`; Compose/Dockerfile ya lo inyecta para contenedor |
 | `PGHOST`,`PGPORT`,`PGDATABASE`,`PGUSER`,`PGPASSWORD` | conexión PostgreSQL schema catalog | administrador DB suministra; `PGPASSWORD` secreto | `database.ts`; obligatorias, valid host/port/role |
 | `PGSSLMODE`,`PGSSLROOTCERT` | TLS y CA | runtime path; CA montada por Compose en `/run/g6-certs/supabase-server-root.crt`; no secreto | `database.ts`; `verify-full`, CA legible |
 | `G6_DATABASE_SCHEMA`,`G6_EXPECTED_ROLE`,`G6_CONNECTION_MODE` | schema/identidad/mode | Marco/DB owner autoriza rol | `database.ts`; schema literal `catalog`, expected role whitelist `catalog_dev_login`/`catalog_app`, mode `session`/`direct` |
@@ -17,10 +17,12 @@ Owner Poma; rama `poma` (snapshot consultado `570bf025afabf956f94cbac8fe2589aa19
 | `CATALOG_TAXONOMY_URL` | URL de Taxonomy; condicional según demo/uso | runtime; no secreto | `taxonomy-config.ts`; origin privado sin credenciales |
 | `CATALOG_MARKETPLACE_DEMO_PREVIEW_ENABLED` | default false; preview de demo | runtime privado | `config.ts`; bool; no autoriza datos falsos |
 | `CATALOG_PRICING_URL` | requerida si preview true | runtime privado | `config.ts`; solo `http://pricing-svc:3002` |
-| `DATABASE_URL` | parser soporta alternativa/configuración DB | runtime secreto | `database.ts`; usar config soportada exacta; no mezclar esquemas de fuentes |
-| `RABBITMQ_URL`, `CATALOG_AMQP_PRODUCER_USERS` | aparecen en rama personal `poma`, no afirmar master/deployment | secreto URL + identidad suministrada por owner | implementación candidata AMQP; requiere reconciliar AsyncAPI y red antes de activar |
+| `DATABASE_URL` | no soportada como alternativa | no configurar | `CatalogConfig` exige variables `PG*`; el test de configuración rechaza que `DATABASE_URL` las sustituya |
+| `SECURITY_ISSUER`, `SECURITY_DISCOVERY_URL`, `SECURITY_JWKS_URL` | opcionales, pero las tres deben configurarse juntas si se configura alguna | runtime.env; URLs públicas, no tokens | configuración de seguridad candidata; validar HTTPS/forma en el código de la rama |
+| `RABBITMQ_URL`, `CATALOG_AMQP_PRODUCER_USERS` | opcionales al arrancar; activan AMQP si se configuran | runtime.env; URL/usuarios son sensibles | código candidato de Poma; bloqueo de deploy AMQP hasta compatibilidad de nombres, red y permisos |
+| `CATALOG_PREPARATION_TIMEOUT_MS` | opcional, entero positivo | runtime.env | límite de preparación; respetar validador del SHA |
 
-Compose inyecta NODE_ENV/PORT/service port y CA; resto por env_file privado. No copies runtime values.
+Compose inyecta `NODE_ENV=production`, `PORT=3001`, `CATALOG_SVC_PORT=3001` y monta CA en solo lectura. El Dockerfile define `CATALOG_SVC_HOST=0.0.0.0`. El resto de valores requeridos/condicionales procede de `runtime.env`; no copies valores.
 
 ## C. Dependencias
 
@@ -28,7 +30,7 @@ Supabase PostgreSQL TLS verify-full; `g6-http` alias `catalog-svc`; Taxonomy por
 
 ## D. HTTP / seguridad
 
-OpenAPI oficial docs SHA `c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b`, `0.6.0-rc.1`, tag Productos. Evidencia de demo en `apps/api-gateway/INT-ASAP-RESULTADO.md` y tests identifica dos GET de negocio: `GET /api/v1/productos?canal=MARKETPLACE&q=...` y `GET /api/v1/productos/por-slug/{slug}?canal=MARKETPLACE`; ambos dieron 503 en el corte documentado por falta de candidatos válidos. El tercer GET que aparece en el artefacto demo de respaldo es `GET /api/v1/productos/{productoId}` y **responde 503 estático desde `scripts/demo-fallback/`, no es una llamada a Catalog ni evidencia de endpoint usado en el flujo comercial**. Por tanto, las fuentes disponibles respaldan dos endpoints comerciales utilizados y una ruta fallback; la afirmación de tres endpoints de negocio requiere confirmación de Poma/owner de demo. `GET /health` 200; readiness 503 Oracle. Reglas comerciales requieren canal y elegibilidad; JWT/scope OpenAPI. Fixtures e2e mockeadas no prueban DB real.
+OpenAPI de docs `origin/master` SHA `c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b`, `0.6.0-rc.1`, gobierna Productos. La guía de demo `apps/api-gateway/INT-ASAP-MARKETPLACE.md` identifica tres GET públicos comprobados mediante HTTPS sin token el 2026-10-19 23:46 UTC: (1) `GET /api/v1/categorias` → **200** (lo atiende Taxonomy, no Catalog); (2) `GET /api/v1/productos?canal=MARKETPLACE&q=codex-audit&pagina=1&tamanio=24` → **200**, lista vacía (`items=0`); (3) `GET /api/v1/productos/por-slug/codex-audit-nonexistent?canal=MARKETPLACE` → **404** para slug deliberadamente inexistente. Son resultados HTTP reales del recorrido público, no evidencia de producto comercial positivo ni de readiness general. En particular, la auditoría Oracle del 19-oct registró `/health/ready` de Catalog **503**; mantener ambos estados separados. No atribuir el endpoint de categorías a Catalog ni usar la ruta fallback `/productos/{productoId}` como endpoint probado.
 
 ## E. RabbitMQ
 
@@ -44,4 +46,4 @@ Schema `catalog`, rol limitado esperado, select queries para readiness y demo. B
 
 ## H. Bloqueos y entrega
 
-Poma: resolver readiness 503 con permisos/config/db evidence; confirmar endpoints de demo (solo dos rutas comerciales verificables); demostrar lectura positiva y negativa. Rabbit boundary bloqueada hasta reconciliación y acceso de red autorizado. Marco: runtime privado/rol existente, release autorizada, no publicar fallback productivo.
+Poma: investigar y corregir readiness 503; añadir una prueba con producto válido para demostrar respuesta comercial positiva. Rabbit candidate bloqueado hasta reconciliación y red autorizada. Marco: suministrar runtime privado/rol y autorizar release cuando los gates estén satisfechos; no publicar fallback productivo.

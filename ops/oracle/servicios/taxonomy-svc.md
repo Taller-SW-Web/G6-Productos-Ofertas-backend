@@ -2,17 +2,20 @@
 
 ## A. Identidad
 
-Owner Lopez; rama `lopez` (`c6032dffd42dfa0eeeb9cbe8477b3de076c64e6d`, snapshot consultado; ver historial/merge para SHA fuente exacto). Puerto 3006 / `TAXONOMY_SVC_PORT`; schema `taxonomy`. Proyecto/contenedor `g6-taxonomy-svc`, generic Compose, runtime `/etc/g6-taxonomy-svc/runtime.env`, estado `/var/lib/g6-productos-ofertas/taxonomy-svc`. Oracle 19-oct: desplegado/healthy; `/health/readiness` y `/health/ready` 200; categorías GET 200 vía Gateway/directo. `master` SHA reference `9205eb455c4965a82ccb9fc4714cf976e4c059b0`.
+Owner Lopez; HEAD `origin/lopez` contrastado `4e099f5c04d7ba17a100b669c6a85f4eae6f90ec`. Puerto 3006 / `TAXONOMY_SVC_PORT`; schema `taxonomy`. Proyecto/contenedor `g6-taxonomy-svc`, Compose genérico, runtime `/etc/g6-taxonomy-svc/runtime.env`, estado `/var/lib/g6-productos-ofertas/taxonomy-svc`. Oracle 19-oct: desplegado; readiness 200 y categorías vía Gateway 200.
 
 ## B. Configuración runtime
 
 | Variable | Requisito | Bootstrap |
 |---|---|---|
-| `NODE_ENV`,`PORT`,`TAXONOMY_SVC_PORT` | production/3006 por Compose | `src/config/environment.ts`; puerto validado |
-| `DATABASE_URL` | requerida, incluye credencial PostgreSQL (secreto) | environment config valida URL/host; provider DB; TLS settings por deployment |
-| `PGSSLMODE`,`PGSSLROOTCERT` | verificar en config/provider del SHA antes variar | CA montada ro por Compose, no revela validez config |
+| `NODE_ENV`,`PORT`,`TAXONOMY_SVC_PORT` | Compose production/3006 | Dockerfile genérico también define production; Compose fija ambas variables de puerto |
+| `DATABASE_URL` | requerida; URI PostgreSQL con host, puerto, base y credenciales | runtime.env; contraseña secreta; SSL `verify-full`, CA y `currentSchema=taxonomy` como parámetros |
+| `G6_EXPECTED_ROLE` | requerida: `taxonomy_dev_login` o `taxonomy_app` | runtime.env; identidad validada por provider |
+| `G6_CONNECTION_MODE` | requerida: `session` o `direct` | runtime.env; provider aplica modo |
+| `G6_CONNECT_HOST` | opcional; host TCP alternativo manteniendo TLS contra el host nominal | runtime.env |
+| `PGHOST`,`PGPORT`,`PGDATABASE`,`PGUSER`,`PGPASSWORD`,`PGSSLMODE`,`PGSSLROOTCERT`,`G6_DATABASE_SCHEMA` | se derivan/validan desde `DATABASE_URL` por parser/provider; schema debe ser taxonomy | No configurar aliases separados sin confirmar precedencia | `database.ts` valida conexión efectiva y verify-full |
 
-No crear otros env names no consumidos. Compose inyecta NODE_ENV/PORT/TAXONOMY_SVC_PORT; runtime env DB privado.
+Dockerfile genérico fija `NODE_ENV=production` y `TAXONOMY_SVC_HOST=0.0.0.0`; Compose fija `NODE_ENV`, `PORT` y `TAXONOMY_SVC_PORT` y monta CA read-only. `DATABASE_URL`, `G6_EXPECTED_ROLE`, `G6_CONNECTION_MODE` y cualquier `G6_CONNECT_HOST` proceden de runtime.env.
 
 ## C. Dependencias
 

@@ -2,16 +2,16 @@
 
 ## A. Identidad
 
-Owner Vera; rama `vera` (snapshot `3071a1a5687f4bdcf78cc7e561aa91e4e2550483`, confirmar commit exacto de código antes de entrega). Puerto 3002 / `PRICING_SVC_PORT`; PostgreSQL propio, schema contractual a verificar en las migraciones de la revisión. Proyecto/contenedor `g6-pricing-svc`; generic Compose; runtime `/etc/g6-pricing-svc/runtime.env`; estado `/var/lib/g6-productos-ofertas/pricing-svc`. Oracle al 19-oct: healthy, `/health/ready` 200, sin GET de negocio exitoso. `master` referencia `9205eb455c4965a82ccb9fc4714cf976e4c059b0`.
+Owner Vera; `origin/vera` HEAD `48afbf7a6845db4aaba6b58eb336396fa0e85ea7` (sin check run en ese SHA; último CI verde predecessor `3071a1a5687f4bdcf78cc7e561aa91e4e2550483`). Puerto 3002 / `PRICING_SVC_PORT`; schema `pricing` según migraciones. Proyecto/contenedor `g6-pricing-svc`; Compose genérico; runtime `/etc/g6-pricing-svc/runtime.env`; estado `/var/lib/g6-productos-ofertas/pricing-svc`. Oracle readiness 200 es observación histórica y no prueba el HEAD actual ni una operación comercial.
 
 ## B. Configuración runtime
 
 | Variable | Requisito / origen | Validación |
 |---|---|---|
-| `NODE_ENV`, `PORT`, `PRICING_SVC_PORT` | NODE_ENV/puertos los inyecta Compose | `config/environment.ts`, `verifyEnvironment`; port entero y válido |
+| `NODE_ENV`, `PORT`, `PRICING_SVC_PORT` | Dockerfile genérico y Compose fijan production; Compose fija ambos puertos a 3002 | `config/environment.ts`, `verifyEnvironment`; port entero y válido |
 | `DATABASE_URL` | requerida; Marco/DB owner suministra URL con credencial | URL Postgres válida, `sslmode=verify-full` fuera de pruebas locales; únicos parámetros permitidos `sslmode`, `sslrootcert` |
 | `PGSSLMODE`, `PGSSLROOTCERT` | TLS/CA; ruta CA Compose `/run/g6-certs/supabase-server-root.crt` | ssl verify-full, CA parse X509; TLS global no puede deshabilitarse |
-| `AUTH_ISSUER`,`AUTH_JWKS_URL` | auth pareada si se configura según código/contrato | HTTPS URL; valores runtime, no compartir token/secret |
+| `AUTH_ISSUER`,`AUTH_JWKS_URL` | opcionales, pero deben venir juntas si se configura auth | HTTPS URL fuera de test local; runtime.env |
 | `GATEWAY_DEMO_NO_AUTH_ENABLED` | default false; demo controlada | producción true exige `PRICING_DEMO_PRODUCTION_CONFIRMED=true`; no habilitar por defecto |
 | `PRICING_DEMO_PRODUCTION_CONFIRMED` | solo guard explícito de demo | bool |
 | `NODE_TLS_REJECT_UNAUTHORIZED` | no debe ser `0` | rechazado si TLS global desactivado |

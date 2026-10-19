@@ -2,7 +2,7 @@
 
 ## A. Identidad
 
-Owner Castilla; rama personal `castilla`. Puerto 3007 / `COMBOS_SVC_PORT`. Schema/DB/Rabbit: no declarados en scaffold actual. Proyecto/contenedor `g6-combos-svc`, generic Compose, runtime `/etc/g6-combos-svc/runtime.env`, estado `/var/lib/g6-productos-ofertas/combos-svc`. Oracle 19-oct no desplegado. Código master ref `9205eb455c4965a82ccb9fc4714cf976e4c059b0`; branch actual `castilla` al SHA de trabajo. Controladores actuales solo health scaffold, no endpoints de negocio asumidos.
+Owner Castilla; rama `castilla`, HEAD `83240f239ba98678ce217e1678970af77ad3a73d`. Puerto 3007 / `COMBOS_SVC_PORT`. Schema físico `combos` existe; scaffold no configura DB/Rabbit. Proyecto/contenedor `g6-combos-svc`, Compose genérico, runtime `/etc/g6-combos-svc/runtime.env`, estado `/var/lib/g6-productos-ofertas/combos-svc`. No desplegado al corte 19-oct. Controladores solo health scaffold, no endpoints de negocio.
 
 ## B. Configuración runtime
 

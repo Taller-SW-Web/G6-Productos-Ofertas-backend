@@ -1,4 +1,6 @@
-# Contrato común de desarrollo y despliegue G6
+# Base documental de desarrollo y despliegue G6 (propuesta, no contrato definitivo)
+
+> Esta estructura de `ops/oracle/` está aprobada como base documental, pero no está aprobada como contrato definitivo de desarrollo/despliegue. Las fichas y requisitos sirven para preparar microservicios; los conflictos identificados, especialmente RabbitMQ, son bloqueos específicos y no deben convertirse en acuerdos por inferencia. El estado por SHA está en [ESTADO_SERVICIOS.md](ESTADO_SERVICIOS.md).
 
 **Alcance:** preparación técnica de los nueve componentes para el sistema Oracle existente. No concede autorización de despliegue ni cambia los contratos externos. Estado VM: observación `2026-10-19 22:32:52–22:36:19 UTC`, [ESTADO_ACTUAL.md](ESTADO_ACTUAL.md). Fuente de despliegue: `services.psv` registry v2, Compose de `ops/oracle/`, `Dockerfile.service`, `ops/oracle/build-service.sh`, workflows de `.github/workflows/` y código de cada servicio en el SHA de esta rama. Contratos oficiales consultados en docs `origin/master` SHA `c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b`: OpenAPI `0.6.0-rc.1`, AsyncAPI `0.6.0-rc.2` (candidatos; consultar su estado documental, no inferir homologación externa). Las ramas personales no fusionadas se citan como evidencia de implementación pendiente, nunca como contrato.
 

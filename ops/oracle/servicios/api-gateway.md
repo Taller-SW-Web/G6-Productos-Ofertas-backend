@@ -8,7 +8,7 @@
 | Puerto / env | 3000 / `API_GATEWAY_PORT` (fallback `PORT`) |
 | Schema / Docker | Sin DB propia conocida. Proyecto/contendor `g6-api-gateway`, Compose dedicado `docker-compose.gateway.yml`; runtime `/etc/g6-api-gateway/runtime.env`; estado `/var/lib/g6-productos-ofertas/api-gateway`. |
 | Oracle (19-oct-2026) | Desplegado; Docker `unhealthy`; `/health` 200; readiness falla por Catalog `not_ready`, cobertura `partial`. `/api/v1/categorias` 200 vía Gateway. |
-| Código | `master` SHA de referencia `9205eb455c4965a82ccb9fc4714cf976e4c059b0`; branch `castilla` en SHA del trabajo actual. No hay rama personal del Gateway. Código `apps/api-gateway/`. |
+| Código | HEAD auditado `9205eb455c4965a82ccb9fc4714cf976e4c059b0`; sin rama personal del Gateway. CI exacto verde run `39342273073`. Código `apps/api-gateway/`. |
 
 ## B. Configuración runtime
 

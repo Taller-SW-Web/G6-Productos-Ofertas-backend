@@ -14,7 +14,7 @@ Un PASS requiere evidencia reproducible ligada a SHA y alcance. Si un gate aplic
 | Rabbit/red | AsyncAPI/topología reconciliados; aliases y conectividad probados desde contenedor aislado; permisos mínimos, ACK/idempotencia; retry/DLX solo si aprobado | ☐ |
 | HTTP/auth | Gateway route, origen y timeout; JWT/JWKS/scopes del contrato; pruebas 2xx, 4xx, 5xx y auth sin efectos remotos destructivos | ☐ |
 | CI | CI exitosa para SHA; identificar alcance real, skips y gates faltantes; no equiparar build con smoke integral | ☐ |
-| Rollback | Imagen anterior identificada y procedimiento probado/documentado para ese servicio/Compose; sin `down -v`, cambios globales o rollback hipotético | ☐ |
+| Recuperación | Si existe imagen anterior: identificarla y ensayar restauración en Compose aislado. En primer despliegue sin imagen anterior: simular en entorno aislado el fallo de arranque, detener y retirar únicamente el contenedor/proyecto de aplicación recién creado, conservar datos/redes compartidas y verificar estado previo sin servicio; documentar recuperación y evidencia. No presentar esto como rollback remoto probado en Oracle. Prohibido `down -v` o cambios globales. | ☐ |
 | Red/operación | loopback, `g6-http`/`g6-edge` correctos; dependencias no alcanzables declaradas; runtime privado existe sin revelar valores; release individual autorizada | ☐ |
 | Evidencia final | Informe compactado abajo ligado a SHA/CI/artefactos | ☐ |
 
@@ -37,11 +37,11 @@ Marco debe hacer:
 El desarrollador ya dejó resuelto:
 ```
 
-**READY_FOR_DEPLOY** exige todos los gates aplicables con PASS, CI sobre el SHA y plan de rollback. La autorización de release sigue aparte. No uses “probado” para lint, tests unitarios o documentación solamente.
+**READY_FOR_DEPLOY** exige todos los gates aplicables con PASS, CI sobre el SHA y plan de recuperación que cubra primer despliegue y actualización. La autorización de release sigue aparte. No uses “probado” para lint, tests unitarios o documentación solamente.
 
 ## Gates CI de mayor impacto propuestos (sin implementación en esta tarea)
 
-Prioridad para Issue transversal: (1) construir cada imagen y validar health + readiness contractuales por servicio con dependencias desechables, haciendo que los skips sean explícitos; (2) contrato automático env/puerto/entrypoint/health/network a partir del registry y config parser; (3) pruebas Rabbit de nombres/bindings/permisos desde AsyncAPI y código, una vez resuelta la discrepancia contractual, más guard que rechace mocks/fallbacks productivos; (4) diff-check de OpenAPI/AsyncAPI y tests de contrato con regresión en PR. No ampliar CI hasta acordar alcance/owner.
+Prioridad para Issue transversal: bloquear el merge/entrega si (1) variables obligatorias/condicionales del parser no corresponden a `runtime.env`/Compose; (2) puertos, entrypoint, health/readiness o redes difieren entre registry, Dockerfile, Compose y código; (3) rutas, operación, auth o esquema HTTP no corresponden al OpenAPI; (4) nombres de mensajería del candidato no son compatibles con AsyncAPI oficial y topología física. Añadir pruebas de imagen y readiness con dependencias desechables, manteniendo skips explícitos. Para Rabbit, el gate de compatibilidad debe ser bloqueante y señalar el conflicto, no “arreglarlo” automáticamente ni declarar un candidato homologado. Propuesta documental; no se modificó workflow ni CI en esta tarea.
 
 ## Auditoría de cobertura CI observada
 

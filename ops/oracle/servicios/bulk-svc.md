@@ -2,7 +2,7 @@
 
 ## A. Identidad
 
-Owner Castilla; rama `castilla`. Puerto 3008 / `BULK_SVC_PORT`. Schema/DB/Rabbit no declarados en scaffold actual. Proyecto/contenedor `g6-bulk-svc`, generic Compose, runtime `/etc/g6-bulk-svc/runtime.env`, estado `/var/lib/g6-productos-ofertas/bulk-svc`. Oracle 19-oct no desplegado. Código master ref `9205eb455c4965a82ccb9fc4714cf976e4c059b0`, implementación actual en `apps/bulk-svc/` scaffold health solamente.
+Owner Castilla; rama `castilla`, HEAD `83240f239ba98678ce217e1678970af77ad3a73d`. Puerto 3008 / `BULK_SVC_PORT`. Schema físico `bulk` existe; scaffold no configura DB/Rabbit. Proyecto/contenedor `g6-bulk-svc`, Compose genérico, runtime `/etc/g6-bulk-svc/runtime.env`, estado `/var/lib/g6-productos-ofertas/bulk-svc`. No desplegado al corte 19-oct; `apps/bulk-svc/` solo demuestra scaffold health.
 
 ## B. Configuración runtime
 
