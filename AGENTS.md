@@ -134,3 +134,7 @@ DEPENDENCIAS EXTERNAS: <owner | operación afectada | condición exacta de desbl
 CAMBIOS FUERA DEL ALCANCE: <ninguno o justificación expresa>
 ESTADO FINAL: PASS / PARTIAL / BLOCKED
 ```
+
+## G1 Marketplace H4 — documentación operativa obligatoria
+
+Antes de implementar o modificar endpoints consumidos por Marketplace, lee [`integraciones/g1-marketplace/README.md`](integraciones/g1-marketplace/README.md), su matriz de operaciones y pruebas, el acuerdo normativo enlazado en ese paquete y el OpenAPI de Docs. Esta lectura se suma, no sustituye, a SPEC, DEC-F/ADR, modelo y pruebas del servicio. Registra contrato, código, CI, despliegue, grant y E2E con SHA exacto como estados independientes. No tomes informes históricos como estado actual.

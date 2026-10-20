@@ -34,3 +34,7 @@ Unit tests pueden contribuir al primer estado, pero no cierran los otros tres. U
 - No uses credenciales reales ni leas valores de `runtime.env`; publica nombres de variable, nunca valores.
 - Si DB/AMQP/upstream no está disponible, prepara tests con contenedores aislados. No cambies el esquema/nombres para “hacerlo funcionar” sin decisión.
 - No ejecutes despliegue ni SQL sobre Supabase/Oracle. No hagas commit, push, merge ni publicación sin autorización expresa.
+
+## H4 Marketplace — autoridad y estado
+
+El [paquete operativo H4](../../integraciones/g1-marketplace/README.md) es la fuente actual de operaciones, owner y evidencia G1. La matriz de esta guía registra despliegue/infraestructura por sus propios SHA y ambiente; no deducir deploy de que una ruta responda HTTP 200, ni readiness estable de liveness. Separar la imagen digest desplegada del código de ramas personales/PR. Autenticación se valida por token real, allowlist y scope; el YAML o `DEMO_NO_AUTH` no acreditan grant ni seguridad H4.
