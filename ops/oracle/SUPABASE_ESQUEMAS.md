@@ -23,7 +23,7 @@ Observación: `2026-10-20 00:11:34.265687+00` UTC, con Supabase MCP en el proyec
 
 | Schema | Tabla | Filas exactas observadas |
 |---|---|---:|
-+| `bulk` | `batch_jobs` | 0 |
+| `bulk` | `batch_jobs` | 0 |
 | `bulk` | `batch_rows` | 0 |
 | `bulk` | `export_jobs` | 0 |
 | `bulk` | `file_manifests` | 0 |

@@ -45,7 +45,7 @@ Prioridad para Issue transversal: bloquear el merge/entrega si (1) variables obl
 
 ## Auditoría de cobertura CI observada
 
-Fuente: `.github/workflows/ci.yml` en `49bf41658ff3944e6a48e24d2c53cdeeb197807a`. Evaluación estática contrastada con CI del SHA exacto: GitHub Actions run `39344071317` finalizó `success`. Esa ejecución valida el workflow vigente de backend, no esta edición documental ni readiness remota.
+Fuente: `.github/workflows/ci.yml` en `f418cf335007bed9397d5d5d30c36183fe47517c`. Evaluación estática contrastada con CI del SHA exacto: GitHub Actions run `39347193787` finalizó `success`. Esa ejecución valida el workflow vigente de backend, no readiness remota.
 
 | Control solicitado | ¿CI lo detecta hoy? | Evidencia y límite |
 |---|---|---|

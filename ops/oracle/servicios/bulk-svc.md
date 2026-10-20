@@ -2,7 +2,7 @@
 
 ## A. Identidad
 
-Owner Castilla; rama `castilla`, HEAD `49bf41658ff3944e6a48e24d2c53cdeeb197807a` (docs-only respecto al SHA de código `83240f239ba98678ce217e1678970af77ad3a73d`). Puerto 3008 / `BULK_SVC_PORT`. Schema físico `bulk` existe; scaffold no configura DB/Rabbit. Proyecto/contenedor `g6-bulk-svc`, Compose genérico, runtime `/etc/g6-bulk-svc/runtime.env`, estado `/var/lib/g6-productos-ofertas/bulk-svc`. No desplegado al corte 19-oct; `apps/bulk-svc/` solo demuestra scaffold health.
+Owner Castilla; rama `castilla`, HEAD `f418cf335007bed9397d5d5d30c36183fe47517c` (docs-only respecto al SHA de código `83240f239ba98678ce217e1678970af77ad3a73d`). Puerto 3008 / `BULK_SVC_PORT`. Schema físico `bulk` existe; scaffold no configura DB/Rabbit. Proyecto/contenedor `g6-bulk-svc`, Compose genérico, runtime `/etc/g6-bulk-svc/runtime.env`, estado `/var/lib/g6-productos-ofertas/bulk-svc`. No desplegado al corte 19-oct; `apps/bulk-svc/` solo demuestra scaffold health.
 
 ## B. Configuración runtime
 
