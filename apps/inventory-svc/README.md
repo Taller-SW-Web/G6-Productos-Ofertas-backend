@@ -233,3 +233,16 @@ una prueba aprobada.
 - [`AVANCE_BLOQUE_01.md`](./AVANCE_BLOQUE_01.md) … [`AVANCE_BLOQUE_06.md`](./AVANCE_BLOQUE_06.md) — avance por bloque.
 - [`CONFIGURACION.md`](./CONFIGURACION.md) — variables y arranque fail-closed.
 - [`data/data-f1/README.md`](./data/data-f1/README.md) — preparación DATA-004.
+
+## Integración Marketplace H4
+
+**Corte documental:** rama `taco`, código de operación auditado en `b02615841f63ea3249d9ad16a0cf32f4ea2b20c2`; PR #10 sigue abierto en draft. CI GitHub Actions del SHA exacto `b026158` consultada el 2026-10-20: PASS en validación general, PostgreSQL Taxonomy e Inventory PostgreSQL/RabbitMQ. Este CI no demuestra deploy Oracle, grant G7 ni E2E G1.
+
+| OperationId | Método/ruta | Identidad/scope de contrato | Semántica |
+|---|---|---|---|
+| `consultarDisponibilidadComercial` | GET `/api/v1/inventario/disponibilidad/comercial` | `modulo-marketplace`, `api-productos`, `inventario:disponibilidad:leer` y allowlist OpenAPI | Proyección sin saldos/ubicaciones; cuatro estados comerciales. |
+| `verificarCantidadComercial` | POST `/api/v1/inventario/disponibilidad/comercial/verificar` | Mismo cliente/audiencia/scope contractual por operación | `channel_id=MARKETPLACE`, modo `ENVIO_DOMICILIO`, `fulfillment_ref` solo con contexto válido, `lines[]` SKU/cantidad; `binding=false`; SUFICIENTE no reserva. |
+
+D-INV-01 exige resolver una única ubicación ejecutable; nunca sumar saldos independientes. Mapeo de cumplimiento ausente/ambiguo produce `INDETERMINADO` (resultado comercial HTTP 200), no `AGOTADO` ni error de red. Contexto semánticamente inválido puede responder 422 según OpenAPI. El origen/semántica de `fulfillment_ref` no se inventa y se registra con owner G2/G5/G6 y cierre en [matriz H4](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/castilla/integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md).
+
+`INVENTORY_DEMO_NO_AUTH_ENABLED` / allowlist de IP del Gateway es bypass demo limitado, no JWT real ni evidencia H4. G7 debe acreditar token y grant efectivos. CI PostgreSQL/RabbitMQ y pruebas locales no son deploy ni E2E Marketplace; documentar image digest/ambiente y recorrido BFF separadamente.
