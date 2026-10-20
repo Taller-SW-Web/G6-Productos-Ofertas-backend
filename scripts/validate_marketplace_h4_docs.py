@@ -88,6 +88,15 @@ def operation_index(spec: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return result
 
 
+def has_effective_service_bearer(security: Any) -> bool:
+    """OpenAPI security requirements are OR alternatives; schemes within one are AND."""
+    return (
+        isinstance(security, list)
+        and bool(security)
+        and all(isinstance(alternative, dict) and "serviceBearer" in alternative for alternative in security)
+    )
+
+
 def validate(docs_dir: Path, matrix_path: Path = MATRIX) -> list[str]:
     errors: list[str] = []
     matrix_text = matrix_path.read_text(encoding="utf-8")
@@ -114,7 +123,19 @@ def validate(docs_dir: Path, matrix_path: Path = MATRIX) -> list[str]:
             if len(row) < 3 or f"`{operation_id}`" not in row[2]:
                 errors.append(f"{function} debe incluir {operation_id}")
     f026 = by_id.get("F-026", [])
-    if len(f026) < 16 or "G5" not in f026[2] or "G6 crea" in f026[15].lower():
+    f026_text = " ".join(f026).lower()
+    g6_claims_order = bool(re.search(
+        r"\bg6\s+(?:crea|creará|crearía|es responsable de crear|está a cargo de crear)\s+pedido\b"
+        r"|\b(?:crea|crear|creación de)\s+pedido\s+(?:pertenece|es responsabilidad de|es de)\s+g6\b",
+        f026_text,
+    ))
+    if (
+        len(f026) < 16
+        or "g5 crea pedido" not in f026_text
+        or g6_claims_order
+        or "g1 ejecuta experiencia y orquestación bff" not in f026_text
+        or "`creado` != `pagado`" not in f026_text
+    ):
         errors.append("F-026 debe atribuir crear pedido a G5 y no a G6")
 
     if yaml is None:
@@ -135,8 +156,8 @@ def validate(docs_dir: Path, matrix_path: Path = MATRIX) -> list[str]:
             errors.append(f"{operation_id}: método/ruta OpenAPI {actual['method']} {actual['path']}, esperado {expected_method} {expected_path}")
         if not actual["scope"]:
             errors.append(f"{operation_id}: x-required-scope ausente")
-        if "serviceBearer" not in {name for scheme in actual["security"] for name in scheme}:
-            errors.append(f"{operation_id}: serviceBearer no está en security efectiva (operación/heredada)")
+        if not has_effective_service_bearer(actual["security"]):
+            errors.append(f"{operation_id}: alguna alternativa de security efectiva permite omitir serviceBearer")
         if actual["clients"] is not None and "modulo-marketplace" not in actual["clients"]:
             errors.append(f"{operation_id}: allowlist no autoriza modulo-marketplace")
 
@@ -151,12 +172,10 @@ def validate(docs_dir: Path, matrix_path: Path = MATRIX) -> list[str]:
             actual = operations.get(operation_id)
             if not actual:
                 continue
-            # The operationId in this function row binds the dependency to
-            # the canonical method/path above. Endpoint cells may summarize
-            # route families or combine G1/G2/G5 routes, so are not parsed as
-            # a second OpenAPI source.
-            generic_scope = any(term in row[7].lower() for term in ("scopes por operación", "scopes de consulta", "scopes g6 usados"))
-            if actual["scope"] and actual["scope"] not in row[7] and not generic_scope:
+            endpoint_token = f"{actual['method']} `{actual['path']}`"
+            if endpoint_token not in row[3]:
+                errors.append(f"{row[0]} Endpoint no documenta {endpoint_token} para {operation_id}")
+            if actual["scope"] and actual["scope"] not in row[7]:
                 errors.append(f"{row[0]} no registra scope {actual['scope']} de {operation_id}")
 
     for n in range(1, 10):

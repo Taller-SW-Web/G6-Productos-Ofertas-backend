@@ -54,7 +54,7 @@ Al corte 2026-10-20: Backend #125 Poma `a81f2d5`; #10 Taco `b026158` (draft); #1
 
 ## Matriz funcional y validador documental
 
-`MATRIZ_OPERACIONES_H4.md` mantiene una fila por cada una de las 25 funciones G1. Desde la raíz habitual de Backend, ejecuta:
+`MATRIZ_OPERACIONES_H4.md` mantiene una fila por cada una de las 25 funciones G1. Desde la raíz habitual de Backend, ejecuta primero las pruebas unitarias aisladas y luego, en un workspace que tenga Docs disponible, la comprobación contractual real:
 
 ```powershell
 python -m unittest discover -s tests/docs -p "test_*.py" -v
@@ -62,6 +62,10 @@ python scripts/validate_marketplace_h4_docs.py
 python scripts/validate_marketplace_h4_docs.py --docs-dir ..\docs
 ```
 
+La suite `tests/docs` usa fixtures temporales propios; es la que ejecuta GitHub Actions con Python 3.12 y `PyYAML==6.0.2`, sin checkout ni credenciales de Docs. Su PASS valida la lógica del script, pero no equivale a validar el OpenAPI real. La segunda ejecución lee OpenAPI y el acuerdo normativo del repositorio Docs indicado; su resultado contractual se informa por separado.
+
 El validador resuelve Docs, en orden, desde `--docs-dir`, `G6_DOCS_DIR`, `../docs`, `../G6-Productos-Ofertas-docs` y `../docs-g1-h4` (compatibilidad). Una fuente solo es válida si contiene el OpenAPI canónico y el acuerdo normativo H4. Si no encuentra ninguna, devuelve `NO_EJECUTADO: FUENTE_NO_DISPONIBLE` con código distinto de cero; también puede configurarse `G6_DOCS_DIR` con la raíz local de Docs.
 
-La validación usa PyYAML ya disponible para comprobar operationId, método, ruta, scope requerido, seguridad efectiva (incluida herencia) y allowlist real de clientes del OpenAPI, y vincula cada operationId G6 con su fila funcional. Las rutas externas G1/G2/G5 se mantienen fuera de la búsqueda en el OpenAPI de G6. Se conservan las comprobaciones de 25 funciones, M-01–M-09 aceptados y enlaces Markdown relativos. Para `obtenerRecomendaciones`, se verifica por separado que la allowlist incluya Marketplace, Chatbot y Retail mientras el registro pendiente de `recomendaciones:leer` enumera solo Chatbot; esto no acredita grant G7.
+La validación contractual comprueba operationId, método y ruta exactos en la columna endpoint, scope específico, seguridad efectiva (incluida herencia y todas las alternativas OR) y allowlist de clientes; vincula cada operación G6 con su fila funcional. Las rutas externas G1/G2/G5 se mantienen fuera de la búsqueda en el OpenAPI de G6. También comprueba las 25 funciones, M-01–M-09 aceptados y enlaces relativos. Para `obtenerRecomendaciones`, se verifica separadamente la allowlist Marketplace/Chatbot/Retail y que el registro pendiente de `recomendaciones:leer` solo enumere Chatbot; esto no acredita grant G7.
+
+La revisión del OpenAPI actual detecta alternativas `userBearer` para `listarProductos`, `obtenerProductoPorSlug`, `consultarPrecios` y `obtenerPrecioSku`, además de `serviceBearer`. Como `security` es una lista de alternativas OR, el validador contractual informa FAIL para esas operaciones mientras exista una alternativa que omita la identidad técnica. Este hallazgo no se corrige modificando OpenAPI desde Backend.
