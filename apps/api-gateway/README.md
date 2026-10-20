@@ -251,6 +251,6 @@ orígenes reales o despliegue.
 
 ## Marketplace H4 — estado vigente
 
-Este informe corresponde al corte histórico del 2026-10-16. No representa el estado actual de ramas, PR, runtime ni autorización. Consulta [`integraciones/g1-marketplace/`](../../integraciones/g1-marketplace/README.md) para el estado vigente por operación y el [acuerdo normativo Docs](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/master/integraciones/ACUERDO_G1_G6_H4_2026-10-20.md). Su evidencia fechada se conserva sin reinterpretarla como evidencia de HEAD posterior.
+Este informe corresponde al corte histórico del 2026-10-16. No representa el estado actual de ramas, PR, runtime ni autorización. Consulta [`integraciones/g1-marketplace/`](../../integraciones/g1-marketplace/README.md) para el estado vigente por operación y el [acuerdo normativo Docs](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/docs/g1-marketplace-homologacion-lote03/integraciones/ACUERDO_G1_G6_H4_2026-10-20.md). Su evidencia fechada se conserva sin reinterpretarla como evidencia de HEAD posterior.
 
 El cliente esperado es `modulo-marketplace`, audience `api-productos`, con scopes OpenAPI por operación; grant/token real requiere evidencia G7. `GATEWAY_DEMO_NO_AUTH_ENABLED` es bypass demo, separado de autenticación H4.
