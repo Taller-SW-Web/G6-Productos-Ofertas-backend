@@ -21,6 +21,12 @@ AGREEMENT_REL = Path("integraciones/ACUERDO_G1_G6_H4_2026-10-20.md")
 OPENAPI_REL = Path("contratos/http/openapi.yaml")
 EXPECTED = [f"F-{n:03d}" for n in (6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,23,24,25,26,31,36,37,38,39)]
 EXTERNAL_OPERATION_IDS = {"crearPedido"}
+MIXED_AUTH_OPERATION_IDS = {
+    "listarProductos",
+    "obtenerProductoPorSlug",
+    "consultarPrecios",
+    "obtenerPrecioSku",
+}
 METHODS = {"get", "post", "put", "patch", "delete", "options", "head", "trace"}
 
 # These are operation correspondences stated in the H4 matrix and its normative
@@ -83,21 +89,61 @@ def operation_index(spec: dict[str, Any]) -> dict[str, dict[str, Any]]:
                 "method": method.upper(), "path": f"{base}{path}",
                 "scope": operation.get("x-required-scope"),
                 "clients": operation.get("x-allowed-client-ids"),
+                "audience": operation.get("x-service-audience"),
                 "security": security,
             }
     return result
 
 
-def has_effective_service_bearer(security: Any) -> bool:
-    """OpenAPI security requirements are OR alternatives; schemes within one are AND."""
+def has_expected_security(security: Any, operation_id: str) -> bool:
+    """Check the exact authorized OpenAPI OR alternatives for an operation."""
+    if not isinstance(security, list) or not security:
+        return False
+    alternatives: list[str] = []
+    for alternative in security:
+        if not isinstance(alternative, dict) or len(alternative) != 1:
+            return False
+        scheme, scopes = next(iter(alternative.items()))
+        if not isinstance(scopes, list) or scopes != []:
+            return False
+        alternatives.append(scheme)
+    if operation_id in MIXED_AUTH_OPERATION_IDS:
+        return len(alternatives) == 2 and set(alternatives) == {"userBearer", "serviceBearer"}
+    return alternatives == ["serviceBearer"]
+
+
+def recommendations_registry_diagnostic(spec: dict[str, Any], operations: dict[str, dict[str, Any]]) -> tuple[str | None, str | None]:
+    """Return a non-grant status, or a validation error for malformed data."""
+    security_contract = spec.get("x-security-contract")
+    if not isinstance(security_contract, dict):
+        return None, "x-security-contract debe ser un objeto"
+    pending_registry = security_contract.get("service_scopes_pending_registration")
+    if not isinstance(pending_registry, dict):
+        return None, "service_scopes_pending_registration debe ser un objeto"
+    registration = pending_registry.get("recomendaciones:leer")
+    if not isinstance(registration, dict):
+        return None, "Falta el registro pending de recomendaciones:leer"
+    pending_clients = registration.get("clients")
+    operation = operations.get("obtenerRecomendaciones")
+    allowed_clients = operation.get("clients") if operation else None
+    for label, clients in (("registro pendiente", pending_clients), ("allowlist obtenerRecomendaciones", allowed_clients)):
+        if (
+            not isinstance(clients, list)
+            or not clients
+            or any(not isinstance(client, str) or not client for client in clients)
+            or len(clients) != len(set(clients))
+        ):
+            return None, f"{label}: clients debe ser una lista no vacía de client_id únicos"
+    if set(pending_clients) == set(allowed_clients):
+        return "REGISTRO_CONTRACTUAL_CONSISTENTE; esto no acredita un grant efectivo de G7", None
     return (
-        isinstance(security, list)
-        and bool(security)
-        and all(isinstance(alternative, dict) and "serviceBearer" in alternative for alternative in security)
+        "PENDIENTE_G7: allowlist de obtenerRecomendaciones y registro pendiente de recomendaciones:leer difieren; "
+        "seguimiento en Backend #138; no se infiere grant efectivo",
+        None,
     )
 
 
-def validate(docs_dir: Path, matrix_path: Path = MATRIX) -> list[str]:
+def validate(docs_dir: Path, matrix_path: Path = MATRIX, diagnostics: list[str] | None = None) -> list[str]:
     errors: list[str] = []
     matrix_text = matrix_path.read_text(encoding="utf-8")
     rows = parse_matrix(matrix_text)
@@ -146,7 +192,9 @@ def validate(docs_dir: Path, matrix_path: Path = MATRIX) -> list[str]:
         agreement = (docs_dir / AGREEMENT_REL).read_text(encoding="utf-8")
     except (OSError, yaml.YAMLError) as exc:
         return [f"No se pudieron leer OpenAPI/acuerdo: {exc}"]
-    operations = operation_index(spec or {})
+    if not isinstance(spec, dict):
+        return ["OpenAPI YAML debe tener un objeto raíz"]
+    operations = operation_index(spec)
     for operation_id, (expected_method, expected_path) in G6_OPERATIONS.items():
         actual = operations.get(operation_id)
         if actual is None:
@@ -156,10 +204,19 @@ def validate(docs_dir: Path, matrix_path: Path = MATRIX) -> list[str]:
             errors.append(f"{operation_id}: método/ruta OpenAPI {actual['method']} {actual['path']}, esperado {expected_method} {expected_path}")
         if not actual["scope"]:
             errors.append(f"{operation_id}: x-required-scope ausente")
-        if not has_effective_service_bearer(actual["security"]):
-            errors.append(f"{operation_id}: alguna alternativa de security efectiva permite omitir serviceBearer")
-        if actual["clients"] is not None and "modulo-marketplace" not in actual["clients"]:
-            errors.append(f"{operation_id}: allowlist no autoriza modulo-marketplace")
+        if not has_expected_security(actual["security"], operation_id):
+            policy = "userBearer OR serviceBearer" if operation_id in MIXED_AUTH_OPERATION_IDS else "solo serviceBearer"
+            errors.append(f"{operation_id}: security efectiva no coincide con la política autorizada ({policy})")
+        if actual["audience"] != "api-productos":
+            errors.append(f"{operation_id}: x-service-audience debe ser api-productos para la vía técnica")
+        if actual["clients"] is not None:
+            if (
+                not isinstance(actual["clients"], list)
+                or any(not isinstance(client, str) or not client for client in actual["clients"])
+            ):
+                errors.append(f"{operation_id}: x-allowed-client-ids debe ser una lista de client_id")
+            elif "modulo-marketplace" not in actual["clients"]:
+                errors.append(f"{operation_id}: allowlist no autoriza modulo-marketplace")
 
     for row in rows:
         if len(row) < 8:
@@ -181,13 +238,18 @@ def validate(docs_dir: Path, matrix_path: Path = MATRIX) -> list[str]:
     for n in range(1, 10):
         if not any(line.startswith(f"| M-{n:02d} ") and "`ACEPTADO_G6_COMUNICADO_G1`" in line for line in agreement.splitlines()):
             errors.append(f"Acuerdo M-{n:02d} no consta aceptado")
-    security_contract = spec.get("x-security-contract", {})
-    pending = security_contract.get("service_scopes_pending_registration", {}).get("recomendaciones:leer", {}).get("clients", [])
     recommendation_clients = operations.get("obtenerRecomendaciones", {}).get("clients") or []
-    if set(recommendation_clients) != {"modulo-marketplace", "modulo-chatbot", "modulo-retail"}:
+    if (
+        not isinstance(recommendation_clients, list)
+        or any(not isinstance(client, str) or not client for client in recommendation_clients)
+        or set(recommendation_clients) != {"modulo-marketplace", "modulo-chatbot", "modulo-retail"}
+    ):
         errors.append("Allowlist real de obtenerRecomendaciones no contiene exactamente Marketplace, Chatbot y Retail")
-    if pending != ["modulo-chatbot"]:
-        errors.append(f"Registro pendiente recomendaciones:leer cambió; valor observado: {pending}")
+    registry_diagnostic, registry_error = recommendations_registry_diagnostic(spec, operations)
+    if registry_error:
+        errors.append(registry_error)
+    elif diagnostics is not None and registry_diagnostic:
+        diagnostics.append(registry_diagnostic)
 
     try:
         changed = subprocess.run(["git", "diff", "--name-only", "origin/master...HEAD"], cwd=ROOT,
@@ -219,11 +281,14 @@ def main(argv: list[str] | None = None) -> int:
     if docs_dir is None:
         print("NO_EJECUTADO: FUENTE_NO_DISPONIBLE. Proporcione la ruta del repositorio Docs con --docs-dir <ruta>.", file=sys.stderr)
         return 2
-    errors = validate(docs_dir)
+    diagnostics: list[str] = []
+    errors = validate(docs_dir, diagnostics=diagnostics)
+    for diagnostic in diagnostics:
+        print(f"INFO: {diagnostic}")
     if errors:
         print("FAIL: " + "\n".join(errors), file=sys.stderr)
         return 1
-    print(f"PASS: {len(EXPECTED)} filas únicas; correspondencia operationId/método/ruta/scope/cliente OpenAPI válida; M-01–M-09 aceptados; discrepancy recomendaciones:leer registrada (sin inferir grant G7).")
+    print(f"PASS: {len(EXPECTED)} filas únicas; correspondencia operationId/método/ruta/scope/cliente OpenAPI válida; M-01–M-09 aceptados; autorización de contrato válida (sin inferir grant G7).")
     return 0
 
 
