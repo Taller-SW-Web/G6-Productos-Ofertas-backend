@@ -351,3 +351,13 @@ aislado: comprobado. Contrato/provider HTTP y mensajería de negocio, integraci�
 compartida autenticada, homologación externa y despliegue: no acreditados aquí.
 HU CA-03/05 requieren flujo y publicación reales posteriores; Outbox local no
 acredita entrega al broker. No se cierra #54 automáticamente.
+
+## Integración G1 Marketplace H4 — brecha de precio por SKU
+
+**Corte de código:** rama `vera`, HEAD `48afbf7a6845db4aaba6b58eb336396fa0e85ea7`. CI consultada para ese SHA: no se encontraron check-runs. No inferir CI, despliegue, grant G7 ni E2E. El historial previo de PR #132 o CI de commits anteriores no prueba este HEAD.
+
+OpenAPI G6 publica `obtenerPrecioSku`, `GET /api/v1/precios/skus/{sku}` con `precios:leer` y audiencia `api-productos`; en este HEAD el `PricingReadController` no registra handler `GET skus/:sku`. Por tanto, es **CONTRATO_DEFINIDO / NO IMPLEMENTADO en este SHA**. La operación `GET /api/v1/precios` (consulta masiva) no sustituye el lookup por ruta individual, y las programaciones bajo `/skus/{sku}/programaciones` son otra operación.
+
+Para implementar sin fabricar contexto, el provider necesita identidad autoritativa de Catalog para saber que el SKU es vendible/elegible y a qué producto corresponde; debe resolver canal aplicable, instante/vigencia efectiva y reglas de precio base/oferta, moneda y versión conforme al contrato. Si falta una entrada/campo o la composición padre/SKU no está definida, registrar brecha exacta en matriz, no inferir precio para padre con variantes. No agregar campos ni ruta alterna sin cambio de OpenAPI aprobado.
+
+G1 consume desde su BFF con cliente técnico `modulo-marketplace`, audience `api-productos` y scope/allowlist de OpenAPI. El bypass `GATEWAY_DEMO_NO_AUTH_ENABLED` no es autenticación H4. Condición mínima: handler, tests Provider de SKU activo/inactivo/no elegible, canal y vigencia, respuesta/errores OpenAPI, identity/grant G7 comprobados aparte, CI del mismo SHA y después BFF/deploy/E2E separados. Consultar [matriz H4](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/castilla/integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md).

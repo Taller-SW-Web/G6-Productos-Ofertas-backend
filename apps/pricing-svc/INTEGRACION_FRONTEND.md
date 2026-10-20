@@ -173,3 +173,9 @@ No intervino React ni el cliente compartido de Castilla.
 | Vercel | NO EJECUTADO |
 
 No se cierran issues, se fusionan PR ni se atribuye aceptación externa.
+
+> **Actualización normativa G1 H4 (2026-10-20):** G6 aceptó y comunicó M-01–M-09. Este informe conserva sus mediciones históricas; el estado vigente por operación está en la [matriz H4](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/castilla/integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md) y el [acuerdo G1–G6](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/docs/g1-marketplace-homologacion-lote03/integraciones/ACUERDO_G1_G6_H4_2026-10-20.md).
+
+`obtenerPrecioSku` (`GET /api/v1/precios/skus/{sku}`) sigue siendo una brecha específica en HEAD `48afbf7a6845db4aaba6b58eb336396fa0e85ea7`: OpenAPI lo define, pero el controller observado no tiene handler individual `GET skus/:sku`. Se necesita fuente autoritativa de Catalog para asociar identidad/elegibilidad SKU↔producto, y semántica contractual de canal, vigencia efectiva y composición base/oferta. No inferir SKU ni precio padre; no convertir resultados del adapter, datos mock o ruta `/productos/{productoId}` en provider de `/skus/{sku}`. Este SHA no tiene check-runs CI asociados en la consulta; no reutilizar CI anterior como evidencia.
+
+No se declara deploy, autorización G7 ni React→Gateway→Pricing→PostgreSQL real por estos ensayos. El corte previo y sus resultados se conservan como evidencia temporal, no como estado actual.
