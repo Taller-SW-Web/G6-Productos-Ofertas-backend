@@ -54,4 +54,14 @@ Al corte 2026-10-20: Backend #125 Poma `a81f2d5`; #10 Taco `b026158` (draft); #1
 
 ## Matriz funcional y validador documental
 
-`MATRIZ_OPERACIONES_H4.md` mantiene una fila por cada una de las 25 funciones G1. Ejecuta `python scripts/validate_marketplace_h4_docs.py` desde la raíz de Backend para comprobar el número y unicidad de funciones, los operationIds contra el OpenAPI canónico de Docs cuando esté disponible en `../docs-g1-h4`, los nueve acuerdos aceptados, los puntos de ownership críticos y enlaces Markdown relativos. Si Docs no está accesible, el validador reporta `NO_EJECUTADO: FUENTE_NO_DISPONIBLE`.
+`MATRIZ_OPERACIONES_H4.md` mantiene una fila por cada una de las 25 funciones G1. Desde la raíz habitual de Backend, ejecuta:
+
+```powershell
+python -m unittest discover -s tests/docs -p "test_*.py" -v
+python scripts/validate_marketplace_h4_docs.py
+python scripts/validate_marketplace_h4_docs.py --docs-dir ..\docs
+```
+
+El validador resuelve Docs, en orden, desde `--docs-dir`, `G6_DOCS_DIR`, `../docs`, `../G6-Productos-Ofertas-docs` y `../docs-g1-h4` (compatibilidad). Una fuente solo es válida si contiene el OpenAPI canónico y el acuerdo normativo H4. Si no encuentra ninguna, devuelve `NO_EJECUTADO: FUENTE_NO_DISPONIBLE` con código distinto de cero; también puede configurarse `G6_DOCS_DIR` con la raíz local de Docs.
+
+La validación usa PyYAML ya disponible para comprobar operationId, método, ruta, scope requerido, seguridad efectiva (incluida herencia) y allowlist real de clientes del OpenAPI, y vincula cada operationId G6 con su fila funcional. Las rutas externas G1/G2/G5 se mantienen fuera de la búsqueda en el OpenAPI de G6. Se conservan las comprobaciones de 25 funciones, M-01–M-09 aceptados y enlaces Markdown relativos. Para `obtenerRecomendaciones`, se verifica por separado que la allowlist incluya Marketplace, Chatbot y Retail mientras el registro pendiente de `recomendaciones:leer` enumera solo Chatbot; esto no acredita grant G7.
