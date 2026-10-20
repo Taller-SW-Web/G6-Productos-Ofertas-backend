@@ -188,3 +188,51 @@ publicada en `843725b` es la validada por CI).
 No se modificaron contratos, migraciones, Gateway, Frontend ni datos de otros
 contextos. Los trece issues de Taco siguen OPEN; implementación interna,
 aceptación, homologación y despliegue son estados distintos.
+
+## Corte 2026-10-20 — Ficha predeploy Oracle (`CHECKLIST_PREDEPLOY.md`) y Hito 4
+
+Consolidación conforme a `ops/oracle/GUIA_DEVTEAM.md`, `ops/oracle/CONTRATO_DESPLIEGUE.md`,
+`ops/oracle/servicios/inventory-svc.md`, `ops/oracle/RABBITMQ_COMPATIBILIDAD.md` y
+`ops/oracle/CHECKLIST_PREDEPLOY.md` (incorporados en `master` `47e219e376fff1004ec10e9803c16119c811a699`):
+
+```text
+Servicio / owner: inventory-svc / Miguel Ángel Taco Zavala (taco)
+Issue / rama / SHA:
+  - Backend (#14, #25, #30, #31, #97, #98, #99, #100, #101, #102, #103, #104, #105): rama taco, SHA base b02615841f63ea3249d9ad16a0cf32f4ea2b20c2 (CI run 39207480173 SUCCESS)
+  - Frontend (#17, #18, #39 y parte UI de #104): rama taco, SHA 0ec39b80893326f25b32e5c499f7838b7137dfc1
+Contrato HTTP (versión/SHA) / AsyncAPI (versión/SHA) / DEC-F-ADR:
+  - Docs origin/master SHA c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b
+  - OpenAPI 0.6.0-rc.1 / AsyncAPI 0.6.0-rc.2 / SPEC-015, SPEC-016 / DEC-F-001, 002, 005, 009, 013, 014, 015
+Build / typecheck / lint / tests (comandos y resultados):
+  - Backend: npm run typecheck PASS; npm run lint PASS; npm run build:inventory-svc PASS; vitest unit (apps/inventory-svc/src) 24 archivos / 253 tests PASS; vitest e2e (apps/inventory-svc/test) 4 archivos / 90 PASS (10 omitidos sin Gateway/DB local); node --test apps/inventory-svc/data/data-f1/dry-run.test.mjs 27/27 PASS
+  - Frontend: npm run typecheck PASS; npm run lint PASS; vitest adapters (src/features/inventory/adapters/vitest.config.ts) 19/19 PASS; verify-production mock (58 vistas) y api (53 vistas) PASS
+Integración local real (dependencias, versiones, evidencia):
+  - GitHub Actions run 39207480173 (y 39205232766): PostgreSQL 17 + RabbitMQ 3.13 efímeros sobre Ubuntu / Node 24.15.0 -> 21/21 casos reales PASS, 0 omitidos
+Imagen + Compose equivalentes y health/readiness:
+  - Dockerfile.inventory-svc (CMD ["node", "dist/apps/inventory-svc/main.js"], puerto 3005 / INVENTORY_SVC_PORT)
+  - GET /health (liveness 200 sin dependencias) separado de GET /health/readiness (200 ready solo si SELECT 1 en PostgreSQL responde; 503 not_ready si falla, sin falso healthy). Salud/pausa AMQP separada en InventoryConsumerService.getMetrics() para no bloquear HTTP/DB cuando el broker está aislado
+Variables runtime requeridas (nombres, suministrador; ningún valor):
+  - Infra/Compose: NODE_ENV, PORT, INVENTORY_SVC_PORT
+  - Runtime privado (/etc/g6-inventory/runtime.env): DATABASE_URL o PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD, PGSSLMODE, PGSSLROOTCERT, RABBITMQ_URL (opcional al arranque, requerida para AMQP), G7_JWT_ISSUER, G7_JWT_PUBLIC_KEY (o JWT_PUBLIC_KEY), RESERVATION_TTL_SECONDS, DEFAULT_LOW_STOCK_THRESHOLD, INVENTORY_WORKER_INTERVAL_MS, INVENTORY_WORKER_BATCH_SIZE, INVENTORY_DEMO_NO_AUTH_ENABLED, INVENTORY_DEMO_GATEWAY_IPS
+Dependencias físicas / configuradas / probadas:
+  - Probadas en CI con contenedores efímeros aislados (PostgreSQL 17 y RabbitMQ 3.13). No desplegado en Oracle al corte 19-oct-2026
+Auth, red y permisos pendientes:
+  - Reconciliación topología RabbitMQ física (po.inventario.q, po.eventos.x, po.resultados.x) vs contractual AsyncAPI (po.inventory.q, po.events.x, po.results.x) y red aislada del broker (Marco / #29)
+  - Grants reales G7 y pruebas bilaterales G5 M1/M2 (#30, #31)
+  - Enrutamiento demo y propagación de errores del verificador en api-gateway (#25, #106, #107)
+  - Cliente HTTP compartido de Frontend y apertura de CommercialModeGate (#45 / #109)
+Despliegue remoto / smoke (si autorizado; deployment ID y SHA):
+  - NO EJECUTADO (sin autorización ni despliegue en Oracle; auto_release=false)
+Bloqueos, owner responsable y criterio verificable para cerrar:
+  - #14 (DATA-004): Poma (#12) + Marco/Infra · confirmar SKUs publicados, baseline y autorización antes de escribir en Supabase (dry-run offline listo con 38 filas candidatas, ready_for_load=false)
+  - #25/#100: Marco/Castilla (#106/#107) · exponer ruta comercial demo en Gateway y propagar códigos 400/401/422/503 del verificador
+  - #99/#101: Marco + G4/G5/G7 · cerrar DEC-F-009/014/015 para conectar la política pura de conciliación offline a endpoint HTTP
+  - #102: Marco + owners Bulk/Catálogo + #29 · tipar GenericData (bulk adjust / sku deactivated) y reconciliar nombres físicos/contractuales de RabbitMQ
+  - #104/#105 y Frontend #17/#18/#39: Marco/Castilla (#45/#109, #106/#107, #111) · conectar cliente compartido, retirar bloqueo de CommercialModeGate y ejecutar E2E integrado
+Estado: PARTIAL (Implementación interna completa + Integración real aislada en CI PASS; bloqueos externos acotados por frontera)
+Marco debe hacer:
+  - Revisar/aprobar PR #10 en Backend, definir reconciliación de nombres AMQP (#29), resolver rutas/errores de Gateway (#106/#107), publicar cliente compartido Frontend (#45/#109) y autorizar #14/#111 cuando corresponda.
+El desarrollador ya dejó resuelto:
+  - 100% de la implementación interna autorizada en apps/inventory-svc, preparador y dry-run de DATA-004 (#14), suite real 21/21 en CI y adaptador HTTP Frontend con 19 pruebas unitarias en src/features/inventory/.
+```
+
