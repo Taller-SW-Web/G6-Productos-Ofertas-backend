@@ -25,7 +25,7 @@ Owner Taco; HEAD contrastado `origin/taco` `b02615841f63ea3249d9ad16a0cf32f4ea2b
 | `G7_JWT_PUBLIC_KEY` | obligatoria para endpoints protegidos; PEM público RS256 | runtime.env; material público provisto por Seguridad | `inventory-auth.guard.ts`; sin clave confiable se rechaza el token |
 | `JWT_PUBLIC_KEY` | alias heredado opcional, usado solo si falta `G7_JWT_PUBLIC_KEY` | runtime.env si se usa; PEM público | fallback explícito del guard; no sustituye el issuer |
 
-Dockerfile propio fija `NODE_ENV=production` y `EXPOSE 3005`. Compose de producción inyecta `NODE_ENV`, `PORT=3005`, `INVENTORY_SVC_PORT=3005` y monta la CA de solo lectura en el overlay HTTP. Los valores de negocio/DB/demo deben venir de `/etc/g6-inventory/runtime.env`.
+Dockerfile propio fija `NODE_ENV=production`, `EXPOSE 3005` y ejecuta directamente `CMD ["node", "dist/apps/inventory-svc/main.js"]`; no copia ni necesita `dist/apps/g6-service-entrypoint.mjs`, que pertenece al mecanismo de `Dockerfile.service`. Compose de producción inyecta `NODE_ENV`, `PORT=3005`, `INVENTORY_SVC_PORT=3005` y monta la CA de solo lectura en el overlay HTTP. Los valores de negocio/DB/demo deben venir de `/etc/g6-inventory/runtime.env`.
 
 ## C. Dependencias
 

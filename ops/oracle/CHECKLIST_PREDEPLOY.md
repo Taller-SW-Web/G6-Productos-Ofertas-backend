@@ -5,7 +5,7 @@ Un PASS requiere evidencia reproducible ligada a SHA y alcance. Si un gate aplic
 | Gate | Evidencia comprobable | Resultado |
 |---|---|---|
 | Ownership/contrato | Rama y issue correctos; OpenAPI/AsyncAPI, DEC-F/ADR y versiones citadas; ninguna discrepancia contractual sin resolver | ☐ |
-| Build/artifact | `npm ci`; `npm run build:<service>` y `bash ops/oracle/build-service.sh <service>`; `dist/apps/<service>/main.js` + `dist/apps/g6-service-entrypoint.mjs` | ☐ |
+| Build/artifact | `npm ci`; build del servicio y verificación de su `main.js`. Si usa `Dockerfile.service`, ejecutar `bash ops/oracle/build-service.sh <service>` y verificar también `dist/apps/g6-service-entrypoint.mjs`, que es el CMD de esa imagen. Si usa `Dockerfile.inventory-svc`, verificar `dist/apps/inventory-svc/main.js`, que es su CMD; no exigir el wrapper genérico. En ambos casos comprobar que el artefacto verificado coincide con el entrypoint real de la imagen | ☐ |
 | Calidad | `npm run typecheck`, `npm run lint`, `npm test -- <scope>` o comando exacto existente; resultados y skips explicados | ☐ |
 | Puerto/config | Ficha completa; env vars respaldadas por parser; `PORT` y variable del registro coinciden; validación bootstrap; valores secretos ausentes de logs/docs | ☐ |
 | Compose/imagen | `docker compose ... config --quiet` con Compose/base+overlay aplicables y runtime fixture; build `Dockerfile.service` o `Dockerfile.inventory-svc`; usuario/healthcheck/loopback correctos | ☐ |
