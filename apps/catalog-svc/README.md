@@ -206,3 +206,18 @@ no se cambia la aserción 400 y no se inventa una política de confianza demo.
 - [Guía PG del proyecto](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ops/postgres-runtime/guia-desarrollo-local.md).
 - DEC-F-001 y -011 delimitan identidad y perfil físico; DEC-F-012 exige distinguir
   contrato, implementación local, integración autenticada y despliegue.
+
+## Integración Marketplace H4
+
+**Corte de evidencia:** rama personal `poma`, HEAD `a81f2d5fa735d7353b5df0ec0f095abac489e5d3`; PR #125 abierto, no integrado. CI del SHA exacto consultada el 2026-10-20: PASS (workflow principal y Taxonomy PostgreSQL desechable). No se infiere despliegue, grant G7 ni E2E G1.
+
+### Operaciones Catalog
+
+- `listarProductos` — `GET /api/v1/productos`: listado/búsqueda comercial bajo `canal=MARKETPLACE`; validar `q`, paginación, categoría/marca solo según OpenAPI y elegibilidad desde la proyección autorizada.
+- `obtenerProductoPorSlug` — `GET /api/v1/productos/por-slug/{slug}`: ficha por slug; mantener `product_id`, `slug`, `variant_id`, `sku` y `sku_base` separados. Un producto simple usa `sku_base`; un producto con variantes publica solo SKU elegibles. Nunca deducir SKU desde IDs ni devolver variantes administrativas inactivas.
+- Filtros múltiples de categoría/marca y precio: no afirmar paridad si el OpenAPI G6 vigente no los expone. No aplicar un filtro global únicamente sobre una página parcial.
+- Las pruebas `commercial.e2e-spec.ts` usan repositorio/Taxonomy sustituidos por fixtures aisladas: evidencian comportamiento HTTP/controlado, no PostgreSQL integrado, llamada BFF G1, grant ni E2E comercial externo.
+
+### Cierre de integración
+
+Leer [paquete operativo H4](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/castilla/integraciones/g1-marketplace/README.md), [matriz](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/castilla/integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md), [Acuerdo G1–G6](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/docs/g1-marketplace-homologacion-lote03/integraciones/ACUERDO_G1_G6_H4_2026-10-20.md) y operationId OpenAPI. M-01–M-09 están `ACEPTADO_G6_COMUNICADO_G1`; esto permite implementar reglas Catalog propias. La elegibilidad comercial requiere prueba provider con datos identificados; no confundir fixtures contractuales, base PostgreSQL aislada, Supabase o Oracle. Cierre mínimo: provider de listado vacío/elegible/no elegible, slug simple con SKU base, variantes con SKU distinto de `variant_id`, campos comerciales y JWT/scopes; ligar resultados al SHA exacto.
