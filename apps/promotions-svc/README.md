@@ -188,3 +188,24 @@ Estos resultados históricos son del bloque #70, anteriores a los nuevos tests
 de #33. Ver `COUPON_COMMANDS.md` y `test/evidence/` para las pruebas posteriores
 de cupones y `CORRECCIONES-PENDIENTES.md` para la revisión actual. Estos avances
 no forman parte del diff vigente de #116. No acreditan revisión, merge ni cierre.
+
+## Integración Marketplace H4 — estado por frontera
+
+**Corte:** rama `cueva`, HEAD auditado `3f42e0e474071a13eb1b3120819d142cfeda4a95`; PR #123 abierto en draft. CI de Actions del SHA exacto consultada el 2026-10-20: PASS (dos ejecuciones de lint/typecheck/test/build/smoke; PR describe 20 pruebas E2E omitidas por configuración privada). No se infiere despliegue ni grant G7.
+
+### Operaciones HTTP G1 del contrato G6
+
+El OpenAPI G6 enumera `listarPromociones`, `evaluarPromociones`, `validarCupon` y `obtenerRecomendaciones`. En este HEAD el controller HTTP del servicio Promotions solo expone health; no se localizaron handlers HTTP de evaluación de promociones ni validación de cupones. Por ello, para Marketplace se registran como **CONTRATO_DEFINIDO / NO IMPLEMENTADO HTTP en este SHA**, pendientes de implementación y Provider según SPEC/OpenAPI. Los adaptadores/consumidores AMQP no satisfacen esos operationIds.
+
+| Capacidad | Semántica de integración |
+|---|---|
+| `POST /api/v1/promociones/evaluar` — `evaluarPromociones` | Evaluación no consume ni reserva beneficio. El consumidor solicita un resultado conforme al DTO OpenAPI. |
+| `POST /api/v1/cupones/validar` — `validarCupon` | Validación sin consumo. `customer_ref`, cuando lo exija la regla, identifica al comprador y nunca al BFF técnico. |
+| `GET /api/v1/promociones` — `listarPromociones` | Lectura de canal solo en la forma publicada en OpenAPI; handler/provider por verificar. |
+| `GET /api/v1/recomendaciones` — `obtenerRecomendaciones` | Aplicar audience/scope/allowlist de OpenAPI; mantener D-REC-01/02 para productos con varios SKU, sin inventar precio/stock global del padre. |
+
+El avance actual de Cueva incluye consumidores AMQP/Outbox y reglas internas; el runtime productivo de consumidores permanece deshabilitado por configuración (`PROMOTIONS_COUPON_RUNTIME_ENABLED=false` conforme al PR #123) y requiere gates propios antes de activarse. No declarar endpoint HTTP funcional por ese avance. G5 conserva la orquestación de consumo/restauración; G6 conserva autoridad de reglas y uso. No consumir durante evaluar/validar.
+
+### Evidencia mínima siguiente
+
+Implementar cada handler contractual con autorización real según OpenAPI, probar resultado aplicable/no aplicable y válido/inválido, ausencia/error, idempotencia donde contrato lo declare y ausencia de mutación de cupo/uso. Ligar Provider/CI al nuevo SHA. Luego verificar grant/token G7, deploy por digest y BFF/E2E G1 separadamente. Consultar la [matriz H4](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/castilla/integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md) y el [acuerdo normativo](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/docs/g1-marketplace-homologacion-lote03/integraciones/ACUERDO_G1_G6_H4_2026-10-20.md).
