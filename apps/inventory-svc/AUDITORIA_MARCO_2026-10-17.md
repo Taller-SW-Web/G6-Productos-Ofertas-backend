@@ -198,7 +198,7 @@ Consolidación conforme a `ops/oracle/GUIA_DEVTEAM.md`, `ops/oracle/CONTRATO_DES
 ```text
 Servicio / owner: inventory-svc / Miguel Ángel Taco Zavala (taco)
 Issue / rama / SHA:
-  - Backend (#14, #25, #30, #31, #97, #98, #99, #100, #101, #102, #103, #104, #105): rama taco, SHA base b02615841f63ea3249d9ad16a0cf32f4ea2b20c2 (CI run 39207480173 SUCCESS)
+  - Backend (#14, #25, #30, #31, #97, #98, #99, #100, #101, #102, #103, #104, #105): rama taco, SHA base b02615841f63ea3249d9ad16a0cf32f4ea2b20c2 (CI run 39207480173 SUCCESS) y alineación documental Marketplace H4 6d266af7aa7ead2e6d263838d6b94ee5ea02da1d (CI run 39505583544 SUCCESS)
   - Frontend (#17, #18, #39 y parte UI de #104): rama taco, SHA 0ec39b80893326f25b32e5c499f7838b7137dfc1
 Contrato HTTP (versión/SHA) / AsyncAPI (versión/SHA) / DEC-F-ADR:
   - Docs origin/master SHA c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b
@@ -235,4 +235,3 @@ Marco debe hacer:
 El desarrollador ya dejó resuelto:
   - 100% de la implementación interna autorizada en apps/inventory-svc, preparador y dry-run de DATA-004 (#14), suite real 21/21 en CI y adaptador HTTP Frontend con 19 pruebas unitarias en src/features/inventory/.
 ```
-
