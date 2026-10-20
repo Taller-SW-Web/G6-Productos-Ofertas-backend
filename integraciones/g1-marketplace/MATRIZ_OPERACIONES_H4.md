@@ -1,6 +1,6 @@
 # Matriz de operaciones G1 Marketplace ↔ G6 H4
 
-Corte de auditoría: 2026-10-20. Contrato contrastado contra OpenAPI Docs `0.6.0-rc.1` candidato. Los estados operativos no se infieren del YAML. SHA HEAD consultado al cierre: `master=47e219e376fff1004ec10e9803c16119c811a699`, `castilla=e5678c3` (PR #137), `poma=c595d5de4db899a23a332ee2d264d43733a387c0`, `taco=6d266af7aa7ead2e6d263838d6b94ee5ea02da1d`, `cueva=3f3b8aabcd00e568f663ae66980e710f416a25d9`, `lopez=ca166aa7a00b6c42286a94ccad0410f11384d03e`, `vera=7970bdb554b460c368a71b2b80477e5bbcbab3fb`; Frontend `castilla=245f1e56df625449c0ea1f61761a06e96788992a`. Son HEAD consultados, no prueba de que toda la implementación indicada exista en cada uno.
+Corte de auditoría: 2026-10-20. Contrato contrastado contra OpenAPI Docs `0.6.0-rc.1` candidato. Los estados operativos no se infieren del YAML. SHA HEAD consultado al cierre: `master=47e219e376fff1004ec10e9803c16119c811a699`, `castilla=6827878` (PR #137), `poma=c595d5de4db899a23a332ee2d264d43733a387c0`, `taco=6d266af7aa7ead2e6d263838d6b94ee5ea02da1d`, `cueva=3f3b8aabcd00e568f663ae66980e710f416a25d9`, `lopez=ca166aa7a00b6c42286a94ccad0410f11384d03e`, `vera=7970bdb554b460c368a71b2b80477e5bbcbab3fb`; Frontend `castilla=245f1e56df625449c0ea1f61761a06e96788992a`. Son HEAD consultados, no prueba de que toda la implementación indicada exista en cada uno.
 
 **Leyenda de estados:** `CONTRATO_DEFINIDO` significa operationId/schema localizado en OpenAPI; implementación, CI, despliegue, grant y E2E se mantienen `NO_VERIFICADO` salvo evidencia explícita ligada al SHA. PR/CI declarados por sus propios PRs se indican como referencia documental y no se extrapolan a otras operaciones.
 
@@ -27,7 +27,7 @@ Corte de auditoría: 2026-10-20. Contrato contrastado contra OpenAPI Docs `0.6.0
 
 ## Auditoría de evidencia
 
-- Backend PR #10 es draft. Su cuerpo reporta CI PASS del SHA `843725b...`, pero el HEAD remoto vigente es `b026158...`; por la regla de corte no se le atribuye ese PASS al HEAD nuevo hasta consultar Actions para el SHA exacto.
+- Backend PR #10 es draft. Su cuerpo reporta CI PASS del SHA `843725b...`, pero el HEAD remoto vigente es `6d266af...`; por la regla de corte no se le atribuye ese PASS al HEAD nuevo hasta consultar Actions para el SHA exacto.
 - Backend PR #123 es draft y describe consumidores AMQP/Outbox; eso no prueba handler HTTP para `evaluarPromociones`/`validarCupon`.
 - Backend PR #125 y #131 siguen abiertos; la persistencia/handlers se deben calificar por operación y pruebas, no por archivos listados en PR.
 - Ningún grant G7, despliegue o E2E G1→G6 se acredita en esta matriz sin evidencia enlazada y ligada a ambiente/SHA.
