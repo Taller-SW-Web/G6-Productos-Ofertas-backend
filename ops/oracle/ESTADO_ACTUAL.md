@@ -1,6 +1,6 @@
 # Estado operativo actual de Oracle
 
-**Observación:** 2026-10-19 22:32:52–22:36:19 UTC (17:32:52–17:36:19 Lima). Host `g6-po-vcn`. Auditoría SSH de solo lectura. Rama `castilla`, SHA de trabajo `9fb59128da489f4173e97739c3d27e459087ead2`; SHA actual de `master`: `9205eb455c4965a82ccb9fc4714cf976e4c059b0`.
+**Observación base:** 2026-10-19 22:32:52–22:36:19 UTC (17:32:52–17:36:19 Lima), auditoría SSH de solo lectura. **Complemento posterior:** HTTPS/SSH de solo lectura 2026-10-20 (detalles al final). La auditoría fechada no se reescribió. El SHA de `master` verificado al revisar fue `9205eb455c4965a82ccb9fc4714cf976e4c059b0`.
 
 Este resumen refleja solo las comprobaciones enumeradas en la [auditoría completa](auditorias/2026-10-19_22-32-52_UTC/RESUMEN.md). Los documentos del 17 de octubre siguen siendo evidencia histórica y no fueron reescritos.
 
@@ -58,3 +58,23 @@ Este resumen refleja solo las comprobaciones enumeradas en la [auditoría comple
 - [Resumen](auditorias/2026-10-19_22-32-52_UTC/RESUMEN.md) · [VM](auditorias/2026-10-19_22-32-52_UTC/INVENTARIO_VM.md) · [Contenedores y HTTP](auditorias/2026-10-19_22-32-52_UTC/CONTENEDORES_HTTP.md)
 - [Redes y HTTPS](auditorias/2026-10-19_22-32-52_UTC/REDES_CADDY_HTTPS.md) · [RabbitMQ](auditorias/2026-10-19_22-32-52_UTC/RABBITMQ.md) · [CI/CD](auditorias/2026-10-19_22-32-52_UTC/CICD.md)
 - [Seguridad](auditorias/2026-10-19_22-32-52_UTC/SEGURIDAD.md) · [Hallazgos](auditorias/2026-10-19_22-32-52_UTC/HALLAZGOS.md) · [Evidencias](auditorias/2026-10-19_22-32-52_UTC/EVIDENCIAS.md)
+
+## Evidencia complementaria — 2026-10-20
+
+No se reescriben las observaciones históricas del 19-oct. A las **00:08:47–00:08:51 UTC**, desde PowerShell con `curl.exe` (TLS verificado por defecto, sin flags de omisión), las tres solicitudes GET públicas y sin autenticación dieron `ssl_verify_result=0` y `Content-Type: application/json; charset=utf-8`:
+
+| Solicitud | HTTP / tiempo | Respuesta observada |
+|---|---:|---|
+| `GET /api/v1/productos?canal=MARKETPLACE` | 200 / 13.021927 s | JSON `{items,pagina,tamanio,total}`; página 1, tamaño 20, 15 items, total 15. Incluye Nike Academy (`product_id=2ee6399e-2333-5916-847b-f6d2a0f03527`, slug `nike-academy-hv4386-100`). |
+| `GET /api/v1/categorias` | 200 / 1.936968 s | JSON `{categories}`, 8 categorías; primera `Balones`, `ACTIVA` (`categoria_id=fcb3cac1-b14a-b935-fc1a-c147b878a5c6`). La atiende Taxonomy vía Gateway. |
+| `GET /api/v1/productos/por-slug/nike-academy-hv4386-100?canal=MARKETPLACE` | 200 / 3.163814 s | JSON con `product_id=2ee6399e-2333-5916-847b-f6d2a0f03527`, slug `nike-academy-hv4386-100`, nombre Nike Academy, SKU base `NIK-ACADEMY-HV4386-05`, precio regular 129.9 PEN, sin oferta, cero variantes y una imagen. |
+
+La lista y el detalle muestran datos comerciales para esas lecturas, no cobertura de todos los casos de Catalog. La respuesta positiva procede del contenedor desplegado `catalog-svc:9205eb455c4965a82ccb9fc4714cf976e4c059b0`; no prueba que la rama candidata Poma `a81f2d5` esté desplegada.
+
+### Estado de contenedores y readiness consultado por SSH
+
+Consultas SSH de solo lectura, sin leer `runtime.env`, observaron el 2026-10-20 00:09 UTC: Gateway, Catalog, Pricing y Taxonomy activos y Docker `healthy`; imágenes tagueadas respectivamente `9205eb4`, `9205eb4`, `2970df9` y `97ca576`. Caddy y RabbitMQ también estaban activos. `g6-http` incluye los cuatro servicios HTTP; RabbitMQ está únicamente en `g6-po_g6_backend`, sin red compartida con los servicios.
+
+Desde dentro de los contenedores, Pricing `/health/ready` y Taxonomy `/health/ready` devolvieron 200. Catalog readiness fue intermitente durante la observación: un GET interno respondió 503 a las 00:07:06 y GETs a las 00:09:31 respondieron 200 tanto en localhost del contenedor como desde el alias `catalog-svc` visto por Gateway. El healthcheck Docker de Gateway también alternó `ready`/`not_ready`, con cobertura `partial`; su comprobación HTTP directa a `/health/ready` dio 404, pues el contenedor ejecuta el bundle de readiness y no expone esa ruta. Por tanto, el `healthy` Docker no acredita readiness HTTP estable ni los upstreams no configurados.
+
+Las respuestas públicas 200 confirman Caddy→Gateway→rutas de demo funcionales para esta observación. No resuelven por sí mismas la intermitencia de readiness de Catalog ni permiten atribuir su causa a Caddy, Gateway, datos o acceso Supabase. No se alteraron VM, broker ni servicios.

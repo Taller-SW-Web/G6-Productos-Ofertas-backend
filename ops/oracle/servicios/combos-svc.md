@@ -2,7 +2,7 @@
 
 ## A. Identidad
 
-Owner Castilla; rama `castilla`, HEAD `83240f239ba98678ce217e1678970af77ad3a73d`. Puerto 3007 / `COMBOS_SVC_PORT`. Schema físico `combos` existe; scaffold no configura DB/Rabbit. Proyecto/contenedor `g6-combos-svc`, Compose genérico, runtime `/etc/g6-combos-svc/runtime.env`, estado `/var/lib/g6-productos-ofertas/combos-svc`. No desplegado al corte 19-oct. Controladores solo health scaffold, no endpoints de negocio.
+Owner Castilla; rama `castilla`, HEAD `49bf41658ff3944e6a48e24d2c53cdeeb197807a` (docs-only respecto al SHA de código `83240f239ba98678ce217e1678970af77ad3a73d`). Puerto 3007 / `COMBOS_SVC_PORT`. Schema físico `combos` existe; scaffold no configura DB/Rabbit. Proyecto/contenedor `g6-combos-svc`, Compose genérico, runtime `/etc/g6-combos-svc/runtime.env`, estado `/var/lib/g6-productos-ofertas/combos-svc`. No desplegado al corte 19-oct. Controladores solo health scaffold, no endpoints de negocio.
 
 ## B. Configuración runtime
 

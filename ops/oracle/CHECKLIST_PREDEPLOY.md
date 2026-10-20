@@ -45,7 +45,7 @@ Prioridad para Issue transversal: bloquear el merge/entrega si (1) variables obl
 
 ## Auditoría de cobertura CI observada
 
-Fuente: `.github/workflows/ci.yml` del SHA de esta rama. Evaluación estática del workflow y sus scripts, no resultado de ejecución en esta tarea.
+Fuente: `.github/workflows/ci.yml` en `49bf41658ff3944e6a48e24d2c53cdeeb197807a`. Evaluación estática contrastada con CI del SHA exacto: GitHub Actions run `39344071317` finalizó `success`. Esa ejecución valida el workflow vigente de backend, no esta edición documental ni readiness remota.
 
 | Control solicitado | ¿CI lo detecta hoy? | Evidencia y límite |
 |---|---|---|
@@ -57,5 +57,7 @@ Fuente: `.github/workflows/ci.yml` del SHA de esta rama. Evaluación estática d
 | Incompatibilidad AMQP | No | no hay integración común RabbitMQ/AsyncAPI/nombres/permisos para los productores/consumidores; CI no detecta drift físico-contractual. |
 | Mocks productivos | No exhaustivo | no se ve gate estático completo que prohíba fallback/mock de producción; tests unitarios sí usan dobles legítimos. |
 | Regresión de contrato de integración | No exhaustivo | hay tests de app, no gate global de diff/compatibilidad OpenAPI/AsyncAPI y rutas/scopes por consumidor. |
+
+La CI actual también ejecuta una simulación aislada de deploy/rollback (`ops/oracle/tests/deploy-g6-service.test.sh`) y verifica selección/recuperación del CD con mocks. Esto no demuestra que la recuperación remota se haya ejecutado en Oracle. Para un primer despliegue sin imagen previa se conserva el gate de simular fallo y retirar únicamente el contenedor/proyecto recién creado en Compose aislado; los datos y redes compartidas deben quedar intactos y adjuntarse evidencias.
 
 Esta matriz distingue validación declarativa de conectividad funcional y no implica que se ejecutó CI durante la tarea.

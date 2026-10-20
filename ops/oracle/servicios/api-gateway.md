@@ -18,7 +18,7 @@
 | `GATEWAY_<SERVICE>_URL` | Opcional por upstream definido; origen HTTP(S) sin credenciales | runtime privado / no secreto | `gateway-settings.ts`; solo URL de origen |
 | `GATEWAY_<SERVICE>_READINESS_PATH` | Opcional, solo con URL; path confirmado por owner y nunca liveness | runtime privado | valida formato y rechaza `/health` |
 | `GATEWAY_TIMEOUT_MS` | opcional; default 5000, rango 1–60000 | runtime privado; no secreto | `gateway-settings.ts` |
-| `AUTH_ISSUER`, `AUTH_JWKS_URL` | Pareadas cuando demo auth apagada; HTTPS sin user/pass/query/fragment | URL issuer/JWKS; normalmente no secreto | `gateway-settings.ts`; token verificación usa identidad contractual |
+| `AUTH_ISSUER`, `AUTH_JWKS_URL` | Opcionales; si `GATEWAY_DEMO_NO_AUTH_ENABLED=false`, deben configurarse ambas o ninguna; cuando se configuran, HTTPS sin user/pass/query/fragment | runtime.env; URL issuer/JWKS, normalmente no secreto | `gateway-settings.ts`; ausencia de ambas es aceptada por parser, no acredita rutas protegidas operativas ni reemplaza el contrato de identidad |
 | `GATEWAY_PUBLIC_OPERATION_IDS` | opcional allowlist; solo operationId que OpenAPI marca público | runtime privado | `gateway-settings.ts`; lista inválida falla bootstrap |
 | `GATEWAY_DEMO_NO_AUTH_ENABLED` | default false; demo no debe habilitarse en producción | runtime privado; no secreto | `gateway-settings.ts`; excepción de demo explícita |
 
@@ -47,3 +47,7 @@ Sin persistencia propia conocida, migraciones o rol PostgreSQL. El Gateway no de
 ## H. Bloqueos y entrega
 
 Readiness bloqueada por Catalog al corte auditado. Antes de release, issue/owner transversal, cada upstream autorizado+listo, auth/JWKS/scope y routing funcional probados; Marco autoriza deployment individual. Registrar salud parcial y SHA.
+
+### Evidencia complementaria 2026-10-20
+
+El tag Oracle inspeccionado por SSH seguía siendo `api-gateway:9205eb455c4965a82ccb9fc4714cf976e4c059b0`; Docker reportó `healthy`. El bundle de readiness del healthcheck alternó `ready` y `not_ready`, siempre con `coverage=partial`; las rutas de demo públicas dieron 200 (detalles/tiempos en [ESTADO_ACTUAL.md](../ESTADO_ACTUAL.md)). Una solicitud interna a `http://127.0.0.1:3000/health/ready` respondió 404: no declarar que existe ese endpoint HTTP; el healthcheck de imagen invoca un bundle local. El run CI exacto del SHA Gateway es `39038657868`; el run `39342273073` pertenece a `castilla` SHA `83240f2` y no es evidencia CI de este Gateway.

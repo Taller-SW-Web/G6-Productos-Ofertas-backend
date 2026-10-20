@@ -14,7 +14,6 @@
 | Esquemas/tablas Supabase observados y su límite de evidencia | [`SUPABASE_ESQUEMAS.md`](SUPABASE_ESQUEMAS.md) |
 | Redes y dependencias | [`MATRIZ_DEPENDENCIAS.md`](MATRIZ_DEPENDENCIAS.md) |
 | RabbitMQ | [`RABBITMQ_COMPATIBILIDAD.md`](RABBITMQ_COMPATIBILIDAD.md) |
-| Esquemas y tablas PostgreSQL | [`SUPABASE_ESQUEMAS.md`](SUPABASE_ESQUEMAS.md) |
 | Gates y formato de entrega | [`CHECKLIST_PREDEPLOY.md`](CHECKLIST_PREDEPLOY.md) |
 | Procedimientos CD, operación y rollback | Secciones posteriores de este README y scripts enlazados |
 | Evidencia histórica | [`auditorias/README.md`](auditorias/README.md) |
