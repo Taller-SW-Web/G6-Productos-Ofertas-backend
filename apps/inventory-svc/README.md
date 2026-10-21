@@ -268,7 +268,7 @@ una prueba aprobada.
 
 ## Integración Marketplace H4
 
-**Corte documental:** rama `taco`, código de operación auditado en `b02615841f63ea3249d9ad16a0cf32f4ea2b20c2`; PR #10 sigue abierto en draft. CI GitHub Actions del SHA exacto `b026158` consultada el 2026-10-20: PASS en validación general, PostgreSQL Taxonomy e Inventory PostgreSQL/RabbitMQ. Este CI no demuestra deploy Oracle, grant G7 ni E2E G1.
+**Corte documental:** rama `taco`, código de operación auditado en `b02615841f63ea3249d9ad16a0cf32f4ea2b20c2` y corte Hito 4 en `7a546e78629683c8258df1a6d9beab24e74ef136`; PR #10 sigue abierto en draft. CI GitHub Actions del SHA `7a546e7` (run 39524047809): PASS en validación general, PostgreSQL Taxonomy e Inventory PostgreSQL/RabbitMQ. Este CI no demuestra deploy Oracle, grant G7 ni E2E G1.
 
 | OperationId | Método/ruta | Identidad/scope de contrato | Semántica |
 |---|---|---|---|

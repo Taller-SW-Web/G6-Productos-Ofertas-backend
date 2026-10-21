@@ -198,7 +198,7 @@ Consolidación conforme a `ops/oracle/GUIA_DEVTEAM.md`, `ops/oracle/CONTRATO_DES
 ```text
 Servicio / owner: inventory-svc / Miguel Ángel Taco Zavala (taco)
 Issue / rama / SHA:
-  - Backend (#14, #25, #30, #31, #97, #98, #99, #100, #101, #102, #103, #104, #105): rama taco, SHA base b02615841f63ea3249d9ad16a0cf32f4ea2b20c2 (CI run 39207480173 SUCCESS), alineación documental Marketplace H4 6d266af7aa7ead2e6d263838d6b94ee5ea02da1d (CI run 39505583544 SUCCESS) y merge de master 47e219e en 5a8a92b (sin cambios en apps/inventory-svc)
+  - Backend (#14, #25, #30, #31, #97, #98, #99, #100, #101, #102, #103, #104, #105): rama taco, SHA base b02615841f63ea3249d9ad16a0cf32f4ea2b20c2 (CI run 39207480173 SUCCESS), alineación documental Marketplace H4 6d266af7aa7ead2e6d263838d6b94ee5ea02da1d (CI run 39505583544 SUCCESS), merge de master 47e219e en 5a8a92b (sin cambios en apps/inventory-svc) y corte Hito 4 7a546e78629683c8258df1a6d9beab24e74ef136 (CI run 39524047809 SUCCESS)
   - Frontend (#17, #18, #39 y parte UI de #104): rama taco, SHA 0ff0a99 (merge de master 6e0448a + correcciones "all", carga parcial del dashboard, distribución porUbicacion y reconciliación de recepciones inciertas)
 Contrato HTTP (versión/SHA) / AsyncAPI (versión/SHA) / DEC-F-ADR:
   - Docs origin/master SHA c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b
@@ -275,8 +275,5 @@ acredita entrega de eventos, homologación de topología ni deploy Oracle.
 
 ### Evidencia de este corte
 
-- Backend: merge `5a8a92b`; validaciones locales y CI se registran en el commit
-  documental de esta actualización.
-- Frontend: `0ff0a99` (merge `master` + correcciones `"all"`, carga parcial del
-  dashboard, distribución por `porUbicacion` y reconciliación de recepciones
-  inciertas; 24/24 pruebas del adaptador).
+- Backend: `7a546e78629683c8258df1a6d9beab24e74ef136` (merge `5a8a92b`) — CI run 39524047809 SUCCESS: validación general, Inventory real PostgreSQL/RabbitMQ y Taxonomy real.
+- Frontend: `0ff0a9962e1f25bb9f6bc323090fd6d5707a5e5d` (merge `master` + correcciones `"all"`, carga parcial del dashboard, distribución por `porUbicacion` y reconciliación de recepciones inciertas; 24/24 pruebas del adaptador). El CI de Frontend se ejecuta al abrir el PR `taco`→`master`.
