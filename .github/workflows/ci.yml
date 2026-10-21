@@ -300,3 +300,37 @@ jobs:
 
       - name: Taxonomy integration tests (must not be skipped)
         run: node scripts/ci/run-taxonomy-integration.mjs
+
+  inventory-integration:
+    name: Inventory integration on disposable PostgreSQL and RabbitMQ
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout Backend
+        uses: actions/checkout@v4
+        with:
+          path: backend
+      - name: Checkout pinned Inventory contracts
+        uses: actions/checkout@v4
+        with:
+          repository: Taller-SW-Web/G6-Productos-Ofertas-docs
+          ref: c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b
+          path: docs
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Inventory isolated PostgreSQL and RabbitMQ tests (must not be skipped)
+        env:
+          INVENTORY_REAL_INTEGRATION: '1'
+        run: npm test -- apps/inventory-svc/test/inventory.real.integration.spec.ts --reporter=verbose
