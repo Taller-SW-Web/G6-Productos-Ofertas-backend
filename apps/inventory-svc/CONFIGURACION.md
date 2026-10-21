@@ -60,6 +60,31 @@ El consumidor comprueba la existencia de `po.inventory.q`, usa prefetch 20 y ACK
 
 `inventory.bulk.stock.adjust.requested` y `catalog.sku.deactivated` quedan aislados con `BLOCKED_CONTRACT`: el AsyncAPI consultado declara `GenericData`, sin payload ejecutable suficiente. Un mensaje inválido, un contrato bloqueado o un fallo técnico pausa el consumidor y cierra el canal sin ACK. RabbitMQ puede volver a poner las entregas pendientes en la cola al cerrar el canal; este proceso no reconecta automáticamente mientras esté pausado. Requiere resolver la causa y llamar internamente a `resume()` o reiniciar. Un mensaje persistente incompatible puede bloquear el avance de esa cola compartida. No hay endpoint público de reanudación, retry/DLX productivo ni publicación a colas alternativas. La pérdida de conexión sin pausa programa reconexión a los 30 s.
 
+### Matriz de incompatibilidad de topología (bloqueo de deploy AMQP)
+
+El código usa los nombres del AsyncAPI `0.6.0-rc.2`; la topología física
+observada (auditoría Oracle `2026-10-19 22:32:52 UTC`, RabbitMQ 4.2.9, vhost
+`g6-productos-ofertas`) usa nombres en español. No se asume que sean alias.
+
+| Elemento | Código/AsyncAPI | Físico observado | ACL `g6_inventario` |
+|---|---|---|---|
+| Cola consumida | `po.inventory.q` | `po.inventario.q` | read `po.inventario.q` |
+| Exchange de eventos | `po.events.x` | `po.eventos.x` | write `po.eventos.x` |
+| Exchange de resultados | `po.results.x` | `po.resultados.x` | write `po.resultados.x` |
+| Configure | — | — | ninguno (`^$`) |
+
+Por tanto, conectar/publicar con los nombres del código falla por recurso
+inexistente o ACL. El servicio no crea ni modifica la topología. El desbloqueo
+requiere que Marco/#29 y el owner de infraestructura fijen nombres, bindings y
+permisos, y autoricen la prueba en el entorno.
+
+**Independencia HTTP/PostgreSQL:** `RABBITMQ_URL` es opcional al arranque; sin
+broker el proceso sirve HTTP y mantiene los eventos en Outbox como `PENDING`.
+`/health/readiness` solo depende de PostgreSQL. La pausa del consumidor no
+bloquea HTTP ni las transacciones. El estado AMQP se consulta aparte en
+`getMetrics()`. Un deploy HTTP/DB es viable con AMQP bloqueado; eso no acredita
+el flujo de eventos.
+
 Para recuperar una pausa, consultar internamente `getMetrics().pauseReason` y resolver primero su causa: `BLOCKED_CONTRACT` requiere contrato ejecutable y handler revisados con Marco y el productor; `INVALID_MESSAGE` requiere corregir el productor y acordar con Infra el tratamiento de la entrega retenida; `DEPENDENCY_OR_PROCESSING_FAILED` requiere restablecer la dependencia y verificar el estado durable. Llamar a `resume()` o reiniciar sin esa resolución puede volver a pausar la misma cola. La reanudación es una llamada interna del proceso o un reinicio coordinado con Infra, no una nueva ruta HTTP. Tras reanudar, contrastar ACK/duplicados/fallos con Inbox, operación y Outbox; readiness de PostgreSQL por sí solo no demuestra recuperación del consumidor.
 
 La prueba real del consumer se prepara en `test/inventory.real.integration.spec.ts`: cola quorum y binding de inicialización únicamente en el vhost efímero propio, entrega duplicada, replay de operación, rechazo durable y retención/redelivery de JSON inválido. Retirar y confirmar ese fixture corrupto es una acción exclusiva de la prueba para poder comprobar `resume()`, no una autorización para descartar mensajes productivos. Esta cobertura debe ejecutarse con `INVENTORY_REAL_INTEGRATION=1`; las omisiones locales no acreditan su resultado ni homologación de topología/retry/DLX.

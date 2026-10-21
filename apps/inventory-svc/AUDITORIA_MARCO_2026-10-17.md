@@ -198,14 +198,14 @@ Consolidación conforme a `ops/oracle/GUIA_DEVTEAM.md`, `ops/oracle/CONTRATO_DES
 ```text
 Servicio / owner: inventory-svc / Miguel Ángel Taco Zavala (taco)
 Issue / rama / SHA:
-  - Backend (#14, #25, #30, #31, #97, #98, #99, #100, #101, #102, #103, #104, #105): rama taco, SHA base b02615841f63ea3249d9ad16a0cf32f4ea2b20c2 (CI run 39207480173 SUCCESS) y alineación documental Marketplace H4 6d266af7aa7ead2e6d263838d6b94ee5ea02da1d (CI run 39505583544 SUCCESS)
-  - Frontend (#17, #18, #39 y parte UI de #104): rama taco, SHA 0ec39b80893326f25b32e5c499f7838b7137dfc1
+  - Backend (#14, #25, #30, #31, #97, #98, #99, #100, #101, #102, #103, #104, #105): rama taco, SHA base b02615841f63ea3249d9ad16a0cf32f4ea2b20c2 (CI run 39207480173 SUCCESS), alineación documental Marketplace H4 6d266af7aa7ead2e6d263838d6b94ee5ea02da1d (CI run 39505583544 SUCCESS) y merge de master 47e219e en 5a8a92b (sin cambios en apps/inventory-svc)
+  - Frontend (#17, #18, #39 y parte UI de #104): rama taco, SHA 0ff0a99 (merge de master 6e0448a + correcciones "all", carga parcial del dashboard, distribución porUbicacion y reconciliación de recepciones inciertas)
 Contrato HTTP (versión/SHA) / AsyncAPI (versión/SHA) / DEC-F-ADR:
   - Docs origin/master SHA c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b
   - OpenAPI 0.6.0-rc.1 / AsyncAPI 0.6.0-rc.2 / SPEC-015, SPEC-016 / DEC-F-001, 002, 005, 009, 013, 014, 015
 Build / typecheck / lint / tests (comandos y resultados):
   - Backend: npm run typecheck PASS; npm run lint PASS; npm run build:inventory-svc PASS; vitest unit (apps/inventory-svc/src) 24 archivos / 253 tests PASS; vitest e2e (apps/inventory-svc/test) 4 archivos / 90 PASS (10 omitidos sin Gateway/DB local); node --test apps/inventory-svc/data/data-f1/dry-run.test.mjs 27/27 PASS
-  - Frontend: npm run typecheck PASS; npm run lint PASS; vitest adapters (src/features/inventory/adapters/vitest.config.ts) 19/19 PASS; verify-production mock (58 vistas) y api (53 vistas) PASS
+  - Frontend: npm run typecheck PASS; npm run lint PASS; vitest adapters (src/features/inventory/adapters/vitest.config.ts) 24/24 PASS; verify-production mock (58 vistas) y api (53 vistas) PASS
 Integración local real (dependencias, versiones, evidencia):
   - GitHub Actions run 39207480173 (y 39205232766): PostgreSQL 17 + RabbitMQ 3.13 efímeros sobre Ubuntu / Node 24.15.0 -> 21/21 casos reales PASS, 0 omitidos
 Imagen + Compose equivalentes y health/readiness:
@@ -233,5 +233,50 @@ Estado: PARTIAL (Implementación interna completa + Integración real aislada en
 Marco debe hacer:
   - Revisar/aprobar PR #10 en Backend, definir reconciliación de nombres AMQP (#29), resolver rutas/errores de Gateway (#106/#107), publicar cliente compartido Frontend (#45/#109) y autorizar #14/#111 cuando corresponda.
 El desarrollador ya dejó resuelto:
-  - 100% de la implementación interna autorizada en apps/inventory-svc, preparador y dry-run de DATA-004 (#14), suite real 21/21 en CI y adaptador HTTP Frontend con 19 pruebas unitarias en src/features/inventory/.
+  - 100% de la implementación interna autorizada en apps/inventory-svc, preparador y dry-run de DATA-004 (#14), suite real 21/21 en CI y adaptador HTTP Frontend con 24 pruebas unitarias en src/features/inventory/.
 ```
+
+## Actualización 2026-10-20 — sincronización con `master` y matriz AMQP
+
+Se ejecutó merge normal de `origin/master` (`47e219e376fff1004ec10e9803c16119c811a699`)
+en `taco` sin conflictos; el merge no modifica `apps/inventory-svc/` y conserva
+la implementación interna. El Frontend hizo el equivalente desde `master`
+`6e0448a` y añadió las correcciones del adaptador (24 pruebas).
+
+### Matriz de incompatibilidad RabbitMQ (bloqueo de deploy AMQP)
+
+Fuentes: código de `apps/inventory-svc`, AsyncAPI `0.6.0-rc.2` y auditoría
+Oracle `2026-10-19 22:32:52 UTC` (RabbitMQ 4.2.9, vhost `g6-productos-ofertas`).
+No se modificó la topología.
+
+| Elemento | Código/AsyncAPI | Físico observado | ACL `g6_inventario` |
+|---|---|---|---|
+| Cola consumida | `po.inventory.q` | `po.inventario.q` | read `po.inventario.q` |
+| Exchange de eventos | `po.events.x` | `po.eventos.x` | write `po.eventos.x` |
+| Exchange de resultados | `po.results.x` | `po.resultados.x` | write `po.resultados.x` |
+| Configure | — | — | ninguno (`^$`) |
+
+Los nombres no son alias: consumir/publicar con el código actual falla por
+recurso inexistente o ACL. El flujo AMQP permanece **BLOQUEADO_ESPECÍFICO**
+hasta reconciliación de Marco/#29 y del owner de infraestructura. No se
+inventan bindings, retry/DLX ni permisos.
+
+### Independencia de HTTP/PostgreSQL respecto del broker
+
+- `RABBITMQ_URL` es opcional al arranque; sin broker se sirve HTTP y el Outbox
+  conserva eventos `PENDING`.
+- `/health/readiness` solo exige PostgreSQL (`SELECT 1`); no depende de
+  RabbitMQ.
+- La pausa del consumidor no bloquea operaciones HTTP ni transacciones.
+- El estado AMQP se reporta por separado en `InventoryConsumerService.getMetrics()`.
+
+Esto permite desplegar/probar HTTP y persistencia con AMQP bloqueado. No
+acredita entrega de eventos, homologación de topología ni deploy Oracle.
+
+### Evidencia de este corte
+
+- Backend: merge `5a8a92b`; validaciones locales y CI se registran en el commit
+  documental de esta actualización.
+- Frontend: `0ff0a99` (merge `master` + correcciones `"all"`, carga parcial del
+  dashboard, distribución por `porUbicacion` y reconciliación de recepciones
+  inciertas; 24/24 pruebas del adaptador).

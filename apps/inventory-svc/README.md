@@ -132,6 +132,38 @@ coordinado. `getMetrics()` expone contadores locales (conexión, pausa, ACK,
 duplicados, rechazos, fallos, reconexiones). No hay endpoint/exportador de
 métricas.
 
+### 4.1 Compatibilidad de topología: bloqueo de deploy AMQP
+
+El código de esta rama usa los nombres del AsyncAPI (`po.inventory.q`,
+`po.events.x`, `po.results.x`); la topología física observada en la auditoría
+Oracle `2026-10-19 22:32:52 UTC` usa nombres en español. **No son alias.**
+
+| Elemento | Código de esta rama (y AsyncAPI) | Topología física observada | ACL del usuario `g6_inventario` |
+|---|---|---|---|
+| Cola de consumo | `po.inventory.q` | `po.inventario.q` | **read** `po.inventario.q` |
+| Exchange de eventos | `po.events.x` | `po.eventos.x` | **write** `po.eventos.x` |
+| Exchange de resultados | `po.results.x` | `po.resultados.x` | **write** `po.resultados.x` |
+| Configure | — | — | ninguno (`^$`) |
+
+Consecuencia: conectar el consumidor o publicar con los nombres del código
+fallaría por cola/exchange inexistente o por ACL. El flujo AMQP queda
+**BLOQUEADO_ESPECÍFICO** hasta que Marco/#29 y el owner de infraestructura
+reconcilien nombres y permisos. Este servicio **no crea ni modifica** exchanges,
+colas, bindings ni ACL.
+
+La frontera HTTP/PostgreSQL es independiente del broker:
+
+- `RABBITMQ_URL` es opcional al arranque; sin ella el proceso sirve HTTP y
+  conserva los eventos en Outbox como `PENDING`.
+- `GET /health/readiness` solo comprueba `SELECT 1` en PostgreSQL; no exige
+  RabbitMQ ni marca `not_ready` por su ausencia.
+- La pausa del consumidor no bloquea las operaciones HTTP ni las transacciones
+  de persistencia.
+- El estado AMQP se reporta aparte en `InventoryConsumerService.getMetrics()`.
+
+Esto habilita desplegar y probar los flujos HTTP/DB mientras AMQP sigue
+bloqueado; **no** acredita el flujo de eventos ni la homologación de topología.
+
 ## 5. Configuración
 
 Todas las variables, su obligatoriedad, valor por defecto, comportamiento
@@ -165,7 +197,7 @@ identifica **owner · operación afectada · condición verificable de desbloque
 | [#101](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/101) | IMPLEMENTAR_PARCIAL | Escrituras contractuales salvo frontera offline | Marco + G4/G5/G7 · autorización offline · homologación antes de conectar la política pura a una mutación persistente |
 | [#102](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/102) | IMPLEMENTAR_PARCIAL | Inbox/Outbox, inicialización SKU, workers, resiliencia | Marco + owners Bulk/Catálogo · payload tipado de bulk/deactivated · Infra y G5/#29 · homologación de topología y retry/DLX |
 | [#103](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/103) | IMPLEMENTAR_PARCIAL | Límites, timeouts, errores sanitizados, contadores internos | Infra/G5 · validar fallos y recuperación con DB/broker reales; sin exporter/endpoint de métricas no contratado |
-| [#104](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/104) | BLOQUEADO_ESPECÍFICO | Provider HTTP; adaptador Frontend de umbrales, KPIs autoritativos de dashboard y traslados con transporte inyectable (19 pruebas, SHA Frontend `0ec39b8`, `src/features/inventory/INTEGRACION_HTTP.md`); lecturas sin fuente contractual fallan con `CONTRATO_BLOQUEADO` | Marco · cliente compartido #109 y rutas #106/#107 · integración React↔Gateway validada (área Frontend) |
+| [#104](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/104) | BLOQUEADO_ESPECÍFICO | Provider HTTP; adaptador Frontend de umbrales, KPIs autoritativos de dashboard, distribución `porUbicacion` y traslados con transporte inyectable (24 pruebas, SHA Frontend `0ff0a99`, `src/features/inventory/INTEGRACION_HTTP.md`); lecturas sin fuente contractual fallan con `CONTRATO_BLOQUEADO` | Marco · cliente compartido #109 y rutas #106/#107 · integración React↔Gateway validada (área Frontend) |
 | [#105](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/105) | BLOQUEADO_ESPECÍFICO | Suites locales/provider (no son E2E real) | Marco/Infra · #104, stack aislado PostgreSQL/RabbitMQ, datos autorizados y #110 · recorrido real React→Gateway→Inventory→persistencia |
 
 > El número de issues abiertos no mide ausencia funcional. Cada fila separa
