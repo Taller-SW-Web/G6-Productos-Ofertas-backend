@@ -7,6 +7,8 @@ import { PostgresCatalogRepository } from './postgres-catalog.repository.js';
 describe('Catalog provider SQL and projections (isolated)', () => {
   const statements: { text: string; values: unknown[] }[] = [];
   let productWithVariants = false;
+  let productImageUrls = ['https://example.test/product.webp'];
+  let variantImageUrls = ['https://example.test/variant.webp'];
   const client = {
     release() {},
     async query(config: string | { text: string }, values: unknown[] = []) {
@@ -32,9 +34,13 @@ describe('Catalog provider SQL and projections (isolated)', () => {
       if (text.includes('from "catalog"."variants"'))
         return { rows: [['variant-fixture', '0002']] };
       if (text.includes('from "catalog"."product_images"'))
-        return { rows: [['https://example.test/product.webp']] };
+        return { rows: productImageUrls.map((url) => [url]) };
       if (text.includes('from "catalog"."variant_images"'))
-        return { rows: [['https://example.test/variant.webp']] };
+        return { rows: variantImageUrls.map((url) => [url]) };
+      if (text.includes('SELECT url FROM catalog.product_images'))
+        return { rows: productImageUrls.map((url) => ({ url })) };
+      if (text.includes('SELECT vi.url'))
+        return { rows: variantImageUrls.map((url) => ({ url })) };
       if (text.includes('from "catalog"."product_attribute_values"'))
         return { rows: [['c1', 'Material', null, 'Cotton']] };
       if (text.includes('from "catalog"."variant_attribute_values"'))
@@ -56,6 +62,8 @@ describe('Catalog provider SQL and projections (isolated)', () => {
   beforeEach(() => {
     statements.length = 0;
     productWithVariants = false;
+    productImageUrls = ['https://example.test/product.webp'];
+    variantImageUrls = ['https://example.test/variant.webp'];
   });
   it('parameterizes literal text and filters eligibility in COUNT before LIMIT/OFFSET', async () => {
     await repo.listCandidates(
@@ -123,5 +131,52 @@ describe('Catalog provider SQL and projections (isolated)', () => {
         valor: 'Cotton',
       },
     ]);
+  });
+
+  it('checks demo read access with bounded SELECT-only probes on the four required tables', async () => {
+    await repo.checkDemoReadAccess();
+    const checks = statements.filter((statement) =>
+      /SELECT 1 FROM catalog\.(products|variants|product_images|variant_images) LIMIT 0/.test(
+        statement.text,
+      ),
+    );
+    expect(checks.map((statement) => statement.text)).toEqual([
+      'SELECT 1 FROM catalog.products LIMIT 0',
+      'SELECT 1 FROM catalog.variants LIMIT 0',
+      'SELECT 1 FROM catalog.product_images LIMIT 0',
+      'SELECT 1 FROM catalog.variant_images LIMIT 0',
+    ]);
+    expect(checks.every((statement) => statement.values.length === 0)).toBe(
+      true,
+    );
+  });
+
+  it('falls back from placeholder product images to valid variant images', async () => {
+    productImageUrls = ['https://placehold.co/800x800/png?text=placeholder'];
+    const page = await repo.listDemoCandidates(
+      {
+        canal: 'MARKETPLACE',
+        pagina: 1,
+        tamanio: 20,
+        orden: 'NOMBRE_ASC',
+      },
+      100,
+    );
+    expect(page[0].images).toEqual(['https://example.test/variant.webp']);
+  });
+
+  it('excludes candidates with only placeholder images', async () => {
+    productImageUrls = ['https://placehold.co/800x800/png?text=placeholder'];
+    variantImageUrls = ['https://placehold.co/800x800/png?text=placeholder'];
+    const page = await repo.listDemoCandidates(
+      {
+        canal: 'MARKETPLACE',
+        pagina: 1,
+        tamanio: 20,
+        orden: 'NOMBRE_ASC',
+      },
+      100,
+    );
+    expect(page).toEqual([]);
   });
 });

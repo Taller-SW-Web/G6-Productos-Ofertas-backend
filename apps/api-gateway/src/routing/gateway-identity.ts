@@ -152,8 +152,9 @@ export class GatewayIdentity {
   async authorize(
     route: ContractRoute,
     authorization: string | undefined,
+    allowDemoBypass = isDemoPublicRoute(route),
   ): Promise<void> {
-    if (this.settings.demoNoAuthEnabled) return;
+    if (this.settings.demoNoAuthEnabled && allowDemoBypass) return;
     if (!route.security.length) {
       if (!this.settings.publicOperations.includes(route.operationId))
         throw new GatewayFailure(403, 'SCOPE_INSUFICIENTE');
@@ -197,4 +198,14 @@ export class GatewayIdentity {
     if (route.introspection)
       throw new GatewayFailure(503, 'SERVICIO_NO_DISPONIBLE');
   }
+}
+
+/** Temporary read-only public surface for the Marketplace demo. */
+export function isDemoPublicRoute(route: ContractRoute): boolean {
+  return (
+    route.method === 'GET' &&
+    ['listarCategorias', 'listarProductos', 'obtenerProductoPorSlug'].includes(
+      route.operationId,
+    )
+  );
 }
