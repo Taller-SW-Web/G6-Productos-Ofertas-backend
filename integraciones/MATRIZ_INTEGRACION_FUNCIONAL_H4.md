@@ -22,37 +22,39 @@ Corte documental 2026-10-20, objetivo Hito 4 2026-10-31. Oracle es evidencia de 
 - Módulo de negocio/bounded context: responsabilidad y datos propios, como Catalog o Pricing.
 - Microservicio: proceso que implementa operaciones. Gateway es transversal.
 - Operación API: operationId y ruta independiente del OpenAPI.
-- ID funcional: WF-001…WF-016 del [índice normativo](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/wireframes/INDEX.md). SPEC/HU/FLOW conservan IDs propios. No se inventan FUNC/FN.
+- Identidad funcional: el nombre oficial de cada funcionalidad según el [índice normativo](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/wireframes/INDEX.md). WF identifica un wireframe asociado; SPEC, HU, FLOW y MK identifican artefactos distintos y conservan sus códigos oficiales. No se inventan FUNC/FN.
 - VERIFICADO = evidencia observable asociada a SHA/entorno/alcance; PARCIAL = solo una parte; PENDIENTE = sin evidencia suficiente; BLOQUEADO_ESPECÍFICO = solo frontera afectada espera resolución externa; NO_VERIFICADO = no hubo observación reproducible actual; NO_APLICA = contrato no lo exige, con fundamento.
 
-## C. Resumen: exactamente 16 funcionalidades
+## C. Resumen de las 16 funcionalidades
 
-| ID y nombre oficial | MK / pantallas | Responsable · microservicio | SPEC/HU/FLOW | Frontend | Backend, HTTP, DB | AMQP | Seguridad, CI, deploy, E2E y bloqueo |
-|---|---|---|---|---|---|---|---|
-| WF-001 Carga y exportación masiva de productos | [MK-001](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-001/component-spec.md) S01–S05 | Marco Castilla · bulk-svc | [SPEC-001](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-001-carga-exportacion-masiva-productos.md) · [HU-001](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-001-carga-exportacion-masiva-productos.md) · [FLOW-001](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-001-carga-exportacion-masiva-productos.md) | MOCK; [FE #34](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/34) | Solo health scaffold; 8 ops sin handlers. Schema bulk documentado, sin persistencia funcional master. | Eventos bulk contractuales; sin conexión/consumer real. | 401/403 no probado; sin deploy/E2E. Backend #88–94; #93 AMQP no bloquea HTTP/DB. |
-| WF-002 Gestión de combos de productos | [MK-002](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-002/component-spec.md) S01–S04 | Marco Castilla · combos-svc | [SPEC-002](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-002-gestion-combos-productos.md) · [HU-002](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-002-gestion-combos-productos.md) · [FLOW-002](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-002-gestion-combos-productos.md) | MOCK; FE #34; PR FE #28 abierto | Solo health; 6 ops sin handlers. Schema documentado, persistencia real no demostrada. | Sin evento propio Combo; consumer no verificado. | Auth no probado; sin deploy/E2E. Backend #79–87. |
-| WF-003 Gestión de productos (CRUD principal) | [MK-003](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-003/component-spec.md); spec cruza MK-004-S01 | Gabriel Poma · catalog-svc | [SPEC-003](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-003-gestion-productos-crud.md) · [HU-003](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-003-gestion-productos-crud.md) · [FLOW-003](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-003-gestion-productos-crud.md) | MOCK; [FE #35](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/35), PR #40 abierto/CI fallida | Solo listarProductos y obtenerProductoPorSlug en controller master. Schema/repos presentes; Oracle respondió con tag previo 9205…, no SHA actual. | Preparación/baja contractuales; no producer/consumer probado. | 200 demo no prueba 401/403. Sin E2E CRUD. Backend #43–51. |
-| WF-004 Gestión de variantes y SKU | [MK-004](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-004/component-spec.md); spec cruza MK-003-S04 | Gabriel Poma · catalog-svc | [SPEC-004](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-004-gestion-variantes-skus.md) · [HU-004](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-004-gestion-variantes-skus.md) · [FLOW-004](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-004-gestion-variantes-skus.md) | MOCK; FE #35 | Variantes sin controller master, DB runtime no demostrada. | Eventos SKU contractuales, no reales. | Auth/pruebas no verificadas; sin E2E. Backend #43–51. |
-| WF-005 Gestión de cupones de descuento | [MK-005](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-005/component-spec.md) S01–S06 | Axel Cueva · promotions-svc | [SPEC-005](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-005-gestion-cupones-descuento.md) · [HU-005](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-005-gestion-cupones-descuento.md) · [FLOW-005](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-005-gestion-cupones-descuento.md) | MOCK; [FE #36](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/36), PR #41 no merge/CI fallida | Solo health; CRUD/validación ausentes. Migración no prueba handler. | Consumo/restauración contractuales; broker sin conexiones/consumers, nombres incompatibles. | Auth no probado; no deploy/E2E. Backend #70–78; #33 bloquea solo integración G5. |
-| WF-006 Gestión de ofertas y promociones | [MK-006](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-006/component-spec.md) S01–S06 | Axel Cueva · promotions-svc | [SPEC-006](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-006-gestion-ofertas-promociones.md) · [HU-006](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-006-gestion-ofertas-promociones.md) · [FLOW-006](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-006-gestion-ofertas-promociones.md) | MOCK; FE #36 | Sin handlers comerciales master, persistencia funcional pendiente. | Proyecciones contractuales, no runtime. | Auth no probado; sin deploy/E2E. Backend #70–78. |
-| WF-007 Reglas de venta cruzada y upselling | [MK-007](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-007/component-spec.md) S01–S07 | Axel Cueva · promotions-svc | [SPEC-007](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-007-reglas-venta-cruzada-upselling.md) · [HU-007](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-007-reglas-venta-cruzada-upselling.md) · [FLOW-007](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-007-reglas-venta-cruzada-upselling.md) | MOCK; FE #36 | Recomendaciones/CRUD sin handler master. | Proyecciones contractuales, sin consumers. | Auth no probado; sin deploy/E2E. Backend #70–78. |
-| WF-008 Gestión de categorías y subcategorías | [MK-008](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-008/component-spec.md) S01–S05 | Leonardo López · taxonomy-svc | [SPEC-008](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-008-gestion-categorias.md) · [HU-008](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-008-gestion-categorias.md) · [FLOW-008](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-008-gestion-categorias.md) | MOCK; [FE #37](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/37), PR #41 sin merge | GET categorías master; Oracle comprobó lectura vía Gateway en tag anterior. CRUD/árbol pendientes. Schema taxonomy; readiness en tag anterior. | Cambio/baja segura contractuales; consumer no verificado. | Auth por ruta; GET demo no prueba 401/403 admin. Backend #34–42. |
-| WF-009 Gestión de características y valores | [MK-009](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-009/component-spec.md) S01–S06 | Leonardo López · taxonomy-svc | [SPEC-009](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-009-gestion-caracteristicas.md) · [HU-009](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-009-gestion-caracteristicas.md) · [FLOW-009](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-009-gestion-caracteristicas.md) | MOCK; FE #37 | Sin rutas comerciales en controller master. | characteristic-value.updated contractual, no runtime. | Auth no probado; sin deploy/E2E. Backend #34–42. |
-| WF-010 Asociación entre tipos de producto y características | [MK-010](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-010/component-spec.md) S01–S05 | Leonardo López · taxonomy-svc | [SPEC-010](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-010-asociacion-tipo-producto-caracteristica.md) · [HU-010](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-010-asociacion-tipo-producto-caracteristica.md) · [FLOW-010](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-010-asociacion-tipo-producto-caracteristica.md) | MOCK; FE #37 | Asociación sin controller master. | product-type-schema.changed contractual, no publisher/consumer. | Auth no probado; sin deploy/E2E. Backend #34–42. |
-| WF-011 Gestión de marcas | [MK-011](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-011/component-spec.md) S01–S05 | Leonardo López · taxonomy-svc | [SPEC-011](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-011-gestion-marcas.md) · [HU-011](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-011-gestion-marcas.md) · [FLOW-011](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-011-gestion-marcas.md) | MOCK; FE #37 | GET marcas en master; alta/edición/estado pendiente, no probado en Oracle. | Baja segura contractual; consumer no evidenciado. | Auth no probado; sin E2E. Backend #34–42. |
-| WF-012 Gestión de SEO y metadatos | [MK-012](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-012/component-spec.md) S01–S03 | Leonardo López · taxonomy-svc | [SPEC-012](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-012-seo-metadatos.md) · [HU-012](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-012-seo-metadatos.md) · [FLOW-012](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-012-seo-metadatos.md) | MOCK; FE #37 | SEO/slug/historial sin controller master. | Sin evento específico atribuible. | Auth/pruebas no verificadas. Backend #34–42. |
-| WF-013 Gestión de precios individuales y masivos | [MK-013](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-013/component-spec.md) S01–S06 | Leonardo Vera · pricing-svc | [SPEC-013](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-013-gestion-precios-individuales-masivos.md) · [HU-013](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-013-gestion-precios-individuales-masivos.md) · [FLOW-013](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-013-gestion-precios-individuales-masivos.md) | UI mock; FE #47 adaptador candidato sin React→Gateway; [FE #38](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/38), #45 pendiente | Cuatro GET administrativos master; consultas comerciales, writes/importación parciales. Schema pricing; Outbox parcial PR #127. | price.changed/bulk/init contractuales; relay/publicación no acreditados. | Gateway/G7 parcial. BE #121/#127/#128/#132 merged, alcances parciales. Oracle readiness no es E2E. Backend #24/#55–60. |
-| WF-014 Historial de auditoría de precios | [MK-014](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-014/component-spec.md) S01–S05 | Leonardo Vera · price-audit-svc | [SPEC-014](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-014-historial-auditoria-precios.md) · [HU-014](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-014-historial-auditoria-precios.md) · [FLOW-014](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-014-historial-auditoria-precios.md) | MOCK explícito; FE #38 | Solo health; sin API/audit append-only master. | Consumer price.changed no verificado; broker sin conexiones. | Auth no probado; sin deploy/E2E. Backend #61–69. |
-| WF-015 Control de stock y disponibilidad | [MK-015](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-015/component-spec.md) sin pantalla [MK-015](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-015/component-spec.md)-SXX identificable | Miguel Taco · inventory-svc | [SPEC-015](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-015-control-stock-disponibilidad.md) · [HU-015](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-015-control-stock-disponibilidad.md) · [FLOW-015](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-015-control-stock-disponibilidad.md) | MOCK; [FE #39](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/39) | Solo health master; APIs sin handler. Modelo/migraciones Docs no prueban DB runtime. | Contractual; sin conexión real. | Auth no inventado; 401/403 no probado. Sin deploy/E2E. Backend #97–105; PR #10/CI 39207480173 candidato, no master. |
-| WF-016 Dashboard analítico y alertas de stock | [MK-016](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-016/component-spec.md) incluye pantallas MK-015-S01/S03–S05 | Miguel Taco · inventory-svc | [SPEC-016](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-016-dashboard-alertas-stock.md) · [HU-016](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-016-dashboard-alertas-stock.md) · [FLOW-016](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-016-dashboard-alertas-stock.md) | MOCK; FE #39 | Dashboard/umbrales sin controller ni DB runtime. | stock.changed contractual; consumer no verificado. | Auth no probado; sin deploy/E2E. Backend #97–105. AMQP no bloquea trabajo GET/DB. |
+| Funcionalidad (nombre oficial) | Referencias WF / MK | Responsable · microservicio | SPEC / HU / FLOW | Estado |
+|---|---|---|---|---|
+| Carga y exportación masiva de productos | WF-001 · [MK-001](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-001/component-spec.md) S01–S05 | Marco Castilla · bulk-svc | [SPEC-001](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-001-carga-exportacion-masiva-productos.md) · [HU-001](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-001-carga-exportacion-masiva-productos.md) · [FLOW-001](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-001-carga-exportacion-masiva-productos.md) | Operaciones §D · estados §E |
+| Gestión de combos de productos | WF-002 · [MK-002](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-002/component-spec.md) S01–S04 | Marco Castilla · combos-svc | [SPEC-002](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-002-gestion-combos-productos.md) · [HU-002](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-002-gestion-combos-productos.md) · [FLOW-002](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-002-gestion-combos-productos.md) | Operaciones §D · estados §E |
+| Gestión de productos (CRUD principal) | WF-003 · [MK-003](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-003/component-spec.md); spec cruza MK-004-S01 | Gabriel Poma · catalog-svc | [SPEC-003](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-003-gestion-productos-crud.md) · [HU-003](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-003-gestion-productos-crud.md) · [FLOW-003](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-003-gestion-productos-crud.md) | Operaciones §D · estados §E |
+| Gestión de variantes y SKU | WF-004 · [MK-004](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-004/component-spec.md); spec cruza MK-003-S04 | Gabriel Poma · catalog-svc | [SPEC-004](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-004-gestion-variantes-skus.md) · [HU-004](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-004-gestion-variantes-skus.md) · [FLOW-004](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-004-gestion-variantes-skus.md) | Operaciones §D · estados §E |
+| Gestión de cupones de descuento | WF-005 · [MK-005](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-005/component-spec.md) S01–S06 | Axel Cueva · promotions-svc | [SPEC-005](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-005-gestion-cupones-descuento.md) · [HU-005](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-005-gestion-cupones-descuento.md) · [FLOW-005](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-005-gestion-cupones-descuento.md) | Operaciones §D · estados §E |
+| Gestión de ofertas y promociones | WF-006 · [MK-006](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-006/component-spec.md) S01–S06 | Axel Cueva · promotions-svc | [SPEC-006](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-006-gestion-ofertas-promociones.md) · [HU-006](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-006-gestion-ofertas-promociones.md) · [FLOW-006](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-006-gestion-ofertas-promociones.md) | Operaciones §D · estados §E |
+| Reglas de venta cruzada y upselling | WF-007 · [MK-007](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-007/component-spec.md) S01–S07 | Axel Cueva · promotions-svc | [SPEC-007](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-007-reglas-venta-cruzada-upselling.md) · [HU-007](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-007-reglas-venta-cruzada-upselling.md) · [FLOW-007](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-007-reglas-venta-cruzada-upselling.md) | Operaciones §D · estados §E |
+| Gestión de categorías y subcategorías | WF-008 · [MK-008](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-008/component-spec.md) S01–S05 | Leonardo López · taxonomy-svc | [SPEC-008](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-008-gestion-categorias.md) · [HU-008](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-008-gestion-categorias.md) · [FLOW-008](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-008-gestion-categorias.md) | Operaciones §D · estados §E |
+| Gestión de características y valores | WF-009 · [MK-009](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-009/component-spec.md) S01–S06 | Leonardo López · taxonomy-svc | [SPEC-009](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-009-gestion-caracteristicas.md) · [HU-009](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-009-gestion-caracteristicas.md) · [FLOW-009](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-009-gestion-caracteristicas.md) | Operaciones §D · estados §E |
+| Asociación entre tipos de producto y características | WF-010 · [MK-010](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-010/component-spec.md) S01–S05 | Leonardo López · taxonomy-svc | [SPEC-010](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-010-asociacion-tipo-producto-caracteristica.md) · [HU-010](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-010-asociacion-tipo-producto-caracteristica.md) · [FLOW-010](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-010-asociacion-tipo-producto-caracteristica.md) | Operaciones §D · estados §E |
+| Gestión de marcas | WF-011 · [MK-011](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-011/component-spec.md) S01–S05 | Leonardo López · taxonomy-svc | [SPEC-011](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-011-gestion-marcas.md) · [HU-011](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-011-gestion-marcas.md) · [FLOW-011](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-011-gestion-marcas.md) | Operaciones §D · estados §E |
+| Gestión de SEO y metadatos | WF-012 · [MK-012](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-012/component-spec.md) S01–S03 | Leonardo López · taxonomy-svc | [SPEC-012](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-012-seo-metadatos.md) · [HU-012](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-012-seo-metadatos.md) · [FLOW-012](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-012-seo-metadatos.md) | Operaciones §D · estados §E |
+| Gestión de precios individuales y masivos | WF-013 · [MK-013](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-013/component-spec.md) S01–S06 | Leonardo Vera · pricing-svc | [SPEC-013](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-013-gestion-precios-individuales-masivos.md) · [HU-013](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-013-gestion-precios-individuales-masivos.md) · [FLOW-013](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-013-gestion-precios-individuales-masivos.md) | Operaciones §D · estados §E |
+| Historial de auditoría de precios | WF-014 · [MK-014](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-014/component-spec.md) S01–S05 | Leonardo Vera · price-audit-svc | [SPEC-014](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-014-historial-auditoria-precios.md) · [HU-014](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-014-historial-auditoria-precios.md) · [FLOW-014](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-014-historial-auditoria-precios.md) | Operaciones §D · estados §E |
+| Control de stock y disponibilidad | WF-015 · [MK-015](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-015/component-spec.md) sin pantallas MK-015-SXX identificables | Miguel Taco · inventory-svc | [SPEC-015](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-015-control-stock-disponibilidad.md) · [HU-015](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-015-control-stock-disponibilidad.md) · [FLOW-015](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-015-control-stock-disponibilidad.md) | Operaciones §D · estados §E |
+| Dashboard analítico y alertas de stock | WF-016 · [MK-016](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-016/component-spec.md) incluye pantallas MK-015-S01/S03–S05 | Miguel Taco · inventory-svc | [SPEC-016](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-016-dashboard-alertas-stock.md) · [HU-016](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/hu/HU-016-dashboard-alertas-stock.md) · [FLOW-016](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/flujos/FLOW-016-dashboard-alertas-stock.md) | Operaciones §D · estados §E |
 
 
 
-## D. Operaciones HTTP (contrato vs master)
 
-Contrato: [OpenAPI fijado al corte](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/contratos/http/openapi.yaml). Cada línea es una operación/ruta separada. Salvo indicación, no hay controller de negocio en Backend master.
 
-### WF-001 Bulk
+Contrato: [OpenAPI fijado al corte](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/contratos/http/openapi.yaml) `0.6.0-rc.1`. Cada línea representa `operationId`, método y ruta. El resumen de 16 funcionalidades no equivale a la cobertura total del contrato. Salvo indicación, no hay controller de negocio en Backend master.
+
+### Carga y exportación masiva de productos
+
+Referencia documental: `WF-001` (wireframe)
 - descargarPlantillaProductos — GET /api/v1/carga-masiva/productos/plantilla — pendiente
 - crearImportacionGeneralProductos — POST /api/v1/carga-masiva/productos/importaciones — pendiente
 - obtenerImportacionGeneralProductos — GET /api/v1/carga-masiva/productos/importaciones/{batchId} — pendiente
@@ -62,7 +64,9 @@ Contrato: [OpenAPI fijado al corte](https://github.com/Taller-SW-Web/G6-Producto
 - obtenerExportacionGeneralProductos — GET /api/v1/carga-masiva/productos/exportaciones/{exportId} — pendiente
 - descargarExportacionGeneralProductos — GET /api/v1/carga-masiva/productos/exportaciones/{exportId}/archivo — pendiente
 
-### WF-002 Combos
+### Gestión de combos de productos
+
+Referencia documental: `WF-002` (wireframe)
 - listarCombosAdmin — GET /api/v1/combos — pendiente
 - crearCombo — POST /api/v1/combos — pendiente
 - obtenerCombo — GET /api/v1/combos/{comboId} — pendiente
@@ -70,7 +74,9 @@ Contrato: [OpenAPI fijado al corte](https://github.com/Taller-SW-Web/G6-Producto
 - desactivarCombo — POST /api/v1/combos/{comboId}/desactivar — pendiente
 - consultarDisponibilidadCombo — GET /api/v1/combos/{comboId}/disponibilidad — pendiente
 
-### WF-003 Productos
+### Gestión de productos
+
+Referencia documental: `WF-003` (wireframe)
 - listarProductos — GET /api/v1/productos — controller master; Oracle 20-oct 200 con 15 items en tag 9205eb455c4965a82ccb9fc4714cf976e4c059b0, distinto de master actual.
 - crearProducto — POST /api/v1/productos — pendiente
 - obtenerProducto — GET /api/v1/productos/{productoId} — pendiente
@@ -82,7 +88,9 @@ Contrato: [OpenAPI fijado al corte](https://github.com/Taller-SW-Web/G6-Producto
 - obtenerPreparacionProducto — GET /api/v1/productos/{productoId}/preparacion — pendiente
 - reintentarPreparacionProducto — POST /api/v1/productos/{productoId}/preparacion/reintentar — pendiente
 
-### WF-004 Variantes y SKU
+### Gestión de variantes y SKU
+
+Referencia documental: `WF-004` (wireframe)
 - listarVariantesProducto — GET /api/v1/productos/{productoId}/variantes — pendiente
 - crearVariante — POST /api/v1/productos/{productoId}/variantes — pendiente
 - obtenerVariante — GET /api/v1/productos/{productoId}/variantes/{variantId} — pendiente
@@ -93,7 +101,9 @@ Contrato: [OpenAPI fijado al corte](https://github.com/Taller-SW-Web/G6-Producto
 - reintentarPreparacionVariante — POST /api/v1/productos/{productoId}/variantes/{variantId}/preparacion/reintentar — pendiente
 - resolverCodigoBarras — POST /api/v1/productos/codigos-barras/resolver — pendiente
 
-### WF-005 Cupones
+### Gestión de cupones de descuento
+
+Referencia documental: `WF-005` (wireframe)
 - listarCupones — GET /api/v1/cupones — pendiente
 - crearCupon — POST /api/v1/cupones — pendiente
 - obtenerCuponAdmin — GET /api/v1/cupones/{cuponId} — pendiente
@@ -102,7 +112,11 @@ Contrato: [OpenAPI fijado al corte](https://github.com/Taller-SW-Web/G6-Producto
 - desactivarCupon — POST /api/v1/cupones/{cuponId}/desactivar — pendiente
 - validarCupon — POST /api/v1/cupones/validar — pendiente; validar no consume
 
-### WF-006 Promociones
+### Gestión de ofertas y promociones
+
+Referencia documental: `WF-006` (wireframe)
+
+- listarPromocionesAdmin — GET /api/v1/promociones/administracion — OpenAPI provisional-internal, source SPEC-006; no implementada en Backend master: el controller [promotions-svc](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/47e219e376fff1004ec10e9803c16119c811a699/apps/promotions-svc/src/promotions-svc.controller.ts) solo expone health en ese SHA.
 - listarPromociones — GET /api/v1/promociones — pendiente
 - crearPromocion — POST /api/v1/promociones — pendiente
 - obtenerPromocionAdmin — GET /api/v1/promociones/{promocionId} — pendiente
@@ -111,7 +125,9 @@ Contrato: [OpenAPI fijado al corte](https://github.com/Taller-SW-Web/G6-Producto
 - desactivarPromocion — POST /api/v1/promociones/{promocionId}/desactivar — pendiente
 - evaluarPromociones — POST /api/v1/promociones/evaluar — pendiente; no consume cupón
 
-### WF-007 Recomendaciones
+### Reglas de venta cruzada y upselling
+
+Referencia documental: `WF-007` (wireframe)
 - obtenerRecomendaciones — GET /api/v1/recomendaciones — pendiente
 - listarReglasRecomendacion — GET /api/v1/recomendaciones/reglas — pendiente
 - crearReglaRecomendacion — POST /api/v1/recomendaciones/reglas — pendiente
@@ -120,7 +136,9 @@ Contrato: [OpenAPI fijado al corte](https://github.com/Taller-SW-Web/G6-Producto
 - activarReglaRecomendacion — POST /api/v1/recomendaciones/reglas/{reglaId}/activar — pendiente
 - desactivarReglaRecomendacion — POST /api/v1/recomendaciones/reglas/{reglaId}/desactivar — pendiente
 
-### WF-008 Categorías
+### Gestión de categorías y subcategorías
+
+Referencia documental: `WF-008` (wireframe)
 - listarCategorias — GET /api/v1/categorias — controller master; Oracle observó lectura por Gateway.
 - obtenerArbolCategoriasAdmin — GET /api/v1/categorias/arbol — pendiente
 - crearCategoria — POST /api/v1/categorias — pendiente
@@ -130,7 +148,9 @@ Contrato: [OpenAPI fijado al corte](https://github.com/Taller-SW-Web/G6-Producto
 - reactivarCategoria — POST /api/v1/categorias/{categoriaId}/reactivar — pendiente
 - listarCategoriasAdmin — GET /api/v1/categorias/administracion — pendiente
 
-### WF-009 Características
+### Gestión de características y valores
+
+Referencia documental: `WF-009` (wireframe)
 - listarCaracteristicas — GET /api/v1/caracteristicas — pendiente
 - crearCaracteristica — POST /api/v1/caracteristicas — pendiente
 - obtenerCaracteristica — GET /api/v1/caracteristicas/{caracteristicaId} — pendiente
@@ -143,7 +163,9 @@ Contrato: [OpenAPI fijado al corte](https://github.com/Taller-SW-Web/G6-Producto
 - desactivarCaracteristica — POST /api/v1/caracteristicas/{caracteristicaId}/desactivar — pendiente
 - reactivarCaracteristica — POST /api/v1/caracteristicas/{caracteristicaId}/reactivar — pendiente
 
-### WF-010 Tipos y asociaciones
+### Asociación entre tipos de producto y características
+
+Referencia documental: `WF-010` (wireframe)
 - listarTiposProducto — GET /api/v1/tipos-producto — pendiente
 - crearTipoProducto — POST /api/v1/tipos-producto — pendiente
 - obtenerTipoProducto — GET /api/v1/tipos-producto/{tipoProductoId} — pendiente
@@ -154,7 +176,9 @@ Contrato: [OpenAPI fijado al corte](https://github.com/Taller-SW-Web/G6-Producto
 - actualizarAsociacionTipoCaracteristica — PATCH /api/v1/tipos-producto/{tipoProductoId}/caracteristicas/{caracteristicaId} — pendiente
 - solicitarDesasociacionTipoCaracteristica — POST /api/v1/tipos-producto/{tipoProductoId}/caracteristicas/{caracteristicaId}/desasociar — pendiente
 
-### WF-011 Marcas
+### Gestión de marcas
+
+Referencia documental: `WF-011` (wireframe)
 - listarMarcas — GET /api/v1/marcas — controller master; Oracle no probó esta operación.
 - crearMarca — POST /api/v1/marcas — pendiente
 - obtenerMarcaAdmin — GET /api/v1/marcas/{marcaId} — pendiente
@@ -163,7 +187,9 @@ Contrato: [OpenAPI fijado al corte](https://github.com/Taller-SW-Web/G6-Producto
 - reactivarMarca — POST /api/v1/marcas/{marcaId}/reactivar — pendiente
 - listarMarcasAdmin — GET /api/v1/marcas/administracion — pendiente
 
-### WF-012 SEO
+### Gestión de SEO y metadatos
+
+Referencia documental: `WF-012` (wireframe)
 - resolverSlugCategoriaCreacion — POST /api/v1/seo/categorias/slug/resolver — pendiente; propone slug, no crea categoría.
 - obtenerSeoPorSlug — GET /api/v1/seo/{slug} — pendiente
 - resolverSlugAnterior — GET /api/v1/seo/resoluciones/{slugAnterior} — pendiente
@@ -172,7 +198,9 @@ Contrato: [OpenAPI fijado al corte](https://github.com/Taller-SW-Web/G6-Producto
 - listarHistorialSlugCategoria — GET /api/v1/categorias/{categoriaId}/seo/historial — pendiente
 - obtenerOperacionMaestra — GET /api/v1/taxonomia/operaciones/{operationId} — pendiente; no sustituye operación funcional
 
-### WF-013 Pricing
+### Gestión de precios individuales y masivos
+
+Referencia documental: `WF-013` (wireframe)
 - consultarPrecios — GET /api/v1/precios — consulta comercial pendiente.
 - obtenerPrecioSku — GET /api/v1/precios/skus/{sku} — pendiente; #24 bloquea contexto SKU.
 - actualizarPrecioSku — PATCH /api/v1/precios/skus/{sku} — pendiente
@@ -187,14 +215,18 @@ Contrato: [OpenAPI fijado al corte](https://github.com/Taller-SW-Web/G6-Producto
 - obtenerImportacionPrecios — GET /api/v1/precios/importaciones/{batchId} — controller master, sin E2E
 - descargarReporteImportacionPrecios — GET /api/v1/precios/importaciones/{batchId}/reporte — pendiente
 
-### WF-014 Price Audit
+### Historial y auditoría de precios
+
+Referencia documental: `WF-014` (wireframe)
 - listarAuditoriaPrecios — GET /api/v1/auditoria-precios — pendiente
 - obtenerAuditoriaPrecio — GET /api/v1/auditoria-precios/{auditId} — pendiente
 - crearExportacionAuditoriaPrecios — POST /api/v1/auditoria-precios/exportaciones — pendiente
 - obtenerExportacionAuditoriaPrecios — GET /api/v1/auditoria-precios/exportaciones/{exportId} — pendiente
 - descargarExportacionAuditoriaPrecios — GET /api/v1/auditoria-precios/exportaciones/{exportId}/archivo — pendiente
 
-### WF-015 Inventario
+### Control de stock y disponibilidad
+
+Referencia documental: `WF-015` (wireframe)
 - consultarDisponibilidad — GET /api/v1/inventario/disponibilidad — pendiente
 - solicitarReserva — POST /api/v1/inventario/reservas — pendiente
 - confirmarReserva — POST /api/v1/inventario/reservas/{reservaId}/confirmar — pendiente
@@ -214,7 +246,9 @@ Contrato: [OpenAPI fijado al corte](https://github.com/Taller-SW-Web/G6-Producto
 - obtenerTrasladoInventario — GET /api/v1/inventario/traslados/{trasladoId} — pendiente
 - registrarRecepcionTrasladoInventario — POST /api/v1/inventario/traslados/{trasladoId}/recepciones — pendiente
 
-### WF-016 Dashboard/alertas
+### Dashboard analítico y alertas de stock
+
+Referencia documental: `WF-016` (wireframe)
 - obtenerDashboardInventario — GET /api/v1/inventario/dashboard — pendiente
 - obtenerUmbralesInventario — GET /api/v1/inventario/umbrales — pendiente; compartida como trazabilidad en WF-015, no API duplicada
 - actualizarUmbralGlobal — PUT /api/v1/inventario/umbrales/global — pendiente
@@ -230,7 +264,243 @@ El resumen de AsyncAPI por feature: Bulk coordina solicitudes de Catalog/Pricing
 
 **Código backend revisado en el SHA master del corte:** [Catalog commercial.controller.ts](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/47e219e376fff1004ec10e9803c16119c811a699/apps/catalog-svc/src/commercial.controller.ts), [Taxonomy taxonomy.controller.ts](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/47e219e376fff1004ec10e9803c16119c811a699/apps/taxonomy-svc/src/taxonomy.controller.ts), [Pricing pricing-read.controller.ts](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/47e219e376fff1004ec10e9803c16119c811a699/apps/pricing-svc/src/http/pricing-read.controller.ts), y controladores scaffold [Bulk](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/47e219e376fff1004ec10e9803c16119c811a699/apps/bulk-svc/src/bulk-svc.controller.ts), [Combos](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/47e219e376fff1004ec10e9803c16119c811a699/apps/combos-svc/src/combos-svc.controller.ts), [Promotions](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/47e219e376fff1004ec10e9803c16119c811a699/apps/promotions-svc/src/promotions-svc.controller.ts), [Inventory](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/47e219e376fff1004ec10e9803c16119c811a699/apps/inventory-svc/src/inventory-svc.controller.ts), [Price Audit](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/47e219e376fff1004ec10e9803c16119c811a699/apps/price-audit-svc/src/price-audit-svc.controller.ts).<br>
 **Modelos de persistencia por owner:** [bulk](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/datos/bulk/physical-model.md), [combos](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/datos/combos/physical-model.md), [catalog](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/datos/catalog-svc/physical-model.md), [promotions](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/datos/promotions/physical-model.md), [taxonomy](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/datos/taxonomy/physical-model.md), [pricing](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/datos/pricing/physical-model.md), [price_audit](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/datos/price_audit/physical-model.md), [inventory](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/datos/inventory-svc/physical-model.md). Modelo o migración no equivale a persistencia runtime por operación.
-## E. Seguridad, evidencias transversales y bloqueos
+### Operación transversal de soporte a SKU (no constituye una funcionalidad 17)
+
+- consultarDatosFisicos — POST /api/v1/productos/datos-fisicos/consulta — operación provisional de consulta física asociada al SKU; Catálogo es owner G6 del perfil físico de producto simple y cada variante mantiene su propio peso/dimensiones ([SPEC-003](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-003-gestion-productos-crud.md), [SPEC-004](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/requisitos/specs/SPEC-004-gestion-variantes-skus.md)). Despacho/G2 es el consumidor indicado por `x-source-external`; el contrato no acredita homologación. En Backend master SHA `47e219e`, el Gateway registra la ruta, pero eso no demuestra handler de Catálogo ni ejecución de la operación: [tabla de rutas](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/47e219e376fff1004ec10e9803c16119c811a699/apps/api-gateway/src/routing/contract-routes.ts). En Backend master SHA `47e219e`, el controller comercial de Catálogo tampoco registra esta ruta ([commercial.controller.ts](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/blob/47e219e376fff1004ec10e9803c16119c811a699/apps/catalog-svc/src/commercial.controller.ts)). Estado de implementación: PENDIENTE/NO_VERIFICADO en runtime.
+
+## E. Estados independientes por funcionalidad
+
+El resumen conserva 16 funcionalidades en formato compacto. Por funcionalidad se separan implementación backend, frontend/Gateway, persistencia, AMQP, autenticación/autorización, CI, despliegue, E2E y homologación. `PENDIENTE` indica evidencia insuficiente al corte, no necesariamente una falla. La CI documental no prueba runtime de cada operación.
+
+### Carga y exportación masiva de productos
+
+Referencia funcional: `WF-001` (wireframe) · issues de implementación backend: #88–94.
+
+- Backend: Solo health scaffold; 8 ops sin handlers. Schema bulk documentado, sin persistencia funcional master.
+- Frontend / Gateway: MOCK; [FE #34](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/34)
+- Persistencia: Schema descrito; persistencia funcional en master no demostrada.
+- AMQP: Eventos bulk contractuales; sin conexión/consumer real.
+- Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
+- E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
+- Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
+
+### Gestión de combos de productos
+
+Referencia funcional: `WF-002` (wireframe) · issues de implementación backend: #79–87.
+
+- Backend: Solo health; 6 ops sin handlers. Schema documentado, persistencia real no demostrada.
+- Frontend / Gateway: MOCK; FE #34; PR FE #28 abierto
+- Persistencia: Schema descrito; persistencia funcional en master no demostrada.
+- AMQP: Sin evento propio Combo; consumer no verificado.
+- Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
+- E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
+- Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
+
+### Gestión de productos (CRUD principal)
+
+Referencia funcional: `WF-003` (wireframe) · issues de implementación backend: #43–51.
+
+- Backend: Solo listarProductos y obtenerProductoPorSlug en controller master. Schema/repos presentes; Oracle respondió con tag previo 9205…, no SHA actual.
+- Frontend / Gateway: MOCK; [FE #35](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/35), PR #40 abierto/CI fallida
+- Persistencia: Schema/repositorios presentes; persistencia runtime en master no demostrada.
+- AMQP: Preparación/baja contractuales; no producer/consumer probado.
+- Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
+- E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
+- Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
+
+### Gestión de variantes y SKU
+
+Referencia funcional: `WF-004` (wireframe) · issues de implementación backend: #43–51.
+
+- Backend: Variantes sin controller master, DB runtime no demostrada.
+- Frontend / Gateway: MOCK; FE #35
+- Persistencia: Persistencia runtime NO_VERIFICADA.
+- AMQP: Eventos SKU contractuales, no reales.
+- Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
+- E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
+- Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
+
+### Gestión de cupones de descuento
+
+Referencia funcional: `WF-005` (wireframe) · issues de implementación backend: #70–78.
+
+- Backend: Solo health; CRUD/validación ausentes. Migración no prueba handler.
+- Frontend / Gateway: MOCK; [FE #36](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/36), PR #41 no merge/CI fallida
+- Persistencia: Migración mencionada; persistencia funcional/runtime no demostrada.
+- AMQP: Consumo/restauración contractuales; broker sin conexiones/consumers, nombres incompatibles.
+- Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
+- E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
+- Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
+
+### Gestión de ofertas y promociones
+
+Referencia funcional: `WF-006` (wireframe) · issues de implementación backend: #70–78.
+
+- Backend: Sin handlers comerciales master, persistencia funcional pendiente.
+- Frontend / Gateway: MOCK; FE #36
+- Persistencia: PENDIENTE; evidencia runtime no presentada.
+- AMQP: Proyecciones contractuales, no runtime.
+- Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
+- E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
+- Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
+
+### Reglas de venta cruzada y upselling
+
+Referencia funcional: `WF-007` (wireframe) · issues de implementación backend: #70–78.
+
+- Backend: Recomendaciones/CRUD sin handler master.
+- Frontend / Gateway: MOCK; FE #36
+- Persistencia: PENDIENTE/NO_VERIFICADO; detalle funcional en el estado Backend.
+- AMQP: Proyecciones contractuales, sin consumers.
+- Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
+- E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
+- Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
+
+### Gestión de categorías y subcategorías
+
+Referencia funcional: `WF-008` (wireframe) · issues de implementación backend: #34–42.
+
+- Backend: GET categorías master; Oracle comprobó lectura vía Gateway en tag anterior. CRUD/árbol pendientes. Schema taxonomy; readiness en tag anterior.
+- Frontend / Gateway: MOCK; [FE #37](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/37), PR #41 sin merge
+- Persistencia: Schema descrito; runtime no verificado con SHA/entorno actual.
+- AMQP: Cambio/baja segura contractuales; consumer no verificado.
+- Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
+- E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
+- Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
+
+### Gestión de características y valores
+
+Referencia funcional: `WF-009` (wireframe) · issues de implementación backend: #34–42.
+
+- Backend: Sin rutas comerciales en controller master.
+- Frontend / Gateway: MOCK; FE #37
+- Persistencia: PENDIENTE/NO_VERIFICADO; detalle funcional en el estado Backend.
+- AMQP: characteristic-value.updated contractual, no runtime.
+- Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
+- E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
+- Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
+
+### Asociación entre tipos de producto y características
+
+Referencia funcional: `WF-010` (wireframe) · issues de implementación backend: #34–42.
+
+- Backend: Asociación sin controller master.
+- Frontend / Gateway: MOCK; FE #37
+- Persistencia: PENDIENTE/NO_VERIFICADO; detalle funcional en el estado Backend.
+- AMQP: product-type-schema.changed contractual, no publisher/consumer.
+- Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
+- E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
+- Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
+
+### Gestión de marcas
+
+Referencia funcional: `WF-011` (wireframe) · issues de implementación backend: #34–42.
+
+- Backend: GET marcas en master; alta/edición/estado pendiente, no probado en Oracle.
+- Frontend / Gateway: MOCK; FE #37
+- Persistencia: PENDIENTE/NO_VERIFICADO; detalle funcional en el estado Backend.
+- AMQP: Baja segura contractual; consumer no evidenciado.
+- Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
+- E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
+- Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
+
+### Gestión de SEO y metadatos
+
+Referencia funcional: `WF-012` (wireframe) · issues de implementación backend: #34–42.
+
+- Backend: SEO/slug/historial sin controller master.
+- Frontend / Gateway: MOCK; FE #37
+- Persistencia: PENDIENTE/NO_VERIFICADO; detalle funcional en el estado Backend.
+- AMQP: Sin evento específico atribuible.
+- Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
+- E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
+- Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
+
+### Gestión de precios individuales y masivos
+
+Referencia funcional: `WF-013` (wireframe) · issues de implementación backend: #24/#55–60.
+
+- Backend: Cuatro GET administrativos master; consultas comerciales, writes/importación parciales. Schema pricing; Outbox parcial [Backend PR #127](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/127).
+- Frontend / Gateway: UI mock; [FE PR #47](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/47) abierto, head `f99fb6eeb45a67c34aee4368b53363952716a258`; adaptador candidato sin React→Gateway; [FE #38](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/38), #45 pendiente
+- Persistencia: Schema descrito; Outbox parcial no acredita persistencia completa.
+- AMQP: price.changed/bulk/init contractuales; relay/publicación no acreditados.
+- Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- Despliegue: Oracle observó readiness; no se acredita despliegue de SHA funcional actual.
+- E2E: PENDIENTE; readiness no equivale a E2E.
+- Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
+
+### Historial de auditoría de precios
+
+Referencia funcional: `WF-014` (wireframe) · issues de implementación backend: #61–69.
+
+- Backend: Solo health; sin API/audit append-only master.
+- Frontend / Gateway: MOCK explícito; FE #38
+- Persistencia: PENDIENTE/NO_VERIFICADO; detalle funcional en el estado Backend.
+- AMQP: Consumer price.changed no verificado; broker sin conexiones.
+- Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
+- E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
+- Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
+
+### Control de stock y disponibilidad
+
+Referencia funcional: `WF-015` (wireframe) · issues de implementación backend: #97–105.
+
+- Backend: Solo health master; APIs sin handler. Modelo/migraciones Docs no prueban DB runtime.
+- Frontend / Gateway: MOCK; [FE #39](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/issues/39)
+- Persistencia: Persistencia runtime NO_VERIFICADA.
+- AMQP: Contractual; sin conexión real.
+- Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
+- E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
+- Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
+
+### Dashboard analítico y alertas de stock
+
+Referencia funcional: `WF-016` (wireframe) · issues de implementación backend: #97–105.
+
+- Backend: Dashboard/umbrales sin controller ni DB runtime.
+- Frontend / Gateway: MOCK; FE #39
+- Persistencia: Persistencia runtime NO_VERIFICADA.
+- AMQP: stock.changed contractual; consumer no verificado.
+- Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
+- E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
+- Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
+
+### CI del SHA auditado antes de esta corrección
+
+El HEAD previo `74e69b2c912592fac38f612aa0bc179a7b2b8f2c` coincide con [run 39532444119 (pull_request)](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/39532444119) y [run 39532438601 (push)](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/39532438601), ambos SUCCESS/completed. Los jobs de lint, typecheck, tests, build, smoke, validación documental y Taxonomy finalizaron correctamente. Estos resultados corresponden al SHA auditado previo: no demuestran despliegue Oracle, autorización E2E ni implementación de las 16 funcionalidades. Todo commit posterior requiere CI propia.
+
+## F. Seguridad, evidencias transversales y bloqueos
 
 OpenAPI define por operación bearer, scopes y respuestas 401/403. No se inventan issuer, claims, roles o grants de G7. Backend #21 informa Gateway con readiness/cobertura parcial; PR #134 habilita un bypass de demo acotado a GET aprobados, no autenticación general. Oracle observó 200 sin auth para lecturas de demo Catalog/categorías y 401 en otros grupos; eso no sustituye pruebas 401/403 por operación. Frontend #45 mantiene pendientes cliente común, sesión/JWT y composición API. En modo API no se permite fallback silencioso a mock.
 
@@ -244,7 +514,7 @@ OpenAPI define por operación bearer, scopes y respuestas 401/403. No se inventa
 
 Los PRs #121/#127/#128/#132 son merges parciales; FE #47 permanece abierto. CI run 39036724209 corresponde al candidato FE #47. El status API consultado no devolvió checks asociados al SHA master backend del corte, por tanto CI exacta de master = NO_VERIFICADO. Oracle muestra imágenes de SHA previos y cinco servicios ausentes. No se ejecutó build, E2E ni deploy en esta auditoría documental.
 
-## F. Brechas P0 Hito 4
+## G. Brechas P0 Hito 4
 
 1. **Demo:** no hay recorrido autenticado pantalla→operación para las 16 funciones. Solo algunas lecturas demo observadas; resto mock o sin handler.
 2. **CI/CD:** Oracle registra ausentes Price Audit, Promotions, Inventory, Combos y Bulk; readiness Gateway parcial/inestable. CI de candidatos no es CI del SHA integrado/desplegado. Release individual controlado por #111.
@@ -252,16 +522,16 @@ Los PRs #121/#127/#128/#132 son merges parciales; FE #47 permanece abierto. CI r
 4. **Seguridad:** sin pruebas 401/403 por operación; Gateway/JWT/cliente Frontend incompletos. No inventar permisos G7. Bypass de demo no es política final.
 5. **AMQP/DB:** Outbox Pricing parcial no acredita relay/consumer. Broker sin conexiones y con topología discrepante. AMQP bloqueado no detiene HTTP/DB independiente.
 
-## G. Nomenclatura y contradicciones
+## H. Nomenclatura y contradicciones
 
-1. Backend #114 titula 16 funcionalidades, pero el cuerpo habla de “16 MK” como identidad. Propuesta no ejecutada: título “Matriz central de integración funcional — Hito 4” y texto “16 funcionalidades WF-001…WF-016; MK solo como referencia visual secundaria”. No editar ni cerrar el issue.
-2. README usa ID 001…016; índice funcional usa WF-001…WF-016. Se eligió WF, sin crear códigos.
-3. Component-spec MK-003 menciona MK-004-S01; MK-004 menciona MK-003-S04; MK-015 no lista pantallas MK-015-SXX y MK-016 referencia pantallas MK-015. Owner UX debe reconciliar; no renombrar archivos.
+1. El título actual de Backend #114 dice 16 funcionalidades; el cuerpo todavía habla de “16 MK” como identidad. El issue no se editó ni cerró. Propuesta pendiente: título “Matriz central de integración funcional — Hito 4” y texto “16 funcionalidades WF-001…WF-016; MK solo como referencia visual secundaria”. No editar ni cerrar el issue.
+2. No hay contradicción funcional entre README y el índice: README enumera las funcionalidades en orden 001…016, mientras el índice asigna a cada wireframe WF-001…WF-016. Es diferencia de presentación y significado de artefacto, no discrepancia del catálogo.
+3. Hallazgo UX real: el component-spec de [MK-003](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-003/component-spec.md) referencia MK-004-S01 y el de [MK-004](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-004/component-spec.md) referencia MK-003-S04. El component-spec de [MK-015](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-015/component-spec.md) no identifica pantallas MK-015-SXX y [MK-016](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/MK-016/component-spec.md) usa pantallas con prefijo MK-015. Owner: gobernanza UX del módulo / responsables de MK-003/004/015/016. Pendiente: reconciliar la atribución en las fuentes UX; la matriz no cambia nombres ni ownership.
 4. OpenAPI rc.1 / AsyncAPI rc.2 no prueban homologación. Matriz intermodular y alineaciones mantienen pendientes por consumidor.
 5. Exchanges/colas candidatos difieren de los físicos; no se eligió ni alteró configuración. Resolver con owner contractual.
 6. Backend #121/#127/#128/#132 y FE #47 son parciales/candidato; no prueban integración completa, relay, deploy o E2E.
 
-## H. Referencias y actualización
+## I. Referencias y actualización
 
 - [Índice funcional](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/wireframes/INDEX.md) · [README mockups](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/ux/mockups/README.md) · [OpenAPI](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/contratos/http/openapi.yaml) · [AsyncAPI](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/contratos/eventos/asyncapi.yaml).
 - [DEC-F registro](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/arquitectura/decisiones/REGISTRO_DEC_F.md) · [matriz trazabilidad DEC-F](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/arquitectura/decisiones/MATRIZ_TRAZABILIDAD_DEC_F.md) · [matriz intermodular](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/integraciones/MATRIZ_INTERMODULAR_BACKEND.md).
@@ -269,4 +539,4 @@ Los PRs #121/#127/#128/#132 son merges parciales; FE #47 permanece abierto. CI r
 - Issues por owner: Bulk #88–94; Combos #79–87; Catalog #43–51; Promotions #70–78; Taxonomy #34–42; Pricing #24/#55–60; Price Audit #61–69; Inventory #97–105.
 - Actualizar estados solo con fuente exacta, SHA, run, entorno y alcance. Separar implementación, integración, DB, AMQP, homologación, deploy y E2E. Enlazar en vez de copiar extensamente [MATRIZ_INTERMODULAR_BACKEND](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/integraciones/MATRIZ_INTERMODULAR_BACKEND.md), [MATRIZ_DEPENDENCIAS](../ops/oracle/MATRIZ_DEPENDENCIAS.md), [RABBITMQ_COMPATIBILIDAD](../ops/oracle/RABBITMQ_COMPATIBILIDAD.md) y [ESTADO_ACTUAL](../ops/oracle/ESTADO_ACTUAL.md).
 
-Conteo del resumen: WF-001…WF-016 = 16 filas. La matriz no constituye evidencia runtime.
+Conteo del resumen: 16 funcionalidades en el orden canónico del índice; WF-001…WF-016 son referencias a wireframes. La comparación OpenAPI tras esta corrección representa 141 registros por funcionalidad, 135 operationId/método/ruta únicos y 6 repeticiones justificadas de operaciones compartidas (ver §D); no hay operaciones OpenAPI omitidas ni tuplas documentadas fuera del contrato. Esto acredita cobertura documental del contrato fijado, no implementación ni runtime.
