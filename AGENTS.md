@@ -18,6 +18,19 @@ Prohibido escribir código antes de completar los pasos 1 a 5:
 8. **Revisar `git diff`:** verificar cambios exactos y ausencia de whitespace errors.
 9. **Reportar resultados y bloqueos:** según el formato de reporte obligatorio.
 
+### Lectura obligatoria para preparación Oracle
+
+Antes de modificar un microservicio, además de leer `AGENTS.md` y el Issue asignado, consulta los contratos OpenAPI, AsyncAPI y DEC-F aplicables, y estas guías de despliegue:
+
+1. `ops/oracle/GUIA_DEVTEAM.md`.
+2. `ops/oracle/CONTRATO_DESPLIEGUE.md`.
+3. `ops/oracle/servicios/<servicio>.md`.
+4. `ops/oracle/MATRIZ_DEPENDENCIAS.md`.
+5. `ops/oracle/RABBITMQ_COMPATIBILIDAD.md`, cuando el servicio use o proponga AMQP.
+6. `ops/oracle/CHECKLIST_PREDEPLOY.md`.
+
+Un microservicio no puede declararse `READY_FOR_DEPLOY` sin evidencias asociadas a su SHA que demuestren el cumplimiento de todos los requisitos aplicables de compilación, configuración, persistencia, mensajería, seguridad, contratos, Docker y readiness. Un bloqueo específico de AMQP no debe impedir el desarrollo independiente de funcionalidades HTTP o de persistencia dentro del alcance autorizado.
+
 ---
 
 ## 2. Política definitiva de ramas
