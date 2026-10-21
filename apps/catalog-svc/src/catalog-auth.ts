@@ -280,7 +280,11 @@ export class CatalogTokenVerifier {
 
   async verify(token: string): Promise<CatalogPrincipal> {
     const segments = token.split('.');
-    if (segments.length !== 3) throw new CatalogTokenRejected();
+    if (
+      segments.length !== 3 ||
+      segments.some((segment) => !/^[A-Za-z0-9_-]+$/.test(segment))
+    )
+      throw new CatalogTokenRejected();
     let header: JwtHeader;
     let claims: JwtClaims;
     try {

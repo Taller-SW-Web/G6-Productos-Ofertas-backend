@@ -1,5 +1,8 @@
 import { Test } from '@nestjs/testing';
-import type { INestApplication } from '@nestjs/common';
+import {
+  ServiceUnavailableException,
+  type INestApplication,
+} from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
@@ -185,6 +188,78 @@ describe('Catalog HTTP routes and security (isolated use-case fixtures)', () => 
         );
     },
   );
+  const reads = [
+    ['get', '/productos?canal=MARKETPLACE', 'dispatch'],
+    ['get', '/productos/p?canal=MARKETPLACE', 'dispatch'],
+    ['get', '/productos/por-slug/fixture?canal=MARKETPLACE', 'dispatch'],
+    ['get', '/productos/p/preparacion', 'channel'],
+    ['get', '/productos/p/variantes', 'channel'],
+    ['get', '/productos/p/variantes/v', 'channel'],
+    ['post', '/productos/datos-fisicos/consulta', 'manager'],
+    ['post', '/productos/codigos-barras/resolver', 'channel'],
+  ] as const;
+  it.each(reads)(
+    'protects read operation %s %s before executing its use case',
+    async (method, path, wrongIdentity) => {
+      for (const bearer of [undefined, 'invalid', wrongIdentity]) {
+        const call = request(app.getHttpServer())[method]('/api/v1' + path);
+        if (bearer) call.set('Authorization', 'Bearer ' + bearer);
+        const status = bearer === wrongIdentity ? 403 : 401;
+        const result = await call
+          .set('X-Correlation-Id', correlation)
+          .expect(status);
+        expect(result.headers['content-type']).toContain(
+          'application/problem+json',
+        );
+        expect(result.body).toMatchObject({
+          status,
+          code: status === 401 ? 'TOKEN_INVALIDO' : 'SCOPE_INSUFICIENTE',
+          correlationId: correlation,
+        });
+      }
+      for (const useCase of [
+        ...Object.values(commercial),
+        ...Object.values(queryRepository),
+        ...Object.values(mutations),
+      ])
+        expect(useCase).not.toHaveBeenCalled();
+    },
+  );
+  it.each([
+    ['/productos?canal=MARKETPLACE&canal=RETAIL', 'channel'],
+    ['/productos?canal=MARKETPLACE&pagina=1&pagina=2', 'channel'],
+    ['/productos?canal=MARKETPLACE&unknown=1', 'channel'],
+    ['/productos/p/variantes?pagina=1&pagina=2', 'manager'],
+    ['/productos/p/variantes?unknown=1', 'manager'],
+  ])(
+    'rejects duplicate or unsupported query parameters at %s',
+    async (path, bearer) => {
+      const result = await request(app.getHttpServer())
+        .get('/api/v1' + path)
+        .set('Authorization', 'Bearer ' + bearer)
+        .expect(400);
+      expect(result.body.code).toBe('VALIDACION');
+      expect(commercial.list).not.toHaveBeenCalled();
+      expect(queryRepository.listVariants).not.toHaveBeenCalled();
+    },
+  );
+  it('keeps read dependency failures sanitized and never invokes a mutation', async () => {
+    queryRepository.productPreparation.mockRejectedValueOnce(
+      new ServiceUnavailableException('private SQL and token'),
+    );
+    const result = await request(app.getHttpServer())
+      .get('/api/v1/productos/p/preparacion')
+      .set('Authorization', 'Bearer manager')
+      .set('X-Correlation-Id', correlation)
+      .expect(503);
+    expect(result.body).toMatchObject({
+      code: 'SERVICIO_NO_DISPONIBLE',
+      correlationId: correlation,
+    });
+    expect(JSON.stringify(result.body)).not.toMatch(/private|SQL|token/);
+    for (const mutation of Object.values(mutations))
+      expect(mutation).not.toHaveBeenCalled();
+  });
   it.each(writes)(
     'rejects unauthenticated and unauthorized callers of %s %s',
     async (method, path, body, _status, useCase) => {

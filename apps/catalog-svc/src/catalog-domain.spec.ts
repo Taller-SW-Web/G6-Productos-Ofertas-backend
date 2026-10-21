@@ -90,6 +90,37 @@ describe('catalog domain activation rules', () => {
     expect(isPhysicalProfileComplete({ pesoKg: 1 })).toBe(false);
   });
 
+  it.each(['pesoKg', 'largo', 'ancho', 'alto'] as const)(
+    'validates partial and complete profiles for %s',
+    (measurement) => {
+      const profile = (value: number | null | undefined): PhysicalProfile =>
+        measurement === 'pesoKg'
+          ? { ...completeProfile, pesoKg: value }
+          : {
+              ...completeProfile,
+              dimensionesCm: {
+                ...completeProfile.dimensionesCm,
+                [measurement]: value,
+              },
+            };
+      for (const value of [undefined, null]) {
+        expect(isPhysicalProfileValid(profile(value))).toBe(true);
+        expect(isPhysicalProfileComplete(profile(value))).toBe(false);
+        expect(
+          canActivateProduct(readyProduct({ physicalProfile: profile(value) })),
+        ).toBe(false);
+      }
+      for (const value of [0, -1, NaN, Infinity, -Infinity]) {
+        expect(isPhysicalProfileValid(profile(value))).toBe(false);
+        expect(isPhysicalProfileComplete(profile(value))).toBe(false);
+      }
+      for (const value of [Number.MIN_VALUE, 0.001, Number.MAX_VALUE]) {
+        expect(isPhysicalProfileValid(profile(value))).toBe(true);
+        expect(isPhysicalProfileComplete(profile(value))).toBe(true);
+      }
+    },
+  );
+
   it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
     'rejects a non-positive or non-finite physical measurement (%s)',
     (value) => {

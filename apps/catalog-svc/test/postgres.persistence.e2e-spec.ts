@@ -1118,6 +1118,194 @@ describe.skipIf(!dockerAvailable)(
         response: { code: 'PRODUCTO_NO_ADMITE_VARIANTES' },
       });
     });
+    it('keeps a partial simple draft and rejects activation until its physical profile is complete', async () => {
+      const service = mutationService();
+      const product = await service.createProduct(
+        {
+          ...createRequest(),
+          perfilFisico: { pesoKg: 1 },
+        },
+        actor,
+      );
+      expect(product).toMatchObject({ status: 'BORRADOR', catalog_version: 0 });
+      await complete(product.product_id);
+      await expect(
+        service.state(product.product_id, undefined, 'activate', {}, actor),
+      ).rejects.toMatchObject({ status: 422 });
+      const unchanged = await transactions.run(async (tx) =>
+        repository.aggregate(
+          tx,
+          (await repository.lockProduct(tx, product.product_id))!,
+        ),
+      );
+      expect(unchanged).toMatchObject({
+        estado: 'BORRADOR',
+        catalog_version: 0n,
+      });
+      expect(unchanged.profile).toMatchObject({
+        pesoKg: '1',
+        largo: null,
+        ancho: null,
+        alto: null,
+      });
+      await service.update(
+        product.product_id,
+        undefined,
+        { perfilFisico: fullProfile },
+        actor,
+      );
+      await expect(
+        service.state(product.product_id, undefined, 'activate', {}, actor),
+      ).resolves.toMatchObject({ status: 'ACTIVO' });
+    });
+
+    it('ignores unprepared draft/inactive siblings and rolls back incomplete active variant edits', async () => {
+      const service = mutationService();
+      const parent = await service.createProduct(createRequest(true), actor);
+      const children = [];
+      for (const size of ['ready', 'draft', 'rejected']) {
+        children.push(
+          await service.createVariant(
+            parent.product_id,
+            {
+              sku: 'V-' + randomUUID(),
+              atributosIdentificadores: [
+                {
+                  caracteristica_id: 'size',
+                  nombre: 'Size',
+                  valor_id: size,
+                  valor: size,
+                },
+              ],
+              imagenUrl: 'https://example.test/variant',
+              perfilFisico: size === 'ready' ? fullProfile : { pesoKg: 1 },
+            },
+            actor,
+          ),
+        );
+      }
+      const [ready, draft, rejected] = children;
+      if (!ready || !draft || !rejected)
+        throw new Error('Missing variant fixture');
+      const messages = new CatalogMessageService(database);
+      for (const row of await requested(parent.product_id)) {
+        if (
+          row.event_name.startsWith('pricing.') ||
+          row.payload.variant_id === ready.variant_id
+        )
+          await messages.consume(resultFor(row));
+        else if (row.payload.variant_id === rejected.variant_id)
+          await messages.consume(resultFor(row, true));
+      }
+      await service.state(
+        parent.product_id,
+        rejected.variant_id,
+        'deactivate',
+        undefined,
+        actor,
+      );
+      await expect(
+        service.state(
+          parent.product_id,
+          rejected.variant_id,
+          'reactivate',
+          undefined,
+          actor,
+        ),
+      ).rejects.toMatchObject({ status: 422 });
+      await service.state(
+        parent.product_id,
+        ready.variant_id,
+        'activate',
+        undefined,
+        actor,
+      );
+      await service.state(parent.product_id, undefined, 'activate', {}, actor);
+      const snapshot = () =>
+        transactions.run(async (tx) =>
+          repository.aggregate(
+            tx,
+            (await repository.lockProduct(tx, parent.product_id))!,
+          ),
+        );
+      const before = await snapshot();
+      await expect(
+        service.update(
+          parent.product_id,
+          ready.variant_id,
+          {
+            perfilFisico: { pesoKg: 1 },
+            catalogVersion: 1,
+          },
+          actor,
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      const after = await snapshot();
+      expect(after).toEqual(before);
+      expect(after.estado).toBe('ACTIVO');
+      expect(
+        after.children.find((c) => c.id === ready.variant_id)?.estado,
+      ).toBe('ACTIVA');
+      expect(
+        after.children.find((c) => c.id === draft.variant_id)?.estado,
+      ).toBe('BORRADOR');
+      expect(
+        after.children.find((c) => c.id === rejected.variant_id)?.estado,
+      ).toBe('INACTIVA');
+      const preparation = await new CatalogQueryRepository(
+        database,
+      ).productPreparation(parent.product_id);
+      expect(
+        preparation?.variantes.find((v) => v.variant_id === draft.variant_id)
+          ?.inventario,
+      ).toMatchObject({ status: 'PENDING', manual_retry_allowed: false });
+      expect(
+        preparation?.variantes.find((v) => v.variant_id === rejected.variant_id)
+          ?.inventario,
+      ).toMatchObject({
+        status: 'REJECTED',
+        manual_retry_allowed: false,
+        code: 'FIXTURE_REJECTED',
+      });
+      const intents = await requested(parent.product_id);
+      expect(
+        intents.filter((r) => r.event_name.startsWith('pricing.')),
+      ).toHaveLength(1);
+      expect(
+        intents.filter((r) => r.event_name.startsWith('inventory.')),
+      ).toHaveLength(3);
+      const queries = new CatalogQueryRepository(database);
+      const draftPage = await queries.listVariants(
+        parent.product_id,
+        1,
+        1,
+        'BORRADOR',
+      );
+      expect(draftPage?.meta).toEqual({
+        pagina: 1,
+        tamanio: 1,
+        total: 1,
+        totalPaginas: 1,
+      });
+      expect(draftPage?.items.map((v) => v.variant_id)).toEqual([
+        draft.variant_id,
+      ]);
+      expect(
+        await queries.listVariants(parent.product_id, 2, 1, 'ACTIVA'),
+      ).toMatchObject({ items: [], meta: { total: 1, totalPaginas: 1 } });
+      expect(
+        await queries.findVariant(randomUUID(), ready.variant_id),
+      ).toBeNull();
+      expect(
+        await queries.physicalData([ready.sku, parent.sku_base, draft.sku]),
+      ).toMatchObject({
+        productos: [{ sku: ready.sku, estado: 'ACTIVO', ...fullProfile }],
+        noEncontrados: [parent.sku_base, draft.sku],
+      });
+      expect(await snapshot()).toEqual(after);
+      expect(await requested(parent.product_id)).toEqual(intents);
+    });
+
     it('validates completed preparation and rolls back invalid active edits including versions', async () => {
       const service = mutationService(),
         product = await service.createProduct(createRequest(), actor);

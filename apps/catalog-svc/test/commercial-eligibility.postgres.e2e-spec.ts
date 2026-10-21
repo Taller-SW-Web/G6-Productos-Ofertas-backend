@@ -7,6 +7,10 @@ import {
   type CommercialEligibilityPolicy,
 } from '../src/commercial-eligibility.js';
 import { Database } from '../src/database.js';
+import {
+  CATALOG_READ_DEMO,
+  CATALOG_MARKETPLACE_PREVIEW,
+} from '../src/catalog-read-demo.js';
 
 function writeEvidence(value: Readonly<Record<string, string | number>>): void {
   process.stdout.write(JSON.stringify(value) + '\n');
@@ -17,6 +21,10 @@ describe.skipIf(process.env.G6_READONLY_INTEGRATION !== 'catalog')(
   () => {
     it('queries the candidate table or fails closed when it is unavailable', async () => {
       const app = await Test.createTestingModule({ imports: [AppModule] })
+        .overrideProvider(CATALOG_READ_DEMO)
+        .useValue({ enabled: false })
+        .overrideProvider(CATALOG_MARKETPLACE_PREVIEW)
+        .useValue(false)
         .compile()
         .then((module) => module.createNestApplication());
 
@@ -45,12 +53,13 @@ describe.skipIf(process.env.G6_READONLY_INTEGRATION !== 'catalog')(
           ]) {
             const response = await request(app.getHttpServer())
               .get(path)
-              .expect(503);
-            expect(response.body.code).toBe('SERVICIO_NO_DISPONIBLE');
+              .expect(401);
+            expect(response.body.code).toBe('TOKEN_INVALIDO');
           }
           writeEvidence({
             evidence: 'catalog-commercial-eligibility-postgres',
-            outcome: 'candidate-table-absent-adapter-and-endpoints-503',
+            outcome:
+              'candidate-table-absent-adapter-503-unauthenticated-endpoints-401',
           });
           return;
         }

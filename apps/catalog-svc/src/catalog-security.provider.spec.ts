@@ -133,6 +133,7 @@ describe('Marketplace provider security and invalid pagination regression', () =
       undefined,
       token({ exp: 1 }),
       token().slice(0, -12) + 'bad-signature',
+      token() + '~',
     ]) {
       const call = request(app.getHttpServer()).get(path);
       if (bearer) call.auth(bearer, { type: 'bearer' });

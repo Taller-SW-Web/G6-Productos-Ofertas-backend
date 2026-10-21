@@ -101,7 +101,7 @@ diferidos existentes. Los errores se exponen mediante `CatalogPersistenceError`
 con una categoría interna segura;
 el SQL, los parámetros y el texto del driver no se incluyen en mensajes.
 
-Las 16 pruebas actuales de `postgres.persistence.e2e-spec.ts` usan PostgreSQL 17
+Las 18 pruebas actuales de `postgres.persistence.e2e-spec.ts` usan PostgreSQL 17
 efímero con TLS, role `catalog_app` y un schema ajeno de comprobación. Incluyen
 persistencia, DATA-002, coordinación transaccional y fallos del pool; el caso
 JOINT-01 utiliza además un RabbitMQ desechable. En local,
@@ -116,6 +116,9 @@ comparan las columnas, tipos, nulabilidad, presencia de defaults y nombres de
 todas las restricciones declarativas de las 13 tablas con la fixture oficial.
 Los triggers y permisos se verifican mediante PostgreSQL, no mediante ese test
 de metadatos.
+
+El [bloque de auditoría #45/#46](AUDIT-45-46.md) documenta las reglas,
+las ocho operaciones HTTP y los límites normativos que permanecen abiertos.
 
 ## Ejecución y pruebas
 

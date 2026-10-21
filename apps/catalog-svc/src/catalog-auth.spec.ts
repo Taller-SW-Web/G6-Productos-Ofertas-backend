@@ -119,6 +119,14 @@ describe('Catalog JWT verification', () => {
       roles: ['GESTOR_COMERCIAL'],
     });
   });
+  it.each(['~', '=', '+', '/'])(
+    'rejects non-base64url characters in a JWT signature (%s)',
+    async (suffix) => {
+      await expect(verifier.verify(token() + suffix)).rejects.toBeInstanceOf(
+        CatalogTokenRejected,
+      );
+    },
+  );
   it('shares a cold discovery/JWKS load across 100 simultaneous verifications and recovers after failure', async () => {
     const fetcher = vi.spyOn(globalThis, 'fetch');
     try {
