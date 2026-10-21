@@ -50,6 +50,8 @@ Corte documental 2026-10-20, objetivo Hito 4 2026-10-31. Oracle es evidencia de 
 
 
 
+## D. Operaciones HTTP (contrato vs master)
+
 Contrato: [OpenAPI fijado al corte](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b/contratos/http/openapi.yaml) `0.6.0-rc.1`. Cada línea representa `operationId`, método y ruta. El resumen de 16 funcionalidades no equivale a la cobertura total del contrato. Salvo indicación, no hay controller de negocio en Backend master.
 
 ### Carga y exportación masiva de productos
@@ -281,7 +283,7 @@ Referencia funcional: `WF-001` (wireframe) · issues de implementación backend:
 - Persistencia: Schema descrito; persistencia funcional en master no demostrada.
 - AMQP: Eventos bulk contractuales; sin conexión/consumer real.
 - Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
-- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental se detallan en §E, subsección «CI del SHA documental auditado y evidencia anterior».
 - Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
 - E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
 - Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
@@ -295,7 +297,7 @@ Referencia funcional: `WF-002` (wireframe) · issues de implementación backend:
 - Persistencia: Schema descrito; persistencia funcional en master no demostrada.
 - AMQP: Sin evento propio Combo; consumer no verificado.
 - Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
-- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental se detallan en §E, subsección «CI del SHA documental auditado y evidencia anterior».
 - Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
 - E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
 - Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
@@ -309,7 +311,7 @@ Referencia funcional: `WF-003` (wireframe) · issues de implementación backend:
 - Persistencia: Schema/repositorios presentes; persistencia runtime en master no demostrada.
 - AMQP: Preparación/baja contractuales; no producer/consumer probado.
 - Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
-- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental se detallan en §E, subsección «CI del SHA documental auditado y evidencia anterior».
 - Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
 - E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
 - Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
@@ -323,7 +325,7 @@ Referencia funcional: `WF-004` (wireframe) · issues de implementación backend:
 - Persistencia: Persistencia runtime NO_VERIFICADA.
 - AMQP: Eventos SKU contractuales, no reales.
 - Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
-- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental se detallan en §E, subsección «CI del SHA documental auditado y evidencia anterior».
 - Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
 - E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
 - Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
@@ -337,7 +339,7 @@ Referencia funcional: `WF-005` (wireframe) · issues de implementación backend:
 - Persistencia: Migración mencionada; persistencia funcional/runtime no demostrada.
 - AMQP: Consumo/restauración contractuales; broker sin conexiones/consumers, nombres incompatibles.
 - Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
-- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental se detallan en §E, subsección «CI del SHA documental auditado y evidencia anterior».
 - Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
 - E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
 - Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
@@ -351,7 +353,7 @@ Referencia funcional: `WF-006` (wireframe) · issues de implementación backend:
 - Persistencia: PENDIENTE; evidencia runtime no presentada.
 - AMQP: Proyecciones contractuales, no runtime.
 - Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
-- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental se detallan en §E, subsección «CI del SHA documental auditado y evidencia anterior».
 - Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
 - E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
 - Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
@@ -365,7 +367,7 @@ Referencia funcional: `WF-007` (wireframe) · issues de implementación backend:
 - Persistencia: PENDIENTE/NO_VERIFICADO; detalle funcional en el estado Backend.
 - AMQP: Proyecciones contractuales, sin consumers.
 - Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
-- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental se detallan en §E, subsección «CI del SHA documental auditado y evidencia anterior».
 - Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
 - E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
 - Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
@@ -379,7 +381,7 @@ Referencia funcional: `WF-008` (wireframe) · issues de implementación backend:
 - Persistencia: Schema descrito; runtime no verificado con SHA/entorno actual.
 - AMQP: Cambio/baja segura contractuales; consumer no verificado.
 - Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
-- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental se detallan en §E, subsección «CI del SHA documental auditado y evidencia anterior».
 - Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
 - E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
 - Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
@@ -393,7 +395,7 @@ Referencia funcional: `WF-009` (wireframe) · issues de implementación backend:
 - Persistencia: PENDIENTE/NO_VERIFICADO; detalle funcional en el estado Backend.
 - AMQP: characteristic-value.updated contractual, no runtime.
 - Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
-- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental se detallan en §E, subsección «CI del SHA documental auditado y evidencia anterior».
 - Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
 - E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
 - Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
@@ -407,7 +409,7 @@ Referencia funcional: `WF-010` (wireframe) · issues de implementación backend:
 - Persistencia: PENDIENTE/NO_VERIFICADO; detalle funcional en el estado Backend.
 - AMQP: product-type-schema.changed contractual, no publisher/consumer.
 - Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
-- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental se detallan en §E, subsección «CI del SHA documental auditado y evidencia anterior».
 - Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
 - E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
 - Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
@@ -421,7 +423,7 @@ Referencia funcional: `WF-011` (wireframe) · issues de implementación backend:
 - Persistencia: PENDIENTE/NO_VERIFICADO; detalle funcional en el estado Backend.
 - AMQP: Baja segura contractual; consumer no evidenciado.
 - Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
-- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental se detallan en §E, subsección «CI del SHA documental auditado y evidencia anterior».
 - Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
 - E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
 - Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
@@ -435,7 +437,7 @@ Referencia funcional: `WF-012` (wireframe) · issues de implementación backend:
 - Persistencia: PENDIENTE/NO_VERIFICADO; detalle funcional en el estado Backend.
 - AMQP: Sin evento específico atribuible.
 - Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
-- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental se detallan en §E, subsección «CI del SHA documental auditado y evidencia anterior».
 - Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
 - E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
 - Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
@@ -449,7 +451,7 @@ Referencia funcional: `WF-013` (wireframe) · issues de implementación backend:
 - Persistencia: Schema descrito; Outbox parcial no acredita persistencia completa.
 - AMQP: price.changed/bulk/init contractuales; relay/publicación no acreditados.
 - Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
-- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental se detallan en §E, subsección «CI del SHA documental auditado y evidencia anterior».
 - Despliegue: Oracle observó readiness; no se acredita despliegue de SHA funcional actual.
 - E2E: PENDIENTE; readiness no equivale a E2E.
 - Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
@@ -463,7 +465,7 @@ Referencia funcional: `WF-014` (wireframe) · issues de implementación backend:
 - Persistencia: PENDIENTE/NO_VERIFICADO; detalle funcional en el estado Backend.
 - AMQP: Consumer price.changed no verificado; broker sin conexiones.
 - Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
-- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental se detallan en §E, subsección «CI del SHA documental auditado y evidencia anterior».
 - Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
 - E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
 - Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
@@ -477,7 +479,7 @@ Referencia funcional: `WF-015` (wireframe) · issues de implementación backend:
 - Persistencia: Persistencia runtime NO_VERIFICADA.
 - AMQP: Contractual; sin conexión real.
 - Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
-- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental se detallan en §E, subsección «CI del SHA documental auditado y evidencia anterior».
 - Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
 - E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
 - Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
@@ -491,14 +493,16 @@ Referencia funcional: `WF-016` (wireframe) · issues de implementación backend:
 - Persistencia: Persistencia runtime NO_VERIFICADA.
 - AMQP: stock.changed contractual; consumer no verificado.
 - Autenticación / autorización: 401/403 NO_VERIFICADO por operación; ver limitación consignada en la fuente de estado.
-- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental constan en §F.
+- CI del código de negocio en master: NO_VERIFICADO por operación; los runs del SHA documental se detallan en §E, subsección «CI del SHA documental auditado y evidencia anterior».
 - Despliegue: PENDIENTE/NO_VERIFICADO para SHA de master citado.
 - E2E: PENDIENTE; no se aporta resultado reproducible con SHAs y entorno.
 - Homologación externa: PENDIENTE/NO_VERIFICADO para los límites intermodulares aplicables (§F); la lógica interna G6 no requiere homologación externa.
 
-### CI del SHA auditado antes de esta corrección
+### CI del SHA documental auditado y evidencia anterior
 
-El HEAD previo `74e69b2c912592fac38f612aa0bc179a7b2b8f2c` coincide con [run 39532444119 (pull_request)](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/39532444119) y [run 39532438601 (push)](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/39532438601), ambos SUCCESS/completed. Los jobs de lint, typecheck, tests, build, smoke, validación documental y Taxonomy finalizaron correctamente. Estos resultados corresponden al SHA auditado previo: no demuestran despliegue Oracle, autorización E2E ni implementación de las 16 funcionalidades. Todo commit posterior requiere CI propia.
+El HEAD auditado `999850619fa7a48cc225b27fcd161ffcf885bd8e` coincide con [run 39535334327 (push)](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/39535334327) y [run 39535340206 (pull_request)](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/39535340206), ambos SUCCESS/completed. Estos runs validan el commit documental auditado. No prueban despliegue Oracle, autorización E2E ni implementación de las 16 funcionalidades.
+
+Como evidencia anterior, el SHA `74e69b2c912592fac38f612aa0bc179a7b2b8f2c` coincide con [run 39532444119 (pull_request)](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/39532444119) y [run 39532438601 (push)](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/39532438601), ambos SUCCESS/completed. Los jobs de lint, typecheck, tests, build, smoke, validación documental y Taxonomy finalizaron correctamente en ese SHA anterior; esta evidencia no valida `9998506` ni commits posteriores. La CI de un commit documental valida ese commit, no la implementación ni el despliegue de las 16 funcionalidades.
 
 ## F. Seguridad, evidencias transversales y bloqueos
 
