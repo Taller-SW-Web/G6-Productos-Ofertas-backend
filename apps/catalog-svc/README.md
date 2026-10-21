@@ -101,14 +101,21 @@ diferidos existentes. Los errores se exponen mediante `CatalogPersistenceError`
 con una categoría interna segura;
 el SQL, los parámetros y el texto del driver no se incluyen en mensajes.
 
-Las cinco pruebas de persistencia y la prueba adicional del lote DATA-002 en
-`postgres.persistence.e2e-spec.ts` usan PostgreSQL 17 efímero con TLS, role
-`catalog_app` y un schema ajeno de comprobación. En CI son seis pruebas en
-total: cinco de persistencia y una de validación DATA-002. En local,
+Las 16 pruebas actuales de `postgres.persistence.e2e-spec.ts` usan PostgreSQL 17
+efímero con TLS, role `catalog_app` y un schema ajeno de comprobación. Incluyen
+persistencia, DATA-002, coordinación transaccional y fallos del pool; el caso
+JOINT-01 utiliza además un RabbitMQ desechable. En local,
 la suite se omite si Docker u OpenSSL no están disponibles. En CI, la suite falla
 explícitamente en esas condiciones y no acepta una omisión como resultado
 aprobado. La cobertura incluye persistencia, rollback/constraints, permisos y
 violaciones NOT NULL. La suite no usa ni escribe en Supabase.
+
+La [auditoría de #43 y #44](AUDIT-43-44.md) separa los resultados actuales,
+la evidencia histórica y las dependencias pendientes. Las pruebas del esquema
+comparan las columnas, tipos, nulabilidad, presencia de defaults y nombres de
+todas las restricciones declarativas de las 13 tablas con la fixture oficial.
+Los triggers y permisos se verifican mediante PostgreSQL, no mediante ese test
+de metadatos.
 
 ## Ejecución y pruebas
 

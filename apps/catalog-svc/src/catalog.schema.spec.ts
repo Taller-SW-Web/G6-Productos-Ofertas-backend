@@ -1,4 +1,5 @@
 import { getTableConfig } from 'drizzle-orm/pg-core';
+import { readFileSync } from 'node:fs';
 import {
   activationChecks,
   catalogSchema,
@@ -19,6 +20,54 @@ import {
 } from './catalog.schema.js';
 
 describe('catalog Drizzle schema', () => {
+  // This immutable fixture is copied from Docs, not generated from Drizzle.
+  const migration = readFileSync(
+    new URL('../test/fixtures/0001_create_catalog.sql', import.meta.url),
+    'utf8',
+  );
+
+  it.each(Object.values(catalogSchema).map(getTableConfig))(
+    'matches every column and named constraint in the official $name table',
+    (table) => {
+      const definition = new RegExp(
+        `CREATE TABLE catalog\\.${table.name} \\(([\\s\\S]*?)\\n\\);`,
+      ).exec(migration)?.[1];
+      expect(definition).toBeDefined();
+      if (!definition) throw new Error('Missing official table definition');
+      const columns = [
+        ...definition.matchAll(
+          /^    (\w+) (uuid|text|boolean|bigint|integer|jsonb|numeric|timestamptz|catalog\.estado_\w+)([^\n]*)/gm,
+        ),
+      ].map(([, name, type, modifiers]) => ({
+        name,
+        type: type
+          .replace('catalog.', '')
+          .replace('timestamptz', 'timestamp with time zone'),
+        notNull: modifiers.includes('NOT NULL'),
+        hasDefault: modifiers.includes('DEFAULT'),
+      }));
+      expect(
+        table.columns.map((column) => ({
+          name: column.name,
+          type: column.getSQLType(),
+          notNull: column.notNull,
+          hasDefault: column.hasDefault,
+        })),
+      ).toEqual(columns);
+      const constraints = [...definition.matchAll(/CONSTRAINT (\w+)/g)]
+        .map(([, name]) => name)
+        .sort();
+      expect(
+        [
+          ...table.primaryKeys.map((key) => key.getName()),
+          ...table.foreignKeys.map((key) => key.getName()),
+          ...table.uniqueConstraints.map((key) => key.name),
+          ...table.checks.map((constraint) => constraint.name),
+        ].sort(),
+      ).toEqual(constraints);
+    },
+  );
+
   it('maps exactly the 13 tables in the physical model to catalog', () => {
     const tables = Object.values(catalogSchema).map(getTableConfig);
     expect(tables).toHaveLength(13);
