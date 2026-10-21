@@ -199,13 +199,13 @@ Consolidación conforme a `ops/oracle/GUIA_DEVTEAM.md`, `ops/oracle/CONTRATO_DES
 Servicio / owner: inventory-svc / Miguel Ángel Taco Zavala (taco)
 Issue / rama / SHA:
   - Backend (#14, #25, #30, #31, #97, #98, #99, #100, #101, #102, #103, #104, #105): rama taco, SHA base b02615841f63ea3249d9ad16a0cf32f4ea2b20c2 (CI run 39207480173 SUCCESS), alineación documental Marketplace H4 6d266af7aa7ead2e6d263838d6b94ee5ea02da1d (CI run 39505583544 SUCCESS), merge de master 47e219e en 5a8a92b (sin cambios en apps/inventory-svc) y corte Hito 4 7a546e78629683c8258df1a6d9beab24e74ef136 (CI run 39524047809 SUCCESS)
-  - Frontend (#17, #18, #39 y parte UI de #104): rama taco, SHA 0ff0a99 (merge de master 6e0448a + correcciones "all", carga parcial del dashboard, distribución porUbicacion y reconciliación de recepciones inciertas)
+  - Frontend (#17, #18, #39 y parte UI de #104): rama taco, SHA 3714f975683796960b876b871091c398c2b317be (merge de master 6e0448a + correcciones "all", carga parcial del dashboard, distribución porUbicacion y resolución de TAC-P0-01/TAC-P0-02 en recepción inmutable e incierta)
 Contrato HTTP (versión/SHA) / AsyncAPI (versión/SHA) / DEC-F-ADR:
   - Docs origin/master SHA c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b
   - OpenAPI 0.6.0-rc.1 / AsyncAPI 0.6.0-rc.2 / SPEC-015, SPEC-016 / DEC-F-001, 002, 005, 009, 013, 014, 015
 Build / typecheck / lint / tests (comandos y resultados):
   - Backend: npm run typecheck PASS; npm run lint PASS; npm run build:inventory-svc PASS; vitest unit (apps/inventory-svc/src) 24 archivos / 253 tests PASS; vitest e2e (apps/inventory-svc/test) 4 archivos / 90 PASS (10 omitidos sin Gateway/DB local); node --test apps/inventory-svc/data/data-f1/dry-run.test.mjs 27/27 PASS
-  - Frontend: npm run typecheck PASS; npm run lint PASS; vitest adapters (src/features/inventory/adapters/vitest.config.ts) 24/24 PASS; verify-production mock (58 vistas) y api (53 vistas) PASS
+  - Frontend: npm run typecheck PASS; npm run lint PASS; vitest adapters (src/features/inventory/adapters/vitest.config.ts) 28/28 PASS; Playwright MK-015/MK-016 60/60 PASS; verify-production mock (58 vistas) y api (53 vistas) PASS
 Integración local real (dependencias, versiones, evidencia):
   - GitHub Actions run 39207480173 (y 39205232766): PostgreSQL 17 + RabbitMQ 3.13 efímeros sobre Ubuntu / Node 24.15.0 -> 21/21 casos reales PASS, 0 omitidos
 Imagen + Compose equivalentes y health/readiness:
@@ -233,15 +233,18 @@ Estado: PARTIAL (Implementación interna completa + Integración real aislada en
 Marco debe hacer:
   - Revisar/aprobar PR #10 en Backend, definir reconciliación de nombres AMQP (#29), resolver rutas/errores de Gateway (#106/#107), publicar cliente compartido Frontend (#45/#109) y autorizar #14/#111 cuando corresponda.
 El desarrollador ya dejó resuelto:
-  - 100% de la implementación interna autorizada en apps/inventory-svc, preparador y dry-run de DATA-004 (#14), suite real 21/21 en CI y adaptador HTTP Frontend con 24 pruebas unitarias en src/features/inventory/.
+  - 100% de la implementación interna autorizada en apps/inventory-svc, preparador y dry-run de DATA-004 (#14), suite real 21/21 en CI y adaptador HTTP Frontend con 28 pruebas unitarias/flujo y 60 pruebas Playwright de inventario en src/features/inventory/.
 ```
 
-## Actualización 2026-10-20 — sincronización con `master` y matriz AMQP
+## Actualización 2026-10-20 — sincronización con `master`, matriz AMQP y cierre de `TAC-P0-01`/`TAC-P0-02`
 
 Se ejecutó merge normal de `origin/master` (`47e219e376fff1004ec10e9803c16119c811a699`)
 en `taco` sin conflictos; el merge no modifica `apps/inventory-svc/` y conserva
 la implementación interna. El Frontend hizo el equivalente desde `master`
-`6e0448a` y añadió las correcciones del adaptador (24 pruebas).
+`6e0448a` y resolvió `TAC-P0-01` (solicitud inmutable de recepción con
+`operationId`, `receivedAt` y `note` conservados en reintentos) y `TAC-P0-02`
+(tres estados explícitos `IN_FLIGHT`, `UNCERTAIN` y `RECONCILED`; ningún
+`GET /traslados` genérico libera operaciones inciertas).
 
 ### Matriz de incompatibilidad RabbitMQ (bloqueo de deploy AMQP)
 
@@ -276,4 +279,4 @@ acredita entrega de eventos, homologación de topología ni deploy Oracle.
 ### Evidencia de este corte
 
 - Backend: `7a546e78629683c8258df1a6d9beab24e74ef136` (merge `5a8a92b`) — CI run 39524047809 SUCCESS: validación general, Inventory real PostgreSQL/RabbitMQ y Taxonomy real.
-- Frontend: `0ff0a9962e1f25bb9f6bc323090fd6d5707a5e5d` (merge `master` + correcciones `"all"`, carga parcial del dashboard, distribución por `porUbicacion` y reconciliación de recepciones inciertas; 24/24 pruebas del adaptador). El CI de Frontend se ejecuta al abrir el PR `taco`→`master`.
+- Frontend: `3714f975683796960b876b871091c398c2b317be` (merge `master` + correcciones `"all"`, carga parcial del dashboard, distribución por `porUbicacion` y resolución de `TAC-P0-01`/`TAC-P0-02` con solicitud inmutable y protección de operaciones inciertas; 28/28 pruebas del adaptador y 60/60 Playwright MK-015/MK-016). El CI de Frontend se ejecuta al abrir el PR `taco`→`master`.
