@@ -1,6 +1,7 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from './schema.js';
+import { PromotionsQueryRepository } from './query-repository.js';
 
 type Database = NodePgDatabase<typeof schema>;
 export type NewPromotion = Omit<
@@ -162,10 +163,12 @@ class RecommendationRepository {
 // The repositories are scoped to the transaction's single client. They add no
 // HTTP handlers or domain decisions, and never consume/restore coupons.
 export class PromotionsRepositories {
+  readonly queries: PromotionsQueryRepository;
   readonly promotions: PromotionRepository;
   readonly coupons: CouponRepository;
   readonly recommendations: RecommendationRepository;
   constructor(private readonly db: Database) {
+    this.queries = new PromotionsQueryRepository(db);
     this.promotions = new PromotionRepository(db);
     this.coupons = new CouponRepository(db);
     this.recommendations = new RecommendationRepository(db);
