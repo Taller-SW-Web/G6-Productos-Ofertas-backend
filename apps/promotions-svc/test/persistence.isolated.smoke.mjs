@@ -134,7 +134,7 @@ try {
       'postgres:17-alpine',
       'sh',
       '-c',
-      'cp /test-tls/server.key /tmp/server.key && chmod 600 /tmp/server.key && chown postgres /tmp/server.key && exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/test-tls/server.crt -c ssl_key_file=/tmp/server.key',
+      'cp /test-tls/server.key /tmp/server.key && cp /test-tls/server.crt /tmp/server.crt && chmod 600 /tmp/server.key && chmod 644 /tmp/server.crt && chown postgres /tmp/server.key && exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/tmp/server.crt -c ssl_key_file=/tmp/server.key',
     ],
     { POSTGRES_PASSWORD: password },
   );
