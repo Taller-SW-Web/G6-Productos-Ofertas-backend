@@ -23,6 +23,8 @@ type ConfigurationVariable =
   | 'PORT'
   | 'PROMOTIONS_DEPENDENCY_PROBES_ENABLED'
   | 'PROMOTIONS_COUPON_RUNTIME_ENABLED'
+  | 'AUTH_ISSUER'
+  | 'AUTH_JWKS_URL'
   | 'ENV_FILE';
 
 export class PromotionsConfigurationError extends Error {
@@ -49,6 +51,7 @@ export interface PromotionsConfiguration {
   readonly rabbitmqUrl: string;
   readonly dependencyProbesEnabled: boolean;
   readonly couponRuntimeEnabled: boolean;
+  readonly auth?: Readonly<{ issuer: string; jwksUrl: string }>;
 }
 
 function isPort(value: string): boolean {
@@ -64,6 +67,33 @@ export function validatePromotionsConfiguration(
   environment: Readonly<NodeJS.ProcessEnv>,
 ): PromotionsConfiguration {
   const invalid = new Set<ConfigurationVariable>();
+  let auth: PromotionsConfiguration['auth'];
+  if (
+    environment.AUTH_ISSUER !== undefined ||
+    environment.AUTH_JWKS_URL !== undefined
+  ) {
+    for (const name of ['AUTH_ISSUER', 'AUTH_JWKS_URL'] as const) {
+      try {
+        const url = new URL(environment[name] ?? '');
+        if (
+          url.protocol !== 'https:' ||
+          url.username ||
+          url.password ||
+          url.search ||
+          url.hash ||
+          environment[name]?.trim() !== environment[name]
+        )
+          invalid.add(name);
+      } catch {
+        invalid.add(name);
+      }
+    }
+    if (!invalid.has('AUTH_ISSUER') && !invalid.has('AUTH_JWKS_URL'))
+      auth = Object.freeze({
+        issuer: environment.AUTH_ISSUER!,
+        jwksUrl: environment.AUTH_JWKS_URL!,
+      });
+  }
   const enabled = (name: ConfigurationVariable): boolean => {
     const value = environment[name] ?? 'false';
     if (!['true', 'false'].includes(value)) invalid.add(name);
@@ -152,6 +182,7 @@ export function validatePromotionsConfiguration(
     rabbitmqUrl: required.RABBITMQ_URL,
     dependencyProbesEnabled,
     couponRuntimeEnabled,
+    auth,
   });
 }
 

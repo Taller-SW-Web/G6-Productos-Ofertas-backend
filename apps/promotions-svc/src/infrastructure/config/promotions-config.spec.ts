@@ -11,6 +11,37 @@ import {
 describe('Promotions configuration', () => {
   const fixture = createEnvironmentFixture();
   afterAll(() => fixture.cleanup());
+  it('requires a paired HTTPS issuer/JWKS configuration and does not serialize it', () => {
+    for (const auth of [
+      { AUTH_ISSUER: 'https://issuer.test' },
+      { AUTH_JWKS_URL: 'https://issuer.test/jwks' },
+      { AUTH_ISSUER: '', AUTH_JWKS_URL: '' },
+      {
+        AUTH_ISSUER: 'http://issuer.test',
+        AUTH_JWKS_URL: 'https://issuer.test/jwks',
+      },
+      {
+        AUTH_ISSUER: 'https://issuer.test',
+        AUTH_JWKS_URL: 'https://user:secret@issuer.test/jwks',
+      },
+      {
+        AUTH_ISSUER: 'https://issuer.test',
+        AUTH_JWKS_URL: 'https://issuer.test/jwks?token=secret',
+      },
+    ])
+      expect(() =>
+        validatePromotionsConfiguration({ ...fixture.environment, ...auth }),
+      ).toThrow(PromotionsConfigurationError);
+    const config = new PromotionsConfigService(
+      validatePromotionsConfiguration({
+        ...fixture.environment,
+        AUTH_ISSUER: 'https://issuer.test',
+        AUTH_JWKS_URL: 'https://issuer.test/jwks',
+      }),
+    );
+    expect(config.settings.auth?.issuer).toBe('https://issuer.test');
+    expect(JSON.stringify(config)).not.toContain('issuer');
+  });
 
   it('maps the official PostgreSQL variables to immutable typed settings', () => {
     const settings = validatePromotionsConfiguration(fixture.environment);

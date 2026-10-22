@@ -13,6 +13,12 @@ con master, smoke de configuración sintética y job PostgreSQL aislado de #71.
 
 ## Corte de ejecución #70/#71 — 22/10/2026
 
+Avance posterior #72/#73: reglas internas y diez handlers de consulta, con siete
+lecturas de maestros respaldadas por PostgreSQL. Las tres consultas comerciales
+conservan un gate explícito hasta disponer de sus fuentes autorizadas; la
+acumulación multibeneficio y D-REC-01/02 siguen pendientes específicos. Ver
+[CONSULTAS-DOMINIO.md](CONSULTAS-DOMINIO.md) para matriz, fuentes, pruebas y límites.
+
 Se reprodujo el fallo de CI 39505633881: el contenedor de Promotions recibía
 solo variables de puerto y rechazaba diez variables obligatorias ausentes.
 `test/container.smoke.mjs` comprueba el rechazo y un arranque positivo con

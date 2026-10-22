@@ -19,7 +19,9 @@ export async function inPromotionsTransaction<T, C extends SqlClient>(
   const client = await pool.connect();
   let destroy = false;
   try {
-    await client.query(readOnly ? 'BEGIN READ ONLY' : 'BEGIN');
+    await client.query(
+      readOnly ? 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY' : 'BEGIN',
+    );
     await client.query("SET LOCAL statement_timeout = '5s'");
     await client.query("SET LOCAL lock_timeout = '3s'");
     const result = await work(client);

@@ -24,6 +24,7 @@ import {
   docsRevision,
   officialMigrations,
 } from './support/official-migrations.mjs';
+import { verifyHttpReadQueries } from './support/http-query-checks.mjs';
 
 const { Pool } = pg;
 const directory = mkdtempSync(join(tmpdir(), 'g6-promotions-persistence-'));
@@ -173,25 +174,24 @@ try {
   await admin.query(
     `CREATE ROLE promotions_test_login LOGIN PASSWORD '${password}' IN ROLE po_promotions_runtime; CREATE SCHEMA external_fixture; CREATE TABLE external_fixture.private_data(id integer); REVOKE ALL ON SCHEMA external_fixture FROM PUBLIC`,
   );
-  resources = nativeCouponResources(
-    new PromotionsConfigService(
-      validatePromotionsConfiguration({
-        NODE_ENV: 'test',
-        PGHOST: '127.0.0.1',
-        PGPORT: String(port),
-        PGDATABASE: 'postgres',
-        PGUSER: 'promotions_test_login',
-        PGPASSWORD: password,
-        PGSSLMODE: 'verify-full',
-        PGSSLROOTCERT: certificate,
-        G6_DATABASE_SCHEMA: 'promotions',
-        G6_CONNECTION_MODE: 'session',
-        RABBITMQ_URL: `amqp://synthetic:${password}@127.0.0.1:1/test`,
-        PROMOTIONS_COUPON_RUNTIME_ENABLED: 'false',
-        PROMOTIONS_DEPENDENCY_PROBES_ENABLED: 'false',
-      }),
-    ),
+  const runtimeConfig = new PromotionsConfigService(
+    validatePromotionsConfiguration({
+      NODE_ENV: 'test',
+      PGHOST: '127.0.0.1',
+      PGPORT: String(port),
+      PGDATABASE: 'postgres',
+      PGUSER: 'promotions_test_login',
+      PGPASSWORD: password,
+      PGSSLMODE: 'verify-full',
+      PGSSLROOTCERT: certificate,
+      G6_DATABASE_SCHEMA: 'promotions',
+      G6_CONNECTION_MODE: 'session',
+      RABBITMQ_URL: `amqp://synthetic:${password}@127.0.0.1:1/test`,
+      PROMOTIONS_COUPON_RUNTIME_ENABLED: 'false',
+      PROMOTIONS_DEPENDENCY_PROBES_ENABLED: 'false',
+    }),
   );
+  resources = nativeCouponResources(runtimeConfig);
   const persistence = new PromotionsPersistence(resources.pool);
 
   stage = 'mapping parity';
@@ -637,6 +637,8 @@ try {
     'existing coupon command replays once; Drizzle reads use/receipt/inbox/outbox on the same pool; history and fingerprint remain protected',
   );
 
+  stage = 'HTTP queries and signed JWT with real PostgreSQL';
+  checks.push(...(await verifyHttpReadQueries(resources, runtimeConfig)));
   console.log(
     JSON.stringify({
       status: 'PASS',
