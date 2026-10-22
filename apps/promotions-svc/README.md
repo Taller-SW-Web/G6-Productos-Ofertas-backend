@@ -1,15 +1,47 @@
-# Promotions: estructura y configuración — backend #70
+# Promotions: estructura, configuración y persistencia — backend #70/#71
 
 Owner: Axel Cueva. Rama: `cueva`. Alcance: `apps/promotions-svc/`.
 Este documento describe el avance local de #70. Los avances de #33/#70/#15/#112
 fueron retirados del PR #116, fusionado el 16/10/2026 mediante `c3a6b0a`, que
-contiene solo el Gateway aprobado. Estos avances se publican después en `cueva`,
-sin otra rama ni otro PR. Las correcciones
+contiene solo el Gateway aprobado. Estos avances permanecen en `cueva`,
+con el PR #123 existente en draft. Las correcciones
 actuales se detallan en `CORRECCIONES-PENDIENTES.md`.
-No se modifican otras aplicaciones, dependencias/configuración global, contratos,
-migraciones históricas, permisos ni datos compartidos.
+No se modifican otras aplicaciones, dependencias, contratos, migraciones
+históricas, permisos ni datos compartidos. La excepción autorizada por Axel el
+22/10/2026 es `.github/workflows/ci.yml`: reconciliación exclusiva de ese archivo
+con master, smoke de configuración sintética y job PostgreSQL aislado de #71.
 
-## Base normativa consultada
+## Corte de ejecución #70/#71 — 22/10/2026
+
+Se reprodujo el fallo de CI 39505633881: el contenedor de Promotions recibía
+solo variables de puerto y rechazaba diez variables obligatorias ausentes.
+`test/container.smoke.mjs` comprueba el rechazo y un arranque positivo con
+configuración sintética, `/health` 200 y el healthcheck real de la imagen.
+No se cambia la validación de producción ni se confunde liveness con readiness.
+
+#71 incorpora mapping Drizzle de las 13 tablas oficiales, repositorios de
+promociones/cupones/recomendaciones y consultas de proyecciones/Inbox/Outbox/
+recibos. Comparte pool y unidad transaccional con el núcleo de cupones.
+No ejecuta DDL ni consultas al inicializarse. Ver [PERSISTENCE.md](PERSISTENCE.md)
+para alcance, pruebas reproducibles y límites.
+
+Normativa revisada: Docs `51a5ce6e76bb0c61d93ef47416e46797bf5b9846`,
+migraciones oficiales 0001–0004 sin cambios; OpenAPI 0.6.0-rc.1 y AsyncAPI
+0.6.0-rc.3. El código AMQP anterior conserva bindings físicos de rc.2:
+su adaptación a rc.3 y homologación siguen pendientes de #75/#33. Los probes
+aislados con la cola anterior prueban el adaptador, no la topología rc.3 real.
+El consumidor/pump y probes siguen deshabilitados por defecto.
+
+Validación local del checkout con estos cambios: 71 unitarias y 6 E2E de
+Promotions; 293 unitarias generales y 347 E2E generales, con 20 omitidas por
+dependencias/configuración existentes; typecheck, lint, formato y builds PASS.
+También PASS: arranque compilado, Docker, 7 escenarios de probes reales,
+11 escenarios de cupones y 8 grupos de persistencia con PostgreSQL TLS
+descartable. Las pruebas locales no acreditan CI remota, integración compartida,
+homologación, aprobación DATA ni despliegue. #70/#71 permanecen abiertos hasta
+la revisión y aceptación correspondientes.
+
+## Base normativa del avance anterior de #70
 
 Docs: commit `c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b`.
 

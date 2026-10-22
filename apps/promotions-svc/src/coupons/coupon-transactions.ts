@@ -9,17 +9,15 @@ import {
 } from './coupon-command.js';
 import { couponContracts } from './coupon-contract.generated.js';
 import { matchesSchema } from './schema-validator.js';
-
-export interface SqlClient {
-  query(
-    sql: string,
-    values?: unknown[],
-  ): Promise<{ rows: Record<string, unknown>[] }>;
-  release(): void;
-}
-export interface SqlPool {
-  connect(): Promise<SqlClient>;
-}
+import {
+  inPromotionsTransaction,
+  type SqlClient,
+  type SqlPool,
+} from '../infrastructure/persistence/sql-transaction.js';
+export type {
+  SqlClient,
+  SqlPool,
+} from '../infrastructure/persistence/sql-transaction.js';
 export interface ConsumptionEvidence {
   reservationConfirmed: boolean;
   snapshotDurable: boolean;
@@ -57,105 +55,104 @@ export class CouponCommandProcessor {
   async process(value: unknown, actor: string): Promise<CouponResult> {
     const command = parseCouponCommand(value, actor);
     const fingerprint = commandFingerprint(command, actor);
-    const client = await this.pool.connect();
     try {
-      await client.query('BEGIN');
-      await client.query("SET LOCAL statement_timeout = '5s'");
-      await client.query("SET LOCAL lock_timeout = '3s'");
-      await client.query(
-        "SELECT pg_advisory_xact_lock(hashtextextended('promotions:order:' || $1, 0))",
-        [command.data.order_id],
-      );
-      await client.query(
-        "SELECT pg_advisory_xact_lock(hashtextextended('promotions:operation:' || $1, 0))",
-        [command.operation_id.toLowerCase()],
-      );
-      const inbox = await client.query(
-        'SELECT promotions.fn_begin_inbox($1::jsonb, $2) AS fresh',
-        [JSON.stringify(command), handler],
-      );
-      let result: CouponResult;
-      if (inbox.rows[0].fresh === false) {
-        const previous = await client.query(
-          'SELECT result FROM promotions.inbox WHERE message_id=$1 AND handler=$2',
-          [command.message_id, handler],
+      return await inPromotionsTransaction(this.pool, async (client) => {
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended('promotions:order:' || $1, 0))",
+          [command.data.order_id],
         );
-        result = this.savedResult(previous.rows[0]?.result);
-      } else {
-        const existing = await client.query(
-          'SELECT * FROM promotions.coupon_command_receipts WHERE operation_id=$1',
-          [command.operation_id],
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended('promotions:operation:' || $1, 0))",
+          [command.operation_id.toLowerCase()],
         );
-        const receipt = existing.rows[0];
-        const intention =
-          command.name === consumptionName ? 'CONSUMIR' : 'RESTAURAR';
-        if (
-          receipt &&
-          (receipt.request_fingerprint !== fingerprint ||
-            receipt.source_client_id !== actor ||
-            receipt.intention !== intention)
-        ) {
-          result = this.result(command, {}, 'IDEMPOTENCY_CONFLICT');
-          await this.enqueue(client, result);
-        } else if (receipt) {
-          result = this.savedResult(receipt.result_payload);
+        const inbox = await client.query(
+          'SELECT promotions.fn_begin_inbox($1::jsonb, $2) AS fresh',
+          [JSON.stringify(command), handler],
+        );
+        let result: CouponResult;
+        if (inbox.rows[0].fresh === false) {
+          const previous = await client.query(
+            'SELECT result FROM promotions.inbox WHERE message_id=$1 AND handler=$2',
+            [command.message_id, handler],
+          );
+          result = this.savedResult(previous.rows[0]?.result);
         } else {
-          await client.query(
-            `INSERT INTO promotions.coupon_command_receipts
+          const existing = await client.query(
+            'SELECT * FROM promotions.coupon_command_receipts WHERE operation_id=$1',
+            [command.operation_id],
+          );
+          const receipt = existing.rows[0];
+          const intention =
+            command.name === consumptionName ? 'CONSUMIR' : 'RESTAURAR';
+          if (
+            receipt &&
+            (receipt.request_fingerprint !== fingerprint ||
+              receipt.source_client_id !== actor ||
+              receipt.intention !== intention)
+          ) {
+            result = this.result(command, {}, 'IDEMPOTENCY_CONFLICT');
+            await this.enqueue(client, result);
+          } else if (receipt) {
+            result = this.savedResult(receipt.result_payload);
+          } else {
+            await client.query(
+              `INSERT INTO promotions.coupon_command_receipts
             (operation_id,order_id,source_client_id,intention,coupon_code,reservation_id,commercial_snapshot_ref,request_fingerprint,request_payload)
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`,
-            [
-              command.operation_id,
-              command.data.order_id,
-              actor,
-              intention,
-              command.data.coupon_code ?? null,
-              command.data.reservation_id ?? null,
-              command.data.commercial_snapshot_ref ?? null,
-              fingerprint,
-              JSON.stringify(command.data),
-            ],
-          );
-          await client.query('SAVEPOINT coupon_business');
-          try {
-            const data =
-              command.name === consumptionName
-                ? await this.consume(client, command)
-                : await this.restore(client, command);
-            result = this.result(command, data);
-          } catch (error) {
-            if (!(error instanceof Error) || !businessErrors.has(error.message))
-              throw error;
-            await client.query('ROLLBACK TO SAVEPOINT coupon_business');
-            result = this.result(command, {}, error.message);
-          }
-          await client.query('RELEASE SAVEPOINT coupon_business');
-          await this.enqueue(client, result);
-          await client.query(
-            `UPDATE promotions.coupon_command_receipts SET status=$2,
+              [
+                command.operation_id,
+                command.data.order_id,
+                actor,
+                intention,
+                command.data.coupon_code ?? null,
+                command.data.reservation_id ?? null,
+                command.data.commercial_snapshot_ref ?? null,
+                fingerprint,
+                JSON.stringify(command.data),
+              ],
+            );
+            await client.query('SAVEPOINT coupon_business');
+            try {
+              const data =
+                command.name === consumptionName
+                  ? await this.consume(client, command)
+                  : await this.restore(client, command);
+              result = this.result(command, data);
+            } catch (error) {
+              if (
+                !(error instanceof Error) ||
+                !businessErrors.has(error.message)
+              )
+                throw error;
+              await client.query('ROLLBACK TO SAVEPOINT coupon_business');
+              result = this.result(command, {}, error.message);
+            }
+            await client.query('RELEASE SAVEPOINT coupon_business');
+            await this.enqueue(client, result);
+            await client.query(
+              `UPDATE promotions.coupon_command_receipts SET status=$2,
             result_payload=$3::jsonb, completed_at=$4 WHERE operation_id=$1`,
+              [
+                command.operation_id,
+                result.name.endsWith('.rejected') ? 'REJECTED' : 'COMPLETED',
+                JSON.stringify(result),
+                result.occurred_at,
+              ],
+            );
+          }
+          await client.query(
+            'UPDATE promotions.inbox SET completed_at=$3,result=$4::jsonb WHERE message_id=$1 AND handler=$2',
             [
-              command.operation_id,
-              result.name.endsWith('.rejected') ? 'REJECTED' : 'COMPLETED',
+              command.message_id,
+              handler,
+              this.clock().toISOString(),
               JSON.stringify(result),
-              result.occurred_at,
             ],
           );
         }
-        await client.query(
-          'UPDATE promotions.inbox SET completed_at=$3,result=$4::jsonb WHERE message_id=$1 AND handler=$2',
-          [
-            command.message_id,
-            handler,
-            this.clock().toISOString(),
-            JSON.stringify(result),
-          ],
-        );
-      }
-      await client.query('COMMIT');
-      return result;
+        return result;
+      });
     } catch (error) {
-      await client.query('ROLLBACK').catch(() => undefined);
       // No driver diagnostics or secret-bearing errors cross this boundary.
       if (
         error instanceof Error &&
@@ -163,8 +160,6 @@ export class CouponCommandProcessor {
       )
         throw error;
       throw new Error('COUPON_COMMAND_FAILED');
-    } finally {
-      client.release();
     }
   }
 

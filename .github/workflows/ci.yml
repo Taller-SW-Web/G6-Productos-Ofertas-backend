@@ -283,6 +283,30 @@ jobs:
       - name: Positive Marketplace containers with disposable PostgreSQL and TLS
         run: bash scripts/ci/marketplace-docker.sh
 
+  promotions-persistence:
+    name: Promotions persistence on disposable PostgreSQL with TLS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+          cache: 'npm'
+
+      - name: Install dependencies (clean)
+        run: npm ci
+
+      - name: Build Promotions
+        run: npm run build:promotions-svc
+
+      - name: Verify official mapping, repositories, permissions and rollback
+        env:
+          G6_TEST_OPENSSL: openssl
+        run: node apps/promotions-svc/test/persistence.isolated.smoke.mjs
+
   taxonomy-integration:
     name: Taxonomy integration on disposable PostgreSQL
     runs-on: ubuntu-latest

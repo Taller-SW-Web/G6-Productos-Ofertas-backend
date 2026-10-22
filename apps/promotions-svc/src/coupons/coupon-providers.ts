@@ -1,6 +1,8 @@
 import type { Provider } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import type { Pool as PgPool, PoolConfig } from 'pg';
+import { PromotionsPersistence } from '../infrastructure/persistence/promotions-persistence.js';
 import { PromotionsConfigService } from '../infrastructure/config/promotions-config.js';
 import {
   CouponAmqpPublisher,
@@ -14,7 +16,6 @@ import {
 import {
   CouponCommandProcessor,
   type CouponEvidenceProvider,
-  type SqlPool,
 } from './coupon-transactions.js';
 import { record } from './schema-validator.js';
 import type { ConsumerChannelPort } from './coupon-consumer.js';
@@ -28,10 +29,6 @@ import { PromotionsStartupLogger } from '../infrastructure/logging/startup-logge
 
 export const COUPON_RESOURCES = Symbol('COUPON_RESOURCES');
 export const COUPON_EVIDENCE_PROVIDER = Symbol('COUPON_EVIDENCE_PROVIDER');
-interface NativePool extends SqlPool {
-  end(): Promise<void>;
-  on(event: 'error', listener: () => void): void;
-}
 interface BrokerConnection {
   createConfirmChannel(): Promise<ConfirmChannelPort>;
   createChannel(): Promise<
@@ -43,7 +40,7 @@ interface BrokerConnection {
   on(event: string, listener: () => void): void;
 }
 interface CouponResources {
-  pool: NativePool;
+  pool: PgPool;
   publisher: ConfirmedResultPublisher;
   openConsumerChannel(): Promise<ConsumerChannelPort>;
   onApplicationShutdown(): Promise<void>;
@@ -64,7 +61,7 @@ export function nativeCouponResources(
   ) {
     throw new Error('COUPON_DRIVER_UNAVAILABLE');
   }
-  const Pool = pg.Pool as new (options: Record<string, unknown>) => NativePool;
+  const Pool = pg.Pool as new (options: PoolConfig) => PgPool;
   const connect = amqp.connect as (
     url: string,
     options: Record<string, unknown>,
@@ -176,6 +173,12 @@ export function nativeCouponResources(
 }
 
 export const couponProviders: Provider[] = [
+  {
+    provide: PromotionsPersistence,
+    inject: [COUPON_RESOURCES],
+    useFactory: (resources: CouponResources) =>
+      new PromotionsPersistence(resources.pool),
+  },
   {
     provide: COUPON_RUNTIME_BOUNDARY,
     useFactory: (): CouponRuntimeBoundary => ({
