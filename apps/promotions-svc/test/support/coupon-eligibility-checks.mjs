@@ -2,10 +2,23 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { AuthoritativeCouponEvidence } from '../../../../dist/apps/promotions-svc/coupons/authoritative-coupon-evidence.js';
 import { CouponCommandProcessor } from '../../../../dist/apps/promotions-svc/coupons/coupon-transactions.js';
+import {
+  CouponCommandDeliveryHandler,
+  CouponAmqpPublisher,
+} from '../../../../dist/apps/promotions-svc/coupons/coupon-amqp.js';
+import { CouponOutbox } from '../../../../dist/apps/promotions-svc/coupons/coupon-outbox.js';
+import { setTimeout as delay } from 'node:timers/promises';
 
 // These are internal, explicitly synthetic verified facts. No G5/Inventory
 // response or authenticated external integration is simulated as production.
-export async function verifyCouponEligibility({ pool, admin, command }) {
+export async function verifyCouponEligibility({
+  pool,
+  admin,
+  command,
+  restore,
+  connection,
+  channel,
+}) {
   const promotion = randomUUID();
   const coupon = randomUUID();
   await admin.query('BEGIN');
@@ -148,7 +161,175 @@ export async function verifyCouponEligibility({ pool, admin, command }) {
     ).rows[0].count,
     '1',
   );
+  const expectedResults = new Map();
+  const handler = new CouponCommandDeliveryHandler(processor);
+  const output = await channel.assertQueue('', { exclusive: true });
+  await channel.bindQueue(
+    output.queue,
+    'po.resultados.x',
+    'promotions.coupon.#',
+  );
+  async function receive(receiver) {
+    for (let i = 0; i < 100; i++) {
+      const message = await receiver.get('po.promociones.q', { noAck: false });
+      if (message) return message;
+      await delay(25);
+    }
+    throw new Error('ELIGIBILITY_DELIVERY_TIMEOUT');
+  }
+  async function deliver(input, loseAck = false) {
+    channel.publish(
+      'po.comandos.x',
+      input.name,
+      Buffer.from(JSON.stringify(input)),
+      {
+        persistent: true,
+        contentType: 'application/json',
+        messageId: input.message_id,
+        userId: 'guest',
+      },
+    );
+    await channel.waitForConfirms();
+    let receiver = await connection.createChannel();
+    receiver.on('error', () => undefined);
+    try {
+      let message = await receive(receiver);
+      assert.equal(message.properties.userId, 'guest'); // Explicit mapping for this disposable broker only.
+      assert.equal(message.properties.messageId, input.message_id);
+      if (loseAck) {
+        await assert.rejects(
+          handler.handle(message, 'modulo-ventas', () => {
+            throw new Error('ELIGIBILITY_LOST_ACK');
+          }),
+          /ELIGIBILITY_LOST_ACK/,
+        );
+        const readsAfterCommit = reads;
+        await receiver.close();
+        receiver = await connection.createChannel();
+        receiver.on('error', () => undefined);
+        message = await receive(receiver);
+        assert.equal(message.fields.redelivered, true);
+        const result = await handler.handle(message, 'modulo-ventas', () =>
+          receiver.ack(message),
+        );
+        assert.equal(
+          reads,
+          readsAfterCommit,
+          'redelivery must not reload evidence',
+        );
+        expectedResults.set(result.message_id, result);
+        return result;
+      }
+      let committedAtAck;
+      const result = await handler.handle(message, 'modulo-ventas', () => {
+        // A separate connection observes the durable receipt/Inbox/Outbox.
+        committedAtAck = admin.query(
+          `SELECT result_payload,
+          (SELECT count(*)::int FROM promotions.inbox WHERE message_id=$2 AND completed_at IS NOT NULL) AS inbox,
+          (SELECT count(*)::int FROM promotions.outbox WHERE operation_id=$1) AS outbox
+          FROM promotions.coupon_command_receipts WHERE operation_id=$1`,
+          [input.operation_id, input.message_id],
+        );
+        receiver.ack(message);
+      });
+      const row = (await committedAtAck).rows[0];
+      assert.deepEqual(row.result_payload, result);
+      assert.equal(row.inbox, 1);
+      assert.equal(row.outbox, 1);
+      expectedResults.set(result.message_id, result);
+      return result;
+    } finally {
+      await receiver.close().catch(() => undefined);
+    }
+  }
+  assert.equal((await deliver(restore(replay))).data.outcome, 'RESTORED');
+  const brokerCommand = input();
+  const brokerResult = await deliver(brokerCommand, true);
+  assert.match(brokerResult.name, /consumption.completed$/);
+  const verifiedReads = reads;
+  assert.deepEqual(
+    await deliver({ ...brokerCommand, message_id: randomUUID() }),
+    brokerResult,
+  );
+  assert.equal(reads, verifiedReads);
+  assert.equal(
+    (await deliver(input())).data.result_code,
+    'COUPON_GLOBAL_LIMIT',
+  );
+  const restored = await deliver(restore(brokerCommand));
+  assert.equal(restored.data.outcome, 'RESTORED');
+  const history = async () =>
+    (
+      await admin.query('SELECT * FROM promotions.coupon_uses WHERE id=$1', [
+        brokerResult.data.consumption_id,
+      ])
+    ).rows[0];
+  const savedHistory = await history();
+  assert.equal(
+    (await deliver(restore(brokerCommand))).data.outcome,
+    'RESTORED',
+  );
+  assert.deepEqual(await history(), savedHistory);
+  assert.match((await deliver(input())).name, /consumption.completed$/);
+  assert.equal(
+    (await deliver(input())).data.result_code,
+    'COUPON_GLOBAL_LIMIT',
+  );
+  mutate = (f) => ({
+    ...f,
+    basket: { lines: f.basket.lines.map((l) => ({ ...l, regular: '99.99' })) },
+  });
+  assert.equal(
+    (await deliver(input())).data.result_code,
+    'COUPON_NOT_ELIGIBLE',
+  );
+  assert.deepEqual(
+    (
+      await admin.query(
+        `SELECT count(*)::int AS total,
+    count(*) FILTER (WHERE restored_at IS NULL)::int AS active FROM promotions.coupon_uses WHERE coupon_id=$1`,
+        [coupon],
+      )
+    ).rows[0],
+    { total: 3, active: 1 },
+  );
+  const outbox = new CouponOutbox(pool, new CouponAmqpPublisher(channel));
+  for (let i = 0; i < 1000; i++) {
+    const outcome = await outbox.publishOne();
+    assert.notEqual(outcome, 'pending', 'real broker confirms required');
+    if (outcome === 'empty') break;
+    if (i === 999) throw new Error('ELIGIBILITY_OUTBOX_DRAIN_LIMIT');
+  }
+  const pending = new Map(expectedResults);
+  for (let i = 0; i < 200 && pending.size; i++) {
+    const message = await channel.get(output.queue, { noAck: true });
+    if (!message) {
+      await delay(25);
+      continue;
+    }
+    const result = JSON.parse(message.content);
+    if (pending.has(result.message_id)) {
+      assert.deepEqual(result, pending.get(result.message_id));
+      assert.equal(message.properties.deliveryMode, 2);
+      pending.delete(result.message_id);
+    }
+  }
+  assert.equal(
+    pending.size,
+    0,
+    'all durable results arrive unchanged through real RabbitMQ',
+  );
+  assert.equal(
+    (
+      await admin.query(
+        'SELECT count(*)::int AS count FROM promotions.outbox WHERE published_at IS NULL',
+      )
+    ).rows[0].count,
+    0,
+  );
   return [
     'authoritative eligibility: durable identities, scope, exact minimum, malformed facts rollback, concurrent last use and replay without evidence reload',
+    'authoritative evidence through real AMQP/PG: consume and restore; lost ACK/redelivery and fresh-message replay preserve one use and result without loading evidence again',
+    'real AMQP results match durable Outbox payloads with broker confirms; ACK observes committed receipt/Inbox/Outbox; distinct restorations preserve history and free the last slot only once',
   ];
 }

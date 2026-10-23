@@ -675,7 +675,14 @@ try {
     })),
   );
   checks.push(
-    ...(await verifyCouponEligibility({ pool: runtime, admin, command })),
+    ...(await verifyCouponEligibility({
+      pool: runtime,
+      admin,
+      command,
+      restore,
+      connection,
+      channel,
+    })),
   );
   await channel.close();
   console.log(

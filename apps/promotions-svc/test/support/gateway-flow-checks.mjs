@@ -14,6 +14,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { PromotionsPersistence } from '../../../../dist/apps/promotions-svc/infrastructure/persistence/promotions-persistence.js';
 import { httpContracts } from '../../../../dist/apps/promotions-svc/http/http-contract.generated.js';
 import { valid } from '../../../../dist/apps/promotions-svc/http/http-validation.js';
+import { createG7SessionFixture } from './g7-session-fixture.mjs';
+import { verifySessionGatewayFlow } from './session-gateway-checks.mjs';
 
 async function freePort() {
   const server = netServer();
@@ -63,12 +65,14 @@ export async function verifyGatewayFlow(resources, baseConfig, directory) {
     use: 'sig',
   };
   let jwksRequests = 0;
+  let sessionFixture;
   const auth = httpsServer(
     {
       cert: readFileSync(join(directory, 'server.crt')),
       key: readFileSync(join(directory, 'server.key')),
     },
-    (req, res) => {
+    async (req, res) => {
+      if (await sessionFixture?.handle(req, res)) return;
       if (req.url !== '/jwks') {
         res.writeHead(404).end();
         return;
@@ -109,6 +113,7 @@ export async function verifyGatewayFlow(resources, baseConfig, directory) {
   }
   const user = token(),
     forbidden = token({ roles: ['LECTOR'] });
+  sessionFixture = createG7SessionFixture(token);
   const service = token({
     tipo: 'servicio',
     sub: 'modulo-marketplace',
@@ -477,6 +482,24 @@ export async function verifyGatewayFlow(resources, baseConfig, directory) {
       );
       assert.equal(uiCoupon.maxGlobalUses, 5);
       assert.equal(uiCoupon.state, 'ACTIVO');
+      frontendEvidence.session = await verifySessionGatewayFlow({
+        frontend,
+        port: await freePort(),
+        gateway,
+        issuer,
+        certificate: join(directory, 'server.crt'),
+        directory,
+        evidenceDir,
+        fixture: sessionFixture,
+      });
+      const sessionCoupon = await persistence.read((r) =>
+        r.coupons.findByCode('UI_SESSION'),
+      );
+      assert.equal(sessionCoupon.maxGlobalUses, 7);
+      assert.equal(sessionCoupon.state, 'ACTIVO');
+      checks.push(
+        'full main entry: G7 contract login/MFA/refresh/logout fixture → native Gateway/Promotions → real PG; CRUD/reload, 409, signed expired JWT renewal, revoked refresh and real role 403; no injected browser tokens',
+      );
     }
     const after = await resources.pool.query(
       'SELECT (SELECT count(*)::int FROM promotions.coupon_uses) AS uses, (SELECT count(*)::int FROM promotions.coupon_command_receipts) AS receipts, (SELECT count(*)::int FROM promotions.inbox) AS inbox, (SELECT count(*)::int FROM promotions.outbox) AS outbox',
@@ -497,6 +520,8 @@ export async function verifyGatewayFlow(resources, baseConfig, directory) {
       node: process.version,
       platform: process.platform,
       jwks: 'real HTTPS fixture, not G7',
+      sessionProvider:
+        'G7 published contract fixture only; shared G7 not tested',
       checks,
       sharedWrites: false,
       deployedE2E: 'NOT_EXECUTED',
@@ -520,13 +545,15 @@ export async function verifyGatewayFlow(resources, baseConfig, directory) {
     mkdirSync(target, { recursive: true });
     writeFileSync(
       join(target, 'gateway-diagnostics.log'),
-      logs
-        .join('')
-        .replaceAll(db.password, '[synthetic-secret]')
-        .replaceAll(user, '[synthetic-token]')
-        .replaceAll(forbidden, '[synthetic-token]') +
-        '\n' +
-        (error instanceof Error ? error.message : 'ISOLATED_FAILURE'),
+      sessionFixture.redact(
+        logs
+          .join('')
+          .replaceAll(db.password, '[synthetic-secret]')
+          .replaceAll(user, '[synthetic-token]')
+          .replaceAll(forbidden, '[synthetic-token]') +
+          '\n' +
+          (error instanceof Error ? error.message : 'ISOLATED_FAILURE'),
+      ),
     );
     throw error;
   } finally {

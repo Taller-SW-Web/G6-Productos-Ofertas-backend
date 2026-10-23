@@ -14,8 +14,9 @@ Cupones, Promociones y Recomendaciones. Usa exclusivamente rutas administrativas
 oficiales y traduce DTOs/enum/canales/fechas a los modelos de presentación existentes.
 El proveedor se inyecta explícitamente en `PromotionApiContext`; el modo API sin
 proveedor permanece bloqueado y no carga mocks ni implementaciones del módulo.
-La sesión se recibe por callback del owner G7: no hay login inventado, identidad
-de otro módulo, tokens en URL/localStorage, ni sesión productiva de muestra.
+La sesión se recibe mediante el cliente G7 de login/MFA/refresh/logout del
+Frontend, conectado al callback HTTP con URLs explícitas y tokens solo en
+memoria. El modo API sin configuración sigue bloqueado; no acredita G7 compartido.
 
 Las consultas y escrituras de Cupones se prueban con PostgreSQL real. Promociones
 y reglas disponen del adaptador administrativo. El frontend incorpora selectores
@@ -40,6 +41,11 @@ rutas a los contratos. Los tokens de prueba se inyectan solo en memoria del
 navegador; la entrada de test no se incluye en el build normal.
 
 ## Recorrido comprobable
+
+El paso 6 amplía este runner con cinco pruebas de la entrada real `src/main.tsx`,
+sesión G7 de contrato por HTTPS verificado, Gateway/PG nativos y consistencia
+AMQP. Se conserva el recorrido anterior. Una ejecución conjunta y la matriz
+de autoridades/fronteras están en [FLUJO-E2E.md](FLUJO-E2E.md).
 
 - Gateway: usuario válido, expirado, firma alterada, rol insuficiente, token de
   servicio y scopes; respuestas 200/401/403 con JWKS HTTPS real.
