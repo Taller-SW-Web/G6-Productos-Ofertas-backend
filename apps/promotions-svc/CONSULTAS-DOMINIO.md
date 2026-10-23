@@ -1,6 +1,6 @@
 # Reglas y consultas Promotions — #72/#73
 
-Owner: Axel Cueva. Rama única: `cueva`. Corte: 22/10/2026, America/Lima.
+Owner: Axel Cueva. Rama única: `cueva`. Corte: 23/10/2026, America/Lima.
 **Estado: IMPLEMENTAR_PARCIAL.** No se declaran completados los issues ni una
 integración comercial operativa por disponer de handlers y pruebas aisladas.
 
@@ -83,7 +83,7 @@ administrativos ausentes. JSON malformado y validación usan 400 VALIDACION.
 | Owner | Operación | Condición verificable de desbloqueo |
 | --- | --- | --- |
 | Catálogo/Pricing + integración G6/G7 | evaluarPromociones / validarCupon | Adaptador autenticado de elegibilidad y precios SKU/canal/instante, con identidad autorizada; o payloads/versiones y procedencia de proyección acordados y probados. GenericData por sí solo no permite adivinar campos, vigencia o elegibilidad. |
-| Promotions/arquitectura G6 | Evaluación con varias promociones que permiten acumularse | Revisar y adoptar la [propuesta v1 de composición](PROPUESTA-COMBINACION.md), con reparto, desempate e identidad principal definidos y prototipo aislado en test/proposals. Resolver redondeo, límites de producción y representación/snapshot con los consumidores antes de conectar el HTTP. El caso afectado sigue fallando explícitamente; las alternativas exclusivas siguen implementadas. |
+| Promotions/arquitectura G6 | Evaluación con varias promociones que permiten acumularse | Revisar y adoptar la [propuesta v1 de composición](PROPUESTA-COMBINACION.md), ya implementada en src con redondeo y límites técnicos, sin conexión al HTTP. Homologar escala, límites operativos y representación/snapshot con los consumidores. El caso afectado sigue protegido; las alternativas exclusivas siguen implementadas. |
 | Catálogo/Pricing/Inventario + arquitectura G6 | Recomendaciones enriquecidas | Adaptador autenticado para producto simple; para múltiples SKU, resolver D-REC-01/02 sin escoger/agregar variantes por inferencia. availability es obligatoria: no se inventa un estado ni un precio. |
 | G7/owner de entorno | Integración autenticada desplegada de cualquier consulta | Issuer/JWKS y grants reales por consumidor, configuración de entorno y prueba autenticada. JWT sintético de prueba no acredita grant G7. |
 
@@ -91,6 +91,42 @@ No se reutiliza el token del canal imponiéndole scopes adicionales de Catálogo
 Pricing. El puerto pendiente no usa arrays, precios o stock simulados en producción.
 Los límites/idempotencia definitivos de consumo siguen revalidándose al consumir;
 una validación positiva no reserva el último uso.
+
+## Continuación #72/#73 — paso 4
+
+La propuesta v1 ya cuenta con motor interno compilado y presupuesto de búsqueda,
+más proyección monetaria exacta con escala explícita, redondeo total mitad hacia
+arriba y reparto por mayor resto/desempate canónico. Conserva las 26 regresiones
+originales y añade conservación monetaria en cestas pequeñas y agotamiento de
+presupuesto. Su salida no se conecta a DTOs: la semántica singular de promotion_id,
+la composición, el snapshot y las escalas deben homologarse. El gate de acumulación
+de `evaluateBasket` y el provider comercial bloqueado permanecen activos.
+
+Las tres llamadas del puerto comercial tienen límite de 2,5 s por llamada y señal
+AbortSignal hacia el adaptador. Timeout, excepción síncrona o fallo de transporte
+se traducen a dependencia no disponible (HTTP 503 sanitizado). No hay reintento
+implícito ni lista vacía que esconda una caída. En recomendaciones los dos pasos
+secuenciales tienen cada uno ese límite; no se promete 2,5 s para toda la solicitud.
+Los adaptadores futuros deben cerrar el transporte al abortar. El wrapper se
+aplica también al sustituir el provider en pruebas; no abre conexiones por defecto.
+
+La revisión de OpenAPI rc.1 confirma el bloqueo de identidad concreto: listarProductos,
+obtenerProducto, obtenerPrecioSku y consultar disponibilidad comercial autorizan
+solo modulo-marketplace, modulo-chatbot y modulo-retail. Promotions no figura en
+esas allowlists. El endpoint de datos físicos está reservado a modulo-despacho.
+No se suplantan esas identidades ni se reenvía el token del consumidor.
+
+| Owner | Operación afectada | Desbloqueo verificable |
+| --- | --- | --- |
+| Marco/contratos G6 + Poma/Catálogo, Vera/Pricing, Taco/Inventario + G7 | Fuentes reales para evaluar/validar/recomendar | Homologar operación/payload tipado y allowlist para identidad propia de Promotions; emitir grants/audiencia/scopes reales y probar transporte autenticado para SKU/canal/instante. GenericData no acredita esa forma. |
+| Arquitectura G6 + Catálogo/Inventario/Pricing | Recomendaciones de producto con varios SKU | Resolución registrada D-REC-01/02 para disponibilidad/precio de variantes y prueba contractual; no agregar variantes por inferencia. |
+| Marco/G6 + Pricing/Ventas y consumidores | Publicar composición/resultado monetario | Aceptación verificable de propuesta v1, escala y límites; semántica de identidad y snapshot homologada/versionada donde sea necesaria. |
+
+Implementación interna: avance anterior. Pruebas locales: registrar por comando y
+SHA en el reporte. Integración autenticada compartida, homologación y despliegue:
+NO EJECUTADOS. Estas fronteras no bloquean las siete consultas propias ni las
+invariantes internas. La evidencia sintética HTTP sirve para el comportamiento
+interno, nunca para afirmar que existen grants comerciales reales.
 
 ## Pruebas reproducibles
 

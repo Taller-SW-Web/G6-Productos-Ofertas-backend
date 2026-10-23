@@ -20,6 +20,7 @@ import {
 import { evaluateBasket } from '../domain/basket-evaluation.js';
 import { Decimal } from '../domain/decimal.js';
 import { PROMOTIONS_CLOCK, type PromotionsClock } from '../domain/clock.js';
+import { BoundedCommercialContext } from '../infrastructure/resilience/commercial-deadline.js';
 import { httpContracts } from './http-contract.generated.js';
 import {
   isUuid,
@@ -111,12 +112,15 @@ function paginated<T>(rows: T[], total: number, q: PageFilter) {
 }
 @Injectable()
 export class PromotionsQueryService {
+  private readonly facts: CommercialContext;
   constructor(
     @Inject(PromotionsPersistence)
     private readonly persistence: PromotionsPersistence,
-    @Inject(COMMERCIAL_CONTEXT) private readonly facts: CommercialContext,
+    @Inject(COMMERCIAL_CONTEXT) facts: CommercialContext,
     @Inject(PROMOTIONS_CLOCK) private readonly clock: PromotionsClock,
-  ) {}
+  ) {
+    this.facts = new BoundedCommercialContext(facts);
+  }
   async execute(id: string, request: Request): Promise<unknown> {
     const contract = httpContracts[id];
     const q = queryInput(request.query, contract);

@@ -500,6 +500,49 @@ export async function verifyHttpReadQueries(resources, baseConfig) {
       service('recomendaciones:leer'),
     );
     assert.deepEqual(noRecs.recommendations, []);
+    await app.close();
+    app = undefined;
+    let timeoutCalls = 0;
+    let timeoutSignal;
+    call = await start({
+      ...fixtureFacts,
+      basket: async (_body, _at, signal) => {
+        timeoutCalls++;
+        timeoutSignal = signal;
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () =>
+              reject(
+                new Error('fixture transport aborted; secret diagnostics'),
+              ),
+            { once: true },
+          );
+        });
+      },
+      recommendationProducts: async () => {
+        throw new Error('fixture upstream failure with private customer data');
+      },
+    });
+    await call(
+      'evaluarPromociones',
+      '/api/v1/promociones/evaluar',
+      service('promociones:evaluar'),
+      basket,
+      503,
+    );
+    assert.equal(timeoutCalls, 1, 'no implicit commercial retry');
+    assert.equal(timeoutSignal.aborted, true, 'deadline reaches the transport');
+    await call(
+      'obtenerRecomendaciones',
+      '/api/v1/recomendaciones?productoId=HTTP-ORIGIN&canal=MARKETPLACE',
+      service('recomendaciones:leer'),
+      undefined,
+      503,
+    );
+    checks.push(
+      'commercial timeout aborts its explicit fixture transport once; upstream errors become sanitized contractual 503, never empty recommendations',
+    );
     const after = await resources.pool.query(
       'SELECT (SELECT count(*)::int FROM promotions.coupon_uses) AS uses, (SELECT count(*)::int FROM promotions.coupon_command_receipts) AS receipts, (SELECT count(*)::int FROM promotions.inbox) AS inbox, (SELECT count(*)::int FROM promotions.outbox) AS outbox',
     );

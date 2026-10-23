@@ -20,14 +20,20 @@ export interface ResolvedBasket {
   lines: ResolvedLine[];
 }
 export interface CommercialContext {
-  basket(request: BasketRequest, at: string): Promise<ResolvedBasket>;
+  basket(
+    request: BasketRequest,
+    at: string,
+    signal?: AbortSignal,
+  ): Promise<ResolvedBasket>;
   recommendationOrigin(
     productId: string,
     channel: string,
+    signal?: AbortSignal,
   ): Promise<{ active: boolean; channelEligible: boolean; categoryId: string }>;
   recommendationProducts(
     ids: readonly string[],
     channel: string,
+    signal?: AbortSignal,
   ): Promise<
     ReadonlyMap<
       string,

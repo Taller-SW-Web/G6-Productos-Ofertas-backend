@@ -1,8 +1,8 @@
 # Propuesta de combinación de beneficios — versión 1
 
-Owner: Axel Cueva · rama `cueva` · issue #72 · 22/10/2026.
+Owner: Axel Cueva · rama `cueva` · issue #72 · actualización 23/10/2026.
 
-**Estado: propuesta definida y prototipo de referencia aislado.** El usuario pidió
+**Estado: propuesta v1 implementada como motor interno acotado, sin activar HTTP.** El usuario pidió
 resolver la decisión pendiente al no existir acuerdo. Este documento concreta la
 regla propuesta por Promotions; no acredita aceptación de Marco ni de otros módulos.
 No crea una DEC-F ni modifica OpenAPI, AsyncAPI, datos persistentes o runtime.
@@ -104,8 +104,11 @@ Para la futura salida monetaria se propone:
 - Antes de salida, exigir precios regulares/oferta representables en la escala de
   la moneda. Si no lo son, la integración debe resolver esa discrepancia con Pricing.
 
-**Este redondeo es una propuesta pendiente de homologación y no está implementado
-en el prototipo.** No se convierten fracciones a `number` ni se conectan al DTO.
+**Este redondeo está implementado internamente y sigue pendiente de homologación.**
+`projectBenefitMoney` exige escala explícita (0–6), devuelve unidades mínimas
+`bigint`, valida precios representables y conserva total/saldos/descuento. No hay
+registro implícito de monedas. El ejemplo PEN usa escala 2 como entrada explícita.
+No se convierten fracciones a `number` ni se conectan al DTO.
 Elegir una regla aquí no acredita que Pricing/Ventas la hayan aceptado.
 
 ## Ejemplos de aceptación
@@ -126,17 +129,24 @@ de Pricing salvo que se indique. La prioridad fija el orden mostrado.
 
 ## Implementación, pruebas y activación
 
-El prototipo está en `test/proposals/combination-policy.ts`, con pruebas en
-`test/proposals/combination-policy.spec.ts`. Está fuera de `src/`, del build de
-Promotions y de las importaciones HTTP. Usa entradas sintéticas explícitas y
+El motor está en `src/domain/benefit-composition.ts` y la proyección monetaria en
+`src/domain/benefit-money.ts`. El archivo original de `test/proposals` reexporta
+el motor para conservar las 26 pruebas de regresión, incluido el oráculo exhaustivo.
+No existen importaciones desde los handlers HTTP ni desde `evaluateBasket`.
+Está compilado, pero su ejecución pública sigue aislada. Usa entradas sintéticas explícitas y
 ya elegibles; no sustituye Catálogo, Pricing, JWT, base de datos o broker.
 
-La enumeración de subconjuntos es exponencial y solo sirve como referencia de
-corrección para cestas pequeñas. Para producción hace falta un evaluador exacto
-con presupuesto de trabajo, límites acordados y error técnico contractual cuando
-no pueda completar la búsqueda. No truncar campañas, usar un resultado parcial
-ni declarar óptimo un algoritmo voraz. Su optimización y límites no se presentan
-como resueltos por este prototipo.
+La enumeración exacta sigue siendo exponencial y se acota técnicamente a 12
+campañas y 100 líneas, con máximo 250 000 unidades de trabajo y 100 ms por defecto.
+El presupuesto puede reducirse; el tiempo puede ampliarse explícitamente hasta
+1 000 ms. Hay controles de reloj monotónico durante validación, búsqueda y reparto,
+y antes de devolver. Los importes de entrada tienen límite de 128 caracteres.
+Si se supera un límite se lanza `CompositionBudgetExceeded`: no se devuelve el
+mejor candidato parcial, no se truncan campañas ni se usa una aproximación voraz.
+Estos límites internos aún requieren revisión operativa antes de activar HTTP;
+el futuro adaptador deberá traducir el agotamiento al error técnico contractual.
+No se publican parámetros ni códigos nuevos. Las 26 regresiones originales y las
+pruebas monetarias/budgets ejercitan el mismo motor compilado.
 
 ```powershell
 npm test -- apps/promotions-svc/test/proposals/combination-policy.spec.ts --maxWorkers=1
@@ -145,9 +155,9 @@ npm test -- apps/promotions-svc/test/proposals/combination-policy.spec.ts --maxW
 | Dimensión | Estado |
 | --- | --- |
 | Regla propuesta | Definida en versión 1; no cambia DEC-F adoptadas. |
-| Referencia interna | Implementada en pruebas: fórmula, compatibilidad, identidades y conservación exacta. |
+| Motor interno | Implementado en src: fórmula, compatibilidad, identidades, conservación exacta y búsqueda acotada. |
 | Pruebas | Ejecución y resultado por separado en el reporte de la entrega. |
-| Redondeo/snapshot/límites de producción | Especificados como propuestas o trabajo previo; no implementados. |
+| Redondeo/límites | Implementados internamente como propuesta v1; adopción y límites operativos pendientes. Snapshot contractual aún pendiente. |
 | HTTP en producción | Sin cambios; mantiene el gate de combinación múltiple y el provider comercial bloqueado. |
 | Homologación externa / despliegue | No realizados. |
 
@@ -157,7 +167,7 @@ npm test -- apps/promotions-svc/test/proposals/combination-policy.spec.ts --maxW
 | --- | --- | --- |
 | Axel/Promotions + Marco/arquitectura G6 | Adoptar composición interna | Revisión registrada de esta versión: orden, reparto, desempate y límites de producción. |
 | G6 + owners de Marketplace, Chatbot, Retail y Ventas/Postventa | Respuesta/snapshot de múltiples beneficios | Aceptación verificable de `promotion_id` principal; si hace falta desglose, contrato versionado y pruebas de consumidor. No se presume aceptación por silencio. |
-| Pricing + Ventas/Postventa + G6 | Salida monetaria y conciliación | Confirmar escala/redondeo/reparto y ejemplos monetarios; implementar y probar la regla homologada. |
+| Pricing + Ventas/Postventa + G6 | Salida monetaria y conciliación | Confirmar escala/redondeo/reparto y ejemplos monetarios; verificar la implementación candidata contra la regla homologada. |
 | Catálogo/Pricing + integración G6/G7 | Evaluación comercial real | Adaptadores con identidad autorizada y precios/elegibilidad coherentes para canal/instante. |
 
 Este documento queda listo para revisión; no se enviaron mensajes ni se atribuyó
