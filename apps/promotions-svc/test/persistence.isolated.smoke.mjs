@@ -641,6 +641,26 @@ try {
   stage = 'HTTP queries and signed JWT with real PostgreSQL';
   checks.push(...(await verifyHttpWrites(resources, runtimeConfig, admin)));
   checks.push(...(await verifyHttpReadQueries(resources, runtimeConfig)));
+  if (process.env.G6_PROMOTIONS_GATEWAY_E2E === 'true') {
+    stage = 'native Gateway/Promotions flow with real PostgreSQL';
+    // The provider suite closes its pool to verify 503. A new restricted pool
+    // runs afterwards, so Gateway fixtures cannot alter its pagination/empty
+    // assertions. No provider tests are skipped or weakened.
+    const gatewayResources = nativeCouponResources(runtimeConfig);
+    try {
+      const { verifyGatewayFlow } =
+        await import('./support/gateway-flow-checks.mjs');
+      checks.push(
+        ...(await verifyGatewayFlow(
+          gatewayResources,
+          runtimeConfig,
+          directory,
+        )),
+      );
+    } finally {
+      await gatewayResources.onApplicationShutdown();
+    }
+  }
   console.log(
     JSON.stringify({
       status: 'PASS',
