@@ -2,14 +2,24 @@ import type { Request } from 'express';
 import { httpContracts } from './http-contract.generated.js';
 import { queryInput, valid } from './http-validation.js';
 describe('Official Promotions HTTP schemas', () => {
-  it('includes exactly the ten query operationIds and no mutation operation', () => {
-    expect(Object.keys(httpContracts)).toHaveLength(10);
+  it('includes the ten queries and twelve authorized administrative operationIds', () => {
+    expect(Object.keys(httpContracts)).toHaveLength(22);
     expect(
       Object.values(httpContracts)
-        .filter((c) => c.method === 'POST')
+        .filter(
+          (c) => c.method === 'POST' && c.security.includes('serviceBearer'),
+        )
         .map((c) => c.path)
         .sort(),
     ).toEqual(['/api/v1/cupones/validar', '/api/v1/promociones/evaluar']);
+    expect(
+      Object.entries(httpContracts).filter(([id]) =>
+        /^(crear|actualizar|activar|desactivar)/.test(id),
+      ),
+    ).toHaveLength(12);
+    for (const [id, c] of Object.entries(httpContracts))
+      if (/^(crear|actualizar|activar|desactivar)/.test(id))
+        expect(c.security).toEqual(['userBearer']);
   });
   it.each([
     { lines: [] },

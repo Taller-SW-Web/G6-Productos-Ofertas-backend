@@ -28,7 +28,7 @@ import {
   valid,
 } from './http-validation.js';
 const iso = (s: string) => new Date(s).toISOString();
-function promotionDto(p: PromotionQueryRow) {
+export function promotionDto(p: PromotionQueryRow) {
   if (!p.policy) throw new Error('INCOMPLETE_PROMOTION_POLICY');
   return {
     promotionId: p.id,
@@ -60,7 +60,7 @@ function promotionDto(p: PromotionQueryRow) {
     },
   };
 }
-function couponDto(c: CouponQueryRow) {
+export function couponDto(c: CouponQueryRow) {
   return {
     cuponId: c.id,
     codigo: c.code,
@@ -80,7 +80,7 @@ function couponDto(c: CouponQueryRow) {
     updatedAt: iso(c.updatedAt),
   };
 }
-function ruleDto(r: RuleQueryRow) {
+export function ruleDto(r: RuleQueryRow) {
   return {
     reglaId: r.id,
     nombre: r.name,

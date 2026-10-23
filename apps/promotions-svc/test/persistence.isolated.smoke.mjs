@@ -16,6 +16,7 @@ import {
 } from '../../../dist/apps/promotions-svc/infrastructure/persistence/promotions-persistence.js';
 import { nativeCouponResources } from '../../../dist/apps/promotions-svc/coupons/coupon-providers.js';
 import { CouponCommandProcessor } from '../../../dist/apps/promotions-svc/coupons/coupon-transactions.js';
+import { verifyHttpWrites } from './support/http-write-checks.mjs';
 import {
   PromotionsConfigService,
   validatePromotionsConfiguration,
@@ -638,6 +639,7 @@ try {
   );
 
   stage = 'HTTP queries and signed JWT with real PostgreSQL';
+  checks.push(...(await verifyHttpWrites(resources, runtimeConfig, admin)));
   checks.push(...(await verifyHttpReadQueries(resources, runtimeConfig)));
   console.log(
     JSON.stringify({

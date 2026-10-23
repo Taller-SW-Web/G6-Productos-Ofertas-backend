@@ -15,6 +15,18 @@ const allowed = new Set([
   'obtenerCuponAdmin',
   'listarReglasRecomendacion',
   'obtenerReglaRecomendacion',
+  'crearPromocion',
+  'actualizarPromocion',
+  'activarPromocion',
+  'desactivarPromocion',
+  'crearCupon',
+  'actualizarCupon',
+  'activarCupon',
+  'desactivarCupon',
+  'crearReglaRecomendacion',
+  'actualizarReglaRecomendacion',
+  'activarReglaRecomendacion',
+  'desactivarReglaRecomendacion',
 ]);
 function resolve(value) {
   if (Array.isArray(value)) return value.map(resolve);
@@ -59,7 +71,10 @@ for (const [path, methods] of Object.entries(doc.paths))
           .map((p) => [p.name, { required: !!p.required, schema: p.schema }]),
       ),
       body: resolve(op.requestBody?.content?.['application/json']?.schema),
-      response: resolve(op.responses['200'].content['application/json'].schema),
+      response: resolve(
+        (op.responses['200'] ?? op.responses['201']).content['application/json']
+          .schema,
+      ),
       errors: op['x-error-codes'],
     };
   }

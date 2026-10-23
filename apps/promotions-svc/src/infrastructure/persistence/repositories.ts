@@ -32,6 +32,31 @@ export type RecommendationItem = Omit<
 class PromotionRepository {
   constructor(private readonly db: Database) {}
 
+  async lock(id: string) {
+    await this.db
+      .select({ id: schema.promotions.id })
+      .from(schema.promotions)
+      .where(eq(schema.promotions.id, id))
+      .for('update');
+  }
+
+  async replaceConfiguration(
+    id: string,
+    scopes: readonly PromotionScope[],
+    policy: CombinationPolicy,
+  ) {
+    await this.db
+      .delete(schema.promotionScopes)
+      .where(eq(schema.promotionScopes.promotionId, id));
+    await this.db
+      .insert(schema.promotionScopes)
+      .values(scopes.map((scope) => ({ ...scope, promotionId: id })));
+    await this.db
+      .update(schema.combinationPolicy)
+      .set(policy)
+      .where(eq(schema.combinationPolicy.promotionId, id));
+  }
+
   async create(
     promotion: NewPromotion,
     scopes: readonly PromotionScope[],
@@ -82,6 +107,14 @@ class PromotionRepository {
 class CouponRepository {
   constructor(private readonly db: Database) {}
 
+  async lock(id: string) {
+    await this.db
+      .select({ id: schema.coupons.id })
+      .from(schema.coupons)
+      .where(eq(schema.coupons.id, id))
+      .for('update');
+  }
+
   async create(coupon: NewCoupon) {
     const [saved] = await this.db
       .insert(schema.coupons)
@@ -100,7 +133,7 @@ class CouponRepository {
     return coupon;
   }
 
-  async update(id: string, changes: Partial<Omit<NewCoupon, 'promotionId'>>) {
+  async update(id: string, changes: Partial<NewCoupon>) {
     const [updated] = await this.db
       .update(schema.coupons)
       .set(changes)
@@ -120,6 +153,23 @@ class CouponRepository {
 
 class RecommendationRepository {
   constructor(private readonly db: Database) {}
+
+  async lock(id: string) {
+    await this.db
+      .select({ id: schema.recommendationRules.id })
+      .from(schema.recommendationRules)
+      .where(eq(schema.recommendationRules.id, id))
+      .for('update');
+  }
+
+  async replaceItems(id: string, items: readonly RecommendationItem[]) {
+    await this.db
+      .delete(schema.recommendationItems)
+      .where(eq(schema.recommendationItems.ruleId, id));
+    await this.db
+      .insert(schema.recommendationItems)
+      .values(items.map((item) => ({ ...item, ruleId: id })));
+  }
 
   async create(rule: NewRecommendation, items: readonly RecommendationItem[]) {
     const [saved] = await this.db

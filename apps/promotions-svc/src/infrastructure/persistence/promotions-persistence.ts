@@ -3,6 +3,8 @@ import type { Pool, PoolClient } from 'pg';
 import * as schema from './schema.js';
 import { PromotionsRepositories } from './repositories.js';
 import { inPromotionsTransaction } from './sql-transaction.js';
+import { PromotionRuleError } from '../../domain/promotion-rules.js';
+import { CommercialDependencyError } from '../../domain/commercial-context.js';
 
 // Do not expose driver messages, query parameters, credentials, or raw causes.
 export class PromotionsPersistenceError extends Error {
@@ -62,6 +64,11 @@ export class PromotionsPersistence {
         readOnly,
       );
     } catch (error) {
+      if (
+        error instanceof PromotionRuleError ||
+        error instanceof CommercialDependencyError
+      )
+        throw error;
       throw new PromotionsPersistenceError(sqlState(error));
     }
   }

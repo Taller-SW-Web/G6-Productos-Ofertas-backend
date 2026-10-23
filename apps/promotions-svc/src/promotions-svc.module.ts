@@ -23,6 +23,12 @@ import {
   PromotionsProblemFilter,
 } from './http/query-controller.js';
 import { PromotionsQueryService } from './http/query-service.js';
+import { PromotionsWriteController } from './http/write-controller.js';
+import { PromotionsWriteService } from './http/write-service.js';
+import {
+  ADMIN_REFERENCES,
+  blockedAdminReferences,
+} from './domain/admin-references.js';
 import {
   PROMOTIONS_JWKS,
   PromotionsIdentity,
@@ -32,11 +38,17 @@ import {
 
 @Module({
   imports: [],
-  controllers: [PromotionsSvcController, PromotionsQueryController],
+  controllers: [
+    PromotionsSvcController,
+    PromotionsQueryController,
+    PromotionsWriteController,
+  ],
   providers: [
     ...couponProviders,
     { provide: PROMOTIONS_CLOCK, useValue: { now: () => new Date() } },
     PromotionsQueryService,
+    PromotionsWriteService,
+    { provide: ADMIN_REFERENCES, useValue: blockedAdminReferences },
     PromotionsIdentity,
     PromotionsQueryGuard,
     { provide: APP_FILTER, useClass: PromotionsProblemFilter },
