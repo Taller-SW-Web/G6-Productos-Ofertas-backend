@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { rootCertificates, checkServerIdentity } from 'node:tls';
 import {
   InvalidBulkEnvironment,
@@ -8,12 +11,33 @@ const valid = {
   NODE_ENV: 'test',
   BULK_SVC_PORT: '3008',
 };
-const caPath = 'C:\\test\\bulk-ca.pem';
+const caDirectory = mkdtempSync(join(tmpdir(), 'bulk-ca-'));
+const caPath = join(caDirectory, 'bulk-ca.pem');
+writeFileSync(caPath, rootCertificates[0]!);
+const invalidCaCases: ReadonlyArray<{
+  nombre: string;
+  path: string;
+  contents?: string;
+}> = [
+  {
+    nombre: 'missing',
+    path: join(caDirectory, 'missing-ca.pem'),
+  },
+  {
+    nombre: 'invalid',
+    path: join(caDirectory, 'invalid-ca.pem'),
+    contents: 'not a certificate',
+  },
+];
 const certificateReader = () => rootCertificates[0]!;
 const remoteUrl =
   'postgresql://bulk_user:secret-value@db.example.test:5432/postgres';
 
 describe('parseBulkEnvironment', () => {
+  afterAll(() => {
+    rmSync(caDirectory, { recursive: true, force: true });
+  });
+
   it('parses configuration and applies operational limits', () => {
     const config = parseBulkEnvironment(valid);
     expect(config).toMatchObject({
@@ -39,18 +63,15 @@ describe('parseBulkEnvironment', () => {
         .port,
     ).toBe(3009);
     expect(
-      parseBulkEnvironment(
-        {
-          NODE_ENV: 'production',
-          PORT: '3008',
-          BULK_SVC_PORT: '3008',
-          DATABASE_URL:
-            remoteUrl +
-            '?sslmode=verify-full&sslrootcert=' +
-            encodeURIComponent(caPath),
-        },
-        certificateReader,
-      ).port,
+      parseBulkEnvironment({
+        NODE_ENV: 'production',
+        PORT: '3008',
+        BULK_SVC_PORT: '3008',
+        DATABASE_URL:
+          remoteUrl +
+          '?sslmode=verify-full&sslrootcert=' +
+          encodeURIComponent(caPath),
+      }).port,
     ).toBe(3008);
   });
 
@@ -150,20 +171,18 @@ describe('parseBulkEnvironment', () => {
   });
 
   it('requires verify-full and validates CA for remote PostgreSQL', () => {
-    const config = parseBulkEnvironment(
-      {
-        NODE_ENV: 'production',
-        BULK_SVC_PORT: '3008',
-        DATABASE_URL:
-          remoteUrl +
-          '?sslmode=verify-full&sslrootcert=' +
-          encodeURIComponent(caPath),
-      },
-      certificateReader,
-    );
+    const config = parseBulkEnvironment({
+      NODE_ENV: 'production',
+      BULK_SVC_PORT: '3008',
+      DATABASE_URL:
+        remoteUrl +
+        '?sslmode=verify-full&sslrootcert=' +
+        encodeURIComponent(caPath),
+    });
     expect(config.databaseSsl).toMatchObject({
       rejectUnauthorized: true,
       checkServerIdentity,
+      ca: rootCertificates[0],
     });
     expect(config.databaseUrl).not.toContain('sslmode');
     expect(config.databaseUrl).not.toContain('sslrootcert');
@@ -180,6 +199,39 @@ describe('parseBulkEnvironment', () => {
       }),
     ).toThrow('verify-full');
   });
+
+  it.each(invalidCaCases)(
+    'rejects a real $nombre CA file without exposing its contents or path',
+    ({ path, contents }) => {
+      if (contents) writeFileSync(path, contents);
+      try {
+        expect(() =>
+          parseBulkEnvironment({
+            NODE_ENV: 'production',
+            DATABASE_URL:
+              remoteUrl +
+              '?sslmode=verify-full&sslrootcert=' +
+              encodeURIComponent(path),
+          }),
+        ).toThrow('CA legible y válida');
+        try {
+          parseBulkEnvironment({
+            NODE_ENV: 'production',
+            DATABASE_URL:
+              remoteUrl +
+              '?sslmode=verify-full&sslrootcert=' +
+              encodeURIComponent(path),
+          });
+        } catch (error) {
+          expect((error as Error).message).not.toContain(path);
+          if (contents)
+            expect((error as Error).message).not.toContain(contents);
+        }
+      } finally {
+        if (contents) rmSync(path, { force: true });
+      }
+    },
+  );
 
   it.each([
     () => {

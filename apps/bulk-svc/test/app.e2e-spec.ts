@@ -78,6 +78,10 @@ describe('BulkSvcController (e2e)', () => {
     const response = await request(app.getHttpServer())
       .get('/health/readiness')
       .expect(503);
+    await request(app.getHttpServer())
+      .get('/health')
+      .expect(200)
+      .expect({ status: 'ok', service: 'bulk-svc' });
     expect(JSON.stringify(response.body)).not.toMatch(
       /private-password|private-host|postgres:\/\//,
     );

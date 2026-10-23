@@ -42,8 +42,14 @@ describe('BulkReadinessService', () => {
 
   it('returns false when DATABASE_URL is absent', async () => {
     const config = parseBulkEnvironment({ NODE_ENV: 'test', PORT: '3008' });
-    const service = new BulkReadinessService(config, null);
+    const pool: BulkReadinessPool = {
+      query: vi.fn().mockResolvedValue(undefined),
+      end: vi.fn().mockResolvedValue(undefined),
+      on: vi.fn().mockReturnThis(),
+    };
+    const service = new BulkReadinessService(config, pool);
     await expect(service.check()).resolves.toBe(false);
+    expect(pool.query).not.toHaveBeenCalled();
     await expect(service.onModuleDestroy()).resolves.toBeUndefined();
   });
 
