@@ -10,8 +10,9 @@ export interface ActiveAdminReferences {
   skus: ReadonlySet<string>;
   categories: ReadonlySet<string>;
 }
-// Only an authorized Catalog adapter can distinguish inactive/missing references
-// from transport failure. GenericData does not define that projection mapping.
+// OpenAPI defines typed Catalog/Taxonomy reads, but their current service
+// allowlists do not authorize Promotions, and administrative variants require
+// userBearer. Frontend selections cannot replace independent backend checks.
 export interface AdminReferences {
   verify(
     request: AdminReferenceRequest,

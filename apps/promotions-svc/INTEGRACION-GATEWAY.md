@@ -18,9 +18,12 @@ La sesión se recibe por callback del owner G7: no hay login inventado, identida
 de otro módulo, tokens en URL/localStorage, ni sesión productiva de muestra.
 
 Las consultas y escrituras de Cupones se prueban con PostgreSQL real. Promociones
-y reglas disponen del adaptador administrativo, pero los selectores y las
-altas/ediciones/activaciones que requieren referencias de Catálogo conservan su
-dependencia específica. El selector sin adaptador falla explícitamente. Evaluar,
+y reglas disponen del adaptador administrativo. El frontend incorpora selectores
+HTTP tipados de productos, variantes y categorías con sesión de usuario; su
+integración compartida sigue pendiente de configuración y prueba autenticada.
+Las altas/ediciones/activaciones que requieren verificación independiente de
+referencias en el backend conservan su dependencia específica, descrita en
+[REFERENCIAS-CATALOGO.md](REFERENCIAS-CATALOGO.md). Evaluar,
 validar una cesta, consumir o restaurar no son acciones de la administración React.
 
 No se modifica el Gateway. El runner inicia sus entrypoints compilados y los de
@@ -89,7 +92,7 @@ atribuye una reserva/snapshot sintéticos a G5/Inventario.
 | Owner | Operación | Condición verificable de desbloqueo |
 | --- | --- | --- |
 | G7 / integración de sesión frontend | Operar estas pantallas en entorno compartido | Proveedor de access token de usuario real, issuer/JWKS/grants y origen Gateway configurados; prueba autenticada de sesión/roles por entorno. El harness no es un login. |
-| Poma/Catálogo + Marco/contratos G6 y G7 | Selectores y referencias para altas/ediciones/activaciones | Adaptador tipado/autorizado para IDs/SKU/categoría/actividad y permisos efectivos; no inferir forma de GenericData. |
+| Poma/Catálogo, López/Taxonomía + integración G6/G7 | Lecturas compartidas de selectores y referencias para altas/ediciones/activaciones | Configurar y probar la sesión de usuario de los selectores. Para la validación autoritativa backend, definir una operación/identidad propia autorizada para verificar actividad de producto/SKU/categoría, sin delegarla al navegador. |
 | Catálogo/Pricing/Inventario + arquitectura | Consultas comerciales y recomendaciones enriquecidas | Adaptadores propios autenticados SKU/canal/instante; resolver D-REC-01/02 para varios SKU. |
 | Marco/infra AMQP + G7 + G5/Inventario | Consumo/restauración compartida #33/#75 | Identidad/ACL/red/topología homologadas, reserva confirmada/snapshot durable y prueba bilateral v2. Runtime permanece protegido. |
 | Marco / #111 y owners de entorno | E2E Oracle desplegado | Autorización individual de SHA/imagen/destino, configuración y comprobación autenticada del entorno. |

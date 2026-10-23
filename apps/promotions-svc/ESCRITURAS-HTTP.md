@@ -80,7 +80,11 @@ Compara usos/recibos/Inbox/Outbox antes/después: sin efectos de consumo/restaur
 
 Catálogo + integración G6/G7 | altas/ediciones/activaciones que verifican referencias |
 adaptador autorizado que distinga referencias inexistentes/inactivas de fallo técnico,
-con procedencia y prueba autenticada. GenericData no define por sí solo ese mapping.
+con procedencia y prueba autenticada. OpenAPI sí contiene DTOs tipados de Catálogo
+y Taxonomía; la identidad de servicio de Promotions no está incluida en las
+allowlists de lectura y las variantes administrativas exigen `userBearer`.
+Los selectores HTTP de usuario del frontend no sustituyen esa validación propia.
+Ver [REFERENCIAS-CATALOGO.md](REFERENCIAS-CATALOGO.md).
 
 Implementación y pruebas internas se informan separadas de homologación externa,
 grants, carga DATA y despliegue. El consumidor/pump de cupones sigue deshabilitado.
