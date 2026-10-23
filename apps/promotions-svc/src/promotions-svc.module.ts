@@ -1,5 +1,11 @@
 import { Module } from '@nestjs/common';
-import { APP_FILTER } from '@nestjs/core';
+import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import {
+  PROMOTIONS_OPERATION_LOGGER,
+  PromotionsOperationLogger,
+} from './infrastructure/logging/operation-logger.js';
+import { PromotionsObservationInterceptor } from './http/observation-interceptor.js';
+import { PromotionsReadinessMonitor } from './health/promotions-readiness-monitor.js';
 import { PROMOTIONS_CLOCK } from './domain/clock.js';
 import { PromotionsSvcController } from './promotions-svc.controller.js';
 import { PromotionsSvcService } from './promotions-svc.service.js';
@@ -52,6 +58,11 @@ import {
     PromotionsIdentity,
     PromotionsQueryGuard,
     { provide: APP_FILTER, useClass: PromotionsProblemFilter },
+    {
+      provide: PROMOTIONS_OPERATION_LOGGER,
+      useFactory: () => new PromotionsOperationLogger(),
+    },
+    { provide: APP_INTERCEPTOR, useClass: PromotionsObservationInterceptor },
     { provide: COMMERCIAL_CONTEXT, useValue: blockedCommercialContext },
     {
       provide: PROMOTIONS_JWKS,
@@ -72,6 +83,7 @@ import {
       useFactory: nativePromotionsDependencyProbes,
     },
     PromotionsReadinessService,
+    PromotionsReadinessMonitor,
   ],
 })
 export class PromotionsSvcModule {}

@@ -19,18 +19,30 @@ import { PromotionsQueryGuard, QueryOperation } from './promotions-identity.js';
 import { PromotionsQueryService } from './query-service.js';
 import { httpContracts } from './http-contract.generated.js';
 import { correlationId, PromotionsHttpError } from './http-validation.js';
+import {
+  PROMOTIONS_OPERATION_LOGGER,
+  PromotionsOperationLogger,
+} from '../infrastructure/logging/operation-logger.js';
+import { requestElapsed } from './observation-interceptor.js';
+
+const operationsBySpecificity = Object.entries(httpContracts).sort(
+  ([, a], [, b]) =>
+    (a.path.match(/\{/g)?.length ?? 0) - (b.path.match(/\{/g)?.length ?? 0),
+);
 
 @Catch()
 export class PromotionsProblemFilter implements ExceptionFilter {
   constructor(
     @Inject(HttpAdapterHost) private readonly adapter: HttpAdapterHost,
+    @Inject(PROMOTIONS_OPERATION_LOGGER)
+    private readonly logger: PromotionsOperationLogger,
   ) {}
   catch(error: unknown, host: ArgumentsHost): void {
     const context = host.switchToHttp();
     const request = context.getRequest<Request>();
     const response = context.getResponse<Response>();
-    const operation = Object.values(httpContracts).find(
-      (o) =>
+    const operation = operationsBySpecificity.find(
+      ([, o]) =>
         o.method === request.method &&
         new RegExp(
           '^' + o.path.replace(/\{[^}]+\}/g, '[^/]+') + '/?$',
@@ -57,6 +69,13 @@ export class PromotionsProblemFilter implements ExceptionFilter {
           ? new PromotionsHttpError(503, 'SERVICIO_NO_DISPONIBLE')
           : new PromotionsHttpError(500, 'ERROR_INTERNO');
     const id = correlationId(request);
+    this.logger.http(
+      operation[0],
+      problem.status,
+      id,
+      requestElapsed(request),
+      problem.code,
+    );
     const titles: Record<string, string> = {
       VALIDACION: 'Datos de entrada inválidos',
       TOKEN_INVALIDO: 'Token ausente o inválido',

@@ -51,4 +51,39 @@ describe('Promotions readiness', () => {
     expect(JSON.stringify(await result)).not.toContain('secret');
     expect(vi.getTimerCount()).toBe(0);
   });
+  it('does not probe a broker unused by the requested operating profile', async () => {
+    const broker = { check: vi.fn().mockRejectedValue(new Error('unused')) };
+    const service = new PromotionsReadinessService({
+      database: { check: async () => undefined },
+      broker,
+    });
+    expect(await service.check(false)).toMatchObject({
+      status: 'ready',
+      dependencies: { database: 'up', broker: 'disabled' },
+    });
+    expect(broker.check).not.toHaveBeenCalled();
+    expect((await service.check()).status).toBe('not_ready');
+  });
+  it('coalesces concurrent checks, does not cache completed probes and refuses readiness during drain', async () => {
+    let finish!: () => void;
+    const database = {
+      check: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+    };
+    const service = new PromotionsReadinessService({ database });
+    const first = service.check(false);
+    const second = service.check(false);
+    await Promise.resolve();
+    expect(database.check).toHaveBeenCalledTimes(1);
+    service.beforeApplicationShutdown();
+    finish();
+    expect((await first).status).toBe('not_ready');
+    expect(await second).toEqual(await first);
+    expect((await service.check(false)).status).toBe('not_ready');
+    expect(database.check).toHaveBeenCalledTimes(1);
+  });
 });

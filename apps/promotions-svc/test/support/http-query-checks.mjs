@@ -13,6 +13,10 @@ import { httpContracts } from '../../../../dist/apps/promotions-svc/http/http-co
 import { valid } from '../../../../dist/apps/promotions-svc/http/http-validation.js';
 import { PROMOTIONS_CLOCK } from '../../../../dist/apps/promotions-svc/domain/clock.js';
 import {
+  PROMOTIONS_OPERATION_LOGGER,
+  PromotionsOperationLogger,
+} from '../../../../dist/apps/promotions-svc/infrastructure/logging/operation-logger.js';
+import {
   assertPromotion,
   assertCoupon,
 } from '../../../../dist/apps/promotions-svc/domain/promotion-rules.js';
@@ -144,6 +148,7 @@ export async function verifyHttpReadQueries(resources, baseConfig) {
   );
   let app;
   async function start(facts) {
+    const observations = [];
     const builder = Test.createTestingModule({ imports: [PromotionsSvcModule] })
       .overrideProvider(PromotionsConfigService)
       .useValue(config)
@@ -152,7 +157,13 @@ export async function verifyHttpReadQueries(resources, baseConfig) {
       .overrideProvider(COUPON_RESOURCES)
       .useValue({ ...resources, onApplicationShutdown: async () => undefined })
       .overrideProvider(PROMOTIONS_JWKS)
-      .useValue(async () => [key]);
+      .useValue(async () => [key])
+      .overrideProvider(PROMOTIONS_OPERATION_LOGGER)
+      .useValue(
+        new PromotionsOperationLogger((line) =>
+          observations.push(JSON.parse(line)),
+        ),
+      );
     if (facts) builder.overrideProvider(COMMERCIAL_CONTEXT).useValue(facts);
     const module = await builder.compile();
     app = module.createNestApplication({ logger: false });
@@ -175,6 +186,34 @@ export async function verifyHttpReadQueries(resources, baseConfig) {
       });
       const data = await response.json();
       assert.equal(response.status, expected, `${id}: ${JSON.stringify(data)}`);
+      assert.equal(response.headers.get('x-correlation-id'), trace);
+      const matching = observations.filter(
+        (entry) => entry.correlation_id === trace,
+      );
+      assert.equal(
+        matching.length,
+        1,
+        'exactly one operation observation per request',
+      );
+      assert.equal(
+        matching[0].operation,
+        id,
+        'static routes must not be attributed to parameterized routes',
+      );
+      assert.equal(matching[0].status, expected);
+      assert.ok(Number.isFinite(matching[0].duration_ms));
+      const serialized = JSON.stringify(matching);
+      for (const secret of [
+        bearer,
+        baseConfig.settings.database.password,
+        body?.customer_ref,
+        body?.coupon_code,
+      ].filter(Boolean))
+        assert.equal(
+          serialized.includes(secret),
+          false,
+          'no credentials or business identifiers in telemetry',
+        );
       if (expected === 200) {
         assert.equal(
           valid(data, httpContracts[id].response),

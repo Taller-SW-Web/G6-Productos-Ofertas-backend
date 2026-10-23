@@ -148,7 +148,12 @@ export function queryInput(
   }
   return output;
 }
+const correlations = new WeakMap<Request, string>();
 export function correlationId(request: Request): string {
+  const existing = correlations.get(request);
+  if (existing) return existing;
   const v = request.header('X-Correlation-Id');
-  return isUuid(v) ? v : randomUUID();
+  const id = isUuid(v) ? v : randomUUID();
+  correlations.set(request, id);
+  return id;
 }

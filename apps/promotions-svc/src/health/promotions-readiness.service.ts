@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { withDeadline } from '../infrastructure/resilience/deadline.js';
 
 export const PROMOTIONS_DEPENDENCY_PROBES = Symbol(
   'PROMOTIONS_DEPENDENCY_PROBES',
@@ -13,21 +14,60 @@ export type PromotionsDependencyProbes = Readonly<
 >;
 
 type DependencyStatus = 'up' | 'down' | 'not_implemented' | 'disabled';
+export interface PromotionsReadiness {
+  status: 'ready' | 'not_ready';
+  service: 'promotions-svc';
+  dependencies: { database: DependencyStatus; broker: DependencyStatus };
+}
 
 @Injectable()
 export class PromotionsReadinessService {
+  private draining = false;
+  private readonly pending = new Map<boolean, Promise<PromotionsReadiness>>();
   constructor(
     @Inject(PROMOTIONS_DEPENDENCY_PROBES)
     private readonly probes: PromotionsDependencyProbes,
   ) {}
 
-  async check() {
+  async check(brokerRequired = true): Promise<PromotionsReadiness> {
+    if (this.draining)
+      return {
+        status: 'not_ready',
+        service: 'promotions-svc',
+        dependencies: { database: 'disabled', broker: 'disabled' },
+      };
+    const existing = this.pending.get(brokerRequired);
+    if (existing) return existing;
+    const checking = this.performCheck(brokerRequired);
+    this.pending.set(brokerRequired, checking);
+    try {
+      return await checking;
+    } finally {
+      if (this.pending.get(brokerRequired) === checking)
+        this.pending.delete(brokerRequired);
+    }
+  }
+
+  beforeApplicationShutdown(): void {
+    this.draining = true;
+  }
+
+  private async performCheck(
+    brokerRequired: boolean,
+  ): Promise<PromotionsReadiness> {
     const [database, broker] = await Promise.all([
       this.checkDependency(this.probes.database),
-      this.checkDependency(this.probes.broker),
+      brokerRequired
+        ? this.checkDependency(this.probes.broker)
+        : Promise.resolve('disabled' as const),
     ]);
     return {
-      status: database === 'up' && broker === 'up' ? 'ready' : 'not_ready',
+      status:
+        !this.draining &&
+        database === 'up' &&
+        (!brokerRequired || broker === 'up')
+          ? 'ready'
+          : 'not_ready',
       service: 'promotions-svc',
       dependencies: { database, broker },
     };
@@ -38,23 +78,11 @@ export class PromotionsReadinessService {
   ): Promise<DependencyStatus> {
     if (!probe) return 'not_implemented';
     if (probe === 'disabled') return 'disabled';
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await Promise.race([
-        Promise.resolve().then(() => probe.check(controller.signal)),
-        new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(() => {
-            controller.abort();
-            reject(new Error('Dependency probe timed out'));
-          }, 1000);
-        }),
-      ]);
+      await withDeadline((signal) => probe.check(signal), 1000);
       return 'up';
     } catch {
       return 'down';
-    } finally {
-      if (timer) clearTimeout(timer);
     }
   }
 }
