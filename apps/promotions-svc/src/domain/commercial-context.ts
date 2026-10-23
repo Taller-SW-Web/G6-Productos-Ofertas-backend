@@ -55,8 +55,10 @@ export class CommercialDependencyError extends Error {
   }
 }
 // Explicit integration gate, never substituted with production arrays or invented snapshot fields.
-// Catalog/Pricing GenericData payloads have no agreed typed adapter yet. Recommendations
-// additionally require D-REC-01/02. An authenticated adapter must replace this provider.
+// HTTP DTOs exist and a candidate client is implemented in infrastructure/http,
+// but current service allowlists do not authorize Promotions. Async event payloads
+// remain GenericData; multi-SKU recommendations additionally require D-REC-01/02.
+// An authorized, tested integration must replace this provider explicitly.
 export const blockedCommercialContext: CommercialContext = {
   basket: async () => {
     throw new CommercialDependencyError(

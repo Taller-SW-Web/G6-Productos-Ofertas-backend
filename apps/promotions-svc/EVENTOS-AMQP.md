@@ -4,10 +4,17 @@ Owner: Axel Cueva · rama `cueva` · 23/10/2026.
 
 **IMPLEMENTAR_PARCIAL.** El transporte, los resultados de cupones y el dispatcher
 transaccional están implementados y probados con PostgreSQL/RabbitMQ desechables.
-Las proyecciones productivas necesitan mappings tipados y procedencia acordados;
+Los cuatro writers de proyección propia están implementados; las proyecciones
+productivas necesitan decoders de payload tipados y procedencia acordados;
 el registro `ASSIGNED_EVENT_ADAPTERS` está vacío por defecto. La identidad AMQP,
 evidencia de reserva/snapshot y elegibilidad productiva tampoco se sustituyen por
 fixtures. Consumidor y pump siguen desactivados.
+
+La continuación de los pasos 2/3 se detalla en
+[ADAPTADORES-COMERCIALES.md](ADAPTADORES-COMERCIALES.md): writers concretos en
+`src/coupons/assigned-projections.ts`, sin decoders externos inventados ni registro
+productivo. El smoke los usa con decoders sintéticos explícitos; eso no prueba el
+mapping del productor compartido.
 
 ## Normativa y bindings
 
@@ -86,6 +93,11 @@ Los campos `fixture_*` y la equivalencia `guest`/productor existen únicamente e
 `test/support/assigned-event-checks.mjs`. No acreditan identidad productiva, grants,
 homologación, precios ni elegibilidad reales. La suite verifica checksums de las
 migraciones oficiales antes de aplicarlas solo a la base desechable.
+
+El escenario adicional de los pasos 2/3 prueba los writers de `src/` con las cuatro
+identidades normalizadas: producto/SKU separados, cambio de padre rechazado con
+rollback de Inbox, coexistencia de canal global/específico y stock explícito.
+Las comprobaciones anteriores se mantienen; sus resultados se registran por entrega.
 
 ## Dependencias específicas pendientes
 

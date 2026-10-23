@@ -8,6 +8,7 @@ import {
   assignedEventContracts,
   promotionsBrokerBinding,
 } from '../../../../dist/apps/promotions-svc/coupons/event-contract.generated.js';
+import { createAssignedProjectionAdapter } from '../../../../dist/apps/promotions-svc/coupons/assigned-projections.js';
 import { CouponCommandConsumer } from '../../../../dist/apps/promotions-svc/coupons/coupon-consumer.js';
 
 export async function verifyAssignedEvents({
@@ -47,45 +48,43 @@ export async function verifyAssignedEvents({
     data.fixture_version > 0 &&
     typeof data.fixture_active === 'boolean';
   const adapters = Object.fromEntries(
-    Object.keys(assignedEventContracts).map((name) => [
-      name,
-      {
-        validate,
-        apply: async (client, body) => {
-          const data = body.data;
-          const values = [
-            data.fixture_id,
-            JSON.stringify(data),
-            data.fixture_version,
-            body.occurred_at,
-            body.message_id,
-          ];
-          if (name.startsWith('catalog.'))
-            await client.query(
-              `INSERT INTO promotions.catalog_projection
-        (reference_type,reference_id,product_id,active,snapshot,source_version,source_occurred_at,source_message_id)
-        VALUES ('PRODUCTO',$1,$1,false,$2::jsonb,$3,$4,$5)
-        ON CONFLICT(reference_type,reference_id) DO UPDATE SET active=false,snapshot=EXCLUDED.snapshot,source_version=EXCLUDED.source_version,source_occurred_at=EXCLUDED.source_occurred_at,source_message_id=EXCLUDED.source_message_id`,
-              values,
-            );
-          else if (name.startsWith('pricing.'))
-            await client.query(
-              `INSERT INTO promotions.price_projection
-        (sku,channel_id,snapshot,source_version,source_occurred_at,source_message_id) VALUES ($1,NULL,$2::jsonb,$3,$4,$5)
-        ON CONFLICT(sku,channel_id) DO UPDATE SET snapshot=EXCLUDED.snapshot,source_version=EXCLUDED.source_version,source_occurred_at=EXCLUDED.source_occurred_at,source_message_id=EXCLUDED.source_message_id`,
-              values,
-            );
-          else
-            await client.query(
-              `INSERT INTO promotions.stock_projection
-        (sku,availability,snapshot,source_version,source_occurred_at,source_message_id) VALUES ($1,'AGOTADO',$2::jsonb,$3,$4,$5)
-        ON CONFLICT(sku) DO UPDATE SET availability='AGOTADO',snapshot=EXCLUDED.snapshot,source_version=EXCLUDED.source_version,source_occurred_at=EXCLUDED.source_occurred_at,source_message_id=EXCLUDED.source_message_id`,
-              values,
-            );
-          if (failAfterWrite) await client.query('SELECT 1/0');
+    Object.keys(assignedEventContracts).map((name) => {
+      // Explicit synthetic decoder ONLY in this disposable test. Production has
+      // no agreed GenericData mapping and its registry remains empty.
+      const adapter = createAssignedProjectionAdapter(name, (data) => {
+        if (!validate(data)) throw new Error('INVALID_SYNTHETIC_MAPPING');
+        const sourceVersion = BigInt(data.fixture_version);
+        if (name === 'catalog.product.deactivated')
+          return { productId: data.fixture_id, sourceVersion };
+        if (name === 'catalog.sku.deactivated')
+          return {
+            sku: data.fixture_id,
+            productId: data.fixture_product ?? data.fixture_id + '-PRODUCT',
+            sourceVersion,
+          };
+        if (name === 'pricing.price.changed')
+          return {
+            sku: data.fixture_id,
+            channelId: data.fixture_channel ?? null,
+            sourceVersion,
+          };
+        return {
+          sku: data.fixture_id,
+          availability: data.fixture_availability ?? 'AGOTADO',
+          sourceVersion,
+        };
+      });
+      return [
+        name,
+        {
+          validate: adapter.validate,
+          apply: async (client, body) => {
+            await adapter.apply(client, body);
+            if (failAfterWrite) await client.query('SELECT 1/0');
+          },
         },
-      },
-    ]),
+      ];
+    }),
   );
   const dispatcher = new PromotionsAssignedEventDispatcher(pool, adapters);
   dispatcher.assertReady();
@@ -105,6 +104,44 @@ export async function verifyAssignedEvents({
     );
     assert.ok(receipt.rows[0].completed_at);
     assert.deepEqual(receipt.rows[0].result, { handled: true });
+    if (name.startsWith('catalog.')) {
+      const row = (
+        await admin.query(
+          'SELECT reference_type,reference_id,product_id,active,snapshot FROM promotions.catalog_projection WHERE reference_id=$1',
+          [body.data.fixture_id],
+        )
+      ).rows[0];
+      assert.equal(
+        row.reference_type,
+        name === 'catalog.product.deactivated' ? 'PRODUCTO' : 'SKU',
+      );
+      assert.equal(
+        row.product_id,
+        name === 'catalog.product.deactivated'
+          ? body.data.fixture_id
+          : body.data.fixture_id + '-PRODUCT',
+      );
+      assert.equal(row.active, false);
+      assert.deepEqual(row.snapshot, body.data);
+    } else if (name.startsWith('pricing.')) {
+      const row = (
+        await admin.query(
+          'SELECT channel_id,snapshot FROM promotions.price_projection WHERE sku=$1',
+          [body.data.fixture_id],
+        )
+      ).rows[0];
+      assert.equal(row.channel_id, null);
+      assert.deepEqual(row.snapshot, body.data);
+    } else {
+      const row = (
+        await admin.query(
+          'SELECT availability,snapshot FROM promotions.stock_projection WHERE sku=$1',
+          [body.data.fixture_id],
+        )
+      ).rows[0];
+      assert.equal(row.availability, 'AGOTADO');
+      assert.deepEqual(row.snapshot, body.data);
+    }
     await assert.rejects(
       dispatcher.process(
         delivery({ ...body, data: { ...body.data, fixture_version: 2 } }),
@@ -115,6 +152,56 @@ export async function verifyAssignedEvents({
   }
   checks.push(
     'four assigned event envelopes: real PG Inbox/projection transaction, exact replay and conflicting message_id rejection, using explicitly synthetic field adapters',
+  );
+  const skuEvent = event('catalog.sku.deactivated', 2);
+  const changedParent = {
+    ...event('catalog.sku.deactivated', 3),
+    data: {
+      ...skuEvent.data,
+      fixture_version: 3,
+      fixture_product: 'DIFFERENT-PRODUCT',
+    },
+  };
+  await dispatcher.process(delivery(skuEvent), skuEvent.producer);
+  await assert.rejects(
+    dispatcher.process(delivery(changedParent), changedParent.producer),
+    /PROMOTIONS_ASSIGNED_EVENT_FAILED/,
+  );
+  assert.equal(
+    (
+      await admin.query(
+        'SELECT count(*)::int n FROM promotions.inbox WHERE message_id=$1',
+        [changedParent.message_id],
+      )
+    ).rows[0].n,
+    0,
+  );
+  const channelPrice = event('pricing.price.changed', 1);
+  channelPrice.data.fixture_channel = 'MARKETPLACE';
+  await dispatcher.process(delivery(channelPrice), channelPrice.producer);
+  assert.equal(
+    (
+      await admin.query(
+        'SELECT count(*)::int n FROM promotions.price_projection WHERE sku=$1',
+        [channelPrice.data.fixture_id],
+      )
+    ).rows[0].n,
+    2,
+  );
+  const stock = event('inventory.stock.changed', 3);
+  stock.data.fixture_availability = 'STOCK_BAJO';
+  await dispatcher.process(delivery(stock), stock.producer);
+  assert.equal(
+    (
+      await admin.query(
+        'SELECT availability FROM promotions.stock_projection WHERE sku=$1',
+        [stock.data.fixture_id],
+      )
+    ).rows[0].availability,
+    'STOCK_BAJO',
+  );
+  checks.push(
+    'real normalized projection writers distinguish product/SKU identities, reject parent reassignment atomically, preserve global/channel price rows and apply explicit stock availability; fixture decoders are not external contracts',
   );
   const body = event();
   body.data.fixture_id += '-rollback';

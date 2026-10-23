@@ -4,6 +4,12 @@ Owner: Axel Cueva. Rama única: `cueva`. Corte: 23/10/2026, America/Lima.
 **Estado: IMPLEMENTAR_PARCIAL.** No se declaran completados los issues ni una
 integración comercial operativa por disponer de handlers y pruebas aisladas.
 
+Continuación pasos 2/3: el cliente HTTP saliente tipado ya está implementado,
+aislado y sin registro productivo. No faltan DTOs HTTP por GenericData; faltan
+identidad/delegación autorizadas y las fronteras específicas de resolución SKU y
+recomendaciones. Ver [ADAPTADORES-COMERCIALES.md](ADAPTADORES-COMERCIALES.md) para
+operaciones, pruebas y límites actuales. GenericData sigue aplicando a los eventos.
+
 ## Fuentes consultadas
 
 Docs G6 `51a5ce6e76bb0c61d93ef47416e46797bf5b9846`: OpenAPI 0.6.0-rc.1,
