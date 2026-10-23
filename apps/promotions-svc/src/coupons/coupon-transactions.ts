@@ -12,7 +12,6 @@ import { matchesSchema } from './schema-validator.js';
 import {
   inPromotionsTransaction,
   type SqlClient,
-  type SqlPool,
 } from '../infrastructure/persistence/sql-transaction.js';
 export type {
   SqlClient,
@@ -28,10 +27,15 @@ export interface ConsumptionEvidence {
 }
 // Must be backed by authorized durable evidence and authoritative eligibility.
 // No production fallback is provided for this integration boundary.
-export interface CouponEvidenceProvider {
+export interface CouponEvidenceProvider<C extends SqlClient = SqlClient> {
   verify(
     command: CouponCommand,
     signal: AbortSignal,
+  ): Promise<ConsumptionEvidence>;
+  revalidate?(
+    command: CouponCommand,
+    evidence: ConsumptionEvidence,
+    client: C,
   ): Promise<ConsumptionEvidence>;
 }
 const businessErrors = new Set([
@@ -45,10 +49,10 @@ const businessErrors = new Set([
 ]);
 const handler = 'coupon-commands-v2';
 
-export class CouponCommandProcessor {
+export class CouponCommandProcessor<C extends SqlClient = SqlClient> {
   constructor(
-    private readonly pool: SqlPool,
-    private readonly evidence: CouponEvidenceProvider,
+    private readonly pool: { connect(): Promise<C> },
+    private readonly evidence: CouponEvidenceProvider<C>,
     private readonly clock: () => Date = () => new Date(),
   ) {}
 
@@ -179,7 +183,7 @@ export class CouponCommandProcessor {
   }
 
   private async consume(
-    client: SqlClient,
+    client: C,
     command: CouponCommand,
   ): Promise<Record<string, unknown>> {
     const controller = new AbortController();
@@ -199,6 +203,15 @@ export class CouponCommandProcessor {
       throw new Error('COUPON_EVIDENCE_UNAVAILABLE');
     } finally {
       if (timer) clearTimeout(timer);
+    }
+    // Await local SQL outside the external-evidence race: a deadline must never
+    // release the client while a verifier is still using that transaction.
+    if (this.evidence.revalidate) {
+      try {
+        proof = await this.evidence.revalidate(command, proof, client);
+      } catch {
+        throw new Error('COUPON_EVIDENCE_UNAVAILABLE');
+      }
     }
     if (
       !proof.reservationConfirmed ||

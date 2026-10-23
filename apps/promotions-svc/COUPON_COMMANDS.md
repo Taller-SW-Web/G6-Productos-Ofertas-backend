@@ -60,7 +60,11 @@ una reserva/snapshot a partir de las referencias opacas del comando. No valida
 una referencia por existir ni convierte un 202 en éxito. Para integración debe
 reemplazarse por el adaptador autorizado, conservando las comprobaciones propias.
 La elegibilidad autoritativa de alcance/monto mínimo/proyecciones pertenece a
-Promotions (#71/#72/#75), no a Ventas ni a Inventario. El provider de prueba
+Promotions (#71/#72/#75), no a Ventas ni a Inventario. Ahora existe
+`AuthoritativeCouponEvidence`, que revalida con repositorios/reglas propias
+en el mismo cliente y transacción del consumo. Su fuente externa de hechos
+durables sigue pendiente y la clase no está registrada en Nest; véase
+[EVIDENCIA-CUPONES.md](EVIDENCIA-CUPONES.md). El provider de prueba
 solo es válido en el smoke aislado; no sustituye esas reglas propias.
 
 `CouponRuntime` integra el consumidor y `CouponOutboxPump` con el ciclo de vida
@@ -85,7 +89,7 @@ No se declaran colas, exchanges, políticas retry/DLX, ACL ni túneles compartid
 | Owner                                  | Operación afectada                    | Desbloqueo verificable                                                                                                                                                     |
 | -------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Ventas/Inventario y coordinación Marco | Evidencia de reserva/snapshot         | Fuente contractual/autorizada para verificar las referencias opacas del comando; implementar y probar el adaptador, sin acceso cross-schema.                               |
-| Axel/Promotions #71/#72/#75            | Elegibilidad autoritativa propia      | Repositorios, reglas de alcance/mínimo y proyecciones propias implementados y probados; conservar una sola implementación y respetar los prerrequisitos de esos bloques.   |
+| Axel/Promotions #71/#72/#75            | Conectar elegibilidad propia a evidencia real | Verificador transaccional implementado y probado con PostgreSQL; pendiente registrar una fuente autorizada de hechos durables y resolver condiciones comerciales/proyecciones que no puedan verificarse. |
 | G5/owner mensajería G6                 | Consumo/pump continuos en broker real | Conectividad/identidad/ACL y dispatcher de la cola compartida que conserve los eventos de #75; supervisión/reconexión y retry/DLX según acuerdo vigente.                   |
 | Axel/configuración local               | Arranque con configuración privada    | Resuelto localmente: broker de desarrollo aislado, RABBITMQ_URL completado y arranque real de liveness PASS. La integración con el broker de G5 conserva su gate separado. |
 

@@ -10,6 +10,7 @@ import { CouponOutboxPump } from '../../../dist/apps/promotions-svc/coupons/coup
 import { CouponCommandConsumer } from '../../../dist/apps/promotions-svc/coupons/coupon-consumer.js';
 import { promotionsBrokerBinding } from '../../../dist/apps/promotions-svc/coupons/event-contract.generated.js';
 import { verifyAssignedEvents } from './support/assigned-event-checks.mjs';
+import { verifyCouponEligibility } from './support/coupon-eligibility-checks.mjs';
 import {
   docsRevision,
   officialMigrations,
@@ -672,6 +673,9 @@ try {
       channel,
       commandHandler: new CouponCommandDeliveryHandler(processor),
     })),
+  );
+  checks.push(
+    ...(await verifyCouponEligibility({ pool: runtime, admin, command })),
   );
   await channel.close();
   console.log(
