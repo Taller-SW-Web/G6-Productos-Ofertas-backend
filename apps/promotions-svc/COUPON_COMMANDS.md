@@ -1,9 +1,11 @@
 # Consumo y restauración de cupones — backend #33
 
 Owner Axel Cueva, rama `cueva`. Fuente normativa: Docs
-`c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b`, AsyncAPI `0.6.0-rc.2`,
+`51a5ce6e76bb0c61d93ef47416e46797bf5b9846`, AsyncAPI `0.6.0-rc.3`,
 SPEC-005, DEC-F-007/008/009/012 y modelo físico/migraciones 0001–0004.
 Las migraciones se consumen sin cambios solo en PostgreSQL descartable.
+La adaptación física y el dispatcher de #75 están descritos en
+[EVENTOS-AMQP.md](EVENTOS-AMQP.md); su prueba aislada no activa el runtime compartido.
 Este avance se publica en `cueva` después del merge confirmado de #116
 (`c3a6b0a`, 16/10/2026), sin abrir otro PR. Fue retirado de #116 junto con
 #70/#15/#112; aquel PR integró únicamente el Gateway.
@@ -65,12 +67,13 @@ solo es válido en el smoke aislado; no sustituye esas reglas propias.
 de Nest. La opción `PROMOTIONS_COUPON_RUNTIME_ENABLED` es `false` por defecto.
 Activarla sin un `COUPON_RUNTIME_BOUNDARY` autorizado rechaza el arranque antes
 de abrir un canal o publicar. La frontera actual rechaza expresamente: evidencia,
-elegibilidad, dispatcher e identidad/ACL siguen pendientes. Una opción de entorno
+elegibilidad, mappings productivos del dispatcher e identidad/ACL siguen pendientes. Una opción de entorno
 no los concede ni sustituye sus pruebas.
 
-La cola `po.promotions.q` también contiene eventos de proyecciones de #75. El dispatcher debe llamar
-a este handler solo para los dos comandos y aportar el actor verificado mediante
-la identidad/ACL homologada del broker; la identidad no se obtiene del JSON.
+La cola `po.promociones.q` también contiene eventos de proyecciones de #75. El
+consumidor deriva los dos comandos al handler de cupones y los otros cuatro al
+dispatcher transaccional, con actor verificado mediante identidad/ACL homologada.
+Confirma cada entrega después del commit correspondiente; la identidad no se obtiene del JSON.
 El pump reutiliza `CouponOutbox.publishOne()`, sin una segunda implementación
 transaccional: procesa una publicación por vez, recupera filas pendientes tras
 fallos y exige confirms para el marcado. Al cerrar Nest drena consumidor/pump

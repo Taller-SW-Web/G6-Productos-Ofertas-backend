@@ -19,6 +19,11 @@ conservan un gate explícito hasta disponer de sus fuentes autorizadas; la
 acumulación multibeneficio y D-REC-01/02 siguen pendientes específicos. Ver
 [CONSULTAS-DOMINIO.md](CONSULTAS-DOMINIO.md) para matriz, fuentes, pruebas y límites.
 
+Avance #74/#75 del 23/10/2026: las doce escrituras administrativas y el dispatcher
+AMQP transaccional se documentan en [ESCRITURAS-HTTP.md](ESCRITURAS-HTTP.md) y
+[EVENTOS-AMQP.md](EVENTOS-AMQP.md). Ambos conservan fronteras específicas pendientes
+de adaptadores autorizados; no acreditan despliegue ni activación del consumidor.
+
 Se reprodujo el fallo de CI 39505633881: el contenedor de Promotions recibía
 solo variables de puerto y rechazaba diez variables obligatorias ausentes.
 `test/container.smoke.mjs` comprueba el rechazo y un arranque positivo con
@@ -33,9 +38,9 @@ para alcance, pruebas reproducibles y límites.
 
 Normativa revisada: Docs `51a5ce6e76bb0c61d93ef47416e46797bf5b9846`,
 migraciones oficiales 0001–0004 sin cambios; OpenAPI 0.6.0-rc.1 y AsyncAPI
-0.6.0-rc.3. El código AMQP anterior conserva bindings físicos de rc.2:
-su adaptación a rc.3 y homologación siguen pendientes de #75/#33. Los probes
-aislados con la cola anterior prueban el adaptador, no la topología rc.3 real.
+0.6.0-rc.3. #75 adapta código, contratos generados, probe y fixtures a los nombres
+físicos rc.3. La base se prueba con broker desechable; la homologación compartida
+y los mappings productivos de los payloads genéricos siguen pendientes específicos.
 El consumidor/pump y probes siguen deshabilitados por defecto.
 
 Validación local del checkout con estos cambios: 71 unitarias y 6 E2E de
@@ -136,7 +141,7 @@ exitosas en esa invocación permiten `ready`. No hay fan-out a otros servicios.
 Los probes reales de #70 abren clientes propios bajo demanda y los cierran al
 terminar, también ante error/cancelación. PostgreSQL ejecuta `SELECT 1` con el CA
 configurado y `rejectUnauthorized=true`. RabbitMQ autentica y hace una consulta
-pasiva de `po.promotions.q`; una cola ausente no se crea. No consumen, publican,
+pasiva de `po.promociones.q` (adaptada en #75); una cola ausente no se crea. No consumen, publican,
 declaran topología ni escriben filas. Los timeouts del driver son de 750 ms.
 Un `ready` acredita esas dependencias en esa comprobación; no elegibilidad,
 consumidor funcional, permisos completos de #71 ni homologación G5.

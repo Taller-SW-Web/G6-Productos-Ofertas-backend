@@ -10,6 +10,67 @@ import {
 } from './coupon-transactions.js';
 
 describe('continuous coupon consumer boundaries', () => {
+  it('ACKs another assigned event only after its dispatcher resolves the durable commit', async () => {
+    let deliver: ((message: BrokerDelivery | null) => void) | undefined;
+    let commit: (() => void) | undefined;
+    const durable = new Promise<void>((resolve) => {
+      commit = resolve;
+    });
+    const channel = {
+      prefetch: async () => undefined,
+      consume: async (
+        _queue: string,
+        callback: (message: BrokerDelivery | null) => void,
+        _options: { noAck: false },
+      ) => {
+        deliver = callback;
+        return { consumerTag: 'tag' };
+      },
+      ack: vi.fn(),
+      cancel: async () => undefined,
+      close: async () => undefined,
+    };
+    const processor = new CouponCommandProcessor(
+      {
+        connect: async () => {
+          throw new Error('Unexpected coupon access');
+        },
+      },
+      {
+        verify: async () => {
+          throw new Error('Unexpected evidence access');
+        },
+      },
+    );
+    const boundary = {
+      authenticatedActor: async () => 'catalog-svc',
+      handleOtherAssignedEvent: vi.fn(async () => durable),
+      failed: vi.fn(),
+    };
+    const consumer = new CouponCommandConsumer(
+      channel,
+      new CouponCommandDeliveryHandler(processor),
+      boundary,
+    );
+    await consumer.start();
+    const message: BrokerDelivery = {
+      content: Buffer.from('{}'),
+      properties: {},
+      fields: {
+        exchange: 'po.eventos.x',
+        routingKey: 'catalog.product.deactivated',
+      },
+    };
+    deliver?.(message);
+    await vi.waitFor(() =>
+      expect(boundary.handleOtherAssignedEvent).toHaveBeenCalledOnce(),
+    );
+    expect(channel.ack).not.toHaveBeenCalled();
+    commit?.();
+    await vi.waitFor(() => expect(channel.ack).toHaveBeenCalledWith(message));
+    expect(boundary.failed).not.toHaveBeenCalled();
+    await consumer.stop();
+  });
   it('uses manual ACK/prefetch and never discards another assigned event', async () => {
     let deliver: ((message: BrokerDelivery | null) => void) | undefined;
     const channel = {
@@ -55,14 +116,14 @@ describe('continuous coupon consumer boundaries', () => {
     await consumer.start();
     expect(channel.prefetch).toHaveBeenCalledWith(20);
     expect(channel.consume).toHaveBeenCalledWith(
-      'po.promotions.q',
+      'po.promociones.q',
       expect.any(Function),
       { noAck: false },
     );
     deliver?.({
       content: Buffer.from('{}'),
       fields: {
-        exchange: 'po.events.x',
+        exchange: 'po.eventos.x',
         routingKey: 'inventory.stock.changed',
       },
       properties: {},

@@ -126,12 +126,12 @@ try {
   connection = await ready(() => amqp.connect(brokerUrl, { timeout: 750 }));
   connection.on('error', () => undefined);
   const channel = await connection.createChannel();
-  await channel.assertQueue('po.promotions.q', {
+  await channel.assertQueue('po.promociones.q', {
     durable: true,
     arguments: { 'x-queue-type': 'quorum' },
   });
   channel.sendToQueue(
-    'po.promotions.q',
+    'po.promociones.q',
     Buffer.from('synthetic-probe-preservation-check'),
   );
   const environment = {
@@ -198,17 +198,17 @@ try {
     'broker authentication failure is down without private diagnostics',
   );
   stage = 'queue-preservation';
-  const queue = await channel.checkQueue('po.promotions.q');
+  const queue = await channel.checkQueue('po.promociones.q');
   assert.equal(queue.consumerCount, 0);
   assert.equal(queue.messageCount, 1);
   checks.push('all probes preserve queued messages and create zero consumers');
   stage = 'test-fixture-queue-cleanup';
-  const queued = await channel.get('po.promotions.q', { noAck: false });
+  const queued = await channel.get('po.promociones.q', { noAck: false });
   assert.ok(queued);
   channel.ack(queued);
   // RabbitMQ 4.1 quorum does not support conditional deletion. This fixture
   // owns the entire disposable broker and already verified zero consumers.
-  await channel.deleteQueue('po.promotions.q');
+  await channel.deleteQueue('po.promociones.q');
   stage = 'missing-queue';
   assert.deepEqual((await check()).dependencies, {
     database: 'up',

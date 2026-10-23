@@ -1,4 +1,5 @@
 import { consumptionName, restorationName } from './coupon-command.js';
+import { promotionsBrokerBinding } from './event-contract.generated.js';
 import {
   CouponCommandDeliveryHandler,
   type CouponDelivery,
@@ -49,9 +50,9 @@ export class CouponCommandConsumer {
       void this.fail();
     });
     try {
-      await this.channel.prefetch(20);
+      await this.channel.prefetch(promotionsBrokerBinding.prefetch);
       const consumer = await this.channel.consume(
-        'po.promotions.q',
+        promotionsBrokerBinding.queue,
         (message) => {
           if (!message) {
             void this.fail();
@@ -82,8 +83,10 @@ export class CouponCommandConsumer {
         this.channel.ack(message),
       );
     } else {
-      // The dispatcher must durably handle/ACK its event; this consumer never drops it.
+      // Dispatch resolves only after its own durable commit; ACK belongs to this
+      // channel, after completion, just as it does for coupon commands.
       await this.boundary.handleOtherAssignedEvent(message);
+      this.channel.ack(message);
     }
   }
 

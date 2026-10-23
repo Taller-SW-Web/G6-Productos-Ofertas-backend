@@ -26,6 +26,14 @@ import {
   type CouponRuntimeBoundary,
 } from './coupon-runtime.js';
 import { PromotionsStartupLogger } from '../infrastructure/logging/startup-logger.js';
+import {
+  ASSIGNED_EVENT_ADAPTERS,
+  PROMOTIONS_BROKER_IDENTITY,
+  PromotionsAssignedEventDispatcher,
+  blockedBrokerIdentity,
+  type AssignedEventAdapters,
+  type PromotionsBrokerIdentity,
+} from './assigned-event-dispatcher.js';
 
 export const COUPON_RESOURCES = Symbol('COUPON_RESOURCES');
 export const COUPON_EVIDENCE_PROVIDER = Symbol('COUPON_EVIDENCE_PROVIDER');
@@ -173,6 +181,14 @@ export function nativeCouponResources(
 }
 
 export const couponProviders: Provider[] = [
+  { provide: ASSIGNED_EVENT_ADAPTERS, useValue: Object.freeze({}) },
+  { provide: PROMOTIONS_BROKER_IDENTITY, useValue: blockedBrokerIdentity },
+  {
+    provide: PromotionsAssignedEventDispatcher,
+    inject: [COUPON_RESOURCES, ASSIGNED_EVENT_ADAPTERS],
+    useFactory: (resources: CouponResources, adapters: AssignedEventAdapters) =>
+      new PromotionsAssignedEventDispatcher(resources.pool, adapters),
+  },
   {
     provide: PromotionsPersistence,
     inject: [COUPON_RESOURCES],
@@ -181,17 +197,27 @@ export const couponProviders: Provider[] = [
   },
   {
     provide: COUPON_RUNTIME_BOUNDARY,
-    useFactory: (): CouponRuntimeBoundary => ({
+    inject: [PromotionsAssignedEventDispatcher, PROMOTIONS_BROKER_IDENTITY],
+    useFactory: (
+      dispatcher: PromotionsAssignedEventDispatcher,
+      identity: PromotionsBrokerIdentity,
+    ): CouponRuntimeBoundary => ({
       assertReady: async () => {
+        try {
+          dispatcher.assertReady();
+          await identity.assertReady();
+        } catch {
+          throw new Error(
+            'COUPON_RUNTIME_BLOCKED_EVIDENCE_ELIGIBILITY_DISPATCHER_IDENTITY',
+          );
+        }
         throw new Error(
           'COUPON_RUNTIME_BLOCKED_EVIDENCE_ELIGIBILITY_DISPATCHER_IDENTITY',
         );
       },
-      authenticatedActor: async () => {
-        throw new Error('COUPON_AUTHENTICATED_ACTOR_UNAVAILABLE');
-      },
-      handleOtherAssignedEvent: async () => {
-        throw new Error('PROMOTIONS_EVENT_DISPATCHER_UNAVAILABLE');
+      authenticatedActor: (delivery) => identity.actor(delivery),
+      handleOtherAssignedEvent: async (delivery) => {
+        await dispatcher.process(delivery, await identity.actor(delivery));
       },
       failed: () => new PromotionsStartupLogger().runtimeStopped(),
     }),

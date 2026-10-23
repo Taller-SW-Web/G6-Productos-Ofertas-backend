@@ -11,6 +11,7 @@ export interface ContractSchema {
   pattern?: string;
   format?: string;
   description?: string;
+  additionalProperties?: boolean | ContractSchema;
 }
 export interface MessageContract {
   exchange: string;
@@ -86,6 +87,15 @@ export function matchesSchema(value: unknown, schema: ContractSchema): boolean {
   )
     return false;
   if (record(value)) {
+    for (const [key, item] of Object.entries(value)) {
+      if (Object.hasOwn(schema.properties ?? {}, key)) continue;
+      if (schema.additionalProperties === false) return false;
+      if (
+        record(schema.additionalProperties) &&
+        !matchesSchema(item, schema.additionalProperties)
+      )
+        return false;
+    }
     if (schema.required?.some((key) => !Object.hasOwn(value, key)))
       return false;
     if (

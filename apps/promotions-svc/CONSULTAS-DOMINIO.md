@@ -9,8 +9,8 @@ integración comercial operativa por disponer de handlers y pruebas aisladas.
 Docs G6 `51a5ce6e76bb0c61d93ef47416e46797bf5b9846`: OpenAPI 0.6.0-rc.1,
 Arquitectura, SPEC/HU-005/006/007, WF-006, modelos lógico/físico de Promotions,
 DEC-F-007/008/009/012 y matrices de trazabilidad/intermodular. AsyncAPI vigente
-rc.3 conserva payloads GenericData para las proyecciones; sus bindings y el
-dispatcher previo no se modifican aquí.
+rc.3 conserva payloads GenericData para las proyecciones. La etapa #72/#73 no
+modificó bindings/dispatcher; su actualización posterior se documenta en EVENTOS-AMQP.md.
 
 Identidad: contrato oficial G7 `Modulo-de-Seguridad/specs/contrato-api/openapi.yaml`
 consultado el 22/10/2026. Firma RS256, issuer exacto, expiración y claims del
@@ -36,9 +36,11 @@ scope y allowlist de su operación OpenAPI.
 - El núcleo de consumo/restauración, locks, recibos, replay y Outbox existentes
   permanece como única implementación de esos efectos. No se consume al consultar.
 
-Los validadores de configuración son funciones de dominio; los endpoints de
-escritura administrativa y su orquestación corresponden a #74. No se presentan
-como implementados por existir repositorios o validadores internos.
+Los validadores de configuración son funciones de dominio. La etapa #74 posterior
+implementa las doce escrituras administrativas y su orquestación, documentadas en
+[ESCRITURAS-HTTP.md](ESCRITURAS-HTTP.md), con verificación de referencias protegida.
+La adaptación física y el dispatcher posteriores de #75 se describen en
+[EVENTOS-AMQP.md](EVENTOS-AMQP.md); no activan las fuentes comerciales de esta etapa.
 
 ## #73: superficie HTTP
 

@@ -1,8 +1,9 @@
-// Generated from G6 Docs c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b, AsyncAPI 0.6.0-rc.2.
+// Generated from G6 Docs 51a5ce6e76bb0c61d93ef47416e46797bf5b9846, AsyncAPI 0.6.0-rc.3.
+// Source SHA-256: 10a61ce14468dbab3439270d0e008acb0695f7e256d4bd6e49d75e61e19dc5d0
 import type { MessageContract } from './schema-validator.js';
 export const couponContracts: Readonly<Record<string, MessageContract>> = {
   'promotions.coupon.consumption.requested': {
-    exchange: 'po.commands.x',
+    exchange: 'po.comandos.x',
     routingKey: 'promotions.coupon.consumption.requested',
     schema: {
       allOf: [
@@ -149,7 +150,7 @@ export const couponContracts: Readonly<Record<string, MessageContract>> = {
     },
   },
   'promotions.coupon.restoration.requested': {
-    exchange: 'po.commands.x',
+    exchange: 'po.comandos.x',
     routingKey: 'promotions.coupon.restoration.requested',
     schema: {
       allOf: [
@@ -272,7 +273,7 @@ export const couponContracts: Readonly<Record<string, MessageContract>> = {
     },
   },
   'promotions.coupon.consumption.completed': {
-    exchange: 'po.results.x',
+    exchange: 'po.resultados.x',
     routingKey: 'promotions.coupon.consumption.completed',
     schema: {
       allOf: [
@@ -410,7 +411,7 @@ export const couponContracts: Readonly<Record<string, MessageContract>> = {
     },
   },
   'promotions.coupon.consumption.rejected': {
-    exchange: 'po.results.x',
+    exchange: 'po.resultados.x',
     routingKey: 'promotions.coupon.consumption.rejected',
     schema: {
       allOf: [
@@ -553,7 +554,7 @@ export const couponContracts: Readonly<Record<string, MessageContract>> = {
     },
   },
   'promotions.coupon.restoration.completed': {
-    exchange: 'po.results.x',
+    exchange: 'po.resultados.x',
     routingKey: 'promotions.coupon.restoration.completed',
     schema: {
       allOf: [
@@ -683,7 +684,7 @@ export const couponContracts: Readonly<Record<string, MessageContract>> = {
     },
   },
   'promotions.coupon.restoration.rejected': {
-    exchange: 'po.results.x',
+    exchange: 'po.resultados.x',
     routingKey: 'promotions.coupon.restoration.rejected',
     schema: {
       allOf: [

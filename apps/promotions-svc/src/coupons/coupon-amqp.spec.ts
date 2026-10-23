@@ -31,7 +31,7 @@ class TestChannel extends EventEmitter {
     options: Record<string, unknown>,
     callback: (error: unknown) => void,
   ) {
-    expect(exchange).toBe('po.results.x');
+    expect(exchange).toBe('po.resultados.x');
     expect(key).toBe(result().name);
     expect(JSON.parse(body.toString()).kind).toBe('result');
     this.options = options;

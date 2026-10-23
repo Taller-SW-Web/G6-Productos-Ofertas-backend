@@ -107,7 +107,7 @@ describe('coupon service lifecycle gate', () => {
     const message = {
       fields: {
         routingKey: 'inventory.stock.changed',
-        exchange: 'po.events.x',
+        exchange: 'po.eventos.x',
       },
       properties: {},
       content: Buffer.from('{}'),

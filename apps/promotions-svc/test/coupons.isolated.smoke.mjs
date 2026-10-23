@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -9,6 +8,12 @@ import { CouponCommandProcessor } from '../../../dist/apps/promotions-svc/coupon
 import { CouponOutbox } from '../../../dist/apps/promotions-svc/coupons/coupon-outbox.js';
 import { CouponOutboxPump } from '../../../dist/apps/promotions-svc/coupons/coupon-outbox-pump.js';
 import { CouponCommandConsumer } from '../../../dist/apps/promotions-svc/coupons/coupon-consumer.js';
+import { promotionsBrokerBinding } from '../../../dist/apps/promotions-svc/coupons/event-contract.generated.js';
+import { verifyAssignedEvents } from './support/assigned-event-checks.mjs';
+import {
+  docsRevision,
+  officialMigrations,
+} from './support/official-migrations.mjs';
 import {
   CouponAmqpPublisher,
   CouponCommandDeliveryHandler,
@@ -125,19 +130,8 @@ try {
   const migrationClient = await admin.connect();
   try {
     await migrationClient.query('BEGIN; SET LOCAL ROLE po_promotions_owner');
-    for (const migration of [
-      '0001_promotions_persistence',
-      '0002_promotions_global_price_projection',
-      '0003_promotions_timestamps_and_delete_rules',
-      '0004_coupon_idempotency_receipts',
-    ]) {
-      await migrationClient.query(
-        readFileSync(
-          `node_modules/.cache/promotions-work/datos_promotions_migrations_${migration}.sql`,
-          'utf8',
-        ),
-      );
-    }
+    for (const migration of await officialMigrations())
+      await migrationClient.query(migration);
     await migrationClient.query('COMMIT');
   } finally {
     migrationClient.release();
@@ -447,7 +441,7 @@ try {
         {
           content: Buffer.from(JSON.stringify(brokenCommand)),
           properties: { contentType: 'application/json' },
-          fields: { exchange: 'po.commands.x', routingKey: brokenCommand.name },
+          fields: { exchange: 'po.comandos.x', routingKey: brokenCommand.name },
         },
         'modulo-ventas',
         () => {
@@ -496,20 +490,25 @@ try {
   connection.on('error', () => undefined);
   const channel = await connection.createConfirmChannel();
   channel.on('error', () => undefined);
-  await channel.assertExchange('po.commands.x', 'topic', { durable: true });
-  await channel.assertExchange('po.results.x', 'topic', { durable: true });
-  await channel.assertQueue('po.promotions.q', {
+  await channel.assertExchange('po.comandos.x', 'topic', { durable: true });
+  await channel.assertExchange('po.resultados.x', 'topic', { durable: true });
+  await channel.assertExchange('po.eventos.x', 'topic', { durable: true });
+  await channel.assertQueue('po.promociones.q', {
     durable: true,
     arguments: { 'x-queue-type': 'quorum' },
   });
-  for (const key of ['consumption', 'restoration'])
+  for (const binding of promotionsBrokerBinding.bindings)
     await channel.bindQueue(
-      'po.promotions.q',
-      'po.commands.x',
-      `promotions.coupon.${key}.requested`,
+      'po.promociones.q',
+      binding.exchange,
+      binding.routing_key,
     );
   const results = await channel.assertQueue('', { exclusive: true });
-  await channel.bindQueue(results.queue, 'po.results.x', 'promotions.coupon.#');
+  await channel.bindQueue(
+    results.queue,
+    'po.resultados.x',
+    'promotions.coupon.#',
+  );
   const brokerCommand = command();
   const receiving = await connection.createChannel();
   receiving.on('error', () => undefined);
@@ -540,7 +539,7 @@ try {
   );
   await worker.start();
   channel.publish(
-    'po.commands.x',
+    'po.comandos.x',
     brokerCommand.name,
     Buffer.from(JSON.stringify(brokerCommand)),
     {
@@ -563,7 +562,7 @@ try {
 
   const lostAckCommand = command();
   channel.publish(
-    'po.commands.x',
+    'po.comandos.x',
     lostAckCommand.name,
     Buffer.from(JSON.stringify(lostAckCommand)),
     { persistent: true, contentType: 'application/json' },
@@ -571,7 +570,7 @@ try {
   await channel.waitForConfirms();
   const interrupted = await connection.createChannel();
   const lostDelivery = await ready(async () => {
-    const message = await interrupted.get('po.promotions.q', { noAck: false });
+    const message = await interrupted.get('po.promociones.q', { noAck: false });
     if (!message) throw new Error('WAIT');
     return message;
   });
@@ -588,7 +587,7 @@ try {
   );
   await interrupted.close();
   const redelivered = await ready(async () => {
-    const message = await channel.get('po.promotions.q', { noAck: false });
+    const message = await channel.get('po.promociones.q', { noAck: false });
     if (!message) throw new Error('WAIT');
     return message;
   });
@@ -665,6 +664,15 @@ try {
   checks.push(
     'continuous Outbox pump recovers pending rows with real broker confirms and drains before shutdown',
   );
+  checks.push(
+    ...(await verifyAssignedEvents({
+      pool: runtime,
+      admin,
+      connection,
+      channel,
+      commandHandler: new CouponCommandDeliveryHandler(processor),
+    })),
+  );
   await channel.close();
   console.log(
     JSON.stringify(
@@ -677,7 +685,7 @@ try {
           encoding: 'utf8',
           windowsHide: true,
         }).trim(),
-        normative_commit: 'c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b',
+        normative_commit: docsRevision,
         working_tree: execFileSync(
           'git',
           [

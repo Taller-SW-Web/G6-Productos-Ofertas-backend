@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { promotionsBrokerBinding } from '../coupons/event-contract.generated.js';
 import type { PromotionsConfigService } from '../infrastructure/config/promotions-config.js';
 import type { PromotionsDependencyProbes } from './promotions-readiness.service.js';
 
@@ -110,7 +111,7 @@ export function nativePromotionsDependencyProbes(
           channel = await connection.createChannel();
           channel.on('error', () => undefined);
           signal.throwIfAborted();
-          await channel.checkQueue('po.promotions.q');
+          await channel.checkQueue(promotionsBrokerBinding.queue);
           signal.throwIfAborted();
         } finally {
           signal.removeEventListener('abort', abort);

@@ -1,7 +1,13 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 
 const contract = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+if (contract.info.version !== '0.6.0-rc.3')
+  throw new Error('UNEXPECTED_CONTRACT_VERSION');
+const sourceHash = createHash('sha256')
+  .update(readFileSync(process.argv[2].replace(/\.json$/, '.yaml')))
+  .digest('hex');
 const names = [
   'PromotionsCouponConsumptionRequested',
   'PromotionsCouponRestorationRequested',
@@ -41,9 +47,54 @@ writeFileSync(
   fileURLToPath(
     new URL('../src/coupons/coupon-contract.generated.ts', import.meta.url),
   ),
-  '// Generated from G6 Docs c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b, AsyncAPI 0.6.0-rc.2.\n' +
+  '// Generated from G6 Docs 51a5ce6e76bb0c61d93ef47416e46797bf5b9846, AsyncAPI 0.6.0-rc.3.\n' +
+    `// Source SHA-256: ${sourceHash}\n` +
     "import type { MessageContract } from './schema-validator.js';\n" +
     'export const couponContracts: Readonly<Record<string, MessageContract>> = ' +
     JSON.stringify(messages, null, 2) +
+    ';\n',
+);
+const assigned = Object.fromEntries(
+  Object.values(contract.components.messages)
+    .filter(
+      (message) =>
+        message['x-consumers']?.includes('promotions-svc') &&
+        message['x-producer'] !== 'modulo-ventas',
+    )
+    .map((message) => [
+      message.name,
+      {
+        producer: message['x-producer'],
+        exchange: message['x-exchange'],
+        routingKey: message['x-routing-key'],
+        schema: dereference(message.payload),
+      },
+    ]),
+);
+if (Object.keys(assigned).length !== 4)
+  throw new Error('UNEXPECTED_ASSIGNED_EVENTS');
+const [queue, binding] =
+  Object.entries(contract['x-rabbitmq-topology'].queues).find(
+    ([, entry]) =>
+      entry.consumer === 'promotions-svc' && Array.isArray(entry.bindings),
+  ) ?? [];
+if (!queue || binding.prefetch !== 20 || binding.bindings.length !== 6)
+  throw new Error('UNEXPECTED_PROMOTIONS_BINDING');
+writeFileSync(
+  fileURLToPath(
+    new URL('../src/coupons/event-contract.generated.ts', import.meta.url),
+  ),
+  '// Generated from G6 Docs 51a5ce6e76bb0c61d93ef47416e46797bf5b9846, AsyncAPI 0.6.0-rc.3.\n' +
+    `// Source SHA-256: ${sourceHash}\n` +
+    "import type { MessageContract } from './schema-validator.js';\n" +
+    'export const promotionsBrokerBinding = ' +
+    JSON.stringify(
+      { queue, prefetch: binding.prefetch, bindings: binding.bindings },
+      null,
+      2,
+    ) +
+    ' as const;\n' +
+    'export const assignedEventContracts: Readonly<Record<string, MessageContract & { producer: string }>> = ' +
+    JSON.stringify(assigned, null, 2) +
     ';\n',
 );
