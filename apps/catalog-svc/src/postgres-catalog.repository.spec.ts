@@ -66,23 +66,21 @@ describe('Catalog provider SQL and projections (isolated)', () => {
     variantImageUrls = ['https://example.test/variant.webp'];
   });
   it('parameterizes literal text and filters eligibility in COUNT before LIMIT/OFFSET', async () => {
-    await repo.listCandidates(
-      {
-        canal: 'MARKETPLACE',
-        q: "x%' OR true --",
-        pagina: 2,
-        tamanio: 10,
-        orden: 'NOMBRE_DESC',
-      },
-      { productIds: ['product-fixture'], variantIds: ['variant-fixture'] },
-    );
+    await repo.listCandidates({
+      canal: 'MARKETPLACE',
+      q: "x%' OR true --",
+      pagina: 2,
+      tamanio: 10,
+      orden: 'NOMBRE_DESC',
+    });
     const count = statements.find((s) => s.text.includes('count(*)'))!;
     expect(count.text).toContain('exists (SELECT');
     expect(count.text).not.toContain('OR true --');
     expect(count.values).toContain("%x\\%' OR true --%");
     expect(count.values).toContain('ACTIVO');
     expect(count.values).toContain('ACTIVA');
-    expect(count.values).toContain('product-fixture');
+    expect(count.text).not.toContain('sku_channel_eligibility');
+    expect(count.text).toContain('"product_id" = "catalog"."products"."id"');
     const page = statements.find((s) => s.text.includes('limit'))!;
     expect(page.text).toContain('"nombre" desc');
     expect(page.values.slice(-2)).toEqual([10, 10]);
@@ -95,10 +93,7 @@ describe('Catalog provider SQL and projections (isolated)', () => {
     expect(simple?.sku_base).toBe('0001');
     expect(simple?.variants).toEqual([]);
     productWithVariants = true;
-    const detail = await repo.findCandidateBySlug('fixture', {
-      productIds: ['product-fixture'],
-      variantIds: ['variant-fixture'],
-    });
+    const detail = await repo.findCandidateBySlug('fixture');
     expect(detail?.variants).toEqual([
       {
         variant_id: 'variant-fixture',
@@ -130,6 +125,39 @@ describe('Catalog provider SQL and projections (isolated)', () => {
         valor_id: null,
         valor: 'Cotton',
       },
+    ]);
+  });
+
+  it('collects lightweight sellable candidates before hydration and applies matched IDs before count/page', async () => {
+    const query = {
+      canal: 'MARKETPLACE' as const,
+      pagina: 1,
+      tamanio: 1,
+      orden: 'NOMBRE_ASC' as const,
+      q: 'fixture',
+    };
+    await repo.priceCandidates(query);
+    expect(statements.filter((s) => s.text.startsWith('select'))).toHaveLength(
+      2,
+    );
+    expect(
+      statements.every(
+        (s) => !/images|attribute_values|limit|offset/.test(s.text),
+      ),
+    ).toBe(true);
+    expect(
+      statements.some((s) =>
+        s.text.includes('inner join "catalog"."variants"'),
+      ),
+    ).toBe(true);
+    statements.length = 0;
+    await repo.listCandidates(query, false, [
+      '00000000-0000-4000-8000-000000000001',
+    ]);
+    const count = statements.find((s) => s.text.includes('count(*)'))!;
+    expect(count.text).toContain('ANY(');
+    expect(count.values).toContainEqual([
+      '00000000-0000-4000-8000-000000000001',
     ]);
   });
 

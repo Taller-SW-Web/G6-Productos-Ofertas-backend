@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import type { Canal, ProductQuery } from './commercial.types.js';
+import { compareDecimal } from './decimal.js';
 
 export function parseProductQuery(
   input: Record<string, unknown>,
@@ -42,7 +43,7 @@ export function parseProductQuery(
       throw new BadRequestException();
     return +raw;
   }
-  function price(key: string): number | undefined {
+  function price(key: string): string | undefined {
     const raw = input[key];
     if (raw === undefined) return undefined;
     if (
@@ -53,7 +54,7 @@ export function parseProductQuery(
       +raw < 0
     )
       throw new BadRequestException();
-    return +raw;
+    return raw;
   }
   if (
     input.estado !== undefined &&
@@ -74,7 +75,7 @@ export function parseProductQuery(
   if (
     precioMin !== undefined &&
     precioMax !== undefined &&
-    precioMin > precioMax
+    compareDecimal(precioMin, precioMax) > 0
   )
     throw new BadRequestException();
   return {

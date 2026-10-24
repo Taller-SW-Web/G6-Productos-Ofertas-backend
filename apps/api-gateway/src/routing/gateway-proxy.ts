@@ -145,7 +145,11 @@ export class GatewayProxy {
       const headers: Record<string, string> = {
         accept: req.header('accept') ?? 'application/json',
       };
-      if (authorization && (!this.settings.demoNoAuthEnabled || !demoBypass))
+      if (
+        authorization &&
+        !this.settings.readOnlyDemoEnabled &&
+        (!this.settings.demoNoAuthEnabled || !demoBypass)
+      )
         headers.authorization = authorization;
       for (const header of route.headers) {
         const value =

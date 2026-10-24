@@ -11,8 +11,9 @@ import {
   sql,
   type SQL,
 } from 'drizzle-orm';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { Database } from './database.js';
+import { Database, type CatalogTransaction } from './database.js';
+import { isDemoCatalogImage } from './catalog-read-demo.js';
+import type { PriceCandidate } from './catalog-price-filter.js';
 import {
   products,
   variants,
@@ -28,7 +29,6 @@ import type {
   ProductSummary,
   CommercialVariant,
 } from './commercial.types.js';
-import type { EligibilitySelection } from './commercial-eligibility.js';
 
 const projection = {
   product_id: products.id,
@@ -66,6 +66,40 @@ function isDemoImageUrl(value: unknown): value is string {
 export class PostgresCatalogRepository {
   constructor(private readonly database: Database) {}
 
+  private async images(
+    tx: CatalogTransaction,
+    productId: string,
+    readDemo: boolean,
+  ) {
+    const own = await tx
+      .select({ url: productImages.url })
+      .from(productImages)
+      .where(eq(productImages.product_id, productId))
+      .orderBy(asc(productImages.posicion), asc(productImages.id));
+    if (!readDemo) return own;
+    const photos = own.filter((image) => isDemoCatalogImage(image.url));
+    if (photos.length) return photos;
+    // Internal read-only presentation: actual associated variant photos, never placeholders.
+    const children = await tx
+      .select({ url: variantImages.url })
+      .from(variantImages)
+      .innerJoin(variants, eq(variants.id, variantImages.variant_id))
+      .where(eq(variants.product_id, productId))
+      .orderBy(
+        asc(variants.id),
+        asc(variantImages.posicion),
+        asc(variantImages.id),
+      )
+      .limit(100);
+    return [
+      ...new Map(
+        children
+          .filter((image) => isDemoCatalogImage(image.url))
+          .map((image) => [image.url, image]),
+      ).values(),
+    ];
+  }
+
   async checkDemoReadAccess(): Promise<void> {
     await this.database.read(async (db) => {
       await db.execute(sql.raw('SELECT 1 FROM catalog.products LIMIT 0'));
@@ -94,7 +128,7 @@ export class PostgresCatalogRepository {
   }
 
   private async demoImages(
-    tx: NodePgDatabase,
+    tx: CatalogTransaction,
     productId: string,
   ): Promise<string[]> {
     const own = await tx.execute(sql`SELECT url FROM catalog.product_images
@@ -211,13 +245,11 @@ export class PostgresCatalogRepository {
     );
   }
 
-  // Sin selección: candidato INTERNO, jamás acredita elegibilidad de un canal.
-  private where(
-    query: ProductQuery,
-    selection?: EligibilitySelection,
-  ): SQL | undefined {
-    const conditions: SQL[] = [eq(products.estado, 'ACTIVO')];
-    if (query.estado && query.estado !== 'ACTIVO') conditions.push(sql`false`);
+  // D-CAT-05/06: elegibilidad global, en el mismo snapshot que COUNT y página.
+  private where(query: ProductQuery, readDemo = false): SQL | undefined {
+    const conditions: SQL[] = [];
+    if (query.estado || !readDemo)
+      conditions.push(eq(products.estado, query.estado ?? 'ACTIVO'));
     if (query.q !== undefined) {
       const literal = query.q.replace(/[\\%_]/g, '\\$&');
       conditions.push(
@@ -231,37 +263,38 @@ export class PostgresCatalogRepository {
       conditions.push(eq(products.categoria_id, query.categoriaId));
     if (query.marcaId !== undefined)
       conditions.push(eq(products.marca_id, query.marcaId));
-    if (selection) {
-      conditions.push(inArray(products.id, [...selection.productIds]));
+    if (
+      !readDemo &&
+      (query.estado === undefined || query.estado === 'ACTIVO')
+    ) {
       conditions.push(
         or(
           eq(products.tiene_variantes, false),
-          exists(this.activeVariants(selection).where),
+          exists(sql`(SELECT 1 FROM ${variants} WHERE
+            ${variants.product_id} = ${products.id}
+            AND ${variants.estado} = ${'ACTIVA'})`),
         )!,
       );
     }
     return and(...conditions);
   }
 
-  private activeVariants(selection: EligibilitySelection) {
-    // Fragmento correlacionado: solo productos con una variante activa elegible.
-    return {
-      where: sql`(SELECT 1 FROM ${variants} WHERE
-      ${variants.product_id} = ${products.id} AND ${variants.estado} = ${'ACTIVA'}
-      AND ${inArray(variants.id, [...selection.variantIds])})`,
-    };
-  }
-
   async listCandidates(
     query: ProductQuery,
-    selection?: EligibilitySelection,
+    readDemo = false,
+    productIds?: readonly string[],
   ): Promise<ProductPage> {
     if (query.precioMin !== undefined || query.precioMax !== undefined)
       throw new ServiceUnavailableException();
     return this.database.read((db) =>
       db.transaction(
         async (tx) => {
-          const where = this.where(query, selection);
+          const where = and(
+            this.where(query, readDemo),
+            productIds === undefined
+              ? undefined
+              : sql`${products.id} = ANY(${sql.param(productIds)}::uuid[])`,
+          );
           const [count] = await tx
             .select({ total: sql<number>`count(*)::integer` })
             .from(products)
@@ -278,13 +311,93 @@ export class PostgresCatalogRepository {
             )
             .limit(query.tamanio)
             .offset((query.pagina - 1) * query.tamanio);
+          if (readDemo) {
+            // A bounded page uses five queries, not one round trip per photo/attribute.
+            // Keep the same read-only snapshot and preserve SQL filtering/count/pagination.
+            const ids = rows.map((row) => row.product_id);
+            if (!ids.length)
+              return {
+                items: [],
+                pagina: query.pagina,
+                tamanio: query.tamanio,
+                total: count?.total ?? 0,
+              };
+            const own = await tx
+              .select({
+                productId: productImages.product_id,
+                url: productImages.url,
+              })
+              .from(productImages)
+              .where(inArray(productImages.product_id, ids))
+              .orderBy(
+                asc(productImages.product_id),
+                asc(productImages.posicion),
+                asc(productImages.id),
+              );
+            const children = await tx
+              .select({
+                productId: variants.product_id,
+                url: variantImages.url,
+              })
+              .from(variantImages)
+              .innerJoin(variants, eq(variants.id, variantImages.variant_id))
+              .where(inArray(variants.product_id, ids))
+              .orderBy(
+                asc(variants.product_id),
+                asc(variants.id),
+                asc(variantImages.posicion),
+                asc(variantImages.id),
+              );
+            const values = await tx
+              .select({
+                productId: productAttributes.product_id,
+                ...attributeProjection,
+              })
+              .from(productAttributes)
+              .where(inArray(productAttributes.product_id, ids))
+              .orderBy(
+                asc(productAttributes.product_id),
+                asc(productAttributes.caracteristica_id),
+              );
+            const photos = new Map<string, string[]>();
+            const fallback = new Map<string, string[]>();
+            const attributes = new Map<string, Attribute[]>();
+            for (const image of own.filter((image) =>
+              isDemoCatalogImage(image.url),
+            ))
+              photos.set(image.productId, [
+                ...(photos.get(image.productId) ?? []),
+                image.url,
+              ]);
+            for (const image of children) {
+              if (!isDemoCatalogImage(image.url)) continue;
+              const gallery = fallback.get(image.productId) ?? [];
+              if (gallery.length < 100 && !gallery.includes(image.url))
+                gallery.push(image.url);
+              fallback.set(image.productId, gallery);
+            }
+            for (const { productId, ...attribute } of values)
+              attributes.set(productId, [
+                ...(attributes.get(productId) ?? []),
+                attribute,
+              ]);
+            return {
+              items: rows.map((row) => ({
+                ...row,
+                images:
+                  photos.get(row.product_id) ??
+                  fallback.get(row.product_id) ??
+                  [],
+                attributes: attributes.get(row.product_id) ?? [],
+              })),
+              pagina: query.pagina,
+              tamanio: query.tamanio,
+              total: count?.total ?? 0,
+            };
+          }
           const items: ProductSummary[] = [];
           for (const row of rows) {
-            const images = await tx
-              .select({ url: productImages.url })
-              .from(productImages)
-              .where(eq(productImages.product_id, row.product_id))
-              .orderBy(asc(productImages.posicion), asc(productImages.id));
+            const images = await this.images(tx, row.product_id, readDemo);
             const attributes: Attribute[] = await tx
               .select(attributeProjection)
               .from(productAttributes)
@@ -308,9 +421,66 @@ export class PostgresCatalogRepository {
     );
   }
 
+  /** Local authoritative context only; an inter-service transport still needs its contract/grant. */
+  async skuContext(sku: string) {
+    return this.database.read(async (db) => {
+      const result = await db.execute(sql`SELECT si.sku, p.id AS product_id,
+        (si.variant_id IS NOT NULL) AS is_variant,
+        (p.estado = 'ACTIVO' AND (si.variant_id IS NULL OR v.estado = 'ACTIVA')) AS active
+        FROM catalog.sku_identity si LEFT JOIN catalog.variants v ON v.id = si.variant_id
+        JOIN catalog.products p ON p.id = COALESCE(si.product_id, v.product_id)
+        WHERE si.sku = ${sku} AND ((si.product_id IS NOT NULL AND NOT p.tiene_variantes)
+          OR (si.variant_id IS NOT NULL AND p.tiene_variantes))`);
+      const row = result.rows[0];
+      if (!row) return null;
+      if (
+        typeof row.sku !== 'string' ||
+        typeof row.product_id !== 'string' ||
+        typeof row.is_variant !== 'boolean' ||
+        typeof row.active !== 'boolean'
+      )
+        throw new Error();
+      return {
+        sku: row.sku,
+        productId: row.product_id,
+        isVariant: row.is_variant,
+        active: row.active,
+        eligible: row.active,
+      };
+    });
+  }
+
+  async priceCandidates(query: ProductQuery): Promise<PriceCandidate[]> {
+    return this.database.read((db) =>
+      db.transaction(
+        async (tx) => {
+          const where = this.where(query);
+          const simple = await tx
+            .select({ productId: products.id, sku: products.sku_base })
+            .from(products)
+            .where(and(where, eq(products.tiene_variantes, false)));
+          const children = await tx
+            .select({ productId: products.id, sku: variants.sku })
+            .from(products)
+            .innerJoin(variants, eq(variants.product_id, products.id))
+            .where(
+              and(
+                where,
+                eq(products.tiene_variantes, true),
+                eq(variants.estado, 'ACTIVA'),
+              ),
+            );
+          return [...simple, ...children];
+        },
+        { isolationLevel: 'repeatable read', accessMode: 'read only' },
+      ),
+    );
+  }
+
   async findCandidateBySlug(
     slug: string,
-    selection?: EligibilitySelection,
+    canal: ProductQuery['canal'] = 'MARKETPLACE',
+    readDemo = false,
   ): Promise<(ProductSummary & { variants: CommercialVariant[] }) | null> {
     return this.database.read((db) =>
       db.transaction(
@@ -323,22 +493,18 @@ export class PostgresCatalogRepository {
                 eq(products.slug, slug),
                 this.where(
                   {
-                    canal: 'MARKETPLACE',
+                    canal,
                     pagina: 1,
                     tamanio: 1,
                     orden: 'NOMBRE_ASC',
                   },
-                  selection,
+                  readDemo,
                 ),
               ),
             )
             .limit(1);
           if (!row) return null;
-          const images = await tx
-            .select({ url: productImages.url })
-            .from(productImages)
-            .where(eq(productImages.product_id, row.product_id))
-            .orderBy(asc(productImages.posicion), asc(productImages.id));
+          const images = await this.images(tx, row.product_id, readDemo);
           const attributes = await tx
             .select(attributeProjection)
             .from(productAttributes)
@@ -354,10 +520,7 @@ export class PostgresCatalogRepository {
                 .where(
                   and(
                     eq(variants.product_id, row.product_id),
-                    eq(variants.estado, 'ACTIVA'),
-                    selection
-                      ? inArray(variants.id, [...selection.variantIds])
-                      : undefined,
+                    readDemo ? undefined : eq(variants.estado, 'ACTIVA'),
                   ),
                 )
                 .orderBy(asc(variants.id))
@@ -396,6 +559,92 @@ export class PostgresCatalogRepository {
             images: images.map((i) => i.url),
             attributes,
             variants: result,
+          };
+        },
+        { isolationLevel: 'repeatable read', accessMode: 'read only' },
+      ),
+    );
+  }
+
+  async findCandidateByProductId(
+    productId: string,
+    canal: ProductQuery['canal'],
+    readDemo = false,
+  ): Promise<(ProductSummary & { variants: CommercialVariant[] }) | null> {
+    return this.database.read((db) =>
+      db.transaction(
+        async (tx) => {
+          const [row] = await tx
+            .select(projection)
+            .from(products)
+            .where(
+              and(
+                sql`${products.id}::text = ${productId}`,
+                this.where(
+                  {
+                    canal,
+                    pagina: 1,
+                    tamanio: 1,
+                    orden: 'NOMBRE_ASC',
+                  },
+                  readDemo,
+                ),
+              ),
+            )
+            .limit(1);
+          if (!row) return null;
+          const images = await this.images(tx, row.product_id, readDemo);
+          const attributes: Attribute[] = await tx
+            .select(attributeProjection)
+            .from(productAttributes)
+            .where(eq(productAttributes.product_id, row.product_id))
+            .orderBy(asc(productAttributes.caracteristica_id));
+          const children = row.tiene_variantes
+            ? await tx
+                .select({ variant_id: variants.id, sku: variants.sku })
+                .from(variants)
+                .where(
+                  and(
+                    eq(variants.product_id, row.product_id),
+                    readDemo ? undefined : eq(variants.estado, 'ACTIVA'),
+                  ),
+                )
+                .orderBy(asc(variants.id))
+            : [];
+          const commercialVariants: CommercialVariant[] = [];
+          for (const child of children) {
+            const values = await tx
+              .select({
+                caracteristica_id: variantAttributes.caracteristica_id,
+                nombre: variantAttributes.nombre_snapshot,
+                valor_id: variantAttributes.valor_id,
+                valor: variantAttributes.valor,
+                identifying: variantAttributes.es_identificador,
+              })
+              .from(variantAttributes)
+              .where(eq(variantAttributes.variant_id, child.variant_id))
+              .orderBy(asc(variantAttributes.caracteristica_id));
+            const gallery = await tx
+              .select({ url: variantImages.url })
+              .from(variantImages)
+              .where(eq(variantImages.variant_id, child.variant_id))
+              .orderBy(asc(variantImages.posicion), asc(variantImages.id));
+            const project = (identifying: boolean): Attribute[] =>
+              values
+                .filter((value) => value.identifying === identifying)
+                .map(({ identifying: _internal, ...attribute }) => attribute);
+            commercialVariants.push({
+              ...child,
+              identifying_attributes: project(true),
+              non_identifying_attributes: project(false),
+              images: gallery.map((image) => image.url),
+            });
+          }
+          return {
+            ...row,
+            images: images.map((image) => image.url),
+            attributes,
+            variants: commercialVariants,
           };
         },
         { isolationLevel: 'repeatable read', accessMode: 'read only' },

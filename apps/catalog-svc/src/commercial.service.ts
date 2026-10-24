@@ -2,14 +2,14 @@ import {
   Inject,
   Injectable,
   HttpException,
+  ForbiddenException,
   ServiceUnavailableException,
   Optional,
   BadRequestException,
 } from '@nestjs/common';
 import { CatalogConfig } from './config.js';
+import { CatalogPriceFilter } from './catalog-price-filter.js';
 import { DEMO_PRICING, type CurrentProductPrice } from './pricing.client.js';
-import { COMMERCIAL_ELIGIBILITY } from './commercial-eligibility.js';
-import type { CommercialEligibilityPolicy } from './commercial-eligibility.js';
 import type {
   ProductQuery,
   ProductDetail,
@@ -19,21 +19,36 @@ import type {
 } from './commercial.types.js';
 import { PostgresCatalogRepository } from './postgres-catalog.repository.js';
 import { TaxonomyClient } from './taxonomy.client.js';
+import type { TaxonomyIdentity } from './taxonomy.client.js';
+import {
+  CATALOG_READ_DEMO,
+  type CatalogReadDemo,
+} from './catalog-read-demo.js';
 
 @Injectable()
 export class CommercialService {
   constructor(
     private readonly repository: PostgresCatalogRepository,
-    @Inject(COMMERCIAL_ELIGIBILITY)
-    private readonly eligibility: CommercialEligibilityPolicy,
     private readonly taxonomy: TaxonomyClient,
+    @Optional()
+    @Inject(CATALOG_READ_DEMO)
+    private readonly readDemo: CatalogReadDemo = { enabled: false },
     @Optional() private readonly config?: CatalogConfig,
     @Optional()
     @Inject(DEMO_PRICING)
     private readonly pricing?: {
       currentPrice(id: string): Promise<CurrentProductPrice | null>;
     },
+    @Optional() private readonly priceFilter?: CatalogPriceFilter,
   ) {}
+
+  private async read<T>(work: () => Promise<T>): Promise<T> {
+    try {
+      return await work();
+    } catch {
+      throw new ServiceUnavailableException();
+    }
+  }
 
   private demoEnabled(query: ProductQuery): boolean {
     return (
@@ -69,12 +84,20 @@ export class CommercialService {
   async list(
     query: ProductQuery,
     correlationId?: string,
+    administrativeState = false,
+    identity?: TaxonomyIdentity,
   ): Promise<ProductPage> {
-    if (query.precioMin !== undefined || query.precioMax !== undefined) {
-      // Falta semántica de precio por producto y frontera Pricing aprobada.
+    const monetary =
+      query.precioMin !== undefined || query.precioMax !== undefined;
+    // Administrative non-active and demo searches retain their previous scope.
+    if (
+      monetary &&
+      (this.readDemo.enabled ||
+        this.demoEnabled(query) ||
+        (query.estado !== undefined && query.estado !== 'ACTIVO'))
+    )
       throw new ServiceUnavailableException();
-    }
-    if (this.demoEnabled(query)) {
+    if (!this.readDemo.enabled && this.demoEnabled(query)) {
       if (query.estado !== undefined)
         throw new BadRequestException('estado no está disponible en preview');
       if (query.categoriaId !== undefined)
@@ -106,19 +129,40 @@ export class CommercialService {
         total: ordered.length,
       };
     }
-    const selection = await this.eligibility.resolve(query.canal);
     if (query.categoriaId !== undefined)
-      await this.taxonomy.category(query.categoriaId, correlationId);
+      await this.taxonomy.category(query.categoriaId, correlationId, identity);
     if (query.marcaId !== undefined)
-      await this.taxonomy.brand(query.marcaId, correlationId);
-    return this.repository.listCandidates(query, selection);
+      await this.taxonomy.brand(query.marcaId, correlationId, identity);
+    const isAdministrativeState =
+      query.estado !== undefined && query.estado !== 'ACTIVO';
+    if (isAdministrativeState && !administrativeState)
+      throw new ForbiddenException();
+    if (this.readDemo.enabled)
+      return this.repository.listCandidates(query, true);
+    if (monetary)
+      return this.read(async () => {
+        if (!this.priceFilter) throw new ServiceUnavailableException();
+        const candidates = await this.repository.priceCandidates(query);
+        const productIds = await this.priceFilter.matchingProducts(
+          candidates,
+          query,
+          correlationId,
+        );
+        return this.repository.listCandidates(
+          { ...query, precioMin: undefined, precioMax: undefined },
+          false,
+          productIds,
+        );
+      });
+    return this.read(() => this.repository.listCandidates(query));
   }
   async detail(
     slug: string,
     query: ProductQuery,
     correlationId?: string,
+    identity?: TaxonomyIdentity,
   ): Promise<ProductDetail> {
-    if (this.demoEnabled(query)) {
+    if (!this.readDemo.enabled && this.demoEnabled(query)) {
       let product: Awaited<
         ReturnType<PostgresCatalogRepository['findDemoCandidateBySlug']>
       >;
@@ -148,17 +192,51 @@ export class CommercialService {
         throw new ServiceUnavailableException();
       }
     }
-    const selection = await this.eligibility.resolve(query.canal);
-    const product = await this.repository.findCandidateBySlug(slug, selection);
+    const product = this.readDemo.enabled
+      ? await this.repository.findCandidateBySlug(slug, query.canal, true)
+      : await this.read(() =>
+          this.repository.findCandidateBySlug(slug, query.canal),
+        );
     if (!product)
       throw new HttpException({ code: 'PRODUCTO_NO_ENCONTRADO' }, 404);
     try {
       return {
         ...product,
-        marca: await this.taxonomy.brand(product.marca_id, correlationId),
+        marca: await this.taxonomy.brand(
+          product.marca_id,
+          correlationId,
+          identity,
+        ),
       };
     } catch {
       // La marca obligatoria no se fabrica ni se reemplaza por el ID.
+      throw new ServiceUnavailableException();
+    }
+  }
+
+  async productById(
+    productId: string,
+    canal: ProductQuery['canal'],
+    correlationId?: string,
+    identity?: TaxonomyIdentity,
+  ): Promise<ProductDetail> {
+    const product = this.readDemo.enabled
+      ? await this.repository.findCandidateByProductId(productId, canal, true)
+      : await this.read(() =>
+          this.repository.findCandidateByProductId(productId, canal),
+        );
+    if (!product)
+      throw new HttpException({ code: 'PRODUCTO_NO_ENCONTRADO' }, 404);
+    try {
+      return {
+        ...product,
+        marca: await this.taxonomy.brand(
+          product.marca_id,
+          correlationId,
+          identity,
+        ),
+      };
+    } catch {
       throw new ServiceUnavailableException();
     }
   }
