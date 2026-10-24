@@ -28,7 +28,6 @@ import type {
   ProductSummary,
   CommercialVariant,
 } from './commercial.types.js';
-import type { EligibilitySelection } from './commercial-eligibility.js';
 
 const projection = {
   product_id: products.id,
@@ -245,12 +244,8 @@ export class PostgresCatalogRepository {
     );
   }
 
-  // Sin selección: candidato INTERNO, jamás acredita elegibilidad de un canal.
-  private where(
-    query: ProductQuery,
-    selection?: EligibilitySelection,
-    readDemo = false,
-  ): SQL | undefined {
+  // D-CAT-05/06: elegibilidad global, en el mismo snapshot que COUNT y página.
+  private where(query: ProductQuery, readDemo = false): SQL | undefined {
     const conditions: SQL[] = [];
     if (query.estado || !readDemo)
       conditions.push(eq(products.estado, query.estado ?? 'ACTIVO'));
@@ -268,32 +263,23 @@ export class PostgresCatalogRepository {
     if (query.marcaId !== undefined)
       conditions.push(eq(products.marca_id, query.marcaId));
     if (
-      selection &&
+      !readDemo &&
       (query.estado === undefined || query.estado === 'ACTIVO')
     ) {
-      conditions.push(inArray(products.id, [...selection.productIds]));
       conditions.push(
         or(
           eq(products.tiene_variantes, false),
-          exists(this.activeVariants(selection).where),
+          exists(sql`(SELECT 1 FROM ${variants} WHERE
+            ${variants.product_id} = ${products.id}
+            AND ${variants.estado} = ${'ACTIVA'})`),
         )!,
       );
     }
     return and(...conditions);
   }
 
-  private activeVariants(selection: EligibilitySelection) {
-    // Fragmento correlacionado: solo productos con una variante activa elegible.
-    return {
-      where: sql`(SELECT 1 FROM ${variants} WHERE
-      ${variants.product_id} = ${products.id} AND ${variants.estado} = ${'ACTIVA'}
-      AND ${inArray(variants.id, [...selection.variantIds])})`,
-    };
-  }
-
   async listCandidates(
     query: ProductQuery,
-    selection?: EligibilitySelection,
     readDemo = false,
   ): Promise<ProductPage> {
     if (query.precioMin !== undefined || query.precioMax !== undefined)
@@ -301,7 +287,7 @@ export class PostgresCatalogRepository {
     return this.database.read((db) =>
       db.transaction(
         async (tx) => {
-          const where = this.where(query, selection, readDemo);
+          const where = this.where(query, readDemo);
           const [count] = await tx
             .select({ total: sql<number>`count(*)::integer` })
             .from(products)
@@ -430,7 +416,6 @@ export class PostgresCatalogRepository {
 
   async findCandidateBySlug(
     slug: string,
-    selection?: EligibilitySelection,
     canal: ProductQuery['canal'] = 'MARKETPLACE',
     readDemo = false,
   ): Promise<(ProductSummary & { variants: CommercialVariant[] }) | null> {
@@ -450,7 +435,6 @@ export class PostgresCatalogRepository {
                     tamanio: 1,
                     orden: 'NOMBRE_ASC',
                   },
-                  selection,
                   readDemo,
                 ),
               ),
@@ -474,9 +458,6 @@ export class PostgresCatalogRepository {
                   and(
                     eq(variants.product_id, row.product_id),
                     readDemo ? undefined : eq(variants.estado, 'ACTIVA'),
-                    selection
-                      ? inArray(variants.id, [...selection.variantIds])
-                      : undefined,
                   ),
                 )
                 .orderBy(asc(variants.id))
@@ -524,7 +505,6 @@ export class PostgresCatalogRepository {
 
   async findCandidateByProductId(
     productId: string,
-    selection: EligibilitySelection | undefined,
     canal: ProductQuery['canal'],
     readDemo = false,
   ): Promise<(ProductSummary & { variants: CommercialVariant[] }) | null> {
@@ -544,7 +524,6 @@ export class PostgresCatalogRepository {
                     tamanio: 1,
                     orden: 'NOMBRE_ASC',
                   },
-                  selection,
                   readDemo,
                 ),
               ),
@@ -565,9 +544,6 @@ export class PostgresCatalogRepository {
                   and(
                     eq(variants.product_id, row.product_id),
                     readDemo ? undefined : eq(variants.estado, 'ACTIVA'),
-                    selection
-                      ? inArray(variants.id, [...selection.variantIds])
-                      : undefined,
                   ),
                 )
                 .orderBy(asc(variants.id))

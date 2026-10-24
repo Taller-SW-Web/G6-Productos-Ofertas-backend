@@ -1,5 +1,12 @@
 # catalog-svc — configuración y readiness (#43)
 
+La [decisión D-CAT-05/06](DECISION-D-CAT-05-06.md) registra la elegibilidad global
+implementada por indicación de Gabriel en `poma`: producto simple ACTIVO, o padre
+ACTIVO con al menos una variante ACTIVA. Los detalles incluyen únicamente variantes
+ACTIVA. Los cuatro canales comparten la regla; el enum VENTAS no concede acceso a
+`modulo-ventas`. Se conservan las consultas administrativas autorizadas y los modos
+demo explícitos. La ratificación documental y homologación externa siguen pendientes.
+
 Demo interna de consulta real aprobada el 2026-10-17: [alcance, evidencias y liberación pendiente](DEMO-READ-ONLY.md).
 
 Rama personal `poma`. El PR #119 conserva el código comercial incorporado desde
@@ -60,8 +67,9 @@ no sus valores. Bootstrap registra JSON sanitizado con `APPLICATION_STARTED` o
   comercial de master. No abre un cliente PostgreSQL adicional.
 - El endpoint ready tiene un timeout de 2 s. Un error o dependencia no comprobada
   devuelve 503 con el código contractual `SERVICIO_NO_DISPONIBLE`, sin secretos.
-- Con la política comercial pendiente de master, una conexión DB válida no basta
-  para declarar el servicio ready. No se sustituye esa política por mocks.
+- La política global D-CAT-05/06 consulta productos y variantes oficiales. Una
+  consulta vacía válida permite readiness; un fallo DB devuelve 503. No requiere
+  asignaciones por canal ni llamadas a Pricing/Inventario.
 - El pool conserva su máximo de 4 conexiones y timeouts explícitos de 10 s. Los
   timeouts del pool no alargan el límite de respuesta HTTP de readiness.
 - Los sondeos concurrentes comparten una sola comprobación y un plazo de 2 s
@@ -101,7 +109,7 @@ diferidos existentes. Los errores se exponen mediante `CatalogPersistenceError`
 con una categoría interna segura;
 el SQL, los parámetros y el texto del driver no se incluyen en mensajes.
 
-Las 18 pruebas actuales de `postgres.persistence.e2e-spec.ts` usan PostgreSQL 17
+Las 19 pruebas actuales de `postgres.persistence.e2e-spec.ts` usan PostgreSQL 17
 efímero con TLS, role `catalog_app` y un schema ajeno de comprobación. Incluyen
 persistencia, DATA-002, coordinación transaccional y fallos del pool; el caso
 JOINT-01 utiliza además un RabbitMQ desechable. En local,
@@ -148,8 +156,8 @@ tras el timeout sin acumular trabajo. No acreditan integración real.
 `test/runtime-postgres.e2e-spec.ts` ejecuta el entry point compilado con PostgreSQL
 17 descartable y TLS real cuando Docker está disponible. Comprueba arranque
 positivo en `session` y `direct`, rechazo de identidad faltante, CA ajena y hostname
-incorrecto, y liveness 200/readiness cerrado al detener la base. No sustituye
-Database, el cliente PG ni la política comercial. Requiere Docker y OpenSSL; en
+incorrecto, readiness 200 con el esquema oficial vacío y liveness 200/readiness
+503 al detener la base. No sustituye Database ni el cliente PG. Requiere Docker y OpenSSL; en
 este equipo sin Docker se informa como omitida, no como PASS de integración.
 En GitHub Actions Docker está disponible y la suite se ejecuta normalmente.
 

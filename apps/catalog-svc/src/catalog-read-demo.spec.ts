@@ -9,7 +9,6 @@ import {
 } from './catalog-read-demo.js';
 import { PostgresCatalogRepository } from './postgres-catalog.repository.js';
 import { TaxonomyClient } from './taxonomy.client.js';
-import { COMMERCIAL_ELIGIBILITY } from './commercial-eligibility.js';
 
 describe('Explicit internal read-only demo (HTTP provider, isolated repositories)', () => {
   let app: INestApplication;
@@ -30,9 +29,6 @@ describe('Explicit internal read-only demo (HTTP provider, isolated repositories
     })),
     findCandidateByProductId: vi.fn(async () => product),
   };
-  const resolve = vi.fn(async () => {
-    throw new Error('Unresolved commercial eligibility');
-  });
   beforeEach(async () => {
     vi.clearAllMocks();
     const module = await Test.createTestingModule({ imports: [AppModule] })
@@ -40,8 +36,6 @@ describe('Explicit internal read-only demo (HTTP provider, isolated repositories
       .useValue({ enabled: true })
       .overrideProvider(PostgresCatalogRepository)
       .useValue(repository)
-      .overrideProvider(COMMERCIAL_ELIGIBILITY)
-      .useValue({ resolve })
       .overrideProvider(TaxonomyClient)
       .useValue({ brand: async () => ({ marca_id: 'brand', name: 'Fixture' }) })
       .compile();
@@ -77,10 +71,8 @@ describe('Explicit internal read-only demo (HTTP provider, isolated repositories
       .expect(200);
     expect(repository.listCandidates).toHaveBeenCalledWith(
       expect.objectContaining({ estado: 'BORRADOR' }),
-      undefined,
       true,
     );
-    expect(resolve).not.toHaveBeenCalled();
     await request(app.getHttpServer())
       .get('/api/v1/productos?canal=MARKETPLACE&pagina=0')
       .expect(400);
@@ -95,11 +87,9 @@ describe('Explicit internal read-only demo (HTTP provider, isolated repositories
       .expect(200);
     expect(repository.findCandidateByProductId).toHaveBeenCalledWith(
       'fixture',
-      undefined,
       'MARKETPLACE',
       true,
     );
-    expect(resolve).not.toHaveBeenCalled();
   });
   it('rejects writes and keeps unrelated protected reads protected', async () => {
     for (const path of [

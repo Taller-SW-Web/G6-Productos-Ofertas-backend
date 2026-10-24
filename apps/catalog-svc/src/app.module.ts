@@ -9,8 +9,6 @@ import { PostgresCatalogWriteRepository } from './postgres-catalog-write.reposit
 import { CatalogTransactionManager } from './catalog-transaction.js';
 import { CommercialService } from './commercial.service.js';
 import { CommercialController } from './commercial.controller.js';
-import { COMMERCIAL_ELIGIBILITY } from './commercial-eligibility.js';
-import { PostgresCommercialEligibility } from './postgres-commercial-eligibility.js';
 import {
   CATALOG_TAXONOMY_CONFIG,
   readTaxonomyConfig,
@@ -114,10 +112,6 @@ import { DEMO_PRICING, PricingClient } from './pricing.client.js';
         },
       }),
       inject: [CommercialReadinessController],
-    },
-    {
-      provide: COMMERCIAL_ELIGIBILITY,
-      useClass: PostgresCommercialEligibility,
     },
     { provide: APP_FILTER, useClass: ProblemFilter },
   ],

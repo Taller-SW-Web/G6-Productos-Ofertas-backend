@@ -303,7 +303,6 @@ describe.skipIf(!dockerAvailable)(
       expect((await reads.listCandidates(query)).items).toHaveLength(0);
       const page = await reads.listCandidates(
         { ...query, estado: 'BORRADOR' },
-        undefined,
         true,
       );
       expect(page.total).toBe(1);
@@ -312,22 +311,13 @@ describe.skipIf(!dockerAvailable)(
         images: ['https://example.test/demo-variant.jpg'],
       });
       expect(
-        await reads.findCandidateByProductId(
-          parent.id,
-          undefined,
-          'MARKETPLACE',
-          true,
-        ),
+        await reads.findCandidateByProductId(parent.id, 'MARKETPLACE', true),
       ).toMatchObject({
         product_id: parent.id,
         images: ['https://example.test/demo-variant.jpg'],
       });
       expect(
-        await reads.findCandidateByProductId(
-          parent.id,
-          { productIds: [parent.id], variantIds: [] },
-          'MARKETPLACE',
-        ),
+        await reads.findCandidateByProductId(parent.id, 'MARKETPLACE'),
       ).toBeNull();
     });
 
@@ -1044,6 +1034,93 @@ describe.skipIf(!dockerAvailable)(
         if (!dependency || row.event_name.startsWith(dependency + '.'))
           await messages.consume(resultFor(row));
     }
+    it('D-CAT-05/06: filters global eligibility before count/pagination in every channel without candidate tables', async () => {
+      const service = mutationService();
+      const marker = 'eligibility-' + randomUUID();
+      const visible: string[] = [];
+      const hidden: { product_id: string; slug: string }[] = [];
+      // Identical names exercise the deterministic product-id tie breaker.
+      for (const state of [
+        'ACTIVO',
+        'BORRADOR',
+        'INACTIVO',
+        'ACTIVO',
+      ] as const) {
+        const product = await service.createProduct(
+          { ...createRequest(), nombre: marker },
+          actor,
+        );
+        if (state !== 'BORRADOR') {
+          await complete(product.product_id);
+          await service.state(
+            product.product_id,
+            undefined,
+            'activate',
+            {},
+            actor,
+          );
+        }
+        if (state === 'INACTIVO')
+          await service.state(
+            product.product_id,
+            undefined,
+            'deactivate',
+            {},
+            actor,
+          );
+        if (state === 'ACTIVO') visible.push(product.product_id);
+        else hidden.push(product);
+      }
+      const reads = new PostgresCatalogRepository(database);
+      visible.sort();
+      const intentsBefore = await database.read((db) =>
+        db.select().from(outbox),
+      );
+      for (const canal of [
+        'MARKETPLACE',
+        'CHATBOT',
+        'RETAIL',
+        'VENTAS',
+      ] as const) {
+        const query = {
+          canal,
+          q: marker,
+          pagina: 1,
+          tamanio: 1,
+          orden: 'NOMBRE_ASC' as const,
+        };
+        for (const pagina of [1, 2, 3]) {
+          const page = await reads.listCandidates({ ...query, pagina });
+          expect(page.total).toBe(2);
+          expect(page.items.map((p) => p.product_id)).toEqual(
+            pagina <= 2 ? [visible[pagina - 1]] : [],
+          );
+        }
+        for (const product of hidden) {
+          expect(
+            await reads.findCandidateBySlug(product.slug, canal),
+          ).toBeNull();
+          expect(
+            await reads.findCandidateByProductId(product.product_id, canal),
+          ).toBeNull();
+        }
+        const simple = await reads.findCandidateByProductId(visible[0], canal);
+        expect(simple).toMatchObject({ tiene_variantes: false, variants: [] });
+        expect(await reads.findCandidateBySlug(simple!.slug, canal)).toEqual(
+          simple,
+        );
+        expect(
+          await reads.listCandidates({ ...query, q: 'missing-' + marker }),
+        ).toMatchObject({ items: [], total: 0 });
+        for (const estado of ['BORRADOR', 'INACTIVO'] as const)
+          expect(
+            await reads.listCandidates({ ...query, estado }),
+          ).toMatchObject({ total: 1 });
+      }
+      expect(await database.read((db) => db.select().from(outbox))).toEqual(
+        intentsBefore,
+      );
+    });
     it('creates simple and variant products atomically with the correct preparation and Outbox intents', async () => {
       const service = mutationService(),
         body = createRequest(),
@@ -1163,7 +1240,7 @@ describe.skipIf(!dockerAvailable)(
       const service = mutationService();
       const parent = await service.createProduct(createRequest(true), actor);
       const children = [];
-      for (const size of ['ready', 'draft', 'rejected']) {
+      for (const size of ['ready', 'ready-2', 'draft', 'rejected']) {
         children.push(
           await service.createVariant(
             parent.product_id,
@@ -1178,20 +1255,23 @@ describe.skipIf(!dockerAvailable)(
                 },
               ],
               imagenUrl: 'https://example.test/variant',
-              perfilFisico: size === 'ready' ? fullProfile : { pesoKg: 1 },
+              perfilFisico: size.startsWith('ready')
+                ? fullProfile
+                : { pesoKg: 1 },
             },
             actor,
           ),
         );
       }
-      const [ready, draft, rejected] = children;
-      if (!ready || !draft || !rejected)
+      const [ready, ready2, draft, rejected] = children;
+      if (!ready || !ready2 || !draft || !rejected)
         throw new Error('Missing variant fixture');
       const messages = new CatalogMessageService(database);
       for (const row of await requested(parent.product_id)) {
         if (
           row.event_name.startsWith('pricing.') ||
-          row.payload.variant_id === ready.variant_id
+          row.payload.variant_id === ready.variant_id ||
+          row.payload.variant_id === ready2.variant_id
         )
           await messages.consume(resultFor(row));
         else if (row.payload.variant_id === rejected.variant_id)
@@ -1220,6 +1300,13 @@ describe.skipIf(!dockerAvailable)(
         undefined,
         actor,
       );
+      await service.state(
+        parent.product_id,
+        ready2.variant_id,
+        'activate',
+        undefined,
+        actor,
+      );
       await service.state(parent.product_id, undefined, 'activate', {}, actor);
       const snapshot = () =>
         transactions.run(async (tx) =>
@@ -1243,6 +1330,25 @@ describe.skipIf(!dockerAvailable)(
       const after = await snapshot();
       expect(after).toEqual(before);
       expect(after.estado).toBe('ACTIVO');
+      const reads = new PostgresCatalogRepository(database);
+      for (const canal of [
+        'MARKETPLACE',
+        'CHATBOT',
+        'RETAIL',
+        'VENTAS',
+      ] as const) {
+        const detail = await reads.findCandidateByProductId(
+          parent.product_id,
+          canal,
+        );
+        expect(detail?.variants.map((v) => v.variant_id)).toEqual(
+          [ready.variant_id, ready2.variant_id].sort(),
+        );
+        expect(detail?.sku_base).toBe(parent.sku_base);
+        expect(await reads.findCandidateBySlug(parent.slug, canal)).toEqual(
+          detail,
+        );
+      }
       expect(
         after.children.find((c) => c.id === ready.variant_id)?.estado,
       ).toBe('ACTIVA');
@@ -1273,7 +1379,7 @@ describe.skipIf(!dockerAvailable)(
       ).toHaveLength(1);
       expect(
         intents.filter((r) => r.event_name.startsWith('inventory.')),
-      ).toHaveLength(3);
+      ).toHaveLength(4);
       const queries = new CatalogQueryRepository(database);
       const draftPage = await queries.listVariants(
         parent.product_id,
@@ -1291,8 +1397,8 @@ describe.skipIf(!dockerAvailable)(
         draft.variant_id,
       ]);
       expect(
-        await queries.listVariants(parent.product_id, 2, 1, 'ACTIVA'),
-      ).toMatchObject({ items: [], meta: { total: 1, totalPaginas: 1 } });
+        await queries.listVariants(parent.product_id, 3, 1, 'ACTIVA'),
+      ).toMatchObject({ items: [], meta: { total: 2, totalPaginas: 2 } });
       expect(
         await queries.findVariant(randomUUID(), ready.variant_id),
       ).toBeNull();
@@ -1435,6 +1541,11 @@ describe.skipIf(!dockerAvailable)(
         db.select().from(products).where(eq(products.id, parent.product_id)),
       );
       expect(stillInactive.estado).toBe('INACTIVO');
+      const reads = new PostgresCatalogRepository(database);
+      expect(
+        await reads.findCandidateByProductId(parent.product_id, 'MARKETPLACE'),
+      ).toBeNull();
+      expect(await reads.findCandidateBySlug(parent.slug)).toBeNull();
       await service.state(
         parent.product_id,
         undefined,
@@ -1453,6 +1564,9 @@ describe.skipIf(!dockerAvailable)(
         status: 'INACTIVO',
         variants: [expect.objectContaining({ status: 'ACTIVA' })],
       });
+      expect(
+        await reads.findCandidateByProductId(parent.product_id, 'MARKETPLACE'),
+      ).toBeNull();
     });
     it('admits only one manual retry, rejects stale results and keeps COMPLETED terminal with Inbox dedupe', async () => {
       vi.stubEnv('CATALOG_PREPARATION_TIMEOUT_MS', '1');

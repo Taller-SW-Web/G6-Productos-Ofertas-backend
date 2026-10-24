@@ -6,7 +6,6 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { pathToFileURL } from 'node:url';
-import type { CommercialEligibilityPolicy } from './commercial-eligibility.js';
 import {
   CATALOG_READ_DEMO,
   type CatalogReadDemo,
@@ -74,7 +73,6 @@ async function runReadinessProbe(): Promise<void> {
     { Database },
     { CatalogConfig },
     { PricingClient },
-    eligibility,
     repository,
   ] = await Promise.all([
     import('@nestjs/core'),
@@ -82,7 +80,6 @@ async function runReadinessProbe(): Promise<void> {
     import('./database.js'),
     import('./config.js'),
     import('./pricing.client.js'),
-    import('./commercial-eligibility.js'),
     import('./postgres-catalog.repository.js'),
   ]);
   const config = new CatalogConfig(process.env);
@@ -109,7 +106,6 @@ async function runReadinessProbe(): Promise<void> {
           tamanio: 1,
           orden: 'NOMBRE_ASC',
         },
-        undefined,
         true,
       );
       eligibilityStatus = 'not_evaluated_demo';
@@ -126,9 +122,6 @@ async function runReadinessProbe(): Promise<void> {
         tamanio: 1,
         orden: 'NOMBRE_ASC',
       });
-      await app
-        .get<CommercialEligibilityPolicy>(eligibility.COMMERCIAL_ELIGIBILITY)
-        .resolve('MARKETPLACE');
       eligibilityStatus = 'ready';
     }
     status = 'ready';

@@ -7,7 +7,6 @@ import { PostgresCatalogRepository } from '../src/postgres-catalog.repository.js
 import { TaxonomyClient } from '../src/taxonomy.client.js';
 import { CatalogConfig } from '../src/config.js';
 import { DEMO_PRICING } from '../src/pricing.client.js';
-import { COMMERCIAL_ELIGIBILITY } from '../src/commercial-eligibility.js';
 import { CatalogTokenVerifier } from '../src/catalog-auth.js';
 import {
   CATALOG_MARKETPLACE_PREVIEW,
@@ -65,12 +64,6 @@ describe('Marketplace demo preview (HTTP fixtures; Pricing is mocked)', () => {
             },
           },
           { provide: PostgresCatalogRepository, useValue: repository },
-          {
-            provide: COMMERCIAL_ELIGIBILITY,
-            useValue: {
-              resolve: async () => ({ productIds: [], variantIds: [] }),
-            },
-          },
           {
             provide: TaxonomyClient,
             useValue: {
@@ -143,7 +136,6 @@ describe('Marketplace demo preview (HTTP fixtures; Pricing is mocked)', () => {
       .expect(200);
     expect(repository.listCandidates).toHaveBeenCalledWith(
       expect.objectContaining({ estado: 'BORRADOR' }),
-      undefined,
       true,
     );
     expect(repository.listDemoCandidates).not.toHaveBeenCalled();

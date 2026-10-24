@@ -10,9 +10,10 @@ import {
   type CatalogSecurityConfig,
 } from './catalog-auth.js';
 import { CATALOG_AMQP_SETTINGS } from './catalog-amqp.js';
+import { PostgresCatalogRepository } from './postgres-catalog.repository.js';
 
 /** HTTP provider regression: actual controller, guard, crypto, discovery/JWKS,
- * parser and fail-closed eligibility. No PostgreSQL or React/Gateway E2E claim. */
+ * parser and persistence failures. No PostgreSQL or React/Gateway E2E claim. */
 describe('Marketplace provider security and invalid pagination regression', () => {
   let issuer: Server,
     origin: string,
@@ -140,7 +141,7 @@ describe('Marketplace provider security and invalid pagination regression', () =
       expect((await call.expect(401)).body.code).toBe('TOKEN_INVALIDO');
     }
   });
-  it('keeps scope/client/audience 403 ahead of validation, and valid commercial reads fail closed at eligibility', async () => {
+  it('keeps scope/client/audience 403 ahead of validation, and valid reads return 503 on persistence failure', async () => {
     for (const claims of [
       { scope: 'invalid' },
       { sub: 'modulo-ventas' },
@@ -162,5 +163,36 @@ describe('Marketplace provider security and invalid pagination regression', () =
           .expect(503)
       ).body.code,
     ).toBe('SERVICIO_NO_DISPONIBLE');
+  });
+
+  it('serves an authenticated empty catalog to existing clients and does not authorize Ventas', async () => {
+    const read = vi
+      .spyOn(app.get(PostgresCatalogRepository), 'listCandidates')
+      .mockResolvedValue({ items: [], pagina: 1, tamanio: 20, total: 0 });
+    try {
+      for (const [sub, canal] of [
+        ['modulo-marketplace', 'MARKETPLACE'],
+        ['modulo-chatbot', 'CHATBOT'],
+        ['modulo-retail', 'RETAIL'],
+      ]) {
+        const response = await request(app.getHttpServer())
+          .get('/api/v1/productos?canal=' + canal)
+          .auth(token({ sub }), { type: 'bearer' })
+          .expect(200);
+        expect(response.body).toEqual({
+          items: [],
+          pagina: 1,
+          tamanio: 20,
+          total: 0,
+        });
+      }
+      await request(app.getHttpServer())
+        .get('/api/v1/productos?canal=VENTAS')
+        .auth(token({ sub: 'modulo-ventas' }), { type: 'bearer' })
+        .expect(403);
+      expect(read).toHaveBeenCalledTimes(3);
+    } finally {
+      read.mockRestore();
+    }
   });
 });

@@ -66,23 +66,21 @@ describe('Catalog provider SQL and projections (isolated)', () => {
     variantImageUrls = ['https://example.test/variant.webp'];
   });
   it('parameterizes literal text and filters eligibility in COUNT before LIMIT/OFFSET', async () => {
-    await repo.listCandidates(
-      {
-        canal: 'MARKETPLACE',
-        q: "x%' OR true --",
-        pagina: 2,
-        tamanio: 10,
-        orden: 'NOMBRE_DESC',
-      },
-      { productIds: ['product-fixture'], variantIds: ['variant-fixture'] },
-    );
+    await repo.listCandidates({
+      canal: 'MARKETPLACE',
+      q: "x%' OR true --",
+      pagina: 2,
+      tamanio: 10,
+      orden: 'NOMBRE_DESC',
+    });
     const count = statements.find((s) => s.text.includes('count(*)'))!;
     expect(count.text).toContain('exists (SELECT');
     expect(count.text).not.toContain('OR true --');
     expect(count.values).toContain("%x\\%' OR true --%");
     expect(count.values).toContain('ACTIVO');
     expect(count.values).toContain('ACTIVA');
-    expect(count.values).toContain('product-fixture');
+    expect(count.text).not.toContain('sku_channel_eligibility');
+    expect(count.text).toContain('"product_id" = "catalog"."products"."id"');
     const page = statements.find((s) => s.text.includes('limit'))!;
     expect(page.text).toContain('"nombre" desc');
     expect(page.values.slice(-2)).toEqual([10, 10]);
@@ -95,10 +93,7 @@ describe('Catalog provider SQL and projections (isolated)', () => {
     expect(simple?.sku_base).toBe('0001');
     expect(simple?.variants).toEqual([]);
     productWithVariants = true;
-    const detail = await repo.findCandidateBySlug('fixture', {
-      productIds: ['product-fixture'],
-      variantIds: ['variant-fixture'],
-    });
+    const detail = await repo.findCandidateBySlug('fixture');
     expect(detail?.variants).toEqual([
       {
         variant_id: 'variant-fixture',

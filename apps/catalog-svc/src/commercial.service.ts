@@ -9,8 +9,6 @@ import {
 } from '@nestjs/common';
 import { CatalogConfig } from './config.js';
 import { DEMO_PRICING, type CurrentProductPrice } from './pricing.client.js';
-import { COMMERCIAL_ELIGIBILITY } from './commercial-eligibility.js';
-import type { CommercialEligibilityPolicy } from './commercial-eligibility.js';
 import type {
   ProductQuery,
   ProductDetail,
@@ -30,8 +28,6 @@ import {
 export class CommercialService {
   constructor(
     private readonly repository: PostgresCatalogRepository,
-    @Inject(COMMERCIAL_ELIGIBILITY)
-    private readonly eligibility: CommercialEligibilityPolicy,
     private readonly taxonomy: TaxonomyClient,
     @Optional()
     @Inject(CATALOG_READ_DEMO)
@@ -43,6 +39,14 @@ export class CommercialService {
       currentPrice(id: string): Promise<CurrentProductPrice | null>;
     },
   ) {}
+
+  private async read<T>(work: () => Promise<T>): Promise<T> {
+    try {
+      return await work();
+    } catch {
+      throw new ServiceUnavailableException();
+    }
+  }
 
   private demoEnabled(query: ProductQuery): boolean {
     return (
@@ -126,11 +130,8 @@ export class CommercialService {
     if (isAdministrativeState && !administrativeState)
       throw new ForbiddenException();
     if (this.readDemo.enabled)
-      return this.repository.listCandidates(query, undefined, true);
-    const selection = isAdministrativeState
-      ? undefined
-      : await this.eligibility.resolve(query.canal);
-    return this.repository.listCandidates(query, selection);
+      return this.repository.listCandidates(query, true);
+    return this.read(() => this.repository.listCandidates(query));
   }
   async detail(
     slug: string,
@@ -168,17 +169,11 @@ export class CommercialService {
         throw new ServiceUnavailableException();
       }
     }
-    const selection = this.readDemo.enabled
-      ? undefined
-      : await this.eligibility.resolve(query.canal);
     const product = this.readDemo.enabled
-      ? await this.repository.findCandidateBySlug(
-          slug,
-          undefined,
-          query.canal,
-          true,
-        )
-      : await this.repository.findCandidateBySlug(slug, selection, query.canal);
+      ? await this.repository.findCandidateBySlug(slug, query.canal, true)
+      : await this.read(() =>
+          this.repository.findCandidateBySlug(slug, query.canal),
+        );
     if (!product)
       throw new HttpException({ code: 'PRODUCTO_NO_ENCONTRADO' }, 404);
     try {
@@ -202,20 +197,10 @@ export class CommercialService {
     correlationId?: string,
     identity?: TaxonomyIdentity,
   ): Promise<ProductDetail> {
-    const selection = this.readDemo.enabled
-      ? undefined
-      : await this.eligibility.resolve(canal);
     const product = this.readDemo.enabled
-      ? await this.repository.findCandidateByProductId(
-          productId,
-          undefined,
-          canal,
-          true,
-        )
-      : await this.repository.findCandidateByProductId(
-          productId,
-          selection,
-          canal,
+      ? await this.repository.findCandidateByProductId(productId, canal, true)
+      : await this.read(() =>
+          this.repository.findCandidateByProductId(productId, canal),
         );
     if (!product)
       throw new HttpException({ code: 'PRODUCTO_NO_ENCONTRADO' }, 404);
