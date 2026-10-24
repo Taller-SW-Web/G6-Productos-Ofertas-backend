@@ -5,7 +5,10 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { ApiGatewayModule } from '../src/api-gateway.module.js';
 import { CONTRACT_ROUTES } from '../src/routing/contract-routes.js';
-import { GatewayIdentity } from '../src/routing/gateway-identity.js';
+import {
+  GatewayIdentity,
+  isDemoPublicRoute,
+} from '../src/routing/gateway-identity.js';
 import {
   GATEWAY_SETTINGS,
   readGatewaySettings,
@@ -82,13 +85,18 @@ describe('Gateway no-auth demo mode', () => {
       await new Promise<void>((done) => provider.close(() => done()));
   });
 
-  it.each(CONTRACT_ROUTES)(
+  it.each(CONTRACT_ROUTES.filter(isDemoPublicRoute))(
     '$method $path forwards without requiring or forwarding Authorization',
     async (route) => {
-      const path = route.path.replace(
+      const routePath = route.path.replace(
         /\{[^}]+\}/g,
         '11111111-1111-1111-1111-111111111111',
       );
+      const path =
+        route.operationId === 'listarProductos' ||
+        route.operationId === 'obtenerProductoPorSlug'
+          ? `${routePath}?canal=MARKETPLACE`
+          : routePath;
       const success = Object.entries(route.responses).find(
         ([status]) => Number(status) >= 200 && Number(status) < 300,
       )!;
@@ -129,9 +137,19 @@ describe('Gateway no-auth demo mode', () => {
     },
   );
 
+  it('keeps write operations authenticated while demo read bypass is enabled', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/api/v1/productos')
+      .set('Content-Type', 'application/json')
+      .send({ fixture: true });
+
+    expect(response.status).toBe(401);
+    expect(calls).toHaveLength(0);
+  });
+
   it('ignores invalid supplied Authorization and does not forward it', async () => {
     const response = await request(app.getHttpServer())
-      .get('/api/v1/productos')
+      .get('/api/v1/productos?canal=MARKETPLACE')
       .set('Authorization', 'Bearer secret-that-must-not-leak');
 
     expect(response.status).toBe(200);
@@ -140,13 +158,18 @@ describe('Gateway no-auth demo mode', () => {
   });
 
   it.each(['MARKETPLACE', 'CHATBOT', 'RETAIL', 'VENTAS'])(
-    'passes channel %s through to the catalog upstream',
+    'passes channel %s through only when that request is authenticated or public',
     async (canal) => {
       const response = await request(app.getHttpServer()).get(
         `/api/v1/productos?canal=${canal}`,
       );
-      expect(response.status).toBe(200);
-      expect(calls[0].url).toBe(`/api/v1/productos?canal=${canal}`);
+      if (canal === 'MARKETPLACE') {
+        expect(response.status).toBe(200);
+        expect(calls[0].url).toBe(`/api/v1/productos?canal=${canal}`);
+      } else {
+        expect(response.status).toBe(401);
+        expect(calls).toHaveLength(0);
+      }
     },
   );
 
@@ -167,9 +190,9 @@ describe('Gateway no-auth demo mode', () => {
       '/api/v1/categorias',
     );
 
-    expect(missingIdempotency.status).toBe(400);
+    expect(missingIdempotency.status).toBe(401);
     expect(invalidCorrelation.status).toBe(400);
-    expect(wrongContentType.status).toBe(400);
+    expect(wrongContentType.status).toBe(401);
     expect(unknown.status).toBe(404);
     expect(wrongMethod.status).toBe(404);
     expect(calls).toHaveLength(0);
