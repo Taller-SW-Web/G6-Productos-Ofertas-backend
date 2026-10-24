@@ -49,7 +49,9 @@ describe('Fronteras de escritura bloqueadas por contrato', () => {
     async (method, path) => {
       const client = request(app.getHttpServer());
       const call = method === 'PATCH' ? client.patch(path) : client.post(path);
-      await call.send({ precioRegular: 12.3, priceVersion: 1 }).expect(404);
+      await call
+        .send({ precioRegular: 12.3, priceVersion: 1 })
+        .expect(path.includes('/importaciones') ? 404 : 503);
       expect(update).not.toHaveBeenCalled();
       expect(schedule).not.toHaveBeenCalled();
       expect(transaction).not.toHaveBeenCalled();

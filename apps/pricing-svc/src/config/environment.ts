@@ -11,6 +11,7 @@ export interface PricingConfig {
   databaseSsl: false | ConnectionOptions;
   auth?: { issuer: string; jwksUrl: string };
   demoNoAuthEnabled?: boolean;
+  amqpUrl?: string;
 }
 
 export class InvalidPricingConfig extends Error {}
@@ -172,5 +173,32 @@ export function validateEnvironment(env: NodeJS.ProcessEnv): PricingConfig {
     databaseSsl,
     ...(auth ? { auth } : {}),
     ...(demoNoAuthEnabled ? { demoNoAuthEnabled: true } : {}),
+    ...(env.PRICING_AMQP_URL === undefined
+      ? {}
+      : { amqpUrl: validateAmqpUrl(env.PRICING_AMQP_URL, nodeEnv) }),
   };
+}
+
+export function validateAmqpUrl(value: string, environment: string): string {
+  try {
+    const url = new URL(value);
+    if (
+      value !== value.trim() ||
+      url.hash ||
+      url.search ||
+      !url.username ||
+      !url.password ||
+      !['amqp:', 'amqps:'].includes(url.protocol) ||
+      (url.protocol !== 'amqps:' &&
+        (environment === 'production' ||
+          !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)))
+    )
+      throw new Error();
+    url.searchParams.set('heartbeat', '5');
+    return url.toString();
+  } catch {
+    throw new InvalidPricingConfig(
+      'PRICING_AMQP_URL debe ser AMQPS; AMQP solo en loopback de pruebas.',
+    );
+  }
 }

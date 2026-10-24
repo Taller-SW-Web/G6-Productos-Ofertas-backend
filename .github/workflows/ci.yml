@@ -83,6 +83,14 @@ jobs:
           PRICING_TEST_POSTGRES: '1'
         run: npm run test:e2e -- apps/pricing-svc --reporter=verbose
 
+      - name: Vera providers and messaging on disposable PostgreSQL and RabbitMQ
+        env:
+          PRICING_TEST_POSTGRES: '1'
+          PRICING_TEST_AMQP: '1'
+          PRICE_AUDIT_TEST_POSTGRES: '1'
+          PRICE_AUDIT_TEST_AMQP: '1'
+        run: npm run test:e2e -- apps/pricing-svc apps/price-audit-svc --reporter=verbose
+
       - name: Build individual representative application (catalog-svc)
         run: npm run build:catalog-svc
 
@@ -229,6 +237,10 @@ jobs:
               # Fixture aislada: liveness no necesita una base disponible.
               runtime_env+=(--env 'DATABASE_URL=postgresql://pricing:ci-fixture@127.0.0.1:1/pricing?sslmode=verify-full')
             fi
+            if [[ "$service" == price-audit-svc ]]; then
+              runtime_env+=(--env 'DATABASE_URL=postgresql://audit:ci-fixture@127.0.0.1:1/audit?sslmode=verify-full'
+                --env 'AUTH_ISSUER=https://identity.invalid' --env 'AUTH_JWKS_URL=https://identity.invalid/jwks')
+            fi
             docker run --detach --name "$name" --publish "127.0.0.1::${port}" \
               --env "PORT=${port}" --env "${port_env}=${port}" "${runtime_env[@]}" "g6-service:${service}-ci" >/dev/null
             host_port="$(docker port "$name" "${port}/tcp" | awk -F: '{print $NF}')"
@@ -249,13 +261,13 @@ jobs:
                 process.exit(1);
               }
             ' "$response" "$service"
-            if [[ "$service" == pricing-svc ]]; then
+            if [[ "$service" == pricing-svc || "$service" == price-audit-svc ]]; then
               readiness_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${host_port}/health/ready")"
               if [[ "$readiness_status" != 503 ]]; then
-                printf 'FAIL: pricing-svc debe responder readiness=503 con la base de fixture inaccesible.\n' >&2
+                printf 'FAIL: %s debe responder readiness=503 con la base de fixture inaccesible.\n' "$service" >&2
                 exit 1
               fi
-              printf 'PASS: pricing-svc mantiene liveness=200 y readiness=503 con PostgreSQL inaccesible.\n'
+              printf 'PASS: %s mantiene liveness=200 y readiness=503 con PostgreSQL inaccesible.\n' "$service"
             fi
             healthy=''
             for attempt in {1..30}; do

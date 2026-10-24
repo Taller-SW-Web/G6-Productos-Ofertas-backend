@@ -6,7 +6,7 @@ import {
 } from '../domain/price.js';
 import { record } from './pricing-read.guard.js';
 
-// Preparación interna, sin rutas ni PriceFact: P-PRI-02 sigue bloqueando HTTP.
+// DTO contractual; autorizar escrituras y construir PriceFact exige providers aprobados.
 function money(value: unknown): string {
   requireRule(
     typeof value === 'number' && Number.isFinite(value),

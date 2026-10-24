@@ -27,7 +27,15 @@ export class PricingHttpFilter implements ExceptionFilter {
           ? new PricingHttpError(503, 'SERVICIO_NO_DISPONIBLE')
           : error instanceof PriceRuleError
             ? new PricingHttpError(
-                error.code === 'PRECIO_NO_ENCONTRADO' ? 404 : 400,
+                error.code === 'PRECIO_NO_ENCONTRADO'
+                  ? 404
+                  : [
+                        'VERSION_CONFLICT',
+                        'VIGENCIA_SUPERPUESTA',
+                        'IDEMPOTENCY_CONFLICT',
+                      ].includes(error.code)
+                    ? 409
+                    : 400,
                 error.code,
               )
             : new PricingHttpError(500, 'ERROR_INTERNO');

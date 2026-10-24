@@ -1,5 +1,72 @@
 # pricing-svc — configuración y persistencia (#52, #53)
 
+## Entrega Vera 2026-10-23: #24 y #55–60
+
+Esta sección actualiza el estado del candidato; las secciones siguientes son
+evidencia histórica de sus SHA. Rama `vera` sincronizada con
+`origin/master@0b4e385` mediante merge normal. No se acredita Oracle ni E2E real.
+
+| operationId / alcance | Estado del candidato |
+|---|---|
+| consultarPrecios; obtenerPrecioSku (#24/#55) | Handlers GET, resolver propio, parámetros SKU/canal/instante y JWT humano/servicio. Provider HTTP/DB probado con contexto Catalog de fixture; sin integración productiva de Catalog. |
+| obtenerPrecioBaseProducto; listarProgramacionesPrecioProducto; listarProgramacionesPrecioSku; obtenerImportacionPrecios (#55) | Lecturas existentes conservadas. |
+| prevalidarImportacionPrecios; descargarReporteImportacionPrecios (#55) | Sin implementación: P-PRI-01 formato/política de importación sin aprobar. No se inventan parser, cabeceras ni reporte. |
+| actualizarPrecioSku; actualizarPrecioBaseProducto; programarPrecioSku; programarPrecioBaseProducto (#56) | Controladores usan mutaciones existentes, versión/conflictos y Outbox transaccional. Por defecto 503 sin autorizer G7 y factory aprobados; fixtures explícitas prueban HTTP/SQL, actor no viene del body. |
+| crearImportacionPrecios (#56) | Sin implementación por P-PRI-01. No se fabrica admisión 202 ni procesamiento masivo. |
+| pricing.price.changed (#57) | Relay real con confirms, mandatory/rutas, persistencia y replay del mismo message_id. Solo envelope, no se inventa GenericData. P-PRI-02 sigue abierto. |
+| Otros eventos/commands candidatos de #57 | Inicialización, bulk y catalog.sku.deactivated no tienen nuevos handlers en esta entrega; requieren completar su caso de uso/acuerdo por operación. No se presentan como implementados por existir el relay. |
+| Resiliencia (#58) | Fallos DB/broker, confirm sin ruta, rollback después del confirm, relays concurrentes, reconexión y logs sanitizados probados aisladamente. No se promete exactly-once ni homologación productiva. |
+| React/Gateway (#59) | Provider preparado; Frontend #45/PR #47 y Gateway #21 pendientes de integración real. No se modificó frontend. |
+| Recorrido completo (#60) | Segmentos HTTP/SQL/Outbox y broker probados; falta React/Gateway/contexto Catalog/grant G7 y payload acordado. No se declara E2E comercial. |
+
+PRICING_CATALOG_CONTEXT es un puerto interno sin provider productivo implícito.
+Debe resolver producto/variante, SKU, estado y elegibilidad desde Catalog/Poma.
+No hay SQL cruzado ni endpoint inventado. Ausencia real usa el único 404 publicado
+PRECIO_NO_ENCONTRADO; fallo/ausencia de provider devuelve 503, no lista vacía.
+Batch omite solo ausencia contractual de precio, propaga otros errores. Se
+requiere mapping aprobado PRICING_CHANNEL_IDS entre enum comercial y UUID canónico;
+el nombre del canal no se usa como UUID. Precio vigente devuelve versión de la
+definición para CAS; consulta histórica explícita devuelve versión del snapshot.
+
+PRICING_WRITE_AUTHORIZER y PRICING_FACT_FACTORY son ports internos sin defaults
+productivos. Vera/Marco/G7 deben implementar introspección/autorización mutante y
+Marco/Vera/consumidores acordar P-PRI-02 antes de habilitar escrituras. La factory
+recibe estado antes/después dentro del lock; fallo revierte toda la transacción.
+JWT firmado de lectura no sustituye autorización mutante/introspección. Incluso
+con el bypass demo previo, no se permiten escrituras sin esos dos providers.
+
+PRICING_AMQP_URL es opcional. AMQPS obligatorio salvo loopback dev/test,
+heartbeat 5 s; sin parámetros arbitrarios. Relay comprueba po.eventos.x, nunca
+declara topología. Cada lote bloquea hasta 10 pendientes con skip-locked,
+publish durable/mandatory/confirm y marca published_at después de confirmar ruta.
+Fallo no descarta; attempts/last_error sanitizado y readiness permiten observarlo.
+Un rollback DB después del confirm puede repetir message_id: Inbox del consumidor
+debe deduplicar. Sin URL no se activa el worker ni dependencia AMQP.
+Topología/ACL/red Oracle y retry/DLX: Marco/#29/#110, aprobación y prueba real
+separadas. No se publica a un broker compartido desde los tests.
+
+Fuentes de este corte: Docs oficial master
+`1ee0d9e5a788dbe559a376bf96a60c6117af3956`: SPEC-013, OpenAPI, AsyncAPI,
+modelo Pricing y DEC-F-001/006/009/012. Paquete operativo
+`integraciones/g1-marketplace/{README,MATRIZ_OPERACIONES_H4,PRUEBAS_Y_EVIDENCIAS_H4}.md`
+de master y acuerdo/alineación Docs PR #94
+`a8d89296b0eac37315ef30a9390f1e4e30933136` leídos; coinciden en identidades
+separadas, precio por SKU/canal/vigencia y JWT servidor a servidor por scope.
+No se atribuye grant real a JWT firmados por la fixture.
+
+Pruebas y dependencias compartidas autorizadas: ver
+[evidencia reproducible Price Audit](../price-audit-svc/README.md#pruebas-reproducibles).
+Resumen local: 662 unitarias PASS; 432 E2E PASS y 37 omitidas de otros servicios;
+typecheck general y estricto de fuentes/tests, lint y builds propios PASS.
+CSV/PDF y consumidor Audit tienen pruebas separadas; no convierten segmentos
+aislados en el recorrido React→Gateway→Pricing→Audit.
+
+No se cierran automáticamente #24/#55–60: faltan sus criterios de integración
+documentados. Owner/condición: Poma/Vera contrato Catalog y provider probado;
+Marco/Vera formato P-PRI-01; Marco/Vera/consumidores payload P-PRI-02;
+Marco/G7 introspección/grant; Marco/Gateway/Frontend #45 composición y recorrido
+con SHAs y token/dataset reales; Marco aprobación individual Oracle #111.
+
 Owner: Leonardo Vera, rama `vera`. Alcance operativo: `IMPLEMENTAR_AHORA`.
 
 **Entrega interna #13, #24, #55–#60:** consultas administrativas, autenticación
