@@ -12,6 +12,7 @@ import { promotionsBrokerBinding } from '../../../dist/apps/promotions-svc/coupo
 import { verifyAssignedEvents } from './support/assigned-event-checks.mjs';
 import { verifyCouponEligibility } from './support/coupon-eligibility-checks.mjs';
 import { verifyRestorationConformance } from './support/restoration-conformance-checks.mjs';
+import { verifyNativeTransport } from './support/native-transport-checks.mjs';
 import {
   docsRevision,
   officialMigrations,
@@ -514,6 +515,15 @@ try {
     results.queue,
     'po.resultados.x',
     'promotions.coupon.#',
+  );
+  checks.push(
+    ...(await verifyNativeTransport({
+      brokerPort,
+      brokerContainer: created[1],
+      channel,
+      resultsQueue: results.queue,
+      docker,
+    })),
   );
   const brokerCommand = command();
   const receiving = await connection.createChannel();

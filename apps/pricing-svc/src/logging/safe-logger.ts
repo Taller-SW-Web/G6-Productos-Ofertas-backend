@@ -5,11 +5,13 @@ const MESSAGES = new Set([
   'Configuración inválida: revisar NODE_ENV, PRICING_SVC_PORT/PORT y DATABASE_URL/TLS.',
   'No se pudo iniciar pricing-svc.',
   'Conexión PostgreSQL inactiva no disponible.',
+  'Publicación AMQP de Pricing pendiente de recuperación.',
 ]);
 const CONTEXTS = new Set([
   'Bootstrap',
   'PricingReadiness',
   'PricingDatabase',
+  'PricingOutboxRelay',
   'NestFactory',
   'NestApplication',
 ]);

@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, count, eq, isNull } from 'drizzle-orm';
+import { and, asc, count, eq, isNull, or, lte, gt, inArray } from 'drizzle-orm';
+import type { PriceDefinition } from '../domain/price.js';
 import {
   PricingDatabase,
   type PricingTransaction,
@@ -21,6 +22,58 @@ export class PricingRepository {
   constructor(
     @Inject(PricingDatabase) private readonly database: PricingDatabase,
   ) {}
+
+  readCandidates(
+    productId: string,
+    sku: string,
+    channelId: string | null,
+    at: Date,
+  ) {
+    return this.transaction(
+      async (tx) => {
+        const rows = await tx
+          .select()
+          .from(prices)
+          .where(
+            and(
+              or(eq(prices.productId, productId), eq(prices.sku, sku)),
+              channelId === null
+                ? isNull(prices.channelId)
+                : or(eq(prices.channelId, channelId), isNull(prices.channelId)),
+            ),
+          );
+        if (!rows.length) return [];
+        const snapshots = await tx
+          .select()
+          .from(priceValidities)
+          .where(
+            and(
+              inArray(
+                priceValidities.priceId,
+                rows.map((row) => row.id),
+              ),
+              eq(priceValidities.isCancelled, false),
+              lte(priceValidities.validFrom, at),
+              or(
+                isNull(priceValidities.validUntil),
+                gt(priceValidities.validUntil, at),
+              ),
+            ),
+          );
+        return rows.map((row) => ({
+          target: (row.productId !== null
+            ? { productId: row.productId, sku: null }
+            : { productId: null, sku: row.sku! }) as PriceDefinition['target'],
+          channelId: row.channelId,
+          priceVersion: row.priceVersion,
+          validities: snapshots.filter(
+            (snapshot) => snapshot.priceId === row.id,
+          ),
+        }));
+      },
+      { isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
+  }
 
   // El caller construye snapshot + Outbox/Inbox en el mismo tx; no publicar aquí.
   async transaction<T>(

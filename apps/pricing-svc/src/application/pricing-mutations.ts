@@ -23,6 +23,8 @@ export type PriceFact = Pick<
   typeof outbox.$inferInsert,
   'messageId' | 'correlationId' | 'causationId' | 'operationId' | 'payload'
 >;
+export type PriceFactSource =
+  PriceFact | ((before: PriceDefinition, after: PriceDefinition) => PriceFact);
 
 @Injectable()
 export class PricingMutations {
@@ -36,20 +38,20 @@ export class PricingMutations {
     input: PriceUpdate,
     expectedVersion: bigint,
     now: Date,
-    fact: PriceFact,
+    fact: PriceFactSource,
   ) {
     return this.repository.transaction(async (tx) => {
       const { row, definition } = await this.load(tx, target, channelId);
       const result = changePrice(definition, input, expectedVersion, now);
-      await this.persist(
+      const stored = await this.persist(
         tx,
         row.id,
         result.definition,
         expectedVersion,
         now,
-        fact,
+        typeof fact === 'function' ? fact(definition, result.definition) : fact,
       );
-      return result;
+      return { ...result, validityId: stored.id };
     });
   }
 
@@ -58,7 +60,7 @@ export class PricingMutations {
     channelId: string | null,
     input: Parameters<typeof schedulePrice>[1],
     now: Date,
-    fact: PriceFact,
+    fact: PriceFactSource,
   ) {
     return this.repository.transaction(async (tx) => {
       const { row, definition } = await this.load(tx, target, channelId);
@@ -69,7 +71,7 @@ export class PricingMutations {
         plan,
         row.priceVersion,
         now,
-        fact,
+        typeof fact === 'function' ? fact(definition, plan) : fact,
       );
       const [scheduled] = await tx
         .insert(scheduledPrices)
