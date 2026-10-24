@@ -110,6 +110,15 @@ Gateway, configuración, permisos ni datos compartidos. `node --check` y
 `git diff --check` pasan. La nueva ejecución completa de CI se identifica por el
 SHA que contiene este ajuste; el run anterior no se presenta como CI global PASS.
 
+La ejecución `40060791828` de `c193fac` pasó el smoke online, el proveedor real
+Drizzle/Taxonomy y el smoke offline, incluidos los nuevos 503 de Catálogo. Detectó
+una carrera al recuperar PostgreSQL: el script solo esperaba a Taxonomy, mientras
+Catálogo puede conservar una comprobación fallida hasta drenar su trabajo
+subyacente (timeout HTTP 2 s, pool 10 s). La prueba espera ahora readiness 200 de
+Catálogo durante un máximo de 30 s; solo admite 503 contractual como estado
+transitorio y falla ante otro status o al agotar el plazo. El control del servicio
+no se modifica ni se acepta un 503 como resultado final satisfactorio.
+
 | Owner | Operación o cierre | Condición verificable |
 | --- | --- | --- |
 | Marco/Arquitectura + owner Docs | Ratificación/documentación D-CAT-05/06 | Aprobación registrada y publicación versionada alineada en Docs |
