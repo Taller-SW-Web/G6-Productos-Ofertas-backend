@@ -12,12 +12,14 @@ async function check(path, expected, bearer = valid, base = 'http://api-gateway:
   if (base.includes('api-gateway') && path.startsWith('/api/')) assert.equal(response.headers.get('x-correlation-id'), correlation);
   if (expected >= 400) {
     assert.match(response.headers.get('content-type'), /application\/problem\+json/);
-    assert.equal(payload.code, ({ 400: 'VALIDACION', 401: 'TOKEN_INVALIDO', 403: 'SCOPE_INSUFICIENTE', 503: 'SERVICIO_NO_DISPONIBLE' })[expected]);
+    assert.equal(payload.code, ({ 400: 'VALIDACION', 401: 'TOKEN_INVALIDO', 403: 'SCOPE_INSUFICIENTE', 404: 'PRODUCTO_NO_ENCONTRADO', 503: 'SERVICIO_NO_DISPONIBLE' })[expected]);
   }
   return payload;
 }
 if (process.argv[2] === 'offline') {
   await check('/api/v1/categorias', 503);
+  await check('/api/v1/productos?canal=MARKETPLACE&q=ci', 503);
+  await check('/health/ready', 503, '', 'http://catalog-svc:3001');
   await check('/health', 200);
 } else {
   assert.deepEqual((await check('/api/v1/categorias', 200)).categories, []);
@@ -26,11 +28,11 @@ if (process.argv[2] === 'offline') {
     await check(path, 401, expired);
     await check(path, 403, forbidden);
   }
-  await check('/api/v1/productos?canal=MARKETPLACE&q=ci', 503);
-  await check('/api/v1/productos/por-slug/inexistente?canal=MARKETPLACE', 503);
+  assert.deepEqual(await check('/api/v1/productos?canal=MARKETPLACE&q=ci', 200), { items: [], pagina: 1, tamanio: 20, total: 0 });
+  await check('/api/v1/productos/por-slug/inexistente?canal=MARKETPLACE', 404);
   await check('/api/v1/productos?canal=MARKETPLACE&pagina=0', 400);
   await check('/health/ready', 200, '', 'http://taxonomy-svc:3006');
-  await check('/health/ready', 503, '', 'http://catalog-svc:3001');
+  await check('/health/ready', 200, '', 'http://catalog-svc:3001');
   await check('/health', 200, '', 'http://catalog-svc:3001');
 }
 console.log('PASS: Docker Marketplace ' + (process.argv[2] ?? 'online') + ' (sin elegibilidad comercial inventada)');

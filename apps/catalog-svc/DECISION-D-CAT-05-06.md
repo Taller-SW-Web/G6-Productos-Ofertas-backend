@@ -95,6 +95,21 @@ Las omisiones locales incluyen PostgreSQL, RabbitMQ e integración configurable.
 La CI del commit candidato debe consultarse por SHA antes de afirmar que las
 pruebas desechables se ejecutaron; los resultados locales no las reemplazan.
 
+En `fb73cac7a8bc6fc14653c71bc21488dac7f51166`, la CI
+[40060234883](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/40060234883)
+aprobó 752 unitarias y 450 E2E (60 omitidas), incluidos los 19 casos de persistencia
+y los 4 de arranque/TLS de Catálogo. El run global falló en el smoke compartido
+porque esperaba 503 para el listado vacío que ahora devuelve correctamente 200.
+
+Gabriel autorizó expresamente modificar **únicamente**
+`scripts/ci/marketplace-probe.mjs`, como excepción puntual al alcance compartido de
+AGENTS.md §3: validar listado vacío 200, slug inexistente 404, readiness 200,
+conservar 401/403 y comprobar 503 de listado/readiness al detener PostgreSQL.
+Se incorpora el código contractual 404 en el helper de aserciones; no se alteran
+Gateway, configuración, permisos ni datos compartidos. `node --check` y
+`git diff --check` pasan. La nueva ejecución completa de CI se identifica por el
+SHA que contiene este ajuste; el run anterior no se presenta como CI global PASS.
+
 | Owner | Operación o cierre | Condición verificable |
 | --- | --- | --- |
 | Marco/Arquitectura + owner Docs | Ratificación/documentación D-CAT-05/06 | Aprobación registrada y publicación versionada alineada en Docs |
