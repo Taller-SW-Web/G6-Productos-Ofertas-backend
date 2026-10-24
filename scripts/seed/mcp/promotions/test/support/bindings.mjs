@@ -19,6 +19,7 @@ export function isolatedBindings() {
   const prices = skus.map((s, index) => ({
     sku: s.sku,
     channel_id: null,
+    currency: 'PEN',
     amount: String(100 + index),
     valid_from: '2026-11-01T05:00:00Z',
     valid_until: '2026-12-01T05:00:00Z',
