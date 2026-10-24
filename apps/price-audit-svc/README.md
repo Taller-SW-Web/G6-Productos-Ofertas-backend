@@ -2,7 +2,7 @@
 
 Owner Leonardo Vera; rama `vera`; corte 2026-10-23. Implementación interna y
 pruebas locales no acreditan despliegue Oracle, homologación ni grants G7.
-El cierre integral de #63/#66 y la integración #68/#69 siguen parciales.
+El cierre integral de #63/#65/#66 y la integración #68/#69 siguen parciales.
 
 ## Fuentes verificadas
 
@@ -109,7 +109,7 @@ grants compartidos se verifican aparte, no se ejecutan desde este servicio.
 | #62 | Schema propio, ACL append-only, dedupe y rollback SQL probados contra migración normativa intacta. |
 | #63 | Invariantes monetarias/null, límites y protección de originales probados; mapping/variación y archivo frío pendientes P-AUD-02/03. |
 | #64 | Lecturas/descargas contractuales con DB aislada y JWT, filtros, paginación, vacío, validación, 401/403/404. |
-| #65 | Única escritura HTTP publicada: crear exportación transaccional con CSV/PDF reales; no CRUD de bitácora. |
+| #65 | ABIERTO / IMPLEMENTADO_PARCIAL. Persistencia transaccional, pruebas aisladas y exportaciones CSV/PDF implementadas. Falta consumir cambios reales de Pricing mediante decoder productivo aprobado, sujeto a P-AUD-02; AUDIT_PRICE_CHANGE_DECODER permanece null. Las fixtures no acreditan consumo productivo. PR #139 solo referencia este issue, sin cierre automático. |
 | #66 | Inbox/ACK/dedupe/reconexión con broker real y decoder de fixture; mapping productivo y homologación pendientes. |
 | #67 | Timeouts DB/JWKS/AMQP, readiness y logs sanitizados probados; sin diagnóstico productivo atribuido. |
 | #68 | Provider preparado; falta React→Gateway con Frontend #45 / Backend #21. No se modificó frontend ni Gateway. |
