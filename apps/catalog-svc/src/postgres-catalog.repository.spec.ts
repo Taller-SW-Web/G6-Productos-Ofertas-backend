@@ -128,6 +128,39 @@ describe('Catalog provider SQL and projections (isolated)', () => {
     ]);
   });
 
+  it('collects lightweight sellable candidates before hydration and applies matched IDs before count/page', async () => {
+    const query = {
+      canal: 'MARKETPLACE' as const,
+      pagina: 1,
+      tamanio: 1,
+      orden: 'NOMBRE_ASC' as const,
+      q: 'fixture',
+    };
+    await repo.priceCandidates(query);
+    expect(statements.filter((s) => s.text.startsWith('select'))).toHaveLength(
+      2,
+    );
+    expect(
+      statements.every(
+        (s) => !/images|attribute_values|limit|offset/.test(s.text),
+      ),
+    ).toBe(true);
+    expect(
+      statements.some((s) =>
+        s.text.includes('inner join "catalog"."variants"'),
+      ),
+    ).toBe(true);
+    statements.length = 0;
+    await repo.listCandidates(query, false, [
+      '00000000-0000-4000-8000-000000000001',
+    ]);
+    const count = statements.find((s) => s.text.includes('count(*)'))!;
+    expect(count.text).toContain('ANY(');
+    expect(count.values).toContainEqual([
+      '00000000-0000-4000-8000-000000000001',
+    ]);
+  });
+
   it('checks demo read access with bounded SELECT-only probes on the four required tables', async () => {
     await repo.checkDemoReadAccess();
     const checks = statements.filter((statement) =>

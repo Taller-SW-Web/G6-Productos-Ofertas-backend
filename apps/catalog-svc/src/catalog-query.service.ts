@@ -2,12 +2,14 @@ import {
   BadRequestException,
   HttpException,
   Injectable,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { CatalogQueryRepository } from './catalog-query.repository.js';
 import { CommercialService } from './commercial.service.js';
 import type { Canal } from './commercial.types.js';
 import type { TaxonomyIdentity } from './taxonomy.client.js';
+import { BarcodeService } from './barcode.service.js';
 
 const channels: readonly Canal[] = [
   'MARKETPLACE',
@@ -66,6 +68,7 @@ export class CatalogQueryService {
   constructor(
     private readonly repository: CatalogQueryRepository,
     private readonly commercial: CommercialService,
+    @Optional() private readonly barcode?: BarcodeService,
   ) {}
 
   product(
@@ -125,7 +128,7 @@ export class CatalogQueryService {
     return result;
   }
 
-  resolveBarcode(body: unknown): never {
+  resolveBarcode(body: unknown): Promise<{ sku: string }> {
     if (
       !body ||
       typeof body !== 'object' ||
@@ -135,7 +138,7 @@ export class CatalogQueryService {
       (body as Record<string, string>).codigo_barras.length === 0
     )
       throw new BadRequestException();
-    // D-CAT-01..04: no approved persisted barcode association exists yet.
-    throw new ServiceUnavailableException({ code: 'SERVICIO_NO_DISPONIBLE' });
+    if (!this.barcode) throw new ServiceUnavailableException();
+    return this.barcode.resolve((body as Record<string, string>).codigo_barras);
   }
 }

@@ -1,5 +1,11 @@
 # catalog-svc — configuración y readiness (#43)
 
+Los [puntos 2 y 3](DECISION-PUNTOS-2-3.md) incorporan filtros monetarios previos a
+paginación y el resolver persistente de códigos de barras, con administración
+interna autorizada. La integración productiva con Pricing requiere su identidad,
+contexto SKU y mapeo de canales; barcode requiere aplicar la migración aditiva
+`migrations/0002_create_sku_barcodes.sql` mediante el procedimiento oficial.
+
 La [decisión D-CAT-05/06](DECISION-D-CAT-05-06.md) registra la elegibilidad global
 implementada por indicación de Gabriel en `poma`: producto simple ACTIVO, o padre
 ACTIVO con al menos una variante ACTIVA. Los detalles incluyen únicamente variantes
@@ -109,7 +115,7 @@ diferidos existentes. Los errores se exponen mediante `CatalogPersistenceError`
 con una categoría interna segura;
 el SQL, los parámetros y el texto del driver no se incluyen en mensajes.
 
-Las 19 pruebas actuales de `postgres.persistence.e2e-spec.ts` usan PostgreSQL 17
+Las 21 pruebas actuales de `postgres.persistence.e2e-spec.ts` usan PostgreSQL 17
 efímero con TLS, role `catalog_app` y un schema ajeno de comprobación. Incluyen
 persistencia, DATA-002, coordinación transaccional y fallos del pool; el caso
 JOINT-01 utiliza además un RabbitMQ desechable. En local,

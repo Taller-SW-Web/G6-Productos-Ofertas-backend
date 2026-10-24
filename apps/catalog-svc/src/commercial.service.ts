@@ -8,6 +8,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { CatalogConfig } from './config.js';
+import { CatalogPriceFilter } from './catalog-price-filter.js';
 import { DEMO_PRICING, type CurrentProductPrice } from './pricing.client.js';
 import type {
   ProductQuery,
@@ -38,6 +39,7 @@ export class CommercialService {
     private readonly pricing?: {
       currentPrice(id: string): Promise<CurrentProductPrice | null>;
     },
+    @Optional() private readonly priceFilter?: CatalogPriceFilter,
   ) {}
 
   private async read<T>(work: () => Promise<T>): Promise<T> {
@@ -85,10 +87,16 @@ export class CommercialService {
     administrativeState = false,
     identity?: TaxonomyIdentity,
   ): Promise<ProductPage> {
-    if (query.precioMin !== undefined || query.precioMax !== undefined) {
-      // Falta semántica de precio por producto y frontera Pricing aprobada.
+    const monetary =
+      query.precioMin !== undefined || query.precioMax !== undefined;
+    // Administrative non-active and demo searches retain their previous scope.
+    if (
+      monetary &&
+      (this.readDemo.enabled ||
+        this.demoEnabled(query) ||
+        (query.estado !== undefined && query.estado !== 'ACTIVO'))
+    )
       throw new ServiceUnavailableException();
-    }
     if (!this.readDemo.enabled && this.demoEnabled(query)) {
       if (query.estado !== undefined)
         throw new BadRequestException('estado no está disponible en preview');
@@ -131,6 +139,21 @@ export class CommercialService {
       throw new ForbiddenException();
     if (this.readDemo.enabled)
       return this.repository.listCandidates(query, true);
+    if (monetary)
+      return this.read(async () => {
+        if (!this.priceFilter) throw new ServiceUnavailableException();
+        const candidates = await this.repository.priceCandidates(query);
+        const productIds = await this.priceFilter.matchingProducts(
+          candidates,
+          query,
+          correlationId,
+        );
+        return this.repository.listCandidates(
+          { ...query, precioMin: undefined, precioMax: undefined },
+          false,
+          productIds,
+        );
+      });
     return this.read(() => this.repository.listCandidates(query));
   }
   async detail(

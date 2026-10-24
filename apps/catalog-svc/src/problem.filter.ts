@@ -35,9 +35,11 @@ export class ProblemFilter implements ExceptionFilter {
         : status === 403
           ? 'SCOPE_INSUFICIENTE'
           : status === 404
-            ? ['PRODUCTO_NO_ENCONTRADO', 'VARIANTE_NO_ENCONTRADA'].includes(
-                String(supplied),
-              )
+            ? [
+                'PRODUCTO_NO_ENCONTRADO',
+                'VARIANTE_NO_ENCONTRADA',
+                'CODIGO_BARRAS_NO_ENCONTRADO',
+              ].includes(String(supplied))
               ? String(supplied)
               : 'PRODUCTO_NO_ENCONTRADO'
             : status === 409 &&

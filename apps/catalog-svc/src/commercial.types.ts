@@ -7,8 +7,8 @@ export interface ProductQuery {
   pagina: number;
   tamanio: number;
   estado?: 'BORRADOR' | 'ACTIVO' | 'INACTIVO';
-  precioMin?: number;
-  precioMax?: number;
+  precioMin?: string | number;
+  precioMax?: string | number;
   orden: 'NOMBRE_ASC' | 'NOMBRE_DESC';
 }
 export interface Attribute {

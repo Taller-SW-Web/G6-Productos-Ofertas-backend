@@ -7,6 +7,7 @@ describe('CommercialService', () => {
     listCandidates: vi.fn(),
     findCandidateBySlug: vi.fn(),
     findCandidateByProductId: vi.fn(),
+    priceCandidates: vi.fn(),
   };
   const taxonomy = { category: vi.fn(), brand: vi.fn() };
   const service = new CommercialService(repository as never, taxonomy as never);
@@ -49,5 +50,58 @@ describe('CommercialService', () => {
     repository.listCandidates.mockResolvedValue({ items: [], total: 0 });
     await service.list(query);
     expect(repository.listCandidates).toHaveBeenCalledWith(query);
+  });
+
+  it('evaluates the complete lightweight candidate set before the SQL product count/page', async () => {
+    const candidates = Array.from({ length: 250 }, (_, i) => ({
+      productId: 'p' + i,
+      sku: 's' + i,
+    }));
+    repository.priceCandidates.mockResolvedValue(candidates);
+    repository.listCandidates.mockResolvedValue({
+      items: [{ product_id: 'p150' }],
+      total: 1,
+    });
+    const filter = { matchingProducts: vi.fn(async () => ['p150']) };
+    const priced = new CommercialService(
+      repository as never,
+      taxonomy as never,
+      { enabled: false },
+      undefined,
+      undefined,
+      filter as never,
+    );
+    const request = {
+      ...query,
+      pagina: 2,
+      tamanio: 1,
+      precioMin: '80',
+      precioMax: '100',
+    };
+    await priced.list(request, 'correlation');
+    expect(filter.matchingProducts).toHaveBeenCalledWith(
+      candidates,
+      request,
+      'correlation',
+    );
+    expect(repository.listCandidates).toHaveBeenCalledWith(
+      { ...request, precioMin: undefined, precioMax: undefined },
+      false,
+      ['p150'],
+    );
+    expect(repository.priceCandidates.mock.invocationCallOrder[0]).toBeLessThan(
+      repository.listCandidates.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('preserves administrative non-active monetary queries as unavailable until their own policy is defined', async () => {
+    await expect(
+      service.list(
+        { ...query, estado: 'BORRADOR', precioMin: '1' },
+        undefined,
+        true,
+      ),
+    ).rejects.toMatchObject({ status: 503 });
+    expect(repository.priceCandidates).not.toHaveBeenCalled();
   });
 });

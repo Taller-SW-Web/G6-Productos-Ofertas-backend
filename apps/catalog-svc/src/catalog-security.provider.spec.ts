@@ -11,6 +11,7 @@ import {
 } from './catalog-auth.js';
 import { CATALOG_AMQP_SETTINGS } from './catalog-amqp.js';
 import { PostgresCatalogRepository } from './postgres-catalog.repository.js';
+import { BarcodeRepository } from './barcode.repository.js';
 
 /** HTTP provider regression: actual controller, guard, crypto, discovery/JWKS,
  * parser and persistence failures. No PostgreSQL or React/Gateway E2E claim. */
@@ -163,6 +164,44 @@ describe('Marketplace provider security and invalid pagination regression', () =
           .expect(503)
       ).body.code,
     ).toBe('SERVICIO_NO_DISPONIBLE');
+  });
+
+  it('resolves exact barcode text only for Retail and preserves the contractual 404', async () => {
+    const read = vi.spyOn(app.get(BarcodeRepository), 'resolve');
+    try {
+      read.mockResolvedValueOnce('000-SKU').mockResolvedValueOnce(null);
+      const url = '/api/v1/productos/codigos-barras/resolver';
+      const success = await request(app.getHttpServer())
+        .post(url)
+        .auth(token({ sub: 'modulo-retail' }), { type: 'bearer' })
+        .send({ codigo_barras: ' 000/ABC ' })
+        .expect(200);
+      expect(success.body).toEqual({ sku: '000-SKU' });
+      expect(read).toHaveBeenCalledWith(' 000/ABC ');
+      const absent = await request(app.getHttpServer())
+        .post(url)
+        .auth(token({ sub: 'modulo-retail' }), { type: 'bearer' })
+        .send({ codigo_barras: 'missing' })
+        .expect(404);
+      expect(absent.body.code).toBe('CODIGO_BARRAS_NO_ENCONTRADO');
+      for (const sub of [
+        'modulo-marketplace',
+        'modulo-chatbot',
+        'modulo-ventas',
+      ])
+        await request(app.getHttpServer())
+          .post(url)
+          .auth(token({ sub }), { type: 'bearer' })
+          .send({ codigo_barras: '0001' })
+          .expect(403);
+      await request(app.getHttpServer())
+        .post(url)
+        .send({ codigo_barras: '0001' })
+        .expect(401);
+      expect(read).toHaveBeenCalledTimes(2);
+    } finally {
+      read.mockRestore();
+    }
   });
 
   it('serves an authenticated empty catalog to existing clients and does not authorize Ventas', async () => {

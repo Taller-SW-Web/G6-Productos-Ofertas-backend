@@ -50,6 +50,9 @@ import {
   readCatalogSecurityConfig,
 } from './catalog-auth.js';
 import { DEMO_PRICING, PricingClient } from './pricing.client.js';
+import { CatalogPriceFilter } from './catalog-price-filter.js';
+import { BarcodeRepository } from './barcode.repository.js';
+import { BarcodeService } from './barcode.service.js';
 
 @Module({
   imports: [],
@@ -68,6 +71,9 @@ import { DEMO_PRICING, PricingClient } from './pricing.client.js';
     CatalogQueryRepository,
     PostgresCatalogWriteRepository,
     CommercialService,
+    CatalogPriceFilter,
+    BarcodeRepository,
+    BarcodeService,
     CatalogQueryService,
     CatalogMutationService,
     {

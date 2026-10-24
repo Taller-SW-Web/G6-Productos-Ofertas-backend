@@ -29,6 +29,7 @@ import {
 import { CatalogTransactionManager } from '../src/catalog-transaction.js';
 import { PostgresCatalogWriteRepository } from '../src/postgres-catalog-write.repository.js';
 import { PostgresCatalogRepository } from '../src/postgres-catalog.repository.js';
+import { BarcodeRepository } from '../src/barcode.repository.js';
 import {
   products,
   activationChecks,
@@ -192,6 +193,10 @@ describe.skipIf(!dockerAvailable)(
         resolve('apps/catalog-svc/test/fixtures/0001_create_catalog.sql'),
         'utf8',
       );
+      const barcodeMigration = readFileSync(
+        resolve('apps/catalog-svc/migrations/0002_create_sku_barcodes.sql'),
+        'utf8',
+      );
       command(
         'docker',
         [
@@ -204,7 +209,7 @@ describe.skipIf(!dockerAvailable)(
           '-v',
           'ON_ERROR_STOP=1',
         ],
-        `CREATE ROLE po_catalog_owner NOLOGIN;\nCREATE ROLE catalog_app LOGIN PASSWORD 'isolated-runtime-password';\nCREATE SCHEMA catalog AUTHORIZATION po_catalog_owner;\nCREATE SCHEMA foreign_context;\nCREATE TABLE foreign_context.private_probe (value text);\nINSERT INTO foreign_context.private_probe VALUES ('isolated');\nSET ROLE po_catalog_owner;\n${migration}`,
+        `CREATE ROLE po_catalog_owner NOLOGIN;\nCREATE ROLE catalog_app LOGIN PASSWORD 'isolated-runtime-password';\nCREATE SCHEMA catalog AUTHORIZATION po_catalog_owner;\nCREATE SCHEMA foreign_context;\nCREATE TABLE foreign_context.private_probe (value text);\nINSERT INTO foreign_context.private_probe VALUES ('isolated');\nSET ROLE po_catalog_owner;\n${migration}\n${barcodeMigration}`,
       );
       port = command('docker', ['port', container, '5432/tcp'])
         .split(':')
@@ -1121,6 +1126,236 @@ describe.skipIf(!dockerAvailable)(
         intentsBefore,
       );
     });
+    it('D-CAT-01..04: persists multiple exact codes, rejects concurrent/history reuse and preserves retirement audit', async () => {
+      const service = mutationService();
+      const simple = await service.createProduct(createRequest(), actor);
+      const other = await service.createProduct(createRequest(), actor);
+      const barcode = new BarcodeRepository(database);
+      const code = '000-Barcode-' + randomUUID();
+      await barcode.register(code, simple.sku_base, 'registered-actor');
+      await barcode.register(
+        ' ' + code + ' ',
+        simple.sku_base,
+        'registered-actor',
+      );
+      expect(await barcode.resolve(code)).toBeNull();
+      const reads = new PostgresCatalogRepository(database);
+      expect(await reads.skuContext(simple.sku_base)).toMatchObject({
+        productId: simple.product_id,
+        active: false,
+        eligible: false,
+        isVariant: false,
+      });
+      await complete(simple.product_id);
+      await service.state(simple.product_id, undefined, 'activate', {}, actor);
+      expect(await barcode.resolve(code)).toBe(simple.sku_base);
+      expect(await reads.skuContext(simple.sku_base)).toMatchObject({
+        active: true,
+        eligible: true,
+      });
+      expect(await barcode.resolve(' ' + code + ' ')).toBe(simple.sku_base);
+      expect(await barcode.resolve(code.toLowerCase())).toBeNull();
+      const duplicate = 'concurrent-' + randomUUID();
+      const results = await Promise.allSettled([
+        barcode.register(duplicate, simple.sku_base, 'actor-a'),
+        barcode.register(duplicate, other.sku_base, 'actor-b'),
+      ]);
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(results.find((r) => r.status === 'rejected')).toMatchObject({
+        reason: { code: 'BARCODE_ALREADY_REGISTERED' },
+      });
+      const retired = await barcode.retire(code, 'retired-actor');
+      expect(retired).toMatchObject({
+        created_by: 'registered-actor',
+        retired_by: 'retired-actor',
+      });
+      expect(await barcode.retire(code, 'another-actor')).toEqual(retired);
+      expect(await barcode.resolve(code)).toBeNull();
+      await expect(
+        barcode.register(code, other.sku_base, 'actor'),
+      ).rejects.toMatchObject({ code: 'BARCODE_ALREADY_REGISTERED' });
+      await expect(
+        database.transaction((tx) =>
+          tx.execute(
+            sql`UPDATE catalog.sku_barcodes SET retired_at = NULL, retired_by = NULL WHERE codigo_barras = ${code}`,
+          ),
+        ),
+      ).rejects.toMatchObject({ failure: 'check' });
+      await service.state(
+        simple.product_id,
+        undefined,
+        'deactivate',
+        {},
+        actor,
+      );
+      expect(await barcode.resolve(' ' + code + ' ')).toBeNull();
+      await service.state(
+        simple.product_id,
+        undefined,
+        'reactivate',
+        {},
+        actor,
+      );
+      expect(await barcode.resolve(' ' + code + ' ')).toBe(simple.sku_base);
+      expect(await barcode.resolve(code)).toBeNull();
+      expect(
+        (await barcode.list(simple.sku_base)).find(
+          (r) => r.codigo_barras === code,
+        ),
+      ).toEqual(retired);
+      await expect(
+        barcode.register('unknown-' + code, 'nonexistent-sku', 'actor'),
+      ).rejects.toMatchObject({ code: 'SKU_NOT_SELLABLE' });
+      await expect(
+        database.transaction((tx) =>
+          tx.execute(
+            sql`UPDATE catalog.sku_barcodes SET codigo_barras = ${'new'} WHERE codigo_barras = ${code}`,
+          ),
+        ),
+      ).rejects.toMatchObject({ sqlState: '42501' });
+      await expect(
+        database.transaction((tx) =>
+          tx.execute(
+            sql`DELETE FROM catalog.sku_barcodes WHERE codigo_barras = ${code}`,
+          ),
+        ),
+      ).rejects.toMatchObject({ sqlState: '42501' });
+      const ownerMutation = `SET ROLE po_catalog_owner; UPDATE catalog.sku_barcodes SET sku_identity_id = (SELECT id FROM catalog.sku_identity WHERE sku = '${other.sku_base}') WHERE codigo_barras = '${code}';`;
+      expect(() =>
+        command(
+          'docker',
+          [
+            'exec',
+            '-i',
+            container,
+            'psql',
+            '-U',
+            'postgres',
+            '-v',
+            'ON_ERROR_STOP=1',
+          ],
+          ownerMutation,
+        ),
+      ).toThrow();
+      expect(
+        (await barcode.list(simple.sku_base)).find(
+          (r) => r.codigo_barras === code,
+        ),
+      ).toEqual(retired);
+    });
+
+    it('D-CAT-01..04/PF: variant identity and eligibility exclude parent base and inactive children before monetary pagination', async () => {
+      const service = mutationService();
+      const marker = 'price-' + randomUUID();
+      const parent = await service.createProduct(
+        { ...createRequest(true), nombre: marker },
+        actor,
+      );
+      const barcode = new BarcodeRepository(database);
+      await expect(
+        barcode.register('base-' + randomUUID(), parent.sku_base, 'actor'),
+      ).rejects.toMatchObject({ code: 'SKU_NOT_SELLABLE' });
+      const children = [];
+      for (const size of ['one', 'two'])
+        children.push(
+          await service.createVariant(
+            parent.product_id,
+            {
+              sku: 'PF-' + randomUUID(),
+              atributosIdentificadores: [
+                {
+                  caracteristica_id: 'size',
+                  nombre: 'Size',
+                  valor_id: size,
+                  valor: size,
+                },
+              ],
+              imagenUrl: 'https://example.test/variant',
+              perfilFisico: fullProfile,
+            },
+            actor,
+          ),
+        );
+      const [active, draft] = children;
+      const code = '000-variant-' + randomUUID();
+      await barcode.register(code, active.sku, 'actor');
+      await complete(parent.product_id);
+      await service.state(
+        parent.product_id,
+        active.variant_id,
+        'activate',
+        undefined,
+        actor,
+      );
+      expect(await barcode.resolve(code)).toBeNull();
+      await service.state(parent.product_id, undefined, 'activate', {}, actor);
+      expect(await barcode.resolve(code)).toBe(active.sku);
+      const reads = new PostgresCatalogRepository(database);
+      const query = {
+        canal: 'RETAIL' as const,
+        q: marker,
+        pagina: 1,
+        tamanio: 1,
+        orden: 'NOMBRE_ASC' as const,
+      };
+      expect(await reads.skuContext(parent.sku_base)).toBeNull();
+      expect(await reads.skuContext(active.sku)).toMatchObject({
+        productId: parent.product_id,
+        isVariant: true,
+        active: true,
+        eligible: true,
+      });
+      expect(await reads.skuContext(draft.sku)).toMatchObject({
+        active: false,
+        eligible: false,
+      });
+      expect(await reads.priceCandidates(query)).toEqual([
+        { productId: parent.product_id, sku: active.sku },
+      ]);
+      expect(
+        await reads.listCandidates(query, false, [parent.product_id]),
+      ).toMatchObject({ total: 1, items: [{ product_id: parent.product_id }] });
+      expect(
+        await reads.listCandidates({ ...query, pagina: 2 }, false, [
+          parent.product_id,
+        ]),
+      ).toMatchObject({ total: 1, items: [] });
+      expect(await reads.listCandidates(query, false, [])).toMatchObject({
+        total: 0,
+        items: [],
+      });
+      expect(await reads.priceCandidates(query)).not.toContainEqual({
+        productId: parent.product_id,
+        sku: draft.sku,
+      });
+      await service.state(
+        parent.product_id,
+        active.variant_id,
+        'deactivate',
+        undefined,
+        actor,
+      );
+      expect(await barcode.resolve(code)).toBeNull();
+      await service.state(
+        parent.product_id,
+        active.variant_id,
+        'reactivate',
+        undefined,
+        actor,
+      );
+      expect(await barcode.resolve(code)).toBeNull();
+      await service.state(
+        parent.product_id,
+        undefined,
+        'reactivate',
+        {},
+        actor,
+      );
+      expect(await barcode.resolve(code)).toBe(active.sku);
+      await barcode.retire(code, 'actor');
+      expect(await barcode.resolve(code)).toBeNull();
+    });
+
     it('creates simple and variant products atomically with the correct preparation and Outbox intents', async () => {
       const service = mutationService(),
         body = createRequest(),

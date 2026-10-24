@@ -13,6 +13,7 @@ import {
 } from 'drizzle-orm';
 import { Database, type CatalogTransaction } from './database.js';
 import { isDemoCatalogImage } from './catalog-read-demo.js';
+import type { PriceCandidate } from './catalog-price-filter.js';
 import {
   products,
   variants,
@@ -281,13 +282,19 @@ export class PostgresCatalogRepository {
   async listCandidates(
     query: ProductQuery,
     readDemo = false,
+    productIds?: readonly string[],
   ): Promise<ProductPage> {
     if (query.precioMin !== undefined || query.precioMax !== undefined)
       throw new ServiceUnavailableException();
     return this.database.read((db) =>
       db.transaction(
         async (tx) => {
-          const where = this.where(query, readDemo);
+          const where = and(
+            this.where(query, readDemo),
+            productIds === undefined
+              ? undefined
+              : sql`${products.id} = ANY(${sql.param(productIds)}::uuid[])`,
+          );
           const [count] = await tx
             .select({ total: sql<number>`count(*)::integer` })
             .from(products)
@@ -408,6 +415,62 @@ export class PostgresCatalogRepository {
             tamanio: query.tamanio,
             total: count?.total ?? 0,
           };
+        },
+        { isolationLevel: 'repeatable read', accessMode: 'read only' },
+      ),
+    );
+  }
+
+  /** Local authoritative context only; an inter-service transport still needs its contract/grant. */
+  async skuContext(sku: string) {
+    return this.database.read(async (db) => {
+      const result = await db.execute(sql`SELECT si.sku, p.id AS product_id,
+        (si.variant_id IS NOT NULL) AS is_variant,
+        (p.estado = 'ACTIVO' AND (si.variant_id IS NULL OR v.estado = 'ACTIVA')) AS active
+        FROM catalog.sku_identity si LEFT JOIN catalog.variants v ON v.id = si.variant_id
+        JOIN catalog.products p ON p.id = COALESCE(si.product_id, v.product_id)
+        WHERE si.sku = ${sku} AND ((si.product_id IS NOT NULL AND NOT p.tiene_variantes)
+          OR (si.variant_id IS NOT NULL AND p.tiene_variantes))`);
+      const row = result.rows[0];
+      if (!row) return null;
+      if (
+        typeof row.sku !== 'string' ||
+        typeof row.product_id !== 'string' ||
+        typeof row.is_variant !== 'boolean' ||
+        typeof row.active !== 'boolean'
+      )
+        throw new Error();
+      return {
+        sku: row.sku,
+        productId: row.product_id,
+        isVariant: row.is_variant,
+        active: row.active,
+        eligible: row.active,
+      };
+    });
+  }
+
+  async priceCandidates(query: ProductQuery): Promise<PriceCandidate[]> {
+    return this.database.read((db) =>
+      db.transaction(
+        async (tx) => {
+          const where = this.where(query);
+          const simple = await tx
+            .select({ productId: products.id, sku: products.sku_base })
+            .from(products)
+            .where(and(where, eq(products.tiene_variantes, false)));
+          const children = await tx
+            .select({ productId: products.id, sku: variants.sku })
+            .from(products)
+            .innerJoin(variants, eq(variants.product_id, products.id))
+            .where(
+              and(
+                where,
+                eq(products.tiene_variantes, true),
+                eq(variants.estado, 'ACTIVA'),
+              ),
+            );
+          return [...simple, ...children];
         },
         { isolationLevel: 'repeatable read', accessMode: 'read only' },
       ),
