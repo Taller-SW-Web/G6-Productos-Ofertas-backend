@@ -40,3 +40,7 @@ Schema `taxonomy`; readiness de lectura observada a PostgreSQL. Rol/migraciones 
 ## H. Bloqueos y entrega
 
 Lopez: mantener evidencia de DB/readiness por SHA y ampliar funcional smoke contractual. Marco: confirmar estado runtime y autorización si hay nuevo SHA; Gateway necesita arreglar dependencia Catalog antes readiness completa. Operatividad de categorías no implica producto completo.
+
+## Marketplace H4 — Taxonomy
+
+G1 consume categorías vía `listarCategorias` (`GET /api/v1/categorias`); la consulta de marcas comerciales corresponde a la operación publicada en OpenAPI (`listarMarcas`, GET `/api/v1/marcas`). Mantener solo datos comerciales elegibles; no exponer DTO administrativo. La evidencia Provider, scope y estado por SHA se actualizan en la [matriz H4](../../../integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md).

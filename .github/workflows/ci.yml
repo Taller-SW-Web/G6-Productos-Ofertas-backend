@@ -42,6 +42,25 @@ jobs:
           G6_TEST_OPENSSL: openssl
         run: node apps/promotions-svc/test/persistence.isolated.smoke.mjs
 
+  marketplace-h4-documentation-tests:
+    name: Marketplace H4 documentation validator tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pinned validator test dependency
+        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
+
+      - name: Run isolated Marketplace H4 validator tests
+        run: python -m unittest discover -s tests/docs -p "test_*.py" -v
+
   validate:
     name: Lint, Typecheck, Test, Build & Smoke Test
     runs-on: ubuntu-latest
