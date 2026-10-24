@@ -119,6 +119,12 @@ export class CommercialPrices {
       at,
     );
     const resolved = resolvePrice(definitions, context, channelId, at);
+    let effectiveChannel: (typeof channels)[number] | null = null;
+    if (resolved.definition.channelId !== null) {
+      if (channel === undefined || resolved.definition.channelId !== channelId)
+        throw new PricingHttpError(503, 'SERVICIO_NO_DISPONIBLE');
+      effectiveChannel = channel;
+    }
     const validity = definitions
       .flatMap((d) => d.validities)
       .find((v) => v === resolved.validity)!;
@@ -130,7 +136,7 @@ export class CommercialPrices {
           ? null
           : wireMoney(validity.precioOferta),
       currency: validity.currency,
-      channel_id: resolved.definition.channelId,
+      channel_id: effectiveChannel,
       valid_from: validity.validFrom.toISOString(),
       valid_until: validity.validUntil?.toISOString() ?? null,
       price_version: wireVersion(

@@ -176,10 +176,14 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
       const simpleSku = 'SIMPLE-' + randomUUID();
       const variantSku = 'VARIANT-' + randomUUID();
       const inheritedSku = 'INHERITED-' + randomUUID();
+      const scopedSku = 'SCOPED-' + randomUUID();
+      const fallbackSku = 'FALLBACK-' + randomUUID();
+      const fallbackProductId = randomUUID();
       for (const [sku, isVariant] of [
         [simpleSku, false],
         [variantSku, true],
         [inheritedSku, true],
+        [scopedSku, true],
       ] as const)
         contexts.set(sku, {
           sku,
@@ -188,6 +192,13 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
           active: true,
           eligible: true,
         });
+      contexts.set(fallbackSku, {
+        sku: fallbackSku,
+        productId: fallbackProductId,
+        isVariant: true,
+        active: true,
+        eligible: true,
+      });
       const stored = await repository.transaction(async (tx) => {
         const global = await create(tx, { productId });
         const retail = await create(tx, { productId }, retailChannel);
@@ -200,7 +211,13 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
           .update(priceValidities)
           .set({ precioRegular: '55.55', precioOferta: null })
           .where(eq(priceValidities.id, override.validity.id));
-        return { global, retail, override };
+        const scoped = await create(tx, { sku: scopedSku }, retailChannel);
+        await tx
+          .update(priceValidities)
+          .set({ precioRegular: '33.33', precioOferta: null })
+          .where(eq(priceValidities.id, scoped.validity.id));
+        const fallback = await create(tx, { productId: fallbackProductId });
+        return { global, retail, override, scoped, fallback };
       });
       const get = (path: string, token = identity.token()) =>
         request(app!.getHttpServer())
@@ -248,8 +265,60 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
         origen: 'PRODUCTO',
         precio_regular: 77.77,
         vigencia_id: stored.retail.validity.id,
-        channel_id: retailChannel,
+        channel_id: 'RETAIL',
       });
+      const commercialCases = [
+        {
+          sku: simpleSku,
+          origen: 'PRODUCTO',
+          channel_id: 'RETAIL',
+          precio_regular: 77.77,
+        },
+        {
+          sku: inheritedSku,
+          origen: 'PRODUCTO',
+          channel_id: 'RETAIL',
+          precio_regular: 77.77,
+        },
+        {
+          sku: variantSku,
+          origen: 'SKU_OVERRIDE',
+          channel_id: null,
+          precio_regular: 55.55,
+        },
+        {
+          sku: scopedSku,
+          origen: 'SKU_OVERRIDE',
+          channel_id: 'RETAIL',
+          precio_regular: 33.33,
+        },
+        {
+          sku: fallbackSku,
+          origen: 'PRODUCTO',
+          channel_id: null,
+          precio_regular: 99.99,
+        },
+      ];
+      for (const expected of commercialCases) {
+        const response = await get(
+          `/api/v1/precios/skus/${expected.sku}?at=${at}&canal=RETAIL`,
+        ).expect(200);
+        expect(response.body).toMatchObject(expected);
+        expect([null, 'MARKETPLACE', 'CHATBOT', 'RETAIL', 'VENTAS']).toContain(
+          response.body.channel_id,
+        );
+        expect(response.body.channel_id).not.toBe(retailChannel);
+      }
+      const scopedBatch = await get(
+        `/api/v1/precios?skus=${commercialCases.map((c) => c.sku).join(',')}&at=${at}&canal=RETAIL`,
+      ).expect(200);
+      expect(scopedBatch.body.items).toMatchObject(commercialCases);
+      for (const item of scopedBatch.body.items) {
+        expect([null, 'MARKETPLACE', 'CHATBOT', 'RETAIL', 'VENTAS']).toContain(
+          item.channel_id,
+        );
+        expect(item.channel_id).not.toBe(retailChannel);
+      }
       await get(`/api/v1/precios/productos/${productId}`, serviceToken).expect(
         401,
       );

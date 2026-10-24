@@ -1,5 +1,12 @@
-import { describe, expect, it, beforeAll, afterAll } from 'vitest';
-import { parseCommercialQuery } from './commercial-prices.js';
+import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import {
+  CommercialPrices,
+  channels,
+  parseCommercialQuery,
+} from './commercial-prices.js';
+import type { PricingRepository } from '../persistence/pricing.repository.js';
+import * as priceResolution from '../domain/resolve-price.js';
 import { PricingReadGuard } from './pricing-read.guard.js';
 import { SignedUser } from '../../test/signed-user.js';
 describe('Consultas comerciales contractuales', () => {
@@ -26,6 +33,89 @@ describe('Consultas comerciales contractuales', () => {
     { skus: 'SKU', unexpected: 'field' },
   ])('rechaza consulta inválida %j', (query) =>
     expect(() => parseCommercialQuery(query, true)).toThrow(),
+  );
+});
+
+describe('Serialización del canal efectivo comercial', () => {
+  const at = new Date('2030-06-01T00:00:00Z');
+  function fixture(
+    channelId: string | null,
+    channel?: (typeof channels)[number],
+  ) {
+    const validity = {
+      id: randomUUID(),
+      precioRegular: '12.50',
+      precioOferta: null,
+      currency: 'PEN',
+      motivoCambio: 'fixture',
+      usuarioId: null,
+      validFrom: new Date('2030-01-01T00:00:00Z'),
+      validUntil: null,
+      priceVersion: 1n,
+      isCancelled: false,
+    };
+    const definition = {
+      target: { productId: 'product', sku: null },
+      channelId,
+      priceVersion: 1n,
+      validities: [validity],
+    };
+    const readCandidates = vi.fn().mockResolvedValue([definition]);
+    const service = new CommercialPrices(
+      { readCandidates } as unknown as PricingRepository,
+      {
+        resolve: async (sku) => ({
+          sku,
+          productId: 'product',
+          isVariant: false,
+          active: true,
+          eligible: true,
+        }),
+      },
+      channel === undefined ? {} : { [channel]: channelId! },
+    );
+    return { service, definition, validity, readCandidates };
+  }
+  it.each(channels)(
+    'traduce UUID interno a %s sin cambiar el lookup de persistencia',
+    async (channel) => {
+      const internalId = randomUUID();
+      const { service, readCandidates } = fixture(internalId, channel);
+      const response = await service.sku('sku', channel, at);
+      expect(response.channel_id).toBe(channel);
+      expect(response.channel_id).not.toBe(internalId);
+      expect(readCandidates).toHaveBeenCalledWith(
+        'product',
+        'sku',
+        internalId,
+        at,
+      );
+    },
+  );
+  it.each([undefined, 'RETAIL'] as const)(
+    'no publica UUID ni convierte inconsistencias en vacío (canal %s)',
+    async (channel) => {
+      const { service, definition, validity } = fixture(randomUUID(), channel);
+      const resolver = vi
+        .spyOn(priceResolution, 'resolvePrice')
+        .mockReturnValue({
+          definition: { ...definition, channelId: randomUUID() },
+          validity,
+          origen: 'PRODUCTO',
+        });
+      try {
+        for (const operation of [
+          () => service.sku('sku', channel, at),
+          () => service.batch(['sku'], channel, at),
+        ])
+          await expect(operation()).rejects.toMatchObject({
+            status: 503,
+            code: 'SERVICIO_NO_DISPONIBLE',
+          });
+      } finally {
+        resolver.mockRestore();
+      }
+    },
   );
 });
 describe('JWT técnico solo para operationIds comerciales autorizados', () => {
