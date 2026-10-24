@@ -4,6 +4,7 @@ import {
   CommercialPrices,
   channels,
   parseCommercialQuery,
+  serializeCommercialChannel,
 } from './commercial-prices.js';
 import type { PricingRepository } from '../persistence/pricing.repository.js';
 import * as priceResolution from '../domain/resolve-price.js';
@@ -37,6 +38,24 @@ describe('Consultas comerciales contractuales', () => {
 });
 
 describe('Serialización del canal efectivo comercial', () => {
+  it('invierte solo un mapeo unívoco; global no requiere mapeo', () => {
+    const id = randomUUID();
+    expect(serializeCommercialChannel(null, undefined)).toBeNull();
+    expect(serializeCommercialChannel(id, { RETAIL: id })).toBe('RETAIL');
+    for (const mapping of [
+      undefined,
+      {},
+      { CHATBOT: randomUUID() },
+      { RETAIL: id, CHATBOT: id },
+    ])
+      expect(() => serializeCommercialChannel(id, mapping)).toThrow(
+        'SERVICIO_NO_DISPONIBLE',
+      );
+    // GET ya conoce el canal solicitado: no cambia su resolución por el mapeo inverso.
+    expect(
+      serializeCommercialChannel(id, { RETAIL: id, CHATBOT: id }, 'RETAIL'),
+    ).toBe('RETAIL');
+  });
   const at = new Date('2030-06-01T00:00:00Z');
   function fixture(
     channelId: string | null,

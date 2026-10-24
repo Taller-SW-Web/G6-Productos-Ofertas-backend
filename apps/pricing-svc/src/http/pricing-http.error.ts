@@ -5,7 +5,20 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { PricingPersistenceError } from '../persistence/persistence.error.js';
-import { PriceRuleError } from '../domain/price.js';
+import { PriceRuleError, type PriceErrorCode } from '../domain/price.js';
+
+const ruleStatus: Record<PriceErrorCode, number> = {
+  PRECIO_INVALIDO: 422,
+  OFERTA_INVALIDA: 422,
+  ACCION_OFERTA_INVALIDA: 422,
+  SCOPE_PRECIO_INVALIDO: 422,
+  VALIDACION: 400,
+  MOTIVO_CAMBIO_REQUERIDO: 400,
+  PRECIO_NO_ENCONTRADO: 404,
+  VERSION_CONFLICT: 409,
+  VIGENCIA_SUPERPUESTA: 409,
+  IDEMPOTENCY_CONFLICT: 409,
+};
 
 export class PricingHttpError extends Error {
   constructor(
@@ -26,18 +39,7 @@ export class PricingHttpFilter implements ExceptionFilter {
         : error instanceof PricingPersistenceError
           ? new PricingHttpError(503, 'SERVICIO_NO_DISPONIBLE')
           : error instanceof PriceRuleError
-            ? new PricingHttpError(
-                error.code === 'PRECIO_NO_ENCONTRADO'
-                  ? 404
-                  : [
-                        'VERSION_CONFLICT',
-                        'VIGENCIA_SUPERPUESTA',
-                        'IDEMPOTENCY_CONFLICT',
-                      ].includes(error.code)
-                    ? 409
-                    : 400,
-                error.code,
-              )
+            ? new PricingHttpError(ruleStatus[error.code], error.code)
             : new PricingHttpError(500, 'ERROR_INTERNO');
     response
       .status(failure.status)

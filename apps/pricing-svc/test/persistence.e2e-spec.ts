@@ -32,6 +32,7 @@ import {
   CommercialPrices,
   PRICING_CATALOG_CONTEXT,
   PRICING_CHANNEL_IDS,
+  channels,
   type PricingCatalogContext,
 } from '../src/http/commercial-prices.js';
 import {
@@ -61,6 +62,9 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
       NonNullable<Awaited<ReturnType<PricingCatalogContext['resolve']>>>
     >();
     const retailChannel = randomUUID();
+    const channelIds: Partial<Record<(typeof channels)[number], string>> = {
+      RETAIL: retailChannel,
+    };
     let denyWrite = false;
     const actor = '74ed2f19-7e70-4915-a6f6-bbc691b82587';
     const factFactory: PricingFactFactory = (before, after, metadata) => {
@@ -143,7 +147,7 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
         .overrideProvider(PRICING_CATALOG_CONTEXT)
         .useValue({ resolve: async (sku: string) => contexts.get(sku) ?? null })
         .overrideProvider(PRICING_CHANNEL_IDS)
-        .useValue({ RETAIL: retailChannel })
+        .useValue(channelIds)
         .overrideProvider(PRICING_WRITE_AUTHORIZER)
         .useValue(async () => {
           if (denyWrite) throw new PricingHttpError(403, 'SCOPE_INSUFICIENTE');
@@ -350,6 +354,300 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
         ),
       ).rejects.toMatchObject({ status: 503 });
     });
+
+    it('PATCH SKU serializa canal antes de mutar y rechaza mapeos inexistentes/ambiguos sin efectos', async () => {
+      const sku = 'PATCH-CHANNEL-' + randomUUID();
+      const unknownChannel = randomUUID();
+      await repository.transaction(async (tx) => {
+        for (const channelId of [null, retailChannel, unknownChannel]) {
+          const row = await create(tx, { sku }, channelId);
+          await tx
+            .update(priceValidities)
+            .set({ validFrom: new Date(Date.now() - 60000) })
+            .where(eq(priceValidities.id, row.validity.id));
+        }
+      });
+      const correlation = randomUUID();
+      const body = {
+        precioRegular: 120,
+        accionPrecioOferta: 'ELIMINAR',
+        moneda: 'PEN',
+        motivoCambio: 'Canal contractual',
+        priceVersion: 1,
+      };
+      const patch = (channelId: string | null) =>
+        request(app!.getHttpServer())
+          .patch(`/api/v1/precios/skus/${sku}`)
+          .set('Authorization', 'Bearer ' + identity.token())
+          .set('X-Correlation-Id', correlation)
+          .send({ ...body, channelId });
+      for (const [channelId, expected] of [
+        [null, null],
+        [retailChannel, 'RETAIL'],
+      ] as const) {
+        const response = await patch(channelId).expect(200);
+        expect(response.body).toMatchObject({
+          sku,
+          channel_id: expected,
+          price_version: 2,
+        });
+        expect(response.body.channel_id).not.toBe(retailChannel);
+        expect(
+          (await repository.findDefinition({ sku }, channelId))!.channelId,
+        ).toBe(channelId);
+      }
+      const state = async () => {
+        const definitions = await database.db
+          .select()
+          .from(prices)
+          .where(eq(prices.sku, sku))
+          .orderBy(prices.id);
+        return {
+          definitions,
+          histories: await Promise.all(
+            definitions.map((row) => repository.findValidities(row.id)),
+          ),
+          events: await database.db
+            .select()
+            .from(outbox)
+            .where(eq(outbox.correlationId, correlation))
+            .orderBy(outbox.id),
+        };
+      };
+      for (const ambiguous of [false, true]) {
+        const before = await state();
+        const update = vi.spyOn(mutations, 'update');
+        if (ambiguous) channelIds.CHATBOT = retailChannel;
+        try {
+          const response = await patch(
+            ambiguous ? retailChannel : unknownChannel,
+          ).expect(503);
+          expect(response.body).toMatchObject({
+            status: 503,
+            code: 'SERVICIO_NO_DISPONIBLE',
+            correlationId: correlation,
+          });
+          expect(update).not.toHaveBeenCalled();
+          expect(await state()).toEqual(before);
+        } finally {
+          update.mockRestore();
+          delete channelIds.CHATBOT;
+        }
+      }
+      const scheduled = await request(app!.getHttpServer())
+        .post(`/api/v1/precios/skus/${sku}/programaciones`)
+        .set('Authorization', 'Bearer ' + identity.token())
+        .send({
+          channelId: retailChannel,
+          tipoPrecio: 'REGULAR',
+          importe: 150,
+          moneda: 'PEN',
+          motivoCambio: 'Canal administrativo',
+          validFrom: '2035-01-01T00:00:00Z',
+        })
+        .expect(201);
+      expect(scheduled.body.channelId).toBe(retailChannel);
+    });
+
+    it.each(['producto', 'sku'] as const)(
+      'HTTP de %s conserva códigos/estados y no persiste escrituras inválidas',
+      async (kind) => {
+        const target =
+          kind === 'producto'
+            ? { productId: randomUUID() }
+            : { sku: 'HTTP-STATUS-' + randomUUID() };
+        const row = await repository.transaction(async (tx) => {
+          const stored = await create(tx, target);
+          await tx
+            .update(priceValidities)
+            .set({ validFrom: new Date(Date.now() - 60000) })
+            .where(eq(priceValidities.id, stored.validity.id));
+          return stored;
+        });
+        const path =
+          'productId' in target
+            ? `/api/v1/precios/productos/${target.productId}`
+            : `/api/v1/precios/skus/${target.sku}`;
+        const jwt = 'Bearer ' + identity.token();
+        const correlation = randomUUID();
+        const patchBody = {
+          precioRegular: 99.99,
+          accionPrecioOferta: 'CONSERVAR',
+          moneda: 'PEN',
+          motivoCambio: 'Prueba contractual',
+          priceVersion: 1,
+        };
+        const scheduleBody = {
+          tipoPrecio: 'REGULAR',
+          importe: 120,
+          moneda: 'PEN',
+          motivoCambio: 'Prueba contractual',
+          validFrom: '2035-01-01T00:00:00Z',
+        };
+        const state = async () => ({
+          definition: await repository.findDefinition(target, null),
+          histories: await repository.findValidities(row.definition.id),
+          events: await database.db
+            .select()
+            .from(outbox)
+            .where(eq(outbox.correlationId, correlation))
+            .orderBy(outbox.id),
+        });
+        const before = await state();
+        const cases: {
+          method: 'patch' | 'post';
+          body: object;
+          status: number;
+          code: string;
+        }[] = [
+          {
+            method: 'patch',
+            body: { ...patchBody, precioRegular: 0 },
+            status: 422,
+            code: 'PRECIO_INVALIDO',
+          },
+          {
+            method: 'patch',
+            body: { ...patchBody, precioRegular: 100.001 },
+            status: 422,
+            code: 'PRECIO_INVALIDO',
+          },
+          {
+            method: 'patch',
+            body: {
+              ...patchBody,
+              accionPrecioOferta: 'ESTABLECER',
+              precioOferta: 99.99,
+            },
+            status: 422,
+            code: 'OFERTA_INVALIDA',
+          },
+          {
+            method: 'patch',
+            body: {
+              ...patchBody,
+              accionPrecioOferta: 'ESTABLECER',
+              precioOferta: 100,
+            },
+            status: 422,
+            code: 'OFERTA_INVALIDA',
+          },
+          {
+            method: 'patch',
+            body: { ...patchBody, accionPrecioOferta: 'INVALIDA' },
+            status: 422,
+            code: 'ACCION_OFERTA_INVALIDA',
+          },
+          {
+            method: 'patch',
+            body: { ...patchBody, priceVersion: -1 },
+            status: 400,
+            code: 'VALIDACION',
+          },
+          {
+            method: 'patch',
+            body: { ...patchBody, motivoCambio: '' },
+            status: 400,
+            code: 'VALIDACION',
+          },
+          {
+            method: 'patch',
+            body: { ...patchBody, priceVersion: 0 },
+            status: 409,
+            code: 'VERSION_CONFLICT',
+          },
+          {
+            method: 'post',
+            body: { ...scheduleBody, importe: 0 },
+            status: 422,
+            code: 'PRECIO_INVALIDO',
+          },
+          {
+            method: 'post',
+            body: { ...scheduleBody, importe: 1.001 },
+            status: 422,
+            code: 'PRECIO_INVALIDO',
+          },
+          {
+            method: 'post',
+            body: { ...scheduleBody, tipoPrecio: 'OFERTA', importe: 99.99 },
+            status: 422,
+            code: 'OFERTA_INVALIDA',
+          },
+          {
+            method: 'post',
+            body: { ...scheduleBody, tipoPrecio: 'OFERTA', importe: 100 },
+            status: 422,
+            code: 'OFERTA_INVALIDA',
+          },
+          {
+            method: 'post',
+            body: { ...scheduleBody, tipoPrecio: 'INVALIDO' },
+            status: 400,
+            code: 'VALIDACION',
+          },
+        ];
+        for (const scenario of cases) {
+          const client = request(app!.getHttpServer());
+          const operation =
+            scenario.method === 'patch'
+              ? client.patch(path)
+              : client.post(path + '/programaciones');
+          const response = await operation
+            .set('Authorization', jwt)
+            .set('X-Correlation-Id', correlation)
+            .send(scenario.body)
+            .expect(scenario.status);
+          expect(response.headers['content-type']).toContain(
+            'application/problem+json',
+          );
+          expect(response.headers['x-correlation-id']).toBe(correlation);
+          expect(response.body).toMatchObject({
+            status: scenario.status,
+            code: scenario.code,
+            correlationId: correlation,
+          });
+          expect(await state()).toEqual(before);
+        }
+        await request(app!.getHttpServer())
+          .post(path + '/programaciones')
+          .set('Authorization', jwt)
+          .set('X-Correlation-Id', correlation)
+          .send(scheduleBody)
+          .expect(201);
+        const afterSchedule = await state();
+        const overlap = await request(app!.getHttpServer())
+          .post(path + '/programaciones')
+          .set('Authorization', jwt)
+          .set('X-Correlation-Id', correlation)
+          .send({ ...scheduleBody, importe: 130 })
+          .expect(409);
+        expect(overlap.body).toMatchObject({
+          status: 409,
+          code: 'VIGENCIA_SUPERPUESTA',
+          correlationId: correlation,
+        });
+        expect(overlap.headers['content-type']).toContain(
+          'application/problem+json',
+        );
+        expect(await state()).toEqual(afterSchedule);
+        const missingPath =
+          kind === 'producto'
+            ? `/api/v1/precios/productos/${randomUUID()}`
+            : `/api/v1/precios/skus/missing-${randomUUID()}`;
+        const missing = await request(app!.getHttpServer())
+          .patch(missingPath)
+          .set('Authorization', jwt)
+          .set('X-Correlation-Id', correlation)
+          .send(patchBody)
+          .expect(404);
+        expect(missing.body).toMatchObject({
+          status: 404,
+          code: 'PRECIO_NO_ENCONTRADO',
+          correlationId: correlation,
+        });
+      },
+    );
 
     it('PATCH HTTP usa actor verificado, confirma snapshot/Outbox y revierte fallo de factory sin duplicar efectos', async () => {
       const productId = randomUUID();

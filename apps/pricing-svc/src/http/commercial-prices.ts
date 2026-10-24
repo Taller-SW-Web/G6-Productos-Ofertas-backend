@@ -19,6 +19,21 @@ export interface PricingCatalogContext {
   } | null>;
 }
 export const channels = ['MARKETPLACE', 'CHATBOT', 'RETAIL', 'VENTAS'] as const;
+export function serializeCommercialChannel(
+  channelId: string | null,
+  channelIds: Partial<Record<(typeof channels)[number], string>> | undefined,
+  requested?: (typeof channels)[number],
+): (typeof channels)[number] | null {
+  if (channelId === null) return null;
+  const matches = channels.filter(
+    (channel) =>
+      (requested === undefined || channel === requested) &&
+      channelIds?.[channel] === channelId,
+  );
+  if (matches.length !== 1)
+    throw new PricingHttpError(503, 'SERVICIO_NO_DISPONIBLE');
+  return matches[0];
+}
 export function parseCommercialQuery(
   query: Record<string, unknown>,
   batch = false,
@@ -123,7 +138,11 @@ export class CommercialPrices {
     if (resolved.definition.channelId !== null) {
       if (channel === undefined || resolved.definition.channelId !== channelId)
         throw new PricingHttpError(503, 'SERVICIO_NO_DISPONIBLE');
-      effectiveChannel = channel;
+      effectiveChannel = serializeCommercialChannel(
+        resolved.definition.channelId,
+        this.channelIds,
+        channel,
+      );
     }
     const validity = definitions
       .flatMap((d) => d.validities)
