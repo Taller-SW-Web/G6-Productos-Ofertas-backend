@@ -1,0 +1,208 @@
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { setTimeout } from 'node:timers/promises';
+import { Test } from '@nestjs/testing';
+import type { INestApplication } from '@nestjs/common';
+import request from 'supertest';
+import { connect } from 'amqplib';
+import { PriceAuditSvcModule } from '../src/price-audit-svc.module.js';
+import {
+  AUDIT_PRICE_CHANGE_DECODER,
+  AuditConsumer,
+} from '../src/messaging/audit-consumer.js';
+import type { AuditChange } from '../src/domain/audit.js';
+import { IsolatedAuditPostgres } from './isolated-postgres.js';
+import { IsolatedRabbitmq } from './isolated-rabbitmq.js';
+import { SignedUser } from './signed-user.js';
+
+describe.skipIf(process.env.PRICE_AUDIT_TEST_AMQP !== '1')(
+  'AMQP → Inbox/bitácora → HTTP, mapper de prueba explícito',
+  () => {
+    const postgres = new IsolatedAuditPostgres();
+    const broker = new IsolatedRabbitmq();
+    const identity = new SignedUser();
+    let app: INestApplication;
+    let consumer: AuditConsumer;
+    const rows = async (sku: string) =>
+      (
+        await postgres.admin!.query(
+          'SELECT count(*)::int AS total FROM price_audit.price_audit_log WHERE sku=$1',
+          [sku],
+        )
+      ).rows[0].total;
+    const envelope = (sku: string) => ({
+      message_id: randomUUID(),
+      correlation_id: randomUUID(),
+      occurred_at: new Date().toISOString(),
+      schema_version: 1,
+      producer: 'pricing-svc',
+      kind: 'event',
+      name: 'pricing.price.changed',
+      data: { fixture_sku: sku },
+    });
+    async function publish(body: unknown) {
+      const connection = await connect(broker.url, { timeout: 2000 });
+      connection.on('error', () => undefined);
+      try {
+        const channel = await connection.createConfirmChannel();
+        channel.on('error', () => undefined);
+        channel.publish(
+          'po.eventos.x',
+          'pricing.price.changed',
+          Buffer.from(JSON.stringify(body)),
+          { persistent: true, contentType: 'application/json' },
+        );
+        await channel.waitForConfirms();
+        await channel.close();
+      } finally {
+        await connection.close().catch(() => undefined);
+      }
+    }
+    beforeAll(async () => {
+      await postgres.start();
+      await broker.start();
+      await identity.start();
+      const module = await Test.createTestingModule({
+        imports: [
+          PriceAuditSvcModule.forRoot({
+            NODE_ENV: 'test',
+            PRICE_AUDIT_SVC_PORT: '3003',
+            DATABASE_URL: postgres.runtimeUrl,
+            AUTH_ISSUER: identity.issuer,
+            AUTH_JWKS_URL: identity.issuer + '/jwks',
+            PRICE_AUDIT_AMQP_URL: broker.url.split('?')[0],
+          }),
+        ],
+      })
+        .overrideProvider(AUDIT_PRICE_CHANGE_DECODER)
+        .useValue((data: Record<string, unknown>): AuditChange[] => {
+          // Exclusivo de esta fixture: NO define ni aprueba el payload P-AUD-02 de GenericData.
+          if (typeof data.fixture_sku !== 'string')
+            throw new Error('Fixture incompatible');
+          return [
+            {
+              sku: data.fixture_sku,
+              productId: 'fixture-product',
+              priceType: 'REGULAR',
+              previous: null,
+              next: '12.30',
+              variation: null,
+              operation: 'CREACION',
+              channel: 'GLOBAL',
+              reason: 'ALTA_PRODUCTO',
+              batchId: null,
+              userId: null,
+              email: null,
+              ip: null,
+              at: new Date('2026-10-01T00:00:00Z'),
+            },
+          ];
+        })
+        .compile();
+      app = module.createNestApplication({ logger: false });
+      await app.init();
+      consumer = app.get(AuditConsumer);
+      await vi.waitFor(() => expect(consumer.available).toBe(true), {
+        timeout: 15000,
+      });
+    }, 120000);
+    afterAll(async () => {
+      await app?.close();
+      await identity.stop();
+      await broker.stop();
+      await postgres.stop();
+    });
+    it('consume, confirma commit, consulta por JWT y deduplica un redelivery con el mismo message_id', async () => {
+      const event = envelope('amqp-once');
+      await publish(event);
+      await expect.poll(() => rows('amqp-once'), { timeout: 10000 }).toBe(1);
+      await publish(event);
+      await setTimeout(300);
+      expect(await rows('amqp-once')).toBe(1);
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/auditoria-precios?sku=amqp-once')
+        .set('Authorization', 'Bearer ' + identity.token())
+        .expect(200);
+      expect(response.body.items[0]).toMatchObject({
+        precio_anterior: null,
+        precio_nuevo: 12.3,
+        tipo_operacion: 'CREACION',
+      });
+      expect(
+        (
+          await postgres.admin!.query(
+            'SELECT count(*)::int AS total FROM price_audit.inbox WHERE message_id=$1',
+            [event.message_id],
+          )
+        ).rows[0].total,
+      ).toBe(1);
+    });
+    it('NACK/rollback conserva entrega y recupera después de un fallo de persistencia', async () => {
+      const event = envelope('db-recovery');
+      await postgres.admin!.query(
+        'REVOKE INSERT ON price_audit.price_audit_log FROM price_audit_app',
+      );
+      try {
+        await publish(event);
+        await setTimeout(500);
+        expect(await rows('db-recovery')).toBe(0);
+        expect(
+          (
+            await postgres.admin!.query(
+              'SELECT count(*)::int AS total FROM price_audit.inbox WHERE message_id=$1',
+              [event.message_id],
+            )
+          ).rows[0].total,
+        ).toBe(0);
+      } finally {
+        await postgres.admin!.query(
+          'GRANT INSERT ON price_audit.price_audit_log TO price_audit_app',
+        );
+      }
+      await expect.poll(() => rows('db-recovery'), { timeout: 15000 }).toBe(1);
+      expect(consumer.paused).toBe(false);
+    });
+    it('un envelope inválido pausa consumo sin ACK ni descarte y exige recuperación explícita', async () => {
+      await publish({ ...envelope('invalid'), producer: 'otro-servicio' });
+      await expect.poll(() => consumer.paused, { timeout: 10000 }).toBe(true);
+      await expect
+        .poll(
+          async () =>
+            (await broker.channel!.checkQueue('po.auditoria-precios.q'))
+              .messageCount,
+          { timeout: 10000 },
+        )
+        .toBe(1);
+      expect(await rows('invalid')).toBe(0);
+      await request(app.getHttpServer()).get('/health/ready').expect(503);
+      await request(app.getHttpServer()).get('/health/live').expect(200);
+      const invalid = await broker.channel!.get('po.auditoria-precios.q');
+      if (!invalid) throw new Error('El mensaje no quedó retenido.');
+      broker.channel!.ack(invalid); // Disposición manual exclusiva de la fixture, no política de producción.
+      consumer.start();
+      await expect
+        .poll(() => consumer.available, { timeout: 10000 })
+        .toBe(true);
+    });
+    it('reconecta tras interrupción de broker sin sustituir disponibilidad por liveness', async () => {
+      await broker.pause();
+      try {
+        await expect
+          .poll(() => consumer.available, { timeout: 20000 })
+          .toBe(false);
+      } finally {
+        await broker.resume();
+      }
+      await broker.reconnect();
+      await expect
+        .poll(() => consumer.available, { timeout: 20000 })
+        .toBe(true);
+      const event = envelope('broker-recovery');
+      await publish(event);
+      await expect
+        .poll(() => rows('broker-recovery'), { timeout: 10000 })
+        .toBe(1);
+      await request(app.getHttpServer()).get('/health/ready').expect(200);
+    }, 45000);
+  },
+);
