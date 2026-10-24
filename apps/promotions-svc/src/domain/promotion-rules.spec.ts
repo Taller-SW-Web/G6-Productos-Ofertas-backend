@@ -278,9 +278,41 @@ describe('Promotions business rules #72', () => {
       b = row({ id: 'second' });
     a.policy = { ...a.policy!, automaticPromotion: true };
     b.policy = { ...b.policy!, automaticPromotion: true };
+    for (const p of [a, b])
+      expect(
+        evaluateBasket(request, context, [p], undefined, at).result.toNumber(),
+      ).toBe(170);
     expect(() =>
       evaluateBasket(request, context, [a, b], undefined, at),
     ).toThrow('COMMERCIAL_CONTEXT_UNAVAILABLE');
+    expect(() =>
+      evaluateBasket(request, context, [b, a], undefined, at),
+    ).toThrow('COMMERCIAL_CONTEXT_UNAVAILABLE');
+  });
+  it('keeps automatic/coupon stacking blocked even when each alternative is calculable', () => {
+    const automatic = row(),
+      couponPromotion = row({ id: 'coupon-parent', modality: 'CUPON' });
+    automatic.policy = { ...automatic.policy!, coupon: true };
+    couponPromotion.policy = {
+      ...couponPromotion.policy!,
+      automaticPromotion: true,
+    };
+    const c = {
+      ...coupon({ promotionId: couponPromotion.id }),
+      customerUsed: 0,
+    };
+    const body = { ...request, coupon_code: c.code };
+    for (const p of [automatic, couponPromotion])
+      expect(evaluateBasket(body, context, [p], c, at).result.toNumber()).toBe(
+        170,
+      );
+    for (const promotions of [
+      [automatic, couponPromotion],
+      [couponPromotion, automatic],
+    ])
+      expect(() => evaluateBasket(body, context, promotions, c, at)).toThrow(
+        'COMMERCIAL_CONTEXT_UNAVAILABLE',
+      );
   });
   it.each([
     [{ state: 'INACTIVO' }, undefined, 'CUPON_INACTIVO'],

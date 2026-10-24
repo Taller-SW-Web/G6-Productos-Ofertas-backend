@@ -9,6 +9,7 @@ import { ADMIN_REFERENCES } from '../../../../dist/apps/promotions-svc/domain/ad
 import { PROMOTIONS_JWKS } from '../../../../dist/apps/promotions-svc/http/promotions-identity.js';
 import { httpContracts } from '../../../../dist/apps/promotions-svc/http/http-contract.generated.js';
 import { valid } from '../../../../dist/apps/promotions-svc/http/http-validation.js';
+import { verifyAdminReferenceBoundary } from './admin-reference-checks.mjs';
 
 export async function verifyHttpWrites(resources, baseConfig, admin) {
   const checks = [];
@@ -76,6 +77,7 @@ export async function verifyHttpWrites(resources, baseConfig, admin) {
   let app;
   let refuseReferences = false;
   let referenceHook;
+  let referenceVerifier;
   async function start(withReferences) {
     const builder = Test.createTestingModule({ imports: [PromotionsSvcModule] })
       .overrideProvider(PromotionsConfigService)
@@ -91,7 +93,8 @@ export async function verifyHttpWrites(resources, baseConfig, admin) {
       .useValue(async () => [key]);
     if (withReferences)
       builder.overrideProvider(ADMIN_REFERENCES).useValue({
-        verify: async () => {
+        verify: async (request, signal) => {
+          if (referenceVerifier) return referenceVerifier(request, signal);
           if (refuseReferences)
             throw new Error('Synthetic unavailable Catalog');
           if (referenceHook) await referenceHook();
@@ -459,6 +462,18 @@ export async function verifyHttpWrites(resources, baseConfig, admin) {
     );
     checks.push(
       'recommendation create/patch/state writes validate active origins/targets, explicit UPSELL criteria and ordered aggregate replacement',
+    );
+
+    checks.push(
+      await verifyAdminReferenceBoundary({
+        call,
+        pool: resources.pool,
+        promotion,
+        recommendation,
+        setVerifier: (verify) => {
+          referenceVerifier = verify;
+        },
+      }),
     );
 
     // A real deferred PostgreSQL failure after replacing children must undo the

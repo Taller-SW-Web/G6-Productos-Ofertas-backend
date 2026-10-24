@@ -11,6 +11,7 @@ import { CouponCommandConsumer } from '../../../dist/apps/promotions-svc/coupons
 import { promotionsBrokerBinding } from '../../../dist/apps/promotions-svc/coupons/event-contract.generated.js';
 import { verifyAssignedEvents } from './support/assigned-event-checks.mjs';
 import { verifyCouponEligibility } from './support/coupon-eligibility-checks.mjs';
+import { verifyRestorationConformance } from './support/restoration-conformance-checks.mjs';
 import {
   docsRevision,
   officialMigrations,
@@ -417,6 +418,10 @@ try {
   );
   checks.push(
     'ambiguous fallback rejected; explicit consumption identity restores only its own use',
+  );
+
+  checks.push(
+    await verifyRestorationConformance({ processor, admin, command, restore }),
   );
 
   const brokenPool = {

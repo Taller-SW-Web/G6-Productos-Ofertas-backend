@@ -5,7 +5,7 @@ import {
   type ExceptionFilter,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { randomUUID } from 'node:crypto';
+import { correlationId, isCorrelationId } from './correlation.js';
 
 @Catch()
 export class ProblemFilter implements ExceptionFilter {
@@ -29,24 +29,23 @@ export class ProblemFilter implements ExceptionFilter {
             : status === 503
               ? 'SERVICIO_NO_DISPONIBLE'
               : 'ERROR_INTERNO';
-    const raw = request.headers['x-correlation-id'];
-    const correlationId =
-      typeof raw === 'string' &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        raw,
-      )
-        ? raw
-        : randomUUID();
+    const established = response.getHeader('X-Correlation-Id');
+    const id = correlationId(
+      isCorrelationId(established)
+        ? established
+        : request.headers['x-correlation-id'],
+    );
+    request.headers['x-correlation-id'] = id;
     response
       .status(status)
       .type('application/problem+json')
-      .set('X-Correlation-Id', correlationId)
+      .set('X-Correlation-Id', id)
       .json({
         type: '/errores/' + code.toLowerCase().replaceAll('_', '-'),
         title: code,
         status,
         code,
-        correlationId,
+        correlationId: id,
       });
   }
 }

@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, unlinkSync, rmdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Database, readDatabaseConfig } from './database.js';
@@ -24,7 +24,10 @@ describe('catalog PostgreSQL configuration and lifecycle', () => {
       '-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----',
     ),
   );
-  afterAll(() => rmSync(directory, { recursive: true, force: true }));
+  afterAll(() => {
+    unlinkSync(ca);
+    rmdirSync(directory);
+  });
   afterEach(() => vi.unstubAllEnvs());
   it('uses CA, strict TLS, hostname and bounded pool', () => {
     const config = readDatabaseConfig({ ...env, G6_CONNECT_HOST: '127.0.0.2' });
@@ -36,6 +39,22 @@ describe('catalog PostgreSQL configuration and lifecycle', () => {
     expect(config.max).toBe(4);
     expect(config.connectionTimeoutMillis).toBe(10000);
   });
+  it.each(['session', 'direct'])(
+    'accepts %s with the same strict TLS schema',
+    (mode) => {
+      const user = mode === 'direct' ? 'catalog_app' : env.PGUSER;
+      const expectedRole =
+        mode === 'direct' ? 'catalog_app' : env.G6_EXPECTED_ROLE;
+      expect(
+        readDatabaseConfig({
+          ...env,
+          PGUSER: user,
+          G6_EXPECTED_ROLE: expectedRole,
+          G6_CONNECTION_MODE: mode,
+        }).ssl,
+      ).toMatchObject({ rejectUnauthorized: true, servername: env.PGHOST });
+    },
+  );
   it.each(Object.keys(env))(
     'rejects missing %s without leaking values',
     (key) => {

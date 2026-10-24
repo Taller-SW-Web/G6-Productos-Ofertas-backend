@@ -1,10 +1,35 @@
+import {
+  AcreditacionInstanciaEfimera,
+  BaseNoAisladaError,
+} from './postgres-isolation.js';
+
 export const ROL_PROPIETARIO = 'po_taxonomy_owner';
 export const ROL_APP = 'taxonomy_app';
 export const PASSWORD_APP = 'taxonomy_app_prueba';
 
-export function construirSentenciasDdl(): string[] {
+const SENTENCIA_DROP = 'DROP SCHEMA IF EXISTS taxonomy CASCADE';
+
+function exigirAcreditacion(acreditacion: AcreditacionInstanciaEfimera): void {
+  if (!(acreditacion instanceof AcreditacionInstanciaEfimera)) {
+    throw new BaseNoAisladaError(
+      'DDL destructivo sin acreditación de instancia efímera verificada en vivo.',
+    );
+  }
+}
+
+export function construirSentenciaDropDdl(
+  acreditacion: AcreditacionInstanciaEfimera,
+): string {
+  exigirAcreditacion(acreditacion);
+  return SENTENCIA_DROP;
+}
+
+export function construirSentenciasDdl(
+  acreditacion: AcreditacionInstanciaEfimera,
+): string[] {
+  exigirAcreditacion(acreditacion);
   return [
-    'DROP SCHEMA IF EXISTS taxonomy CASCADE',
+    SENTENCIA_DROP,
     `DO $do$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${ROL_PROPIETARIO}') THEN CREATE ROLE ${ROL_PROPIETARIO} LOGIN; END IF; END $do$;`,
     `DO $do$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${ROL_APP}') THEN CREATE ROLE ${ROL_APP} LOGIN; END IF; END $do$;`,
     `ALTER ROLE ${ROL_APP} WITH LOGIN PASSWORD '${PASSWORD_APP}'`,

@@ -11,6 +11,7 @@ import {
   sql,
   type SQL,
 } from 'drizzle-orm';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Database } from './database.js';
 import {
   products,
@@ -47,9 +48,168 @@ const attributeProjection = {
   valor: productAttributes.valor,
 };
 
+function isDemoImageUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.trim().length === 0) return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      url.hostname !== 'placehold.co' &&
+      !url.hostname.endsWith('.placehold.co')
+    );
+  } catch {
+    return false;
+  }
+}
+
 @Injectable()
 export class PostgresCatalogRepository {
   constructor(private readonly database: Database) {}
+
+  async checkDemoReadAccess(): Promise<void> {
+    await this.database.read(async (db) => {
+      await db.execute(sql.raw('SELECT 1 FROM catalog.products LIMIT 0'));
+      await db.execute(sql.raw('SELECT 1 FROM catalog.variants LIMIT 0'));
+      await db.execute(sql.raw('SELECT 1 FROM catalog.product_images LIMIT 0'));
+      await db.execute(sql.raw('SELECT 1 FROM catalog.variant_images LIMIT 0'));
+    });
+  }
+
+  private demoWhere(query: ProductQuery): SQL | undefined {
+    const conditions: SQL[] = [];
+    if (query.q !== undefined) {
+      const literal = query.q.replace(/[\\%_]/g, '\\$&');
+      conditions.push(
+        or(
+          ilike(products.nombre, '%' + literal + '%'),
+          ilike(products.descripcion, '%' + literal + '%'),
+        )!,
+      );
+    }
+    if (query.categoriaId !== undefined)
+      conditions.push(eq(products.categoria_id, query.categoriaId));
+    if (query.marcaId !== undefined)
+      conditions.push(eq(products.marca_id, query.marcaId));
+    return conditions.length ? and(...conditions) : undefined;
+  }
+
+  private async demoImages(
+    tx: NodePgDatabase,
+    productId: string,
+  ): Promise<string[]> {
+    const own = await tx.execute(sql`SELECT url FROM catalog.product_images
+      WHERE product_id = ${productId}::uuid AND length(trim(url)) > 0
+      ORDER BY principal DESC, posicion ASC, id ASC`);
+    const ownUrls = own.rows.map((row) => row.url).filter(isDemoImageUrl);
+    if (ownUrls.length) return ownUrls;
+    const variantsGallery = await tx.execute(sql`SELECT vi.url
+      FROM catalog.variants v JOIN catalog.variant_images vi ON vi.variant_id = v.id
+      WHERE v.product_id = ${productId}::uuid AND length(trim(vi.url)) > 0
+      ORDER BY vi.posicion ASC, vi.id ASC, v.id ASC`);
+    return variantsGallery.rows.map((row) => row.url).filter(isDemoImageUrl);
+  }
+
+  async listDemoCandidates(
+    query: ProductQuery,
+    maxCandidates: number,
+  ): Promise<ProductSummary[]> {
+    return this.database.read((db) =>
+      db.transaction(
+        async (tx) => {
+          const rows = await tx
+            .select(projection)
+            .from(products)
+            .where(this.demoWhere(query))
+            .orderBy(
+              query.orden === 'NOMBRE_DESC'
+                ? desc(products.nombre)
+                : asc(products.nombre),
+              asc(products.id),
+            )
+            .limit(maxCandidates + 1);
+          if (rows.length > maxCandidates)
+            throw new ServiceUnavailableException();
+          const items: ProductSummary[] = [];
+          for (const row of rows) {
+            const images = await this.demoImages(tx, row.product_id);
+            if (!images.length) continue;
+            const attributes = await tx
+              .select(attributeProjection)
+              .from(productAttributes)
+              .where(eq(productAttributes.product_id, row.product_id))
+              .orderBy(asc(productAttributes.caracteristica_id));
+            items.push({ ...row, images, attributes });
+          }
+          return items;
+        },
+        { isolationLevel: 'repeatable read', accessMode: 'read only' },
+      ),
+    );
+  }
+
+  async findDemoCandidateBySlug(
+    slug: string,
+  ): Promise<(ProductSummary & { variants: CommercialVariant[] }) | null> {
+    return this.database.read((db) =>
+      db.transaction(
+        async (tx) => {
+          const [row] = await tx
+            .select(projection)
+            .from(products)
+            .where(eq(products.slug, slug))
+            .limit(1);
+          if (!row) return null;
+          const images = await this.demoImages(tx, row.product_id);
+          if (!images.length) return null;
+          const attributes = await tx
+            .select(attributeProjection)
+            .from(productAttributes)
+            .where(eq(productAttributes.product_id, row.product_id))
+            .orderBy(asc(productAttributes.caracteristica_id));
+          const children = row.tiene_variantes
+            ? await tx
+                .select({ variant_id: variants.id, sku: variants.sku })
+                .from(variants)
+                .where(eq(variants.product_id, row.product_id))
+                .orderBy(asc(variants.id))
+            : [];
+          const result: CommercialVariant[] = [];
+          for (const child of children) {
+            const values = await tx
+              .select({
+                caracteristica_id: variantAttributes.caracteristica_id,
+                nombre: variantAttributes.nombre_snapshot,
+                valor_id: variantAttributes.valor_id,
+                valor: variantAttributes.valor,
+                identifying: variantAttributes.es_identificador,
+              })
+              .from(variantAttributes)
+              .where(eq(variantAttributes.variant_id, child.variant_id))
+              .orderBy(asc(variantAttributes.caracteristica_id));
+            const gallery = await tx
+              .select({ url: variantImages.url })
+              .from(variantImages)
+              .where(eq(variantImages.variant_id, child.variant_id))
+              .orderBy(asc(variantImages.posicion), asc(variantImages.id));
+            const attrs = (identifying: boolean): Attribute[] =>
+              values
+                .filter((v) => v.identifying === identifying)
+                .map(({ identifying: _internal, ...attribute }) => attribute);
+            result.push({
+              ...child,
+              identifying_attributes: attrs(true),
+              non_identifying_attributes: attrs(false),
+              images: gallery
+                .map((i) => i.url)
+                .filter((url) => url.trim().length > 0),
+            });
+          }
+          return { ...row, images, attributes, variants: result };
+        },
+        { isolationLevel: 'repeatable read', accessMode: 'read only' },
+      ),
+    );
+  }
 
   // Sin selección: candidato INTERNO, jamás acredita elegibilidad de un canal.
   private where(

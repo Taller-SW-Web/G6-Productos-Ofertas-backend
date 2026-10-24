@@ -28,6 +28,24 @@ const command = () => ({
 });
 
 describe('coupon command contract and semantic identity', () => {
+  it.each([undefined, null, '00000000-0000-4000-8000-000000000001'])(
+    'preserves rc.3 restoration compatibility with original reference %s while D-04 sender conformance is separate',
+    (reference) => {
+      const input = {
+        ...command(),
+        name: 'promotions.coupon.restoration.requested',
+        data: {
+          order_id: 'PED-D04',
+          cancellation_reason: 'cancelled',
+          cancelled_at: '2026-10-16T11:00:00Z',
+          ...(reference === undefined
+            ? {}
+            : { consumption_operation_id: reference }),
+        },
+      };
+      expect(parseCouponCommand(input, 'modulo-ventas')).toEqual(input);
+    },
+  );
   it('accepts the exact v2 contract, opaque order and transport identities', () => {
     const input = command();
     expect(parseCouponCommand(input, 'modulo-ventas')).toEqual(input);

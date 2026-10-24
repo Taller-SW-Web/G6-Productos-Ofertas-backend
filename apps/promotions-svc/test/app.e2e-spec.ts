@@ -7,12 +7,32 @@ import {
   PromotionsConfigService,
   validatePromotionsConfiguration,
 } from '../src/infrastructure/config/promotions-config.js';
-import { PromotionsReadinessService } from '../src/health/promotions-readiness.service.js';
+import {
+  PROMOTIONS_DEPENDENCY_PROBES,
+  PromotionsReadinessService,
+} from '../src/health/promotions-readiness.service.js';
 import { COUPON_EVIDENCE_PROVIDER } from '../src/coupons/coupon-providers.js';
 import { CouponRuntime } from '../src/coupons/coupon-runtime.js';
 import { CouponCommandDeliveryHandler } from '../src/coupons/coupon-amqp.js';
 import type { CouponEvidenceProvider } from '../src/coupons/coupon-transactions.js';
 import { createEnvironmentFixture } from './support/environment.js';
+import {
+  ADMIN_REFERENCES,
+  type AdminReferences,
+} from '../src/domain/admin-references.js';
+import {
+  COMMERCIAL_CONTEXT,
+  type CommercialContext,
+} from '../src/domain/commercial-context.js';
+import {
+  COUPON_RUNTIME_BOUNDARY,
+  type CouponRuntimeBoundary,
+} from '../src/coupons/coupon-runtime.js';
+import {
+  PromotionsAssignedEventDispatcher,
+  PROMOTIONS_BROKER_IDENTITY,
+  type PromotionsBrokerIdentity,
+} from '../src/coupons/assigned-event-dispatcher.js';
 
 describe('PromotionsSvcController (e2e)', () => {
   let app: INestApplication<App>;
@@ -135,6 +155,77 @@ describe('Promotions module startup configuration', () => {
       );
     } finally {
       await module.close();
+    }
+  });
+
+  it('cannot bypass the production runtime gate just by satisfying dispatcher and broker preflight', async () => {
+    const module = await Test.createTestingModule({
+      imports: [PromotionsSvcModule],
+    }).compile();
+    try {
+      const dispatcher = vi
+        .spyOn(module.get(PromotionsAssignedEventDispatcher), 'assertReady')
+        .mockReturnValue(undefined);
+      const identity = vi
+        .spyOn(
+          module.get<PromotionsBrokerIdentity>(PROMOTIONS_BROKER_IDENTITY),
+          'assertReady',
+        )
+        .mockResolvedValue(undefined);
+      await expect(
+        module
+          .get<CouponRuntimeBoundary>(COUPON_RUNTIME_BOUNDARY)
+          .assertReady(),
+      ).rejects.toThrow(
+        'COUPON_RUNTIME_BLOCKED_EVIDENCE_ELIGIBILITY_DISPATCHER_IDENTITY',
+      );
+      expect(dispatcher).toHaveBeenCalledOnce();
+      expect(identity).toHaveBeenCalledOnce();
+    } finally {
+      await module.close();
+    }
+  });
+
+  it('does not equate healthy dependency probes or HTTP liveness with commercial readiness', async () => {
+    const module = await Test.createTestingModule({
+      imports: [PromotionsSvcModule],
+    })
+      .overrideProvider(PROMOTIONS_DEPENDENCY_PROBES)
+      .useValue({
+        database: { check: async () => undefined },
+        broker: { check: async () => undefined },
+      })
+      .compile();
+    const app = module.createNestApplication({ logger: false });
+    try {
+      await app.init();
+      expect(await app.get(PromotionsReadinessService).check()).toMatchObject({
+        status: 'ready',
+        dependencies: { database: 'up', broker: 'up' },
+      });
+      const signal = new AbortController().signal;
+      await expect(
+        app
+          .get<AdminReferences>(ADMIN_REFERENCES)
+          .verify(
+            { products: ['P'], skus: ['SKU'], categories: ['C'] },
+            signal,
+          ),
+      ).rejects.toThrow('COMMERCIAL_CONTEXT_UNAVAILABLE');
+      await expect(
+        app
+          .get<CommercialContext>(COMMERCIAL_CONTEXT)
+          .basket(
+            { channel_id: 'MARKETPLACE', lines: [{ sku: 'SKU', quantity: 1 }] },
+            '2026-10-22T12:00:00Z',
+            signal,
+          ),
+      ).rejects.toThrow('COMMERCIAL_CONTEXT_UNAVAILABLE');
+      await request(app.getHttpServer()).get('/health').expect(200);
+      await request(app.getHttpServer()).get('/health/live').expect(404);
+      await request(app.getHttpServer()).get('/health/ready').expect(404);
+    } finally {
+      await app.close();
     }
   });
 });

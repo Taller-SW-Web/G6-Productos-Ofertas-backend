@@ -1,7 +1,7 @@
 import { readGatewaySettings } from './gateway-settings.js';
 import { createSignedIdentity } from '../../test/support/signed-identity.js';
 import { CONTRACT_ROUTES } from './contract-routes.js';
-import { GatewayIdentity } from './gateway-identity.js';
+import { GatewayIdentity, isDemoPublicRoute } from './gateway-identity.js';
 
 describe('Gateway identity from G6/G7 contracts', () => {
   const settings = readGatewaySettings({});
@@ -155,8 +155,59 @@ describe('Gateway identity from G6/G7 contracts', () => {
     await expect(identity.authorize(product, undefined)).rejects.toMatchObject({
       status: 401,
     });
+    const categories = CONTRACT_ROUTES.find(
+      (route) => route.operationId === 'listarCategorias',
+    )!;
+    await expect(
+      identity.authorize(categories, undefined),
+    ).rejects.toMatchObject({
+      status: 401,
+    });
     await expect(
       identity.authorize(product, `Bearer ${signed.token()}`),
     ).rejects.toMatchObject({ status: 503 });
+  });
+  it('bypasses JWT only for the demo public GET allowlist', async () => {
+    const demoIdentity = new GatewayIdentity({
+      ...settings,
+      issuer: undefined,
+      jwksUrl: undefined,
+      demoNoAuthEnabled: true,
+    });
+    const allowed = CONTRACT_ROUTES.filter(isDemoPublicRoute);
+    expect(allowed.map((route) => route.operationId).sort()).toEqual([
+      'listarCategorias',
+      'listarProductos',
+      'obtenerProductoPorSlug',
+    ]);
+    for (const route of allowed) {
+      await expect(
+        demoIdentity.authorize(route, undefined),
+      ).resolves.toBeUndefined();
+      await expect(
+        demoIdentity.authorize(route, 'Bearer malformed-secret-token'),
+      ).resolves.toBeUndefined();
+    }
+    const protectedRoute = CONTRACT_ROUTES.find(
+      (route) => route.method === 'POST',
+    )!;
+    await expect(
+      demoIdentity.authorize(protectedRoute, undefined),
+    ).rejects.toMatchObject({ status: 401, code: 'TOKEN_INVALIDO' });
+  });
+  it('restores JWT and authorization checks when demo mode is disabled', async () => {
+    const identity = new GatewayIdentity({
+      ...settings,
+      demoNoAuthEnabled: false,
+    });
+    const categories = CONTRACT_ROUTES.find(
+      (route) => route.operationId === 'listarCategorias',
+    )!;
+    await expect(
+      identity.authorize(categories, undefined),
+    ).rejects.toMatchObject({ status: 401, code: 'TOKEN_INVALIDO' });
+    await expect(
+      identity.authorize(product, `Bearer ${signed.token()}`),
+    ).rejects.toMatchObject({ status: 503, code: 'SERVICIO_NO_DISPONIBLE' });
   });
 });

@@ -1,0 +1,401 @@
+{
+  "artifact_version": 2,
+  "issue": 13,
+  "scenario": "Inka Athletics",
+  "classification": "demo",
+  "synthetic": true,
+  "notice": "Precios de demostracion, no cotizaciones ni ofertas oficiales del comercio o fabricantes. Matriz de preparacion; ningun SKU publicado al auditar.",
+  "catalog_captured_at": "2026-10-16T23:38:05.750873+00:00",
+  "pricing_captured_at": "2026-10-16T23:38:02.751524+00:00",
+  "contract_version": "0.6.0-rc.1",
+  "valid_channels": [
+    "MARKETPLACE",
+    "CHATBOT",
+    "RETAIL",
+    "VENTAS"
+  ],
+  "channel_policy": "Se conserva channel_id=null (global). Canal especifico con fallback global segun SPEC-013; no se inventan precios por canal.",
+  "scales": [
+    {
+      "family": "camiseta_entrenamiento",
+      "range_pen": [
+        "50.00",
+        "100.00"
+      ],
+      "reason": "Prenda de entrada para entrenamiento; menor valor que el calzado.",
+      "products": [
+        "32a4172c-81b2-b643-1d0f-ae66f627f2ef"
+      ]
+    },
+    {
+      "family": "balon_futbol_recreativo",
+      "range_pen": [
+        "70.00",
+        "120.00"
+      ],
+      "reason": "Balon recreativo de talla deportiva; sin atribuir certificacion profesional.",
+      "products": [
+        "abab3400-46eb-58f7-78d5-8204418b60d9"
+      ]
+    },
+    {
+      "family": "chimpun_entrada",
+      "range_pen": [
+        "180.00",
+        "300.00"
+      ],
+      "reason": "Calzado de futbol de entrada; se conserva el importe existente, sin oferta.",
+      "products": [
+        "08f2c67c-d79a-3e61-c7ee-0262885f68e7"
+      ]
+    },
+    {
+      "family": "running_entrada",
+      "range_pen": [
+        "200.00",
+        "330.00"
+      ],
+      "reason": "Dos modelos de running comparables; diferencia existente de S/ 30.00, sin inventar prestaciones.",
+      "products": [
+        "abaf9767-7431-9b50-495c-aeb880dc3055",
+        "fedeecfb-c7f5-56cf-c31b-9cdf10b47058"
+      ]
+    },
+    {
+      "family": "accesorio_entrenamiento",
+      "range_pen": [
+        "15.00",
+        "100.00"
+      ],
+      "reason": "Banda orientativa sintetica para accesorios sencillos; no asignar importe hasta conocer el articulo y SKU de DATA-002.",
+      "products": []
+    }
+  ],
+  "rows": [
+    {
+      "sku": "ADI-ENT22-AZU-M",
+      "product_id": "32a4172c-81b2-b643-1d0f-ae66f627f2ef",
+      "product_name": "adidas Entrada 22",
+      "product_status": "BORRADOR",
+      "product_version": 0,
+      "variant_id": "35133a17-114a-381e-090a-87446d5fc701",
+      "variant_status": "BORRADOR",
+      "variant_version": 0,
+      "kind": "VARIANTE",
+      "sku_identity_id": "1fb83549-de75-4489-a51f-9224648b3b83",
+      "price_id": "c548fff8-ac7c-27ae-1889-d48f67676ba8",
+      "validity_id": "c431f40c-3bc0-46a1-a56f-87ed2b1f1561",
+      "precio_regular": "79.90",
+      "precio_oferta": null,
+      "currency": "PEN",
+      "channel_id": null,
+      "valid_from": "2026-10-01T05:00:00+00:00",
+      "valid_until": null,
+      "price_version": 1,
+      "origen": "PRODUCTO",
+      "effective_now": true,
+      "commercial_ready": false,
+      "status": "BLOQUEADO_ESPECIFICO",
+      "blockers": [
+        "Producto BORRADOR",
+        "Variante BORRADOR"
+      ],
+      "action": "CONSERVAR_PRECIO_BASE"
+    },
+    {
+      "sku": "ADI-ENT22-BASE",
+      "product_id": "32a4172c-81b2-b643-1d0f-ae66f627f2ef",
+      "product_name": "adidas Entrada 22",
+      "product_status": "BORRADOR",
+      "product_version": 0,
+      "variant_id": null,
+      "variant_status": null,
+      "variant_version": null,
+      "kind": "BASE_NO_VENDIBLE",
+      "sku_identity_id": "fe8a75a1-d44a-41da-b8ba-2bfed14a6349",
+      "price_id": "c548fff8-ac7c-27ae-1889-d48f67676ba8",
+      "validity_id": "c431f40c-3bc0-46a1-a56f-87ed2b1f1561",
+      "precio_regular": "79.90",
+      "precio_oferta": null,
+      "currency": "PEN",
+      "channel_id": null,
+      "valid_from": "2026-10-01T05:00:00+00:00",
+      "valid_until": null,
+      "price_version": 1,
+      "origen": "PRODUCTO",
+      "effective_now": true,
+      "commercial_ready": false,
+      "status": "NO_VENDIBLE",
+      "blockers": [
+        "SKU base de producto con variantes; no usar como unidad vendible."
+      ],
+      "action": "CONSERVAR_PRECIO_BASE"
+    },
+    {
+      "sku": "ADI-RF3-BASE",
+      "product_id": "abaf9767-7431-9b50-495c-aeb880dc3055",
+      "product_name": "adidas Runfalcon 3.0",
+      "product_status": "BORRADOR",
+      "product_version": 0,
+      "variant_id": null,
+      "variant_status": null,
+      "variant_version": null,
+      "kind": "BASE_NO_VENDIBLE",
+      "sku_identity_id": "d52d71f9-25e8-4e95-8b98-fad87974f403",
+      "price_id": "e5487a46-cc52-32eb-49cd-695f17246e40",
+      "validity_id": "c673464b-d87b-44bc-a8aa-dc4bb7eb2c97",
+      "precio_regular": "249.90",
+      "precio_oferta": null,
+      "currency": "PEN",
+      "channel_id": null,
+      "valid_from": "2026-10-01T05:00:00+00:00",
+      "valid_until": null,
+      "price_version": 1,
+      "origen": "PRODUCTO",
+      "effective_now": true,
+      "commercial_ready": false,
+      "status": "NO_VENDIBLE",
+      "blockers": [
+        "SKU base de producto con variantes; no usar como unidad vendible."
+      ],
+      "action": "CONSERVAR_PRECIO_BASE"
+    },
+    {
+      "sku": "ADI-RF3-GRI-38",
+      "product_id": "abaf9767-7431-9b50-495c-aeb880dc3055",
+      "product_name": "adidas Runfalcon 3.0",
+      "product_status": "BORRADOR",
+      "product_version": 0,
+      "variant_id": "532ffc0d-d209-2b48-6506-e94f62026e17",
+      "variant_status": "BORRADOR",
+      "variant_version": 0,
+      "kind": "VARIANTE",
+      "sku_identity_id": "5fbdfbb6-2c5d-44fb-a896-27e2e44405c9",
+      "price_id": "e5487a46-cc52-32eb-49cd-695f17246e40",
+      "validity_id": "c673464b-d87b-44bc-a8aa-dc4bb7eb2c97",
+      "precio_regular": "249.90",
+      "precio_oferta": null,
+      "currency": "PEN",
+      "channel_id": null,
+      "valid_from": "2026-10-01T05:00:00+00:00",
+      "valid_until": null,
+      "price_version": 1,
+      "origen": "PRODUCTO",
+      "effective_now": true,
+      "commercial_ready": false,
+      "status": "BLOQUEADO_ESPECIFICO",
+      "blockers": [
+        "Producto BORRADOR",
+        "Variante BORRADOR"
+      ],
+      "action": "CONSERVAR_PRECIO_BASE"
+    },
+    {
+      "sku": "ADI-RF3-GRI-39",
+      "product_id": "abaf9767-7431-9b50-495c-aeb880dc3055",
+      "product_name": "adidas Runfalcon 3.0",
+      "product_status": "BORRADOR",
+      "product_version": 0,
+      "variant_id": "f1bd0fad-819b-b0fd-b5b1-53bb36fd468f",
+      "variant_status": "BORRADOR",
+      "variant_version": 0,
+      "kind": "VARIANTE",
+      "sku_identity_id": "43ba45b9-c161-4387-a1c9-db2b1f17afc2",
+      "price_id": "e5487a46-cc52-32eb-49cd-695f17246e40",
+      "validity_id": "c673464b-d87b-44bc-a8aa-dc4bb7eb2c97",
+      "precio_regular": "249.90",
+      "precio_oferta": null,
+      "currency": "PEN",
+      "channel_id": null,
+      "valid_from": "2026-10-01T05:00:00+00:00",
+      "valid_until": null,
+      "price_version": 1,
+      "origen": "PRODUCTO",
+      "effective_now": true,
+      "commercial_ready": false,
+      "status": "BLOQUEADO_ESPECIFICO",
+      "blockers": [
+        "Producto BORRADOR",
+        "Variante BORRADOR"
+      ],
+      "action": "CONSERVAR_PRECIO_BASE"
+    },
+    {
+      "sku": "NIK-PITCH-05",
+      "product_id": "abab3400-46eb-58f7-78d5-8204418b60d9",
+      "product_name": "Nike Pitch",
+      "product_status": "BORRADOR",
+      "product_version": 0,
+      "variant_id": null,
+      "variant_status": null,
+      "variant_version": null,
+      "kind": "SIMPLE",
+      "sku_identity_id": "eb4d35ac-41c0-4e6e-a059-5dc35d850a57",
+      "price_id": "bd607234-c18a-5b80-1350-afc195c1ebb1",
+      "validity_id": "608ca059-1877-4ec4-a609-27f8a1ee8b89",
+      "precio_regular": "89.90",
+      "precio_oferta": null,
+      "currency": "PEN",
+      "channel_id": null,
+      "valid_from": "2026-10-01T05:00:00+00:00",
+      "valid_until": null,
+      "price_version": 1,
+      "origen": "PRODUCTO",
+      "effective_now": true,
+      "commercial_ready": false,
+      "status": "BLOQUEADO_ESPECIFICO",
+      "blockers": [
+        "Producto BORRADOR"
+      ],
+      "action": "CONSERVAR_PRECIO_BASE"
+    },
+    {
+      "sku": "NIK-REV7-BASE",
+      "product_id": "fedeecfb-c7f5-56cf-c31b-9cdf10b47058",
+      "product_name": "Nike Revolution 7",
+      "product_status": "BORRADOR",
+      "product_version": 0,
+      "variant_id": null,
+      "variant_status": null,
+      "variant_version": null,
+      "kind": "BASE_NO_VENDIBLE",
+      "sku_identity_id": "3aa8160e-55a5-4f89-abd6-73abf2dc4e5f",
+      "price_id": "78706bdc-ab26-f3a2-5113-390b1fe49c27",
+      "validity_id": "e6242ecc-3705-4f7a-96d4-d527f59759a2",
+      "precio_regular": "279.90",
+      "precio_oferta": null,
+      "currency": "PEN",
+      "channel_id": null,
+      "valid_from": "2026-10-01T05:00:00+00:00",
+      "valid_until": null,
+      "price_version": 1,
+      "origen": "PRODUCTO",
+      "effective_now": true,
+      "commercial_ready": false,
+      "status": "NO_VENDIBLE",
+      "blockers": [
+        "SKU base de producto con variantes; no usar como unidad vendible."
+      ],
+      "action": "CONSERVAR_PRECIO_BASE"
+    },
+    {
+      "sku": "NIK-REV7-NEG-41",
+      "product_id": "fedeecfb-c7f5-56cf-c31b-9cdf10b47058",
+      "product_name": "Nike Revolution 7",
+      "product_status": "BORRADOR",
+      "product_version": 0,
+      "variant_id": "9df1c63b-f475-5ea4-fab4-cf2bb36120ae",
+      "variant_status": "BORRADOR",
+      "variant_version": 0,
+      "kind": "VARIANTE",
+      "sku_identity_id": "0265b4f7-4ca3-455c-a416-de32eb341494",
+      "price_id": "78706bdc-ab26-f3a2-5113-390b1fe49c27",
+      "validity_id": "e6242ecc-3705-4f7a-96d4-d527f59759a2",
+      "precio_regular": "279.90",
+      "precio_oferta": null,
+      "currency": "PEN",
+      "channel_id": null,
+      "valid_from": "2026-10-01T05:00:00+00:00",
+      "valid_until": null,
+      "price_version": 1,
+      "origen": "PRODUCTO",
+      "effective_now": true,
+      "commercial_ready": false,
+      "status": "BLOQUEADO_ESPECIFICO",
+      "blockers": [
+        "Producto BORRADOR",
+        "Variante BORRADOR"
+      ],
+      "action": "CONSERVAR_PRECIO_BASE"
+    },
+    {
+      "sku": "NIK-REV7-NEG-42",
+      "product_id": "fedeecfb-c7f5-56cf-c31b-9cdf10b47058",
+      "product_name": "Nike Revolution 7",
+      "product_status": "BORRADOR",
+      "product_version": 0,
+      "variant_id": "437853de-9b59-6b0b-5b26-ccd51e2e062b",
+      "variant_status": "BORRADOR",
+      "variant_version": 0,
+      "kind": "VARIANTE",
+      "sku_identity_id": "0ece3ef9-cede-4159-85b5-1768b63ab748",
+      "price_id": "78706bdc-ab26-f3a2-5113-390b1fe49c27",
+      "validity_id": "e6242ecc-3705-4f7a-96d4-d527f59759a2",
+      "precio_regular": "279.90",
+      "precio_oferta": null,
+      "currency": "PEN",
+      "channel_id": null,
+      "valid_from": "2026-10-01T05:00:00+00:00",
+      "valid_until": null,
+      "price_version": 1,
+      "origen": "PRODUCTO",
+      "effective_now": true,
+      "commercial_ready": false,
+      "status": "BLOQUEADO_ESPECIFICO",
+      "blockers": [
+        "Producto BORRADOR",
+        "Variante BORRADOR"
+      ],
+      "action": "CONSERVAR_PRECIO_BASE"
+    },
+    {
+      "sku": "PUM-ULP-BASE",
+      "product_id": "08f2c67c-d79a-3e61-c7ee-0262885f68e7",
+      "product_name": "Puma Ultra Play",
+      "product_status": "BORRADOR",
+      "product_version": 0,
+      "variant_id": null,
+      "variant_status": null,
+      "variant_version": null,
+      "kind": "BASE_NO_VENDIBLE",
+      "sku_identity_id": "48951138-c5b2-41e3-9935-3f3b9bec2d12",
+      "price_id": "34a4390e-7805-cb75-bc29-e58383bc0cb8",
+      "validity_id": "687b5950-4669-4e6c-b83b-81f16015963a",
+      "precio_regular": "219.90",
+      "precio_oferta": null,
+      "currency": "PEN",
+      "channel_id": null,
+      "valid_from": "2026-10-01T05:00:00+00:00",
+      "valid_until": null,
+      "price_version": 1,
+      "origen": "PRODUCTO",
+      "effective_now": true,
+      "commercial_ready": false,
+      "status": "NO_VENDIBLE",
+      "blockers": [
+        "SKU base de producto con variantes; no usar como unidad vendible."
+      ],
+      "action": "CONSERVAR_PRECIO_BASE"
+    },
+    {
+      "sku": "PUM-ULP-NEG-42",
+      "product_id": "08f2c67c-d79a-3e61-c7ee-0262885f68e7",
+      "product_name": "Puma Ultra Play",
+      "product_status": "BORRADOR",
+      "product_version": 0,
+      "variant_id": "9ba54bda-2686-8e3b-41c6-68b6efa16338",
+      "variant_status": "BORRADOR",
+      "variant_version": 0,
+      "kind": "VARIANTE",
+      "sku_identity_id": "72c5c4f2-f9cb-40c1-a017-b48a0a4b79cb",
+      "price_id": "34a4390e-7805-cb75-bc29-e58383bc0cb8",
+      "validity_id": "687b5950-4669-4e6c-b83b-81f16015963a",
+      "precio_regular": "219.90",
+      "precio_oferta": null,
+      "currency": "PEN",
+      "channel_id": null,
+      "valid_from": "2026-10-01T05:00:00+00:00",
+      "valid_until": null,
+      "price_version": 1,
+      "origen": "PRODUCTO",
+      "effective_now": true,
+      "commercial_ready": false,
+      "status": "BLOQUEADO_ESPECIFICO",
+      "blockers": [
+        "Producto BORRADOR",
+        "Variante BORRADOR"
+      ],
+      "action": "CONSERVAR_PRECIO_BASE"
+    }
+  ]
+}

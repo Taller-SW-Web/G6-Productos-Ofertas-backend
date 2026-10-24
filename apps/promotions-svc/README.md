@@ -1,6 +1,12 @@
 # Promotions: estructura, configuración y persistencia — backend #70/#71
 
 Owner: Axel Cueva. Rama: `cueva`. Alcance: `apps/promotions-svc/`.
+Estado posterior a la auditoría de #123: [AUDITORIA-PR123.md](AUDITORIA-PR123.md).
+Ese corte distingue implementación local, integración bloqueada, homologación
+pendiente y despliegue no ejecutado; los conteos y SHAs históricos de abajo
+corresponden a sus fechas, no al candidato actual. `/health=200` y probes de
+PG/broker exitosos no acreditan disponibilidad comercial ni autorizan release.
+
 Este documento describe el avance local de #70. Los avances de #33/#70/#15/#112
 fueron retirados del PR #116, fusionado el 16/10/2026 mediante `c3a6b0a`, que
 contiene solo el Gateway aprobado. Estos avances permanecen en `cueva`,

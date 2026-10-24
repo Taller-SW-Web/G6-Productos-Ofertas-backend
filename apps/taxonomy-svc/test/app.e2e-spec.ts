@@ -94,6 +94,38 @@ describe('TaxonomySvc (e2e) — GET /api/v1/categorias y /api/v1/marcas (#22)', 
     });
   });
 
+  it('/health/readiness (GET) responde 503 si el usuario no puede leer las tablas (42501)', async () => {
+    repositorio.errorTablas = Object.assign(
+      new Error('permission denied for table categories'),
+      { code: '42501' },
+    );
+
+    const res = await request(app.getHttpServer())
+      .get('/health/readiness')
+      .expect(503);
+
+    expect(res.headers['content-type']).toContain('application/problem+json');
+    expect(res.body).toMatchObject({
+      type: '/errores/servicio-no-disponible',
+      status: 503,
+      code: 'SERVICIO_NO_DISPONIBLE',
+    });
+  });
+
+  it('/health/readiness (GET) responde 503 si falla una tabla de taxonomía', async () => {
+    repositorio.errorTablas = Object.assign(
+      new Error('relation "taxonomy.brands" does not exist'),
+      { code: '42P01' },
+    );
+
+    const res = await request(app.getHttpServer())
+      .get('/health/readiness')
+      .expect(503);
+
+    expect(res.headers['content-type']).toContain('application/problem+json');
+    expect(res.body.code).toBe('SERVICIO_NO_DISPONIBLE');
+  });
+
   it('/health/readiness (GET) responde 503 en configuración sin fuente de datos, con /health aún en 200', async () => {
     const appSinFuente = await crearApp();
 

@@ -12,6 +12,15 @@ Este avance se publica en `cueva` después del merge confirmado de #116
 
 ## Implementación y alcance
 
+**Compatibilidad D-04:** el acuerdo H4 de Docs
+`1ee0d9e5a788dbe559a376bf96a60c6117af3956`,
+`integraciones/ACUERDO_G5_G6_H4_2026-10-21.md`, exige que G5 envíe siempre
+`consumption_operation_id` en nuevas restauraciones. El schema general rc.3
+lo conserva opcional/anulable y el mismo acuerdo declara que no requiere una
+versión nueva por ese perfil de emisor. No se endurece el parser ni se cambia
+el contrato: [auditoría y pruebas de conformidad](AUDITORIA-PR123.md).
+La conformidad local no acredita productor G5 homologado ni prueba bilateral.
+
 Se implementan los dos comandos `promotions.coupon.consumption.requested` y
 `promotions.coupon.restoration.requested`, y sus cuatro resultados contractuales.
 `coupon-contract.generated.ts` contiene los seis schemas extraídos de AsyncAPI,
