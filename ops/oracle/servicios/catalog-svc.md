@@ -51,3 +51,7 @@ Schema `catalog`, rol limitado esperado, select queries para readiness y demo. B
 ## H. Bloqueos y entrega
 
 Poma: investigar y corregir readiness 503; añadir una prueba con producto válido para demostrar respuesta comercial positiva. Rabbit candidate bloqueado hasta reconciliación y red autorizada. Marco: suministrar runtime privado/rol y autorizar release cuando los gates estén satisfechos; no publicar fallback productivo.
+
+## Marketplace H4 — Catalog
+
+Operaciones consumidas: `listarProductos` (`GET /api/v1/productos`) y `obtenerProductoPorSlug` (`GET /api/v1/productos/por-slug/{slug}`); `listarCategorias`/marcas pertenecen a Taxonomy. Mantener elegibilidad comercial y SKU vendible; no derivar SKU de IDs. Filtros múltiples/precio solo se consideran implementados con contrato y prueba Provider de resultado global. El estado/owner, PR y evidencia por SHA se mantienen en la [matriz H4](../../../integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md). No tomar un HEAD de rama personal como implementado en master ni CI/deploy.
