@@ -371,6 +371,73 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     });
   });
 
+  it('preserves confirmed Outbox publication against delayed failures and out-of-order attempts', async () => {
+    const confirmedAt = new Date('2026-10-23T12:00:00.000Z');
+    const duplicateAt = new Date('2026-10-23T12:05:00.000Z');
+    const published = {
+      messageId: randomUUID(),
+      eventName: 'test.outbox.confirmed',
+      kind: 'event' as const,
+      correlationId: randomUUID(),
+      occurredAt: new Date(),
+      payload: { value: 'confirmed' },
+    };
+    await repository.enqueueOutbox(published);
+    await repository.markOutboxPublished(published.messageId, {
+      publishedAt: confirmedAt,
+      attempts: 4,
+    });
+    await repository.markOutboxPublished(published.messageId, {
+      attempts: 2,
+      lastError: 'late transport failure',
+    });
+    await repository.markOutboxPublished(published.messageId, {
+      publishedAt: duplicateAt,
+      attempts: 1,
+    });
+    const [confirmed] = await database
+      .select()
+      .from(outbox)
+      .where(eq(outbox.messageId, published.messageId));
+    expect(confirmed?.publishedAt?.toISOString()).toBe(
+      confirmedAt.toISOString(),
+    );
+    expect(confirmed?.attempts).toBe(4);
+    expect(confirmed?.lastError).toBeNull();
+    expect(
+      (await repository.findPendingOutbox()).some(
+        (message) => message.messageId === published.messageId,
+      ),
+    ).toBe(false);
+
+    const pending = { ...published, messageId: randomUUID() };
+    await repository.enqueueOutbox(pending);
+    await repository.markOutboxPublished(pending.messageId, {
+      attempts: 3,
+      lastError: 'temporary failure',
+    });
+    expect(
+      (await repository.findPendingOutbox()).some(
+        (message) => message.messageId === pending.messageId,
+      ),
+    ).toBe(true);
+    await repository.markOutboxPublished(pending.messageId, {
+      publishedAt: confirmedAt,
+      attempts: 1,
+    });
+    const [recovered] = await database
+      .select()
+      .from(outbox)
+      .where(eq(outbox.messageId, pending.messageId));
+    expect(recovered?.publishedAt?.toISOString()).toBe(
+      confirmedAt.toISOString(),
+    );
+    expect(recovered?.attempts).toBe(3);
+    await expect(
+      repository.markOutboxPublished(randomUUID(), { attempts: 1 }),
+    ).rejects.toMatchObject({ code: 'FOREIGN_KEY_VIOLATION' });
+  });
+
   it('processes each Inbox handler once and rolls back the receipt if its local mutation fails', async () => {
     const input = {
       messageId: randomUUID(),
@@ -457,6 +524,61 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     ).toHaveLength(0);
   });
 
+  it('validates Inbox replay identity structurally and deduplicates concurrent deliveries', async () => {
+    const input = {
+      messageId: randomUUID(),
+      handler: 'identity-handler',
+      eventName: 'test.identity',
+      correlationId: 'identity-correlation',
+      payload: { nested: { first: 1, second: 2 }, list: [1, 2] },
+    };
+    let effectCount = 0;
+    const effect = async () => {
+      effectCount += 1;
+      return 'stored-result';
+    };
+    await expect(repository.processInboxOnce(input, effect)).resolves.toEqual({
+      processed: true,
+      result: 'stored-result',
+    });
+    await expect(
+      repository.processInboxOnce(
+        {
+          ...input,
+          payload: { list: [1, 2], nested: { second: 2, first: 1 } },
+        },
+        effect,
+      ),
+    ).resolves.toEqual({ processed: false, result: 'stored-result' });
+    for (const incompatible of [
+      { ...input, eventName: 'test.other' },
+      { ...input, correlationId: 'other-correlation' },
+      { ...input, payload: { nested: { first: 9, second: 2 }, list: [1, 2] } },
+    ]) {
+      await expect(
+        repository.processInboxOnce(incompatible, effect),
+      ).rejects.toMatchObject({ code: 'CHECK_VIOLATION' });
+    }
+    expect(effectCount).toBe(1);
+
+    const concurrent = { ...input, messageId: randomUUID() };
+    let concurrentEffects = 0;
+    const concurrentEffect = async () => {
+      concurrentEffects += 1;
+      return 'once';
+    };
+    const results = await Promise.all([
+      repository.processInboxOnce(concurrent, concurrentEffect),
+      repository.processInboxOnce(concurrent, concurrentEffect),
+    ]);
+    expect(results.map((result) => result.processed).sort()).toEqual([
+      false,
+      true,
+    ]);
+    expect(results.map((result) => result.result)).toEqual(['once', 'once']);
+    expect(concurrentEffects).toBe(1);
+  });
+
   it('uses transactional locks to preserve counters for concurrent writes to one batch', async () => {
     const created = await importBatch([
       { rowId: randomUUID(), requiredDomains: ['CATALOGO'] },
@@ -507,6 +629,152 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     ).toMatchObject({
       status: 'COMPLETED',
       completedRows: 0,
+      failedRows: 1,
+      needsReconciliation: true,
+    });
+  });
+
+  it('rejects completed-step and completed-row regressions and preserves durable applied domains', async () => {
+    const created = await importBatch([
+      { rowId: randomUUID(), requiredDomains: ['CATALOGO', 'PRICING'] },
+    ]);
+    const rowId = created.rows[0]!.row.rowId;
+    await repository.updateWorkflowState({
+      batchId: created.batch.batchId,
+      rowId,
+      status: 'PROCESSING',
+      steps: [{ domain: 'CATALOGO', status: 'COMPLETED' }],
+    });
+    await expect(
+      repository.updateWorkflowState({
+        batchId: created.batch.batchId,
+        rowId,
+        status: 'PROCESSING',
+        steps: [
+          { domain: 'PRICING', status: 'PROCESSING' },
+          { domain: 'CATALOGO', status: 'FAILED' },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'CHECK_VIOLATION' });
+    expect(
+      (await repository.listRowSteps(created.batch.batchId, rowId)).map(
+        (step) => [step.domain, step.status],
+      ),
+    ).toEqual([
+      ['CATALOGO', 'COMPLETED'],
+      ['PRICING', 'PENDING'],
+    ]);
+    expect(
+      (await repository.listBatchRows(created.batch.batchId))[0]
+        ?.appliedDomains,
+    ).toEqual(['CATALOGO']);
+
+    await repository.updateWorkflowState({
+      batchId: created.batch.batchId,
+      rowId,
+      status: 'FAILED',
+      failedDomain: 'PRICING',
+      steps: [{ domain: 'PRICING', status: 'FAILED' }],
+    });
+    expect(
+      (await repository.listBatchRows(created.batch.batchId))[0],
+    ).toMatchObject({
+      status: 'FAILED',
+      appliedDomains: ['CATALOGO'],
+      needsReconciliation: true,
+    });
+    await repository.updateWorkflowState({
+      batchId: created.batch.batchId,
+      rowId,
+      status: 'PROCESSING',
+      steps: [{ domain: 'PRICING', status: 'PROCESSING' }],
+    });
+    expect(
+      (await repository.listBatchRows(created.batch.batchId))[0],
+    ).toMatchObject({
+      status: 'PROCESSING',
+      appliedDomains: ['CATALOGO'],
+      needsReconciliation: false,
+    });
+    await repository.updateWorkflowState({
+      batchId: created.batch.batchId,
+      rowId,
+      status: 'COMPLETED',
+      steps: [{ domain: 'PRICING', status: 'COMPLETED' }],
+    });
+    await expect(
+      repository.updateWorkflowState({
+        batchId: created.batch.batchId,
+        rowId,
+        status: 'PROCESSING',
+        steps: [],
+      }),
+    ).rejects.toMatchObject({ code: 'CHECK_VIOLATION' });
+    expect(
+      (await repository.listBatchRows(created.batch.batchId))[0],
+    ).toMatchObject({
+      status: 'COMPLETED',
+      appliedDomains: ['CATALOGO', 'PRICING'],
+    });
+  });
+
+  it('derives reconciliation for partial failure and rolls back an incompatible explicit flag', async () => {
+    const created = await importBatch([
+      { rowId: randomUUID(), requiredDomains: ['CATALOGO', 'PRICING'] },
+    ]);
+    const rowId = created.rows[0]!.row.rowId;
+    await repository.updateWorkflowState({
+      batchId: created.batch.batchId,
+      rowId,
+      status: 'PROCESSING',
+      steps: [{ domain: 'CATALOGO', status: 'COMPLETED' }],
+    });
+    await expect(
+      repository.updateWorkflowState({
+        batchId: created.batch.batchId,
+        rowId,
+        status: 'FAILED',
+        failedDomain: 'PRICING',
+        needsReconciliation: false,
+        steps: [{ domain: 'PRICING', status: 'FAILED' }],
+      }),
+    ).rejects.toMatchObject({ code: 'CHECK_VIOLATION' });
+    expect(
+      (await repository.listRowSteps(created.batch.batchId, rowId)).map(
+        (step) => step.status,
+      ),
+    ).toEqual(['COMPLETED', 'PENDING']);
+    expect(
+      (await repository.listBatchRows(created.batch.batchId))[0],
+    ).toMatchObject({
+      status: 'PROCESSING',
+      appliedDomains: ['CATALOGO'],
+      needsReconciliation: false,
+    });
+    expect(
+      await repository.findBatchByBatchId(created.batch.batchId),
+    ).toMatchObject({
+      status: 'PROCESSING',
+      failedRows: 0,
+      needsReconciliation: false,
+    });
+    await repository.updateWorkflowState({
+      batchId: created.batch.batchId,
+      rowId,
+      status: 'FAILED',
+      failedDomain: 'PRICING',
+      steps: [{ domain: 'PRICING', status: 'FAILED' }],
+    });
+    expect(
+      (await repository.listBatchRows(created.batch.batchId))[0],
+    ).toMatchObject({
+      status: 'FAILED',
+      needsReconciliation: true,
+    });
+    expect(
+      await repository.findBatchByBatchId(created.batch.batchId),
+    ).toMatchObject({
+      status: 'COMPLETED',
       failedRows: 1,
       needsReconciliation: true,
     });

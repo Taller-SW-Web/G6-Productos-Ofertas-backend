@@ -350,16 +350,28 @@ export class BulkPersistenceRepository {
     },
   ): Promise<void> {
     try {
-      const changed = await this.db
-        .update(outbox)
-        .set({
-          publishedAt: result.publishedAt ?? null,
-          attempts: result.attempts,
-          lastError: result.lastError ?? null,
-        })
-        .where(eq(outbox.messageId, messageId))
-        .returning({ id: outbox.id });
-      if (!changed.length) inconsistent('Outbox message was not found');
+      await this.db.transaction(async (tx) => {
+        const [message] = await tx
+          .select()
+          .from(outbox)
+          .where(eq(outbox.messageId, messageId))
+          .for('update')
+          .limit(1);
+        if (!message) throw new BulkPersistenceError('FOREIGN_KEY_VIOLATION');
+        const alreadyPublished = message.publishedAt !== null;
+        await tx
+          .update(outbox)
+          .set({
+            publishedAt: message.publishedAt ?? result.publishedAt ?? null,
+            attempts: Math.max(message.attempts, result.attempts),
+            lastError: alreadyPublished
+              ? null
+              : result.publishedAt
+                ? null
+                : (result.lastError ?? null),
+          })
+          .where(eq(outbox.id, message.id));
+      });
     } catch (error) {
       throw persistenceError(error);
     }
@@ -394,9 +406,30 @@ export class BulkPersistenceRepository {
               ),
             )
             .limit(1);
+          if (!existing) throw new BulkPersistenceError('PERSISTENCE_FAILURE');
+          const [matching] = await tx
+            .select({ result: inbox.result })
+            .from(inbox)
+            .where(
+              and(
+                eq(inbox.messageId, input.messageId),
+                eq(inbox.handler, input.handler),
+                eq(inbox.eventName, input.eventName),
+                sql`${inbox.correlationId} IS NOT DISTINCT FROM ${input.correlationId ?? null}`,
+                sql`${inbox.payload} = ${JSON.stringify(input.payload)}::jsonb`,
+              ),
+            )
+            .limit(1);
+          if (!matching)
+            throw new BulkPersistenceError(
+              'CHECK_VIOLATION',
+              new Error(
+                'Inbox replay identity does not match persisted message',
+              ),
+            );
           return {
             processed: false,
-            result: existing?.result ?? 'ALREADY_PROCESSED',
+            result: existing.result,
           };
         }
         const result = await mutate({
@@ -453,6 +486,9 @@ async function updateWorkflowStateIn(
     changes.set(change.domain, change);
   }
   for (const change of changes.values()) {
+    const previous = steps.find((step) => step.domain === change.domain);
+    if (previous?.status === 'COMPLETED' && change.status !== 'COMPLETED')
+      inconsistent('A completed domain step cannot be reverted');
     await tx
       .update(rowDomainSteps)
       .set({
@@ -474,8 +510,12 @@ async function updateWorkflowStateIn(
     ]),
   );
   const appliedDomains = row.requiredDomains.filter(
-    (domain) => statusByDomain.get(domain as BulkDomain) === 'COMPLETED',
+    (domain) =>
+      row.appliedDomains.includes(domain) ||
+      statusByDomain.get(domain as BulkDomain) === 'COMPLETED',
   );
+  if (row.status === 'COMPLETED' && input.status !== 'COMPLETED')
+    inconsistent('A completed row cannot be reverted');
   if (
     input.status === 'COMPLETED' &&
     row.requiredDomains.some(
@@ -493,7 +533,16 @@ async function updateWorkflowStateIn(
   ) {
     inconsistent('A failed row requires a failed required domain step');
   }
-  const needsReconciliation = input.needsReconciliation ?? false;
+  const needsReconciliation =
+    input.status === 'FAILED' && appliedDomains.length > 0;
+  if (
+    input.needsReconciliation !== undefined &&
+    input.needsReconciliation !== needsReconciliation
+  ) {
+    inconsistent(
+      'Reconciliation flag does not match row state and applied domains',
+    );
+  }
   await tx
     .update(batchRows)
     .set({
