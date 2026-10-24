@@ -1,5 +1,5 @@
 
-> **DOCUMENTO HISTÓRICO — NO REPRESENTA EL ESTADO ACTUAL.** Este corte técnico fue redactado el 2026-10-16. Se conservan su evidencia y límites originales. Las ramas y PR avanzaron después; consulta la [matriz H4 actual](../../integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md) y el [acuerdo normativo](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/docs/g1-marketplace-homologacion-lote03/integraciones/ACUERDO_G1_G6_H4_2026-10-20.md). Ninguna conclusión histórica se extrapola al SHA actual.
+> **DOCUMENTO HISTÓRICO — NO REPRESENTA EL ESTADO ACTUAL.** Este corte técnico fue redactado el 2026-10-16. Se conservan su evidencia y límites originales. Las ramas y PR avanzaron después; consulta la [matriz H4 actual](../../integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md) y el [acuerdo normativo](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/a8d89296b0eac37315ef30a9390f1e4e30933136/integraciones/ACUERDO_G1_G6_H4_2026-10-20.md). Ninguna conclusión histórica se extrapola al SHA actual.
 
 # INT-ASAP Marketplace — corte técnico 2026-10-16
 

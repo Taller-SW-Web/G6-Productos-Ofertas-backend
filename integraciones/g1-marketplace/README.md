@@ -4,9 +4,9 @@
 
 ## Orden de lectura
 
-1. [Acuerdo normativo Docs: G1–G6 H4](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/docs/g1-marketplace-homologacion-lote03/integraciones/ACUERDO_G1_G6_H4_2026-10-20.md).
+1. [Acuerdo normativo Docs: G1–G6 H4](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/a8d89296b0eac37315ef30a9390f1e4e30933136/integraciones/ACUERDO_G1_G6_H4_2026-10-20.md).
 2. [OpenAPI G6](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/master/contratos/http/openapi.yaml), operación/schema aplicable.
-3. [Alineación Marketplace H4 (Docs PR #94)](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/docs/g1-marketplace-homologacion-lote03/integraciones/ALINEACION_MARKETPLACE.md).
+3. [Alineación Marketplace H4 (Docs PR #94)](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/a8d89296b0eac37315ef30a9390f1e4e30933136/integraciones/ALINEACION_MARKETPLACE.md).
 4. [Matriz de operaciones de este paquete](MATRIZ_OPERACIONES_H4.md) y [pruebas/evidencias](PRUEBAS_Y_EVIDENCIAS_H4.md).
 5. SPEC/HU/Flow, DEC-F/ADR y persistencia del servicio owner según [AGENTS.md](../../AGENTS.md).
 
