@@ -21,3 +21,7 @@ Fuentes físicas: auditoría Oracle solo lectura `2026-10-19 22:32:52–22:36:19
 **Publicación externa:** puertos de servicios están enlazados a loopback. HTTPS pasa por Caddy en `g6-edge` a Gateway. No publicar 3000–3008 ni 5672/15672 globalmente. La captura auditada probó TCP 22/80/443 alcanzables y 3000/5672 en timeout desde el auditor; NSG OCI no fue inspeccionado.
 
 Estado por servicio, SHA auditado, Docker health y HTTP probados se resumen en [`ESTADO_ACTUAL.md`](ESTADO_ACTUAL.md). Para preparar un servicio, revisar también su Compose efectivo y autorización individual en el momento de release.
+
+## H4 Marketplace — lectura de estados
+
+Las celdas de infraestructura describen solo el ambiente/SHA observados en la fecha de su corte. No equivalen a E2E G1. HTTP 200 aislado no acredita readiness estable, proveedor PostgreSQL configurado, grant ni funcionamiento funcional del contrato. Ver [`../../integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md`](../../integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md) para la calificación independiente por operación y [`ESTADO_SERVICIOS.md`](ESTADO_SERVICIOS.md) para el corte Oracle. No usar un SHA anterior a HEAD actual como CI de la rama.

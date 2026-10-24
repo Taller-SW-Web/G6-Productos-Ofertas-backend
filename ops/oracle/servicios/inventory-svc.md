@@ -50,3 +50,7 @@ DB schema/tabla/transacciones de reservas, stock, outbox/inbox deben verificarse
 ## H. Bloqueos y entrega
 
 Taco: entregar compatibilidad exacta de topología, TLS readiness, permiso mínimo, outbox/inbox con pruebas reproducibles y ruta funcional no destructiva. Marco: red Rabbit aislada autorizada y deployment approval individual. No usar smoke que cambie stock en Oracle.
+
+## Marketplace H4 — Inventory
+
+G1 consume `consultarDisponibilidadComercial` (`GET /api/v1/inventario/disponibilidad/comercial`) y `verificarCantidadComercial` (`POST /api/v1/inventario/disponibilidad/comercial/verificar`). D-INV-01 exige una única fuente ejecutable. Cuatro estados comerciales, `INDETERMINADO` incluido, no son errores técnicos; verificación `binding=false` no reserva. Fulfillment ambiguo no se resuelve sumando ubicaciones. Scope, HTTP/Provider, CI de HEAD, despliegue y autorización se mantienen separados en la [matriz H4](../../../integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md).
