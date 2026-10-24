@@ -18,6 +18,33 @@ permissions:
   contents: read
 
 jobs:
+  promotions-persistence:
+    name: Promotions persistence on disposable PostgreSQL with TLS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+          cache: 'npm'
+
+      - name: Install dependencies (clean)
+        run: npm ci
+
+      - name: Build Promotions
+        run: npm run build:promotions-svc
+
+      - name: Verify official mapping, repositories, permissions and rollback
+        env:
+          G6_TEST_OPENSSL: openssl
+        run: node apps/promotions-svc/test/persistence.isolated.smoke.mjs
+
+      - name: Verify coupon transport and Outbox on disposable PostgreSQL and RabbitMQ
+        run: node apps/promotions-svc/test/coupons.isolated.smoke.mjs
+
   marketplace-h4-documentation-tests:
     name: Marketplace H4 documentation validator tests
     runs-on: ubuntu-latest
@@ -36,6 +63,30 @@ jobs:
 
       - name: Run isolated Marketplace H4 validator tests
         run: python -m unittest discover -s tests/docs -p "test_*.py" -v
+
+  vera-providers-messaging:
+    name: Vera providers and messaging on disposable PostgreSQL and RabbitMQ
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+          cache: 'npm'
+
+      - name: Install dependencies (clean)
+        run: npm ci
+
+      - name: Vera providers and messaging on disposable PostgreSQL and RabbitMQ
+        env:
+          PRICING_TEST_POSTGRES: '1'
+          PRICING_TEST_AMQP: '1'
+          PRICE_AUDIT_TEST_POSTGRES: '1'
+          PRICE_AUDIT_TEST_AMQP: '1'
+        run: npm run test:e2e -- apps/pricing-svc apps/price-audit-svc --reporter=verbose
 
   validate:
     name: Lint, Typecheck, Test, Build & Smoke Test
@@ -82,14 +133,6 @@ jobs:
         env:
           PRICING_TEST_POSTGRES: '1'
         run: npm run test:e2e -- apps/pricing-svc --reporter=verbose
-
-      - name: Vera providers and messaging on disposable PostgreSQL and RabbitMQ
-        env:
-          PRICING_TEST_POSTGRES: '1'
-          PRICING_TEST_AMQP: '1'
-          PRICE_AUDIT_TEST_POSTGRES: '1'
-          PRICE_AUDIT_TEST_AMQP: '1'
-        run: npm run test:e2e -- apps/pricing-svc apps/price-audit-svc --reporter=verbose
 
       - name: Build individual representative application (catalog-svc)
         run: npm run build:catalog-svc
@@ -226,6 +269,11 @@ jobs:
                 continue
                 ;;
             esac
+            if [[ "$service" == promotions-svc ]]; then
+              G6_PROMOTIONS_TEST_IMAGE="g6-service:${service}-ci" \
+                node apps/promotions-svc/test/container.smoke.mjs
+              continue
+            fi
             name="${service}-generic-ci"
             if [[ "$service" == api-gateway ]]; then
               docker run --rm --entrypoint node "g6-service:${service}-ci" -e \
