@@ -42,3 +42,7 @@ Branch candidate declara schema `promotions`; lista tablas/DDL/rol exacto por ve
 ## H. Bloqueos y entrega
 
 Cueva: demostrar paridad OpenAPI/AsyncAPI y readiness real; resolver exchange/queue/keys/retry con owner de contrato; evidencia DB/TLS/AMQP y permisos mínimos. Marco: mecanismo red broker, credenciales y release con autorización propia.
+
+## Marketplace H4 — Promotions
+
+Las capacidades de canal son `listarPromociones`, `evaluarPromociones`, `validarCupon` y `obtenerRecomendaciones` según OpenAPI. Evaluación y validación no consumen beneficios; G5 orquesta consumo/restauración. Consumidores AMQP/Outbox no acreditan handler HTTP ni runtime de esos operationIds. No atribuir precio/availability a recomendaciones sin schema/decisión. Ver [matriz H4](../../../integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md) para evidencia ligada a PR/SHA.
