@@ -1,5 +1,41 @@
 # DATA-005: preparación de maestros de Inka Athletics
 
+## Auditoría corregida — 24/10/2026
+
+Estado vigente: **`IMPLEMENTADO_LOCAL / INTEGRACION_BLOQUEADA`**. Ver
+[`AUDIT-2026-10-24.md`](AUDIT-2026-10-24.md) para referencias reales, decisiones
+pendientes, comandos y límites de evidencia. Los cortes del 16/10 que siguen
+se conservan como historia; no describen el estado comercial actual.
+
+[`reconciliation-2026-10-24.json`](reconciliation-2026-10-24.json) concilia la
+captura MCP de solo lectura de Catálogo, Taxonomía, Pricing, Inventario y los
+maestros/permisos de Promotions. [`bindings.review-2026-10-24.json`](bindings.review-2026-10-24.json)
+contiene únicamente candidatos existentes, con `BORRADOR`, `active=false`,
+`channels=[]`, revisión pendiente y `executable=false`. No es un lote aprobado.
+
+```powershell
+node scripts/seed/mcp/promotions/reconcile.mjs scripts/seed/mcp/promotions/supabase-readonly-2026-10-24.json
+node scripts/seed/mcp/promotions/reconcile.mjs scripts/seed/mcp/promotions/supabase-readonly-2026-10-24.json --bindings
+```
+
+La consulta reproducible es `reconcile-readonly.sql`: una transacción
+`REPEATABLE READ READ ONLY` que termina en `ROLLBACK`. Se ejecutó por MCP;
+`reconcile.mjs` solo lee una captura local y emite JSON. No ejecuta SQL ni
+autentica el origen de archivos entregados por un tercero. Los hashes de
+objetos son SHA-256 de `JSON.stringify`; `SHA256SUMS` registra bytes de archivo.
+Ninguno sustituye una recaptura/revisión de procedencia por los owners.
+
+El generador ahora reconoce precio padre cuando no hay override aplicable,
+precedencia SKU y luego canal/global, cancelación y fin abierto (`null`).
+Mantiene rechazo de ambigüedad y overrides parciales: exige una vigencia
+única para toda la campaña. Los precios de origen no se duplican ni cambian.
+Un precio global no acredita canales; los bindings `REVIEW` exigen evidencia
+documental explícita por canal. Esa evidencia solo se valida estructuralmente.
+
+La evidencia nueva de PostgreSQL está en `test/evidence/isolated-2026-10-24.json`;
+la del 16/10 se conserva íntegra. El runner fecha sus nuevas capturas en
+America/Lima para evitar sobrescribir evidencia histórica.
+
 Revalidación sobre `cueva` sincronizada con `master` (16/10/2026):
 [`REVISION-MASTER-2026-10-16.md`](../../../../apps/promotions-svc/REVISION-MASTER-2026-10-16.md).
 Las 31 pruebas offline de seed/DATA/restore y el ensayo PostgreSQL descartable
@@ -124,10 +160,13 @@ confirmaciones inexistentes.
 
 Campos para completar con fuentes finales:
 
-- `catalog.products`: `product_id` y `active` por producto seleccionado.
-- `catalog.skus`: `sku`, `product_id`, `active`, `channels` explícitos por SKU.
-- `pricing.prices`: `sku`, `channel_id` (o null global), `amount` decimal exacto,
-  `valid_from` y `valid_until` UTC. Son precios sintéticos publicados por su owner.
+- `catalog.products`: `product_id`, estado observado y `active` por producto.
+- `catalog.skus`: `sku`, `product_id`, estado, `active`, `channels` explícitos;
+  `channel_evidence` por canal en documentos `REVIEW`. Nunca inferirlos del precio global.
+- `pricing.prices`: exactamente un objetivo `sku` o `product_id`, `channel_id`
+  (o null global), `currency`, `amount` decimal exacto, `valid_from` UTC y
+  `valid_until` UTC o null. Conservar IDs/versiones, oferta y cancelación de la
+  fuente real; las referencias de prueba permanecen exclusivamente en tests.
 - `catalog.source` y `pricing.source`: `reference` y SHA-256 de la fuente publicada.
 - `campaign_scopes`: SKU seleccionados para cada ID propio de campaña. Este
   generador prepara alcances por SKU; no convierte un alcance de producto en

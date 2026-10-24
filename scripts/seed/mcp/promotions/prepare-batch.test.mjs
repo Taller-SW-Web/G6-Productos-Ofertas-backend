@@ -69,6 +69,10 @@ test('complete isolated references produce deterministic six-table inactive cont
   });
   const realReview = isolatedBindings();
   realReview.purpose = 'REVIEW';
+  for (const sku of realReview.catalog.skus)
+    sku.channel_evidence = Object.fromEntries(
+      sku.channels.map((c) => [c, 'test-only:channel-review']),
+    );
   assert.equal(
     prepareBatch(realReview).reference_status,
     'OWNER_SOURCE_AUTHENTICITY_REQUIRES_REVIEW',
@@ -175,6 +179,128 @@ test('channel override is selected and a partial override never silently falls b
   assert.doesNotThrow(() => prepareBatch(bindings));
   bindings.pricing.prices.at(-1).valid_from = '2026-11-04T05:00:00Z';
   assert.throws(() => prepareBatch(bindings), /PRICE_COVERAGE_OR_AMBIGUITY/);
+});
+
+const parentPrices = () =>
+  mutate((b) => {
+    for (const p of b.pricing.prices) {
+      p.product_id = b.catalog.skus.find((s) => s.sku === p.sku).product_id;
+      p.sku = null;
+      p.valid_until = null;
+    }
+  });
+
+test('parent prices and open validities cover variants without copying or changing prices', () => {
+  const b = parentPrices();
+  const before = structuredClone(b);
+  const batch = prepareBatch(b);
+  assert.deepEqual(b, before);
+  assert.deepEqual(batch.rows, prepareBatch(isolatedBindings()).rows);
+  assert.equal(batch.validation.provenance, 'SYNTHETIC_TEST_ONLY');
+});
+
+test('parent references reject wrong targets, dual targets, ambiguity and uncovered open starts', () => {
+  for (const change of [
+    (b) => {
+      b.pricing.prices[0].product_id = 'MISSING';
+    },
+    (b) => {
+      b.pricing.prices[0].sku = b.catalog.skus[0].sku;
+    },
+  ]) {
+    const b = parentPrices();
+    change(b);
+    assert.throws(() => prepareBatch(b), /INVALID_PRICE_REFERENCE/);
+  }
+  for (const change of [
+    (b) => {
+      b.pricing.prices.push({ ...b.pricing.prices[0] });
+    },
+    (b) => {
+      b.pricing.prices[0].valid_from = '2026-11-03T05:00:00Z';
+    },
+    (b) => {
+      b.pricing.prices[0].valid_until = '2026-11-02T05:00:00Z';
+    },
+    (b) => {
+      b.pricing.prices[0].is_cancelled = true;
+    },
+  ]) {
+    const b = parentPrices();
+    change(b);
+    assert.throws(() => prepareBatch(b), /PRICE_COVERAGE_OR_AMBIGUITY/);
+  }
+});
+
+test('SKU override precedes parent/channel; partial override cannot hide behind an open parent', () => {
+  const b = parentPrices();
+  const override = {
+    ...b.pricing.prices[0],
+    product_id: null,
+    sku: b.catalog.skus[0].sku,
+    amount: '0.50',
+  };
+  b.pricing.prices.push(override);
+  const fixed = draft();
+  fixed.proposed_rows.promotions[0].discount_type = 'MONTO_FIJO';
+  fixed.proposed_rows.promotions[0].discount_value = '1';
+  assert.throws(() => prepareBatch(b, fixed), /NON_POSITIVE_DEMO_RESULT/);
+  override.valid_from = '2026-11-04T05:00:00Z';
+  assert.throws(() => prepareBatch(b), /PRICE_COVERAGE_OR_AMBIGUITY/);
+});
+
+test('BORRADOR state cannot be overridden by a supplied active flag', () => {
+  for (const change of [
+    (b) => {
+      b.catalog.products[0].state = 'BORRADOR';
+    },
+    (b) => {
+      b.catalog.skus[0].state = 'BORRADOR';
+    },
+  ])
+    assert.throws(
+      () => prepareBatch(mutate(change)),
+      /PUBLISHED_ACTIVE_SKU_REQUIRED/,
+    );
+  assert.throws(
+    () =>
+      prepareBatch(
+        mutate((b) => {
+          b.catalog.products[2].state = 'BORRADOR';
+        }),
+      ),
+    /INVALID_RECOMMENDATION_BINDING/,
+  );
+});
+
+test('global pricing does not accredit channels and supplied evidence is only structural', () => {
+  const b = parentPrices();
+  b.purpose = 'REVIEW';
+  assert.throws(() => prepareBatch(b), /CHANNEL_EVIDENCE_REQUIRED/);
+  for (const sku of b.catalog.skus)
+    sku.channel_evidence = Object.fromEntries(
+      sku.channels.map((c) => [c, 'test-only:channel-review']),
+    );
+  assert.equal(
+    prepareBatch(b).validation.provenance,
+    'NOT_AUTHENTICATED_BY_GENERATOR',
+  );
+  b.catalog.skus[0].channels = [];
+  assert.throws(() => prepareBatch(b), /PUBLISHED_ACTIVE_SKU_REQUIRED/);
+});
+
+test('money/currency checks preserve exactness with parent/open prices and Pricing offers', () => {
+  const b = parentPrices();
+  b.pricing.prices[0].currency = 'USD';
+  assert.throws(() => prepareBatch(b), /CAMPAIGN_CURRENCY_REVIEW_REQUIRED/);
+  b.pricing.prices[0].currency = 'PEN';
+  b.pricing.prices[0].offer_amount = '100.000000000000000000001';
+  assert.throws(() => prepareBatch(b), /INVALID_PRICING_OFFER/);
+  b.pricing.prices[0].offer_amount = '0.000000000000000000001';
+  const fixed = draft();
+  fixed.proposed_rows.promotions[0].discount_type = 'MONTO_FIJO';
+  fixed.proposed_rows.promotions[0].discount_value = '0.01';
+  assert.throws(() => prepareBatch(b, fixed), /NON_POSITIVE_DEMO_RESULT/);
 });
 
 test('fixed discount cannot erase a price; percentages retain exact limits', () => {
