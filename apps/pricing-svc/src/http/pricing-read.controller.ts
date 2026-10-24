@@ -6,9 +6,15 @@ import {
   Query,
   UseFilters,
   UseGuards,
+  SetMetadata,
 } from '@nestjs/common';
 import { PricingReads } from './pricing-reads.js';
-import { PricingReadGuard, uuid } from './pricing-read.guard.js';
+import {
+  COMMERCIAL_PRICING_READ,
+  PricingReadGuard,
+  uuid,
+} from './pricing-read.guard.js';
+import { CommercialPrices, parseCommercialQuery } from './commercial-prices.js';
 import { PricingHttpError, PricingHttpFilter } from './pricing-http.error.js';
 
 function page(query: Record<string, unknown>) {
@@ -40,7 +46,23 @@ function page(query: Record<string, unknown>) {
 @UseGuards(PricingReadGuard)
 @UseFilters(PricingHttpFilter)
 export class PricingReadController {
-  constructor(@Inject(PricingReads) private readonly reads: PricingReads) {}
+  constructor(
+    @Inject(PricingReads) private readonly reads: PricingReads,
+    @Inject(CommercialPrices) private readonly commercial: CommercialPrices,
+  ) {}
+
+  @Get()
+  @SetMetadata(COMMERCIAL_PRICING_READ, true)
+  batch(@Query() query: Record<string, unknown>) {
+    const { skus, channel, at, historical } = parseCommercialQuery(query, true);
+    return this.commercial.batch(skus, channel, at, historical);
+  }
+  @Get('skus/:sku')
+  @SetMetadata(COMMERCIAL_PRICING_READ, true)
+  sku(@Param('sku') sku: string, @Query() query: Record<string, unknown>) {
+    const { channel, at, historical } = parseCommercialQuery(query);
+    return this.commercial.sku(sku, channel, at, historical);
+  }
 
   @Get('productos/:productoId')
   product(
