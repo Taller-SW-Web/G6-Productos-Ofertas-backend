@@ -65,8 +65,8 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
   let broker: amqp.ChannelModel;
   let brokerChannel: amqp.Channel;
   let locationId: string;
-  const exchangeEvents = 'po.events.x';
-  const exchangeResults = 'po.results.x';
+  const exchangeEvents = 'po.eventos.x';
+  const exchangeResults = 'po.resultados.x';
   const exchangeCommands = 'po.commands.x';
   const initializationKey = 'inventory.sku.initialization.requested';
   const queue = `inventory-it-${randomUUID()}`;
@@ -318,12 +318,12 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
     await brokerChannel.assertExchange(exchangeCommands, 'topic', {
       durable: true,
     });
-    await brokerChannel.assertQueue('po.inventory.q', {
+    await brokerChannel.assertQueue('po.inventario.q', {
       durable: true,
       arguments: { 'x-queue-type': 'quorum' },
     });
     await brokerChannel.bindQueue(
-      'po.inventory.q',
+      'po.inventario.q',
       exchangeCommands,
       initializationKey,
     );
@@ -1190,7 +1190,7 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
       const rejected = initializationCommand(randomUUID());
       try {
         expect(
-          (await brokerChannel.checkQueue('po.inventory.q')).messageCount,
+          (await brokerChannel.checkQueue('po.inventario.q')).messageCount,
         ).toBe(0);
         await consumer.start();
         expect(consumer.getMetrics().connected).toBe(true);
@@ -1277,10 +1277,12 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
       // El cierre de la conexión y la baja en la cola se observan por canales
       // distintos; esperar ambas condiciones sin relajar ninguna aserción.
       await viWaitFor(async () => {
-        expect(await brokerChannel.checkQueue('po.inventory.q')).toMatchObject({
-          messageCount: 0,
-          consumerCount: 0,
-        });
+        expect(await brokerChannel.checkQueue('po.inventario.q')).toMatchObject(
+          {
+            messageCount: 0,
+            consumerCount: 0,
+          },
+        );
       }, 5000);
     }, 30_000);
 
@@ -1291,7 +1293,7 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
       const invalid = Buffer.from('fixture-sintetico-json-invalido');
       try {
         expect(
-          (await brokerChannel.checkQueue('po.inventory.q')).messageCount,
+          (await brokerChannel.checkQueue('po.inventario.q')).messageCount,
         ).toBe(0);
         await consumer.start();
         await publishCommand(writer, invalid, invalidId);
@@ -1303,13 +1305,13 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
             failures: 1,
           });
           expect(
-            await brokerChannel.checkQueue('po.inventory.q'),
+            await brokerChannel.checkQueue('po.inventario.q'),
           ).toMatchObject({
             consumerCount: 0,
             messageCount: 1,
           });
         }, 5000);
-        const pending = await brokerChannel.get('po.inventory.q', {
+        const pending = await brokerChannel.get('po.inventario.q', {
           noAck: false,
         });
         expect(pending).not.toBe(false);
@@ -1348,10 +1350,12 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
         await writer.close();
       }
       await viWaitFor(async () => {
-        expect(await brokerChannel.checkQueue('po.inventory.q')).toMatchObject({
-          messageCount: 0,
-          consumerCount: 0,
-        });
+        expect(await brokerChannel.checkQueue('po.inventario.q')).toMatchObject(
+          {
+            messageCount: 0,
+            consumerCount: 0,
+          },
+        );
       }, 5000);
     }, 30_000);
   });

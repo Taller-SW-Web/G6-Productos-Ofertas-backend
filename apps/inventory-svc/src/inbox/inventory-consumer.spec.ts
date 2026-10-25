@@ -55,10 +55,10 @@ describe('Consumer de inventario — transporte simulado (#102/#103)', () => {
 
   it('comprueba la cola preexistente, limita prefetch y exige ACK manual', async () => {
     await service.start();
-    expect(channel.checkQueue).toHaveBeenCalledWith('po.inventory.q');
+    expect(channel.checkQueue).toHaveBeenCalledWith('po.inventario.q');
     expect(channel.prefetch).toHaveBeenCalledWith(20);
     expect(channel.consume).toHaveBeenCalledWith(
-      'po.inventory.q',
+      'po.inventario.q',
       expect.any(Function),
       { noAck: false },
     );

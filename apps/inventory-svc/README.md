@@ -98,7 +98,7 @@ Nunca se exponen DSN, credenciales ni detalles internos.
 
 ## 4. Mensajería (AsyncAPI `0.6.0-rc.2`)
 
-Cola principal consumida: `po.inventory.q` (prefetch 20, ACK manual tras el
+Cola principal consumida: `po.inventario.q` (prefetch 20, ACK manual tras el
 commit de Inbox + saldo + operación + resultado Outbox).
 
 **Produce (Outbox transaccional):**

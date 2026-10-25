@@ -100,7 +100,7 @@ describe('OutboxPublisherService — Publicación Confiable y Confirmación de B
     expect(result.dispatched).toBe(1);
     expect(result.failed).toBe(0);
     expect(publishedMessages).toHaveLength(1);
-    expect(publishedMessages[0].exchange).toBe('po.events.x');
+    expect(publishedMessages[0].exchange).toBe('po.eventos.x');
     expect(publishedMessages[0].routingKey).toBe(
       'inventory.reservation.created',
     );

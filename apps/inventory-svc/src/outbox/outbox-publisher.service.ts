@@ -151,7 +151,7 @@ export class OutboxPublisherService {
                 ? JSON.parse(row.payload)
                 : row.payload;
             const exchange =
-              payload.kind === 'result' ? 'po.results.x' : 'po.events.x';
+              payload.kind === 'result' ? 'po.resultados.x' : 'po.eventos.x';
             const routingKey = row.event_type;
             const content = Buffer.from(JSON.stringify(payload));
             // Preservar exactamente el message_id de negocio en cada reintento.

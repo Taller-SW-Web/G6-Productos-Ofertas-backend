@@ -102,7 +102,7 @@ export class InventoryConsumerService implements OnModuleInit, OnModuleDestroy {
         return;
       }
       // La topología es propiedad de infraestructura: no crear ni cambiar queues/exchanges.
-      await deadline(channel.checkQueue('po.inventory.q'), 5000);
+      await deadline(channel.checkQueue('po.inventario.q'), 5000);
       await deadline(channel.prefetch(20), 5000);
       if (this.stopping) {
         await this.closeConnection();
@@ -111,7 +111,7 @@ export class InventoryConsumerService implements OnModuleInit, OnModuleDestroy {
       this.channel = channel;
       await deadline(
         channel.consume(
-          'po.inventory.q',
+          'po.inventario.q',
           (message) => {
             if (!message) {
               void this.pause('CONSUMER_CANCELLED', channel);
