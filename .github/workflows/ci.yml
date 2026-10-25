@@ -18,6 +18,76 @@ permissions:
   contents: read
 
 jobs:
+  promotions-persistence:
+    name: Promotions persistence on disposable PostgreSQL with TLS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+          cache: 'npm'
+
+      - name: Install dependencies (clean)
+        run: npm ci
+
+      - name: Build Promotions
+        run: npm run build:promotions-svc
+
+      - name: Verify official mapping, repositories, permissions and rollback
+        env:
+          G6_TEST_OPENSSL: openssl
+        run: node apps/promotions-svc/test/persistence.isolated.smoke.mjs
+
+      - name: Verify coupon transport and Outbox on disposable PostgreSQL and RabbitMQ
+        run: node apps/promotions-svc/test/coupons.isolated.smoke.mjs
+
+  marketplace-h4-documentation-tests:
+    name: Marketplace H4 documentation validator tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pinned validator test dependency
+        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
+
+      - name: Run isolated Marketplace H4 validator tests
+        run: python -m unittest discover -s tests/docs -p "test_*.py" -v
+
+  vera-providers-messaging:
+    name: Vera providers and messaging on disposable PostgreSQL and RabbitMQ
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+          cache: 'npm'
+
+      - name: Install dependencies (clean)
+        run: npm ci
+
+      - name: Vera providers and messaging on disposable PostgreSQL and RabbitMQ
+        env:
+          PRICING_TEST_POSTGRES: '1'
+          PRICING_TEST_AMQP: '1'
+          PRICE_AUDIT_TEST_POSTGRES: '1'
+          PRICE_AUDIT_TEST_AMQP: '1'
+        run: npm run test:e2e -- apps/pricing-svc apps/price-audit-svc --reporter=verbose
+
   validate:
     name: Lint, Typecheck, Test, Build & Smoke Test
     runs-on: ubuntu-latest
@@ -199,6 +269,11 @@ jobs:
                 continue
                 ;;
             esac
+            if [[ "$service" == promotions-svc ]]; then
+              G6_PROMOTIONS_TEST_IMAGE="g6-service:${service}-ci" \
+                node apps/promotions-svc/test/container.smoke.mjs
+              continue
+            fi
             name="${service}-generic-ci"
             if [[ "$service" == api-gateway ]]; then
               docker run --rm --entrypoint node "g6-service:${service}-ci" -e \
@@ -209,6 +284,10 @@ jobs:
             if [[ "$service" == pricing-svc ]]; then
               # Fixture aislada: liveness no necesita una base disponible.
               runtime_env+=(--env 'DATABASE_URL=postgresql://pricing:ci-fixture@127.0.0.1:1/pricing?sslmode=verify-full')
+            fi
+            if [[ "$service" == price-audit-svc ]]; then
+              runtime_env+=(--env 'DATABASE_URL=postgresql://audit:ci-fixture@127.0.0.1:1/audit?sslmode=verify-full'
+                --env 'AUTH_ISSUER=https://identity.invalid' --env 'AUTH_JWKS_URL=https://identity.invalid/jwks')
             fi
             docker run --detach --name "$name" --publish "127.0.0.1::${port}" \
               --env "PORT=${port}" --env "${port_env}=${port}" "${runtime_env[@]}" "g6-service:${service}-ci" >/dev/null
@@ -230,13 +309,13 @@ jobs:
                 process.exit(1);
               }
             ' "$response" "$service"
-            if [[ "$service" == pricing-svc ]]; then
+            if [[ "$service" == pricing-svc || "$service" == price-audit-svc ]]; then
               readiness_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${host_port}/health/ready")"
               if [[ "$readiness_status" != 503 ]]; then
-                printf 'FAIL: pricing-svc debe responder readiness=503 con la base de fixture inaccesible.\n' >&2
+                printf 'FAIL: %s debe responder readiness=503 con la base de fixture inaccesible.\n' "$service" >&2
                 exit 1
               fi
-              printf 'PASS: pricing-svc mantiene liveness=200 y readiness=503 con PostgreSQL inaccesible.\n'
+              printf 'PASS: %s mantiene liveness=200 y readiness=503 con PostgreSQL inaccesible.\n' "$service"
             fi
             healthy=''
             for attempt in {1..30}; do

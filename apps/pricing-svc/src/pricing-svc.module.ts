@@ -10,10 +10,26 @@ import { PricingReadController } from './http/pricing-read.controller.js';
 import { PricingReads } from './http/pricing-reads.js';
 import { PricingReadGuard } from './http/pricing-read.guard.js';
 import { PricingMutations } from './application/pricing-mutations.js';
+import {
+  CommercialPrices,
+  PRICING_CATALOG_CONTEXT,
+  PRICING_CHANNEL_IDS,
+} from './http/commercial-prices.js';
+import { PricingOutboxRelay } from './messaging/outbox-relay.js';
+import {
+  PRICING_FACT_FACTORY,
+  PRICING_WRITE_AUTHORIZER,
+  PricingWriteController,
+} from './http/pricing-write.controller.js';
 
 @Module({
   imports: [],
-  controllers: [PricingSvcController, HealthController, PricingReadController],
+  controllers: [
+    PricingSvcController,
+    HealthController,
+    PricingReadController,
+    PricingWriteController,
+  ],
   providers: [
     PricingSvcService,
     PricingReadiness,
@@ -22,6 +38,12 @@ import { PricingMutations } from './application/pricing-mutations.js';
     PricingReads,
     PricingReadGuard,
     PricingMutations,
+    CommercialPrices,
+    PricingOutboxRelay,
+    { provide: PRICING_CATALOG_CONTEXT, useValue: null },
+    { provide: PRICING_CHANNEL_IDS, useValue: {} },
+    { provide: PRICING_WRITE_AUTHORIZER, useValue: null },
+    { provide: PRICING_FACT_FACTORY, useValue: null },
     {
       provide: PRICING_CONFIG,
       useFactory: () => validateEnvironment(process.env),

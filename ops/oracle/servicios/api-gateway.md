@@ -51,3 +51,7 @@ Readiness bloqueada por Catalog al corte auditado. Antes de release, issue/owner
 ### Evidencia complementaria 2026-10-20
 
 El tag Oracle inspeccionado por SSH seguía siendo `api-gateway:9205eb455c4965a82ccb9fc4714cf976e4c059b0`; Docker reportó `healthy`. El bundle de readiness del healthcheck alternó `ready` y `not_ready`, siempre con `coverage=partial`; las rutas de demo públicas dieron 200 (detalles/tiempos en [ESTADO_ACTUAL.md](../ESTADO_ACTUAL.md)). Una solicitud interna a `http://127.0.0.1:3000/health/ready` respondió 404: no declarar que existe ese endpoint HTTP; el healthcheck de imagen invoca un bundle local. El run CI exacto del SHA Gateway es `39038657868`; el run `39342273073` pertenece a `castilla` SHA `83240f2` y no es evidencia CI de este Gateway.
+
+## G1 Marketplace H4 — límite de esta ficha
+
+Operaciones del servicio y estados G1 se mantienen en [`../../../integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md`](../../../integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md). No duplicar schemas: contrastar OpenAPI Docs. El cliente técnico es `modulo-marketplace` desde BFF servidor, audiencia `api-productos`; scopes/grants se verifican por separado. El Gateway solo enruta y aplica políticas: no implementa reglas comerciales. Auth real y deploy no se infieren de rutas declaradas ni de modo demo.

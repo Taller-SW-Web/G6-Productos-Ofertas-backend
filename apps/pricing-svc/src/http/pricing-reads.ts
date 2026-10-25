@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { contains, scheduledStatus } from '../domain/price.js';
+import { cents, contains, scheduledStatus } from '../domain/price.js';
 import { PricingRepository } from '../persistence/pricing.repository.js';
 import { PricingHttpError } from './pricing-http.error.js';
 
@@ -31,6 +31,19 @@ export function wireVersion(version: bigint): number {
   return Number(version);
 }
 
+// OpenAPI publica number; comprobar el viaje decimal sin redondear centavos.
+export function wireMoney(value: string): number {
+  try {
+    const amount = cents(value);
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || cents(String(numeric)) !== amount)
+      throw new Error();
+    return numeric;
+  } catch {
+    throw new PricingHttpError(500, 'ERROR_INTERNO');
+  }
+}
+
 @Injectable()
 export class PricingReads {
   constructor(
@@ -45,9 +58,11 @@ export class PricingReads {
       throw new PricingHttpError(404, 'PRECIO_NO_ENCONTRADO');
     return {
       product_id: productId,
-      precio_regular: Number(validity.precioRegular),
+      precio_regular: wireMoney(validity.precioRegular),
       precio_oferta:
-        validity.precioOferta === null ? null : Number(validity.precioOferta),
+        validity.precioOferta === null
+          ? null
+          : wireMoney(validity.precioOferta),
       currency: validity.currency,
       channel_id: result.definition.channelId,
       valid_from: validity.validFrom.toISOString(),
@@ -71,7 +86,7 @@ export class PricingReads {
           ? { product_id: target.productId }
           : { sku: target.sku }),
         tipoPrecio: schedule.tipoPrecio,
-        importe: Number(schedule.importe),
+        importe: wireMoney(schedule.importe),
         moneda: validity.currency,
         channelId: definition.channelId,
         validFrom: validity.validFrom.toISOString(),

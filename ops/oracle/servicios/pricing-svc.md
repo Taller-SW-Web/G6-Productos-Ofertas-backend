@@ -39,3 +39,7 @@ PostgreSQL con TLS verify-full. Registrar schema/rol/migraciones exactos desde l
 ## H. Bloqueos y entrega
 
 Vera debe asociar GET contractual a test DB real/fixture y capturar smoke de negocio; verificar rol/schema exactos. Gateway/Auth smoke y aprobación por Marco. No declarar readiness 200 como flujo comercial probado.
+
+## Marketplace H4 — Pricing
+
+G1 depende de `consultarPrecios` (`GET /api/v1/precios`) y `obtenerPrecioSku` (`GET /api/v1/precios/skus/{sku}`). No asumir integración real sin handler; el precio requiere SKU vendible autoritativo, canal y vigencia conforme al contrato. El BFF compone su DTO y G5 conserva el snapshot durable. Registrar la brecha y prueba Provider en la [matriz H4](../../../integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md); no inventar contexto/DTO.
