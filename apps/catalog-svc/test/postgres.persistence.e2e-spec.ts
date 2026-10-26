@@ -18,7 +18,11 @@ import { CatalogMutationService } from '../src/catalog-mutation.service.js';
 import type { CatalogMasterClient } from '../src/catalog-master.client.js';
 import { CatalogMessageService } from '../src/catalog-message.service.js';
 import { CatalogQueryRepository } from '../src/catalog-query.repository.js';
-import { activeAttempt, parseCatalogMessage } from '../src/catalog-messages.js';
+import {
+  activeAttempt,
+  parseCatalogMessage,
+  UUID,
+} from '../src/catalog-messages.js';
 import type { Attribute } from '../src/commercial.types.js';
 import { CatalogPersistenceError } from '../src/database-errors.js';
 import {
@@ -1178,6 +1182,24 @@ describe.skipIf(!dockerAvailable)(
         },
       });
     }
+    function cleanupMasterBarrier(operationId: string) {
+      if (!UUID.test(operationId))
+        throw new Error('Invalid isolated fixture operation');
+      command(
+        'docker',
+        [
+          'exec',
+          '-i',
+          container,
+          'psql',
+          '-U',
+          'postgres',
+          '-v',
+          'ON_ERROR_STOP=1',
+        ],
+        `SET ROLE po_catalog_owner; DELETE FROM catalog.master_barriers WHERE operation_id='${operationId}'::uuid;`,
+      );
+    }
     it('master barriers: CLEAR/IN_USE for four entities, durable dedupe, stale finals and matching rejection release', async () => {
       const service = mutationService(),
         messages = new CatalogMessageService(database);
@@ -1212,7 +1234,7 @@ describe.skipIf(!dockerAvailable)(
           await Promise.all([
             messages.consume(command),
             messages.consume(command),
-          ]),
+          ]).then((results) => results.sort()),
         ).toEqual(['APPLIED', 'DUPLICATE']);
         await expect(
           messages.consume({
@@ -1524,11 +1546,7 @@ describe.skipIf(!dockerAvailable)(
         );
       } finally {
         // Only this test's unresolved fixture, on the disposable database.
-        await transactions.run((tx) =>
-          tx
-            .delete(masterBarriers)
-            .where(eq(masterBarriers.operation_id, command.operation_id!)),
-        );
+        cleanupMasterBarrier(command.operation_id!);
       }
     });
     it('D-CAT-05/06: filters global eligibility before count/pagination in every channel without candidate tables', async () => {

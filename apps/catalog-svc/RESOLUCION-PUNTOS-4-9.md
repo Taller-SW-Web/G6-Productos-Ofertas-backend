@@ -133,3 +133,21 @@ integración autenticada, homologación o despliegue de una prueba local.
 Estado global: PARTIAL. Decisiones 4–7/9 cerradas funcionalmente; implementación
 propia preparada. Asociación del punto 8, contratos oficiales, integración y
 operación compartida conservan las condiciones específicas anteriores.
+
+## Seguimiento de CI y excepción compartida autorizada
+
+La primera CI del bloque, 40386214882 sobre fd5aa768dab9b27a0207be177c0778b2b3f26b7b,
+falló en PostgreSQL por tres causas verificadas: comparación DATA-002 de la fila
+JSON completa frente a la columna nueva; aserción de concurrencia que suponía
+un orden de ganadores; y limpieza de fixture que intentaba DELETE con el rol
+runtime, que correctamente carece de ese permiso. La limpieza se realiza ahora
+con el owner de la base desechable y exclusivamente para el operation_id de la
+prueba. No se amplían permisos runtime ni se cambia la lógica de barreras.
+
+Gabriel autorizó expresamente la excepción de AGENTS.md §3 para modificar una
+sola comparación en scripts/seed/mcp/catalog/003_carga_catalogo.sql: excluir
+publicado_alguna_vez del JSON que se compara con el manifiesto histórico.
+No cambia el valor de la columna ni los datos del seed, y conserva las restantes
+comprobaciones. No se ejecuta contra bases compartidas. El parche propuesto
+se conserva como evidencia del alcance aprobado. La CI fallida es histórica;
+una nueva ejecución debe verificar el commit que incorpora estas correcciones.
