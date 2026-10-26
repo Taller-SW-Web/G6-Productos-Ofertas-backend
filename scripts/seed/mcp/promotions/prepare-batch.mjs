@@ -13,6 +13,8 @@ const check = (value, code) => assert.ok(value, code);
 const text = (value) =>
   typeof value === 'string' && value.trim().length > 0 && !value.includes('\0');
 const unique = (values) => new Set(values).size === values.length;
+const activeProduct = (p) =>
+  p?.active === true && (p.state === undefined || p.state === 'ACTIVO');
 const time = (value) => {
   check(
     typeof value === 'string' &&
@@ -109,25 +111,39 @@ function evidence(source) {
   );
 }
 
-function priceFor(prices, sku, channel, from, until) {
-  const overlaps = prices.filter(
-    (p) =>
-      p.sku === sku &&
-      (p.channel_id === channel || p.channel_id === null) &&
-      time(p.valid_from) < until &&
-      time(p.valid_until) > from,
+const endTime = (value) => (value === null ? Infinity : time(value));
+
+// Conservative whole-window reconciliation, not Pricing's runtime resolver.
+// One target/currency per row; a partial override must never be hidden by fallback.
+export function resolvePrice(prices, sku, productId, channel, from, until) {
+  from = time(from);
+  until = time(until);
+  check(from < until, 'INVALID_PRICE_WINDOW');
+  // Resolve the target only among prices applicable to the requested channel.
+  const applicable = prices.filter(
+    (p) => p.channel_id === channel || p.channel_id === null,
   );
-  const overrides = overlaps.filter((p) => p.channel_id === channel);
+  const overlaps = applicable.filter(
+    (p) =>
+      p.is_cancelled !== true &&
+      (p.sku === sku || (p.sku == null && p.product_id === productId)) &&
+      time(p.valid_from) < until &&
+      endTime(p.valid_until) > from,
+  );
+  const skuOverrides = overlaps.filter((p) => p.sku === sku);
+  const target = skuOverrides.length ? skuOverrides : overlaps;
+  const overrides = target.filter((p) => p.channel_id === channel);
   const selected = overrides.length
     ? overrides
-    : overlaps.filter((p) => p.channel_id === null);
+    : target.filter((p) => p.channel_id === null);
   check(
     selected.length === 1 &&
       time(selected[0].valid_from) <= from &&
-      time(selected[0].valid_until) >= until,
+      endTime(selected[0].valid_until) >= until,
     'PRICE_COVERAGE_OR_AMBIGUITY',
   );
-  return decimal(selected[0].amount);
+  decimal(selected[0].amount);
+  return selected[0];
 }
 
 export function prepareBatch(
@@ -173,7 +189,6 @@ export function prepareBatch(
         products.has(s.product_id) &&
         typeof s.active === 'boolean' &&
         Array.isArray(s.channels) &&
-        s.channels.length > 0 &&
         unique(s.channels) &&
         s.channels.every((c) =>
           ['MARKETPLACE', 'CHATBOT', 'RETAIL', 'VENTAS'].includes(c),
@@ -184,15 +199,27 @@ export function prepareBatch(
   }
   for (const p of bindings.pricing.prices) {
     check(
-      skus.has(p.sku) &&
+      ((skus.has(p.sku) && p.product_id == null) ||
+        (p.sku == null && products.has(p.product_id))) &&
+        typeof p.currency === 'string' &&
+        /^[A-Z]{3}$/.test(p.currency) &&
+        (p.is_cancelled === undefined || typeof p.is_cancelled === 'boolean') &&
         (p.channel_id === null ||
           ['MARKETPLACE', 'CHATBOT', 'RETAIL', 'VENTAS'].includes(
             p.channel_id,
           )) &&
-        time(p.valid_from) < time(p.valid_until),
+        time(p.valid_from) < endTime(p.valid_until),
       'INVALID_PRICE_REFERENCE',
     );
     decimal(p.amount);
+    if (p.offer_amount != null) {
+      const regular = decimal(p.amount);
+      const offer = decimal(p.offer_amount);
+      check(
+        offer.amount * regular.scale < regular.amount * offer.scale,
+        'INVALID_PRICING_OFFER',
+      );
+    }
   }
   const rows = structuredClone(draft.proposed_rows);
   check(
@@ -214,19 +241,36 @@ export function prepareBatch(
     const discount = decimal(p.discount_value);
     for (const sku of [...binding.skus].sort()) {
       const s = skus.get(sku);
+      const product = products.get(s?.product_id);
+      const publishedState =
+        product?.has_variants === false && product.sku_base === sku
+          ? 'ACTIVO'
+          : 'ACTIVA';
       check(
-        s?.active === true && products.get(s.product_id)?.active === true,
+        s?.active === true &&
+          activeProduct(product) &&
+          (s.state === undefined || s.state === publishedState) &&
+          s.channels.length > 0,
         'PUBLISHED_ACTIVE_SKU_REQUIRED',
       );
       for (const channel of p.enabled_channels) {
         check(s.channels.includes(channel), 'SKU_CHANNEL_NOT_ELIGIBLE');
-        const price = priceFor(
+        if (bindings.purpose === 'REVIEW') {
+          check(
+            text(s.channel_evidence?.[channel]),
+            'CHANNEL_EVIDENCE_REQUIRED',
+          );
+        }
+        const resolved = resolvePrice(
           bindings.pricing.prices,
           sku,
+          s.product_id,
           channel,
-          time(p.valid_from),
-          time(p.valid_until),
+          p.valid_from,
+          p.valid_until,
         );
+        check(resolved.currency === 'PEN', 'CAMPAIGN_CURRENCY_REVIEW_REQUIRED');
+        const price = decimal(resolved.offer_amount ?? resolved.amount);
         // Positive exact result; does not round money or change Pricing's values.
         check(
           p.discount_type === 'PORCENTAJE'
@@ -251,13 +295,13 @@ export function prepareBatch(
   for (const [index, design] of draft.proposed_recommendations.entries()) {
     const b = bindings.recommendations[index];
     check(
-      products.get(b?.origin_product_id)?.active === true &&
+      activeProduct(products.get(b?.origin_product_id)) &&
         Array.isArray(b.candidate_product_ids) &&
         b.candidate_product_ids.length > 0 &&
         unique(b.candidate_product_ids) &&
         b.candidate_product_ids.every(
           (candidate) =>
-            products.get(candidate)?.active === true &&
+            activeProduct(products.get(candidate)) &&
             candidate !== b.origin_product_id,
         ),
       'INVALID_RECOMMENDATION_BINDING',
@@ -322,6 +366,14 @@ export function prepareBatch(
       bindings.purpose === 'ISOLATED_TEST'
         ? 'SYNTHETIC_TEST_ONLY'
         : 'OWNER_SOURCE_AUTHENTICITY_REQUIRES_REVIEW',
+    validation: {
+      structural: 'PASS',
+      provenance:
+        bindings.purpose === 'ISOLATED_TEST'
+          ? 'SYNTHETIC_TEST_ONLY'
+          : 'NOT_AUTHENTICATED_BY_GENERATOR',
+      commercial_approval: 'NOT_GRANTED_BY_GENERATOR',
+    },
     approvals: { rollback_scope: null, persistent_batch_and_target: null },
     rows,
   };

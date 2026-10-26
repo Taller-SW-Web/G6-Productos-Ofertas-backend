@@ -362,6 +362,26 @@ try {
     'owner-only isolated proof: all six masters, two identical passes, deferred constraints, unchanged timestamps, rollback',
   );
 
+  const inherited = isolatedBindings();
+  for (const price of inherited.pricing.prices) {
+    price.product_id = inherited.catalog.skus.find(
+      (s) => s.sku === price.sku,
+    ).product_id;
+    price.sku = null;
+    price.valid_until = null;
+  }
+  const inheritedBatch = prepareBatch(inherited);
+  assert.deepEqual(inheritedBatch.rows, batch.rows);
+  await transaction('po_promotions_owner', async (client) => {
+    const sql = renderRows(inheritedBatch);
+    await client.query(sql.inserts);
+    await client.query(sql.assertions);
+    await client.query('SET CONSTRAINTS ALL IMMEDIATE');
+  });
+  checks.push(
+    'parent-price inheritance and open validities produce identical inactive masters; isolated rollback verified',
+  );
+
   for (const change of [
     (d) => {
       d.proposed_rows.promotions[0].name += ' changed';
@@ -462,6 +482,11 @@ try {
     result: 'PASS',
     scope: 'DISPOSABLE_LOCAL_ONLY',
     captured_at: new Date().toISOString(),
+    backend_base_sha: spawnSync('git', ['rev-parse', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+      windowsHide: true,
+    }).stdout.trim(),
     postgres_version: (await pool.query('SHOW server_version')).rows[0]
       .server_version,
     postgres_image: docker(['inspect', container, '--format', '{{.Image}}']),
@@ -471,7 +496,12 @@ try {
       [
         '../prepare-batch.mjs',
         '../prepare-batch.test.mjs',
+        '../validate-draft.mjs',
+        '../validate-draft.test.mjs',
+        '../inka-athletics-draft.json',
         '../bindings.template.json',
+        '../reconcile.mjs',
+        '../reconcile.test.mjs',
         './isolated.mjs',
         './support/bindings.mjs',
       ].map((path) => [
@@ -494,6 +524,8 @@ try {
     proof_role:
       'po_promotions_owner (isolated only; not a seed permission proof)',
     seed_role: 'po_promotions_seed',
+    seed_negative_sqlstate: '42501',
+    preview_guard_error: 'SEED_TRIGGER_LOCK_PRIVILEGE_UNRESOLVED',
     seed_master_load: 'BLOCKED_TRIGGER_ROW_LOCK_PRIVILEGE',
     all_data_rollback_verified: true,
     preexisting_aggregate_preserved: true,
@@ -506,7 +538,10 @@ try {
   const directory = new URL('./evidence/', import.meta.url);
   mkdirSync(directory, { recursive: true });
   writeFileSync(
-    new URL('isolated-2026-10-16.json', directory),
+    new URL(
+      `isolated-${new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' })}.json`,
+      directory,
+    ),
     `${JSON.stringify(report, null, 2)}\n`,
   );
   console.log(JSON.stringify(report, null, 2));
