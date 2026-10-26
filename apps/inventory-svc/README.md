@@ -96,7 +96,7 @@ Prefijo de las operaciones: `/api/v1` (el Gateway reenvía `originalUrl`). Los
 
 Nunca se exponen DSN, credenciales ni detalles internos.
 
-## 4. Mensajería (AsyncAPI `0.6.0-rc.2`)
+## 4. Mensajería (AsyncAPI `0.6.0-rc.3` / Topología Oracle)
 
 Cola principal consumida: `po.inventario.q` (prefetch 20, ACK manual tras el
 commit de Inbox + saldo + operación + resultado Outbox).
@@ -132,24 +132,18 @@ coordinado. `getMetrics()` expone contadores locales (conexión, pausa, ACK,
 duplicados, rechazos, fallos, reconexiones). No hay endpoint/exportador de
 métricas.
 
-### 4.1 Compatibilidad de topología: bloqueo de deploy AMQP
+### 4.1 Topología física AMQP adoptada (Resolución #29 / AsyncAPI 0.6.0-rc.3)
 
-El código de esta rama usa los nombres del AsyncAPI (`po.inventory.q`,
-`po.events.x`, `po.results.x`); la topología física observada en la auditoría
-Oracle `2026-10-19 22:32:52 UTC` usa nombres en español. **No son alias.**
+El código de Inventory adopta la nomenclatura física en español oficial de Oracle y las ACLs del usuario `g6_inventario`:
 
-| Elemento | Código de esta rama (y AsyncAPI) | Topología física observada | ACL del usuario `g6_inventario` |
-|---|---|---|---|
-| Cola de consumo | `po.inventory.q` | `po.inventario.q` | **read** `po.inventario.q` |
-| Exchange de eventos | `po.events.x` | `po.eventos.x` | **write** `po.eventos.x` |
-| Exchange de resultados | `po.results.x` | `po.resultados.x` | **write** `po.resultados.x` |
-| Configure | — | — | ninguno (`^$`) |
+| Elemento | Nombre físico en código (AsyncAPI 0.6.0-rc.3) | Referencia histórica (AsyncAPI 0.6.0-rc.2) | ACL del usuario `g6_inventario` | Estado |
+|---|---|---|---|---|
+| Cola de consumo | `po.inventario.q` | `po.inventory.q` | **read** `po.inventario.q` | **Alineado** |
+| Exchange de eventos | `po.eventos.x` | `po.events.x` | **write** `po.eventos.x` | **Alineado** |
+| Exchange de resultados | `po.resultados.x` | `po.results.x` | **write** `po.resultados.x` | **Alineado** |
+| Configure | ninguno | ninguno | ninguno (`^$`) | **Cumplido** (el servicio no declara topología) |
 
-Consecuencia: conectar el consumidor o publicar con los nombres del código
-fallaría por cola/exchange inexistente o por ACL. El flujo AMQP queda
-**BLOQUEADO_ESPECÍFICO** hasta que Marco/#29 y el owner de infraestructura
-reconcilien nombres y permisos. Este servicio **no crea ni modifica** exchanges,
-colas, bindings ni ACL.
+*Nota histórica:* Previo a la actualización contractual AsyncAPI `0.6.0-rc.3` en `master` y la resolución #29, el código utilizaba temporalmente nombres en inglés (`po.inventory.q`, `po.events.x`, `po.results.x`), los cuales diferían de la topología física desplegada en Oracle. Esta discrepancia operativa quedó resuelta adoptando los nombres físicos españoles en el consumidor y publicador Outbox. Este servicio **no crea ni modifica** exchanges, colas, bindings ni ACLs.
 
 La frontera HTTP/PostgreSQL es independiente del broker:
 

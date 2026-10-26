@@ -60,23 +60,18 @@ El consumidor comprueba la existencia de `po.inventario.q`, usa prefetch 20 y AC
 
 `inventory.bulk.stock.adjust.requested` y `catalog.sku.deactivated` quedan aislados con `BLOCKED_CONTRACT`: el AsyncAPI consultado declara `GenericData`, sin payload ejecutable suficiente. Un mensaje inválido, un contrato bloqueado o un fallo técnico pausa el consumidor y cierra el canal sin ACK. RabbitMQ puede volver a poner las entregas pendientes en la cola al cerrar el canal; este proceso no reconecta automáticamente mientras esté pausado. Requiere resolver la causa y llamar internamente a `resume()` o reiniciar. Un mensaje persistente incompatible puede bloquear el avance de esa cola compartida. No hay endpoint público de reanudación, retry/DLX productivo ni publicación a colas alternativas. La pérdida de conexión sin pausa programa reconexión a los 30 s.
 
-### Matriz de incompatibilidad de topología (bloqueo de deploy AMQP)
+### Topología física AMQP adoptada (Resolución #29 / AsyncAPI 0.6.0-rc.3)
 
-El código usa los nombres del AsyncAPI `0.6.0-rc.2`; la topología física
-observada (auditoría Oracle `2026-10-19 22:32:52 UTC`, RabbitMQ 4.2.9, vhost
-`g6-productos-ofertas`) usa nombres en español. No se asume que sean alias.
+El código adopta los nombres físicos en español homologados con la topología Oracle (RabbitMQ 4.2.9, vhost `g6-productos-ofertas`) y el contrato AsyncAPI `0.6.0-rc.3`:
 
-| Elemento | Código/AsyncAPI | Físico observado | ACL `g6_inventario` |
-|---|---|---|---|
-| Cola consumida | `po.inventory.q` | `po.inventario.q` | read `po.inventario.q` |
-| Exchange de eventos | `po.events.x` | `po.eventos.x` | write `po.eventos.x` |
-| Exchange de resultados | `po.results.x` | `po.resultados.x` | write `po.resultados.x` |
-| Configure | — | — | ninguno (`^$`) |
+| Elemento | Nombre en código (AsyncAPI 0.6.0-rc.3) | Referencia histórica (0.6.0-rc.2) | ACL `g6_inventario` | Estado |
+|---|---|---|---|---|
+| Cola consumida | `po.inventario.q` | `po.inventory.q` | read `po.inventario.q` | Alineado con ACL |
+| Exchange de eventos | `po.eventos.x` | `po.events.x` | write `po.eventos.x` | Alineado con ACL |
+| Exchange de resultados | `po.resultados.x` | `po.results.x` | write `po.resultados.x` | Alineado con ACL |
+| Configure | — | — | ninguno (`^$`) | El servicio no crea ni altera recursos |
 
-Por tanto, conectar/publicar con los nombres del código falla por recurso
-inexistente o ACL. El servicio no crea ni modifica la topología. El desbloqueo
-requiere que Marco/#29 y el owner de infraestructura fijen nombres, bindings y
-permisos, y autoricen la prueba en el entorno.
+*Nota histórica:* Previo a la actualización AsyncAPI 0.6.0-rc.3 y la resolución #29, el código utilizaba los identificadores en inglés del AsyncAPI 0.6.0-rc.2 (`po.inventory.q`, `po.events.x`, `po.results.x`) frente a la topología física en español. Con la actualización de contrato y código, los recursos coinciden plenamente con los permisos del usuario de servicio.
 
 **Independencia HTTP/PostgreSQL:** `RABBITMQ_URL` es opcional al arranque; sin
 broker el proceso sirve HTTP y mantiene los eventos en Outbox como `PENDING`.
