@@ -80,6 +80,21 @@ describe('Authoritative catalog master validation', () => {
       client.attributes('type', [value], true, authorization, correlation),
     ).rejects.toMatchObject({ status: 503 });
   });
+  it('rejects an effective schema that changed between type and attribute validation', async () => {
+    vi.stubGlobal(
+      'fetch',
+      async () =>
+        new Response(JSON.stringify(schema), {
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    await expect(
+      client.attributes('type', [value], false, authorization, correlation, 2),
+    ).rejects.toMatchObject({ status: 503 });
+    await expect(
+      client.attributes('type', [value], false, authorization, correlation, 1),
+    ).resolves.toMatchObject([{ nombre: 'Authoritative Size' }]);
+  });
   it('requires mandatory attributes only for activation and rejects unknown LISTA values', async () => {
     vi.stubGlobal(
       'fetch',

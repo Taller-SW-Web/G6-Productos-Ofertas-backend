@@ -31,7 +31,12 @@ import { PostgresCatalogWriteRepository } from '../src/postgres-catalog-write.re
 import { PostgresCatalogRepository } from '../src/postgres-catalog.repository.js';
 import { BarcodeRepository } from '../src/barcode.repository.js';
 import {
+  assertMasterReferences,
+  lockMasterReferences,
+} from '../src/catalog-master-barriers.js';
+import {
   products,
+  masterBarriers,
   activationChecks,
   outbox,
   skuIdentity,
@@ -209,7 +214,7 @@ describe.skipIf(!dockerAvailable)(
           '-v',
           'ON_ERROR_STOP=1',
         ],
-        `CREATE ROLE po_catalog_owner NOLOGIN;\nCREATE ROLE catalog_app LOGIN PASSWORD 'isolated-runtime-password';\nCREATE SCHEMA catalog AUTHORIZATION po_catalog_owner;\nCREATE SCHEMA foreign_context;\nCREATE TABLE foreign_context.private_probe (value text);\nINSERT INTO foreign_context.private_probe VALUES ('isolated');\nSET ROLE po_catalog_owner;\n${migration}\n${barcodeMigration}`,
+        `CREATE ROLE po_catalog_owner NOLOGIN;\nCREATE ROLE catalog_app LOGIN PASSWORD 'isolated-runtime-password';\nCREATE SCHEMA catalog AUTHORIZATION po_catalog_owner;\nCREATE SCHEMA foreign_context;\nCREATE TABLE foreign_context.private_probe (value text);\nINSERT INTO foreign_context.private_probe VALUES ('isolated');\nSET ROLE po_catalog_owner;\n${migration}\n${barcodeMigration}\nINSERT INTO catalog.products (id,nombre,descripcion,categoria_id,tipo_producto_id,marca_id,sku_base,slug,tiene_variantes) VALUES ('00000000-0000-4000-8000-000000000049','Historical','Before migration','historic-category','historic-type','historic-brand','historic-00049','historic-00049',false);\n${readFileSync(resolve('apps/catalog-svc/migrations/0003_product_publication_history.sql'), 'utf8')}`,
       );
       port = command('docker', ['port', container, '5432/tcp'])
         .split(':')
@@ -955,7 +960,7 @@ describe.skipIf(!dockerAvailable)(
         transactions,
         repository,
         {
-          masters: async () => undefined,
+          masters: async () => ({ schemaVersion: 1 }),
           attributes: async (_type: string, values: Attribute[]) => values,
         } as unknown as CatalogMasterClient,
         {
@@ -1039,6 +1044,493 @@ describe.skipIf(!dockerAvailable)(
         if (!dependency || row.event_name.startsWith(dependency + '.'))
           await messages.consume(resultFor(row));
     }
+    it('Q-06: preserves historical NULL, corrects drafts with optimistic concurrency and never clears publication', async () => {
+      const service = mutationService();
+      const historical = '00000000-0000-4000-8000-000000000049';
+      const read = async (id: string) =>
+        database.read(
+          async (db) =>
+            (await db.select().from(products).where(eq(products.id, id)))[0]!,
+        );
+      expect((await read(historical)).publicado_alguna_vez).toBeNull();
+      await expect(
+        service.update(
+          historical,
+          undefined,
+          { tipoProductoId: 'new', catalogVersion: 0 },
+          actor,
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'CAMBIO_ESTRUCTURAL_NO_PERMITIDO' },
+      });
+      const product = await service.createProduct(
+        {
+          ...createRequest(),
+          atributos: [
+            {
+              caracteristica_id: 'material',
+              nombre: 'Material',
+              valor_id: null,
+              valor: 'cotton',
+            },
+          ],
+        },
+        actor,
+      );
+      expect((await read(product.product_id)).publicado_alguna_vez).toBe(false);
+      await expect(
+        service.state(product.product_id, undefined, 'activate', {}, actor),
+      ).rejects.toMatchObject({ status: 422 });
+      expect((await read(product.product_id)).publicado_alguna_vez).toBe(false);
+      const corrected = await service.update(
+        product.product_id,
+        undefined,
+        {
+          tipoProductoId: 'corrected-type',
+          catalogVersion: product.catalog_version,
+        },
+        actor,
+      );
+      expect(corrected).toMatchObject({
+        product_id: product.product_id,
+        sku_base: product.sku_base,
+        slug: product.slug,
+        tipo_producto_id: 'corrected-type',
+        attributes: [{ valor: 'cotton' }],
+      });
+      await expect(
+        service.update(
+          product.product_id,
+          undefined,
+          { tipoProductoId: 'other', catalogVersion: product.catalog_version },
+          actor,
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'VERSION_CONFLICT' },
+      });
+      await complete(product.product_id);
+      await service.state(product.product_id, undefined, 'activate', {}, actor);
+      expect((await read(product.product_id)).publicado_alguna_vez).toBe(true);
+      await service.state(
+        product.product_id,
+        undefined,
+        'deactivate',
+        {},
+        actor,
+      );
+      expect((await read(product.product_id)).publicado_alguna_vez).toBe(true);
+      await expect(
+        transactions.run((tx) =>
+          tx
+            .update(products)
+            .set({ publicado_alguna_vez: false })
+            .where(eq(products.id, product.product_id)),
+        ),
+      ).rejects.toMatchObject({ failure: 'check' });
+      await expect(
+        service.update(
+          product.product_id,
+          undefined,
+          {
+            tipoProductoId: 'after-publication',
+            catalogVersion: Number(
+              (await read(product.product_id)).catalog_version,
+            ),
+          },
+          actor,
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'CAMBIO_ESTRUCTURAL_NO_PERMITIDO' },
+      });
+      expect((await read(product.product_id)).tipo_producto_id).toBe(
+        'corrected-type',
+      );
+    });
+    function masterMessage(
+      type: string,
+      id: string,
+      operation: string = randomUUID(),
+      version = 7,
+      name = 'taxonomy.master.deactivation.check.requested',
+    ) {
+      return parseCatalogMessage({
+        message_id: randomUUID(),
+        schema_version: 1,
+        occurred_at: new Date().toISOString(),
+        correlation_id: randomUUID(),
+        operation_id: operation,
+        causation_id: randomUUID(),
+        producer: 'taxonomy-svc',
+        kind: name.endsWith('.requested')
+          ? 'command'
+          : name.endsWith('.rejected')
+            ? 'result'
+            : 'event',
+        name,
+        data: {
+          entity_type: type,
+          entity_id: id,
+          version,
+          ...(name.endsWith('.rejected') ? { reason: 'TIMEOUT' } : {}),
+        },
+      });
+    }
+    it('master barriers: CLEAR/IN_USE for four entities, durable dedupe, stale finals and matching rejection release', async () => {
+      const service = mutationService(),
+        messages = new CatalogMessageService(database);
+      const marker = 'master-' + randomUUID();
+      const product = await service.createProduct(
+        {
+          ...createRequest(),
+          categoriaId: marker,
+          marcaId: marker,
+          tipoProductoId: marker,
+          atributos: [
+            {
+              caracteristica_id: 'char',
+              nombre: 'Value',
+              valor_id: marker,
+              valor: 'value',
+            },
+          ],
+        },
+        actor,
+      );
+      await complete(product.product_id);
+      await service.state(product.product_id, undefined, 'activate', {}, actor);
+      for (const type of [
+        'CATEGORY',
+        'BRAND',
+        'PRODUCT_TYPE',
+        'CHARACTERISTIC_VALUE',
+      ]) {
+        const command = masterMessage(type, marker);
+        expect(
+          await Promise.all([
+            messages.consume(command),
+            messages.consume(command),
+          ]),
+        ).toEqual(['APPLIED', 'DUPLICATE']);
+        await expect(
+          messages.consume({
+            ...command,
+            data: { ...command.data, version: 8 },
+          }),
+        ).rejects.toThrow('INVALID_CATALOG_MESSAGE');
+        const responses = await database.read((db) =>
+          db
+            .select()
+            .from(outbox)
+            .where(eq(outbox.operation_id, command.operation_id!)),
+        );
+        expect(responses).toHaveLength(1);
+        expect(responses[0].payload).toMatchObject({
+          entity_type: type,
+          entity_id: marker,
+          version: 7,
+          result: 'IN_USE',
+        });
+        await messages.consume({ ...command, message_id: randomUUID() });
+        expect(
+          await database.read((db) =>
+            db
+              .select()
+              .from(outbox)
+              .where(eq(outbox.operation_id, command.operation_id!)),
+          ),
+        ).toHaveLength(1);
+        expect(
+          await messages.consume(
+            masterMessage(
+              type,
+              marker,
+              command.operation_id!,
+              8,
+              'taxonomy.master.deactivated',
+            ),
+          ),
+        ).toBe('STALE');
+        expect(await messages.consume(masterMessage(type, marker))).toBe(
+          'STALE',
+        );
+        const barrier = async () =>
+          database.read(
+            async (db) =>
+              (
+                await db
+                  .select()
+                  .from(masterBarriers)
+                  .where(eq(masterBarriers.operation_id, command.operation_id!))
+              )[0],
+          );
+        expect((await barrier())!.is_blocking).toBe(true);
+        await service.update(
+          product.product_id,
+          undefined,
+          { nombre: 'Independent edit' },
+          actor,
+        );
+        await messages.consume(
+          masterMessage(
+            type,
+            marker,
+            command.operation_id!,
+            7,
+            'taxonomy.master.deactivation.rejected',
+          ),
+        );
+        expect((await barrier())!.is_blocking).toBe(false);
+        expect(
+          await messages.consume({ ...command, message_id: randomUUID() }),
+        ).toBe('TERMINAL');
+        const clear = masterMessage(type, 'unreferenced-' + randomUUID());
+        await messages.consume(clear);
+        const [response] = await database.read((db) =>
+          db
+            .select()
+            .from(outbox)
+            .where(eq(outbox.operation_id, clear.operation_id!)),
+        );
+        expect(response.payload.result).toBe('CLEAR');
+        const [pending] = await database.read((db) =>
+          db
+            .select()
+            .from(masterBarriers)
+            .where(eq(masterBarriers.operation_id, clear.operation_id!)),
+        );
+        expect(pending.is_blocking).toBe(true);
+        await messages.consume(
+          masterMessage(
+            type,
+            clear.data.entity_id as string,
+            clear.operation_id!,
+            7,
+            'taxonomy.master.deactivated',
+          ),
+        );
+      }
+    });
+    it('master barriers: active variant values block even with a draft parent; inactive references do not', async () => {
+      const service = mutationService(),
+        messages = new CatalogMessageService(database),
+        marker = 'value-' + randomUUID();
+      const parent = await service.createProduct(createRequest(true), actor);
+      const variant = await service.createVariant(
+        parent.product_id,
+        {
+          sku: '000-' + marker,
+          atributosIdentificadores: [
+            {
+              caracteristica_id: 'size',
+              nombre: 'Size',
+              valor_id: marker,
+              valor: 'M',
+            },
+          ],
+          imagenUrl: 'https://example.test/variant',
+          perfilFisico: fullProfile,
+        },
+        actor,
+      );
+      await complete(parent.product_id);
+      await service.state(
+        parent.product_id,
+        variant.variant_id,
+        'activate',
+        {},
+        actor,
+      );
+      const check = masterMessage('CHARACTERISTIC_VALUE', marker);
+      await messages.consume(check);
+      const [response] = await database.read((db) =>
+        db
+          .select()
+          .from(outbox)
+          .where(eq(outbox.operation_id, check.operation_id!)),
+      );
+      expect(response.payload.result).toBe('IN_USE');
+      await messages.consume(
+        masterMessage(
+          'CHARACTERISTIC_VALUE',
+          marker,
+          check.operation_id!,
+          7,
+          'taxonomy.master.deactivation.rejected',
+        ),
+      );
+      await service.state(
+        parent.product_id,
+        variant.variant_id,
+        'deactivate',
+        {},
+        actor,
+      );
+      const clear = masterMessage('CHARACTERISTIC_VALUE', marker);
+      await messages.consume(clear);
+      const [unused] = await database.read((db) =>
+        db
+          .select()
+          .from(outbox)
+          .where(eq(outbox.operation_id, clear.operation_id!)),
+      );
+      expect(unused.payload.result).toBe('CLEAR');
+      await expect(
+        service.state(
+          parent.product_id,
+          variant.variant_id,
+          'reactivate',
+          {},
+          actor,
+        ),
+      ).rejects.toMatchObject({ status: 503 });
+      await messages.consume(
+        masterMessage(
+          'CHARACTERISTIC_VALUE',
+          marker,
+          clear.operation_id!,
+          7,
+          'taxonomy.master.deactivated',
+        ),
+      );
+    });
+    it('master barrier advisory locks serialize activation before the check and prevent new writes after CLEAR', async () => {
+      const service = mutationService(),
+        messages = new CatalogMessageService(database),
+        marker = 'race-' + randomUUID();
+      const product = await service.createProduct(
+        { ...createRequest(), categoriaId: marker },
+        actor,
+      );
+      await complete(product.product_id);
+      let release!: () => void, locked!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve)),
+        ready = new Promise<void>((resolve) => (locked = resolve));
+      const writer = transactions.run(async (tx) => {
+        await assertMasterReferences(tx, [{ type: 'CATEGORY', id: marker }]);
+        locked();
+        await gate;
+        await tx
+          .update(products)
+          .set({ estado: 'ACTIVO' })
+          .where(eq(products.id, product.product_id));
+      });
+      await ready;
+      const check = masterMessage('CATEGORY', marker),
+        checkResult = messages.consume(check);
+      release();
+      await writer;
+      await checkResult;
+      const [response] = await database.read((db) =>
+        db
+          .select()
+          .from(outbox)
+          .where(eq(outbox.operation_id, check.operation_id!)),
+      );
+      expect(response.payload.result).toBe('IN_USE');
+      await messages.consume(
+        masterMessage(
+          'CATEGORY',
+          marker,
+          check.operation_id!,
+          7,
+          'taxonomy.master.deactivation.rejected',
+        ),
+      );
+      const blocked = 'blocked-' + randomUUID(),
+        command = masterMessage('CATEGORY', blocked);
+      let releaseBarrier!: () => void, barrierReady!: () => void;
+      const barrierGate = new Promise<void>(
+          (resolve) => (releaseBarrier = resolve),
+        ),
+        installed = new Promise<void>((resolve) => (barrierReady = resolve));
+      const install = transactions.run(async (tx) => {
+        await lockMasterReferences(tx, [{ type: 'CATEGORY', id: blocked }]);
+        await tx.insert(masterBarriers).values({
+          master_type: 'CATEGORY',
+          master_id: blocked,
+          operation_id: command.operation_id!,
+          source_version: 7n,
+          payload: command.data,
+        });
+        barrierReady();
+        await barrierGate;
+      });
+      await installed;
+      const pending = service.createProduct(
+        { ...createRequest(), categoriaId: blocked },
+        actor,
+      );
+      const rejection = expect(pending).rejects.toMatchObject({ status: 503 });
+      releaseBarrier();
+      await install;
+      await rejection;
+      await messages.consume(
+        masterMessage(
+          'CATEGORY',
+          blocked,
+          command.operation_id!,
+          7,
+          'taxonomy.master.deactivated',
+        ),
+      );
+    });
+    it('unresolved PRODUCT_TYPE_CHARACTERISTIC stays blocking, emits no CLEAR and cannot be released by a final event', async () => {
+      const messages = new CatalogMessageService(database),
+        service = mutationService();
+      const product = await service.createProduct(createRequest(), actor);
+      const command = masterMessage(
+        'PRODUCT_TYPE_CHARACTERISTIC',
+        'opaque-association-' + randomUUID(),
+      );
+      try {
+        expect(await messages.consume(command)).toBe('BLOCKED');
+        expect(
+          await database.read((db) =>
+            db
+              .select()
+              .from(outbox)
+              .where(eq(outbox.operation_id, command.operation_id!)),
+          ),
+        ).toEqual([]);
+        expect(
+          await messages.consume(
+            masterMessage(
+              'PRODUCT_TYPE_CHARACTERISTIC',
+              command.data.entity_id as string,
+              command.operation_id!,
+              7,
+              'taxonomy.master.deactivated',
+            ),
+          ),
+        ).toBe('STALE');
+        const [barrier] = await database.read((db) =>
+          db
+            .select()
+            .from(masterBarriers)
+            .where(eq(masterBarriers.operation_id, command.operation_id!)),
+        );
+        expect(barrier.is_blocking).toBe(true);
+        await expect(
+          service.createProduct(createRequest(), actor),
+        ).rejects.toMatchObject({ status: 503 });
+        await service.update(
+          product.product_id,
+          undefined,
+          { nombre: 'Independent' },
+          actor,
+        );
+      } finally {
+        // Only this test's unresolved fixture, on the disposable database.
+        await transactions.run((tx) =>
+          tx
+            .delete(masterBarriers)
+            .where(eq(masterBarriers.operation_id, command.operation_id!)),
+        );
+      }
+    });
     it('D-CAT-05/06: filters global eligibility before count/pagination in every channel without candidate tables', async () => {
       const service = mutationService();
       const marker = 'eligibility-' + randomUUID();

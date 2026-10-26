@@ -77,7 +77,7 @@ export interface MutationInput {
   skuBase?: string;
   tieneVariantes?: boolean;
   precioBaseInicial?: number;
-  sku?: string | null;
+  sku?: string;
   atributos?: Attribute[];
   atributosIdentificadores?: Attribute[];
   atributosNoIdentificadores?: Attribute[];
@@ -120,7 +120,6 @@ export function parseMutation(
           'sku_base',
           'tieneVariantes',
           'tiene_variantes',
-          'tipoProductoId',
           'tipo_producto_id',
           'slug',
         ]
@@ -140,6 +139,10 @@ export function parseMutation(
   const product = kind === 'createProduct' || kind === 'updateProduct';
   const variant = kind === 'createVariant' || kind === 'updateVariant';
   if (product) {
+    if (kind === 'updateProduct' && Object.hasOwn(body, 'tipoProductoId')) {
+      if (!text(body.tipoProductoId)) return catalogError(400, 'VALIDACION');
+      result.tipoProductoId = body.tipoProductoId;
+    }
     for (const k of [
       'nombre',
       'descripcion',
@@ -189,9 +192,8 @@ export function parseMutation(
   }
   if (variant) {
     if (kind === 'createVariant') {
-      if (body.sku != null && !text(body.sku))
-        return catalogError(422, 'SKU_INVALIDO');
-      result.sku = (body.sku as string | null) ?? null;
+      if (!text(body.sku)) return catalogError(422, 'SKU_INVALIDO');
+      result.sku = body.sku;
       result.atributosIdentificadores = attributes(
         body.atributosIdentificadores,
       );

@@ -71,7 +71,7 @@ export class CatalogMasterClient {
     },
     authorization: string,
     correlationId: string,
-  ): Promise<void> {
+  ): Promise<{ schemaVersion: number }> {
     for (const master of [
       {
         id: product.categoria_id,
@@ -119,6 +119,7 @@ export class CatalogMasterClient {
       (type.schemaVersion as number) < 0
     )
       throw new ServiceUnavailableException();
+    return { schemaVersion: type.schemaVersion as number };
   }
   async attributes(
     typeId: string,
@@ -126,6 +127,7 @@ export class CatalogMasterClient {
     required: boolean,
     authorization: string,
     correlationId: string,
+    expectedSchemaVersion?: number,
   ): Promise<Attribute[]> {
     const schema = await this.get(
       '/api/v1/tipos-producto/' +
@@ -142,6 +144,8 @@ export class CatalogMasterClient {
       schema.tipoProducto.estado !== 'ACTIVO' ||
       !Number.isSafeInteger(schema.schemaVersion) ||
       (schema.schemaVersion as number) < 0 ||
+      (expectedSchemaVersion !== undefined &&
+        schema.schemaVersion !== expectedSchemaVersion) ||
       !Array.isArray(schema.caracteristicas) ||
       !schema.caracteristicas.every(object)
     )

@@ -1,8 +1,15 @@
 import { Injectable, Optional } from '@nestjs/common';
 import { CatalogTelemetry } from './catalog-telemetry.js';
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { consumeMasterMessage } from './catalog-master-message.js';
+import { and, asc, eq, isNull, lt } from 'drizzle-orm';
 import { Database } from './database.js';
-import { activationChecks, inbox, outbox, products } from './catalog.schema.js';
+import {
+  activationChecks,
+  inbox,
+  outbox,
+  products,
+  masterBarriers,
+} from './catalog.schema.js';
 import {
   activeAttempt,
   BlockedCatalogHandler,
@@ -30,6 +37,7 @@ export interface CatalogPublisher {
 }
 @Injectable()
 export class CatalogMessageService {
+  private lastBarrierReport = Date.now();
   constructor(
     private readonly database: Database,
     @Optional()
@@ -38,7 +46,9 @@ export class CatalogMessageService {
 
   async consume(
     message: CatalogEnvelope,
-  ): Promise<'APPLIED' | 'STALE' | 'TERMINAL' | 'DUPLICATE'> {
+  ): Promise<'APPLIED' | 'STALE' | 'TERMINAL' | 'DUPLICATE' | 'BLOCKED'> {
+    if (message.name.startsWith('taxonomy.master.'))
+      return consumeMasterMessage(this.database, message, this.telemetry);
     if (!(preparationResults as readonly string[]).includes(message.name))
       throw new BlockedCatalogHandler();
     const result = await this.database.transaction(async (tx) => {
@@ -153,6 +163,24 @@ export class CatalogMessageService {
   async relayOne(
     publisher: CatalogPublisher,
   ): Promise<'PUBLISHED' | 'PENDING' | 'EMPTY'> {
+    // Diagnostic cadence only. Never releases a barrier or resolves an operation.
+    if (Date.now() - this.lastBarrierReport >= 60000) {
+      const pending = await this.database.read((db) =>
+        db
+          .select({ operationId: masterBarriers.operation_id })
+          .from(masterBarriers)
+          .where(
+            and(
+              eq(masterBarriers.is_blocking, true),
+              lt(masterBarriers.created_at, new Date(Date.now() - 60000)),
+            ),
+          )
+          .limit(100),
+      );
+      this.lastBarrierReport = Date.now();
+      for (const row of pending)
+        this.telemetry.record('MASTER_BARRIER_FINAL_PENDING', row);
+    }
     const result = await this.database.transaction(async (tx) => {
       const [row] = await tx
         .select()

@@ -160,6 +160,13 @@ describe.skipIf(!dockerAvailable)(
           readFileSync(
             resolve('apps/catalog-svc/test/fixtures/0001_create_catalog.sql'),
             'utf8',
+          ) +
+          '\n' +
+          readFileSync(
+            resolve(
+              'apps/catalog-svc/migrations/0003_product_publication_history.sql',
+            ),
+            'utf8',
           ),
       );
       databasePort = command('docker', ['port', container, '5432/tcp'])

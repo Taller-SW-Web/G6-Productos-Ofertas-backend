@@ -47,12 +47,14 @@ describe('catalog Drizzle schema', () => {
         hasDefault: modifiers.includes('DEFAULT'),
       }));
       expect(
-        table.columns.map((column) => ({
-          name: column.name,
-          type: column.getSQLType(),
-          notNull: column.notNull,
-          hasDefault: column.hasDefault,
-        })),
+        table.columns
+          .filter((column) => column.name !== 'publicado_alguna_vez')
+          .map((column) => ({
+            name: column.name,
+            type: column.getSQLType(),
+            notNull: column.notNull,
+            hasDefault: column.hasDefault,
+          })),
       ).toEqual(columns);
       const constraints = [...definition.matchAll(/CONSTRAINT (\w+)/g)]
         .map(([, name]) => name)
@@ -107,6 +109,7 @@ describe('catalog Drizzle schema', () => {
         'slug',
         'tiene_variantes',
         'estado',
+        'publicado_alguna_vez',
         'catalog_version',
         'created_at',
         'updated_at',

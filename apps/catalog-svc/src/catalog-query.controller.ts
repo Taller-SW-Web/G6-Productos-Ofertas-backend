@@ -20,6 +20,7 @@ import type { Request } from 'express';
 import { CatalogQueryService } from './catalog-query.service.js';
 import { isCorrelationId } from './correlation.js';
 import { parseProductQuery } from './catalog-query.js';
+import { UUID } from './catalog-messages.js';
 
 @Controller('api/v1/productos')
 @UseGuards(CatalogAuthGuard)
@@ -89,6 +90,7 @@ export class CatalogQueryController {
     @Headers('x-correlation-id') correlationId?: string,
   ) {
     this.validateCorrelation(correlationId);
+    if (!UUID.test(productId)) throw new BadRequestException();
     return this.service.variants(productId, query);
   }
 
@@ -97,9 +99,16 @@ export class CatalogQueryController {
   variant(
     @Param('productoId') productId: string,
     @Param('variantId') variantId: string,
+    @Query() query: Record<string, unknown>,
     @Headers('x-correlation-id') correlationId?: string,
   ) {
     this.validateCorrelation(correlationId);
+    if (
+      !UUID.test(productId) ||
+      !UUID.test(variantId) ||
+      Object.keys(query).length
+    )
+      throw new BadRequestException();
     return this.service.variant(productId, variantId);
   }
 

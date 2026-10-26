@@ -291,8 +291,8 @@ describe('Catalog HTTP routes and security (isolated use-case fixtures)', () => 
         .expect(200);
     for (const path of [
       '/productos/p/preparacion',
-      '/productos/p/variantes',
-      '/productos/p/variantes/v',
+      `/productos/${correlation}/variantes`,
+      `/productos/${correlation}/variantes/${correlation}`,
     ])
       await request(app.getHttpServer())
         .get('/api/v1' + path)
@@ -328,5 +328,48 @@ describe('Catalog HTTP routes and security (isolated use-case fixtures)', () => 
       .get('/api/v1/productos/p?canal=MARKETPLACE&invented=1')
       .set('Authorization', 'Bearer channel')
       .expect(400);
+  });
+  it.each([
+    '/productos/not-a-uuid/variantes',
+    `/productos/${correlation}/variantes/not-a-uuid`,
+    `/productos/${correlation}/variantes?pagina=0`,
+    `/productos/${correlation}/variantes?tamanio=201`,
+    `/productos/${correlation}/variantes?estado=ACTIVO`,
+    `/productos/${correlation}/variantes?pagina=1&pagina=2`,
+    `/productos/${correlation}/variantes?pagina[]=1`,
+    `/productos/${correlation}/variantes?unknown=1`,
+    `/productos/${correlation}/variantes/${correlation}?unknown=1`,
+    `/productos/${correlation}/variantes/${correlation}?pagina=1&pagina=2`,
+  ])('returns contractual 400 before reading variants: %s', async (path) => {
+    const response = await request(app.getHttpServer())
+      .get('/api/v1' + path)
+      .set('Authorization', 'Bearer manager')
+      .expect(400);
+    expect(response.type).toBe('application/problem+json');
+    expect(response.body.code).toBe('VALIDACION');
+    expect(queryRepository.listVariants).not.toHaveBeenCalled();
+    expect(queryRepository.findVariant).not.toHaveBeenCalled();
+  });
+  it('keeps valid absent identities at 404 and rejects invalid correlation at 400', async () => {
+    queryRepository.listVariants.mockResolvedValueOnce(null as never);
+    queryRepository.findVariant.mockResolvedValueOnce(null as never);
+    for (const [path, code] of [
+      [`/productos/${correlation}/variantes`, 'PRODUCTO_NO_ENCONTRADO'],
+      [
+        `/productos/${correlation}/variantes/${correlation}`,
+        'VARIANTE_NO_ENCONTRADA',
+      ],
+    ]) {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1' + path)
+        .set('Authorization', 'Bearer manager')
+        .expect(404);
+      expect(response.body.code).toBe(code);
+      await request(app.getHttpServer())
+        .get('/api/v1' + path)
+        .set('Authorization', 'Bearer manager')
+        .set('X-Correlation-Id', 'invalid')
+        .expect(400);
+    }
   });
 });

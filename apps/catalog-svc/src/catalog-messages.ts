@@ -1,5 +1,25 @@
 import { randomUUID } from 'node:crypto';
 import { object } from './catalog-mutation.input.js';
+import { masterTypes, type MasterType } from './catalog-master-barriers.js';
+export interface MasterData extends Record<string, unknown> {
+  entity_type: MasterType;
+  entity_id: string;
+  version: number;
+}
+export function assertMasterData(
+  data: Record<string, unknown>,
+  operationId: unknown,
+): asserts data is MasterData {
+  if (
+    !UUID.test(String(operationId)) ||
+    !masterTypes.includes(data.entity_type as MasterType) ||
+    typeof data.entity_id !== 'string' ||
+    data.entity_id.length === 0 ||
+    !Number.isSafeInteger(data.version) ||
+    (data.version as number) < 0
+  )
+    throw new InvalidCatalogMessage();
+}
 export const CATALOG_PREPARATION_CONFIG = Symbol('CATALOG_PREPARATION_CONFIG');
 export interface CatalogPreparationConfig {
   timeoutMs?: number;
@@ -65,6 +85,14 @@ export function assertCatalogPublication(message: CatalogEnvelope): void {
   )
     throw new InvalidCatalogMessage();
   const data = message.data;
+  if (message.name === 'catalog.master.deactivation.checked') {
+    assertMasterData(data, message.operation_id);
+    if (
+      message.kind !== 'result' ||
+      !['CLEAR', 'IN_USE'].includes(String(data.result))
+    )
+      throw new InvalidCatalogMessage();
+  }
   if (message.name === 'pricing.product.initialization.requested') {
     if (
       !UUID.test(String(message.operation_id)) ||
@@ -154,11 +182,21 @@ export function parseCatalogMessage(value: unknown): CatalogEnvelope {
     value.kind !==
       (result
         ? 'result'
-        : value.name.endsWith('.requested')
-          ? 'command'
-          : 'event')
+        : value.name === 'taxonomy.master.deactivation.rejected'
+          ? 'result'
+          : value.name.endsWith('.requested')
+            ? 'command'
+            : 'event')
   )
     throw new InvalidCatalogMessage();
+  if (value.name.startsWith('taxonomy.master.')) {
+    assertMasterData(value.data, value.operation_id);
+    if (
+      value.name.endsWith('.rejected') &&
+      (typeof value.data.reason !== 'string' || value.data.reason.length === 0)
+    )
+      throw new InvalidCatalogMessage();
+  }
   if (result) {
     const d = value.data;
     const completed = value.name.endsWith('.completed');

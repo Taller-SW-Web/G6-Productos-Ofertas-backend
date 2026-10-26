@@ -52,6 +52,7 @@ export const products = catalog.table(
     slug: text('slug').notNull(),
     tiene_variantes: boolean('tiene_variantes').notNull(),
     estado: estadoProducto('estado').default('BORRADOR').notNull(),
+    publicado_alguna_vez: boolean('publicado_alguna_vez').default(false),
     catalog_version: bigint('catalog_version', { mode: 'bigint' })
       .default(0n)
       .notNull(),

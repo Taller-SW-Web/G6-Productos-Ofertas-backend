@@ -30,6 +30,56 @@ describe('Catalog preparation message contract and retry identity', () => {
   it('validates typed results and preserves SKU identity', () => {
     expect(parseCatalogMessage(result()).data.sku).toBe('0000123');
   });
+  it('validates all typed master identities without assigning an entity ID format', () => {
+    for (const entity_type of [
+      'CATEGORY',
+      'BRAND',
+      'PRODUCT_TYPE',
+      'CHARACTERISTIC_VALUE',
+      'PRODUCT_TYPE_CHARACTERISTIC',
+    ]) {
+      const message = {
+        ...result(),
+        producer: 'taxonomy-svc',
+        kind: 'command',
+        name: 'taxonomy.master.deactivation.check.requested',
+        data: { entity_type, entity_id: 'opaque / 000', version: 7 },
+      };
+      expect(parseCatalogMessage(message).data.entity_id).toBe('opaque / 000');
+      for (const patch of [
+        { version: null },
+        { version: -1 },
+        { version: 1.5 },
+        { entity_id: '' },
+        { entity_type: 'CHARACTERISTIC' },
+      ])
+        expect(() =>
+          parseCatalogMessage({
+            ...message,
+            data: { ...message.data, ...patch },
+          }),
+        ).toThrow(InvalidCatalogMessage);
+      expect(() =>
+        parseCatalogMessage({ ...message, operation_id: null }),
+      ).toThrow(InvalidCatalogMessage);
+      expect(
+        parseCatalogMessage({
+          ...message,
+          kind: 'result',
+          name: 'taxonomy.master.deactivation.rejected',
+          data: { ...message.data, reason: 'TIMEOUT' },
+        }).kind,
+      ).toBe('result');
+      expect(
+        envelope(
+          'catalog.master.deactivation.checked',
+          { ...message.data, result: 'CLEAR' },
+          message.correlation_id,
+          message.operation_id,
+        ).data.result,
+      ).toBe('CLEAR');
+    }
+  });
   it.each([
     { schema_version: 2 },
     { producer: 'pricing-svc' },
@@ -100,5 +150,32 @@ describe('Catalog preparation message contract and retry identity', () => {
     expect(() =>
       envelope('catalog.product.reactivated', {}, randomUUID()),
     ).toThrow();
+  });
+  it('uses the approved five minute threshold from confirmed publication only', () => {
+    const timeout = preparationTimeout({
+      CATALOG_PREPARATION_TIMEOUT_MS: '300000',
+    });
+    expect(timeout).toBe(300000);
+    const attempt = {
+      message_id: randomUUID(),
+      causation_id: null,
+      published_at: new Date(1000),
+      occurred_at: new Date(0),
+    };
+    expect(manualRetryAllowed('PENDING', attempt, timeout, 300999)).toBe(false);
+    expect(manualRetryAllowed('PENDING', attempt, timeout, 301000)).toBe(true);
+    expect(
+      manualRetryAllowed(
+        'PENDING',
+        { ...attempt, published_at: null },
+        timeout,
+        999999,
+      ),
+    ).toBe(false);
+    expect(manualRetryAllowed('PENDING', attempt, undefined, 999999)).toBe(
+      false,
+    );
+    for (const state of ['REJECTED', 'COMPLETED'])
+      expect(manualRetryAllowed(state, attempt, timeout, 999999)).toBe(false);
   });
 });

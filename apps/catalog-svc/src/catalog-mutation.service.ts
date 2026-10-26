@@ -6,13 +6,16 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
+import {
+  assertMasterReferences,
+  masterReferences,
+} from './catalog-master-barriers.js';
 import { CatalogTransactionManager } from './catalog-transaction.js';
 import { PostgresCatalogWriteRepository } from './postgres-catalog-write.repository.js';
 import { CatalogMasterClient } from './catalog-master.client.js';
 import {
   activationChecks,
-  masterBarriers,
   outbox,
   productIdentifyingCharacteristics,
   products,
@@ -62,14 +65,6 @@ export interface CatalogProductCreationPolicy {
     productId: string,
   ): Promise<{ slug: string; moneda: string }>;
 }
-export const CATALOG_VARIANT_SKU_POLICY = Symbol('CATALOG_VARIANT_SKU_POLICY');
-export interface CatalogVariantSkuPolicy {
-  generate(
-    productId: string,
-    variantId: string,
-    input: MutationInput,
-  ): Promise<string>;
-}
 type Action = 'activate' | 'deactivate' | 'reactivate';
 type Actor = { authorization: string; correlationId: string };
 @Injectable()
@@ -81,9 +76,6 @@ export class CatalogMutationService {
     @Optional()
     @Inject(CATALOG_PRODUCT_CREATION_POLICY)
     private readonly creationPolicy?: CatalogProductCreationPolicy,
-    @Optional()
-    @Inject(CATALOG_VARIANT_SKU_POLICY)
-    private readonly skuPolicy?: CatalogVariantSkuPolicy,
     @Inject(CATALOG_PREPARATION_CONFIG)
     private readonly preparation: CatalogPreparationConfig = {
       timeoutMs: preparationTimeout(),
@@ -161,7 +153,7 @@ export class CatalogMutationService {
             'TIPO_PRODUCTO_INVALIDO',
           ].includes(code)
         ) {
-          if (!(kind === 'createProduct' && code === 'TIPO_PRODUCTO_INVALIDO'))
+          if (!(kind !== 'updateVariant' && code === 'TIPO_PRODUCTO_INVALIDO'))
             catalogError(400, 'VALIDACION');
         }
       }
@@ -202,33 +194,7 @@ export class CatalogMutationService {
     >,
     values: readonly { caracteristica_id: string; valor_id: string | null }[],
   ): Promise<void> {
-    const ids = [
-      ...new Set([
-        aggregate.categoria_id,
-        aggregate.marca_id,
-        aggregate.tipo_producto_id,
-        ...values.flatMap((a) => [
-          a.caracteristica_id,
-          ...(a.valor_id ? [a.valor_id] : []),
-        ]),
-      ]),
-    ].sort();
-    // Coarser identity lock serializes local references; GenericData barrier handlers remain blocked until their protocol is typed.
-    for (const id of ids)
-      await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(hashtextextended(${'catalog-reference:' + id},0))`,
-      );
-    const blocked = await tx
-      .select({ id: masterBarriers.id })
-      .from(masterBarriers)
-      .where(
-        and(
-          inArray(masterBarriers.master_id, ids),
-          eq(masterBarriers.is_blocking, true),
-        ),
-      )
-      .limit(1);
-    if (blocked.length) throw new ServiceUnavailableException();
+    await assertMasterReferences(tx, masterReferences(aggregate, values));
   }
   private async emit(
     tx: CatalogTransaction,
@@ -405,6 +371,7 @@ export class CatalogMutationService {
         slug: context.slug,
         tiene_variantes: input.tieneVariantes!,
         estado: 'BORRADOR',
+        publicado_alguna_vez: false,
       });
       if (!product) throw new Error('PRODUCT_INSERT_FAILED');
       await this.repository.replaceProductCollections(tx, id, {
@@ -454,9 +421,7 @@ export class CatalogMutationService {
       if (!aggregate.tiene_variantes)
         catalogError(409, 'PRODUCTO_NO_ADMITE_VARIANTES');
       const id = randomUUID();
-      const sku =
-        input.sku ?? (await this.skuPolicy?.generate(aggregate.id, id, input));
-      if (!sku) throw new ServiceUnavailableException();
+      const sku = input.sku!;
       const identifying = input.atributosIdentificadores!;
       const other = input.atributosNoIdentificadores ?? [];
       if (
@@ -581,14 +546,59 @@ export class CatalogMutationService {
         child?.catalog_version ?? aggregate.catalog_version,
         input,
       );
-      const attributes = input.atributos ?? input.atributosNoIdentificadores;
+      const changingType =
+        !child &&
+        input.tipoProductoId !== undefined &&
+        input.tipoProductoId !== aggregate.tipo_producto_id;
+      if (changingType) {
+        if (
+          aggregate.estado !== 'BORRADOR' ||
+          aggregate.tiene_variantes ||
+          aggregate.children.length !== 0 ||
+          aggregate.publicado_alguna_vez !== false
+        )
+          catalogError(409, 'CAMBIO_ESTRUCTURAL_NO_PERMITIDO');
+        if (input.catalogVersion === undefined) catalogError(400, 'VALIDACION');
+      }
+      const attributes =
+        input.atributos ??
+        input.atributosNoIdentificadores ??
+        (changingType ? aggregate.attributes.map(attribute) : undefined);
       const refs = {
         ...aggregate,
         categoria_id: input.categoriaId ?? aggregate.categoria_id,
         marca_id: input.marcaId ?? aggregate.marca_id,
+        tipo_producto_id: input.tipoProductoId ?? aggregate.tipo_producto_id,
       };
-      await this.references(tx, refs, attributes ?? []);
-      await this.masters.masters(
+      const finalReferences = masterReferences(refs, [
+        ...(attributes ?? aggregate.attributes),
+        ...aggregate.children.flatMap((c) => c.attributes),
+      ]);
+      const previousReferences = masterReferences(aggregate, [
+        ...aggregate.attributes,
+        ...aggregate.children.flatMap((c) => c.attributes),
+      ]);
+      const introducedReferences = finalReferences.filter(
+        (r) =>
+          !previousReferences.some(
+            (old) => old.type === r.type && old.id === r.id,
+          ),
+      );
+      const oldAttributes = child?.attributes ?? aggregate.attributes;
+      if (
+        attributes?.some(
+          (a) =>
+            !oldAttributes.some(
+              (old) => old.caracteristica_id === a.caracteristica_id,
+            ),
+        )
+      )
+        introducedReferences.push({
+          type: 'PRODUCT_TYPE',
+          id: refs.tipo_producto_id,
+        });
+      await assertMasterReferences(tx, introducedReferences);
+      const schema = await this.masters.masters(
         refs,
         actor.authorization,
         actor.correlationId,
@@ -597,11 +607,12 @@ export class CatalogMutationService {
         attributes === undefined
           ? undefined
           : await this.masters.attributes(
-              aggregate.tipo_producto_id,
+              refs.tipo_producto_id,
               attributes,
               false,
               actor.authorization,
               actor.correlationId,
+              changingType ? schema?.schemaVersion : undefined,
             );
       if (child) {
         if (
@@ -655,6 +666,7 @@ export class CatalogMutationService {
           descripcion: input.descripcion ?? aggregate.descripcion,
           categoria_id: refs.categoria_id,
           marca_id: refs.marca_id,
+          tipo_producto_id: refs.tipo_producto_id,
         })
         .where(eq(products.id, aggregate.id))
         .returning();

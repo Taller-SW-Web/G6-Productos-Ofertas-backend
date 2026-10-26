@@ -194,8 +194,12 @@ Configuración adicional (suministrar secretos fuera del repositorio):
   acordados de infraestructura, no un header de productor sin autenticar.
 - `CATALOG_PREPARATION_TIMEOUT_MS`: entero positivo aprobado para permitir
   recuperación manual de PENDING vencido después de published_at. Si se omite,
-  ese reintento no se habilita. REJECTED necesita política de recuperación por
-  código; COMPLETED siempre es terminal.
+  ese reintento no se habilita. Valor aprobado para desarrollo integrado/staging
+  y local con AMQP real: `300000` (5 minutos), desde publicación confirmada del
+  intento vigente. Ver `runtime.integrated.env.example`. En producción mantener
+  sin configurar hasta completar homologación. Todo REJECTED tiene
+  `manual_retry_allowed=false`; editar datos locales no lo habilita. COMPLETED
+  siempre es terminal.
 
 El runtime no declara recursos en RabbitMQ. Usa la topología aprovisionada;
 confirms, alternate exchange y entrega al consumidor son evidencias diferentes.
@@ -204,6 +208,24 @@ necesitan Docker y, para PostgreSQL TLS, OpenSSL. Nunca apuntarlas a servicios
 compartidos. La suite HTTP aísla casos de uso y no acredita integración real.
 
 ## Auditoría correctiva y bloque 3
+
+Estado actual de las decisiones 4–9 y sus límites:
+[RESOLUCION-PUNTOS-4-9.md](RESOLUCION-PUNTOS-4-9.md). La corrección Q-06 requiere
+la migración aditiva `0003_product_publication_history.sql`, aplicada por el
+proceso oficial antes de habilitar las mutaciones de esta versión. El bootstrap
+no ejecuta SQL de migraciones. Los históricos quedan en NULL, nunca en false por
+backfill. Se exige SKU explícito en toda alta de variante.
+
+Las barreras CATEGORY/BRAND/PRODUCT_TYPE/CHARACTERISTIC_VALUE comparten locks
+transaccionales con las escrituras. CLEAR no libera; solo un final coincidente
+por operación, identidad y versión lo hace. PRODUCT_TYPE_CHARACTERISTIC instala
+una barrera no resuelta, no emite CLEAR y no se libera sin correspondencia
+verificable. Hasta homologarla, nuevas dependencias se rechazan conservadoramente;
+lecturas, bajas y ediciones independientes permanecen disponibles. Un diagnóstico
+periódico informa barreras pendientes de final sin liberarlas por timeout.
+Los payloads Bulk siguen pendientes; no hay un consumidor alternativo que omita
+estas reglas. Los cambios de contratos de Docs se entregan como parches en
+`contracts/`; no se publican ni se consideran homologados automáticamente.
 
 [AUDIT-BLOCK-3.md](AUDIT-BLOCK-3.md) registra la causa del smoke Marketplace,
 las correcciones autorizadas, observabilidad, pruebas de fallos y la matriz de

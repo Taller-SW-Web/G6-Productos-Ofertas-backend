@@ -44,7 +44,7 @@ describe('Contractual catalog mutation validation', () => {
       );
     },
   );
-  it.each(['skuBase', 'tieneVariantes', 'tipoProductoId', 'slug'])(
+  it.each(['skuBase', 'tieneVariantes', 'slug'])(
     'blocks structural product edits through additionalProperties: %s',
     (field) => {
       expect(() =>
@@ -67,6 +67,7 @@ describe('Contractual catalog mutation validation', () => {
   );
   it('validates variant identification without concatenating values or generating SKU', () => {
     const value = {
+      sku: '0000123',
       atributosIdentificadores: [
         {
           caracteristica_id: 'size',
@@ -78,7 +79,7 @@ describe('Contractual catalog mutation validation', () => {
       imagenUrl: 'https://example.test/image',
     };
     expect(parseMutation(value, 'createVariant')).toMatchObject({
-      sku: null,
+      sku: '0000123',
       atributosIdentificadores: value.atributosIdentificadores,
     });
     expect(() =>
@@ -91,6 +92,34 @@ describe('Contractual catalog mutation validation', () => {
         response: { code: 'ATRIBUTO_IDENTIFICADOR_INVALIDO' },
       }),
     );
+  });
+  it.each([undefined, null, '', 123, [], {}])(
+    'requires an explicit variant SKU: %j',
+    (sku) => {
+      expect(() => parseMutation({ sku }, 'createVariant')).toThrowError(
+        expect.objectContaining({
+          status: 422,
+          response: { code: 'SKU_INVALIDO' },
+        }),
+      );
+    },
+  );
+  it('accepts a type correction syntactically and rejects empty/null types', () => {
+    expect(
+      parseMutation(
+        { tipoProductoId: 'new-type', catalogVersion: 3 },
+        'updateProduct',
+      ),
+    ).toEqual({ tipoProductoId: 'new-type', catalogVersion: 3 });
+    for (const tipoProductoId of ['', null, 123])
+      expect(() =>
+        parseMutation({ tipoProductoId }, 'updateProduct'),
+      ).toThrowError(
+        expect.objectContaining({
+          status: 400,
+          response: { code: 'VALIDACION' },
+        }),
+      );
   });
   it.each([
     { catalogVersion: -1 },
