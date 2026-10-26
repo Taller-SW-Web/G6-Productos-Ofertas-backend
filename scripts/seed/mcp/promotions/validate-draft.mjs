@@ -174,6 +174,11 @@ export function validateDraft(
   return {
     result: 'PASS',
     scope: 'DRAFT_INTERNAL_VALIDATION_ONLY',
+    validation: {
+      structural: 'PASS',
+      provenance: 'NOT_CHECKED_BY_DRAFT_VALIDATOR',
+      commercial_approval: 'PENDING',
+    },
     draft_json_sha256: createHash('sha256')
       .update(JSON.stringify(draft))
       .digest('hex'),
