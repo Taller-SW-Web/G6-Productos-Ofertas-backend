@@ -82,6 +82,53 @@ test('report lists independent blockers, absent inventory, absent candidate and 
   );
 });
 
+test('reconciliation distinguishes ACTIVA variants from ACTIVO simple products without granting approval', () => {
+  const snapshot = capture();
+  for (const p of snapshot.products) p.state = 'ACTIVO';
+  for (const s of snapshot.skus) s.state = 'ACTIVA';
+  const before = structuredClone(snapshot);
+  const { bindings, report } = reconcile(snapshot);
+  assert.deepEqual(snapshot, before);
+  assert.ok(bindings.catalog.skus.every((s) => s.active));
+  assert.ok(bindings.catalog.skus.some((s) => s.state === 'ACTIVA'));
+  assert.ok(bindings.catalog.skus.some((s) => s.state === 'ACTIVO'));
+  assert.ok(
+    !report.blockers.some((b) => b.code === 'PUBLISHED_ACTIVE_SKU_REQUIRED'),
+  );
+  assert.equal(report.executable, false);
+  assert.equal(bindings.review.reviewer, null);
+  assert.ok(bindings.catalog.skus.every((s) => s.channels.length === 0));
+  assert.ok(
+    report.blockers.some((b) => b.code === 'CHANNEL_EVIDENCE_REQUIRED'),
+  );
+  assert.ok(
+    report.blockers.some(
+      (b) => b.code === 'SEED_TRIGGER_LOCK_PRIVILEGE_UNRESOLVED',
+    ),
+  );
+  assert.throws(() => prepareBatch(bindings), /COMMERCIAL_REVIEW_REQUIRED/);
+});
+
+test('reconciliation keeps BORRADOR, INACTIVA and wrong-enum variants unpublished', () => {
+  for (const state of ['BORRADOR', 'INACTIVA', 'ACTIVO']) {
+    const snapshot = capture();
+    for (const p of snapshot.products) p.state = 'ACTIVO';
+    for (const s of snapshot.skus) s.state = 'ACTIVA';
+    const variant = snapshot.skus.find((s) => s.sku === 'ADI-RF3-GRI-38');
+    variant.state = state;
+    const { bindings, report } = reconcile(snapshot);
+    assert.equal(
+      bindings.catalog.skus.find((s) => s.sku === variant.sku).active,
+      false,
+      state,
+    );
+    assert.ok(
+      report.blockers.some((b) => b.code === 'PUBLISHED_ACTIVE_SKU_REQUIRED'),
+      state,
+    );
+  }
+});
+
 test('missing/ambiguous parent or future open validity is reported without fabricating fallback', () => {
   for (const change of [
     (s) => {

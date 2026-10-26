@@ -50,7 +50,9 @@ export function reconcile(
   const products = names.map(byName).filter(Boolean);
   const selectedIds = new Set(products.map((p) => p.product_id));
   const skus = [
-    ...snapshot.skus.filter((s) => selectedIds.has(s.product_id)),
+    ...snapshot.skus
+      .filter((s) => selectedIds.has(s.product_id))
+      .map((s) => ({ ...s, active: s.state === 'ACTIVA' })),
     ...products
       .filter((p) => !p.has_variants)
       .map((p) => ({
@@ -58,10 +60,10 @@ export function reconcile(
         sku: p.sku_base,
         state: p.state,
         catalog_version: p.catalog_version,
+        active: p.state === 'ACTIVO',
       })),
   ].map((s) => ({
     ...s,
-    active: s.state === 'ACTIVO',
     channels: [],
     channel_evidence: {},
   }));
@@ -187,10 +189,7 @@ export function reconcile(
         };
       }),
   }));
-  if (
-    products.some((p) => p.state !== 'ACTIVO') ||
-    skus.some((s) => s.state !== 'ACTIVO')
-  )
+  if (products.some((p) => p.state !== 'ACTIVO') || skus.some((s) => !s.active))
     block(
       'PUBLISHED_ACTIVE_SKU_REQUIRED',
       'Poma',

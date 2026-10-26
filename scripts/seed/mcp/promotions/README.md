@@ -1,5 +1,22 @@
 # DATA-005: preparación de maestros de Inka Athletics
 
+## Correcciones previas al merge — 26/10/2026
+
+Ver [AUDIT-2026-10-26.md](AUDIT-2026-10-26.md) para las regresiones de estados
+reales y precios por canal. Productos publicados usan `ACTIVO`; variantes usan
+`ACTIVA`. Un SKU simple conserva el estado de su producto `sku_base`. Los flags
+de actividad no permiten aceptar `BORRADOR` ni estados inactivos.
+
+El canal solicitado se filtra antes de seleccionar overrides SKU o herencia del
+padre. Un override de otro canal no descarta el padre global; uno aplicable que
+solo cubre parte de la campaña sigue rechazándose, sin fallback silencioso.
+
+`SHA256SUMS` conserva exclusivamente los tres hashes históricos esperados por
+el validador de restauración. El inventario actualizado de scripts y evidencia
+está separado en [TOOLING-SHA256SUMS](TOOLING-SHA256SUMS). No se modifica el
+validador, el SQL de escritura ni el contenido comercial; continúan los gates
+de revisión, canales, permisos seed y carga compartida.
+
 ## Auditoría corregida — 24/10/2026
 
 Estado vigente: **`IMPLEMENTADO_LOCAL / INTEGRACION_BLOQUEADA`**. Ver

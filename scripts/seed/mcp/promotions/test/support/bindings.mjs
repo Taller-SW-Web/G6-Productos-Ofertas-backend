@@ -9,10 +9,16 @@ export function isolatedBindings() {
     'running-socks',
     'football',
     'training-cone',
-  ].map((name) => ({ product_id: `TEST_ONLY_${name}`, active: true }));
+  ].map((name) => ({
+    product_id: `TEST_ONLY_${name}`,
+    state: 'ACTIVO',
+    has_variants: true,
+    active: true,
+  }));
   const skus = products.map((p) => ({
     sku: `${p.product_id}_SKU`,
     product_id: p.product_id,
+    state: 'ACTIVA',
     active: true,
     channels: ['MARKETPLACE', 'CHATBOT', 'RETAIL'],
   }));

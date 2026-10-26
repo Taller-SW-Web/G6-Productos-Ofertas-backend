@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import {
   prepareBatch,
+  resolvePrice,
   renderRollback,
   renderRows,
   renderSnapshot,
@@ -190,6 +191,106 @@ const parentPrices = () =>
     }
   });
 
+test('an SKU override in another channel does not hide the global parent price', () => {
+  const b = parentPrices();
+  const parent = b.pricing.prices[0];
+  b.pricing.prices.push({
+    ...parent,
+    product_id: null,
+    sku: b.catalog.skus[0].sku,
+    channel_id: 'RETAIL',
+    amount: '90.00',
+  });
+  const campaign = draft().proposed_rows.promotions[0];
+  for (const channel of [null, 'MARKETPLACE', 'CHATBOT'])
+    assert.equal(
+      resolvePrice(
+        b.pricing.prices,
+        b.catalog.skus[0].sku,
+        b.catalog.products[0].product_id,
+        channel,
+        campaign.valid_from,
+        campaign.valid_until,
+      ),
+      parent,
+    );
+  assert.equal(
+    resolvePrice(
+      b.pricing.prices,
+      b.catalog.skus[0].sku,
+      b.catalog.products[0].product_id,
+      'RETAIL',
+      campaign.valid_from,
+      campaign.valid_until,
+    ),
+    b.pricing.prices.at(-1),
+  );
+  assert.doesNotThrow(() => prepareBatch(b));
+});
+
+test('a variant inherits the open global parent price for every requested channel', () => {
+  const b = parentPrices();
+  const parent = b.pricing.prices[0];
+  const before = structuredClone(b);
+  const campaign = draft().proposed_rows.promotions[0];
+  for (const channel of [null, ...b.catalog.skus[0].channels])
+    assert.equal(
+      resolvePrice(
+        b.pricing.prices,
+        b.catalog.skus[0].sku,
+        b.catalog.products[0].product_id,
+        channel,
+        campaign.valid_from,
+        campaign.valid_until,
+      ),
+      parent,
+    );
+  assert.deepEqual(prepareBatch(b).rows, prepareBatch(isolatedBindings()).rows);
+  assert.deepEqual(b, before);
+});
+
+test('a partial SKU override in the requested channel rejects fallback to the full global parent', () => {
+  for (const partial of [
+    { valid_from: '2026-11-04T05:00:00Z' },
+    { valid_until: '2026-11-04T05:00:00Z' },
+  ]) {
+    const b = parentPrices();
+    b.pricing.prices.push({
+      ...b.pricing.prices[0],
+      product_id: null,
+      sku: b.catalog.skus[0].sku,
+      channel_id: 'RETAIL',
+      amount: '90.00',
+      ...partial,
+    });
+    const campaign = draft().proposed_rows.promotions[0];
+    assert.throws(
+      () =>
+        resolvePrice(
+          b.pricing.prices,
+          b.catalog.skus[0].sku,
+          b.catalog.products[0].product_id,
+          'RETAIL',
+          campaign.valid_from,
+          campaign.valid_until,
+        ),
+      /PRICE_COVERAGE_OR_AMBIGUITY/,
+    );
+    assert.throws(() => prepareBatch(b), /PRICE_COVERAGE_OR_AMBIGUITY/);
+    assert.equal(
+      resolvePrice(
+        b.pricing.prices,
+        b.catalog.skus[0].sku,
+        b.catalog.products[0].product_id,
+        'MARKETPLACE',
+        campaign.valid_from,
+        campaign.valid_until,
+      ),
+      b.pricing.prices[0],
+    );
+  }
+});
+
 test('parent prices and open validities cover variants without copying or changing prices', () => {
   const b = parentPrices();
   const before = structuredClone(b);
@@ -271,6 +372,77 @@ test('BORRADOR state cannot be overridden by a supplied active flag', () => {
       ),
     /INVALID_RECOMMENDATION_BINDING/,
   );
+});
+
+test('published Catalog enums accept ACTIVO products and ACTIVA variants without changing master rows or SQL', () => {
+  const b = isolatedBindings();
+  assert.ok(b.catalog.products.every((p) => p.state === 'ACTIVO'));
+  assert.ok(b.catalog.skus.every((s) => s.state === 'ACTIVA'));
+  const batch = prepareBatch(b);
+  const legacy = structuredClone(b);
+  for (const row of [...legacy.catalog.products, ...legacy.catalog.skus])
+    delete row.state;
+  const previous = prepareBatch(legacy);
+  assert.deepEqual(batch.rows, previous.rows);
+  assert.deepEqual(renderRows(batch), renderRows(previous));
+  assert.equal(batch.executable, false);
+  assert.equal(
+    batch.validation.commercial_approval,
+    'NOT_GRANTED_BY_GENERATOR',
+  );
+});
+
+test('unpublished or wrong-enum variants are rejected even with active=true', () => {
+  for (const state of ['BORRADOR', 'INACTIVA', 'ACTIVO', 'INACTIVO', 'UNKNOWN'])
+    assert.throws(
+      () =>
+        prepareBatch(
+          mutate((b) => {
+            b.catalog.skus[0].state = state;
+          }),
+        ),
+      /PUBLISHED_ACTIVE_SKU_REQUIRED/,
+      state,
+    );
+  assert.throws(
+    () =>
+      prepareBatch(
+        mutate((b) => {
+          b.catalog.skus[0].active = false;
+        }),
+      ),
+    /PUBLISHED_ACTIVE_SKU_REQUIRED/,
+  );
+});
+
+test('unpublished or wrong-enum products cannot be published by an ACTIVA variant', () => {
+  for (const state of ['BORRADOR', 'INACTIVO', 'ACTIVA', 'INACTIVA'])
+    assert.throws(
+      () =>
+        prepareBatch(
+          mutate((b) => {
+            b.catalog.products[0].state = state;
+          }),
+        ),
+      /PUBLISHED_ACTIVE_SKU_REQUIRED/,
+      state,
+    );
+});
+
+test('a simple sku_base uses its ACTIVO product state, not the variant enum', () => {
+  const b = isolatedBindings();
+  b.catalog.products[0].has_variants = false;
+  b.catalog.products[0].sku_base = b.catalog.skus[0].sku;
+  b.catalog.skus[0].state = 'ACTIVO';
+  assert.doesNotThrow(() => prepareBatch(b));
+  for (const state of ['BORRADOR', 'INACTIVO', 'ACTIVA', 'INACTIVA']) {
+    b.catalog.skus[0].state = state;
+    assert.throws(
+      () => prepareBatch(b),
+      /PUBLISHED_ACTIVE_SKU_REQUIRED/,
+      state,
+    );
+  }
 });
 
 test('global pricing does not accredit channels and supplied evidence is only structural', () => {

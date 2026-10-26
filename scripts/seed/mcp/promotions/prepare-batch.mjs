@@ -119,11 +119,14 @@ export function resolvePrice(prices, sku, productId, channel, from, until) {
   from = time(from);
   until = time(until);
   check(from < until, 'INVALID_PRICE_WINDOW');
-  const overlaps = prices.filter(
+  // Resolve the target only among prices applicable to the requested channel.
+  const applicable = prices.filter(
+    (p) => p.channel_id === channel || p.channel_id === null,
+  );
+  const overlaps = applicable.filter(
     (p) =>
       p.is_cancelled !== true &&
       (p.sku === sku || (p.sku == null && p.product_id === productId)) &&
-      (p.channel_id === channel || p.channel_id === null) &&
       time(p.valid_from) < until &&
       endTime(p.valid_until) > from,
   );
@@ -238,10 +241,15 @@ export function prepareBatch(
     const discount = decimal(p.discount_value);
     for (const sku of [...binding.skus].sort()) {
       const s = skus.get(sku);
+      const product = products.get(s?.product_id);
+      const publishedState =
+        product?.has_variants === false && product.sku_base === sku
+          ? 'ACTIVO'
+          : 'ACTIVA';
       check(
         s?.active === true &&
-          activeProduct(products.get(s.product_id)) &&
-          (s.state === undefined || s.state === 'ACTIVO') &&
+          activeProduct(product) &&
+          (s.state === undefined || s.state === publishedState) &&
           s.channels.length > 0,
         'PUBLISHED_ACTIVE_SKU_REQUIRED',
       );
