@@ -65,6 +65,14 @@ describe('Catalog provider SQL and projections (isolated)', () => {
     productImageUrls = ['https://example.test/product.webp'];
     variantImageUrls = ['https://example.test/variant.webp'];
   });
+  it('looks up an opaque context SKU as a SQL parameter within Catalog only', async () => {
+    const sku = " 000-' OR true -- ";
+    expect(await repo.skuContext(sku)).toBeNull();
+    expect(statements).toHaveLength(1);
+    expect(statements[0].values).toEqual([sku]);
+    expect(statements[0].text).not.toContain(sku);
+    expect(statements[0].text).not.toMatch(/taxonomy\.|pricing\./);
+  });
   it('parameterizes literal text and filters eligibility in COUNT before LIMIT/OFFSET', async () => {
     await repo.listCandidates({
       canal: 'MARKETPLACE',

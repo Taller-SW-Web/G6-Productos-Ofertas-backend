@@ -2111,9 +2111,13 @@ describe.skipIf(!dockerAvailable)(
         actor,
       );
       expect(await barcode.resolve(code)).toBeNull();
+      const reads = new PostgresCatalogRepository(database);
+      expect(await reads.skuContext(active.sku)).toMatchObject({
+        active: true,
+        eligible: false,
+      });
       await service.state(parent.product_id, undefined, 'activate', {}, actor);
       expect(await barcode.resolve(code)).toBe(active.sku);
-      const reads = new PostgresCatalogRepository(database);
       const query = {
         canal: 'RETAIL' as const,
         q: marker,
@@ -2121,7 +2125,13 @@ describe.skipIf(!dockerAvailable)(
         tamanio: 1,
         orden: 'NOMBRE_ASC' as const,
       };
-      expect(await reads.skuContext(parent.sku_base)).toBeNull();
+      expect(await reads.skuContext(parent.sku_base)).toMatchObject({
+        productId: parent.product_id,
+        isVariant: false,
+        active: true,
+        eligible: false,
+      });
+      expect(await reads.skuContext('missing-' + randomUUID())).toBeNull();
       expect(await reads.skuContext(active.sku)).toMatchObject({
         productId: parent.product_id,
         isVariant: true,

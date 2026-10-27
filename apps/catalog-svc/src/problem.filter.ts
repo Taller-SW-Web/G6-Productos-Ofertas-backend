@@ -39,6 +39,7 @@ export class ProblemFilter implements ExceptionFilter {
                 'PRODUCTO_NO_ENCONTRADO',
                 'VARIANTE_NO_ENCONTRADA',
                 'CODIGO_BARRAS_NO_ENCONTRADO',
+                'SKU_NO_ENCONTRADO',
               ].includes(String(supplied))
               ? String(supplied)
               : 'PRODUCTO_NO_ENCONTRADO'

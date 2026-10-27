@@ -421,23 +421,27 @@ export class PostgresCatalogRepository {
     );
   }
 
-  /** Local authoritative context only; an inter-service transport still needs its contract/grant. */
+  /** Authoritative SKU state and commercial eligibility, independent of Pricing. */
   async skuContext(sku: string) {
     return this.database.read(async (db) => {
       const result = await db.execute(sql`SELECT si.sku, p.id AS product_id,
         (si.variant_id IS NOT NULL) AS is_variant,
-        (p.estado = 'ACTIVO' AND (si.variant_id IS NULL OR v.estado = 'ACTIVA')) AS active
+        (CASE WHEN si.variant_id IS NULL THEN p.estado = 'ACTIVO'
+          ELSE v.estado = 'ACTIVA' END) AS active,
+        (p.estado = 'ACTIVO' AND
+          ((si.product_id IS NOT NULL AND NOT p.tiene_variantes)
+            OR (si.variant_id IS NOT NULL AND p.tiene_variantes AND v.estado = 'ACTIVA'))) AS eligible
         FROM catalog.sku_identity si LEFT JOIN catalog.variants v ON v.id = si.variant_id
         JOIN catalog.products p ON p.id = COALESCE(si.product_id, v.product_id)
-        WHERE si.sku = ${sku} AND ((si.product_id IS NOT NULL AND NOT p.tiene_variantes)
-          OR (si.variant_id IS NOT NULL AND p.tiene_variantes))`);
+        WHERE si.sku = ${sku}`);
       const row = result.rows[0];
       if (!row) return null;
       if (
         typeof row.sku !== 'string' ||
         typeof row.product_id !== 'string' ||
         typeof row.is_variant !== 'boolean' ||
-        typeof row.active !== 'boolean'
+        typeof row.active !== 'boolean' ||
+        typeof row.eligible !== 'boolean'
       )
         throw new Error();
       return {
@@ -445,7 +449,7 @@ export class PostgresCatalogRepository {
         productId: row.product_id,
         isVariant: row.is_variant,
         active: row.active,
-        eligible: row.active,
+        eligible: row.eligible,
       };
     });
   }
