@@ -17,6 +17,10 @@ import {
   readCatalogSecurityConfig,
   type CatalogSecurityConfig,
 } from './catalog-auth.js';
+import {
+  readCatalogServiceCredentials,
+  type CatalogServiceCredentials,
+} from './catalog-service-credentials.js';
 
 export type Environment = 'development' | 'test' | 'production';
 
@@ -32,6 +36,7 @@ export class CatalogConfig {
   readonly readDemo: CatalogReadDemo;
   readonly marketplaceDemoPreview: boolean;
   readonly pricingOrigin?: string;
+  readonly serviceCredentials?: CatalogServiceCredentials;
 
   constructor(env: Record<string, string | undefined>) {
     this.readDemo = readCatalogReadDemo(env);
@@ -85,6 +90,14 @@ export class CatalogConfig {
         'Configuración de mensajería/preparación de Catálogo inválida.',
       );
     }
+    let serviceCredentials: CatalogServiceCredentials | undefined;
+    try {
+      serviceCredentials = readCatalogServiceCredentials(env, security?.issuer);
+    } catch {
+      errors.push(
+        'CATALOG_SERVICE_TOKEN_URL y CATALOG_SERVICE_CLIENT_SECRET deben configurarse juntos con el emisor autorizado.',
+      );
+    }
     const preview = env.CATALOG_MARKETPLACE_DEMO_PREVIEW_ENABLED;
     if (preview !== undefined && !['true', 'false'].includes(preview)) {
       errors.push(
@@ -131,6 +144,7 @@ export class CatalogConfig {
     this.preparation = Object.freeze(preparation);
     this.marketplaceDemoPreview = preview === 'true';
     this.pricingOrigin = pricingOrigin;
+    this.serviceCredentials = serviceCredentials;
     Object.freeze(this);
   }
 }

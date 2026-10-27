@@ -6,10 +6,13 @@ import {
   envelope,
   InvalidCatalogMessage,
   type CatalogEnvelope,
+  parseCatalogMessage,
 } from './catalog-messages.js';
 import {
   hasActiveMasterUse,
   lockMasterReferences,
+  associationCoordinates,
+  persistedAssociation,
 } from './catalog-master-barriers.js';
 import type { CatalogTelemetry } from './catalog-telemetry.js';
 
@@ -31,6 +34,7 @@ export async function consumeMasterMessage(
   message: CatalogEnvelope,
   telemetry: CatalogTelemetry,
 ) {
+  message = parseCatalogMessage(message);
   assertMasterData(message.data, message.operation_id);
   if (
     ![
@@ -69,18 +73,35 @@ export async function consumeMasterMessage(
       .select()
       .from(masterBarriers)
       .where(eq(masterBarriers.operation_id, operationId));
+    const check = message.name.endsWith('.check.requested');
+    const coordinates = associationCoordinates(data);
+    const storedCoordinates = barrier
+      ? persistedAssociation(barrier.payload)
+      : undefined;
+    const associationMatches =
+      data.entity_type !== 'PRODUCT_TYPE_CHARACTERISTIC' ||
+      (storedCoordinates &&
+        (coordinates
+          ? coordinates.productTypeId === storedCoordinates.productTypeId &&
+            coordinates.characteristicId === storedCoordinates.characteristicId
+          : !check));
     const matches =
+      associationMatches &&
       barrier &&
       barrier.master_type === data.entity_type &&
       barrier.master_id === data.entity_id &&
       barrier.source_version === BigInt(data.version);
-    const check = message.name.endsWith('.check.requested');
     let result: 'APPLIED' | 'STALE' | 'TERMINAL' | 'BLOCKED' = 'STALE';
     if (barrier && !matches) {
-      telemetry.record('MASTER_BARRIER_UNPROVEN_FINAL', {
-        operationId,
-        messageId: message.message_id,
-      });
+      telemetry.record(
+        data.entity_type === 'PRODUCT_TYPE_CHARACTERISTIC' && !storedCoordinates
+          ? 'MASTER_BARRIER_BLOCKED_ASSOCIATION'
+          : 'MASTER_BARRIER_UNPROVEN_FINAL',
+        {
+          operationId,
+          messageId: message.message_id,
+        },
+      );
     } else if (barrier && !barrier.is_blocking) {
       result = 'TERMINAL';
     } else if (check) {
@@ -99,32 +120,19 @@ export async function consumeMasterMessage(
           operationId,
           messageId: message.message_id,
         });
-      } else if (data.entity_type === 'PRODUCT_TYPE_CHARACTERISTIC') {
-        if (!barrier)
-          await tx.insert(masterBarriers).values({
-            master_type: data.entity_type,
-            master_id: data.entity_id,
-            operation_id: operationId,
-            source_version: BigInt(data.version),
-            payload: { request: message, unresolved_association: true },
-          });
-        telemetry.record('MASTER_BARRIER_BLOCKED_ASSOCIATION', {
-          operationId,
-          messageId: message.message_id,
-        });
-        result = 'BLOCKED';
       } else {
         if (!barrier) {
           const use = await hasActiveMasterUse(
             tx,
             data.entity_type,
             data.entity_id,
+            coordinates,
           );
           const response = envelope(
             'catalog.master.deactivation.checked',
             {
               ...data,
-              result: use ? 'IN_USE' : 'CLEAR',
+              result: use ? 'HAS_ACTIVE_PRODUCTS' : 'CLEAR',
             },
             message.correlation_id,
             operationId,
@@ -151,7 +159,7 @@ export async function consumeMasterMessage(
         }
         result = 'APPLIED';
       }
-    } else if (matches && data.entity_type !== 'PRODUCT_TYPE_CHARACTERISTIC') {
+    } else if (matches) {
       await tx
         .update(masterBarriers)
         .set({

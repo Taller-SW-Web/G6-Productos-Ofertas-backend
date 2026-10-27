@@ -50,7 +50,11 @@ import {
   readCatalogSecurityConfig,
 } from './catalog-auth.js';
 import { DEMO_PRICING, PricingClient } from './pricing.client.js';
-import { CatalogPriceFilter } from './catalog-price-filter.js';
+import {
+  CatalogPriceFilter,
+  CATALOG_PRICING_IDENTITY,
+} from './catalog-price-filter.js';
+import { CatalogPricingIdentityProvider } from './catalog-pricing-identity.js';
 import { BarcodeRepository } from './barcode.repository.js';
 import { BarcodeService } from './barcode.service.js';
 
@@ -72,6 +76,11 @@ import { BarcodeService } from './barcode.service.js';
     PostgresCatalogWriteRepository,
     CommercialService,
     CatalogPriceFilter,
+    CatalogPricingIdentityProvider,
+    {
+      provide: CATALOG_PRICING_IDENTITY,
+      useExisting: CatalogPricingIdentityProvider,
+    },
     BarcodeRepository,
     BarcodeService,
     CatalogQueryService,

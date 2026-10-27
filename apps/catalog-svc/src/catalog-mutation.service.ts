@@ -596,6 +596,14 @@ export class CatalogMutationService {
         introducedReferences.push({
           type: 'PRODUCT_TYPE',
           id: refs.tipo_producto_id,
+          characteristicIds: attributes
+            .filter(
+              (a) =>
+                !oldAttributes.some(
+                  (old) => old.caracteristica_id === a.caracteristica_id,
+                ),
+            )
+            .map((a) => a.caracteristica_id),
         });
       await assertMasterReferences(tx, introducedReferences);
       const schema = await this.masters.masters(

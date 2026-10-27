@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { object } from './catalog-mutation.input.js';
-import { masterTypes, type MasterType } from './catalog-master-barriers.js';
+import {
+  masterTypes,
+  associationCoordinates,
+  type MasterType,
+} from './catalog-master-barriers.js';
 export interface MasterData extends Record<string, unknown> {
   entity_type: MasterType;
   entity_id: string;
@@ -89,7 +93,9 @@ export function assertCatalogPublication(message: CatalogEnvelope): void {
     assertMasterData(data, message.operation_id);
     if (
       message.kind !== 'result' ||
-      !['CLEAR', 'IN_USE'].includes(String(data.result))
+      !['CLEAR', 'HAS_ACTIVE_PRODUCTS'].includes(String(data.result)) ||
+      (data.entity_type === 'PRODUCT_TYPE_CHARACTERISTIC' &&
+        !associationCoordinates(data))
     )
       throw new InvalidCatalogMessage();
   }
@@ -191,6 +197,22 @@ export function parseCatalogMessage(value: unknown): CatalogEnvelope {
     throw new InvalidCatalogMessage();
   if (value.name.startsWith('taxonomy.master.')) {
     assertMasterData(value.data, value.operation_id);
+    if (value.data.entity_type === 'PRODUCT_TYPE_CHARACTERISTIC') {
+      if (
+        (value.name.endsWith('.check.requested') ||
+          Object.hasOwn(value.data, 'tipo_producto_id') ||
+          Object.hasOwn(value.data, 'caracteristica_id')) &&
+        !associationCoordinates(value.data)
+      )
+        throw new InvalidCatalogMessage();
+      if (
+        value.name === 'taxonomy.master.deactivated' &&
+        (!Number.isSafeInteger(value.data.schema_version_resultante) ||
+          (value.data.schema_version_resultante as number) <=
+            value.data.version)
+      )
+        throw new InvalidCatalogMessage();
+    }
     if (
       value.name.endsWith('.rejected') &&
       (typeof value.data.reason !== 'string' || value.data.reason.length === 0)

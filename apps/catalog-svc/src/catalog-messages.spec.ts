@@ -43,7 +43,17 @@ describe('Catalog preparation message contract and retry identity', () => {
         producer: 'taxonomy-svc',
         kind: 'command',
         name: 'taxonomy.master.deactivation.check.requested',
-        data: { entity_type, entity_id: 'opaque / 000', version: 7 },
+        data: {
+          entity_type,
+          entity_id: 'opaque / 000',
+          version: 7,
+          ...(entity_type === 'PRODUCT_TYPE_CHARACTERISTIC'
+            ? {
+                tipo_producto_id: 'type / 000',
+                caracteristica_id: 'char / 000',
+              }
+            : {}),
+        },
       };
       expect(parseCatalogMessage(message).data.entity_id).toBe('opaque / 000');
       for (const patch of [
@@ -98,6 +108,67 @@ describe('Catalog preparation message contract and retry identity', () => {
     expect(() => parseCatalogMessage({ ...result(), ...patch })).toThrow(
       InvalidCatalogMessage,
     );
+  });
+  it('requires association coordinates and distinguishes captured business version from the resulting version', () => {
+    const message = {
+      ...result(),
+      producer: 'taxonomy-svc',
+      kind: 'command',
+      name: 'taxonomy.master.deactivation.check.requested',
+      data: {
+        entity_type: 'PRODUCT_TYPE_CHARACTERISTIC',
+        entity_id: 'opaque-association',
+        version: 7,
+        tipo_producto_id: 'type',
+        caracteristica_id: 'characteristic',
+      },
+    };
+    for (const patch of [
+      { tipo_producto_id: undefined },
+      { caracteristica_id: undefined },
+      { tipo_producto_id: '' },
+      { caracteristica_id: 123 },
+    ])
+      expect(() =>
+        parseCatalogMessage({
+          ...message,
+          data: { ...message.data, ...patch },
+        }),
+      ).toThrow(InvalidCatalogMessage);
+    const final = {
+      ...message,
+      kind: 'event',
+      name: 'taxonomy.master.deactivated',
+    };
+    for (const schema_version_resultante of [undefined, null, 6, 7, 1.5])
+      expect(() =>
+        parseCatalogMessage({
+          ...final,
+          data: { ...final.data, schema_version_resultante },
+        }),
+      ).toThrow(InvalidCatalogMessage);
+    expect(
+      parseCatalogMessage({
+        ...final,
+        data: { ...final.data, schema_version_resultante: 9 },
+      }).data.version,
+    ).toBe(7);
+    expect(
+      envelope(
+        'catalog.master.deactivation.checked',
+        { ...message.data, result: 'HAS_ACTIVE_PRODUCTS' },
+        message.correlation_id,
+        message.operation_id,
+      ).data.result,
+    ).toBe('HAS_ACTIVE_PRODUCTS');
+    expect(() =>
+      envelope(
+        'catalog.master.deactivation.checked',
+        { ...message.data, result: 'IN_USE' },
+        message.correlation_id,
+        message.operation_id,
+      ),
+    ).toThrow(InvalidCatalogMessage);
   });
   it('accepts business rejection as a typed result, without interpreting it as a technical error', () => {
     const message = result();
