@@ -93,7 +93,7 @@ export function assertCatalogPublication(message: CatalogEnvelope): void {
     assertMasterData(data, message.operation_id);
     if (
       message.kind !== 'result' ||
-      !['CLEAR', 'HAS_ACTIVE_PRODUCTS'].includes(String(data.result)) ||
+      (data.result !== 'CLEAR' && data.result !== 'IN_USE') ||
       (data.entity_type === 'PRODUCT_TYPE_CHARACTERISTIC' &&
         !associationCoordinates(data))
     )

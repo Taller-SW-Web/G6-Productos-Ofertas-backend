@@ -1427,7 +1427,7 @@ describe.skipIf(!dockerAvailable)(
         `SET ROLE po_catalog_owner; DELETE FROM catalog.master_barriers WHERE operation_id='${operationId}'::uuid;`,
       );
     }
-    it('master barriers: CLEAR/HAS_ACTIVE_PRODUCTS for four entities, durable dedupe, stale finals and matching rejection release', async () => {
+    it('master barriers: CLEAR/IN_USE for four entities, durable dedupe, stale finals and matching rejection release', async () => {
       const service = mutationService(),
         messages = new CatalogMessageService(database);
       const marker = 'master-' + randomUUID();
@@ -1476,11 +1476,18 @@ describe.skipIf(!dockerAvailable)(
             .where(eq(outbox.operation_id, command.operation_id!)),
         );
         expect(responses).toHaveLength(1);
+        expect(responses[0]).toMatchObject({
+          event_name: 'catalog.master.deactivation.checked',
+          kind: 'result',
+          correlation_id: command.correlation_id,
+          causation_id: command.message_id,
+          operation_id: command.operation_id,
+        });
         expect(responses[0].payload).toMatchObject({
           entity_type: type,
           entity_id: marker,
           version: 7,
-          result: 'HAS_ACTIVE_PRODUCTS',
+          result: 'IN_USE',
         });
         await messages.consume({ ...command, message_id: randomUUID() });
         expect(
@@ -1600,7 +1607,7 @@ describe.skipIf(!dockerAvailable)(
           .from(outbox)
           .where(eq(outbox.operation_id, check.operation_id!)),
       );
-      expect(response.payload.result).toBe('HAS_ACTIVE_PRODUCTS');
+      expect(response.payload.result).toBe('IN_USE');
       await messages.consume(
         masterMessage(
           'CHARACTERISTIC_VALUE',
@@ -1678,7 +1685,7 @@ describe.skipIf(!dockerAvailable)(
           .from(outbox)
           .where(eq(outbox.operation_id, check.operation_id!)),
       );
-      expect(response.payload.result).toBe('HAS_ACTIVE_PRODUCTS');
+      expect(response.payload.result).toBe('IN_USE');
       await messages.consume(
         masterMessage(
           'CATEGORY',
@@ -1960,7 +1967,7 @@ describe.skipIf(!dockerAvailable)(
             .from(outbox)
             .where(eq(outbox.operation_id, active.operation_id!)),
         );
-        expect(inUse.payload.result).toBe('HAS_ACTIVE_PRODUCTS');
+        expect(inUse.payload.result).toBe('IN_USE');
         await messages.consume(
           masterMessage(
             'PRODUCT_TYPE_CHARACTERISTIC',
@@ -2024,7 +2031,7 @@ describe.skipIf(!dockerAvailable)(
           .from(outbox)
           .where(eq(outbox.operation_id, check.operation_id!)),
       );
-      expect(response.payload.result).toBe('HAS_ACTIVE_PRODUCTS');
+      expect(response.payload.result).toBe('IN_USE');
       await service.state(
         parent.product_id,
         child.variant_id,

@@ -132,7 +132,7 @@ export async function consumeMasterMessage(
             'catalog.master.deactivation.checked',
             {
               ...data,
-              result: use ? 'HAS_ACTIVE_PRODUCTS' : 'CLEAR',
+              result: use ? 'IN_USE' : 'CLEAR',
             },
             message.correlation_id,
             operationId,

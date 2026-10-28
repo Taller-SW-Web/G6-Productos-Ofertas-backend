@@ -33,7 +33,7 @@ nombre para identificarlo como diseño no aprobado, sin atribuir homologación.
 |---|---|---|
 | Publica comandos | pricing.product.initialization.requested; inventory.sku.initialization.requested | transacción de alta/retry y Outbox; publisher confirmado/mandatory en po.comandos.x |
 | Publica eventos | catalog.product.deactivated; catalog.sku.deactivated | baja local y Outbox; po.eventos.x |
-| Publica resultado de barrera | catalog.master.deactivation.checked | handler transaccional; discrepancia HAS_ACTIVE_PRODUCTS/IN_USE pendiente; AMQP compartido aislado |
+| Publica resultado de barrera | catalog.master.deactivation.checked | handler transaccional y validador alineados a CLEAR/IN_USE; AMQP compartido aislado |
 | Declara resultados Bulk | catalog.bulk.upsert.completed/rejected | nombres registrados, sin caso de uso Bulk funcional; no afirmar implementación |
 | Consume preparación | pricing.product.initialization.completed/rejected; inventory.sku.initialization.completed/rejected | validación, Inbox, operación/SKU/causalidad, stale/terminal/dedupe; resultado de negocio válido ACK tras commit en ensayo |
 | Consume bajas Taxonomy | taxonomy.master.deactivation.check.requested; taxonomy.master.deactivated/rejected | barrera/Inbox/Outbox atómicos y finales versionados; CLEAR no libera; sin final verificable permanece bloqueado |
@@ -68,13 +68,61 @@ con broker desechable; su ejecución exacta se registra en CI/PR.
 |---|---|---|---|
 | Marco/infra + G5/owners G6 | runtime AMQP y recuperación técnica | disposición durable/versionada aprobada, recursos y permisos provisionados, ensayos de caída/saturación/recuperación sin pérdida; después adaptar el gate mediante cambio revisado | integración/despliegue AMQP; no HTTP |
 | Marco/infra + G7 | acceso broker | red privada, vhost, identidad/ACL mínimos y topic permissions probados desde contenedores autorizados | integración |
-| López + Marco + Poma | resultado de bajas de maestros | resolver explícitamente código HAS_ACTIVE_PRODUCTS frente a enum vigente CLEAR/IN_USE y entregar productor/consumidor compatibles con SHA y prueba bilateral | contrato/implementación de esa frontera |
+| López + Marco + Poma | resultado de bajas de maestros | productor/consumidor compatibles con CLEAR/IN_USE, SHA de ambos y prueba bilateral; adaptación interna de Catalog ya implementada | integración/homologación de esa frontera |
 | López + Marco | asociación tipo/característica | IDs autoritativos tipo/característica, version capturada y schema_version_resultante posterior; evidencia del productor y prueba conjunta | homologación de asociación |
 | López + Marco | actualizaciones de proyección Taxonomy | payload tipado/efecto aprobado y versiones en AsyncAPI, más productor verificable | implementación específica |
 | Castilla/Bulk + Marco | upsert masivo | payload/semántica tipados, atomicidad e idempotencia aprobadas en contrato y prueba bilateral | implementación específica |
 | Vera/Taco + Poma | preparación real | resultados/replay compatibles por operación y causalidad, intercambio autenticado con SHA | integración/homologación |
 
-No se traduce HAS_ACTIVE_PRODUCTS a IN_USE en este encargo: el alcance prohíbe
-modificar payloads. La discrepancia queda explícita y el runtime compartido
-aislado, sin presentar adaptación física como homologación del protocolo.
+## Adecuación interna posterior — 2026-10-28
+
+El usuario autorizó corregir los pendientes ya definidos en Docs y Oracle,
+manteniendo las fronteras que requieren respuesta externa. El límite anterior
+de no modificar payloads correspondía a la adaptación física inicial; esta
+corrección implementa el enum ya publicado, sin cambiar el contrato oficial.
+Fuentes: Docs `599c34f4e677c8792532e2cc31ac372473a10710`, AsyncAPI
+`MasterDeactivationCheckedData` (0.6.0-rc.3), consolidación de bajas Taxonomy
+en DEC-F-001 y SPEC-010. No hace falta una nueva decisión de negocio para
+adecuar Catalog a `CLEAR | IN_USE`.
+
+- El handler persiste `IN_USE` si detecta uso activo incompatible; conserva
+  `CLEAR` cuando no lo hay. No cambia consultas, locks, versiones, identidades,
+  correlación, Inbox/Outbox ni la condición que libera una barrera.
+- El validador exige los valores de texto exactos: rechaza
+  `HAS_ACTIVE_PRODUCTS`, arrays y otros tipos. El publisher vuelve a validarlos
+  antes de enviar. No convierte silenciosamente un mensaje histórico ni
+  reescribe una fila Outbox/Inbox conservando su identidad.
+- Si existieran resultados históricos pendientes con `HAS_ACTIVE_PRODUCTS`,
+  no se publicarán como válidos ni se reparan automáticamente. Su conciliación
+  requiere inventario de solo lectura y decisión operativa de Poma/López/Marco
+  sobre operaciones e identidades; no se ejecutó SQL en bases compartidas.
+- Las pruebas de contrato cubren ambos resultados para los cinco maestros y
+  rechazan el enum legado. Las de publisher comprueban destino físico, payload
+  íntegro y bloqueo previo al envío del legado. La suite PostgreSQL conserva
+  dedupe, finales obsoletos, asociaciones, barrera tras CLEAR y liberación solo
+  por final coincidente, ahora esperando IN_USE y verificando correlación.
+
+Las guías Oracle describen el corte histórico del 19–20 de octubre y algunas
+referencias a nombres ingleses ya superadas por esta rama. No acreditan
+conectividad actual, grants ni despliegue de nuestro SHA. El runtime compartido
+permanece aislado hasta la decisión de recuperación y permisos aplicables.
+
+Validación de esta adecuación: primero se reprodujo el rechazo indebido de
+`IN_USE` con la prueba de contrato (13 PASS / 1 FAIL antes del cambio).
+Después: 47 pruebas enfocadas PASS; suite Catalog `npm test -- --maxWorkers=2
+apps/catalog-svc`, 427 PASS; `npm run test:e2e -- --maxWorkers=2 apps/catalog-svc`,
+111 PASS / 47 SKIP. La primera ejecución unitaria general dentro del sandbox
+falló por EACCES en HTTP local; la repetición con permisos de red local pasó
+completa. Typecheck, lint, format:check, build:catalog-svc y diff --check PASS.
+Los SKIP locales incluyen PostgreSQL y RabbitMQ por Docker ausente; no prueban
+persistencia ni mensajería real. La CI exacta del commit y sus suites reales
+se registran en el PR #125. No se ejecutaron pruebas sobre Oracle/Supabase.
+
+Estado del bloque: #47 conserva sus doce mutaciones y no necesitó otro cambio
+HTTP; #48 corrige aquí su discrepancia interna de resultados; #49 conserva
+las dos optimizaciones de listado y la telemetría verificadas previamente.
+Detalle por variantes, adminVariants y llamadas individuales demoPrices
+siguen identificados en RENDIMIENTO-49.md, fuera de esta corrección acotada.
+La integración autenticada, homologación externa y presupuesto real de 7 s
+continúan pendientes de evidencia; ninguno se infiere de CI o documentación.
 Estado #48: IMPLEMENTAR_PARCIAL; AMQP compartido BLOQUEADO_ESPECÍFICO.

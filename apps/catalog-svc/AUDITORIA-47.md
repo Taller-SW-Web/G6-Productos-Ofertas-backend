@@ -38,7 +38,7 @@ consultar su resultado, no inferir PASS desde este enlace.
 |---|---|---|---|
 | Marco/infra + G7 | preparación asíncrona tras las escrituras | red/vhost/ACL e identidades reales autorizadas; recuperación durable homologada | integración AMQP, no CRUD local |
 | Vera + Taco + Poma | completado/rechazo/replay de preparación | SHA de cada productor/consumidor, mismo operation_id y causalidad, prueba bilateral con Inbox/Outbox sin duplicar efectos | integración/homologación |
-| López + Marco + Poma | validación de maestros/esquemas y bajas seguras | productor/versiones/IDs autoritativos y protocolo probado conjuntamente; resolver discrepancias contractuales de resultados por separado en #48 | integración |
+| López + Marco + Poma | validación de maestros/esquemas y bajas seguras | productor/versiones/IDs autoritativos y protocolo probado conjuntamente; resultado CLEAR/IN_USE adecuado internamente en #48, sin homologación bilateral inferida | integración |
 | Marco/proceso oficial BD | migraciones aditivas propuestas 0002/0003 preexistentes | aprobación, aplicación y postcheck por checksum/SHA en ambiente compartido | despliegue; no se aplicaron aquí |
 | Owners de preparación + Marco | recuperación de REJECTED | causa concreta, operación correctiva publicada y replay idempotente probado por código | operación específica; continúa bloqueada con seguridad |
 

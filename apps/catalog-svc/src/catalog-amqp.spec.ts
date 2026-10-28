@@ -5,7 +5,7 @@ import {
   ConfirmedCatalogPublisher,
   readCatalogAmqpConfig,
 } from './catalog-amqp.js';
-import { envelope } from './catalog-messages.js';
+import { envelope, InvalidCatalogMessage } from './catalog-messages.js';
 
 describe('Confirmed catalog publisher (transport fixture, not live broker evidence)', () => {
   function fixture(writable = true) {
@@ -93,6 +93,16 @@ describe('Confirmed catalog publisher (transport fixture, not live broker eviden
         result: 'CLEAR',
       },
     ],
+    [
+      'catalog.master.deactivation.checked',
+      'po.resultados.x',
+      {
+        entity_type: 'CATEGORY',
+        entity_id: 'category',
+        version: 1,
+        result: 'IN_USE',
+      },
+    ],
     ['catalog.bulk.upsert.completed', 'po.resultados.x', {}],
     ['catalog.bulk.upsert.rejected', 'po.resultados.x', {}],
   ] as const)(
@@ -110,6 +120,27 @@ describe('Confirmed catalog publisher (transport fixture, not live broker eviden
       await work;
     },
   );
+  it('blocks a legacy persisted result before publishing without rewriting its identity or payload', async () => {
+    const { channel, publisher } = fixture();
+    const message = envelope(
+      'catalog.master.deactivation.checked',
+      {
+        entity_type: 'CATEGORY',
+        entity_id: 'opaque',
+        version: 7,
+        result: 'IN_USE',
+      },
+      randomUUID(),
+      randomUUID(),
+    );
+    message.data.result = 'HAS_ACTIVE_PRODUCTS';
+    const original = structuredClone(message);
+    await expect(publisher.publish(message)).rejects.toBeInstanceOf(
+      InvalidCatalogMessage,
+    );
+    expect(channel.publish).not.toHaveBeenCalled();
+    expect(message).toEqual(original);
+  });
   it('honors backpressure and fails unconfirmed publications on channel closure', async () => {
     const { channel, publisher } = fixture(false);
     let done = false;

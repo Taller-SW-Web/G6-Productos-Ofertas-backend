@@ -80,14 +80,15 @@ describe('Catalog preparation message contract and retry identity', () => {
           data: { ...message.data, reason: 'TIMEOUT' },
         }).kind,
       ).toBe('result');
-      expect(
-        envelope(
-          'catalog.master.deactivation.checked',
-          { ...message.data, result: 'CLEAR' },
-          message.correlation_id,
-          message.operation_id,
-        ).data.result,
-      ).toBe('CLEAR');
+      for (const result of ['CLEAR', 'IN_USE'])
+        expect(
+          envelope(
+            'catalog.master.deactivation.checked',
+            { ...message.data, result },
+            message.correlation_id,
+            message.operation_id,
+          ).data,
+        ).toEqual({ ...message.data, result });
     }
   });
   it.each([
@@ -156,17 +157,37 @@ describe('Catalog preparation message contract and retry identity', () => {
     expect(
       envelope(
         'catalog.master.deactivation.checked',
-        { ...message.data, result: 'HAS_ACTIVE_PRODUCTS' },
-        message.correlation_id,
-        message.operation_id,
-      ).data.result,
-    ).toBe('HAS_ACTIVE_PRODUCTS');
-    expect(() =>
-      envelope(
-        'catalog.master.deactivation.checked',
         { ...message.data, result: 'IN_USE' },
         message.correlation_id,
         message.operation_id,
+      ).data.result,
+    ).toBe('IN_USE');
+    expect(() =>
+      envelope(
+        'catalog.master.deactivation.checked',
+        { ...message.data, result: 'HAS_ACTIVE_PRODUCTS' },
+        message.correlation_id,
+        message.operation_id,
+      ),
+    ).toThrow(InvalidCatalogMessage);
+  });
+  it.each([
+    'HAS_ACTIVE_PRODUCTS',
+    'in_use',
+    '',
+    null,
+    undefined,
+    1,
+    ['CLEAR'],
+    ['IN_USE'],
+    {},
+  ])('rejects an uncontracted master check result %j', (result) => {
+    expect(() =>
+      envelope(
+        'catalog.master.deactivation.checked',
+        { entity_type: 'CATEGORY', entity_id: 'opaque', version: 7, result },
+        randomUUID(),
+        randomUUID(),
       ),
     ).toThrow(InvalidCatalogMessage);
   });
