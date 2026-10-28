@@ -74,3 +74,69 @@ Owner Poma/Marco: ejecutar medición autorizada sobre el SHA desplegado, con el
 mismo dataset y condiciones. Esto afecta validación de latencia/despliegue,
 no la implementación local. No se hicieron cambios de base compartida,
 autenticación, contratos, otras apps, infraestructura, merge ni despliegue.
+
+## Revisión posterior del PR #125 — listado comercial normal
+
+Base de esta corrección: `a3cade1ede7ad10534623af67b60a0c7ca2420a7`.
+El usuario priorizó explícitamente el listado normal tras la auditoría y pidió
+identificar el resto sin ampliar innecesariamente #49. Ownership: Poma,
+únicamente apps/catalog-svc; operación listarProductos, contrato/decisiones
+citados arriba. Estado de implementación de este alcance: IMPLEMENTAR_AHORA.
+
+`listCandidates(readDemo=false)` todavía ejecutaba COUNT + página + dos SELECT
+por producto devuelto. Ahora comparte las lecturas agrupadas de imágenes propias
+y atributos por los IDs de la página, reutilizando groupedAttributes. No consulta
+las imágenes de variantes en el modo normal. Conserva imágenes propias sin
+filtrarlas, reordenarlas por principal, deduplicarlas ni aplicar fallback: esas
+políticas siguen separadas de ambos modos demo.
+
+| SELECT por listado normal (sin BEGIN/COMMIT) | Antes | Después |
+|---|---:|---:|
+| Página con 4 productos | 10 | 4 |
+| Página con 24 productos | 50 | 4 |
+| Página vacía, incluso fuera de rango con total positivo | 2 | 2 |
+
+COUNT y página mantienen el predicado comercial ACTIVO/EXISTS de variante
+ACTIVA, q literal, categoría/marca, IDs filtrados por precio, orden nombre/ID,
+LIMIT/OFFSET y total en el mismo snapshot repeatable read/read only. Las
+consultas administrativas de estado conservan su predicado. El modo read-demo
+interno conserva su fallback/deduplicación y cinco SELECT para página no vacía;
+el preview Marketplace optimizado conserva su método independiente.
+
+Baseline ejecutada antes de cambiar producción: 13 pruebas PASS en
+commercial-list-equivalence.spec.ts. Las mismas proyecciones completas se
+comparan después para páginas 1/2, tamaños 4/24 y ASC/DESC; incluye colecciones
+vacías, placeholders/URLs repetidas conservados, valores JSON, parámetros SQL,
+IDs monetarios, total fuera de rango y rollback de fallos. Solo el presupuesto
+de SELECT cambia de 2+2*N a cuatro. Driver controlado, no PostgreSQL real.
+
+PERF-49-COMMERCIAL añade a la suite PostgreSQL desechable 30 productos activos
+con preparación real local, 48 combinaciones de página/orden/filtros y una
+restricción de IDs. Compara la página completa con las proyecciones del lector
+de detalle no modificado y cuenta cuatro SELECT (dos en páginas vacías).
+Taxonomy y los resultados de preparación son fixtures explícitas; esta prueba
+no acredita integración autenticada externa ni latencia HTTP de producción.
+Docker no está disponible localmente: su ejecución real y el SHA/resultado de CI
+se registran en el PR; SKIP local no es PASS PostgreSQL.
+
+Validación local de esta revisión: `npm test -- --maxWorkers=2 apps/catalog-svc`,
+416 PASS; `npm run test:e2e -- --maxWorkers=2 apps/catalog-svc`, 111 PASS / 47 SKIP.
+Typecheck, lint, format:check, build:catalog-svc, tipos explícitos de E2E y
+git diff --check ejecutados correctamente. CI del nuevo commit se informa en el
+PR por SHA, sin reutilizar como propia la CI anterior de a3cade1.
+
+## N+1 restantes confirmados y prioridad para Hito 4
+
+| Flujo | Sobrecosto confirmado | Impacto / siguiente paso | Estado |
+|---|---|---|---|
+| listDemoCandidates | Hasta cuatro SELECT por conjunto; corrección previa verificada | Preview público de listado; no confundir con Pricing ni otros lectores | Corregido previamente |
+| listCandidates normal | Antes dos SELECT por producto; ahora cuatro SELECT por página no vacía | Listado comercial autenticado de canales; prioridad de esta revisión | Corregido ahora |
+| demoPrices | N GET de Pricing por producto candidato, cuatro workers, antes de paginar | Alta prioridad de medición H4: sigue pudiendo dominar el preview. Medir DEMO_PRICING real por SHA antes de decidir un lote. Poma/Vera deben confirmar equivalencia de precio por producto frente a los contratos batch por SKU; no sustituirla por inferencia ni crear endpoints | Pendiente; sin cambio de cliente, concurrencia o semántica |
+| findCandidateBySlug / findCandidateByProductId; también detalle preview por slug | Dos SELECT por variante para atributos e imágenes, además del costo fijo del detalle | Ficha/galería H4: priorizar con cardinalidad real de variantes y latencia de detalle; agrupar por IDs preservando estados, orden y separación de atributos identificadores | Pendiente identificado; sin cambios en esta revisión |
+| adminVariants | Tres SELECT por variante: atributos, imágenes y perfil físico | Backoffice; prioridad posterior a lecturas H4 si no hay evidencia de impacto mayor. Mantener perfil nullable, estados/versiones y orden al agrupar | Pendiente identificado; sin cambios en esta revisión |
+
+Los pendientes de agrupación interna son de Poma; no están declarados bloqueados
+por defecto. Un eventual cambio del transporte a Pricing requiere contrato
+existente equivalente y prueba con Vera, sin tocar su servicio unilateralmente.
+No se afirma que esta corrección SQL elimine los timeouts de 7 s de G1: falta
+medir el SHA nuevo con PostgreSQL/Pricing reales en el recorrido autorizado.

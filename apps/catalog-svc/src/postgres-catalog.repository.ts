@@ -378,29 +378,38 @@ export class PostgresCatalogRepository {
             )
             .limit(query.tamanio)
             .offset((query.pagina - 1) * query.tamanio);
+          // Hydrate only the SQL page, in the same read-only snapshot as COUNT.
+          // Ordinary reads retain every own image, without preview filtering/fallback.
+          const ids = rows.map((row) => row.product_id);
+          if (!ids.length)
+            return {
+              items: [],
+              pagina: query.pagina,
+              tamanio: query.tamanio,
+              total: count?.total ?? 0,
+            };
+          const own = await tx
+            .select({
+              productId: productImages.product_id,
+              url: productImages.url,
+            })
+            .from(productImages)
+            .where(inArray(productImages.product_id, ids))
+            .orderBy(
+              asc(productImages.product_id),
+              asc(productImages.posicion),
+              asc(productImages.id),
+            );
+          const attributes = await this.groupedAttributes(tx, ids);
+          const photos = new Map<string, string[]>();
+          const fallback = new Map<string, string[]>();
+          for (const image of own) {
+            if (readDemo && !isDemoCatalogImage(image.url)) continue;
+            const gallery = photos.get(image.productId) ?? [];
+            gallery.push(image.url);
+            photos.set(image.productId, gallery);
+          }
           if (readDemo) {
-            // A bounded page uses five queries, not one round trip per photo/attribute.
-            // Keep the same read-only snapshot and preserve SQL filtering/count/pagination.
-            const ids = rows.map((row) => row.product_id);
-            if (!ids.length)
-              return {
-                items: [],
-                pagina: query.pagina,
-                tamanio: query.tamanio,
-                total: count?.total ?? 0,
-              };
-            const own = await tx
-              .select({
-                productId: productImages.product_id,
-                url: productImages.url,
-              })
-              .from(productImages)
-              .where(inArray(productImages.product_id, ids))
-              .orderBy(
-                asc(productImages.product_id),
-                asc(productImages.posicion),
-                asc(productImages.id),
-              );
             const children = await tx
               .select({
                 productId: variants.product_id,
@@ -415,16 +424,6 @@ export class PostgresCatalogRepository {
                 asc(variantImages.posicion),
                 asc(variantImages.id),
               );
-            const attributes = await this.groupedAttributes(tx, ids);
-            const photos = new Map<string, string[]>();
-            const fallback = new Map<string, string[]>();
-            for (const image of own.filter((image) =>
-              isDemoCatalogImage(image.url),
-            ))
-              photos.set(image.productId, [
-                ...(photos.get(image.productId) ?? []),
-                image.url,
-              ]);
             for (const image of children) {
               if (!isDemoCatalogImage(image.url)) continue;
               const gallery = fallback.get(image.productId) ?? [];
@@ -432,36 +431,16 @@ export class PostgresCatalogRepository {
                 gallery.push(image.url);
               fallback.set(image.productId, gallery);
             }
-            return {
-              items: rows.map((row) => ({
-                ...row,
-                images:
-                  photos.get(row.product_id) ??
-                  fallback.get(row.product_id) ??
-                  [],
-                attributes: attributes.get(row.product_id) ?? [],
-              })),
-              pagina: query.pagina,
-              tamanio: query.tamanio,
-              total: count?.total ?? 0,
-            };
-          }
-          const items: ProductSummary[] = [];
-          for (const row of rows) {
-            const images = await this.images(tx, row.product_id, readDemo);
-            const attributes: Attribute[] = await tx
-              .select(attributeProjection)
-              .from(productAttributes)
-              .where(eq(productAttributes.product_id, row.product_id))
-              .orderBy(asc(productAttributes.caracteristica_id));
-            items.push({
-              ...row,
-              images: images.map((i) => i.url),
-              attributes,
-            });
           }
           return {
-            items,
+            items: rows.map((row) => ({
+              ...row,
+              images:
+                photos.get(row.product_id) ??
+                fallback.get(row.product_id) ??
+                [],
+              attributes: attributes.get(row.product_id) ?? [],
+            })),
             pagina: query.pagina,
             tamanio: query.tamanio,
             total: count?.total ?? 0,

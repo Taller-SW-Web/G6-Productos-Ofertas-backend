@@ -15,7 +15,7 @@ import { LegacyDemoList } from './support/legacy-demo-list.js';
 import { CommercialService } from '../src/commercial.service.js';
 import type { CatalogConfig } from '../src/config.js';
 import type { TaxonomyClient } from '../src/taxonomy.client.js';
-import type { ProductQuery } from '../src/commercial.types.js';
+import type { ProductQuery, ProductSummary } from '../src/commercial.types.js';
 import { CatalogAmqpRuntime } from '../src/catalog-amqp.js';
 import { CatalogTelemetry } from '../src/catalog-telemetry.js';
 import { and, eq, sql } from 'drizzle-orm';
@@ -2078,6 +2078,162 @@ describe.skipIf(!dockerAvailable)(
         ),
       );
     });
+    it('PERF-49-COMMERCIAL: hydrates SQL pages with four SELECT and unchanged detail projections', async () => {
+      const service = mutationService();
+      const marker = 'commercial-perf-' + randomUUID();
+      const reads = new PostgresCatalogRepository(database);
+      const expected: ProductSummary[] = [];
+      for (let i = 0; i < 30; i++) {
+        const product = await service.createProduct(
+          {
+            ...createRequest(),
+            nombre: marker + '-' + String(Math.floor(i / 2)).padStart(2, '0'),
+            categoriaId: i % 2 ? marker : marker + '-other',
+            marcaId: i % 3 ? marker : marker + '-other',
+            imagenes: [
+              { url: 'https://placehold.co/legacy.png', principal: false },
+              { url: 'https://example.test/repeated.png', principal: false },
+              { url: 'https://example.test/repeated.png', principal: true },
+            ],
+            atributos: [
+              {
+                caracteristica_id: 'z',
+                nombre: 'Z',
+                valor_id: null,
+                valor: { nested: [i, false] },
+              },
+              {
+                caracteristica_id: 'a',
+                nombre: 'A',
+                valor_id: '0001',
+                valor: 'Cotton',
+              },
+            ],
+          },
+          actor,
+        );
+        await complete(product.product_id);
+        await service.state(
+          product.product_id,
+          undefined,
+          'activate',
+          {},
+          actor,
+        );
+        const detail = await reads.findCandidateByProductId(
+          product.product_id,
+          'MARKETPLACE',
+        );
+        expect(detail).not.toBeNull();
+        const { variants: _children, ...summary } = detail!;
+        expected.push(summary);
+      }
+      let selects = 0;
+      const counted = {
+        read: <T>(work: (connection: CatalogDatabase) => Promise<T>) =>
+          database.read((db) =>
+            work(
+              new Proxy(db, {
+                get(target, key, receiver) {
+                  if (key === 'transaction')
+                    return (
+                      callback: (tx: CatalogTransaction) => Promise<T>,
+                      config: Parameters<CatalogDatabase['transaction']>[1],
+                    ) =>
+                      target.transaction(
+                        (tx) =>
+                          callback(
+                            new Proxy(tx, {
+                              get(t, k, r) {
+                                const member = Reflect.get(t, k, r);
+                                if (k === 'select')
+                                  return (...args: unknown[]) => {
+                                    selects++;
+                                    return Reflect.apply(member, t, args);
+                                  };
+                                return typeof member === 'function'
+                                  ? member.bind(t)
+                                  : member;
+                              },
+                            }),
+                          ),
+                        config,
+                      );
+                  return Reflect.get(target, key, receiver);
+                },
+              }),
+            ),
+          ),
+      } as Database;
+      const batched = new PostgresCatalogRepository(counted);
+      for (const tamanio of [4, 24])
+        for (const pagina of [1, 2, 9])
+          for (const orden of ['NOMBRE_ASC', 'NOMBRE_DESC'] as const)
+            for (const filter of [
+              {},
+              { categoriaId: marker },
+              { marcaId: marker },
+              { categoriaId: marker, marcaId: marker },
+            ]) {
+              const ordered = expected
+                .filter(
+                  (p) =>
+                    (!('categoriaId' in filter) ||
+                      p.categoria_id === filter.categoriaId) &&
+                    (!('marcaId' in filter) || p.marca_id === filter.marcaId),
+                )
+                .sort((a, b) => {
+                  const byName = a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+                  return (
+                    (orden === 'NOMBRE_DESC' ? -byName : byName) ||
+                    (a.product_id < b.product_id ? -1 : 1)
+                  );
+                });
+              selects = 0;
+              const page = await batched.listCandidates({
+                canal: 'MARKETPLACE',
+                q: marker,
+                tamanio,
+                pagina,
+                orden,
+                ...filter,
+              });
+              expect(page).toEqual({
+                items: ordered.slice((pagina - 1) * tamanio, pagina * tamanio),
+                total: ordered.length,
+                tamanio,
+                pagina,
+              });
+              expect(selects).toBe(page.items.length ? 4 : 2);
+            }
+      const restricted = expected.slice(0, 2);
+      const page = await batched.listCandidates(
+        {
+          canal: 'MARKETPLACE',
+          q: marker,
+          tamanio: 24,
+          pagina: 1,
+          orden: 'NOMBRE_ASC',
+        },
+        false,
+        restricted.map((p) => p.product_id),
+      );
+      expect(page.total).toBe(2);
+      expect(new Set(page.items.map((p) => p.product_id))).toEqual(
+        new Set(restricted.map((p) => p.product_id)),
+      );
+      process.stdout.write(
+        JSON.stringify({
+          evidence: 'PERF-49-COMMERCIAL',
+          products: 30,
+          cases: 48,
+          selectCountNonempty: 4,
+          selectCountEmpty: 2,
+          projection: 'matches-unchanged-detail-reader',
+        }) + '\n',
+      );
+    }, 30000);
+
     it('D-CAT-05/06: filters global eligibility before count/pagination in every channel without candidate tables', async () => {
       const service = mutationService();
       const marker = 'eligibility-' + randomUUID();

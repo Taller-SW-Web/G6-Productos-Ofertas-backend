@@ -34,7 +34,11 @@ describe('Catalog provider SQL and projections (isolated)', () => {
       if (text.includes('from "catalog"."variants"'))
         return { rows: [['variant-fixture', '0002']] };
       if (text.includes('from "catalog"."product_images"'))
-        return { rows: productImageUrls.map((url) => [url]) };
+        return {
+          rows: productImageUrls.map((url) =>
+            text.includes('"product_id",') ? ['product-fixture', url] : [url],
+          ),
+        };
       if (text.includes('from "catalog"."variant_images"'))
         return { rows: variantImageUrls.map((url) => [url]) };
       if (text.includes('SELECT url FROM catalog.product_images'))
