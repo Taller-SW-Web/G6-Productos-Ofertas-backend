@@ -39,10 +39,30 @@ describe('Catalog provider SQL and projections (isolated)', () => {
         return { rows: variantImageUrls.map((url) => [url]) };
       if (text.includes('SELECT url FROM catalog.product_images'))
         return { rows: productImageUrls.map((url) => ({ url })) };
+      if (text.includes('SELECT product_id, url FROM catalog.product_images'))
+        return {
+          rows: productImageUrls.map((url) => ({
+            product_id: 'product-fixture',
+            url,
+          })),
+        };
+      if (text.includes('SELECT v.product_id, vi.url'))
+        return {
+          rows: variantImageUrls.map((url) => ({
+            product_id: 'product-fixture',
+            url,
+          })),
+        };
       if (text.includes('SELECT vi.url'))
         return { rows: variantImageUrls.map((url) => ({ url })) };
       if (text.includes('from "catalog"."product_attribute_values"'))
-        return { rows: [['c1', 'Material', null, 'Cotton']] };
+        return {
+          rows: [
+            text.includes('"product_id",')
+              ? ['product-fixture', 'c1', 'Material', null, 'Cotton']
+              : ['c1', 'Material', null, 'Cotton'],
+          ],
+        };
       if (text.includes('from "catalog"."variant_attribute_values"'))
         return {
           rows: [

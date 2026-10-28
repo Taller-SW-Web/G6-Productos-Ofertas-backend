@@ -1,4 +1,9 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import {
+  Injectable,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { CatalogTelemetry } from './catalog-telemetry.js';
 import {
   and,
   asc,
@@ -64,7 +69,74 @@ function isDemoImageUrl(value: unknown): value is string {
 
 @Injectable()
 export class PostgresCatalogRepository {
-  constructor(private readonly database: Database) {}
+  constructor(
+    private readonly database: Database,
+    @Optional()
+    private readonly telemetry: CatalogTelemetry = new CatalogTelemetry(),
+  ) {}
+
+  private async groupedAttributes(tx: CatalogTransaction, ids: string[]) {
+    const values = await tx
+      .select({
+        productId: productAttributes.product_id,
+        ...attributeProjection,
+      })
+      .from(productAttributes)
+      .where(inArray(productAttributes.product_id, ids))
+      .orderBy(
+        asc(productAttributes.product_id),
+        asc(productAttributes.caracteristica_id),
+      );
+    const attributes = new Map<string, Attribute[]>();
+    for (const { productId, ...attribute } of values) {
+      const group = attributes.get(productId) ?? [];
+      group.push(attribute);
+      attributes.set(productId, group);
+    }
+    return attributes;
+  }
+
+  private async enrichDemoCandidates(
+    tx: CatalogTransaction,
+    rows: Array<Omit<ProductSummary, 'images' | 'attributes'>>,
+  ): Promise<ProductSummary[]> {
+    if (!rows.length) return [];
+    const ids = rows.map((row) => row.product_id);
+    // Preview has its own principal-first order and URL policy. Do not reuse
+    // the internal read-demo image deduplication/100-row limit here.
+    const own = await tx.execute<{ product_id: string; url: string }>(sql`
+      SELECT product_id, url FROM catalog.product_images
+      WHERE product_id = ANY(${sql.param(ids)}::uuid[]) AND length(trim(url)) > 0
+      ORDER BY product_id ASC, principal DESC, posicion ASC, id ASC`);
+    const photos = new Map<string, string[]>();
+    const append = (productId: string, url: string) => {
+      if (!isDemoImageUrl(url)) return;
+      const group = photos.get(productId) ?? [];
+      group.push(url);
+      photos.set(productId, group);
+    };
+    for (const image of own.rows) append(image.product_id, image.url);
+    const missing = ids.filter((id) => !photos.has(id));
+    if (missing.length) {
+      const fallback = await tx.execute<{
+        product_id: string;
+        url: string;
+      }>(sql`
+        SELECT v.product_id, vi.url
+        FROM catalog.variants v JOIN catalog.variant_images vi ON vi.variant_id = v.id
+        WHERE v.product_id = ANY(${sql.param(missing)}::uuid[]) AND length(trim(vi.url)) > 0
+        ORDER BY v.product_id ASC, vi.posicion ASC, vi.id ASC, v.id ASC`);
+      for (const image of fallback.rows) append(image.product_id, image.url);
+    }
+    const attributes = await this.groupedAttributes(tx, ids);
+    return rows
+      .filter((row) => photos.has(row.product_id))
+      .map((row) => ({
+        ...row,
+        images: photos.get(row.product_id)!,
+        attributes: attributes.get(row.product_id) ?? [],
+      }));
+  }
 
   private async images(
     tx: CatalogTransaction,
@@ -150,31 +222,26 @@ export class PostgresCatalogRepository {
     return this.database.read((db) =>
       db.transaction(
         async (tx) => {
-          const rows = await tx
-            .select(projection)
-            .from(products)
-            .where(this.demoWhere(query))
-            .orderBy(
-              query.orden === 'NOMBRE_DESC'
-                ? desc(products.nombre)
-                : asc(products.nombre),
-              asc(products.id),
-            )
-            .limit(maxCandidates + 1);
+          const rows = await this.telemetry.measure(
+            'DEMO_CANDIDATES_SQL',
+            async () =>
+              tx
+                .select(projection)
+                .from(products)
+                .where(this.demoWhere(query))
+                .orderBy(
+                  query.orden === 'NOMBRE_DESC'
+                    ? desc(products.nombre)
+                    : asc(products.nombre),
+                  asc(products.id),
+                )
+                .limit(maxCandidates + 1),
+          );
           if (rows.length > maxCandidates)
             throw new ServiceUnavailableException();
-          const items: ProductSummary[] = [];
-          for (const row of rows) {
-            const images = await this.demoImages(tx, row.product_id);
-            if (!images.length) continue;
-            const attributes = await tx
-              .select(attributeProjection)
-              .from(productAttributes)
-              .where(eq(productAttributes.product_id, row.product_id))
-              .orderBy(asc(productAttributes.caracteristica_id));
-            items.push({ ...row, images, attributes });
-          }
-          return items;
+          return this.telemetry.measure('DEMO_ENRICHMENT_SQL', () =>
+            this.enrichDemoCandidates(tx, rows),
+          );
         },
         { isolationLevel: 'repeatable read', accessMode: 'read only' },
       ),
@@ -348,20 +415,9 @@ export class PostgresCatalogRepository {
                 asc(variantImages.posicion),
                 asc(variantImages.id),
               );
-            const values = await tx
-              .select({
-                productId: productAttributes.product_id,
-                ...attributeProjection,
-              })
-              .from(productAttributes)
-              .where(inArray(productAttributes.product_id, ids))
-              .orderBy(
-                asc(productAttributes.product_id),
-                asc(productAttributes.caracteristica_id),
-              );
+            const attributes = await this.groupedAttributes(tx, ids);
             const photos = new Map<string, string[]>();
             const fallback = new Map<string, string[]>();
-            const attributes = new Map<string, Attribute[]>();
             for (const image of own.filter((image) =>
               isDemoCatalogImage(image.url),
             ))
@@ -376,11 +432,6 @@ export class PostgresCatalogRepository {
                 gallery.push(image.url);
               fallback.set(image.productId, gallery);
             }
-            for (const { productId, ...attribute } of values)
-              attributes.set(productId, [
-                ...(attributes.get(productId) ?? []),
-                attribute,
-              ]);
             return {
               items: rows.map((row) => ({
                 ...row,

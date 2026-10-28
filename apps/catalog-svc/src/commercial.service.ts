@@ -8,6 +8,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { CatalogConfig } from './config.js';
+import { CatalogTelemetry } from './catalog-telemetry.js';
 import { CatalogPriceFilter } from './catalog-price-filter.js';
 import { DEMO_PRICING, type CurrentProductPrice } from './pricing.client.js';
 import type {
@@ -40,6 +41,8 @@ export class CommercialService {
       currentPrice(id: string): Promise<CurrentProductPrice | null>;
     },
     @Optional() private readonly priceFilter?: CatalogPriceFilter,
+    @Optional()
+    private readonly telemetry: CatalogTelemetry = new CatalogTelemetry(),
   ) {}
 
   private async read<T>(work: () => Promise<T>): Promise<T> {
@@ -98,36 +101,48 @@ export class CommercialService {
     )
       throw new ServiceUnavailableException();
     if (!this.readDemo.enabled && this.demoEnabled(query)) {
-      if (query.estado !== undefined)
-        throw new BadRequestException('estado no está disponible en preview');
-      if (query.categoriaId !== undefined)
-        await this.taxonomy.category(query.categoriaId, correlationId);
-      if (query.marcaId !== undefined)
-        await this.taxonomy.brand(query.marcaId, correlationId);
-      let candidates: ProductSummary[];
-      try {
-        candidates = await this.repository.listDemoCandidates(query, 100);
-      } catch {
-        throw new ServiceUnavailableException();
-      }
-      const priced = await this.demoPrices(candidates);
-      const ordered = priced.sort((a, b) => {
-        const order = a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
-        const idOrder =
-          a.product_id < b.product_id
-            ? -1
-            : a.product_id > b.product_id
-              ? 1
-              : 0;
-        return (query.orden === 'NOMBRE_DESC' ? -order : order) || idOrder;
-      });
-      const start = (query.pagina - 1) * query.tamanio;
-      return {
-        items: ordered.slice(start, start + query.tamanio) as DemoProduct[],
-        pagina: query.pagina,
-        tamanio: query.tamanio,
-        total: ordered.length,
-      };
+      return this.telemetry.measure(
+        'DEMO_LIST_TOTAL',
+        async () => {
+          if (query.estado !== undefined)
+            throw new BadRequestException(
+              'estado no está disponible en preview',
+            );
+          if (query.categoriaId !== undefined)
+            await this.taxonomy.category(query.categoriaId, correlationId);
+          if (query.marcaId !== undefined)
+            await this.taxonomy.brand(query.marcaId, correlationId);
+          let candidates: ProductSummary[];
+          try {
+            candidates = await this.repository.listDemoCandidates(query, 100);
+          } catch {
+            throw new ServiceUnavailableException();
+          }
+          const priced = await this.telemetry.measure(
+            'DEMO_PRICING',
+            () => this.demoPrices(candidates),
+            correlationId,
+          );
+          const ordered = priced.sort((a, b) => {
+            const order = a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+            const idOrder =
+              a.product_id < b.product_id
+                ? -1
+                : a.product_id > b.product_id
+                  ? 1
+                  : 0;
+            return (query.orden === 'NOMBRE_DESC' ? -order : order) || idOrder;
+          });
+          const start = (query.pagina - 1) * query.tamanio;
+          return {
+            items: ordered.slice(start, start + query.tamanio) as DemoProduct[],
+            pagina: query.pagina,
+            tamanio: query.tamanio,
+            total: ordered.length,
+          };
+        },
+        correlationId,
+      );
     }
     if (query.categoriaId !== undefined)
       await this.taxonomy.category(query.categoriaId, correlationId, identity);

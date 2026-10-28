@@ -11,6 +11,11 @@ import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 import { DisposableCatalogBroker } from './support/disposable-catalog-broker.js';
+import { LegacyDemoList } from './support/legacy-demo-list.js';
+import { CommercialService } from '../src/commercial.service.js';
+import type { CatalogConfig } from '../src/config.js';
+import type { TaxonomyClient } from '../src/taxonomy.client.js';
+import type { ProductQuery } from '../src/commercial.types.js';
 import { CatalogAmqpRuntime } from '../src/catalog-amqp.js';
 import { CatalogTelemetry } from '../src/catalog-telemetry.js';
 import { and, eq, sql } from 'drizzle-orm';
@@ -29,6 +34,8 @@ import {
   Database,
   readPostgresSettings,
   type PostgresSettings,
+  type CatalogDatabase,
+  type CatalogTransaction,
 } from '../src/database.js';
 import { CatalogTransactionManager } from '../src/catalog-transaction.js';
 import { PostgresCatalogWriteRepository } from '../src/postgres-catalog-write.repository.js';
@@ -334,6 +341,207 @@ describe.skipIf(!dockerAvailable)(
         await reads.findCandidateByProductId(parent.id, 'MARKETPLACE'),
       ).toBeNull();
     });
+
+    it('PERF-49: compares the frozen N+1 and batched preview on the same PostgreSQL snapshot fixtures', async () => {
+      const marker = 'PERF-' + randomUUID();
+      const missingPrice = new Set<string>();
+      await transactions.run(async (tx) => {
+        for (let i = 0; i < 36; i++) {
+          const row = await repository.insertProduct(tx, {
+            ...productInput(marker + '-' + i),
+            nombre: marker + '-' + String(Math.floor(i / 2)).padStart(2, '0'),
+            categoria_id: i % 2 ? marker : marker + '-other',
+            marca_id: i % 3 ? marker : marker + '-other',
+            tiene_variantes: i % 3 === 0,
+          });
+          if (i % 7 === 0) missingPrice.add(row.id);
+          await repository.insertProductImage(tx, {
+            product_id: row.id,
+            url: 'https://placehold.co/placeholder.png',
+            posicion: 0,
+          });
+          if (i % 3 !== 0) {
+            await repository.insertProductImage(tx, {
+              product_id: row.id,
+              url: 'https://example.test/secondary.png',
+              posicion: 0,
+            });
+            await repository.insertProductImage(tx, {
+              product_id: row.id,
+              url: 'https://example.test/principal.png',
+              posicion: 2,
+              principal: true,
+            });
+            // Preview excludes placeholder subdomains; internal read-demo does not.
+            await repository.insertProductImage(tx, {
+              product_id: row.id,
+              url: 'https://child.placehold.co/invalid.png',
+              posicion: 3,
+            });
+          } else {
+            const child = await repository.insertVariant(tx, {
+              product_id: row.id,
+              sku: marker + '-child-' + i,
+              identifying_key: { size: i },
+            });
+            for (let j = 0; j < (i === 3 ? 103 : 2); j++)
+              await repository.insertVariantImage(tx, {
+                variant_id: child.id,
+                url:
+                  i % 6 === 0
+                    ? 'http://example.test/invalid.png'
+                    : 'https://example.test/repeated.png',
+                posicion: j,
+              });
+          }
+          for (const caracteristica of ['z', 'a'])
+            await repository.insertProductAttribute(tx, {
+              product_id: row.id,
+              caracteristica_id: caracteristica,
+              nombre_snapshot: caracteristica,
+              valor_id: null,
+              valor: 'Cotton ' + i,
+            });
+        }
+      });
+      let queries = 0,
+        sqlMs = 0;
+      const instrumented = {
+        read: <T>(work: (db: CatalogDatabase) => Promise<T>) =>
+          database.read(async (db) => {
+            const started = performance.now();
+            try {
+              return await work(
+                new Proxy(db, {
+                  get(target, key, receiver) {
+                    if (key === 'transaction')
+                      return (
+                        callback: (tx: CatalogTransaction) => Promise<T>,
+                        config: Parameters<CatalogDatabase['transaction']>[1],
+                      ) =>
+                        target.transaction(
+                          (tx) =>
+                            callback(
+                              new Proxy(tx, {
+                                get(t, k, r) {
+                                  const member = Reflect.get(t, k, r);
+                                  if (k === 'select' || k === 'execute')
+                                    return (...args: unknown[]) => {
+                                      queries++;
+                                      return Reflect.apply(member, t, args);
+                                    };
+                                  return typeof member === 'function'
+                                    ? member.bind(t)
+                                    : member;
+                                },
+                              }),
+                            ),
+                          config,
+                        );
+                    return Reflect.get(target, key, receiver);
+                  },
+                }),
+              );
+            } finally {
+              sqlMs += performance.now() - started;
+            }
+          }),
+      } as Database;
+      const versions = [
+        new LegacyDemoList(instrumented),
+        new PostgresCatalogRepository(instrumented),
+      ];
+      const base: ProductQuery = {
+        canal: 'MARKETPLACE',
+        q: marker,
+        pagina: 1,
+        tamanio: 4,
+        orden: 'NOMBRE_ASC',
+      };
+      for (const tamanio of [4, 24])
+        for (const orden of ['NOMBRE_ASC', 'NOMBRE_DESC'] as const)
+          for (const pagina of [1, 2]) {
+            const results = [];
+            for (const [index, reads] of versions.entries()) {
+              queries = 0;
+              sqlMs = 0;
+              let pricingMs = 0;
+              const signals = new CatalogTelemetry();
+              const measure = signals.measure.bind(signals);
+              signals.measure = async (stage, work, correlation) => {
+                const started = performance.now();
+                try {
+                  return await measure(stage, work, correlation);
+                } finally {
+                  if (stage === 'DEMO_PRICING')
+                    pricingMs = performance.now() - started;
+                }
+              };
+              const service = new CommercialService(
+                reads,
+                {} as TaxonomyClient,
+                { enabled: false },
+                { marketplaceDemoPreview: true } as CatalogConfig,
+                {
+                  currentPrice: async (id) => {
+                    await pause(2);
+                    return missingPrice.has(id)
+                      ? null
+                      : {
+                          precio_regular: 10,
+                          precio_oferta: null,
+                          currency: 'PEN',
+                        };
+                  },
+                },
+                undefined,
+                signals,
+              );
+              const started = performance.now();
+              const response = await service.list({
+                ...base,
+                tamanio,
+                orden,
+                pagina,
+              });
+              const totalMs = performance.now() - started;
+              results.push(response);
+              expect(queries).toBe(index === 0 ? 79 : 4);
+              process.stdout.write(
+                JSON.stringify({
+                  evidence: 'PERF-49-controlled-postgres-pricing-fixture',
+                  version: index === 0 ? '6278b686-legacy' : 'candidate',
+                  tamanio,
+                  orden,
+                  pagina,
+                  queries,
+                  sqlMs,
+                  pricingMs,
+                  totalMs,
+                  items: response.items.length,
+                  total: response.total,
+                }) + '\n',
+              );
+            }
+            expect(results[1]).toEqual(results[0]);
+            expect(results[1].total).toBe(25);
+          }
+      for (const filter of [
+        { categoriaId: marker },
+        { marcaId: marker },
+        { categoriaId: marker, marcaId: marker },
+        { q: marker + '-absent' },
+      ]) {
+        expect(
+          await versions[1].listDemoCandidates({ ...base, ...filter }, 100),
+        ).toEqual(
+          await versions[0].listDemoCandidates({ ...base, ...filter }, 100),
+        );
+      }
+      for (const reads of versions)
+        await expect(reads.listDemoCandidates(base, 35)).rejects.toThrow();
+      expect((await versions[1].listCandidates(base)).items).toEqual([]);
+    }, 30000);
 
     it('JOINT-01: commits aggregate/Outbox, transports requested/results through a real broker, deduplicates Inbox and reconnects', async () => {
       // Seed an internal BORRADOR coordination fixture, not a mocked HTTP or Taxonomy flow.
