@@ -63,7 +63,7 @@ Estos son **puntos de partida**, no un certificado de que el modo completo del #
 | Inventory — Taco | `INVENTORY_DEMO_NO_AUTH_ENABLED` + `INVENTORY_DEMO_GATEWAY_IPS` limitan **dos** operaciones comerciales; operaciones administrativas siguen bajo guards de usuario. | Ampliar únicamente el alcance permitido por #144, tras definir contexto no humano y perímetro. No convertir en bypass público ni suprimir garantías de movimientos de stock. |
 | Promotions — Cueva | Guards reales exigen JWT. `blockedCommercialContext` y `blockedAdminReferences` impiden ciertas operaciones hasta integrar proveedores comerciales autorizados. | Implementar mecanismo reversible **y** conectar proveedores internos reales. JWT no es el único bloqueo; no deshabilitar las verificaciones de referencias por estar en demo. |
 | Bulk — Marco | En `master`, el módulo HTTP registra health/readiness; faltan endpoints funcionales contractuales conectados. | Implementar API real además de la política de acceso. |
-| Combos — Marco (decisión vigente de liderazgo conforme a Backend #144) | En `master` y rama `poma`, `combos-svc` conserva solo `health`. `AGENTS.md` y `README.md` ya identifican a Marco como owner de código, pero issues #79–#87 están asignados a Poma. | Reasignar seguimiento a Marco preservando historia y ejecutar implementación real; el modo demo no convierte el scaffold en un servicio funcional. |
+| Combos — Marco (decisión vigente de liderazgo conforme a Backend #144) | En `master` y rama `poma`, `combos-svc` conserva solo `health`. `AGENTS.md` y `README.md` identifican a Marco como owner de código; issues #79–#87 fueron reasignados a Marco y Poma queda concentrado en Catalog, preservando el historial. | Reasignar seguimiento a Marco preservando historia y ejecutar implementación real; el modo demo no convierte el scaffold en un servicio funcional. |
 
 **Referencias operativas:** [#144](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/144), [#107](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/107), `AGENTS.md`, `ops/oracle/GUIA_DEVTEAM.md`, `ops/oracle/CONTRATO_DESPLIEGUE.md`, `ops/oracle/RABBITMQ_COMPATIBILIDAD.md`, documentación de cada servicio y OpenAPI/AsyncAPI de G6 Docs. Esta política no reemplaza ninguna de ellas.
 
@@ -109,7 +109,7 @@ La prueba D-03 exige token **emitido realmente por G7**: si aún no se dispone d
 
 **Transversales Backend:** #144, #107, #106, #21, #109, #110, #111, #113 y #115. En #29 solo indicar que la política **no sustituye** los gates AMQP; no cambiar acuerdos de nombres físicos.
 **Seguimiento de servicios:** Catalog #51, Taxonomy #42, Pricing #60, Price Audit #69, Inventory #105, Promotions #78, Bulk #96 y Combos #87.
-**Combos:** además del #87, reasignar los issues Backend #79–#86 a Marco, después de comprobar asignaciones vigentes; conservar responsables históricos en el texto original y no modificar sus entregas previas.
+**Combos:** además del #87, los issues Backend #79–#86 se reasignaron a Marco tras comprobar asignaciones vigentes; conservar responsables históricos en el texto original y no modificar sus entregas previas.
 **Frontend:** #33, #45 y #34 (Combos); otros issues de frontend solo si se modifica la selección API/demo en su implementación.
 
 En cada issue de seguimiento se exige:
