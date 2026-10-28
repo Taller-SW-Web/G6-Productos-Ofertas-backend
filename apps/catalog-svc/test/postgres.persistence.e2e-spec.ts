@@ -382,7 +382,15 @@ describe.skipIf(!dockerAvailable)(
             const child = await repository.insertVariant(tx, {
               product_id: row.id,
               sku: marker + '-child-' + i,
-              identifying_key: { size: i },
+              identifying_key: { size: { valor: i } },
+            });
+            await repository.insertVariantAttribute(tx, {
+              variant_id: child.id,
+              caracteristica_id: 'size',
+              nombre_snapshot: 'Size',
+              valor_id: null,
+              valor: i,
+              es_identificador: true,
             });
             for (let j = 0; j < (i === 3 ? 103 : 2); j++)
               await repository.insertVariantImage(tx, {
