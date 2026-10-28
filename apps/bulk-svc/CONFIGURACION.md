@@ -1,4 +1,4 @@
-# Configuración de `bulk-svc` (#88)
+# Configuración de `bulk-svc` (#88/#89)
 
 ## Variables
 
@@ -45,7 +45,13 @@ Estos límites son política operativa de #88, no límites funcionales de import
 
 `GET /health` responde `200` si el proceso HTTP está vivo y no consulta dependencias. `GET /health/readiness` ejecuta `SELECT 1 FROM bulk.batch_jobs LIMIT 0`; devuelve `200` solo cuando el schema/tabla es accesible, y `503` ante URL ausente, conexión fallida, timeout o permisos insuficientes. Las respuestas no incluyen detalles internos. El pool es diferido por `pg` y se cierra durante el apagado de NestJS.
 
-Sin `DATABASE_URL`, se espera `/health` `200` y `/health/readiness` `503`. Esta compatibilidad mantiene el smoke genérico de CI sin declarar el servicio listo.
+Sin `DATABASE_URL`, se espera `/health` `200` y `/health/readiness` `503`. Esta compatibilidad mantiene el smoke genérico de CI sin declarar el servicio listo. El adaptador Drizzle queda no disponible y no abre otra conexión; el proveedor de persistencia no impide el arranque ni el liveness.
+
+## Persistencia Bulk (#89)
+
+Drizzle usa exclusivamente la misma instancia `pg.Pool` que `BulkReadinessService` recibe por `BULK_READINESS_POOL`. No se crea un pool adicional ni se ejecuta SQL durante el bootstrap. El cierre del pool continúa siendo responsabilidad única de `BulkReadinessService`. Los dobles de readiness no se adaptan a Drizzle: el proveedor solo crea la base Drizzle cuando recibe un `Pool` real.
+
+El schema `bulk` se prepara con el bootstrap y el migrador oficiales de Docs. La aplicación no ejecuta DDL ni modifica `schema_migrations`; los triggers y el resto del DDL permanecen bajo autoridad de la migración oficial. En pruebas, configure únicamente una URL loopback con `sslmode=disable` explícito y una base desechable.
 
 ## Validación local aislada
 

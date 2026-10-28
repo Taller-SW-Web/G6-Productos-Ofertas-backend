@@ -10,6 +10,8 @@ import {
   BulkReadinessService,
   createBulkReadinessPool,
 } from './health/bulk-readiness.service.js';
+import { bulkDatabaseProvider } from './persistence/bulk.database.js';
+import { bulkRepositoryProvider } from './persistence/bulk.repository.js';
 
 @Module({
   imports: [],
@@ -17,6 +19,8 @@ import {
   providers: [
     BulkSvcService,
     BulkReadinessService,
+    bulkDatabaseProvider,
+    bulkRepositoryProvider,
     {
       provide: BULK_ENVIRONMENT,
       useFactory: () => parseBulkEnvironment(process.env),

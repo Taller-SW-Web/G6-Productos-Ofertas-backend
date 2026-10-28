@@ -20,6 +20,7 @@ export function record(value: unknown): value is Record<string, unknown> {
 }
 export const uuid =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const COMMERCIAL_PRICING_READ = 'pricing:commercial-read';
 
 function decode(value: string): unknown {
   if (!/^[\w-]+$/.test(value)) throw new Error();
@@ -64,11 +65,16 @@ export class PricingReadGuard implements CanActivate {
       request.headers.authorization ?? '',
     );
     if (!bearer) throw new PricingHttpError(401, 'TOKEN_INVALIDO');
-    await this.authorize(bearer[1]);
+    const handler = context.getHandler();
+    await this.authorize(
+      bearer[1],
+      !!handler &&
+        Reflect.getMetadata(COMMERCIAL_PRICING_READ, handler) === true,
+    );
     return true;
   }
 
-  async authorize(token: string): Promise<void> {
+  async authorize(token: string, commercial = false): Promise<void> {
     if (!this.config.auth)
       throw new PricingHttpError(503, 'SERVICIO_NO_DISPONIBLE');
     try {
@@ -109,25 +115,43 @@ export class PricingReadGuard implements CanActivate {
       )
         throw new Error();
       const now = Math.floor(Date.now() / 1000);
+      const service = commercial && claims.tipo === 'servicio';
       if (
         claims.iss !== this.config.auth.issuer ||
-        claims.tipo !== 'acceso' ||
+        (!service && claims.tipo !== 'acceso') ||
         typeof claims.sub !== 'string' ||
-        !uuid.test(claims.sub) ||
-        !Number.isSafeInteger(claims.iat) ||
-        (claims.iat as number) > now ||
+        !claims.sub.trim() ||
+        (!service && !uuid.test(claims.sub)) ||
+        ((!service || claims.iat !== undefined) &&
+          (!Number.isSafeInteger(claims.iat) ||
+            (claims.iat as number) > now)) ||
         !Number.isSafeInteger(claims.exp) ||
         (claims.exp as number) <= now ||
         (claims.nbf !== undefined &&
           (!Number.isSafeInteger(claims.nbf) ||
             (claims.nbf as number) > now)) ||
-        typeof claims.jti !== 'string' ||
-        !claims.jti.trim() ||
-        !Array.isArray(claims.roles) ||
-        !claims.roles.every((role) => typeof role === 'string')
+        ((!service || claims.jti !== undefined) &&
+          (typeof claims.jti !== 'string' || !claims.jti.trim())) ||
+        (!service &&
+          (!Array.isArray(claims.roles) ||
+            !claims.roles.every((role) => typeof role === 'string')))
       )
         throw new Error();
-      if (!claims.roles.includes('GESTOR_COMERCIAL'))
+      if (service) {
+        const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+        if (!audiences.includes('api-productos'))
+          throw new PricingHttpError(401, 'TOKEN_INVALIDO');
+        if (
+          typeof claims.scope !== 'string' ||
+          !claims.scope.split(' ').includes('precios:leer') ||
+          !['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'].includes(
+            claims.sub,
+          )
+        )
+          throw new PricingHttpError(403, 'SCOPE_INSUFICIENTE');
+        return;
+      }
+      if (!(claims.roles as string[]).includes('GESTOR_COMERCIAL'))
         throw new PricingHttpError(403, 'SCOPE_INSUFICIENTE');
     } catch (error) {
       if (error instanceof PricingHttpError) throw error;
