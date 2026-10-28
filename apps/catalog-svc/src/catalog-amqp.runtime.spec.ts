@@ -12,6 +12,7 @@ vi.mock('amqplib', async (importOriginal) => ({
 
 describe('Catalog AMQP lifecycle (transport doubles, not broker E2E)', () => {
   const settings = {
+    isolatedTestRecovery: true as const,
     connection: {
       url: 'amqp://catalog:fixture@localhost/g6-productos-ofertas',
       user: 'catalog',
@@ -125,7 +126,30 @@ describe('Catalog AMQP lifecycle (transport doubles, not broker E2E)', () => {
     await active?.onModuleDestroy();
     active = undefined;
     vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
+  it.each([false, true])(
+    'blocks shared runtime without an approved recovery disposition (test flag: %s)',
+    async (isolated) => {
+      vi.stubEnv('NODE_ENV', isolated ? 'production' : 'test');
+      const messages = { consume: vi.fn(), relayOne: vi.fn() };
+      active = new CatalogAmqpRuntime(
+        messages as unknown as CatalogMessageService,
+        {
+          connection: settings.connection,
+          ...(isolated ? { isolatedTestRecovery: true as const } : {}),
+        },
+        { record } as unknown as CatalogTelemetry,
+      );
+      active.onModuleInit();
+      await vi.advanceTimersByTimeAsync(60000);
+      expect(connect).not.toHaveBeenCalled();
+      expect(messages.consume).not.toHaveBeenCalled();
+      expect(messages.relayOne).not.toHaveBeenCalled();
+      expect(record).toHaveBeenCalledExactlyOnceWith('AMQP_RECOVERY_BLOCKED');
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
   it('reconnects after a connection failure and after server-side consumer cancellation', async () => {
     const first = fixture(),
       second = fixture();
@@ -138,6 +162,11 @@ describe('Catalog AMQP lifecycle (transport doubles, not broker E2E)', () => {
     expect(record).toHaveBeenCalledWith('AMQP_CYCLE_PENDING');
     await vi.advanceTimersByTimeAsync(2000);
     expect(first.consumer.consume).toHaveBeenCalledOnce();
+    expect(first.consumer.consume).toHaveBeenCalledWith(
+      'po.catalogo.q',
+      expect.any(Function),
+      { noAck: false },
+    );
     first.deliver(null);
     await flush();
     expect(first.connection.close).toHaveBeenCalledOnce();
@@ -186,6 +215,50 @@ describe('Catalog AMQP lifecycle (transport doubles, not broker E2E)', () => {
     expect(f.consumer.ack).not.toHaveBeenCalled();
     expect(f.connection.close).toHaveBeenCalledOnce();
     expect(f.publisher.publish.mock.calls[0]?.[0]).toBe('po.retry.x');
+  });
+  it.each(['DUPLICATE', 'STALE', 'TERMINAL'] as const)(
+    'ACKs a durably committed %s without a technical retry in the isolated fixture',
+    async (result) => {
+      const f = fixture();
+      vi.mocked(connect).mockResolvedValue(
+        f.connection as unknown as ChannelModel,
+      );
+      start({ consume: vi.fn(async () => result) });
+      await flush();
+      const message = delivery();
+      f.deliver(message);
+      await flush();
+      expect(f.consumer.ack).toHaveBeenCalledExactlyOnceWith(message);
+      expect(f.publisher.publish).not.toHaveBeenCalled();
+    },
+  );
+  it('ACKs a committed business rejection, but disposes malformed JSON only in the explicit isolated DLQ fixture', async () => {
+    const f = fixture();
+    vi.mocked(connect).mockResolvedValue(
+      f.connection as unknown as ChannelModel,
+    );
+    const service = start();
+    await flush();
+    const message = delivery();
+    const body = JSON.parse(message.content.toString());
+    body.name = 'inventory.sku.initialization.rejected';
+    body.data.status = 'REJECTED';
+    body.data.code = 'SKU_INVALIDO';
+    message.content = Buffer.from(JSON.stringify(body));
+    f.deliver(message);
+    await flush();
+    expect(service.consume).toHaveBeenCalledOnce();
+    expect(f.consumer.ack).toHaveBeenCalledExactlyOnceWith(message);
+    expect(f.publisher.publish).not.toHaveBeenCalled();
+    const invalid = delivery();
+    invalid.content = Buffer.from('{private-invalid');
+    f.deliver(invalid);
+    await flush();
+    expect(service.consume).toHaveBeenCalledOnce();
+    expect(f.publisher.publish.mock.calls[0][0]).toBe('po.dlx.x');
+    expect(f.publisher.publish.mock.calls[0][1]).toBe('po.catalogo.q');
+    expect(f.consumer.ack).toHaveBeenCalledWith(invalid);
+    expect(JSON.stringify(record.mock.calls)).not.toContain('private-invalid');
   });
   it('bounds shutdown when a use case has not drained, preserving redelivery by closing the connection', async () => {
     const f = fixture();

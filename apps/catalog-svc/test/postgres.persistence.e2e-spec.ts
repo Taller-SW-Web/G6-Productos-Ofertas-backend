@@ -586,7 +586,7 @@ describe.skipIf(!dockerAvailable)(
         jointBroker.settings,
       );
       jointRuntime.onModuleInit();
-      const requested = await jointBroker.next('po.inventory.q');
+      const requested = await jointBroker.next('po.inventario.q');
       expect(JSON.parse(requested.content.toString()).message_id).toBe(
         messageId,
       );
@@ -680,7 +680,7 @@ describe.skipIf(!dockerAvailable)(
       await jointBroker.resume();
       expect(
         JSON.parse(
-          (await jointBroker.next('po.inventory.q')).content.toString(),
+          (await jointBroker.next('po.inventario.q')).content.toString(),
         ).message_id,
       ).toBe(followupId);
       await jointRuntime.onModuleDestroy();

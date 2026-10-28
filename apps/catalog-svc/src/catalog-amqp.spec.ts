@@ -38,7 +38,7 @@ describe('Confirmed catalog publisher (transport fixture, not live broker eviden
     await Promise.resolve();
     expect(done).toBe(false);
     const args = channel.publish.mock.calls[0] as unknown as unknown[];
-    expect(args[0]).toBe('po.events.x');
+    expect(args[0]).toBe('po.eventos.x');
     expect(args[1]).toBe(message.name);
     expect(args[3]).toMatchObject({
       persistent: true,
@@ -63,6 +63,53 @@ describe('Confirmed catalog publisher (transport fixture, not live broker eviden
     confirm();
     await expect(work).rejects.toThrow('AMQP_PUBLISH_UNCONFIRMED');
   });
+  it.each([
+    [
+      'pricing.product.initialization.requested',
+      'po.comandos.x',
+      {
+        product_id: 'p',
+        sku_base: '0001',
+        precio_regular: 10,
+        moneda: 'PEN',
+        channel_id: null,
+        motivo_cambio: 'ALTA_PRODUCTO',
+      },
+    ],
+    [
+      'inventory.sku.initialization.requested',
+      'po.comandos.x',
+      { product_id: 'p', sku: '0001', variant_id: null },
+    ],
+    ['catalog.product.deactivated', 'po.eventos.x', { product_id: 'p' }],
+    ['catalog.sku.deactivated', 'po.eventos.x', { sku: '0001' }],
+    [
+      'catalog.master.deactivation.checked',
+      'po.resultados.x',
+      {
+        entity_type: 'CATEGORY',
+        entity_id: 'category',
+        version: 1,
+        result: 'CLEAR',
+      },
+    ],
+    ['catalog.bulk.upsert.completed', 'po.resultados.x', {}],
+    ['catalog.bulk.upsert.rejected', 'po.resultados.x', {}],
+  ] as const)(
+    'uses the reconciled physical exchange for %s without rewriting the envelope',
+    async (name, exchange, data) => {
+      const { channel, publisher } = fixture();
+      const message = envelope(name, data, randomUUID(), randomUUID());
+      const work = publisher.publish(message);
+      await Promise.resolve();
+      const args = channel.publish.mock.calls[0];
+      expect(args[0]).toBe(exchange);
+      expect(args[1]).toBe(name);
+      expect(JSON.parse(args[2].toString())).toEqual(message);
+      args[4]();
+      await work;
+    },
+  );
   it('honors backpressure and fails unconfirmed publications on channel closure', async () => {
     const { channel, publisher } = fixture(false);
     let done = false;

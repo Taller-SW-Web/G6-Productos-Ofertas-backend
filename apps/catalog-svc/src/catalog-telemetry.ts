@@ -4,6 +4,7 @@ import { isCorrelationId } from './correlation.js';
 import { SanitizedLogger } from './sanitized-logger.js';
 
 export type CatalogSignal =
+  | 'AMQP_RECOVERY_BLOCKED'
   | 'AMQP_CONNECTED'
   | 'AMQP_CONNECTION_FAILURE'
   | 'AMQP_CHANNEL_FAILURE'

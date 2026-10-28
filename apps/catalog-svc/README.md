@@ -188,6 +188,14 @@ Configuración adicional (suministrar secretos fuera del repositorio):
 
 - `RABBITMQ_URL`: AMQP(S), usuario/contraseña y vhost `g6-productos-ofertas`.
   Si no se configura, el transporte no arranca y los mensajes quedan en Outbox.
+  Con URL configurada el runtime también permanece bloqueado y emite
+  `AMQP_RECOVERY_BLOCKED`: AsyncAPI 0.6.0-rc.3 no aprueba ni aprovisiona
+  retry/DLX. No conecta, consume, ACKea ni publica pendientes en el broker
+  compartido. HTTP y las transacciones locales siguen independientes.
+  La inyección `isolatedTestRecovery: true` solo funciona con NODE_ENV=test
+  en pruebas desechables; ninguna variable de entorno habilita ese ensayo.
+  Nombres físicos del cliente: `po.comandos.x`, `po.eventos.x`,
+  `po.resultados.x`, `po.catalogo.q`. Ver [auditoría #48](AUDITORIA-48.md).
 - `CATALOG_AMQP_PRODUCER_USERS`: objeto JSON que asocia `pricing-svc`,
   `inventory-svc`, `taxonomy-svc` y `bulk-svc` a usuarios broker distintos entre sí
   y del usuario Catálogo. Se valida `user_id` de RabbitMQ; requiere permisos

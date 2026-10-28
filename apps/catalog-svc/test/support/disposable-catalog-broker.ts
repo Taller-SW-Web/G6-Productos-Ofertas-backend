@@ -51,22 +51,22 @@ export class DisposableCatalogBroker {
     this.base = '@127.0.0.1:' + port + '/g6-productos-ofertas';
     const admin = await this.open('catalog-joint');
     this.channel = await admin.createChannel();
-    for (const exchange of ['po.commands.x', 'po.events.x', 'po.results.x'])
+    for (const exchange of ['po.comandos.x', 'po.eventos.x', 'po.resultados.x'])
       await this.channel.assertExchange(exchange, 'topic', { durable: true });
     for (const exchange of ['po.retry.x', 'po.dlx.x'])
       await this.channel.assertExchange(exchange, 'direct', { durable: true });
-    for (const queue of ['po.catalog.q', 'po.inventory.q', 'po.pricing.q'])
+    for (const queue of ['po.catalogo.q', 'po.inventario.q', 'po.precios.q'])
       await this.channel.assertQueue(queue, {
         durable: true,
         arguments: { 'x-queue-type': 'quorum' },
       });
     for (const [prefix, queue] of [
-      ['inventory', 'po.inventory.q'],
-      ['pricing', 'po.pricing.q'],
+      ['inventory', 'po.inventario.q'],
+      ['pricing', 'po.precios.q'],
     ]) {
       await this.channel.bindQueue(
         queue,
-        'po.commands.x',
+        'po.comandos.x',
         prefix +
           '.' +
           (prefix === 'pricing' ? 'product' : 'sku') +
@@ -74,8 +74,8 @@ export class DisposableCatalogBroker {
       );
       for (const result of ['completed', 'rejected'])
         await this.channel.bindQueue(
-          'po.catalog.q',
-          'po.results.x',
+          'po.catalogo.q',
+          'po.resultados.x',
           prefix +
             '.' +
             (prefix === 'pricing' ? 'product' : 'sku') +
@@ -104,26 +104,27 @@ export class DisposableCatalogBroker {
         '.*',
       ]);
     }
-    await this.channel.assertQueue('po.catalog.q.retry', {
+    await this.channel.assertQueue('po.catalogo.q.retry', {
       durable: true,
       arguments: {
         'x-message-ttl': 30000,
         'x-dead-letter-exchange': '',
-        'x-dead-letter-routing-key': 'po.catalog.q',
+        'x-dead-letter-routing-key': 'po.catalogo.q',
       },
     });
     await this.channel.bindQueue(
-      'po.catalog.q.retry',
+      'po.catalogo.q.retry',
       'po.retry.x',
-      'po.catalog.q',
+      'po.catalogo.q',
     );
-    await this.channel.assertQueue('po.catalog.q.dlq', { durable: true });
+    await this.channel.assertQueue('po.catalogo.q.dlq', { durable: true });
     await this.channel.bindQueue(
-      'po.catalog.q.dlq',
+      'po.catalogo.q.dlq',
       'po.dlx.x',
-      'po.catalog.q',
+      'po.catalogo.q',
     );
     this.settings = {
+      isolatedTestRecovery: true,
       connection: {
         url: 'amqp://catalog-joint:' + this.password + this.base,
         user: 'catalog-joint',
@@ -174,7 +175,7 @@ export class DisposableCatalogBroker {
       channel = await connection.createConfirmChannel();
     channel.on('error', () => undefined);
     await new ConfirmedCatalogPublisher(channel, producer + '-joint').raw(
-      'po.results.x',
+      'po.resultados.x',
       String(body.name),
       Buffer.from(JSON.stringify(body)),
       {

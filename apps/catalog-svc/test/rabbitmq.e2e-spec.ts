@@ -89,48 +89,48 @@ describe.skipIf(!dockerAvailable)(
       const confirms = await connection.createConfirmChannel();
       confirms.on('error', () => undefined);
       publisher = new ConfirmedCatalogPublisher(confirms, 'catalog-test');
-      await channel.assertExchange('po.unrouted.x', 'fanout', {
+      await channel.assertExchange('po.sin-ruta.x', 'fanout', {
         durable: true,
       });
-      for (const name of ['po.commands.x', 'po.events.x', 'po.results.x'])
+      for (const name of ['po.comandos.x', 'po.eventos.x', 'po.resultados.x'])
         await channel.assertExchange(name, 'topic', {
           durable: true,
-          alternateExchange: 'po.unrouted.x',
+          alternateExchange: 'po.sin-ruta.x',
         });
       for (const name of ['po.retry.x', 'po.dlx.x'])
         await channel.assertExchange(name, 'direct', { durable: true });
-      await channel.assertQueue('po.unrouted.q', { durable: true });
-      await channel.bindQueue('po.unrouted.q', 'po.unrouted.x', '');
-      for (const queue of ['po.catalog.q', 'po.inventory.q'])
+      await channel.assertQueue('po.sin-ruta.q', { durable: true });
+      await channel.bindQueue('po.sin-ruta.q', 'po.sin-ruta.x', '');
+      for (const queue of ['po.catalogo.q', 'po.inventario.q'])
         await channel.assertQueue(queue, {
           durable: true,
           arguments: { 'x-queue-type': 'quorum' },
         });
       await channel.bindQueue(
-        'po.inventory.q',
-        'po.commands.x',
+        'po.inventario.q',
+        'po.comandos.x',
         'inventory.sku.initialization.requested',
       );
       for (const key of [
         'inventory.sku.initialization.completed',
         'inventory.sku.initialization.rejected',
       ])
-        await channel.bindQueue('po.catalog.q', 'po.results.x', key);
-      await channel.assertQueue('po.catalog.q.retry', {
+        await channel.bindQueue('po.catalogo.q', 'po.resultados.x', key);
+      await channel.assertQueue('po.catalogo.q.retry', {
         durable: true,
         arguments: {
           'x-message-ttl': 30000,
           'x-dead-letter-exchange': '',
-          'x-dead-letter-routing-key': 'po.catalog.q',
+          'x-dead-letter-routing-key': 'po.catalogo.q',
         },
       });
       await channel.bindQueue(
-        'po.catalog.q.retry',
+        'po.catalogo.q.retry',
         'po.retry.x',
-        'po.catalog.q',
+        'po.catalogo.q',
       );
-      await channel.assertQueue('po.catalog.q.dlq', { durable: true });
-      await channel.bindQueue('po.catalog.q.dlq', 'po.dlx.x', 'po.catalog.q');
+      await channel.assertQueue('po.catalogo.q.dlq', { durable: true });
+      await channel.bindQueue('po.catalogo.q.dlq', 'po.dlx.x', 'po.catalogo.q');
       docker([
         'exec',
         container,
@@ -169,7 +169,7 @@ describe.skipIf(!dockerAvailable)(
         randomUUID(),
       );
       await publisher.publish(message);
-      const received = await next('po.inventory.q');
+      const received = await next('po.inventario.q');
       expect(JSON.parse(received.content.toString())).toEqual(message);
       expect(received.properties.deliveryMode).toBe(2);
       expect(received.properties.userId).toBe('catalog-test');
@@ -183,15 +183,15 @@ describe.skipIf(!dockerAvailable)(
         randomUUID(),
       );
       await publisher.publish(message);
-      const captured = await next('po.unrouted.q');
+      const captured = await next('po.sin-ruta.q');
       expect(JSON.parse(captured.content.toString()).message_id).toBe(
         message.message_id,
       );
       channel.ack(captured);
-      expect(await channel.get('po.catalog.q', { noAck: false })).toBe(false);
+      expect(await channel.get('po.catalogo.q', { noAck: false })).toBe(false);
     });
     it('rejects basic.return even when the broker also confirms the publish', async () => {
-      await channel.unbindQueue('po.unrouted.q', 'po.unrouted.x', '');
+      await channel.unbindQueue('po.sin-ruta.q', 'po.sin-ruta.x', '');
       try {
         await expect(
           publisher.publish(
@@ -199,10 +199,10 @@ describe.skipIf(!dockerAvailable)(
           ),
         ).rejects.toThrow('AMQP_PUBLISH_UNCONFIRMED');
       } finally {
-        await channel.bindQueue('po.unrouted.q', 'po.unrouted.x', '');
+        await channel.bindQueue('po.sin-ruta.q', 'po.sin-ruta.x', '');
       }
     });
-    it('uses the adopted direct retry exchange and returns the same message after 30 seconds', async () => {
+    it('tests the unapproved retry design only on the disposable fixture, returning the same message after 30 seconds', async () => {
       const message = envelope(
         'inventory.sku.initialization.requested',
         { sku: '000', product_id: randomUUID() },
@@ -211,7 +211,7 @@ describe.skipIf(!dockerAvailable)(
       );
       await publisher.raw(
         'po.retry.x',
-        'po.catalog.q',
+        'po.catalogo.q',
         Buffer.from(JSON.stringify(message)),
         {
           messageId: message.message_id,
@@ -219,11 +219,51 @@ describe.skipIf(!dockerAvailable)(
           headers: { 'x-retry-count': 1 },
         },
       );
-      expect(await channel.get('po.catalog.q', { noAck: false })).toBe(false);
-      const retried = await next('po.catalog.q', 40000);
+      expect(await channel.get('po.catalogo.q', { noAck: false })).toBe(false);
+      const retried = await next('po.catalogo.q', 40000);
       expect(JSON.parse(retried.content.toString())).toEqual(message);
       channel.ack(retried);
     }, 45000);
+    it('keeps a real queued message untouched when shared recovery is blocked', async () => {
+      const consume = vi.fn(),
+        relayOne = vi.fn();
+      const runtime = new CatalogAmqpRuntime(
+        { consume, relayOne } as unknown as CatalogMessageService,
+        {
+          connection: {
+            url,
+            user: 'catalog-test',
+            producerUsers: {
+              'inventory-svc': 'inventory-test',
+              'pricing-svc': 'pricing-test',
+              'taxonomy-svc': 'taxonomy-test',
+              'bulk-svc': 'bulk-test',
+            },
+          },
+        },
+      );
+      const content = Buffer.from('isolated-pending-message');
+      await publisher.raw(
+        'po.resultados.x',
+        'inventory.sku.initialization.completed',
+        content,
+        { messageId: randomUUID() },
+      );
+      try {
+        runtime.onModuleInit();
+        await pause(100);
+        expect((await channel.checkQueue('po.catalogo.q')).consumerCount).toBe(
+          0,
+        );
+        expect(consume).not.toHaveBeenCalled();
+        expect(relayOne).not.toHaveBeenCalled();
+        const pending = await next('po.catalogo.q');
+        expect(pending.content).toEqual(content);
+        channel.ack(pending);
+      } finally {
+        await runtime.onModuleDestroy();
+      }
+    });
     it('retains the broker delivery until the committed-use-case promise resolves', async () => {
       let release!: () => void, received!: () => void;
       const gate = new Promise<void>((resolve) => {
@@ -242,6 +282,7 @@ describe.skipIf(!dockerAvailable)(
           relayOne: async () => 'EMPTY',
         } as unknown as CatalogMessageService,
         {
+          isolatedTestRecovery: true,
           connection: {
             url,
             user: 'catalog-test',
@@ -283,14 +324,19 @@ describe.skipIf(!dockerAvailable)(
       await new ConfirmedCatalogPublisher(
         producerChannel,
         'inventory-test',
-      ).raw('po.results.x', result.name, Buffer.from(JSON.stringify(result)), {
-        messageId: result.message_id,
-        correlationId: result.correlation_id,
-      });
+      ).raw(
+        'po.resultados.x',
+        result.name,
+        Buffer.from(JSON.stringify(result)),
+        {
+          messageId: result.message_id,
+          correlationId: result.correlation_id,
+        },
+      );
       await started;
       const stopped = runtime.onModuleDestroy();
       try {
-        const redelivered = await next('po.catalog.q');
+        const redelivered = await next('po.catalogo.q');
         expect(redelivered.fields.redelivered).toBe(true);
         expect(JSON.parse(redelivered.content.toString()).message_id).toBe(
           result.message_id,

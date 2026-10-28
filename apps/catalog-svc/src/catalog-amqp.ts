@@ -36,6 +36,8 @@ export interface CatalogAmqpConfig {
 export const CATALOG_AMQP_SETTINGS = Symbol('CATALOG_AMQP_SETTINGS');
 export interface CatalogAmqpSettings {
   connection?: CatalogAmqpConfig;
+  /** Explicit dependency injection for disposable tests only; never read from env. */
+  isolatedTestRecovery?: true;
 }
 export function readCatalogAmqpConfig(
   env: Record<string, string | undefined> = process.env,
@@ -92,10 +94,10 @@ export class ConfirmedCatalogPublisher implements CatalogPublisher {
       return Promise.reject(new InvalidCatalogMessage());
     const exchange =
       message.kind === 'command'
-        ? 'po.commands.x'
+        ? 'po.comandos.x'
         : message.kind === 'event'
-          ? 'po.events.x'
-          : 'po.results.x';
+          ? 'po.eventos.x'
+          : 'po.resultados.x';
     return this.raw(
       exchange,
       message.name,
@@ -209,6 +211,16 @@ export class CatalogAmqpRuntime implements OnModuleInit, OnModuleDestroy {
   ) {}
   onModuleInit(): void {
     if (!this.config) return;
+    // AsyncAPI rc.3 does not approve/provision retry/DLX. Do not acquire any
+    // delivery or publish incompatible pending payloads until recovery is agreed.
+    // HTTP and local transactional Outbox remain available independently.
+    if (
+      !this.settings.isolatedTestRecovery ||
+      process.env.NODE_ENV !== 'test'
+    ) {
+      this.log('AMQP_RECOVERY_BLOCKED');
+      return;
+    }
     this.timer = setInterval(() => {
       void this.tick();
     }, 2000);
@@ -254,7 +266,7 @@ export class CatalogAmqpRuntime implements OnModuleInit, OnModuleDestroy {
             publisher = this.publisher;
           // Infrastructure owns topology. No assert, bind, purge or declare against shared brokers.
           await consumer.consume(
-            'po.catalog.q',
+            'po.catalogo.q',
             (delivery) => {
               if (!delivery) {
                 this.log('AMQP_CONSUMER_CANCELLED');
@@ -334,7 +346,7 @@ export class CatalogAmqpRuntime implements OnModuleInit, OnModuleDestroy {
     const retry = attempt < 3;
     await publisher.raw(
       retry ? 'po.retry.x' : 'po.dlx.x',
-      'po.catalog.q',
+      'po.catalogo.q',
       delivery.content,
       {
         messageId: delivery.properties.messageId,
