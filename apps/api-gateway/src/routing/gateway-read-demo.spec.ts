@@ -13,7 +13,6 @@ describe('G6 read-only demo Gateway boundary', () => {
     const identity = new GatewayIdentity(
       readGatewaySettings({
         G6_READ_ONLY_DEMO_ENABLED: 'true',
-        GATEWAY_DEMO_NO_AUTH_ENABLED: 'true',
       }),
     );
     const approved = [
