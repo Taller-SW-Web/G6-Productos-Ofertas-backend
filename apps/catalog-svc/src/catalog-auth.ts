@@ -436,15 +436,20 @@ export class CatalogAuthGuard implements CanActivate {
     }
 
     if (
+      principal.kind === 'service' &&
+      !principal.audiences.includes(SECURITY_AUDIENCE)
+    )
+      throw new UnauthorizedException({ code: 'TOKEN_INVALIDO' });
+
+    if (
       (policy.identity === 'user' && principal.kind !== 'user') ||
       (policy.identity === 'service' && principal.kind !== 'service') ||
       (principal.kind === 'user' &&
         policy.roles &&
         !policy.roles.some((role) => principal.roles.includes(role))) ||
       (principal.kind === 'service' &&
-        (!principal.audiences.includes(SECURITY_AUDIENCE) ||
-          (policy.scope !== undefined &&
-            !principal.scopes.includes(policy.scope)) ||
+        ((policy.scope !== undefined &&
+          !principal.scopes.includes(policy.scope)) ||
           (policy.allowedClients !== undefined &&
             !policy.allowedClients.includes(principal.subject))))
     )

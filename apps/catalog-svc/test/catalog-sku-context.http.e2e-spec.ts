@@ -178,7 +178,7 @@ describe('Private Pricing SKU context HTTP contract (local signed RS256/JWKS, is
     ['malformed', 'invalid', 401],
     ['expired', { exp: 1 }, 401],
     ['wrong issuer', { iss: 'https://untrusted.example' }, 401],
-    ['wrong audience', { aud: ['another-api'] }, 403],
+    ['wrong audience', { aud: ['another-api'] }, 401],
     ['missing scope', { scope: 'precios:leer' }, 403],
     ['Marketplace', { sub: 'modulo-marketplace' }, 403],
     ['Catalog identity', { sub: 'modulo-productos' }, 403],

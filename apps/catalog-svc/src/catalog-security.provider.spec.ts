@@ -142,12 +142,8 @@ describe('Marketplace provider security and invalid pagination regression', () =
       expect((await call.expect(401)).body.code).toBe('TOKEN_INVALIDO');
     }
   });
-  it('keeps scope/client/audience 403 ahead of validation, and valid reads return 503 on persistence failure', async () => {
-    for (const claims of [
-      { scope: 'invalid' },
-      { sub: 'modulo-ventas' },
-      { aud: ['other-api'] },
-    ])
+  it('keeps scope/client 403 and audience 401 ahead of validation, and valid reads return 503 on persistence failure', async () => {
+    for (const claims of [{ scope: 'invalid' }, { sub: 'modulo-ventas' }])
       expect(
         (
           await request(app.getHttpServer())
@@ -156,6 +152,11 @@ describe('Marketplace provider security and invalid pagination regression', () =
             .expect(403)
         ).body.code,
       ).toBe('SCOPE_INSUFICIENTE');
+    const wrongAudience = await request(app.getHttpServer())
+      .get(path)
+      .auth(token({ aud: ['other-api'] }), { type: 'bearer' })
+      .expect(401);
+    expect(wrongAudience.body.code).toBe('TOKEN_INVALIDO');
     expect(
       (
         await request(app.getHttpServer())
