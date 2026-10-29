@@ -513,7 +513,7 @@ export class PostgresCatalogRepository {
 
   async findCandidateBySlug(
     slug: string,
-    canal: ProductQuery['canal'] = 'MARKETPLACE',
+    canal?: ProductQuery['canal'],
     readDemo = false,
   ): Promise<(ProductSummary & { variants: CommercialVariant[] }) | null> {
     return this.database.read((db) =>

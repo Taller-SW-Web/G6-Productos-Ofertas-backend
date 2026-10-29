@@ -1,6 +1,6 @@
 export type Canal = 'MARKETPLACE' | 'CHATBOT' | 'RETAIL' | 'VENTAS';
 export interface ProductQuery {
-  canal: Canal;
+  canal?: Canal;
   q?: string;
   categoriaId?: string;
   marcaId?: string;

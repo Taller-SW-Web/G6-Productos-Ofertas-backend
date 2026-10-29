@@ -36,6 +36,7 @@ export class CatalogQueryController {
   @RequireCatalogIdentity({
     demoRead: true,
     identity: 'either',
+    roles: ['GESTOR_COMERCIAL'],
     scope: 'catalogo:leer',
     allowedClients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
   })
@@ -48,7 +49,8 @@ export class CatalogQueryController {
     this.validateCorrelation(correlationId);
     return this.service.product(
       productId,
-      parseProductQuery(query, true).canal,
+      parseProductQuery(query, true, request?.catalogPrincipal?.kind !== 'user')
+        .canal,
       correlationId,
       {
         authorization: request?.headers.authorization,

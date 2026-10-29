@@ -50,23 +50,30 @@ export class CatalogPriceFilter {
 
   private async batch(
     skus: string[],
-    canal: Canal,
+    canal: Canal | undefined,
     at: string,
     correlation: string,
     signal: AbortSignal,
   ): Promise<Array<{ sku: string; effective: string; currency: string }>> {
     if (!this.config?.pricingOrigin || !this.identity) throw new Error();
-    // Commas are structural in the published CSV operation, never split an opaque SKU.
-    if (skus.some((sku) => !sku || sku.includes(','))) throw new Error();
+    // A comma cannot be represented unambiguously by the batch CSV contract.
+    const individual = skus.length === 1 && skus[0].includes(',');
+    if (skus.some((sku) => !sku || (!individual && sku.includes(','))))
+      throw new Error();
     const authorization = await this.identity.authorization(signal);
     signal.throwIfAborted();
     if (!/^Bearer [^\s]+$/i.test(authorization)) throw new Error();
-    const url = new URL('/api/v1/precios', this.config.pricingOrigin);
+    const url = new URL(
+      individual
+        ? '/api/v1/precios/skus/' + encodeURIComponent(skus[0])
+        : '/api/v1/precios',
+      this.config.pricingOrigin,
+    );
     url.search = new URLSearchParams({
-      skus: skus.join(','),
-      canal,
       at,
     }).toString();
+    if (!individual) url.searchParams.set('skus', skus.join(','));
+    if (canal !== undefined) url.searchParams.set('canal', canal);
     const response = await fetch(url, {
       headers: { authorization, 'X-Correlation-Id': correlation },
       redirect: 'error',
@@ -93,8 +100,11 @@ export class CatalogPriceFilter {
       await reader.cancel();
     }
     const text = Buffer.concat(chunks).toString('utf8');
-    const raw: unknown = JSON.parse(text);
-    const body = parseDecimalJson(text);
+    const raw: unknown = individual
+      ? { items: [JSON.parse(text)] }
+      : JSON.parse(text);
+    const parsed = parseDecimalJson(text);
+    const body = individual ? { items: [parsed] } : parsed;
     if (
       !record(body) ||
       !Array.isArray(body.items) ||
@@ -162,6 +172,13 @@ export class CatalogPriceFilter {
     try {
       if (!candidates.length) return [];
       const skus = [...new Set(candidates.map((c) => c.sku))];
+      const csvSkus = skus.filter((sku) => !sku.includes(','));
+      const batches: string[][] = [];
+      for (let start = 0; start < csvSkus.length; start += 100)
+        batches.push(csvSkus.slice(start, start + 100));
+      batches.push(
+        ...skus.filter((sku) => sku.includes(',')).map((sku) => [sku]),
+      );
       const owners = new Map<string, string>();
       for (const row of candidates) {
         if (owners.has(row.sku) && owners.get(row.sku) !== row.productId)
@@ -176,17 +193,16 @@ export class CatalogPriceFilter {
         timer = setTimeout(() => {
           controller.abort();
           reject(new Error('Pricing deadline'));
-        }, 10000);
+        }, 5000);
       });
       const matches = new Set<string>();
       let cursor = 0;
       try {
         const worker = async () => {
-          while (cursor < skus.length) {
-            const start = cursor;
-            cursor += 100;
+          while (cursor < batches.length) {
+            const batch = batches[cursor++];
             const rows = await this.batch(
-              skus.slice(start, start + 100),
+              batch,
               query.canal,
               at,
               correlation,
@@ -206,10 +222,7 @@ export class CatalogPriceFilter {
         await Promise.race([
           deadline,
           Promise.all(
-            Array.from(
-              { length: Math.min(3, Math.ceil(skus.length / 100)) },
-              worker,
-            ),
+            Array.from({ length: Math.min(3, batches.length) }, worker),
           ),
         ]);
       } finally {

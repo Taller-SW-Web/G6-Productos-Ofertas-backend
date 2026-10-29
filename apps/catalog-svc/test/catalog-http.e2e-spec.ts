@@ -141,6 +141,26 @@ describe('Catalog HTTP routes and security (isolated use-case fixtures)', () => 
     await app?.close();
   });
   beforeEach(() => vi.clearAllMocks());
+  it.each([
+    ['/productos', 'list'],
+    ['/productos/p', 'productById'],
+    ['/productos/por-slug/fixture', 'detail'],
+  ] as const)(
+    'allows a human query without a channel at %s',
+    async (path, method) => {
+      await request(app.getHttpServer())
+        .get('/api/v1' + path)
+        .set('Authorization', 'Bearer manager')
+        .expect(200);
+      expect(commercial[method]).toHaveBeenCalledOnce();
+      for (const bearer of ['channel', 'dispatch']) {
+        const response = await request(app.getHttpServer())
+          .get('/api/v1' + path)
+          .set('Authorization', 'Bearer ' + bearer);
+        expect(response.status).toBe(bearer === 'channel' ? 400 : 403);
+      }
+    },
+  );
   const writes = [
     ['post', '/productos', {}, 201, 'createProduct'],
     ['patch', '/productos/p', {}, 200, 'update'],

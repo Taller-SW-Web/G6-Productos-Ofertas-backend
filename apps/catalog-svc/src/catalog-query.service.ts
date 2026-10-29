@@ -77,11 +77,15 @@ export class CatalogQueryService {
     correlationId?: string,
     identity?: TaxonomyIdentity,
   ) {
-    if (typeof channel !== 'string' || !channels.includes(channel as Canal))
+    if (
+      (channel === undefined && !identity?.user) ||
+      (channel !== undefined &&
+        (typeof channel !== 'string' || !channels.includes(channel as Canal)))
+    )
       throw new BadRequestException();
     return this.commercial.productById(
       productId,
-      channel as Canal,
+      channel as Canal | undefined,
       correlationId,
       identity,
     );

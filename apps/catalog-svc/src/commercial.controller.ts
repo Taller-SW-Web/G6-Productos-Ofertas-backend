@@ -32,6 +32,7 @@ export class CommercialController {
     marketplacePreviewRead: true,
     demoRead: true,
     identity: 'either',
+    roles: ['GESTOR_COMERCIAL'],
     scope: 'catalogo:leer',
     allowedClients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
   })
@@ -59,7 +60,11 @@ export class CommercialController {
       (request?.catalogPrincipal?.kind === 'user' &&
         request.catalogPrincipal.roles.includes('GESTOR_COMERCIAL'));
     return this.service.list(
-      parseProductQuery(query),
+      parseProductQuery(
+        query,
+        false,
+        request?.catalogPrincipal?.kind !== 'user',
+      ),
       correlationId,
       administrativeState,
       {
@@ -73,6 +78,7 @@ export class CommercialController {
     marketplacePreviewRead: true,
     demoRead: true,
     identity: 'either',
+    roles: ['GESTOR_COMERCIAL'],
     scope: 'catalogo:leer',
     allowedClients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
   })
@@ -85,7 +91,11 @@ export class CommercialController {
     this.validateCorrelation(correlationId);
     return this.service.detail(
       slug,
-      parseProductQuery(query, true),
+      parseProductQuery(
+        query,
+        true,
+        request?.catalogPrincipal?.kind !== 'user',
+      ),
       correlationId,
       {
         authorization: request?.headers.authorization,

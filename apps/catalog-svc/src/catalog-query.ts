@@ -5,6 +5,7 @@ import { compareDecimal } from './decimal.js';
 export function parseProductQuery(
   input: Record<string, unknown>,
   detail = false,
+  requireChannel = true,
 ): ProductQuery {
   const keys = detail
     ? ['canal']
@@ -26,8 +27,10 @@ export function parseProductQuery(
   }
   const canal = input.canal;
   if (
-    typeof canal !== 'string' ||
-    !['MARKETPLACE', 'CHATBOT', 'RETAIL', 'VENTAS'].includes(canal)
+    (canal === undefined && requireChannel) ||
+    (canal !== undefined &&
+      (typeof canal !== 'string' ||
+        !['MARKETPLACE', 'CHATBOT', 'RETAIL', 'VENTAS'].includes(canal)))
   )
     throw new BadRequestException();
   function integer(key: string, fallback: number, max: number): number {
@@ -79,7 +82,7 @@ export function parseProductQuery(
   )
     throw new BadRequestException();
   return {
-    canal: canal as Canal,
+    canal: canal as Canal | undefined,
     q: input.q as string | undefined,
     categoriaId: input.categoriaId as string | undefined,
     marcaId: input.marcaId as string | undefined,

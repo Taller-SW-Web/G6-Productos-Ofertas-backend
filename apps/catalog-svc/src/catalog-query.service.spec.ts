@@ -62,6 +62,22 @@ describe('CatalogQueryService', () => {
       BadRequestException,
     );
   });
+  it('permits absent channel only for a verified human identity', async () => {
+    commercial.productById.mockResolvedValue({ product_id: 'p-1' });
+    await service.product('p-1', undefined, 'correlation', { user: true });
+    expect(commercial.productById).toHaveBeenCalledWith(
+      'p-1',
+      undefined,
+      'correlation',
+      { user: true },
+    );
+    expect(() => service.product('p-1', undefined)).toThrow(
+      BadRequestException,
+    );
+    expect(() =>
+      service.product('p-1', undefined, undefined, { user: false }),
+    ).toThrow(BadRequestException);
+  });
 
   it('returns the declared 404 codes for missing product and variant', async () => {
     repository.productPreparation.mockResolvedValue(null);

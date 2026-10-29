@@ -222,7 +222,7 @@ describe('D-CAT price filtering (isolated HTTP fixtures, no external grant claim
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('bounds a stalled token provider as well as HTTP to 10 seconds', async () => {
+  it('bounds a stalled token provider as well as HTTP to 5 seconds', async () => {
     vi.useFakeTimers();
     const hanging = new CatalogPriceFilter(
       { pricingOrigin: 'http://pricing-svc:3002' } as CatalogConfig,
@@ -231,7 +231,45 @@ describe('D-CAT price filtering (isolated HTTP fixtures, no external grant claim
     const result = expect(
       hanging.matchingProducts([{ productId: 'p', sku: 's' }], query),
     ).rejects.toMatchObject({ status: 503 });
-    await vi.advanceTimersByTimeAsync(10001);
+    await vi.advanceTimersByTimeAsync(5001);
     await result;
+  });
+
+  it('omits channel for a global human query and rejects channel-specific results', async () => {
+    fetchMock.mockResolvedValue(response([{ ...row('s'), channel_id: null }]));
+    expect(
+      await filter.matchingProducts([{ productId: 'p', sku: 's' }], {
+        ...query,
+        canal: undefined,
+      }),
+    ).toEqual(['p']);
+    expect(
+      new URL(String(fetchMock.mock.calls[0][0])).searchParams.has('canal'),
+    ).toBe(false);
+    fetchMock.mockResolvedValue(response([row('s')]));
+    await expect(
+      filter.matchingProducts([{ productId: 'p', sku: 's' }], {
+        ...query,
+        canal: undefined,
+      }),
+    ).rejects.toMatchObject({ status: 503 });
+  });
+
+  it('uses the individual published operation for an opaque SKU containing commas', async () => {
+    const sku = '000,azul ?#';
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(row(sku)), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    expect(
+      await filter.matchingProducts([{ productId: 'p', sku }], query),
+    ).toEqual(['p']);
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.pathname).toBe(
+      '/api/v1/precios/skus/' + encodeURIComponent(sku),
+    );
+    expect(url.searchParams.has('skus')).toBe(false);
+    expect(url.searchParams.get('canal')).toBe('RETAIL');
   });
 });
