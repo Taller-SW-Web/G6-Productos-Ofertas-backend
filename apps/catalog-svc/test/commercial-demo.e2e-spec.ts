@@ -171,6 +171,7 @@ describe('Marketplace demo preview (HTTP fixtures; Pricing is mocked)', () => {
     expect(repository.listDemoCandidates).toHaveBeenCalledWith(
       expect.objectContaining({ canal: 'MARKETPLACE' }),
       100,
+      undefined,
     );
   });
 

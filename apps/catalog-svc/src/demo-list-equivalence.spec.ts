@@ -82,7 +82,7 @@ describe('Preview list response baseline (#49)', () => {
   } as unknown as pg.Pool);
   const repository = new PostgresCatalogRepository({
     read: <T>(read: (connection: typeof db) => Promise<T>) => read(db),
-  } as Database);
+  } as unknown as Database);
   const pricing = {
     currentPrice: vi.fn(async (id: string) =>
       ids.indexOf(id) % 7 === 0
@@ -186,6 +186,29 @@ describe('Preview list response baseline (#49)', () => {
     statements.length = 0;
     await expect(repository.listDemoCandidates(query, 1)).rejects.toThrow();
     expect(statements).toHaveLength(3); // BEGIN, candidates, ROLLBACK
+  });
+
+  it('keeps one correlation across all four measured stages and every Pricing candidate', async () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    const output = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    try {
+      await service.list(query, id);
+      const logs = output.mock.calls.map(
+        ([line]) => JSON.parse(String(line)).message,
+      );
+      expect(logs.map((log) => log.stage)).toEqual([
+        'DEMO_CANDIDATES_SQL',
+        'DEMO_ENRICHMENT_SQL',
+        'DEMO_PRICING',
+        'DEMO_LIST_TOTAL',
+      ]);
+      expect(logs.every((log) => log.correlationId === id)).toBe(true);
+      expect(pricing.currentPrice).toHaveBeenCalledTimes(30);
+      for (const call of pricing.currentPrice.mock.calls)
+        expect(call).toEqual([expect.any(String), undefined, id]);
+    } finally {
+      output.mockRestore();
+    }
   });
 
   it('handles empty candidates and technical failures without a partial success', async () => {

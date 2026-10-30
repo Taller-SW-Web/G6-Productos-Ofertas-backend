@@ -140,3 +140,24 @@ por defecto. Un eventual cambio del transporte a Pricing requiere contrato
 existente equivalente y prueba con Vera, sin tocar su servicio unilateralmente.
 No se afirma que esta corrección SQL elimine los timeouts de 7 s de G1: falta
 medir el SHA nuevo con PostgreSQL/Pricing reales en el recorrido autorizado.
+
+## Respuestas del equipo y correlación — 29/10/2026
+
+Vera confirmó que el preview consultaba el GET administrativo por producto,
+no el precio comercial SKU/canal, y que faltaba X-Correlation-Id. Se corrige
+su propagación desde el listado y detalle a PricingClient, así como desde el
+servicio a las etapas DEMO_CANDIDATES_SQL/DEMO_ENRICHMENT_SQL. Las cuatro
+etapas de listado comparten ahora la correlación HTTP entrante. El cliente
+valida el UUID o genera uno técnico para llamadas independientes sin contexto.
+No cambia endpoint, semántica de precio global, timeout, concurrencia ni SQL.
+
+La prueba de regresión reprodujo cuatro fallos antes de la corrección;
+26 casos de cliente/equivalencia pasan después. Cinco casos HTTP reales
+locales entre Catalog y un servidor Pricing de fixture cubren listado,
+detalle 200/404/503 y aislamiento de peticiones simultáneas. No representan
+un Pricing real ni evidencia de 7 s, y no sustituyen la CI del SHA nuevo.
+
+Marco confirmó que no hay una captura integral actual de logs de las tres
+capas con sus revisiones ejecutadas. La matriz por owner, las discrepancias
+históricas y el paquete de evidencia de solo lectura pendiente están en
+[RESPUESTAS-BLOQUE-A.md](RESPUESTAS-BLOQUE-A.md). Presupuesto G1: NO VERIFICADO.

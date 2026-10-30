@@ -126,3 +126,15 @@ siguen identificados en RENDIMIENTO-49.md, fuera de esta corrección acotada.
 La integración autenticada, homologación externa y presupuesto real de 7 s
 continúan pendientes de evidencia; ninguno se infiere de CI o documentación.
 Estado #48: IMPLEMENTAR_PARCIAL; AMQP compartido BLOQUEADO_ESPECÍFICO.
+
+## Respuestas posteriores del equipo — 29/10/2026
+
+Marco confirmó que ninguna alternativa de recuperación AMQP fue adoptada:
+la candidata A mantiene fallida la prueba de DLQ saturada. Bulk conserva una
+propuesta local aún sin payload oficial tipado. López confirmó GenericData
+en los tres eventos de proyección y operation_id anulable en esos envelopes;
+no se usa como clave obligatoria ni se relajan los UUID de las bajas tipadas.
+Taco aportó evidencia propia de completed/rejected/replay, que no se presenta
+como ejecución bilateral Catalog–Inventory. Se conservan los handlers y el
+runtime bloqueados. La clasificación, owners, condiciones y fuentes están
+actualizados en [RESPUESTAS-BLOQUE-A.md](RESPUESTAS-BLOQUE-A.md).

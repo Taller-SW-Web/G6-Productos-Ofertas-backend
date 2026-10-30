@@ -38,7 +38,11 @@ export class CommercialService {
     @Optional()
     @Inject(DEMO_PRICING)
     private readonly pricing?: {
-      currentPrice(id: string): Promise<CurrentProductPrice | null>;
+      currentPrice(
+        id: string,
+        timeoutMs?: number,
+        correlationId?: string,
+      ): Promise<CurrentProductPrice | null>;
     },
     @Optional() private readonly priceFilter?: CatalogPriceFilter,
     @Optional()
@@ -62,6 +66,7 @@ export class CommercialService {
 
   private async demoPrices<T extends { product_id: string }>(
     rows: T[],
+    correlationId?: string,
   ): Promise<Array<T & CurrentProductPrice>> {
     if (!this.pricing) throw new ServiceUnavailableException();
     const output: Array<T & CurrentProductPrice> = [];
@@ -69,7 +74,11 @@ export class CommercialService {
     const worker = async () => {
       while (cursor < rows.length) {
         const index = cursor++;
-        const price = await this.pricing!.currentPrice(rows[index].product_id);
+        const price = await this.pricing!.currentPrice(
+          rows[index].product_id,
+          undefined,
+          correlationId,
+        );
         if (price) output[index] = Object.assign(rows[index], price);
       }
     };
@@ -114,13 +123,17 @@ export class CommercialService {
             await this.taxonomy.brand(query.marcaId, correlationId);
           let candidates: ProductSummary[];
           try {
-            candidates = await this.repository.listDemoCandidates(query, 100);
+            candidates = await this.repository.listDemoCandidates(
+              query,
+              100,
+              correlationId,
+            );
           } catch {
             throw new ServiceUnavailableException();
           }
           const priced = await this.telemetry.measure(
             'DEMO_PRICING',
-            () => this.demoPrices(candidates),
+            () => this.demoPrices(candidates, correlationId),
             correlationId,
           );
           const ordered = priced.sort((a, b) => {
@@ -191,7 +204,11 @@ export class CommercialService {
       if (!this.pricing) throw new ServiceUnavailableException();
       let price: CurrentProductPrice | null;
       try {
-        price = await this.pricing.currentPrice(product.product_id);
+        price = await this.pricing.currentPrice(
+          product.product_id,
+          undefined,
+          correlationId,
+        );
       } catch {
         throw new ServiceUnavailableException();
       }

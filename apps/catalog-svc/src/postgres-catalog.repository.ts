@@ -218,6 +218,7 @@ export class PostgresCatalogRepository {
   async listDemoCandidates(
     query: ProductQuery,
     maxCandidates: number,
+    correlationId?: string,
   ): Promise<ProductSummary[]> {
     return this.database.read((db) =>
       db.transaction(
@@ -236,11 +237,14 @@ export class PostgresCatalogRepository {
                   asc(products.id),
                 )
                 .limit(maxCandidates + 1),
+            correlationId,
           );
           if (rows.length > maxCandidates)
             throw new ServiceUnavailableException();
-          return this.telemetry.measure('DEMO_ENRICHMENT_SQL', () =>
-            this.enrichDemoCandidates(tx, rows),
+          return this.telemetry.measure(
+            'DEMO_ENRICHMENT_SQL',
+            () => this.enrichDemoCandidates(tx, rows),
+            correlationId,
           );
         },
         { isolationLevel: 'repeatable read', accessMode: 'read only' },
