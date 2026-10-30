@@ -9,6 +9,9 @@ import { TaxonomySvcController } from './taxonomy-svc.controller.js';
 import { TaxonomySvcService } from './taxonomy-svc.service.js';
 import { TAXONOMY_REPOSITORY } from './taxonomy.repository.js';
 import { Database } from './database.js';
+import { TaxonomyWriteRepository } from './persistence/taxonomy-write.repository.js';
+import { TaxonomyWriteService } from './taxonomy-write.service.js';
+import type { TaxonomyWriteUnitOfWork } from './persistence/taxonomy-write.unit-of-work.js';
 
 export interface OpcionesModuloTaxonomy {
   databaseUrl?: string;
@@ -19,7 +22,9 @@ export interface OpcionesModuloTaxonomy {
   controllers: [TaxonomySvcController, TaxonomyController, ReadinessController],
   providers: [
     TaxonomySvcService,
+    TaxonomyWriteService,
     Database,
+    TaxonomyWriteRepository,
     proveedorDeRepositorio(),
     { provide: TAXONOMY_READINESS, useExisting: TAXONOMY_REPOSITORY },
     { provide: APP_FILTER, useClass: ProblemDetailsFilter },
@@ -39,7 +44,15 @@ export class TaxonomySvcModule {
     }
     return {
       module: TaxonomySvcModule,
-      providers: [proveedorDeRepositorio(opciones.databaseUrl)],
+      providers: [
+        proveedorDeRepositorio(opciones.databaseUrl),
+        {
+          provide: TaxonomyWriteRepository,
+          useFactory: (repositorio: TaxonomyWriteUnitOfWork) =>
+            new TaxonomyWriteRepository(repositorio),
+          inject: [TAXONOMY_REPOSITORY],
+        },
+      ],
     };
   }
 }
