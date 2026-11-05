@@ -1,6 +1,12 @@
 import 'reflect-metadata';
 import { spawnSync } from 'node:child_process';
-import { randomBytes, randomUUID, createHash } from 'node:crypto';
+import {
+  randomBytes,
+  randomUUID,
+  createHash,
+  generateKeyPairSync,
+  sign,
+} from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
@@ -13,12 +19,17 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import { connect } from 'amqplib';
 import { Test } from '@nestjs/testing';
 let iniciarTaxonomySvc, DeactivationIntentService, TaxonomyAmqpRuntime;
-let AppModule, CatalogConfig, CATALOG_AMQP_SETTINGS, CatalogDatabase;
+let AppModule,
+  CatalogConfig,
+  CATALOG_AMQP_SETTINGS,
+  CatalogDatabase,
+  TaxonomyClient;
 
 // Isolated, self-provisioned infrastructure only. Never accepts database or AMQP URLs.
 const token = randomBytes(10).toString('hex');
@@ -48,7 +59,8 @@ let pgCreated = false,
   admin,
   rabbit,
   catalogApp,
-  taxonomyApp;
+  taxonomyApp,
+  issuerServer;
 let stage = 'inicialización';
 const docker = (...args) => {
   const r = spawnSync('docker', args, {
@@ -197,6 +209,8 @@ try {
     await import('../../../../dist/apps/catalog-svc/catalog-amqp.js'));
   ({ Database: CatalogDatabase } =
     await import('../../../../dist/apps/catalog-svc/database.js'));
+  ({ TaxonomyClient } =
+    await import('../../../../dist/apps/catalog-svc/taxonomy.client.js'));
   report.build = 'PASS';
   const openssl =
     process.platform === 'win32'
@@ -452,6 +466,52 @@ try {
   ])
     await ch.bindQueue(q, x, k);
   stage = 'Arranque servicios reales';
+  const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const issuerPort = await freePort();
+  const issuer = `http://127.0.0.1:${issuerPort}`;
+  issuerServer = createHttpServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/discovery')
+      res.end(JSON.stringify({ issuer, jwks_uri: `${issuer}/jwks` }));
+    else if (req.url === '/jwks')
+      res.end(
+        JSON.stringify({
+          keys: [
+            {
+              ...keys.publicKey.export({ format: 'jwk' }),
+              kid: 'cross-test',
+              alg: 'RS256',
+              use: 'sig',
+            },
+          ],
+        }),
+      );
+    else {
+      res.statusCode = 404;
+      res.end('{}');
+    }
+  });
+  await new Promise((resolve, reject) =>
+    issuerServer.listen(issuerPort, '127.0.0.1', resolve).once('error', reject),
+  );
+  const now = Math.floor(Date.now() / 1000);
+  const header = Buffer.from(
+    JSON.stringify({ alg: 'RS256', kid: 'cross-test' }),
+  ).toString('base64url');
+  const payload = Buffer.from(
+    JSON.stringify({
+      iss: issuer,
+      sub: 'catalog-svc',
+      tipo: 'servicio',
+      aud: 'api-productos',
+      scope: 'catalogo:leer',
+      iat: now,
+      exp: now + 900,
+      jti: randomUUID(),
+    }),
+  ).toString('base64url');
+  const jwtInput = `${header}.${payload}`;
+  const serviceToken = `${jwtInput}.${sign('RSA-SHA256', Buffer.from(jwtInput), keys.privateKey).toString('base64url')}`;
   const common = {
     NODE_ENV: 'test',
     PGHOST: 'localhost',
@@ -471,6 +531,9 @@ try {
     PORT: String(await freePort()),
     RABBITMQ_URL: taxonomyUrl,
     TAXONOMY_CATALOG_AMQP_USER: 'catalog_test',
+    SECURITY_ISSUER: issuer,
+    SECURITY_DISCOVERY_URL: `${issuer}/discovery`,
+    SECURITY_JWKS_URL: `${issuer}/jwks`,
   };
   const catEnv = {
     ...common,
@@ -480,6 +543,7 @@ try {
     G6_DATABASE_SCHEMA: 'catalog',
     PORT: String(await freePort()),
     RABBITMQ_URL: catalogUrl,
+    CATALOG_TAXONOMY_URL: `http://127.0.0.1:${taxEnv.PORT}`,
     CATALOG_AMQP_PRODUCER_USERS: JSON.stringify({
       'taxonomy-svc': 'taxonomy_test',
       'inventory-svc': 'inventory_test',
@@ -531,6 +595,43 @@ try {
       'INSERT INTO taxonomy.categories(id,nombre,nivel) VALUES ($1,$2,1)',
       [ids[name], `E2E ${name} ${token}`],
     );
+  stage = 'Lecturas HTTP Catalog → Taxonomy';
+  const inactiveCategory = randomUUID(),
+    inactiveBrand = randomUUID();
+  await admin.query(
+    "INSERT INTO taxonomy.categories(id,nombre,nivel,estado) VALUES ($1,$2,1,'INACTIVO')",
+    [inactiveCategory, `inactive-category-${token}`],
+  );
+  await admin.query(
+    "INSERT INTO taxonomy.brands(id,nombre,estado) VALUES ($1,$2,'INACTIVO')",
+    [inactiveBrand, `inactive-brand-${token}`],
+  );
+  const taxonomyClient = catalogApp.get(TaxonomyClient);
+  const identity = { authorization: `Bearer ${serviceToken}`, user: false };
+  await taxonomyClient.category(ids.categoryClear, randomUUID(), identity);
+  assert.equal(
+    (await taxonomyClient.brand(ids.clear, randomUUID(), identity)).marca_id,
+    ids.clear,
+  );
+  for (const [method, entityId, code] of [
+    ['category', inactiveCategory, 'CATEGORIA_INVALIDA'],
+    ['category', randomUUID(), 'CATEGORIA_INVALIDA'],
+    ['brand', inactiveBrand, 'MARCA_INVALIDA'],
+    ['brand', randomUUID(), 'MARCA_INVALIDA'],
+  ]) {
+    await assert.rejects(
+      taxonomyClient[method](entityId, randomUUID(), identity),
+      (error) =>
+        error.getStatus?.() === 422 && error.getResponse?.()?.code === code,
+    );
+  }
+  report.scenarios.HTTP_CATALOG_TAXONOMY = {
+    activas: 'PASS',
+    inactivas: 'PASS',
+    inexistentes: 'PASS',
+    errores: ['CATEGORIA_INVALIDA', 'MARCA_INVALIDA'],
+    autenticacion: 'JWT RS256 y JWKS aislados',
+  };
   const c = await admin.connect();
   try {
     await c.query('BEGIN');
@@ -1282,6 +1383,7 @@ try {
       .catch(() => undefined);
   await taxonomyApp?.close().catch(() => undefined);
   await catalogApp?.close().catch(() => undefined);
+  if (issuerServer) await new Promise((resolve) => issuerServer.close(resolve));
   await rabbit?.close().catch(() => undefined);
   await admin?.end().catch(() => undefined);
   if (rabbitCreated)
