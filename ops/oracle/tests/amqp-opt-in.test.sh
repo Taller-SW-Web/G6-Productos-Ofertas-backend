@@ -7,7 +7,7 @@ trap 'rm -rf "$TEMP_ROOT"' EXIT
 mkdir -p "$TEMP_ROOT/bin" "$TEMP_ROOT/etc"
 cat > "$TEMP_ROOT/bin/stat" <<'MOCK_STAT'
 #!/usr/bin/env bash
-if [[ "${1:-}" == -c && "${2:-}" == '%u:%a' ]]; then printf '0:0640\n'; else exec /usr/bin/stat "$@"; fi
+if [[ "${1:-}" == -c && "${2:-}" == '%u:%a' ]]; then printf '0:%s\n' "${G6_TEST_MANIFEST_MODE:-0640}"; else exec /usr/bin/stat "$@"; fi
 MOCK_STAT
 chmod +x "$TEMP_ROOT/bin/stat"
 PATH="$TEMP_ROOT/bin:$PATH"
@@ -45,6 +45,28 @@ for invalid in 'api-gateway' 'caddy' 'unknown-svc' 'bulk-svc|combos-svc'; do
 done
 pass 'Gateway, Caddy, nombres desconocidos y filas no canónicas rechazados'
 
+printf '%s\n' '#versión-alterada' 'bulk-svc' > "$OPTIN"
+if g6_amqp_service_opted_in bulk-svc >/dev/null 2>&1; then fail 'manifiesto con versión alterada aceptado'; fi
+if ln -s "$TEMP_ROOT/etc/no-existe.psv" "$TEMP_ROOT/etc/manifest-link.psv" 2>/dev/null; then
+  mv "$OPTIN" "$TEMP_ROOT/etc/manifest-real.psv"
+  ln -s "$TEMP_ROOT/etc/no-existe.psv" "$OPTIN"
+  if g6_amqp_selected_services >/dev/null 2>&1; then fail 'symlink colgante tratado como manifiesto ausente'; fi
+  rm "$OPTIN"
+  mv "$TEMP_ROOT/etc/manifest-real.psv" "$OPTIN"
+  rm "$TEMP_ROOT/etc/manifest-link.psv"
+else
+  printf 'NO EJECUTADO: symlink no disponible para fixture de manifiesto\n'
+fi
+G6_SERVICE_ENV_FILE="$TEMP_ROOT/etc/no-existe-runtime.env"
+if g6_amqp_service_opted_in api-gateway >/dev/null 2>&1; then :; else fail 'manifiesto alterado bloqueó Gateway, que no es candidato AMQP'; fi
+[[ "$G6_AMQP_SELECTED" == false ]] || fail 'Gateway quedó seleccionado AMQP'
+G6_SERVICE_ENV_FILE="$RUNTIME"
+G6_TEST_MANIFEST_MODE=0664
+export G6_TEST_MANIFEST_MODE
+if g6_amqp_service_opted_in bulk-svc >/dev/null 2>&1; then fail 'manifiesto modificable por grupo fue aceptado'; fi
+unset G6_TEST_MANIFEST_MODE
+printf 'PASS: manifiestos alterados y symlink colgante fallan cerrados; Gateway conserva despliegue HTTP sin selección\n'
+
 printf '%s\n' '#g6-amqp-opt-in-version=1' 'bulk-svc' 'bulk-svc' > "$OPTIN"
 chmod 640 "$OPTIN"
 if g6_amqp_service_opted_in bulk-svc >/dev/null 2>&1; then fail 'fila duplicada aceptada'; fi
@@ -81,6 +103,21 @@ for service in bulk-svc catalog-svc combos-svc inventory-svc price-audit-svc pri
     pricing-svc) key=PRICING_AMQP_URL; scheme=amqps ;;
     price-audit-svc) key=PRICE_AUDIT_AMQP_URL; scheme=amqps ;;
   esac
+  printf '%s\n' "${key}=${scheme}://user:secret@rabbitmq:5671/otro-vhost" > "$RUNTIME"
+  if g6_amqp_validate_runtime_config "$service" "$RUNTIME" >/dev/null 2>&1; then fail "vhost ajeno aceptado para $service"; fi
+done
+printf '%s\n' 'BULK_AMQP_URL=amqp://user:secret@rabbitmq:5672/%67%36-productos-ofertas' > "$RUNTIME"
+g6_amqp_validate_runtime_config bulk-svc "$RUNTIME" || fail 'vhost contractual con codificación admitida fue rechazado'
+pass 'vhost contractual validado; vhost incorrecto rechazado para los ocho y escape válido aceptado'
+
+for service in bulk-svc catalog-svc combos-svc inventory-svc price-audit-svc pricing-svc promotions-svc taxonomy-svc; do
+  case "$service" in
+    bulk-svc) key=BULK_AMQP_URL; scheme=amqp ;;
+    catalog-svc|inventory-svc|promotions-svc|taxonomy-svc) key=RABBITMQ_URL; scheme=amqp ;;
+    combos-svc) key=COMBOS_AMQP_URL; scheme=amqp ;;
+    pricing-svc) key=PRICING_AMQP_URL; scheme=amqps ;;
+    price-audit-svc) key=PRICE_AUDIT_AMQP_URL; scheme=amqps ;;
+  esac
   printf '%s\n' "${key}=${scheme}://user:secret@rabbitmq:5671/g6-productos-ofertas" > "$RUNTIME"
   if [[ "$service" == taxonomy-svc ]]; then printf '%s\n' 'TAXONOMY_CATALOG_AMQP_USER=catalog-user' >> "$RUNTIME"; fi
   printf '%s\n' '#g6-amqp-opt-in-version=1' "$service" > "$OPTIN"
@@ -89,6 +126,15 @@ for service in bulk-svc catalog-svc combos-svc inventory-svc price-audit-svc pri
   [[ "$G6_AMQP_SELECTED" == true ]] || fail "selección individual ausente para $service"
 done
 pass 'opt-in individual confirmado para los ocho microservicios'
+
+printf '%s\n' '#g6-amqp-opt-in-version=1' 'bulk-svc' > "$OPTIN"
+printf '%s\n' 'BULK_AMQP_URL=amqp://bulk:secret@rabbitmq:5672/g6-productos-ofertas' > "$RUNTIME"
+G6_SERVICE_ENV_FILE="$RUNTIME"
+g6_amqp_service_opted_in bulk-svc || fail 'servicio habilitado en mezcla fue rechazado'
+[[ "$G6_AMQP_SELECTED" == true ]] || fail 'servicio habilitado en mezcla no seleccionado'
+g6_amqp_service_opted_in combos-svc || fail 'servicio excluido de mezcla no permaneció HTTP'
+[[ "$G6_AMQP_SELECTED" == false ]] || fail 'servicio omitido en mezcla quedó conectado'
+pass 'activación mixta selecciona Bulk y mantiene Combos fuera de AMQP'
 
 printf '%s\n' 'BULK_AMQP_URL=amqp://bulk:secret@broker-externo:5672/g6-productos-ofertas' > "$RUNTIME"
 if g6_amqp_validate_runtime_config bulk-svc "$RUNTIME" >/dev/null 2>&1; then fail 'host distinto del alias privado aceptado'; fi
@@ -105,6 +151,8 @@ if command -v jq >/dev/null 2>&1; then
   g6_amqp_validate_runtime_config catalog-svc "$RUNTIME" || fail 'usuarios productores Catalog válidos rechazados'
   printf '%s\n' 'CATALOG_AMQP_ENABLED=true' 'RABBITMQ_URL=amqp://catalog:secret@rabbitmq:5672/g6-productos-ofertas' 'CATALOG_AMQP_PRODUCER_USERS={invalid-json' > "$RUNTIME"
   if g6_amqp_validate_runtime_config catalog-svc "$RUNTIME" >/dev/null 2>&1; then fail 'JSON de productores Catalog inválido aceptado'; fi
+  printf '%s\n' 'CATALOG_AMQP_ENABLED=true' 'RABBITMQ_URL=amqp://catalog:secret@rabbitmq:5672/g6-productos-ofertas' 'CATALOG_AMQP_PRODUCER_USERS={"pricing-svc":"duplicada","inventory-svc":"duplicada","taxonomy-svc":"taxonomy","bulk-svc":"bulk"}' > "$RUNTIME"
+  if g6_amqp_validate_runtime_config catalog-svc "$RUNTIME" >/dev/null 2>&1; then fail 'identidad repetida de productores Catalog aceptada'; fi
   pass 'JSON de productores Catalog se valida sin imprimir identidades'
 else
   printf 'NO EJECUTADO: jq requerido para probar JSON de productores Catalog\n'

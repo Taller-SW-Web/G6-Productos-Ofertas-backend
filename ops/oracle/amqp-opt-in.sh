@@ -67,9 +67,34 @@ g6_amqp_validate_url_key() {
       if (scheme_requirement == "amqp" && scheme != "amqp") bad = 1
       path = value
       sub(/^[A-Za-z]+:\/\/[^\/]+/, "", path)
-      if (path == "" || path == "/") bad = 1
+      decoded_path = decode_percent_path(path)
+      if (decoded_path != "/g6-productos-ofertas") bad = 1
     }
     END { if (count != 1 || bad) exit 1; print "valid" }
+    function hex_value(character, position) {
+      position = index("0123456789ABCDEF", toupper(character))
+      return position ? position - 1 : -1
+    }
+    function decode_percent_path(input, output, index_path, character, high, low, code) {
+      output = ""
+      for (index_path = 1; index_path <= length(input);) {
+        character = substr(input, index_path, 1)
+        if (character != "%") {
+          output = output character
+          index_path++
+          continue
+        }
+        if (index_path + 2 > length(input)) return "!invalid!"
+        high = hex_value(substr(input, index_path + 1, 1))
+        low = hex_value(substr(input, index_path + 2, 1))
+        if (high < 0 || low < 0) return "!invalid!"
+        code = high * 16 + low
+        if (code > 127) return "!invalid!"
+        output = output sprintf("%c", code)
+        index_path += 3
+      }
+      return output
+    }
   ' "$file"
 }
 
@@ -113,7 +138,7 @@ g6_amqp_validate_runtime_config() {
       local producer_users
       producer_users="$(awk -F= '$1=="CATALOG_AMQP_PRODUCER_USERS" {v=substr($0,index($0,"=")+1); sub(/\r$/, "", v); gsub(/^[[:space:]]+|[[:space:]]+$/, "", v); if (v ~ /^".*"$/ || v ~ /^\047.*\047$/) v=substr(v,2,length(v)-2); count++; if (count==1) print v} END {if(count!=1) exit 1}' "$file")" || return 1
       command -v jq >/dev/null 2>&1 || return 1
-      jq -e 'type == "object" and (.["pricing-svc"] | type == "string" and length > 0) and (.["inventory-svc"] | type == "string" and length > 0) and (.["taxonomy-svc"] | type == "string" and length > 0) and (.["bulk-svc"] | type == "string" and length > 0) and ([.[]] | unique | length == length)' <<< "$producer_users" >/dev/null 2>&1 || return 1
+      jq -e 'type == "object" and (.["pricing-svc"] | type == "string" and length > 0) and (.["inventory-svc"] | type == "string" and length > 0) and (.["taxonomy-svc"] | type == "string" and length > 0) and (.["bulk-svc"] | type == "string" and length > 0) and (([.[]] | unique | length) == ([.[]] | length))' <<< "$producer_users" >/dev/null 2>&1 || return 1
     fi
   fi
 }
@@ -121,7 +146,7 @@ g6_amqp_validate_runtime_config() {
 g6_amqp_selected_services() {
   local file="$G6_AMQP_OPT_IN_FILE" line service seen=" " metadata owner mode
   G6_AMQP_SERVICES=()
-  [[ ! -e "$file" ]] && return 0
+  [[ ! -e "$file" && ! -L "$file" ]] && return 0
   [[ -f "$file" && ! -L "$file" && -r "$file" ]] || return 1
   metadata="$(stat -c '%u:%a' "$file" 2>/dev/null)" || return 1
   IFS=':' read -r owner mode <<< "$metadata"
@@ -142,6 +167,9 @@ g6_amqp_selected_services() {
 g6_amqp_service_opted_in() {
   local service="$1" candidate
   G6_AMQP_SELECTED=false
+  if ! g6_amqp_service_allowed "$service"; then
+    return 0
+  fi
   g6_amqp_selected_services || return 1
   for candidate in "${G6_AMQP_SERVICES[@]}"; do
     if [[ "$candidate" == "$service" ]]; then G6_AMQP_SELECTED=true; break; fi

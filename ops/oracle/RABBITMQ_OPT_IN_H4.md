@@ -15,11 +15,11 @@ El único selector de pertenencia de red es `/etc/g6-productos-ofertas/amqp-opt-
 inventory-svc
 ```
 
-La lista vacía o el archivo ausente significa ningún servicio opt-in. Solo acepta nombres exactos de los ocho servicios, sin duplicados. Rechaza Gateway, Caddy, filas extrañas, symlinks, archivos no root-owned o modificables por grupo/otros. Contiene nombres, nunca secretos. Se lee como datos; no se ejecuta. La selección se hace por servicio en cada despliegue: una fila para Inventory no adjunta Combos ni Bulk.
+La lista vacía o el archivo ausente significa ningún servicio opt-in. Solo acepta nombres exactos de los ocho servicios, sin duplicados. Rechaza Gateway, Caddy, filas extrañas, symlinks (incluidos los colgantes), archivos no root-owned o modificables por grupo/otros. Contiene nombres, nunca secretos. Se lee como datos; no se ejecuta. La selección se hace por servicio en cada despliegue: una fila para Inventory no adjunta Combos ni Bulk. Gateway omite la lectura del manifiesto, que no lo puede habilitar ni bloquear por estar corrupto.
 
-La selección exige un runtime env legible, una URL AMQP con usuario, contraseña, host `rabbitmq` y vhost no vacío; Pricing y Price Audit exigen `amqps`. Se valida sin imprimir ni retornar el valor. Flags de consumidor/publicador siguen siendo configuración de cada servicio y no los altera el selector. En concreto, la pertenencia de red, configuración válida y runtime funcional son estados separados. El código actual no expone un flag AMQP uniforme; las excepciones se detallan abajo.
+La selección exige un runtime env legible, una URL AMQP con usuario, contraseña, host `rabbitmq` y vhost contractual `g6-productos-ofertas`; se admite codificación porcentual del path compatible con los parsers que decodifican `URL.pathname`. Pricing y Price Audit exigen `amqps`. Se valida sin imprimir ni retornar el valor. Flags de consumidor/publicador siguen siendo configuración de cada servicio y no los altera el selector. En concreto, la pertenencia de red, configuración válida y runtime funcional son estados separados. El código actual no expone un flag AMQP uniforme; las excepciones se detallan abajo.
 
-El ejecutor solo agrega `docker-compose.service.amqp.yml` o `docker-compose.inventory.amqp.yml` cuando el servicio figura en la lista. Si no figura, el Compose desplegado conserva el conjunto base + overlay HTTP aplicable. Si figura, el ejecutor exige el overlay, valida el runtime y comprueba la red antes de `docker login`, `pull` o `up`. No crea redes.
+En un despliegue normal el ejecutor agrega `docker-compose.service.amqp.yml` o `docker-compose.inventory.amqp.yml` solo cuando el servicio figura en la lista. Si no figura, se aplica base + overlay HTTP. Si figura, exige el overlay, valida el runtime y comprueba la red antes de `docker login`, `pull` o `up`. No crea redes. Si el contenedor actual sí tenía membresía AMQP y la selección nueva la quita, inspecciona y valida esa red antes de modificarlo para que un rollback pueda restaurar el perfil anterior; si esa inspección falla, se detiene antes del pull/up.
 
 ## Red, aislamiento y límites
 
@@ -52,10 +52,32 @@ La revisión de parsers es contra Backend `master` SHA `6117191…`; las fichas 
 | v5 instalado según el corte declarado por Marco; no se consultó VM. | `deploy-g6-service-v6.sh`, explícitamente v6; nunca se presenta como instalado. |
 | `service-registry.sh` y `services.psv` registro v2. | Registro v2 se conserva; composición y release HTTP no requieren migración de registro. |
 | Compose base, overlay HTTP genérico, Gateway e Inventory permanecen sin cambios. | Dos overlays AMQP nuevos; no se modifica base, Gateway, Caddy o workflow. |
-| Sin selector AMQP: comportamiento HTTP actual. | Sin manifiesto o sin fila del servicio: no inspecciona red AMQP y no añade overlay AMQP. |
+| Sin selector AMQP: comportamiento HTTP actual. | Sin fila no añade overlay AMQP; si el contenedor anterior tenía esa red, v6 la valida solo para preservar rollback y luego aplica el perfil HTTP. |
 | Inventory usa wrapper/Compose/proyecto legacy y ruta propia. | Mismo comando y rutas; v6 compone su overlay AMQP dedicado solo al opt-in. |
 
-El v6 conserva CI Actions, control de concurrencia, SHA inmutable, healthchecks, readiness adicional de Catalog y rollback del servicio individual porque se deriva del ejecutor v5. La prueba de regresión debe verificarlo antes de cualquier instalación.
+El candidato conserva control de concurrencia, SHA inmutable, healthchecks, readiness adicional de Catalog, loopback y rollback individual. Para rollback, v6 consulta antes de mutar la membresía real de `g6-po_g6_backend`; el Compose de restauración usa ese perfil anterior, no la selección nueva del manifiesto. La imagen solo se reporta restaurada si pasan health/readiness y el perfil anterior coincide. Si no se puede determinar la membresía o no se verifica el rollback, el ejecutor falla sin afirmar restauración completa. No se guarda URL, credencial ni configuración runtime como estado de rollback.
+
+### Pruebas y alcance de CI
+
+Pruebas enfocadas reproducibles en Linux:
+
+```bash
+bash -n ops/oracle/amqp-opt-in.sh ops/oracle/deploy-g6-service-v6.sh \
+  ops/oracle/tests/amqp-opt-in.test.sh \
+  ops/oracle/tests/deploy-g6-service-v6.test.sh \
+  ops/oracle/tests/amqp-opt-out-compose.test.sh
+bash ops/oracle/tests/amqp-opt-in.test.sh
+bash ops/oracle/tests/deploy-g6-service-v6.test.sh
+bash ops/oracle/tests/amqp-opt-out-compose.test.sh
+bash ops/oracle/tests/deploy-g6-service.test.sh
+bash ops/oracle/tests/deploy-inventory-svc.test.sh
+```
+
+`amqp-opt-out-compose.test.sh` crea una red Docker bridge y un contenedor efímeros, habilita AMQP mediante overlay, recrea sin él y comprueba que HTTP loopback sigue respondiendo. Requiere Docker Engine, Compose v2, `curl` y acceso a una imagen `nginx:alpine`; limpia el proyecto y la red al terminar.
+
+**Resultado local al 6-nov-2026:** `amqp-opt-in.test.sh`, `deploy-g6-service-v6.test.sh` y `bash -n` pasaron en WSL; la prueba de Compose opt-out pasó con Docker Desktop, recreando el contenedor y verificando que HTTP seguía respondiendo. Las pruebas `deploy-g6-service.test.sh`, `deploy-inventory-svc.test.sh`, `deployment-api.test.sh` y `ensure-ghcr-sha-image.test.sh` pasaron en WSL; las comprobaciones que requieren Compose/daemon dentro de WSL informaron `NO EJECUTADO`. La prueba de Compose desechable sí se ejecutó con el daemon Docker Desktop de Windows.
+
+**CI v6: BLOQUEADO por autorización de archivo transversal.** Backend #110 cubre composición de nueve componentes y #29 conectividad AMQP privada, pero ninguno autoriza expresamente modificar `.github/workflows/ci.yml`; AGENTS.md exige autorización del Issue para `.github/`. Por eso no se alteró el workflow ni se afirma que el job Oracle ejecute estas tres pruebas. La CI existente, incluso si está verde para el PR, no equivale a regresión v6. Owner de desbloqueo: Marco; operación: editar workflow compartido; condición: autorización explícita en un Issue y que el job Linux ejecute los comandos de arriba, incluidos `bash -n`.
 
 ## Instalación futura (no ejecutada)
 
@@ -72,7 +94,7 @@ Requiere autorización operativa específica de Marco, auditoría de solo lectur
 
 La instalación de helper/overlays/manifiesto y la sustitución del ejecutor requieren ventana para pausar despliegues automáticos/manuales y comprobar que no hay deploy concurrente. Activar un servicio exige otra liberación individual; solo se recrea ese proyecto Compose. No se requiere ventana para cambios de RabbitMQ porque no se cambia RabbitMQ ni sus redes aquí; la inspección previa debe confirmar el estado, y ante diferencia se detiene todo.
 
-1. Confirmar SHA/código/CI candidato; suspender temporalmente liberaciones concurrentes según el procedimiento de instalación existente. Respaldar con dueño, modo y SHA-256 los archivos del ejecutor v5, registro, Compose, wrapper y estado. No leer/imprimir valores runtime.
+1. Confirmar SHA/código y pruebas locales obligatorias; registrar que CI actual aún no ejecuta la regresión v6. Resolver autorización para el workflow antes de declarar cobertura CI. Suspender temporalmente liberaciones concurrentes según el procedimiento de instalación existente. Respaldar con dueño, modo y SHA-256 los archivos del ejecutor v5, registro, Compose, wrapper y estado. No leer/imprimir valores runtime.
 2. Inspeccionar `g6-po_g6_backend` y RabbitMQ actualmente: red, etiquetas, atributos, aliases, contenedor, puertos publicados y miembros. El preflight histórico no es evidencia actual. Si no coincide exactamente o AMQPS no está disponible para Pricing/Price Audit, no conectarlos; no crear/rediseñar redes en esta operación.
 3. Asegurar un `runtime.env` por servicio con permisos `root:<grupo-del-servicio>` y lectura limitada al usuario de despliegue. Preparar URL, vhost y credenciales individuales desde un canal secreto. No almacenar valores en GitHub/Git ni mostrar en logs. Configurar flags de consumidores por separado después de aprobar cada capacidad.
 4. Instalar como root, con ownership/modos revisados, `amqp-opt-in.sh`, los dos overlays, manifiesto vacío versión 1 y `deploy-g6-service-v6.sh` en ruta versionada de staging. Probar `--version` (`ejecutor=6 registro=2`) y Compose `config --quiet` para cada servicio permitido, base+HTTP+AMQP, sin `up` ni `pull`.
@@ -81,7 +103,7 @@ La instalación de helper/overlays/manifiesto y la sustitución del ejecutor req
 
 ## Reversión futura
 
-La reversión es por servicio y reversible: retirar la fila del manifiesto; usar v6 para redeplegar el SHA activo del mismo servicio con base+overlay HTTP, confirmando que la red AMQP desapareció y que HTTP/readiness sigue sano. Para restablecer ejecutor v5, restaurar atómicamente su copia respaldada y verificar su checksum/`--version`; v5 no lee el manifiesto ni agrega overlay AMQP. No eliminar red, contenedor/volumen RabbitMQ, credenciales, colas ni bindings. No usar `down -v`, `--remove-orphans`, prune o comandos globales. Inventory usa su proyecto `g6-inventory` y Compose legacy.
+La reversión planeada es por servicio: retirar la fila y redeplegar el SHA activo con base+overlay HTTP. En caso de fallo, v6 repone el perfil AMQP real que tenía el contenedor previo; si no puede verificar su perfil o health/readiness, informa rollback no verificado y detiene la secuencia. Confirma que la red AMQP desapareció y HTTP/readiness sigue sano. Para restablecer ejecutor v5, restaurar atómicamente su copia respaldada y verificar su checksum/`--version`; v5 no lee el manifiesto ni agrega overlay AMQP. No eliminar red, contenedor/volumen RabbitMQ, credenciales, colas ni bindings. No usar `down -v`, `--remove-orphans`, prune o comandos globales. Inventory usa su proyecto `g6-inventory` y Compose legacy.
 
 Si un rollback automático de imagen falla, aplicar el runbook actual de rollback individual, mantener la red RabbitMQ intacta y detener nuevos opt-ins. Restaurar v5 requiere la autorización de ventana definida; no debe hacerse a mitad de una operación de reemplazo sin comprobar primero los miembros de red.
 

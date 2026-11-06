@@ -172,6 +172,7 @@ readonly PREVIOUS_FILE="${G6_SERVICE_STATE_DIR}/previous-image"
 readonly REGISTRY_IMAGE="ghcr.io/taller-sw-web/g6-productos-ofertas-backend/${G6_SERVICE_IMAGE_NAME}"
 readonly NEW_IMAGE="${REGISTRY_IMAGE}:${IMAGE_SHA}"
 readonly CURRENT_IMAGE="$(docker inspect --format '{{.Config.Image}}' "$G6_SERVICE_CONTAINER" 2>/dev/null || true)"
+CURRENT_AMQP_PROFILE=false
 if [[ -n "$CURRENT_IMAGE" ]]; then
   readonly CURRENT_PREFIX="${REGISTRY_IMAGE}:"
   [[ "$CURRENT_IMAGE" == "$CURRENT_PREFIX"* ]] ||
@@ -179,6 +180,18 @@ if [[ -n "$CURRENT_IMAGE" ]]; then
   readonly CURRENT_SHA="${CURRENT_IMAGE#"$CURRENT_PREFIX"}"
   [[ "$CURRENT_SHA" =~ ^[0-9a-f]{40}$ ]] ||
     fail 'la etiqueta actual no es un SHA Git de 40 caracteres; se conserva sin cambios'
+  CURRENT_AMQP_PROFILE="$(docker inspect --format '{{if index .NetworkSettings.Networks "g6-po_g6_backend"}}true{{else}}false{{end}}' "$G6_SERVICE_CONTAINER" 2>/dev/null)" ||
+    fail 'no se pudo determinar el perfil AMQP anterior; no se modificó el servicio'
+  [[ "$CURRENT_AMQP_PROFILE" == true || "$CURRENT_AMQP_PROFILE" == false ]] ||
+    fail 'el perfil AMQP anterior es indeterminado; no se modificó el servicio'
+  if [[ "$CURRENT_AMQP_PROFILE" == true ]]; then
+    g6_amqp_service_allowed "$SERVICE_NAME" ||
+      fail 'un componente excluido está conectado a RabbitMQ; no se modificó el servicio'
+    if [[ "$G6_AMQP_SELECTED" != true ]]; then
+      g6_amqp_validate_network "$G6_SERVICE_CONTAINER" ||
+        fail 'no se pudo verificar la red AMQP anterior para un rollback seguro; no se modificó el servicio'
+    fi
+  fi
 fi
 
 export DOCKER_CONFIG
@@ -189,18 +202,24 @@ unset GHCR_TOKEN
 
 compose() {
   local image="$1"
+  local amqp_profile="$G6_AMQP_SELECTED"
   shift
+  if [[ "${1:-}" == true || "${1:-}" == false ]]; then
+    amqp_profile="$1"
+    shift
+  fi
+  [[ "$amqp_profile" == true || "$amqp_profile" == false ]] || return 64
   if [[ "$SERVICE_NAME" == inventory-svc ]]; then
     local -a compose_files=(--file "$G6_SERVICE_COMPOSE_FILE")
     [[ ! -f "$G6_HTTP_INVENTORY_OVERLAY" ]] || compose_files+=(--file "$G6_HTTP_INVENTORY_OVERLAY")
-    [[ "$G6_AMQP_SELECTED" != true ]] || compose_files+=(--file "$G6_AMQP_INVENTORY_OVERLAY")
+    [[ "$amqp_profile" != true ]] || compose_files+=(--file "$G6_AMQP_INVENTORY_OVERLAY")
     env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
       DOCKER_CONFIG="$DOCKER_CONFIG" INVENTORY_IMAGE="$image" \
       docker compose "${compose_files[@]}" --project-name "$G6_SERVICE_COMPOSE_PROJECT" "$@" "$G6_SERVICE_COMPOSE_UNIT"
   else
     local -a compose_files=(--file "$G6_SERVICE_COMPOSE_FILE")
     [[ ! -f "$G6_HTTP_GENERIC_OVERLAY" ]] || compose_files+=(--file "$G6_HTTP_GENERIC_OVERLAY")
-    [[ "$G6_AMQP_SELECTED" != true ]] || compose_files+=(--file "$G6_AMQP_GENERIC_OVERLAY")
+    [[ "$amqp_profile" != true ]] || compose_files+=(--file "$G6_AMQP_GENERIC_OVERLAY")
     env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
       DOCKER_CONFIG="$DOCKER_CONFIG" G6_SERVICE_IMAGE="$image" \
       G6_SERVICE_PORT="$G6_SERVICE_PORT" G6_SERVICE_PORT_ENV="$G6_SERVICE_PORT_ENV" \
@@ -270,7 +289,11 @@ catalog_is_ready() {
 
 service_passes_deployment_gate() {
   local expected_image="$1"
+  local expected_amqp_profile="${2:-$G6_AMQP_SELECTED}"
   service_is_healthy "$expected_image" || return 1
+  local actual_amqp_profile
+  actual_amqp_profile="$(docker inspect --format '{{if index .NetworkSettings.Networks "g6-po_g6_backend"}}true{{else}}false{{end}}' "$G6_SERVICE_CONTAINER" 2>/dev/null)" || return 1
+  [[ "$actual_amqp_profile" == "$expected_amqp_profile" ]] || return 1
   if [[ "$SERVICE_NAME" == catalog-svc ]]; then
     catalog_is_ready
   else
@@ -288,9 +311,9 @@ if ! compose "$NEW_IMAGE" pull; then
 fi
 
 if ! compose "$NEW_IMAGE" up --detach --no-deps; then
-  if [[ -n "$CURRENT_IMAGE" ]] && compose "$CURRENT_IMAGE" up --detach --no-deps; then
+  if [[ -n "$CURRENT_IMAGE" ]] && compose "$CURRENT_IMAGE" "$CURRENT_AMQP_PROFILE" up --detach --no-deps; then
     for attempt in {1..30}; do
-      if service_passes_deployment_gate "$CURRENT_IMAGE"; then
+      if service_passes_deployment_gate "$CURRENT_IMAGE" "$CURRENT_AMQP_PROFILE"; then
         printf '%s\n' "$CURRENT_IMAGE" > "${ACTIVE_FILE}.tmp"
         mv "${ACTIVE_FILE}.tmp" "$ACTIVE_FILE"
         fail "arranque de nueva imagen falló; restaurada ${CURRENT_IMAGE}"
@@ -316,9 +339,9 @@ done
 if [[ "$healthy" != true ]]; then
   printf 'G6 deployment: health/readiness check falló para %s; iniciando rollback\n' "$NEW_IMAGE" >&2
   if [[ -n "$CURRENT_IMAGE" ]]; then
-    if compose "$CURRENT_IMAGE" up --detach --no-deps; then
+    if compose "$CURRENT_IMAGE" "$CURRENT_AMQP_PROFILE" up --detach --no-deps; then
       for attempt in {1..30}; do
-        if service_passes_deployment_gate "$CURRENT_IMAGE"; then
+        if service_passes_deployment_gate "$CURRENT_IMAGE" "$CURRENT_AMQP_PROFILE"; then
           printf '%s\n' "$CURRENT_IMAGE" > "${ACTIVE_FILE}.tmp"
           mv "${ACTIVE_FILE}.tmp" "$ACTIVE_FILE"
           fail "nueva imagen no saludable; restaurada ${CURRENT_IMAGE}"
