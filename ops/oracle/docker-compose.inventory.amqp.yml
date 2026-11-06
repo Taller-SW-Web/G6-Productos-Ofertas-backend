@@ -1,0 +1,14 @@
+# Candidato v6. Conserva el proyecto/servicio Compose histórico de Inventory.
+services:
+  inventory-svc:
+    networks:
+      default: {}
+      amqp:
+        aliases:
+          - inventory-svc
+
+networks:
+  default: {}
+  amqp:
+    external: true
+    name: g6-po_g6_backend

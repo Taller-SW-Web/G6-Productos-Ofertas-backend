@@ -1,5 +1,7 @@
 # Matriz de red y dependencias G6
 
+La preparación de selección AMQP individual (candidato v6, no instalado) y su separación del estado HTTP se documenta en [RABBITMQ_OPT_IN_H4.md](RABBITMQ_OPT_IN_H4.md). La membresía `g6-po_g6_backend` descrita abajo proviene de la auditoría 19-oct y requiere inspección actual antes de uso.
+
 Fuentes físicas: auditoría Oracle solo lectura `2026-10-19 22:32:52–22:36:19 UTC` y Compose versionados en rama `castilla`. Las afirmaciones de membresía/red de esta tabla describen ese corte, no el estado actual de Oracle. `g6-http` observado: Gateway, Catalog, Pricing y Taxonomy; `g6-edge`: Caddy y Gateway. RabbitMQ (`g6-po_g6_backend`) estaba aislado en ese corte. Las rutas Docker indicadas son aliases verificados/configurados en Compose, no equivalen a conectividad funcional probada.
 
 | Componente | Puerto / loopback | g6-http | g6-edge | PostgreSQL / CA | RabbitMQ | HTTP upstream / consumidor | HTTPS público |

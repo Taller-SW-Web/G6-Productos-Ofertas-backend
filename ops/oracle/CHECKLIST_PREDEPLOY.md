@@ -18,6 +18,7 @@ Un PASS requiere evidencia reproducible ligada a SHA y alcance. Si un gate aplic
 | CI | CI exitosa para SHA; identificar alcance real, skips y gates faltantes; no equiparar build con smoke integral | ☐ |
 | Recuperación | Si existe imagen anterior: identificarla y ensayar restauración en Compose aislado. En primer despliegue sin imagen anterior: simular en entorno aislado el fallo de arranque, detener y retirar únicamente el contenedor/proyecto de aplicación recién creado, conservar datos/redes compartidas y verificar estado previo sin servicio; documentar recuperación y evidencia. No presentar esto como rollback remoto probado en Oracle. Prohibido `down -v` o cambios globales. | ☐ |
 | Red/operación | loopback, `g6-http`/`g6-edge` correctos; dependencias no alcanzables declaradas; runtime privado existe sin revelar valores; release individual autorizada | ☐ |
+| Opt-in AMQP (cuando se proponga) | Manifiesto privado exacto y root-owned; servicio permitido (nunca Gateway); config runtime completa según parser sin secretos en logs; red Rabbit actual, miembros, labels y aliases inspeccionados; overlay efectivo solo del servicio; AMQPS verificado para Pricing/Price Audit; contrato/ACL/readiness/rollback con evidencia por SHA. El selector no concede autorización productiva. | ☐ |
 | Evidencia final | Informe compactado abajo ligado a SHA/CI/artefactos | ☐ |
 
 ## Plantilla de entrega a Marco

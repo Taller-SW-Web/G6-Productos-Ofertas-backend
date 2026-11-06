@@ -1,8 +1,14 @@
 # Compatibilidad RabbitMQ: contrato, topología y candidatos
 
+Para este candidato se consultó AsyncAPI `0.6.0-rc.4`, Docs `master` SHA `a7778ec1a22811c1213a94ef096ab905911342cc`. Es una candidata documental; no acredita grants, implementación, conectividad o E2E. Las referencias a versiones anteriores en esta ficha son históricas.
+
+## Opt-in de red (preparación aislada)
+
+El ejecutor candidato v6 y sus overlays se describen en [RABBITMQ_OPT_IN_H4.md](RABBITMQ_OPT_IN_H4.md). Solo conectan el servicio incluido en un manifiesto privado explícito; manifiesto ausente deja la red desconectada. Este selector no corrige discrepancias de exchange/queue/routing key, no concede ACL, no habilita uniformemente flags de runtime y no implementa Retry/DLX. La red e identidades de Oracle requieren auditoría actual antes de cualquier activación; la observación del 19-oct es histórica.
+
 ## Estados que no se deben mezclar
 
-- **Contrato oficial consultado:** AsyncAPI `0.6.0-rc.2` de docs `origin/master` SHA `c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b`. Es el contrato publicado en el repo; no consta homologación externa.
+- **Contrato histórico de esta ficha anterior:** AsyncAPI `0.6.0-rc.2`, Docs SHA `c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b`. Para el candidato de esta rama rige la consulta rc.4 indicada arriba; sigue siendo candidata documental y no acredita homologación externa.
 - **Topología física observada:** auditoría Oracle `2026-10-19 22:32:52 UTC`, RabbitMQ 4.2.9, vhost `g6-productos-ofertas`: exchanges `po.comandos.x` (topic), `po.eventos.x` (topic), `po.resultados.x` (topic), `po.sin-ruta.x` (fanout); 11 colas, 57 bindings, cero mensajes, consumidores y conexiones. Broker aislado; no hay ruta autorizada desde las redes de aplicación. No existe retry/DLX.
 - **Código candidato:** ramas personales indicadas abajo, no equivalen a contrato homologado ni a despliegue.
 

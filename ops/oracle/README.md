@@ -16,6 +16,7 @@
 | Esquemas/tablas Supabase observados y su límite de evidencia | [`SUPABASE_ESQUEMAS.md`](SUPABASE_ESQUEMAS.md) |
 | Redes y dependencias | [`MATRIZ_DEPENDENCIAS.md`](MATRIZ_DEPENDENCIAS.md) |
 | RabbitMQ | [`RABBITMQ_COMPATIBILIDAD.md`](RABBITMQ_COMPATIBILIDAD.md) |
+| Opt-in RabbitMQ por servicio (candidato v6, no instalado) | [`RABBITMQ_OPT_IN_H4.md`](RABBITMQ_OPT_IN_H4.md) |
 | Gates y formato de entrega | [`CHECKLIST_PREDEPLOY.md`](CHECKLIST_PREDEPLOY.md) |
 | Evidencia CI/CD de Hito 4 y migración del check requerido | [`CI-CD-HITO4.md`](CI-CD-HITO4.md) |
 | Procedimientos CD, operación y rollback | Secciones posteriores de este README y scripts enlazados |
@@ -23,11 +24,13 @@
 
 El estado operativo es una observación fechada, no una garantía de que la VM siga igual. Preparar una imagen no autoriza un despliegue: selección y autorización se rigen por `services.psv`, `auto-release-authorization.psv` y los procedimientos de liberación.
 
-> **Estado operativo vigente:** consultar [ESTADO_ACTUAL.md](ESTADO_ACTUAL.md), sustentado por la auditoría SSH del 19 de octubre de 2026. Los reportes fechados dentro de `auditorias/` permanecen como evidencia histórica de su fecha de observación.
+> **Estado operativo:** `ESTADO_ACTUAL.md` refleja la auditoría del 19-oct y es histórico. Marco reportó en su encargo del 6-nov que v5/registro v2 y los Compose HTTP estaban instalados y que RabbitMQ permanece separado; esta rama no accedió a Oracle ni verificó ese estado. Para cualquier decisión operativa, la verificación actual se hace por el procedimiento de solo lectura y la autorización de Marco.
 
 El CD publica imágenes etiquetadas por SHA en GHCR y despliega mediante SSH restringido. Si una etiqueta SHA ya existe, solo se reutiliza cuando coinciden el paquete del servicio, el repositorio fuente y la revisión; una imagen no verificable falla cerrada y nunca se sobrescribe. La concurrencia serializa los intentos por servicio. El manifiesto declarativo `ops/oracle/services.psv`, leído sin ejecutarlo por `ops/oracle/service-registry.sh`, contiene los nueve componentes del monorepo, sus puertos, rutas, imágenes, contenedores, estados y archivos privados de runtime. El PR #122 ya está integrado. La allowlist manual y la autorización automática son independientes: `ops/oracle/auto-release-authorization.psv` comienza con los nueve servicios deshabilitados y exige el ID de una liberación manual exitosa más una referencia de evidencia readiness/smoke funcional. Un nombre en `services.psv` nunca habilita despliegue automático.
 
 ## Estado y límites
+
+`deploy-g6-service-v6.sh` es un candidato separado para selección AMQP individual; v5 queda intacto y no instalado por este trabajo. Véase [`RABBITMQ_OPT_IN_H4.md`](RABBITMQ_OPT_IN_H4.md). El registro v2 y los contratos HTTP existentes se conservan.
 
 - El PR #7 dejó instalado el comando SSH `/usr/local/sbin/deploy-inventory-svc` y el Compose `/opt/g6-productos-ofertas/inventory/docker-compose.inventory.yml`. La ruta `inventory-deploy <SHA de 40 caracteres>` continúa aceptada como compatibilidad histórica de Inventory.
 - El ejecutor común solo recibe un identificador del registro y un SHA hexadecimal de 40 caracteres. Rutas, imagen, proyecto Compose, contenedor, puerto y directorio de estado salen de valores constantes del registro. No acepta shell, rutas, nombre de contenedor ni destino como argumentos.
