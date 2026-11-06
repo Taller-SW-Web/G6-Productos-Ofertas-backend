@@ -1,0 +1,15 @@
+# Candidato v6. Solo el ejecutor v6 lo añade para servicios enumerados en
+# /etc/g6-productos-ofertas/amqp-opt-in.psv. No conecta Gateway ni Caddy.
+services:
+  service:
+    networks:
+      default: {}
+      amqp:
+        aliases:
+          - ${G6_SERVICE_IMAGE_NAME:?G6_SERVICE_IMAGE_NAME es obligatorio}
+
+networks:
+  default: {}
+  amqp:
+    external: true
+    name: g6-po_g6_backend
