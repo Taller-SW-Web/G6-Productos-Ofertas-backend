@@ -25,7 +25,7 @@ El contrato normativo consultado es AsyncAPI `0.6.0-rc.4`, Docs `master` SHA `a7
 
 ### G5 — nombres físicos
 
-G5 conserva actualmente `po.commands.x`, `po.results.x` y `po.sales.q`; G6 utiliza `po.comandos.x`, `po.resultados.x` y `po.ventas.q`. La nomenclatura española está adoptada internamente por G6, pero la transición externa no está homologada definitivamente. No crear aliases, exchanges paralelos ni recursos nuevos. Estas referencias actualizan los diagnósticos rc.2 que siguen como antecedente histórico, no como diagnóstico actual de código.
+Las fuentes documentales de G5 consultadas indican `po.commands.x`, `po.results.x` y `po.sales.q`; la configuración runtime de G5 no fue inspeccionada. G6 utiliza `po.comandos.x`, `po.resultados.x` y `po.ventas.q`. La nomenclatura española está adoptada internamente por G6, pero la transición externa no está homologada definitivamente. No crear aliases, exchanges paralelos ni recursos nuevos. Estas referencias actualizan los diagnósticos rc.2 que siguen como antecedente histórico, no como diagnóstico actual de código.
 
 ### G5 — resultados asíncronos
 
