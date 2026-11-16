@@ -1986,6 +1986,15 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
         completed_rows: 0,
         failed_rows: 0,
       });
+      const report = await request(app!.getHttpServer())
+        .get(`/api/v1/precios/importaciones/${job.id}/reporte`)
+        .set('Authorization', `Bearer ${identity.token()}`)
+        .expect(200);
+      expect(report.text.trimEnd().split('\r\n')).toHaveLength(
+        MAX_INLINE_IMPORT_ROWS + 2,
+      );
+      expect(report.text).toContain('"extra","","PENDING",""');
+      expect(report.text).not.toContain('private');
     });
 
     it('HTTP niega acceso y parámetros inválidos antes de consultar datos', async () => {

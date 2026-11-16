@@ -14,7 +14,10 @@ export class SignedUser {
     alg: 'RS256',
   };
 
-  async start(withServiceToken = false): Promise<void> {
+  async start(
+    withServiceToken = false,
+    introspect?: (token: string) => boolean,
+  ): Promise<void> {
     this.server = createServer(async (request, response) => {
       response.setHeader('Content-Type', 'application/json');
       response.setHeader('Cache-Control', 'public, max-age=60');
@@ -29,12 +32,36 @@ export class SignedUser {
             accessToken: this.token({
               sub: 'modulo-productos',
               tipo: 'servicio',
-              aud: 'api-productos',
+              aud:
+                scope === 'tokens:introspeccion'
+                  ? 'api-seguridad'
+                  : 'api-productos',
               scope,
             }),
             expiresIn: 60,
             scopes: [scope],
           }),
+        );
+        return;
+      }
+      if (introspect && request.url === '/api/v1/auth/introspeccion') {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const { token } = JSON.parse(Buffer.concat(chunks).toString()) as {
+          token: string;
+        };
+        response.end(
+          JSON.stringify(
+            introspect(token)
+              ? {
+                  activo: true,
+                  sub: '74ed2f19-7e70-4915-a6f6-bbc691b82587',
+                  roles: ['GESTOR_COMERCIAL'],
+                  permisos: [],
+                  tipo: 'acceso',
+                }
+              : { activo: false },
+          ),
         );
         return;
       }

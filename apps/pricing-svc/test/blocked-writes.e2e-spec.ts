@@ -12,7 +12,7 @@ import {
 } from '../src/http/pricing-write.controller.js';
 
 // Provider HTTP exclusivamente: no acredita persistencia ni E2E con Gateway.
-describe('Fronteras de escritura bloqueadas por contrato', () => {
+describe('Fronteras de escritura con requisitos faltantes', () => {
   let app: INestApplication<App>;
   const update = vi.fn();
   const schedule = vi.fn();
@@ -52,21 +52,21 @@ describe('Fronteras de escritura bloqueadas por contrato', () => {
   });
 
   it.each([
-    ['PATCH', '/api/v1/precios/productos/producto'],
-    ['PATCH', '/api/v1/precios/skus/SKU'],
-    ['POST', '/api/v1/precios/productos/producto/programaciones'],
-    ['POST', '/api/v1/precios/skus/SKU/programaciones'],
-    ['POST', '/api/v1/precios/importaciones/prevalidar'],
-    ['POST', '/api/v1/precios/importaciones'],
+    ['PATCH', '/api/v1/precios/productos/producto', 503],
+    ['PATCH', '/api/v1/precios/skus/SKU', 503],
+    ['POST', '/api/v1/precios/productos/producto/programaciones', 503],
+    ['POST', '/api/v1/precios/skus/SKU/programaciones', 503],
+    ['POST', '/api/v1/precios/importaciones/prevalidar', 400],
+    ['POST', '/api/v1/precios/importaciones', 503],
   ])(
-    '%s %s no admite cambios ni hechos Outbox con contrato pendiente',
-    async (method, path) => {
+    '%s %s responde %i antes de tocar negocio o persistencia',
+    async (method, path, status) => {
       const client = request(app.getHttpServer());
       const call = method === 'PATCH' ? client.patch(path) : client.post(path);
       await call
         .set('Authorization', `Bearer ${identity.token()}`)
         .send({ precioRegular: 12.3, priceVersion: 1 })
-        .expect(path.includes('/importaciones') ? 404 : 503);
+        .expect(status);
       expect(update).not.toHaveBeenCalled();
       expect(schedule).not.toHaveBeenCalled();
       expect(transaction).not.toHaveBeenCalled();

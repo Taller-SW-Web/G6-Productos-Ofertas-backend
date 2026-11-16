@@ -8,6 +8,7 @@ import { PriceAuditSvcModule } from '../src/price-audit-svc.module.js';
 import { AuditRepository } from '../src/persistence/audit.repository.js';
 import { AUDIT_EXPORT_WORKER } from '../src/http/audit.controller.js';
 import { type AuditChange } from '../src/domain/audit.js';
+import { decodePriceChange } from '../src/messaging/price-change-decoder.js';
 import { IsolatedAuditPostgres } from './isolated-postgres.js';
 import { SignedUser } from './signed-user.js';
 
@@ -140,6 +141,62 @@ describe.skipIf(process.env.PRICE_AUDIT_TEST_POSTGRES !== '1')(
           expect(response.text).toContain('"precio_nuevo":' + value + ',');
           expect(response.text).toContain('"variacion_porcentual":-16.67,');
         }
+      }
+    });
+    it('lee en administración producto y SKU globales, deduplicados por message_id', async () => {
+      const batchId = randomUUID();
+      const productId = randomUUID();
+      const at = new Date('2026-10-11T00:00:00Z');
+      for (const [target_type, sku] of [
+        ['PRODUCTO', null],
+        ['SKU', 'sku-global'],
+      ] as const) {
+        const data = {
+          target_type,
+          sku,
+          product_id: productId,
+          channel_id: null,
+          currency: 'PEN',
+          price_type: 'REGULAR',
+          previous_price: '10.00',
+          new_price: '10.05',
+          operation: 'MODIFICACION',
+          reason: 'Cambio',
+          price_version: 2,
+          valid_from: at.toISOString(),
+          batch_id: batchId,
+          actor: { user_id: null, email: null, ip: null },
+        };
+        const event = {
+          id: randomUUID(),
+          correlationId: randomUUID(),
+          payload: data,
+        };
+        const changes = decodePriceChange(data, at);
+        expect((await repository.append(event, changes)).duplicate).toBe(false);
+        expect((await repository.append(event, changes)).duplicate).toBe(true);
+      }
+      const list = await get(
+        base + '/administracion?batchId=' + batchId,
+      ).expect(200);
+      expect(list.body.meta.total).toBe(2);
+      for (const [target_type, sku] of [
+        ['PRODUCTO', null],
+        ['SKU', 'sku-global'],
+      ] as const) {
+        const item = list.body.items.find(
+          (value: { target_type: string }) => value.target_type === target_type,
+        );
+        expect(item).toMatchObject({
+          sku,
+          product_id: productId,
+          canal_origen: null,
+          precio_nuevo: 10.05,
+          variacion_porcentual: 0.5,
+        });
+        const path = base + '/administracion/' + item.id_auditoria;
+        expect((await get(path).expect(200)).body).toEqual(item);
+        await request(app.getHttpServer()).get(path).expect(401);
       }
     });
     it('revierte Inbox si el INSERT de asientos falla y permite reprocesar', async () => {
@@ -336,7 +393,7 @@ describe.skipIf(process.env.PRICE_AUDIT_TEST_POSTGRES !== '1')(
       try {
         await request(app.getHttpServer()).get('/health/ready').expect(503);
         await request(app.getHttpServer()).get('/health/live').expect(200);
-        const failed = await get(base).expect(200); // La lectura de bitácora no depende de Inbox.
+        const failed = await get(base + '/administracion').expect(200); // La lectura no depende de Inbox.
         expect(failed.body.items.length).toBeGreaterThan(0);
       } finally {
         await database.admin!.query(

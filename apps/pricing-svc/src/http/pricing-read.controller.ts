@@ -153,12 +153,15 @@ export class PricingReadController {
   ) {
     if (!uuid.test(batchId) || Object.keys(query).length)
       throw new PricingHttpError(400, 'VALIDACION');
-    const result = await this.reads.imported(batchId);
-    const quote = (value: unknown) =>
-      '"' + String(value ?? '').replace(/"/g, '""') + '"';
+    const rows = await this.reads.importReport(batchId);
+    const quote = (value: unknown) => {
+      const text = String(value ?? '');
+      const safe = /^[\s]*[=+\-@\t\r\n]/u.test(text) ? "'" + text : text;
+      return '"' + safe.replace(/"/g, '""') + '"';
+    };
     const lines = [
       'row_id,sku,status,code',
-      ...(result.rows ?? []).map((row) =>
+      ...rows.map((row) =>
         [row.row_id, row.sku, row.status, row.code].map(quote).join(','),
       ),
     ];

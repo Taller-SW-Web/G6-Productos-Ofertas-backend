@@ -10,6 +10,8 @@ import { PricingReadController } from './http/pricing-read.controller.js';
 import { PricingReads } from './http/pricing-reads.js';
 import { PricingReadGuard } from './http/pricing-read.guard.js';
 import { PricingMutations } from './application/pricing-mutations.js';
+import { PricingImports } from './application/pricing-imports.js';
+import { PricingImportController } from './http/pricing-import.controller.js';
 import {
   CommercialPrices,
   PRICING_CATALOG_CONTEXT,
@@ -41,6 +43,7 @@ import {
     HealthController,
     PricingReadController,
     PricingWriteController,
+    PricingImportController,
   ],
   providers: [
     PricingSvcService,
@@ -50,6 +53,7 @@ import {
     PricingReads,
     PricingReadGuard,
     PricingMutations,
+    PricingImports,
     CommercialPrices,
     PricingOutboxRelay,
     PricingScheduleReconciler,
