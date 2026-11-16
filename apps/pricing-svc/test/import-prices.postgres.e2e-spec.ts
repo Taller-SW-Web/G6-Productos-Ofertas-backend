@@ -72,6 +72,7 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
             AUTH_JWKS_URL: identity.issuer + '/jwks',
             PRICING_SERVICE_TOKEN_URL: identity.issuer + '/api/v1/auth/token',
             PRICING_SERVICE_CLIENT_SECRET: 'fixture-secret',
+            PRICING_CATALOG_URL: identity.issuer,
           }),
         ],
       })
@@ -278,6 +279,28 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
         );
       });
       expect(await version('restart')).toBe('2');
+    });
+
+    it('mantiene readiness y lecturas de precios con Catalog configurado antes de la migración de importación', async () => {
+      await app.close();
+      await postgres.admin!.query(`
+        ALTER TABLE pricing.bulk_price_jobs
+          DROP COLUMN idempotency_key, DROP COLUMN request_hash
+      `);
+      await postgres.admin!.query(
+        `
+        WITH p AS (INSERT INTO pricing.prices (product_id) VALUES ($1) RETURNING id)
+        INSERT INTO pricing.price_validities
+          (price_id, precio_regular, currency, valid_from, price_version, motivo_cambio)
+        SELECT id, 10, 'PEN', '2020-01-01Z', 1, 'fixture' FROM p
+      `,
+        [productId],
+      );
+      await startApp();
+      await request(app.getHttpServer()).get('/health/ready').expect(200);
+      await get(`/api/v1/precios/productos/${productId}`).expect(200);
+      expect(await imports.processNext()).toBe(false);
+      await post(base, csv(row('preview')), false).expect(503);
     });
   },
 );

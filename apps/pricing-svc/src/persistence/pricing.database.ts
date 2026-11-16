@@ -18,12 +18,9 @@ export type PricingTransaction = Parameters<
 export class PricingDatabase implements OnApplicationShutdown {
   readonly db: PricingDb;
   private readonly pool: Pool;
-  private readonly importsEnabled: boolean;
   private readonly logger = new Logger(PricingDatabase.name);
 
   constructor(@Inject(PRICING_CONFIG) config: PricingConfig) {
-    this.importsEnabled =
-      config.securityMode === 'G7_AUTHENTICATED' && !!config.catalogUrl;
     this.pool = new Pool({
       connectionString: config.databaseUrl,
       ssl: config.databaseSsl,
@@ -45,10 +42,6 @@ export class PricingDatabase implements OnApplicationShutdown {
       await this.pool.query(
         'SELECT 1 FROM pricing.prices, pricing.price_validities, pricing.scheduled_prices, pricing.bulk_price_jobs, pricing.bulk_price_rows, pricing.outbox LIMIT 0',
       );
-      if (this.importsEnabled)
-        await this.pool.query(
-          'SELECT idempotency_key, request_hash FROM pricing.bulk_price_jobs LIMIT 0',
-        );
       const compatibility = await this.pool.query<{ compatible: boolean }>(`
           SELECT to_regclass('pricing.prices') IS NOT NULL
             AND to_regclass('pricing.price_validities') IS NOT NULL

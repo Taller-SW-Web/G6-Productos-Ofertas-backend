@@ -6,7 +6,7 @@ import {
   type OnModuleDestroy,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { and, asc, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { PRICING_CONFIG, type PricingConfig } from '../config/environment.js';
 import { changePrice, PriceRuleError, requireRule } from '../domain/price.js';
 import { importDecision } from '../domain/import-policy.js';
@@ -41,6 +41,7 @@ export class PricingImports implements OnApplicationBootstrap, OnModuleDestroy {
   private timer?: ReturnType<typeof setInterval>;
   private active?: Promise<void>;
   private stopping = false;
+  private importSchemaReady = false;
 
   constructor(
     @Inject(PricingRepository) private readonly repository: PricingRepository,
@@ -211,6 +212,17 @@ export class PricingImports implements OnApplicationBootstrap, OnModuleDestroy {
 
   async processNext() {
     return this.repository.transaction(async (tx) => {
+      // La migración de importación puede aplicarse después de desplegar lecturas.
+      if (!this.importSchemaReady) {
+        const { rows } = await tx.execute<{ compatible: boolean }>(sql`
+          SELECT count(*) = 2 AS compatible
+          FROM information_schema.columns
+          WHERE table_schema = 'pricing' AND table_name = 'bulk_price_jobs'
+            AND column_name IN ('idempotency_key', 'request_hash')
+        `);
+        if (!rows[0]?.compatible) return false;
+        this.importSchemaReady = true;
+      }
       const [job] = await tx
         .select()
         .from(bulkPriceJobs)
