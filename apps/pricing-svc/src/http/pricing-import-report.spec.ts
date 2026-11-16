@@ -24,17 +24,15 @@ describe('Read-only persisted Pricing import report', () => {
   }
   it('returns CSV with quoted persisted results and never exposes private storage metadata', async () => {
     const reads = {
-      imported: vi.fn(async () => ({
-        rows: [
-          {
-            row_id: 1,
-            sku: 'A,"B"',
-            status: 'FAILED',
-            code: 'VALIDACION',
-            report_uri: 'DO_NOT_LEAK',
-          },
-        ],
-      })),
+      importReport: vi.fn(async () => [
+        {
+          row_id: 1,
+          sku: 'A,"B"',
+          status: 'FAILED',
+          code: 'VALIDACION',
+          report_uri: 'DO_NOT_LEAK',
+        },
+      ]),
     };
     const controller = new PricingReadController(
       reads as unknown as PricingReads,
@@ -45,10 +43,10 @@ describe('Read-only persisted Pricing import report', () => {
       'row_id,sku,status,code\r\n"1","A,""B""","FAILED","VALIDACION"\r\n',
     );
     expect(String(result)).not.toContain('DO_NOT_LEAK');
-    expect(reads.imported).toHaveBeenCalledExactlyOnceWith(id);
+    expect(reads.importReport).toHaveBeenCalledExactlyOnceWith(id);
   });
   it('validates the identifier and query before querying persisted data', async () => {
-    const reads = { imported: vi.fn() };
+    const reads = { importReport: vi.fn() };
     const controller = new PricingReadController(
       reads as unknown as PricingReads,
       {} as CommercialPrices,
@@ -59,11 +57,11 @@ describe('Read-only persisted Pricing import report', () => {
     await expect(
       controller.importReport(id, { unexpected: 'true' }, response()),
     ).rejects.toMatchObject({ status: 400 });
-    expect(reads.imported).not.toHaveBeenCalled();
+    expect(reads.importReport).not.toHaveBeenCalled();
   });
   it('preserves the contractual absent-import error without inventing a report', async () => {
     const reads = {
-      imported: vi.fn(async () => {
+      importReport: vi.fn(async () => {
         throw new PricingHttpError(404, 'LOTE_NO_ENCONTRADO');
       }),
     };

@@ -486,7 +486,12 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer', 'serviceBearer'],
     scope: 'precios:leer',
     audience: 'api-productos',
-    clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
+    clients: [
+      'modulo-marketplace',
+      'modulo-chatbot',
+      'modulo-retail',
+      'modulo-productos',
+    ],
     introspection: false,
     headers: [
       {
@@ -536,7 +541,12 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer', 'serviceBearer'],
     scope: 'precios:leer',
     audience: 'api-productos',
-    clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
+    clients: [
+      'modulo-marketplace',
+      'modulo-chatbot',
+      'modulo-retail',
+      'modulo-productos',
+    ],
     introspection: false,
     headers: [
       {
@@ -5195,6 +5205,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
         name: 'x-correlation-id',
         required: false,
       },
+      {
+        name: 'idempotency-key',
+        required: false,
+      },
     ],
     requestTypes: ['multipart/form-data'],
     responses: {
@@ -5216,6 +5230,11 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
       '403': {
         types: ['application/problem+json'],
         codes: ['SCOPE_INSUFICIENTE'],
+        headers: [],
+      },
+      '409': {
+        types: ['application/problem+json'],
+        codes: ['IDEMPOTENCY_CONFLICT'],
         headers: [],
       },
       '413': {
@@ -5305,7 +5324,7 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
       '200': {
         types: ['text/csv'],
         codes: [],
-        headers: [],
+        headers: ['content-disposition'],
       },
       '401': {
         types: ['application/problem+json'],

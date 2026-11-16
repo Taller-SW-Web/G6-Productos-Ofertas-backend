@@ -278,6 +278,37 @@ export class PricingRepository {
     );
   }
 
+  readSkuDefinitions(skus: string[]) {
+    return this.transaction(
+      async (tx) => {
+        const definitions = new Map<
+          string,
+          {
+            definition: typeof prices.$inferSelect;
+            validities: (typeof priceValidities.$inferSelect)[];
+          }
+        >();
+        if (!skus.length) return definitions;
+        const rows = await tx
+          .select({ definition: prices, validity: priceValidities })
+          .from(prices)
+          .leftJoin(priceValidities, eq(prices.id, priceValidities.priceId))
+          .where(inArray(prices.sku, skus));
+        for (const { definition, validity } of rows) {
+          const key = JSON.stringify([definition.sku, definition.channelId]);
+          const current = definitions.get(key) ?? {
+            definition,
+            validities: [],
+          };
+          if (validity) current.validities.push(validity);
+          definitions.set(key, current);
+        }
+        return definitions;
+      },
+      { isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
+  }
+
   readSchedules(
     target: { productId: string } | { sku: string },
     pagina: number,
@@ -355,6 +386,29 @@ export class PricingRepository {
           job,
           rows: rows.length > MAX_INLINE_IMPORT_ROWS ? undefined : rows,
         };
+      },
+      { isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
+  }
+
+  readImportReport(batchId: string) {
+    return this.transaction(
+      async (tx) => {
+        const [job] = await tx
+          .select({ id: bulkPriceJobs.id })
+          .from(bulkPriceJobs)
+          .where(eq(bulkPriceJobs.id, batchId));
+        if (!job) return undefined;
+        return tx
+          .select({
+            rowId: bulkPriceRows.rowId,
+            sku: bulkPriceRows.sku,
+            status: bulkPriceRows.status,
+            code: bulkPriceRows.code,
+          })
+          .from(bulkPriceRows)
+          .where(eq(bulkPriceRows.batchId, batchId))
+          .orderBy(asc(bulkPriceRows.rowId));
       },
       { isolationLevel: 'repeatable read', accessMode: 'read only' },
     );
