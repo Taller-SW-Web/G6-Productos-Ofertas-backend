@@ -144,7 +144,7 @@ service_network="${project}_services"
 docker run -d --name "$issuer" --network "$service_network" --network-alias issuer \
   -v "$scratch/certs:/certs:ro" -v "$root/scripts/ci:/ci:ro" \
   --entrypoint node "$project-api-gateway" /ci/issuer.mjs >/dev/null
-for attempt in {1..30}; do
+for _ in {1..30}; do
   if "${compose[@]}" exec -T api-gateway node -e "fetch('https://issuer:3443/keys').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then break; fi
   sleep 1
 done
