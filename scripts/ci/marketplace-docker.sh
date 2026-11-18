@@ -3,6 +3,27 @@ set -Eeuo pipefail
 # Entorno efímero de prueba. No acepta URLs/credenciales de Supabase.
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
+use_prebuilt="${G6_MARKETPLACE_USE_PREBUILT:-false}"
+case "$use_prebuilt" in
+  true)
+    catalog_image='g6-service:catalog-svc-ci'
+    taxonomy_image='g6-service:taxonomy-svc-ci'
+    for image in "$catalog_image" "$taxonomy_image"; do
+      if ! docker image inspect "$image" >/dev/null 2>&1; then
+        printf 'FALLO: G6_MARKETPLACE_USE_PREBUILT=true requiere la imagen local %s; no se reconstruirá.\n' "$image" >&2
+        exit 1
+      fi
+    done
+    ;;
+  false)
+    catalog_image=''
+    taxonomy_image=''
+    ;;
+  *)
+    printf 'FALLO: G6_MARKETPLACE_USE_PREBUILT debe ser true o false.\n' >&2
+    exit 2
+    ;;
+esac
 scratch="$(mktemp -d)"
 project="g6-mkt-ci-${RANDOM}"
 network="${project}-db"
@@ -75,6 +96,18 @@ services:
     volumes:
       - $scratch/certs:/certs:ro
       - $root/scripts/ci:/ci:ro
+EOF
+if [[ "$use_prebuilt" == true ]]; then
+  cat >> "$scratch/override.yml" <<EOF
+  catalog-svc:
+    image: $catalog_image
+    build: null
+  taxonomy-svc:
+    image: $taxonomy_image
+    build: null
+EOF
+fi
+cat >> "$scratch/override.yml" <<EOF
 networks:
   database-access:
     external: true
@@ -86,17 +119,27 @@ export G6_CATALOG_ENV_FILE="$scratch/catalog.env"
 export G6_TAXONOMY_CA_FILE="$scratch/certs/ca.crt"
 export G6_CATALOG_CA_FILE="$scratch/certs/ca.crt"
 export G6_GATEWAY_HOST_PORT=0
-"${compose[@]}" build
+if [[ "$use_prebuilt" == true ]]; then
+  "${compose[@]}" build api-gateway
+else
+  catalog_image="$project-catalog-svc"
+  taxonomy_image="$project-taxonomy-svc"
+  "${compose[@]}" build
+fi
 # Arranque sin configuración: falla, sin sustituir el smoke positivo posterior.
 for service in taxonomy catalog; do
-  image="$project-${service}-svc"
+  if [[ "$service" == catalog ]]; then image="$catalog_image"; else image="$taxonomy_image"; fi
   set +e
   output="$(docker run --rm "$image" 2>&1)"
   code=$?
   set -e
   [[ "$code" -ne 0 && "$output" == *APPLICATION_START_FAILED* ]]
 done
-"${compose[@]}" up -d --wait --wait-timeout 90
+if [[ "$use_prebuilt" == true ]]; then
+  "${compose[@]}" up --no-build -d --wait --wait-timeout 90
+else
+  "${compose[@]}" up -d --wait --wait-timeout 90
+fi
 service_network="${project}_services"
 docker run -d --name "$issuer" --network "$service_network" --network-alias issuer \
   -v "$scratch/certs:/certs:ro" -v "$root/scripts/ci:/ci:ro" \

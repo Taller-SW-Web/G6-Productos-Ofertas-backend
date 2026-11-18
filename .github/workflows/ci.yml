@@ -48,6 +48,10 @@ jobs:
       run: node scripts/ci/test-performance-workflow.mjs
     - name: Probar política Draft y Ready
       run: node --test scripts/ci/draft-ready-policy.test.mjs
+    - name: Verificar modo preconstruido de Marketplace
+      run: |
+        bash -n scripts/ci/marketplace-docker.sh scripts/ci/tests/marketplace-prebuilt.test.sh
+        bash scripts/ci/tests/marketplace-prebuilt.test.sh
   azure_cd_h5:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
@@ -70,8 +74,9 @@ jobs:
         bash ops/azure/container-apps/tests/workflow.test.sh
         bash ops/shared/tests/ensure-ghcr-sha-image.test.sh
         bash ops/shared/tests/publish-only-workflow.test.sh
+        bash scripts/ci/tests/marketplace-prebuilt.test.sh
         for file in ops/shared/build-service.sh ops/shared/validate-publish-only-source.sh ops/shared/ensure-ghcr-sha-image.sh ops/shared/tests/services-ci.test.sh ops/shared/tests/ensure-ghcr-sha-image.test.sh ops/shared/tests/publish-only-workflow.test.sh ops/azure/container-apps/validate-source.sh ops/azure/container-apps/verify-environment-protection.sh ops/azure/container-apps/deploy.sh ops/azure/container-apps/reconcile-recovery.sh ops/azure/container-apps/smoke-service.sh ops/azure/container-apps/tests/validate-source.test.sh ops/azure/container-apps/tests/verify-environment-protection.test.sh ops/azure/container-apps/tests/deploy.test.sh ops/azure/container-apps/tests/smoke.test.sh ops/azure/container-apps/tests/reconcile-recovery.test.sh ops/azure/container-apps/tests/workflow.test.sh; do bash -n "$file"; done
-        shellcheck ops/shared/build-service.sh ops/shared/validate-publish-only-source.sh ops/shared/ensure-ghcr-sha-image.sh ops/shared/tests/services-ci.test.sh ops/shared/tests/ensure-ghcr-sha-image.test.sh ops/shared/tests/publish-only-workflow.test.sh ops/azure/container-apps/validate-source.sh ops/azure/container-apps/verify-environment-protection.sh ops/azure/container-apps/deploy.sh ops/azure/container-apps/reconcile-recovery.sh ops/azure/container-apps/smoke-service.sh ops/azure/container-apps/tests/validate-source.test.sh ops/azure/container-apps/tests/verify-environment-protection.test.sh ops/azure/container-apps/tests/deploy.test.sh ops/azure/container-apps/tests/smoke.test.sh ops/azure/container-apps/tests/reconcile-recovery.test.sh ops/azure/container-apps/tests/workflow.test.sh
+        shellcheck scripts/ci/marketplace-docker.sh scripts/ci/tests/marketplace-prebuilt.test.sh ops/shared/build-service.sh ops/shared/validate-publish-only-source.sh ops/shared/ensure-ghcr-sha-image.sh ops/shared/tests/services-ci.test.sh ops/shared/tests/ensure-ghcr-sha-image.test.sh ops/shared/tests/publish-only-workflow.test.sh ops/azure/container-apps/validate-source.sh ops/azure/container-apps/verify-environment-protection.sh ops/azure/container-apps/deploy.sh ops/azure/container-apps/reconcile-recovery.sh ops/azure/container-apps/smoke-service.sh ops/azure/container-apps/tests/validate-source.test.sh ops/azure/container-apps/tests/verify-environment-protection.test.sh ops/azure/container-apps/tests/deploy.test.sh ops/azure/container-apps/tests/smoke.test.sh ops/azure/container-apps/tests/reconcile-recovery.test.sh ops/azure/container-apps/tests/workflow.test.sh
   tipos:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
@@ -207,12 +212,6 @@ jobs:
       run: "for app in api-gateway bulk-svc catalog-svc combos-svc inventory-svc price-audit-svc pricing-svc promotions-svc\
         \ taxonomy-svc; do\n  if [ ! -f \"dist/apps/$app/main.js\" ]; then\n    echo \"FALLO: falta el artefacto dist/apps/$app/main.js\"\
         \n    exit 1\n  fi\ndone\necho \"Los nueve componentes tienen artefactos ejecutables válidos.\"\n"
-    - name: Compartir artefactos compilados con las comprobaciones de contenedores
-      uses: actions/upload-artifact@v4
-      with:
-        name: artefactos-compilados
-        path: dist/
-        retention-days: 1
   contenedores:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
@@ -348,6 +347,8 @@ jobs:
     - name: Rechazar arranques sin configuración PostgreSQL
       run: node scripts/ci/invalid-startup.mjs
     - name: Probar Marketplace con PostgreSQL TLS desechable
+      env:
+        G6_MARKETPLACE_USE_PREBUILT: 'true'
       run: bash scripts/ci/marketplace-docker.sh
     needs:
     - compilacion
