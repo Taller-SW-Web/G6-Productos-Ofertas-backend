@@ -1,4 +1,6 @@
-# Candidato de aplicación sobre master — 2026-11-06
+# Ficha histórica de candidato de aplicación — 2026-11-06
+
+> **Registro histórico.** Este documento describe el candidato y los archivos presentes en el corte `387b949e338bf0d19833734e5b22a60f4f7ab60e`. Las referencias a Oracle, Compose, Caddy VM y pruebas asociadas no son procedimientos vigentes: esa infraestructura se retiró del Backend. Conserva el estado que se observó entonces; no lo uses como evidencia del estado actual. Para operación vigente consulta [README Azure](README.md) y [Azure Container Apps H5](container-apps/README.md).
 
 Base: `387b949e338bf0d19833734e5b22a60f4f7ab60e`, posterior al merge del
 publicador oficial #210. La autorización del publicador es independiente de la

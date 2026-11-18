@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+readonly ROOT
 readonly WORKFLOW="$ROOT/.github/workflows/publish-only-images.yml"
-readonly VALIDATOR="$ROOT/ops/oracle/validate-publish-only-source.sh"
+readonly VALIDATOR="$ROOT/ops/shared/validate-publish-only-source.sh"
 readonly SHA='58b94a694fc22ad4401450feaffe8b708330518d'
 readonly REPOSITORY='Taller-SW-Web/G6-Productos-Ofertas-backend'
-readonly TEMP="$(mktemp -d)"
+TEMP="$(mktemp -d)"
+readonly TEMP
 readonly MOCK_BIN="$TEMP/bin"
 readonly OUTPUT="$TEMP/output"
 mkdir "$MOCK_BIN"
@@ -125,7 +127,7 @@ for service in api-gateway bulk-svc catalog-svc combos-svc inventory-svc price-a
   grep -Fq -- "- $service" "$WORKFLOW" || fail "missing service $service"
 done
 [[ "$(grep -Ec '^          - [a-z-]+$' "$WORKFLOW")" == 9 ]] || fail 'publisher must have exactly nine service choices'
-grep -Fq 'publish-g6-ghcr-${{ github.repository }}-${{ inputs.service }}' "$WORKFLOW" || fail 'GHCR publication is not serialized with CD'
+grep -Fq "publish-g6-ghcr-\${{ github.repository }}-\${{ inputs.service }}" "$WORKFLOW" || fail 'GHCR publication is not serialized with CD'
 grep -Fq 'packages: write' "$WORKFLOW" || fail 'GHCR package permission missing'
 grep -Fq 'actions: read' "$WORKFLOW" || fail 'CI verification permission missing'
 grep -Fq 'docker/login-action@v3' "$WORKFLOW" || fail 'GHCR login for private/existing tags is missing'
@@ -134,16 +136,16 @@ grep -Fq 'build-args: SERVICE_NAME=' "$WORKFLOW" || fail 'official build arg mis
 grep -Fq 'ensure-ghcr-sha-image.sh' "$WORKFLOW" || fail 'immutable tag verification missing'
 grep -Fq 'org.opencontainers.image.title' "$WORKFLOW" || fail 'service identity label check missing'
 grep -Fq 'load: true' "$WORKFLOW" || fail 'image is not built locally before publication'
-grep -Fq 'docker push "$IMAGE"' "$WORKFLOW" || fail 'GHCR publication step missing'
-grep -Fq 'validate-publish-only-source.sh "$SERVICE" "$IMAGE_SHA" /dev/null' "$WORKFLOW" || fail 'SHA/master/CI is not revalidated immediately before publication'
+grep -Fq "docker push \"\$IMAGE\"" "$WORKFLOW" || fail 'GHCR publication step missing'
+grep -Fq "validate-publish-only-source.sh \"\$SERVICE\" \"\$IMAGE_SHA\" /dev/null" "$WORKFLOW" || fail 'SHA/master/CI is not revalidated immediately before publication'
 grep -Fq 'steps.publication.outputs.digest' "$WORKFLOW" || fail 'registry push digest is not verified afterward'
 [[ "$(grep -Fc 'validate-publish-only-source.sh' "$WORKFLOW")" -ge 2 ]] || fail 'SHA/master/CI is not validated both before build and before publication'
 build_line="$(grep -nF 'name: Construir imagen OCI local por SHA' "$WORKFLOW" | cut -d: -f1)"
 tag_line="$(grep -nF 'name: Revalidar que el tag SHA sigue ausente antes de publicar' "$WORKFLOW" | cut -d: -f1)"
 push_line="$(grep -nF 'name: Publicar imagen OCI en GHCR' "$WORKFLOW" | cut -d: -f1)"
 [[ -n "$build_line" && -n "$tag_line" && -n "$push_line" && "$build_line" -lt "$tag_line" && "$tag_line" -lt "$push_line" ]] || fail 'segunda comprobación del tag no ocurre entre build y push'
-grep -Fq 'ensure-ghcr-sha-image.sh "$GITHUB_REPOSITORY" "$SERVICE" "$IMAGE_SHA" "$tag_check_output"' "$WORKFLOW" || fail 'segunda comprobación no reutiliza el helper de tag existente'
-grep -Fq '[[ "$tag_exists" == false ]]' "$WORKFLOW" || fail 'tag presente/no verificable no falla cerrado antes del push'
+grep -Fq "ensure-ghcr-sha-image.sh \"\$GITHUB_REPOSITORY\" \"\$SERVICE\" \"\$IMAGE_SHA\" \"\$tag_check_output\"" "$WORKFLOW" || fail 'segunda comprobación no reutiliza el helper de tag existente'
+grep -Fq "[[ \"\$tag_exists\" == false ]]" "$WORKFLOW" || fail 'tag presente/no verificable no falla cerrado antes del push'
 for forbidden in ORACLE_ Tailscale tailscale 'service-deploy' deploy-g6-service.sh 'id-token:' 'docker compose' 'workflow_run'; do
   if grep -Fqi "$forbidden" "$WORKFLOW"; then fail "deployment capability present: $forbidden"; fi
 done

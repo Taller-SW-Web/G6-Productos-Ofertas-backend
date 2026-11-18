@@ -69,8 +69,9 @@ jobs:
         bash ops/azure/container-apps/tests/reconcile-recovery.test.sh
         bash ops/azure/container-apps/tests/workflow.test.sh
         bash ops/shared/tests/ensure-ghcr-sha-image.test.sh
-        for file in ops/shared/ensure-ghcr-sha-image.sh ops/shared/tests/ensure-ghcr-sha-image.test.sh ops/oracle/ensure-ghcr-sha-image.sh ops/azure/container-apps/validate-source.sh ops/azure/container-apps/verify-environment-protection.sh ops/azure/container-apps/deploy.sh ops/azure/container-apps/reconcile-recovery.sh ops/azure/container-apps/smoke-service.sh ops/azure/container-apps/tests/validate-source.test.sh ops/azure/container-apps/tests/verify-environment-protection.test.sh ops/azure/container-apps/tests/deploy.test.sh ops/azure/container-apps/tests/smoke.test.sh ops/azure/container-apps/tests/reconcile-recovery.test.sh ops/azure/container-apps/tests/workflow.test.sh; do bash -n "$file"; done
-        shellcheck ops/shared/ensure-ghcr-sha-image.sh ops/shared/tests/ensure-ghcr-sha-image.test.sh ops/oracle/ensure-ghcr-sha-image.sh ops/azure/container-apps/validate-source.sh ops/azure/container-apps/verify-environment-protection.sh ops/azure/container-apps/deploy.sh ops/azure/container-apps/reconcile-recovery.sh ops/azure/container-apps/smoke-service.sh ops/azure/container-apps/tests/validate-source.test.sh ops/azure/container-apps/tests/verify-environment-protection.test.sh ops/azure/container-apps/tests/deploy.test.sh ops/azure/container-apps/tests/smoke.test.sh ops/azure/container-apps/tests/reconcile-recovery.test.sh ops/azure/container-apps/tests/workflow.test.sh
+        bash ops/shared/tests/publish-only-workflow.test.sh
+        for file in ops/shared/build-service.sh ops/shared/validate-publish-only-source.sh ops/shared/ensure-ghcr-sha-image.sh ops/shared/tests/services-ci.test.sh ops/shared/tests/ensure-ghcr-sha-image.test.sh ops/shared/tests/publish-only-workflow.test.sh ops/azure/container-apps/validate-source.sh ops/azure/container-apps/verify-environment-protection.sh ops/azure/container-apps/deploy.sh ops/azure/container-apps/reconcile-recovery.sh ops/azure/container-apps/smoke-service.sh ops/azure/container-apps/tests/validate-source.test.sh ops/azure/container-apps/tests/verify-environment-protection.test.sh ops/azure/container-apps/tests/deploy.test.sh ops/azure/container-apps/tests/smoke.test.sh ops/azure/container-apps/tests/reconcile-recovery.test.sh ops/azure/container-apps/tests/workflow.test.sh; do bash -n "$file"; done
+        shellcheck ops/shared/build-service.sh ops/shared/validate-publish-only-source.sh ops/shared/ensure-ghcr-sha-image.sh ops/shared/tests/services-ci.test.sh ops/shared/tests/ensure-ghcr-sha-image.test.sh ops/shared/tests/publish-only-workflow.test.sh ops/azure/container-apps/validate-source.sh ops/azure/container-apps/verify-environment-protection.sh ops/azure/container-apps/deploy.sh ops/azure/container-apps/reconcile-recovery.sh ops/azure/container-apps/smoke-service.sh ops/azure/container-apps/tests/validate-source.test.sh ops/azure/container-apps/tests/verify-environment-protection.test.sh ops/azure/container-apps/tests/deploy.test.sh ops/azure/container-apps/tests/smoke.test.sh ops/azure/container-apps/tests/reconcile-recovery.test.sh ops/azure/container-apps/tests/workflow.test.sh
   tipos:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
@@ -216,17 +217,12 @@ jobs:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
       (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
-    name: Validar imágenes de contenedores
+    name: Validar imágenes y pruebas funcionales de contenedores
     runs-on: ubuntu-latest
     steps:
     - name: Obtener código fuente
       uses: actions/checkout@v4
-    - name: Descargar los artefactos compilados
-      uses: actions/download-artifact@v4
-      with:
-        name: artefactos-compilados
-        path: dist/
-    - name: Obtener migraciones oficiales fijadas de Inventory
+    - name: Descargar las migraciones oficiales fijadas de Inventory
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
@@ -240,86 +236,32 @@ jobs:
         cache: npm
     - name: Instalar dependencias de forma reproducible
       run: npm ci
-    - name: Construir la imagen de Inventory
+    - name: Validar el inventario neutral de nueve servicios
+      run: bash ops/shared/tests/services-ci.test.sh
+    - name: Construir la imagen independiente de Inventory
       run: docker build --file Dockerfile.inventory-svc --tag inventory-svc:ci .
-    - name: Simular despliegue Oracle y validar aliases Docker reales (obligatorio)
-      env:
-        G6_REQUIRE_DOCKER_RUNTIME: 'true'
-      run: bash ops/oracle/tests/deploy-g6-service.test.sh
-    - name: Validar el registro cerrado de servicios Oracle
-      run: "set -euo pipefail\nfor file in ops/oracle/service-registry.sh ops/oracle/deploy-g6-service.sh ops/oracle/deploy-inventory-svc.sh\
-        \ ops/oracle/build-service.sh ops/oracle/select-cd-services.sh ops/oracle/validate-cd-source.sh ops/oracle/github-deployment-api.sh\
-        \ ops/oracle/verify-manual-release-provenance.sh ops/oracle/ensure-ghcr-sha-image.sh ops/oracle/tests/deploy-g6-service.test.sh\
-        \ ops/oracle/tests/deploy-inventory-svc.test.sh ops/oracle/tests/select-cd-services.test.sh ops/oracle/tests/validate-cd-source.test.sh\
-        \ ops/oracle/tests/deployment-api.test.sh ops/oracle/tests/publish-isolation.test.sh ops/oracle/tests/ensure-ghcr-sha-image.test.sh;\
-        \ do\n  bash -n \"$file\"\ndone\nenabled=\"$(bash -c 'source ops/oracle/service-registry.sh; g6_enabled_services_json')\"\
-        \ntest \"$enabled\" = '[\"api-gateway\",\"bulk-svc\",\"catalog-svc\",\"combos-svc\",\"inventory-svc\",\"\
-        price-audit-svc\",\"pricing-svc\",\"promotions-svc\",\"taxonomy-svc\"]'\ntest \"$(awk -F'|' '$1 !~ /^#/\
-        \ && NF { count++ } END { print count+0 }' ops/oracle/services.psv)\" = 9\n"
-    - name: Validar puertos, configuración y comprobaciones de salud
-      run: "set -euo pipefail\nruntime_env=\"$(mktemp)\"\ninventory_compose=\"$(mktemp --suffix=.yml)\"\ntrap 'rm\
-        \ -f \"$runtime_env\" \"$inventory_compose\"' EXIT\nwhile IFS='|' read -r service enabled port port_env\
-        \ build_script main_module image_name compose_file project compose_unit container state_dir runtime_env_file;\
-        \ do\n  [[ -n \"$service\" && \"$service\" != \\#* ]] || continue\n  export G6_SERVICE_IMAGE=\"ghcr.io/taller-sw-web/g6-productos-ofertas-backend/${service}:0123456789012345678901234567890123456789\"\
-        \n  export G6_SERVICE_CONTAINER=\"$container\"\n  export G6_SERVICE_PORT=\"$port\"\n  export G6_SERVICE_PORT_ENV=\"\
-        $port_env\"\n  export G6_SERVICE_ENV_FILE=\"$runtime_env\"\n  export G6_SERVICE_IMAGE_NAME=\"$image_name\"\
-        \n  compose_file=ops/oracle/docker-compose.service.yml\n  if [[ \"$service\" == api-gateway ]]; then\n \
-        \   compose_file=ops/oracle/docker-compose.gateway.yml\n  fi\n  config=\"$(docker compose --file \"$compose_file\"\
-        \ config --format json --no-env-resolution)\"\n  jq -e --arg port \"$port\" --arg port_env \"$port_env\"\
-        \ \\\n    '.services.service.environment.PORT == $port and\n     .services.service.environment[$port_env]\
-        \ == $port and\n     .services.service.ports[0].host_ip == \"127.0.0.1\" and\n     (.services.service.ports[0].published\
-        \ | tostring) == $port and\n     any(.services.service.volumes[]; .target == \"/run/g6-certs/supabase-server-root.crt\"\
-        \ and .read_only == true)' \\\n    <<< \"$config\" >/dev/null\n  if [[ \"$service\" == api-gateway ]]; then\n\
-        \    jq -e '.services.service.healthcheck.test == [\"CMD\", \"node\", \"dist/apps/api-gateway/readiness.js\"\
-        ] and\n      .services.service.healthcheck.interval == \"30s\" and\n      .services.service.healthcheck.timeout\
-        \ == \"15s\" and\n      .services.service.healthcheck.start_period == \"30s\" and\n      .services.service.healthcheck.retries\
-        \ == 3' \\\n      <<< \"$config\" >/dev/null\n  else\n    jq -e --arg port \"$port\" \\\n      '((.services.service.healthcheck.test\
-        \ | join(\" \")) | contains(\"127.0.0.1:\" + $port + \"/health\"))' \\\n      <<< \"$config\" >/dev/null\n\
-        \  fi\n  http_config=\"$(docker compose --file \"$compose_file\" --file ops/oracle/docker-compose.service.http.yml\
-        \ config --format json --no-env-resolution)\"\n  jq -e --arg alias \"$image_name\" \\\n    '.services.service.networks[\"\
-        g6-http\"].aliases | index($alias) != null' \\\n    <<< \"$http_config\" >/dev/null\n  if [[ \"$service\"\
-        \ == api-gateway ]]; then\n    jq -e '.services.service.networks[\"g6-edge\"].aliases | index(\"g6-api-gateway\"\
-        ) != null' \\\n      <<< \"$http_config\" >/dev/null\n  else\n    jq -e '(.services.service.networks | has(\"\
-        g6-edge\")) | not' \\\n      <<< \"$http_config\" >/dev/null\n  fi\ndone < ops/oracle/services.psv\nsource\
-        \ ops/oracle/service-registry.sh\ng6_service_config inventory-svc\ngrep -Fq \"process.env.${G6_SERVICE_PORT_ENV}\
-        \ ?? process.env.PORT ?? '${G6_SERVICE_PORT}'\" apps/inventory-svc/src/main.ts\ngrep -Fq \"127.0.0.1:${G6_SERVICE_PORT}/health\"\
-        \ Dockerfile.inventory-svc\nexport INVENTORY_IMAGE=\"ghcr.io/taller-sw-web/g6-productos-ofertas-backend/inventory-svc:0123456789012345678901234567890123456789\"\
-        \nsed \"s|/etc/g6-inventory/runtime.env|${runtime_env}|\" docker-compose.inventory.yml > \"$inventory_compose\"\
-        \ninventory_config=\"$(docker compose --file \"$inventory_compose\" --file ops/oracle/docker-compose.inventory.http.yml\
-        \ config --format json --no-env-resolution)\"\njq -e --arg port \"$G6_SERVICE_PORT\" --arg port_env \"$G6_SERVICE_PORT_ENV\"\
-        \ \\\n  --arg ca_source \"/etc/g6-postgres/supabase-server-root.crt\" \\\n  --arg ca_target \"/run/g6-certs/supabase-server-root.crt\"\
-        \ \\\n  '.services[\"inventory-svc\"].environment.PORT == $port and\n   .services[\"inventory-svc\"].environment[$port_env]\
-        \ == $port and\n   .services[\"inventory-svc\"].ports[0].host_ip == \"127.0.0.1\" and\n   (.services[\"\
-        inventory-svc\"].ports[0].published | tostring) == $port and\n   ((.services[\"inventory-svc\"].healthcheck.test\
-        \ | join(\" \")) | contains(\"127.0.0.1:\" + $port + \"/health\")) and\n   any(.services[\"inventory-svc\"\
-        ].volumes[]; .source == $ca_source and .target == $ca_target and .read_only == true) and\n   (.services[\"\
-        inventory-svc\"].networks[\"g6-http\"].aliases | index(\"inventory-svc\") != null)' \\\n  <<< \"$inventory_config\"\
-        \ >/dev/null\nprintf 'Consistencia de los nueve puertos/env/Compose/healthchecks validada; Inventory conserva\
-        \ puerto, healthcheck, alias g6-http y montaje CA read-only.\\n'\n"
-    - name: Construir imágenes de los nueve servicios Oracle
-      run: "set -euo pipefail\nenabled=\"$(bash -c 'source ops/oracle/service-registry.sh; g6_enabled_services_json')\"\
-        \nwhile IFS= read -r service; do\n  [[ -n \"$service\" ]] || continue\n  docker build --file Dockerfile.service\
-        \ --build-arg SERVICE_NAME=\"$service\" --tag \"g6-service:${service}-ci\" .\ndone < <(jq -r '.[]' <<< \"\
-        $enabled\")\n"
-    - name: Probar salud de imágenes sin dependencias externas
+    - name: Construir las imágenes de los nueve servicios
       run: |
-        set -euo pipefail
-        while IFS='|' read -r service enabled port port_env _; do
+        set -Eeuo pipefail
+        while IFS='|' read -r service port port_env; do
           [[ -n "$service" && "$service" != \#* ]] || continue
-          [[ "$enabled" == true ]] || continue
-          case "$service" in
-            inventory-svc)
-              printf 'INVENTORY: omitido del bucle sin dependencias; lo valida el smoke especializado PostgreSQL/TLS.\n'
-              continue
-              ;;
-            catalog-svc|taxonomy-svc)
-              printf 'NO EJECUTADO: %s requiere configuración PostgreSQL runtime ausente en CI.\n' "$service"
-              continue
-              ;;
-          esac
+          docker build --file Dockerfile.service --build-arg SERVICE_NAME="$service" --tag "g6-service:${service}-ci" .
+        done < ops/shared/services-ci.psv
+    - name: Probar salud y configuración de las nueve imágenes
+      run: |
+        set -Eeuo pipefail
+        while IFS='|' read -r service port port_env; do
+          [[ -n "$service" && "$service" != \#* ]] || continue
+          if [[ "$service" == inventory-svc ]]; then
+            printf 'INVENTORY: se valida con smoke funcional PostgreSQL/TLS aislado.\n'
+            continue
+          fi
+          if [[ "$service" == catalog-svc || "$service" == taxonomy-svc ]]; then
+            printf 'NO EJECUTADO en el bucle sin dependencias: %s requiere PostgreSQL runtime; marketplace-docker.sh ejerce ambos con PostgreSQL/TLS.\n' "$service"
+            continue
+          fi
           if [[ "$service" == promotions-svc ]]; then
-            G6_PROMOTIONS_TEST_IMAGE="g6-service:${service}-ci" \
-              node apps/promotions-svc/test/container.smoke.mjs
+            G6_PROMOTIONS_TEST_IMAGE="g6-service:${service}-ci" node apps/promotions-svc/test/container.smoke.mjs
             continue
           fi
           name="${service}-generic-ci"
@@ -331,7 +273,6 @@ jobs:
           trap 'docker rm --force "$name" >/dev/null 2>&1 || true; if [[ -n "${combos_ca_dir:-}" ]]; then rm -f "$combos_ca_dir/ca.key" "$combos_ca_dir/ca.crt"; rmdir "$combos_ca_dir" 2>/dev/null || true; fi' EXIT
           runtime_env=()
           if [[ "$service" == pricing-svc ]]; then
-            # Fixture aislada: liveness no necesita una base disponible.
             runtime_env+=(--env 'DATABASE_URL=postgresql://pricing:ci-fixture@127.0.0.1:1/pricing?sslmode=verify-full')
           fi
           if [[ "$service" == price-audit-svc ]]; then
@@ -343,17 +284,13 @@ jobs:
             combos_ca="$combos_ca_dir/ca.crt"
             openssl req -x509 -newkey rsa:2048 -nodes -keyout "$combos_ca_dir/ca.key" \
               -out "$combos_ca" -days 1 -subj '/CN=combos-ci-test-ca' \
-              -addext 'basicConstraints=critical,CA:TRUE' \
-              -addext 'keyUsage=critical,keyCertSign,cRLSign'
-            runtime_env+=(--env 'PGHOST=localhost' --env 'PGPORT=1'
-              --env 'PGDATABASE=combos_ci' --env 'PGUSER=combos_ci'
+              -addext 'basicConstraints=critical,CA:TRUE' -addext 'keyUsage=critical,keyCertSign,cRLSign'
+            runtime_env+=(--env 'PGHOST=localhost' --env 'PGPORT=1' --env 'PGDATABASE=combos_ci' --env 'PGUSER=combos_ci'
               --env 'PGPASSWORD=ci-only-unused' --env 'PGSSLMODE=verify-full'
-              --env 'PGSSLROOTCERT=/run/g6-ci-certs/ca.crt'
-              --env 'G6_SECURITY_MODE=G7_AUTHENTICATED'
+              --env 'PGSSLROOTCERT=/run/g6-ci-certs/ca.crt' --env 'G6_SECURITY_MODE=G7_AUTHENTICATED'
               --env 'SECURITY_ISSUER=https://identity.invalid'
               --env 'SECURITY_DISCOVERY_URL=https://identity.invalid/.well-known/openid-configuration'
-              --env 'SECURITY_JWKS_URL=https://identity.invalid/jwks'
-              --env 'COMBOS_RESTRICTED_DEMO_ENABLED=false'
+              --env 'SECURITY_JWKS_URL=https://identity.invalid/jwks' --env 'COMBOS_RESTRICTED_DEMO_ENABLED=false'
               --mount "type=bind,source=$combos_ca,target=/run/g6-ci-certs/ca.crt,readonly")
           fi
           docker run --detach --name "$name" --publish "127.0.0.1::${port}" \
@@ -369,29 +306,18 @@ jobs:
             docker inspect --format 'status={{.State.Status}} exit={{.State.ExitCode}}' "$name" >&2
             exit 1
           fi
-          node -e '
-            const payload = JSON.parse(process.argv[1]);
-            if (payload.status !== "ok" || payload.service !== process.argv[2]) {
-              console.error("Respuesta de salud inesperada del servicio:", payload);
-              process.exit(1);
-            }
-          ' "$response" "$service"
+          node -e 'const payload=JSON.parse(process.argv[1]); if(payload.status!=="ok"||payload.service!==process.argv[2]) process.exit(1)' "$response" "$service"
           if [[ "$service" == pricing-svc || "$service" == price-audit-svc || "$service" == combos-svc ]]; then
             readiness_path=/health/ready
             [[ "$service" != combos-svc ]] || readiness_path=/ready
             readiness_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${host_port}${readiness_path}")"
-            if [[ "$readiness_status" != 503 ]]; then
-              printf 'FALLO: %s debe responder readiness=503 con la base de fixture inaccesible.\n' "$service" >&2
-              exit 1
-            fi
-            printf 'CORRECTO: %s mantiene liveness=200 y readiness=503 con PostgreSQL inaccesible.\n' "$service"
+            [[ "$readiness_status" == 503 ]]
           fi
           if [[ "$service" == combos-svc ]]; then
             if docker run --rm "g6-service:${service}-ci" >/dev/null 2>&1; then
-              printf 'FALLO: %s arranco sin configuracion PostgreSQL obligatoria.\n' "$service" >&2
+              printf 'FALLO: combos-svc arrancó sin configuración PostgreSQL obligatoria.\n' >&2
               exit 1
             fi
-            printf 'CORRECTO: %s falla al arrancar cuando falta configuracion PostgreSQL obligatoria.\n' "$service"
           fi
           healthy=''
           for attempt in {1..30}; do
@@ -401,35 +327,24 @@ jobs:
           done
           [[ "$healthy" == healthy ]]
           docker rm --force "$name" >/dev/null
-          if [[ -n "$combos_ca_dir" ]]; then
-            rm -f "$combos_ca_dir/ca.key" "$combos_ca_dir/ca.crt"
-            rmdir "$combos_ca_dir"
-            combos_ca_dir=''
-          fi
+          if [[ -n "$combos_ca_dir" ]]; then rm -f "$combos_ca_dir/ca.key" "$combos_ca_dir/ca.crt"; rmdir "$combos_ca_dir"; fi
           trap - EXIT
-          printf 'CORRECTO: Dockerfile.service %s escuchó en %s/%s y su healthcheck quedó saludable.\n' "$service" "$port_env" "$port"
-        done < ops/oracle/services.psv
-
-    - name: Probar imagen Oracle de Inventory con PostgreSQL TLS desechable
+          printf 'PASS: %s escuchó en %s/%s y su healthcheck quedó saludable.\n' "$service" "$port_env" "$port"
+        done < ops/shared/services-ci.psv
+    - name: Probar imagen de Inventory con PostgreSQL TLS desechable
       env:
         G6_DOCS_ROOT: ${{ github.workspace }}/.ci/G6-Productos-Ofertas-docs
         INVENTORY_TEST_IMAGE: g6-service:inventory-svc-ci
       run: |
-        set -euo pipefail
-        for attempt in 1 2; do
-          printf 'Smoke Oracle Inventory aislado %s/2\n' "$attempt"
-          bash scripts/ci/inventory-container-smoke.sh
-        done
+        set -Eeuo pipefail
+        for attempt in 1 2; do bash scripts/ci/inventory-container-smoke.sh; done
     - name: Probar imagen independiente de Inventory con PostgreSQL TLS desechable
       env:
         G6_DOCS_ROOT: ${{ github.workspace }}/.ci/G6-Productos-Ofertas-docs
         INVENTORY_TEST_IMAGE: inventory-svc:ci
       run: |
-        set -euo pipefail
-        for attempt in 1 2; do
-          printf 'Smoke Inventory independiente aislado %s/2\n' "$attempt"
-          bash scripts/ci/inventory-container-smoke.sh
-        done
+        set -Eeuo pipefail
+        for attempt in 1 2; do bash scripts/ci/inventory-container-smoke.sh; done
     - name: Rechazar arranques sin configuración PostgreSQL
       run: node scripts/ci/invalid-startup.mjs
     - name: Probar Marketplace con PostgreSQL TLS desechable
@@ -437,53 +352,6 @@ jobs:
     needs:
     - compilacion
     timeout-minutes: 30
-  oracle:
-    if: >-
-      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
-      (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
-    name: Verificar infraestructura Oracle
-    runs-on: ubuntu-latest
-    needs:
-    - contenedores
-    steps:
-    - name: Obtener código fuente
-      uses: actions/checkout@v4
-    - name: Descargar Caddy oficial para la simulación efímera
-      run: docker pull caddy:2.11.6-alpine
-    - name: Descargar Node oficial para el mock HTTP efímero
-      run: docker pull node:24-alpine
-    - name: Validar proxy Caddy real con upstream HTTP local
-      env:
-        CADDY_TEST_IMAGE: caddy:2.11.6-alpine
-      run: bash ops/oracle/tests/caddy-h4.test.sh
-    - name: Validar topología de nueve servicios con Compose y fixtures
-      env:
-        G6_REQUIRE_DOCKER_COMPOSE: 'true'
-      run: bash ops/oracle/tests/topologia-nueve-servicios.test.sh
-    - name: Comprobar sintaxis de las pruebas H4
-      run: |
-        bash -n ops/oracle/tests/caddy-h4.test.sh
-        bash -n ops/oracle/tests/topologia-nueve-servicios.test.sh
-    - name: Probar selección y recuperación de GitHub Deployments
-      run: bash ops/oracle/tests/select-cd-services.test.sh
-    - name: Probar el ciclo de GitHub Deployments con API simulada
-      run: bash ops/oracle/tests/deployment-api.test.sh
-    - name: Probar aislamiento ante fallos de publicación
-      run: bash ops/oracle/tests/publish-isolation.test.sh
-    - name: Probar publicación manual por actores autorizados y SHA validado
-      run: bash ops/oracle/tests/publish-only-workflow.test.sh
-    - name: Probar resguardo de imágenes SHA inmutables
-      run: bash ops/oracle/tests/ensure-ghcr-sha-image.test.sh
-    - name: Comprobar sintaxis de scripts Bash de operación
-      run: "set -euo pipefail\nfor file in ops/oracle/service-registry.sh ops/oracle/deploy-g6-service.sh ops/oracle/deploy-inventory-svc.sh\
-        \ ops/oracle/build-service.sh ops/oracle/select-cd-services.sh ops/oracle/validate-cd-source.sh ops/oracle/github-deployment-api.sh\
-        \ ops/oracle/verify-manual-release-provenance.sh ops/oracle/ensure-ghcr-sha-image.sh ops/oracle/tests/deploy-g6-service.test.sh\
-        \ ops/oracle/tests/deploy-inventory-svc.test.sh ops/oracle/tests/select-cd-services.test.sh ops/oracle/tests/validate-cd-source.test.sh\
-        \ ops/oracle/tests/deployment-api.test.sh ops/oracle/tests/publish-isolation.test.sh ops/oracle/tests/ensure-ghcr-sha-image.test.sh;\
-        \ do\n  bash -n \"$file\"\ndone\nenabled=\"$(bash -c 'source ops/oracle/service-registry.sh; g6_enabled_services_json')\"\
-        \ntest \"$enabled\" = '[\"api-gateway\",\"bulk-svc\",\"catalog-svc\",\"combos-svc\",\"inventory-svc\",\"\
-        price-audit-svc\",\"pricing-svc\",\"promotions-svc\",\"taxonomy-svc\"]'\ntest \"$(awk -F'|' '$1 !~ /^#/\
-        \ && NF { count++ } END { print count+0 }' ops/oracle/services.psv)\" = 9\n"
   taxonomia:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
@@ -818,7 +686,6 @@ jobs:
       - compilacion
       - contenedores
       - persistencia
-      - oracle
       - taxonomia
       - taxonomia_catalogo
       - inventario
@@ -843,7 +710,7 @@ jobs:
         RESULTADOS: ${{ toJSON(needs) }}
       run: |
         printf '%s\n' "$RESULTADOS"
-        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia oracle taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias
+        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias
   compatibilidad:
     name: Lint, Typecheck, Test, Build & Smoke Test
     runs-on: ubuntu-latest
@@ -858,7 +725,6 @@ jobs:
     - compilacion
     - contenedores
     - persistencia
-    - oracle
     - taxonomia
     - taxonomia_catalogo
     - inventario
@@ -883,7 +749,7 @@ jobs:
         RESULTADOS: ${{ toJSON(needs) }}
       run: |
         printf '%s\n' "$RESULTADOS"
-        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia oracle taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias
+        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias
   benchmark_focalizado:
     name: Benchmark focalizado solicitado
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'benchmark'

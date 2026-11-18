@@ -14,15 +14,13 @@ repository="${GITHUB_REPOSITORY:-}"
 event_sha="${GITHUB_SHA:-}"
 readonly authorized_repository='Taller-SW-Web/G6-Productos-Ofertas-backend'
 
-case "$service" in
-  api-gateway|bulk-svc|catalog-svc|combos-svc|inventory-svc|price-audit-svc|pricing-svc|promotions-svc|taxonomy-svc) ;;
-  *) fail 'servicio fuera de la allowlist de publicación' ;;
-esac
+if ! awk -F'|' -v service="$service" '$1 == service { found=1 } END { exit !found }' "$(dirname "${BASH_SOURCE[0]}")/services-ci.psv"; then
+  fail 'servicio fuera de la allowlist de publicación'
+fi
 [[ "$requested_sha" =~ ^[0-9a-f]{40}$ ]] || fail 'SHA inválido'
 [[ "$event_sha" =~ ^[0-9a-f]{40}$ && "$requested_sha" == "$event_sha" ]] ||
   fail 'el SHA solicitado no coincide con el SHA del evento workflow_dispatch'
-[[ "${repository,,}" == "${authorized_repository,,}" ]] ||
-  fail 'GITHUB_REPOSITORY no autorizado'
+[[ "${repository,,}" == "${authorized_repository,,}" ]] || fail 'GITHUB_REPOSITORY no autorizado'
 [[ "${GITHUB_EVENT_NAME:-}" == workflow_dispatch && "${GITHUB_REF:-}" == refs/heads/master ]] ||
   fail 'la publicación requiere workflow_dispatch desde master'
 case "${GITHUB_ACTOR:-}" in
@@ -53,7 +51,6 @@ ci_success="$(gh run list \
   fail 'no se pudo verificar el workflow de CI'
 [[ "$ci_success" == true ]] || fail 'no existe CI push/master exitosa para el SHA exacto'
 
-# Values are restricted above so they cannot inject workflow output commands.
 {
   printf 'sha=%s\n' "$requested_sha"
   printf 'service=%s\n' "$service"
