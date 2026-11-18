@@ -1,21 +1,22 @@
+import { currentTaxonomyValue } from './catalog-taxonomy-update.js';
 import {
   Injectable,
   Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { CatalogTelemetry } from './catalog-telemetry.js';
+import { catalogSkuContext, catalogSkuRecords } from './catalog-sku-query.js';
 import {
   and,
   asc,
   desc,
   eq,
   exists,
-  gt,
   ilike,
   inArray,
+  notInArray,
   or,
   sql,
-  lt,
   type SQL,
 } from 'drizzle-orm';
 import { Database, type CatalogTransaction } from './database.js';
@@ -52,22 +53,8 @@ const attributeProjection = {
   caracteristica_id: productAttributes.caracteristica_id,
   nombre: productAttributes.nombre_snapshot,
   valor_id: productAttributes.valor_id,
-  valor: productAttributes.valor,
+  valor: currentTaxonomyValue(productAttributes),
 };
-
-function isDemoImageUrl(value: unknown): value is string {
-  if (typeof value !== 'string' || value.trim().length === 0) return false;
-  try {
-    const url = new URL(value);
-    return (
-      url.protocol === 'https:' &&
-      url.hostname !== 'placehold.co' &&
-      !url.hostname.endsWith('.placehold.co')
-    );
-  } catch {
-    return false;
-  }
-}
 
 @Injectable()
 export class PostgresCatalogRepository {
@@ -96,48 +83,6 @@ export class PostgresCatalogRepository {
       attributes.set(productId, group);
     }
     return attributes;
-  }
-
-  private async enrichDemoCandidates(
-    tx: CatalogTransaction,
-    rows: Array<Omit<ProductSummary, 'images' | 'attributes'>>,
-  ): Promise<ProductSummary[]> {
-    if (!rows.length) return [];
-    const ids = rows.map((row) => row.product_id);
-    // Preview has its own principal-first order and URL policy. Do not reuse
-    // the internal read-demo image deduplication/100-row limit here.
-    const own = await tx.execute<{ product_id: string; url: string }>(sql`
-      SELECT product_id, url FROM catalog.product_images
-      WHERE product_id = ANY(${sql.param(ids)}::uuid[]) AND length(trim(url)) > 0
-      ORDER BY product_id ASC, principal DESC, posicion ASC, id ASC`);
-    const photos = new Map<string, string[]>();
-    const append = (productId: string, url: string) => {
-      if (!isDemoImageUrl(url)) return;
-      const group = photos.get(productId) ?? [];
-      group.push(url);
-      photos.set(productId, group);
-    };
-    for (const image of own.rows) append(image.product_id, image.url);
-    const missing = ids.filter((id) => !photos.has(id));
-    if (missing.length) {
-      const fallback = await tx.execute<{
-        product_id: string;
-        url: string;
-      }>(sql`
-        SELECT v.product_id, vi.url
-        FROM catalog.variants v JOIN catalog.variant_images vi ON vi.variant_id = v.id
-        WHERE v.product_id = ANY(${sql.param(missing)}::uuid[]) AND length(trim(vi.url)) > 0
-        ORDER BY v.product_id ASC, vi.posicion ASC, vi.id ASC, v.id ASC`);
-      for (const image of fallback.rows) append(image.product_id, image.url);
-    }
-    const attributes = await this.groupedAttributes(tx, ids);
-    return rows
-      .filter((row) => photos.has(row.product_id))
-      .map((row) => ({
-        ...row,
-        images: photos.get(row.product_id)!,
-        attributes: attributes.get(row.product_id) ?? [],
-      }));
   }
 
   private async images(
@@ -174,7 +119,7 @@ export class PostgresCatalogRepository {
     ];
   }
 
-  async checkDemoReadAccess(): Promise<void> {
+  async checkReadinessAccess(): Promise<void> {
     await this.database.read(async (db) => {
       await db.execute(
         sql.raw(`SELECT
@@ -185,40 +130,6 @@ export class PostgresCatalogRepository {
         (SELECT 1 FROM catalog.variant_images LIMIT 0) AS variant_images`),
       );
     });
-  }
-
-  private demoWhere(query: ProductQuery): SQL | undefined {
-    const conditions: SQL[] = [];
-    if (query.q !== undefined) {
-      const literal = query.q.replace(/[\\%_]/g, '\\$&');
-      conditions.push(
-        or(
-          ilike(products.nombre, '%' + literal + '%'),
-          ilike(products.descripcion, '%' + literal + '%'),
-        )!,
-      );
-    }
-    if (query.categoriaId !== undefined)
-      conditions.push(eq(products.categoria_id, query.categoriaId));
-    if (query.marcaId !== undefined)
-      conditions.push(eq(products.marca_id, query.marcaId));
-    return conditions.length ? and(...conditions) : undefined;
-  }
-
-  private async demoImages(
-    tx: CatalogTransaction,
-    productId: string,
-  ): Promise<string[]> {
-    const own = await tx.execute(sql`SELECT url FROM catalog.product_images
-      WHERE product_id = ${productId}::uuid AND length(trim(url)) > 0
-      ORDER BY principal DESC, posicion ASC, id ASC`);
-    const ownUrls = own.rows.map((row) => row.url).filter(isDemoImageUrl);
-    if (ownUrls.length) return ownUrls;
-    const variantsGallery = await tx.execute(sql`SELECT vi.url
-      FROM catalog.variants v JOIN catalog.variant_images vi ON vi.variant_id = v.id
-      WHERE v.product_id = ${productId}::uuid AND length(trim(vi.url)) > 0
-      ORDER BY vi.posicion ASC, vi.id ASC, v.id ASC`);
-    return variantsGallery.rows.map((row) => row.url).filter(isDemoImageUrl);
   }
 
   private async variantsForProduct(
@@ -245,7 +156,7 @@ export class PostgresCatalogRepository {
         caracteristica_id: variantAttributes.caracteristica_id,
         nombre: variantAttributes.nombre_snapshot,
         valor_id: variantAttributes.valor_id,
-        valor: variantAttributes.valor,
+        valor: currentTaxonomyValue(variantAttributes),
         identifying: variantAttributes.es_identificador,
       })
       .from(variantAttributes)
@@ -299,97 +210,6 @@ export class PostgresCatalogRepository {
     });
   }
 
-  async listDemoCandidates(
-    query: ProductQuery,
-    batchSize = 100,
-    correlationId?: string,
-  ): Promise<ProductSummary[]> {
-    if (!Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 100)
-      throw new ServiceUnavailableException();
-    return this.database.read((db) =>
-      db.transaction(
-        async (tx) => {
-          const result: ProductSummary[] = [];
-          let cursor: { name: string; id: string } | undefined;
-          while (true) {
-            const rows = await this.telemetry.measure(
-              'DEMO_CANDIDATES_SQL',
-              async () =>
-                tx
-                  .select(projection)
-                  .from(products)
-                  .where(
-                    and(
-                      this.demoWhere(query),
-                      cursor
-                        ? or(
-                            query.orden === 'NOMBRE_DESC'
-                              ? lt(products.nombre, cursor.name)
-                              : gt(products.nombre, cursor.name),
-                            and(
-                              eq(products.nombre, cursor.name),
-                              gt(products.id, cursor.id),
-                            ),
-                          )
-                        : undefined,
-                    ),
-                  )
-                  .orderBy(
-                    query.orden === 'NOMBRE_DESC'
-                      ? desc(products.nombre)
-                      : asc(products.nombre),
-                    asc(products.id),
-                  )
-                  .limit(batchSize),
-              correlationId,
-            );
-            if (!rows.length) break;
-            cursor = { name: rows.at(-1)!.name, id: rows.at(-1)!.product_id };
-            result.push(
-              ...(await this.telemetry.measure(
-                'DEMO_ENRICHMENT_SQL',
-                () => this.enrichDemoCandidates(tx, rows),
-                correlationId,
-              )),
-            );
-            if (rows.length < batchSize) break;
-          }
-          return result;
-        },
-        { isolationLevel: 'repeatable read', accessMode: 'read only' },
-      ),
-    );
-  }
-
-  async findDemoCandidateBySlug(
-    slug: string,
-  ): Promise<(ProductSummary & { variants: CommercialVariant[] }) | null> {
-    return this.database.read((db) =>
-      db.transaction(
-        async (tx) => {
-          const [row] = await tx
-            .select(projection)
-            .from(products)
-            .where(eq(products.slug, slug))
-            .limit(1);
-          if (!row) return null;
-          const images = await this.demoImages(tx, row.product_id);
-          if (!images.length) return null;
-          const attributes = await tx
-            .select(attributeProjection)
-            .from(productAttributes)
-            .where(eq(productAttributes.product_id, row.product_id))
-            .orderBy(asc(productAttributes.caracteristica_id));
-          const result = row.tiene_variantes
-            ? await this.variantsForProduct(tx, row.product_id, true, true)
-            : [];
-          return { ...row, images, attributes, variants: result };
-        },
-        { isolationLevel: 'repeatable read', accessMode: 'read only' },
-      ),
-    );
-  }
-
   // D-CAT-05/06: elegibilidad global, en el mismo snapshot que COUNT y página.
   private where(query: ProductQuery, readDemo = false): SQL | undefined {
     const conditions: SQL[] = [];
@@ -408,6 +228,16 @@ export class PostgresCatalogRepository {
       conditions.push(eq(products.categoria_id, query.categoriaId));
     if (query.marcaId !== undefined)
       conditions.push(eq(products.marca_id, query.marcaId));
+    if (query.tipoProductoIdsIncluidos?.length)
+      conditions.push(
+        inArray(products.tipo_producto_id, [...query.tipoProductoIdsIncluidos]),
+      );
+    if (query.tipoProductoIdsExcluidos?.length)
+      conditions.push(
+        notInArray(products.tipo_producto_id, [
+          ...query.tipoProductoIdsExcluidos,
+        ]),
+      );
     if (
       !readDemo &&
       (query.estado === undefined || query.estado === 'ACTIVO')
@@ -530,36 +360,41 @@ export class PostgresCatalogRepository {
   }
 
   /** Authoritative SKU state and commercial eligibility, independent of Pricing. */
+  async skuContexts(skus: readonly string[]) {
+    try {
+      return await this.database.read((db) =>
+        db.transaction(
+          async (tx) => {
+            const rows = await catalogSkuRecords(tx, skus);
+            const bySku = new Map(rows.map((row) => [row.sku, row]));
+            return skus.map((sku) => {
+              const row = bySku.get(sku);
+              return row
+                ? {
+                    sku,
+                    status: 'FOUND' as const,
+                    context: catalogSkuContext(row),
+                  }
+                : {
+                    sku,
+                    status: 'SKU_NO_ENCONTRADO' as const,
+                    context: null,
+                  };
+            });
+          },
+          { isolationLevel: 'repeatable read', accessMode: 'read only' },
+        ),
+      );
+    } catch {
+      throw new ServiceUnavailableException({
+        code: 'SERVICIO_NO_DISPONIBLE',
+      });
+    }
+  }
+
   async skuContext(sku: string) {
-    return this.database.read(async (db) => {
-      const result = await db.execute(sql`SELECT si.sku, p.id AS product_id,
-        (si.variant_id IS NOT NULL) AS is_variant,
-        (CASE WHEN si.variant_id IS NULL THEN p.estado = 'ACTIVO'
-          ELSE v.estado = 'ACTIVA' END) AS active,
-        (p.estado = 'ACTIVO' AND
-          ((si.product_id IS NOT NULL AND NOT p.tiene_variantes)
-            OR (si.variant_id IS NOT NULL AND p.tiene_variantes AND v.estado = 'ACTIVA'))) AS eligible
-        FROM catalog.sku_identity si LEFT JOIN catalog.variants v ON v.id = si.variant_id
-        JOIN catalog.products p ON p.id = COALESCE(si.product_id, v.product_id)
-        WHERE si.sku = ${sku}`);
-      const row = result.rows[0];
-      if (!row) return null;
-      if (
-        typeof row.sku !== 'string' ||
-        typeof row.product_id !== 'string' ||
-        typeof row.is_variant !== 'boolean' ||
-        typeof row.active !== 'boolean' ||
-        typeof row.eligible !== 'boolean'
-      )
-        throw new Error();
-      return {
-        sku: row.sku,
-        productId: row.product_id,
-        isVariant: row.is_variant,
-        active: row.active,
-        eligible: row.eligible,
-      };
-    });
+    const [result] = await this.skuContexts([sku]);
+    return result?.context ?? null;
   }
 
   async priceCandidates(query: ProductQuery): Promise<PriceCandidate[]> {
@@ -567,22 +402,24 @@ export class PostgresCatalogRepository {
       db.transaction(
         async (tx) => {
           const where = this.where(query);
-          const simple = await tx
-            .select({ productId: products.id, sku: products.sku_base })
-            .from(products)
-            .where(and(where, eq(products.tiene_variantes, false)));
-          const children = await tx
-            .select({ productId: products.id, sku: variants.sku })
-            .from(products)
-            .innerJoin(variants, eq(variants.product_id, products.id))
-            .where(
-              and(
-                where,
-                eq(products.tiene_variantes, true),
-                eq(variants.estado, 'ACTIVA'),
-              ),
-            );
-          return [...simple, ...children];
+          const result = await tx.execute(sql`
+            SELECT ${products.id} AS "productId", ${products.sku_base} AS "sku"
+            FROM ${products}
+            WHERE ${and(where, eq(products.tiene_variantes, false))}
+            UNION ALL
+            SELECT ${products.id} AS "productId", ${variants.sku} AS "sku"
+            FROM ${products}
+            INNER JOIN ${variants} ON ${eq(variants.product_id, products.id)}
+            WHERE ${and(
+              where,
+              eq(products.tiene_variantes, true),
+              eq(variants.estado, 'ACTIVA'),
+            )}
+          `);
+          return result.rows.map((row) => ({
+            productId: row.productId as string,
+            sku: row.sku as string,
+          }));
         },
         { isolationLevel: 'repeatable read', accessMode: 'read only' },
       ),

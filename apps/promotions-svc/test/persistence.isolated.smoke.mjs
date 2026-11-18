@@ -3,9 +3,17 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import pg from 'pg';
 import { getTableConfig } from 'drizzle-orm/pg-core';
@@ -38,6 +46,7 @@ const created = [];
 const checks = [];
 let admin;
 let resources;
+let nativePostgres;
 let stage = 'normative SQL';
 function docker(args, environment = {}) {
   return execFileSync('docker', args, {
@@ -47,6 +56,59 @@ function docker(args, environment = {}) {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, ...environment },
   }).trim();
+}
+async function startNativePostgres(bin, certificate) {
+  const listener = createServer();
+  await new Promise((done, reject) => {
+    listener.once('error', reject);
+    listener.listen(0, '127.0.0.1', done);
+  });
+  const port = listener.address().port;
+  await new Promise((done, reject) =>
+    listener.close((error) => (error ? reject(error) : done())),
+  );
+  const data = join(directory, 'native-postgres');
+  const passwordFile = join(directory, 'bootstrap-password');
+  const binary = (name) =>
+    join(resolve(bin), name + (process.platform === 'win32' ? '.exe' : ''));
+  const command = (name, args) =>
+    execFileSync(binary(name), args, {
+      stdio: 'ignore',
+      windowsHide: true,
+      timeout: 90000,
+    });
+  writeFileSync(passwordFile, password, { mode: 0o600 });
+  try {
+    command('initdb', [
+      '-D',
+      data,
+      '-U',
+      'postgres',
+      '--encoding=UTF8',
+      '--no-locale',
+      '-A',
+      'scram-sha-256',
+      '--pwfile=' + passwordFile,
+    ]);
+  } finally {
+    rmSync(passwordFile, { force: true });
+  }
+  copyFileSync(certificate, join(data, 'server.crt'));
+  copyFileSync(join(directory, 'server.key'), join(data, 'server.key'));
+  if (process.platform !== 'win32') chmodSync(join(data, 'server.key'), 0o600);
+  nativePostgres = () =>
+    command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop']);
+  command('pg_ctl', [
+    '-D',
+    data,
+    '-l',
+    join(directory, 'postgres.log'),
+    '-o',
+    '-p ' + port + ' -h 127.0.0.1 -c ssl=on',
+    '-w',
+    'start',
+  ]);
+  return port;
 }
 async function ready(operation) {
   for (let attempt = 0; attempt < 90; attempt++) {
@@ -124,32 +186,40 @@ try {
     );
   const certificate = join(directory, 'server.crt');
   stage = 'disposable PostgreSQL';
-  const id = docker(
-    [
-      'run',
-      '--detach',
-      '--rm',
-      '--name',
-      'g6-cueva-persistence-' + randomUUID(),
-      '--publish',
-      '127.0.0.1::5432',
-      '--env',
-      'POSTGRES_PASSWORD',
-      '--mount',
-      `type=bind,source=${directory},target=/test-tls,readonly`,
-      'postgres:17-alpine',
-      'sh',
-      '-c',
-      'cp /test-tls/server.key /tmp/server.key && cp /test-tls/server.crt /tmp/server.crt && chmod 600 /tmp/server.key && chmod 644 /tmp/server.crt && chown postgres /tmp/server.key && exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/tmp/server.crt -c ssl_key_file=/tmp/server.key',
-    ],
-    { POSTGRES_PASSWORD: password },
-  );
-  created.push(id);
-  const port = Number(
-    JSON.parse(
-      docker(['inspect', id, '--format', '{{json .NetworkSettings.Ports}}']),
-    )['5432/tcp'][0].HostPort,
-  );
+  let port;
+  if (process.env.G6_PROMOTIONS_TEST_PG_BIN) {
+    port = await startNativePostgres(
+      process.env.G6_PROMOTIONS_TEST_PG_BIN,
+      certificate,
+    );
+  } else {
+    const id = docker(
+      [
+        'run',
+        '--detach',
+        '--rm',
+        '--name',
+        'g6-cueva-persistence-' + randomUUID(),
+        '--publish',
+        '127.0.0.1::5432',
+        '--env',
+        'POSTGRES_PASSWORD',
+        '--mount',
+        `type=bind,source=${directory},target=/test-tls,readonly`,
+        'postgres:17-alpine',
+        'sh',
+        '-c',
+        'cp /test-tls/server.key /tmp/server.key && cp /test-tls/server.crt /tmp/server.crt && chmod 600 /tmp/server.key && chmod 644 /tmp/server.crt && chown postgres /tmp/server.key && exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/tmp/server.crt -c ssl_key_file=/tmp/server.key -c shared_preload_libraries=pg_stat_statements',
+      ],
+      { POSTGRES_PASSWORD: password },
+    );
+    created.push(id);
+    port = Number(
+      JSON.parse(
+        docker(['inspect', id, '--format', '{{json .NetworkSettings.Ports}}']),
+      )['5432/tcp'][0].HostPort,
+    );
+  }
   admin = new Pool({
     host: '127.0.0.1',
     port,
@@ -160,6 +230,8 @@ try {
     connectionTimeoutMillis: 1000,
   });
   await ready(() => admin.query('SELECT 1'));
+  if (process.env.G6_PERFORMANCE_HTTP === '1')
+    await admin.query('CREATE EXTENSION IF NOT EXISTS pg_stat_statements');
   stage = 'official migrations in disposable database';
   await admin.query(
     'CREATE ROLE po_promotions_owner NOLOGIN; CREATE ROLE po_promotions_runtime NOLOGIN; CREATE SCHEMA promotions AUTHORIZATION po_promotions_owner',
@@ -583,6 +655,7 @@ try {
       order_id: 'ISOLATED-' + randomUUID(),
       coupon_code: 'DEMO_REPO',
       channel_id: 'MARKETPLACE',
+      customer_ref: randomUUID(),
       reservation_id: randomUUID(),
       commercial_snapshot_ref: 'isolated-snapshot',
       effective_at: '2026-10-16T12:00:00Z',
@@ -609,6 +682,21 @@ try {
       )
     ).length,
     1,
+  );
+  const coupon = await persistence.read((repos) =>
+    repos.coupons.findByCode(command.data.coupon_code),
+  );
+  assert.deepEqual(
+    await persistence.read((repos) =>
+      repos.queries.couponUsage(coupon.id, command.data.customer_ref),
+    ),
+    { used: 1, customerUsed: 1 },
+  );
+  assert.deepEqual(
+    await persistence.read((repos) =>
+      repos.queries.couponUsage(coupon.id, null),
+    ),
+    { used: 1, customerUsed: 0 },
   );
   assert.equal(
     (await persistence.read((repos) => repos.receipt(command.operation_id)))
@@ -639,7 +727,7 @@ try {
     { code: '42501' },
   );
   checks.push(
-    'existing coupon command replays once; Drizzle reads use/receipt/inbox/outbox on the same pool; history and fingerprint remain protected',
+    'existing coupon command replays once; PostgreSQL coupon usage counts convert safely with and without customer_ref; Drizzle reads use/receipt/inbox/outbox on the same pool; history and fingerprint remain protected',
   );
 
   stage = 'HTTP queries and signed JWT with real PostgreSQL';
@@ -647,9 +735,17 @@ try {
   checks.push(...(await verifyHttpWrites(resources, runtimeConfig, admin)));
   checks.push(...(await verifyHttpUpstreams(resources, runtimeConfig)));
   stage = 'authenticated Nest service-token wiring';
-  checks.push(...(await verifyServiceTokenWiring(resources, runtimeConfig)));
+  checks.push(
+    ...(await verifyServiceTokenWiring(
+      resources,
+      runtimeConfig,
+      join(directory, 'marketplace-native.json'),
+    )),
+  );
   stage = 'HTTP queries and signed JWT with real PostgreSQL';
-  checks.push(...(await verifyHttpReadQueries(resources, runtimeConfig)));
+  checks.push(
+    ...(await verifyHttpReadQueries(resources, runtimeConfig, admin)),
+  );
   if (process.env.G6_PROMOTIONS_GATEWAY_E2E === 'true') {
     stage = 'native Gateway/Promotions flow with real PostgreSQL';
     // The provider suite closes its pool to verify 503. A new restricted pool
@@ -691,6 +787,13 @@ try {
   );
 } catch (error) {
   // No connection string, query parameters, PostgreSQL detail or fixture password.
+  const profileDiagnostic =
+    error instanceof Error &&
+    /^HTTP profile rejected GET \/api\/v1\/[A-Za-z0-9/_-]+ with \d{3}$/.test(
+      error.message,
+    )
+      ? error.message
+      : undefined;
   console.error(
     JSON.stringify({
       status: 'FAIL',
@@ -698,7 +801,7 @@ try {
       code:
         error instanceof assert.AssertionError
           ? error.message.replaceAll(password, '[redacted]')
-          : 'ISOLATED_PERSISTENCE_CHECK_FAILED',
+          : (profileDiagnostic ?? 'ISOLATED_PERSISTENCE_CHECK_FAILED'),
     }),
   );
   process.exitCode = 1;
@@ -712,5 +815,26 @@ try {
       /* already removed */
     }
   }
-  rmSync(directory, { recursive: true, force: true });
+  if (nativePostgres) {
+    try {
+      nativePostgres();
+    } catch {
+      console.error('ISOLATED_POSTGRES_STOP_FAILED');
+      process.exitCode = 1;
+      nativePostgres = undefined;
+    }
+  }
+  if (
+    !/^g6-promotions-persistence-[A-Za-z0-9]+$/.test(
+      relative(tmpdir(), resolve(directory)),
+    )
+  ) {
+    throw new Error('INVALID_TEST_CLEANUP_PATH');
+  }
+  if (
+    process.exitCode !== 1 ||
+    !process.env.G6_PROMOTIONS_TEST_PG_BIN ||
+    nativePostgres
+  )
+    rmSync(directory, { recursive: true, force: true });
 }

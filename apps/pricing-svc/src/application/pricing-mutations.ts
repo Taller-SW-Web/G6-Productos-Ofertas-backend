@@ -1,4 +1,6 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { PRICING_CONFIG, type PricingConfig } from '../config/environment.js';
+import { insertPricingFacts } from '../messaging/service-bus-deliveries.js';
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import {
@@ -9,7 +11,10 @@ import {
   type PriceDefinition,
   type PriceUpdate,
 } from '../domain/price.js';
-import { PricingRepository } from '../persistence/pricing.repository.js';
+import {
+  PricingRepository,
+  lockGlobalProduct,
+} from '../persistence/pricing.repository.js';
 import type { PricingTransaction } from '../persistence/pricing.database.js';
 import {
   prices,
@@ -37,6 +42,7 @@ export type PriceFactSource =
 export class PricingMutations {
   constructor(
     @Inject(PricingRepository) private readonly repository: PricingRepository,
+    @Optional() @Inject(PRICING_CONFIG) private readonly config?: PricingConfig,
   ) {}
 
   update(
@@ -49,6 +55,8 @@ export class PricingMutations {
   ) {
     return this.repository.transaction(async (tx) => {
       await this.lockSkuAndRejectDeactivated(tx, target);
+      if (target.productId !== undefined && channelId === null)
+        await lockGlobalProduct(tx, target.productId);
       const loaded = await this.loadMaybe(tx, target, channelId);
       if (!loaded) {
         requireRule(expectedVersion === 0n, 'PRECIO_NO_ENCONTRADO');
@@ -111,7 +119,8 @@ export class PricingMutations {
           typeof fact === 'function' ? fact(before, definition) : fact;
         const rows = Array.isArray(facts) ? facts : [facts];
         if (rows.length)
-          await tx.insert(outbox).values(
+          await insertPricingFacts(
+            tx,
             rows.map((item) => ({
               ...item,
               eventName: 'pricing.price.changed',
@@ -119,6 +128,7 @@ export class PricingMutations {
               schemaVersion: 1,
               occurredAt: now,
             })),
+            this.config?.serviceBus !== undefined,
           );
         return {
           definition,
@@ -291,7 +301,8 @@ export class PricingMutations {
     if (facts) {
       const rows = Array.isArray(facts) ? facts : [facts];
       if (rows.length)
-        await tx.insert(outbox).values(
+        await insertPricingFacts(
+          tx,
           rows.map((fact) => ({
             ...fact,
             eventName: 'pricing.price.changed',
@@ -299,6 +310,7 @@ export class PricingMutations {
             schemaVersion: 1,
             occurredAt: now,
           })),
+          this.config?.serviceBus !== undefined,
         );
     }
     return stored;

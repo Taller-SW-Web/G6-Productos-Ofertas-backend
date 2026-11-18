@@ -1,10 +1,29 @@
 import { Client, DatabaseError, Pool } from 'pg';
 import { PricingDatabase } from './pricing.database.js';
 import { PricingRepository } from './pricing.repository.js';
-import { PricingPersistenceError } from './persistence.error.js';
+import {
+  PricingPersistenceError,
+  rethrowPersistenceError,
+} from './persistence.error.js';
+import { DrizzleQueryError } from 'drizzle-orm';
 import { prices } from './pricing.schema.js';
 
 describe('PricingRepository: transacciones Drizzle', () => {
+  it('distingue timeout del cliente de otros errores de persistencia', () => {
+    for (const [message, timeout] of [
+      ['Query read timeout', true],
+      ['other failure', false],
+    ] as const) {
+      try {
+        rethrowPersistenceError(
+          new DrizzleQueryError('SELECT 1', [], new Error(message)),
+        );
+      } catch (error) {
+        expect(error).toBeInstanceOf(PricingPersistenceError);
+        expect((error as PricingPersistenceError).clientTimeout).toBe(timeout);
+      }
+    }
+  });
   afterEach(() => vi.restoreAllMocks());
   const config = {
     nodeEnv: 'test' as const,
@@ -54,6 +73,29 @@ describe('PricingRepository: transacciones Drizzle', () => {
       'commit',
     ]);
     expect(client.release).toHaveBeenCalledOnce();
+  });
+
+  it('mantiene una lectura agrupada aunque el lote tenga 100 SKU sin precio', async () => {
+    const { client, repository } = setup();
+    const contexts = Array.from({ length: 100 }, (_, index) => ({
+      sku: `sku-${index}`,
+      productId: `product-${index}`,
+    }));
+
+    const result = await repository.readCandidatesBatch(
+      contexts,
+      'RETAIL',
+      new Date('2030-06-01T00:00:00Z'),
+    );
+
+    const statements = client.query.mock.calls.map(([query]) =>
+      typeof query === 'string' ? query : query.text,
+    );
+    expect(
+      statements.filter((query) => query.startsWith('select')),
+    ).toHaveLength(1);
+    expect(result).toHaveLength(100);
+    expect(result.every((item) => item.definitions.length === 0)).toBe(true);
   });
 
   it('readImport limita filas y solo selecciona campos de respuesta, nunca row_input', async () => {

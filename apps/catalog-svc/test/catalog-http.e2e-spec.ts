@@ -50,7 +50,32 @@ describe('Catalog HTTP routes and security (isolated use-case fixtures)', () => 
       correlation_id: correlation,
     })),
   };
+  const adminId = '11111111-1111-4111-8111-111111111111';
+  const adminProduct = {
+    productId: adminId,
+    estado: 'BORRADOR',
+    catalogVersion: 4,
+  };
   const queryRepository = {
+    listAdminProducts: vi.fn(async () => ({
+      items: [adminProduct],
+      meta: { pagina: 1, tamanio: 20, total: 1, totalPaginas: 1 },
+    })),
+    resolveAdminSkus: vi.fn(async (skus: string[]) => ({
+      items: skus.map((sku) => ({
+        sku,
+        resultado: 'NO_ENCONTRADO',
+        productId: null,
+        nombre: null,
+        productoPadre: null,
+        variante: null,
+        estado: null,
+        tipoProductoId: null,
+      })),
+    })),
+    findAdminProduct: vi.fn(async (id: string) =>
+      id === adminId ? adminProduct : null,
+    ),
     physicalData: vi.fn(async (skus: string[]) => ({
       productos: [],
       noEncontrados: skus,
@@ -97,6 +122,100 @@ describe('Catalog HTTP routes and security (isolated use-case fixtures)', () => 
       marca: { marca_id: 'brand', name: 'Brand' },
     })),
   };
+  it('routes the private admin list and validates pagination without calling the commercial service', async () => {
+    const path = '/api/v1/productos/administracion';
+    await request(app.getHttpServer()).get(path).expect(401);
+    await request(app.getHttpServer())
+      .get(path)
+      .set('Authorization', 'Bearer channel')
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(path + '?canal=MARKETPLACE')
+      .set('Authorization', 'Bearer manager')
+      .expect(400);
+    await request(app.getHttpServer())
+      .get(path + '?pagina=0')
+      .set('Authorization', 'Bearer manager')
+      .expect(400);
+    const response = await request(app.getHttpServer())
+      .get(path + '?estado=BORRADOR')
+      .set('Authorization', 'Bearer manager')
+      .expect(200);
+    expect(response.body.items).toEqual([adminProduct]);
+    expect(queryRepository.listAdminProducts).toHaveBeenCalledWith(
+      expect.objectContaining({ estado: 'BORRADOR' }),
+    );
+    await request(app.getHttpServer())
+      .get(
+        path +
+          '?tipoProductoIdsExcluidos=combo-a&tipoProductoIdsExcluidos=combo-b',
+      )
+      .set('Authorization', 'Bearer manager')
+      .expect(200);
+    expect(queryRepository.listAdminProducts).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        tipoProductoIdsExcluidos: ['combo-a', 'combo-b'],
+      }),
+    );
+  });
+
+  it('reads an administrative draft and distinguishes malformed IDs from missing products', async () => {
+    const path = '/api/v1/productos/administracion';
+    const response = await request(app.getHttpServer())
+      .get(path + '/' + adminId)
+      .set('Authorization', 'Bearer manager')
+      .expect(200);
+    expect(response.body).toEqual(adminProduct);
+    await request(app.getHttpServer())
+      .get(path + '/' + randomUUID())
+      .set('Authorization', 'Bearer manager')
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(path + '/invalid')
+      .set('Authorization', 'Bearer manager')
+      .expect(400);
+  });
+
+  it('resolves bounded SKU batches only for a human commercial manager', async () => {
+    const skus = ['000-base', 'VAR/40 + ñ', '000-base'];
+    const path = '/api/v1/productos/administracion/skus/resolver';
+    await request(app.getHttpServer()).post(path).send({ skus }).expect(401);
+    await request(app.getHttpServer())
+      .post(path)
+      .set('Authorization', 'Bearer channel')
+      .send({ skus })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(path)
+      .set('Authorization', 'Bearer viewer')
+      .send({ skus })
+      .expect(403);
+    const response = await request(app.getHttpServer())
+      .post(path)
+      .set('Authorization', 'Bearer manager')
+      .send({ skus })
+      .expect(200);
+    expect(
+      response.body.items.map((item: { sku: string }) => item.sku),
+    ).toEqual(skus);
+    expect(queryRepository.resolveAdminSkus).toHaveBeenCalledExactlyOnceWith(
+      skus,
+    );
+    for (const invalid of [
+      {},
+      { skus: [] },
+      { skus: Array(101).fill('sku') },
+      { skus: [''] },
+      { skus: ['a'.repeat(257)] },
+      { skus: ['valid'], extra: true },
+    ])
+      await request(app.getHttpServer())
+        .post(path)
+        .set('Authorization', 'Bearer manager')
+        .send(invalid)
+        .expect(400);
+  });
+
   beforeAll(async () => {
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(CatalogMutationService)

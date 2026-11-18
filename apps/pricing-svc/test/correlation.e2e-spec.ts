@@ -6,40 +6,80 @@ import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import { PricingSvcModule } from '../src/pricing-svc.module.js';
 import { uuid } from '../src/http/pricing-read.guard.js';
+import { SignedUser } from './signed-user.js';
 
 // HTTP de Pricing real y proveedor Catalog de fixture; no es integración con Catalog/G7.
 describe('Correlación Pricing -> Catalog', () => {
   let app: INestApplication<App>;
   let server: Server;
-  const received: string[] = [];
+  const received: Array<{ correlation: string; authorization?: string }> = [];
   let status = 200;
+  const identity = new SignedUser();
   beforeAll(async () => {
-    server = createServer((req, res) => {
-      received.push(String(req.headers['x-correlation-id']));
-      expect(req.headers.authorization).toBeUndefined();
+    await identity.start(true);
+    server = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      received.push({
+        correlation: String(req.headers['x-correlation-id']),
+        authorization: req.headers.authorization,
+      });
+      const isBatch = req.method === 'POST';
+      const responseStatus = isBatch && status === 404 ? 200 : status;
       res.setHeader(
         'content-type',
-        status === 200 ? 'application/json' : 'application/problem+json',
+        responseStatus === 200
+          ? 'application/json'
+          : 'application/problem+json',
       );
-      res.statusCode = status;
-      const sku = decodeURIComponent(req.url!.split('/').at(-2)!);
+      res.statusCode = responseStatus;
+      const batchBody = isBatch
+        ? (JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+            skus: string[];
+          })
+        : undefined;
+      const sku = isBatch
+        ? undefined
+        : decodeURIComponent(req.url!.split('/').at(-2)!);
       res.end(
         JSON.stringify(
-          status === 200
+          status === 200 && isBatch
             ? {
-                sku,
-                productId: 'fixture',
-                isVariant: false,
-                active: false,
-                eligible: false,
+                items: batchBody!.skus.map((requestedSku) => ({
+                  sku: requestedSku,
+                  status: 'FOUND',
+                  context: {
+                    sku: requestedSku,
+                    productId: 'fixture',
+                    isVariant: false,
+                    active: false,
+                    eligible: false,
+                  },
+                })),
               }
-            : {
-                status,
-                code:
-                  status === 404
-                    ? 'SKU_NO_ENCONTRADO'
-                    : 'SERVICIO_NO_DISPONIBLE',
-              },
+            : status === 404 && isBatch
+              ? {
+                  items: batchBody!.skus.map((requestedSku) => ({
+                    sku: requestedSku,
+                    status: 'SKU_NO_ENCONTRADO',
+                    context: null,
+                  })),
+                }
+              : status === 200
+                ? {
+                    sku,
+                    productId: 'fixture',
+                    isVariant: false,
+                    active: false,
+                    eligible: false,
+                  }
+                : {
+                    status,
+                    code:
+                      status === 404
+                        ? 'SKU_NO_ENCONTRADO'
+                        : 'SERVICIO_NO_DISPONIBLE',
+                  },
         ),
       );
     });
@@ -55,7 +95,11 @@ describe('Correlación Pricing -> Catalog', () => {
           NODE_ENV: 'test',
           PORT: '3002',
           DATABASE_URL: 'postgresql://fixture:fixture@127.0.0.1:1/fixture',
-          GATEWAY_DEMO_NO_AUTH_ENABLED: 'true',
+          G6_SECURITY_MODE: 'G7_AUTHENTICATED',
+          AUTH_ISSUER: identity.issuer,
+          AUTH_JWKS_URL: identity.issuer + '/jwks',
+          PRICING_SERVICE_TOKEN_URL: identity.issuer + '/api/v1/auth/token',
+          PRICING_SERVICE_CLIENT_SECRET: 'fixture-secret',
           PRICING_CATALOG_URL: `http://127.0.0.1:${address.port}`,
         }),
       ],
@@ -67,6 +111,7 @@ describe('Correlación Pricing -> Catalog', () => {
     await app?.close();
     server?.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    await identity.stop();
   });
   it.each([200, 404, 503])(
     'conserva UUID entrante/generado en single y batch (Catalog %s)',
@@ -78,7 +123,9 @@ describe('Correlación Pricing -> Catalog', () => {
       ]) {
         for (const correlation of [randomUUID(), undefined]) {
           received.length = 0;
-          const call = request(app.getHttpServer()).get(path);
+          const call = request(app.getHttpServer())
+            .get(path)
+            .set('Authorization', `Bearer ${identity.token()}`);
           if (correlation) call.set('X-Correlation-Id', correlation);
           const response = await call.expect(
             upstreamStatus === 503 ? 503 : path.includes('?') ? 200 : 404,
@@ -86,10 +133,17 @@ describe('Correlación Pricing -> Catalog', () => {
           const actual = response.headers['x-correlation-id'];
           expect(actual).toMatch(uuid);
           if (correlation) expect(actual).toBe(correlation);
-          expect(received.length).toBe(
-            upstreamStatus === 503 || !path.includes('?') ? 1 : 2,
+          // Batch resolves distinct SKU contexts with bounded parallel GETs;
+          // when one fails, the other already in flight may also complete.
+          expect(received.length).toBe(1);
+          expect(received.every((entry) => entry.correlation === actual)).toBe(
+            true,
           );
-          expect(received.every((id) => id === actual)).toBe(true);
+          expect(
+            received.every((entry) =>
+              entry.authorization?.startsWith('Bearer '),
+            ),
+          ).toBe(true);
           if (response.status !== 200)
             expect(response.body.correlationId).toBe(actual);
         }
@@ -100,6 +154,7 @@ describe('Correlación Pricing -> Catalog', () => {
     received.length = 0;
     const response = await request(app.getHttpServer())
       .get('/api/v1/precios/skus/0001')
+      .set('Authorization', `Bearer ${identity.token()}`)
       .set('X-Correlation-Id', 'invalid')
       .expect(400);
     expect(received).toEqual([]);

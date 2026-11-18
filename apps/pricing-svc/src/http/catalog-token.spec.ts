@@ -28,6 +28,7 @@ describe('Credencial propia de Pricing para Catalog (G7 client_credentials)', ()
       let input = '';
       for await (const part of req) input += part.toString();
       requests.push(input);
+      const requestedScope = new URLSearchParams(input).get('scope') ?? '';
       const send = () => {
         res.statusCode = status;
         res.end(
@@ -36,12 +37,12 @@ describe('Credencial propia de Pricing para Catalog (G7 client_credentials)', ()
               tipo: 'servicio',
               sub: 'modulo-productos',
               aud: 'api-productos',
-              scope: 'catalogo:leer',
+              scope: requestedScope,
               ...claims,
             }),
             tokenType: 'Bearer',
             expiresIn: 300,
-            scopes: ['catalogo:leer'],
+            scopes: [requestedScope],
             ...response,
           }),
         );
@@ -124,13 +125,38 @@ describe('Credencial propia de Pricing para Catalog (G7 client_credentials)', ()
     await expect(tokens.get()).rejects.toMatchObject({ status: 503 });
     expect(requests).toHaveLength(2);
   });
-  it('no consulta G7 en demo ni sin credenciales configuradas', async () => {
-    expect(
-      await new CatalogServiceToken(
-        { ...config, demoNoAuthEnabled: true },
-        new PricingReadGuard(config),
-      ).get(),
-    ).toBeNull();
+  it('deduplica la emisión simultánea del mismo scope durante cold start', async () => {
+    delay = 80;
+    const tokens = client();
+    const results = await Promise.all(
+      Array.from({ length: 24 }, () => tokens.get('catalogo:leer')),
+    );
+    expect(new Set(results).size).toBe(1);
+    expect(requests).toHaveLength(1);
+  });
+  it('mantiene singleflight aislado por scope y elimina la promesa tras un error', async () => {
+    delay = 80;
+    const tokens = client();
+    const [catalog, prices] = await Promise.all([
+      tokens.get('catalogo:leer'),
+      tokens.get('precios:leer'),
+    ]);
+    expect(catalog).not.toBe(prices);
+    expect(requests).toHaveLength(2);
+
+    const retryable = client();
+    requests = [];
+    status = 503;
+    const failed = await Promise.allSettled(
+      Array.from({ length: 8 }, () => retryable.get('catalogo:leer')),
+    );
+    expect(failed.every((result) => result.status === 'rejected')).toBe(true);
+    expect(requests).toHaveLength(1);
+    status = 200;
+    expect(await retryable.get('catalogo:leer')).toBeTruthy();
+    expect(requests).toHaveLength(2);
+  });
+  it('falla cerrado sin credenciales G7, sin bypass heredado', async () => {
     await expect(
       new CatalogServiceToken(
         { ...config, serviceToken: undefined },

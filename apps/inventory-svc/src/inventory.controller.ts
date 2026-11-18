@@ -44,6 +44,7 @@ import { INVENTORY_SCOPES, KNOWN_CLIENTS } from './auth/auth.constants.js';
 import {
   AllowCommercialDemo,
   isCommercialDemoRequest,
+  isInventoryPublicRead,
   type CommercialRequest,
 } from './auth/commercial-demo.js';
 
@@ -78,7 +79,8 @@ function assertCanalDelCliente(
   clientId: string | undefined,
   correlationId?: string,
   commercialDemo = false,
-  allowProductsMarketplace = false,
+  allowProductsCommercialGet = false,
+  publicRead = false,
 ): void {
   const expectedClient =
     typeof canal === 'string' && Object.hasOwn(CANAL_CLIENT_MAP, canal)
@@ -90,14 +92,11 @@ function assertCanalDelCliente(
       correlationId,
     );
   }
+  if (publicRead) return;
   if (clientId === KNOWN_CLIENTS.PRODUCTOS) {
-    if (
-      !allowProductsMarketplace ||
-      canal !== 'MARKETPLACE' ||
-      commercialDemo
-    ) {
+    if (!allowProductsCommercialGet || commercialDemo) {
       throw ProblemDetailsException.scopeInsuficiente(
-        'modulo-productos solo puede consultar el GET comercial para MARKETPLACE',
+        'modulo-productos solo puede consultar el GET de disponibilidad comercial interno',
         correlationId,
       );
     }
@@ -311,6 +310,7 @@ export class InventoryController {
       correlationId,
       isCommercialDemoRequest(req),
       true,
+      isInventoryPublicRead(req),
     );
 
     return this.disponibilidadService.consultarDisponibilidadComercial(
@@ -339,6 +339,8 @@ export class InventoryController {
       req.clientId,
       correlationId,
       isCommercialDemoRequest(req),
+      false,
+      isInventoryPublicRead(req),
     );
 
     return this.disponibilidadService.verificarCantidadComercial(

@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import amqp from 'amqplib';
 import pg from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -20,6 +20,8 @@ import {
   TEST_PUBLIC_KEY,
 } from './crypto-test-token.helper.js';
 import { DatabaseService } from '../src/database/database.service.js';
+import { DashboardService } from '../src/dashboard/dashboard.service.js';
+import { loadInventoryConfig } from '../src/config/inventory.config.js';
 import { IdempotencyService } from '../src/idempotency/idempotency.service.js';
 import { KardexService } from '../src/kardex/kardex.service.js';
 import { OutboxService } from '../src/outbox/outbox.service.js';
@@ -524,6 +526,88 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
     else process.env.RABBITMQ_URL = previousRabbitMqUrl;
     cleanupOwnedResources();
   }, 30_000);
+
+  it('PUBLIC_READ_ONLY sirve disponibilidad comercial sin filtrar stock ni mutar y protege POST', async () => {
+    const previousMode = process.env.G6_SECURITY_MODE;
+    const previousPublicOperations = process.env.INVENTORY_PUBLIC_OPERATION_IDS;
+    let app: INestApplication | undefined;
+    const sku = await seedStock();
+    const route = await database.query<{ id: string }>(
+      `INSERT INTO inventory.commercial_fulfillment_routes
+        (channel_id, mode, fulfillment_ref, location_id, active)
+       VALUES ('MARKETPLACE', 'ENVIO_DOMICILIO', $1, $2, true) RETURNING id`,
+      [`phase1-${randomUUID()}`, locationId],
+    );
+    const snapshot = async () => {
+      const result = await database.query<{ value: string }>(
+        `SELECT jsonb_build_object(
+          'stock', (SELECT to_jsonb(s) FROM inventory.stock_balance s WHERE s.sku_id=$1 AND s.location_id=$2),
+          'reservations', (SELECT count(*) FROM inventory.reservations),
+          'operations', (SELECT count(*) FROM inventory.inventory_operations),
+          'kardex', (SELECT count(*) FROM inventory.kardex),
+          'outbox', (SELECT count(*) FROM inventory.outbox),
+          'inbox', (SELECT count(*) FROM inventory.inbox)
+        )::text AS value`,
+        [sku, locationId],
+      );
+      return result.rows[0]?.value;
+    };
+    process.env.G6_SECURITY_MODE = 'PUBLIC_READ_ONLY';
+    process.env.INVENTORY_PUBLIC_OPERATION_IDS =
+      'consultarDisponibilidadComercial';
+    try {
+      const module = await Test.createTestingModule({
+        imports: [InventorySvcModule],
+      })
+        .overrideProvider(InventoryWorkersService)
+        .useValue({})
+        .compile();
+      app = module.createNestApplication();
+      app.useGlobalFilters(new ProblemDetailsFilter());
+      await app.listen(0, '127.0.0.1');
+      const origin = await app.getUrl();
+      const before = await snapshot();
+      const read = await request(origin)
+        .get(
+          `/api/v1/inventario/disponibilidad/comercial?skus=${sku}&canal=MARKETPLACE`,
+        )
+        .expect(200);
+      expect(read.body).toEqual({
+        items: [{ sku, status: 'DISPONIBLE' }],
+      });
+      expect(JSON.stringify(read.body)).not.toMatch(
+        /on_hand|reserved|blocked|available|location_id|stock_version/,
+      );
+      await request(origin)
+        .post('/api/v1/inventario/disponibilidad/comercial/verificar')
+        .send({
+          channel_id: 'MARKETPLACE',
+          fulfillment: { mode: 'ENVIO_DOMICILIO' },
+          lines: [{ sku, quantity: 2 }],
+        })
+        .expect(401);
+      await request(origin)
+        .get(`/api/v1/inventario/disponibilidad?skus=${sku}`)
+        .expect(401);
+      expect(await snapshot()).toBe(before);
+    } finally {
+      await app?.close();
+      await database.query(
+        `DELETE FROM inventory.commercial_fulfillment_routes WHERE id=$1`,
+        [route.rows[0]?.id],
+      );
+      await database.query(
+        `DELETE FROM inventory.stock_balance WHERE sku_id=$1 AND location_id=$2`,
+        [sku, locationId],
+      );
+      if (previousMode === undefined) delete process.env.G6_SECURITY_MODE;
+      else process.env.G6_SECURITY_MODE = previousMode;
+      if (previousPublicOperations === undefined)
+        delete process.env.INVENTORY_PUBLIC_OPERATION_IDS;
+      else
+        process.env.INVENTORY_PUBLIC_OPERATION_IDS = previousPublicOperations;
+    }
+  }, 60_000);
 
   async function withProductionPostgresTls(
     databaseUrl: string,
@@ -1403,7 +1487,9 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
   });
 
   describe('Consumer real — ACK durable, deduplicación y recuperación (#102/#103)', () => {
-    function initializationCommand(defaultLocation = locationId) {
+    function initializationCommand(
+      defaultLocation: string | null = locationId,
+    ) {
       return {
         message_id: randomUUID(),
         operation_id: randomUUID(),
@@ -1457,6 +1543,7 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
       const first = initializationCommand();
       const replay = { ...first, message_id: randomUUID() };
       const rejected = initializationCommand(randomUUID());
+      const withoutLocation = initializationCommand(null);
       try {
         expect(
           (await brokerChannel.checkQueue('po.inventario.q')).messageCount,
@@ -1468,6 +1555,7 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
           first,
           replay,
           rejected,
+          withoutLocation,
         ].entries()) {
           await publishCommand(
             writer,
@@ -1479,8 +1567,8 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
           }, 5000);
         }
         expect(consumer.getMetrics()).toMatchObject({
-          received: 4,
-          acknowledged: 4,
+          received: 5,
+          acknowledged: 5,
           duplicates: 1,
           rejected: 1,
           failures: 0,
@@ -1491,9 +1579,16 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
           status: string;
         }>(
           `SELECT message_id,status FROM inventory.inbox WHERE message_id=ANY($1::uuid[])`,
-          [[first.message_id, replay.message_id, rejected.message_id]],
+          [
+            [
+              first.message_id,
+              replay.message_id,
+              rejected.message_id,
+              withoutLocation.message_id,
+            ],
+          ],
         );
-        expect(inbox.rows).toHaveLength(3);
+        expect(inbox.rows).toHaveLength(4);
         expect(inbox.rows.every((row) => row.status === 'PROCESSED')).toBe(
           true,
         );
@@ -1503,9 +1598,15 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
           result_code: string | null;
         }>(
           `SELECT operation_id,status,result_code FROM inventory.inventory_operations WHERE operation_id=ANY($1::uuid[])`,
-          [[first.operation_id, rejected.operation_id]],
+          [
+            [
+              first.operation_id,
+              rejected.operation_id,
+              withoutLocation.operation_id,
+            ],
+          ],
         );
-        expect(operations.rows).toHaveLength(2);
+        expect(operations.rows).toHaveLength(3);
         expect(operations.rows).toContainEqual({
           operation_id: first.operation_id,
           status: 'APLICADO',
@@ -1516,12 +1617,20 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
           status: 'RECHAZADO',
           result_code: 'UBICACION_NO_ENCONTRADA',
         });
+        expect(operations.rows).toContainEqual({
+          operation_id: withoutLocation.operation_id,
+          status: 'APLICADO',
+          result_code: null,
+        });
         expect(
           await stockRepo.findBySkus([first.data.sku], locationId),
         ).toMatchObject([
           { on_hand: 0, reserved: 0, blocked: 0, stock_version: 0 },
         ]);
         expect(await stockRepo.findBySkus([rejected.data.sku])).toHaveLength(0);
+        expect(
+          await stockRepo.findBySkus([withoutLocation.data.sku]),
+        ).toHaveLength(0);
         const events = await database.query<{
           event_type: string;
           count: string;
@@ -1538,6 +1647,38 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
           event_type: 'inventory.sku.initialization.completed',
           count: '2',
         });
+
+        // Catalog valida delivery.properties.userId contra su producerUsers.
+        // El publisher real debe propagar el usuario AMQP autenticado de la
+        // conexión (extraído de RABBITMQ_URL), no un valor del payload.
+        for (;;) {
+          const dispatched = await new OutboxPublisherService(
+            database,
+            outboxRepo,
+          ).dispatchPending(10);
+          if (dispatched.dispatched === 0) break;
+        }
+        const initializationUserIds = new Map<string, string | undefined>();
+        for (;;) {
+          const message = await brokerChannel.get(queue);
+          if (!message) break;
+          const payload = JSON.parse(message.content.toString('utf8')) as {
+            name?: string;
+          };
+          if (
+            payload.name === 'inventory.sku.initialization.completed' ||
+            payload.name === 'inventory.sku.initialization.rejected'
+          ) {
+            initializationUserIds.set(payload.name, message.properties.userId);
+          }
+          brokerChannel.ack(message);
+        }
+        expect(
+          initializationUserIds.get('inventory.sku.initialization.completed'),
+        ).toBe('inventory_test');
+        expect(
+          initializationUserIds.get('inventory.sku.initialization.rejected'),
+        ).toBe('inventory_test');
       } finally {
         await consumer.onModuleDestroy();
         await writer.close();
@@ -2622,6 +2763,367 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
       }
     });
   });
+
+  it('agrega dashboard en PostgreSQL real: filtros, umbrales, multiubicación, equivalencia y plan con cardinalidad', async () => {
+    const tag = `c2-${randomUUID()}`;
+    const skuMulti = `${tag}-MULTI`;
+    const skuZero = `${tag}-ZERO`;
+    const skuReservedBlocked = `${tag}-RESERVED-BLOCKED`;
+    const skuGlobalLow = `${tag}-GLOBAL-LOW`;
+    const skuGlobalAvailable = `${tag}-GLOBAL-AVAILABLE`;
+    const skuFallback = `${tag}-FALLBACK`;
+    const locationIds: string[] = [];
+    const globalOverrideId = randomUUID();
+    const olderSkuOverrideId = randomUUID();
+    const newerSkuOverrideId = randomUUID();
+    const dashboard = new DashboardService(database);
+    const defaultThreshold = loadInventoryConfig().defaultLowStockThreshold;
+
+    try {
+      for (let index = 0; index < 4; index++) {
+        const location = await database.query<{ id: string }>(
+          `INSERT INTO inventory.locations(code,name,type)
+           VALUES($1,$2,'ALMACEN') RETURNING id`,
+          [`${tag}-LOC-${index}`, `${tag} location ${index}`],
+        );
+        locationIds.push(location.rows[0].id);
+      }
+
+      await database.query(
+        `INSERT INTO inventory.stock_threshold_override
+           (id,sku_id,location_id,umbral_efectivo,created_at,updated_at)
+         VALUES($1,NULL,NULL,4,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z'),
+               ($2,$3,NULL,2,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z'),
+               ($4,$3,NULL,8,'2026-02-01T00:00:00Z','2026-02-01T00:00:00Z')`,
+        [globalOverrideId, olderSkuOverrideId, skuMulti, newerSkuOverrideId],
+      );
+
+      await database.query(
+        `INSERT INTO inventory.stock_balance
+           (sku_id,location_id,on_hand,reserved,blocked)
+         VALUES($1,$7,12,2,2),($1,$8,7,2,1),
+               ($2,$7,4,2,2),($3,$8,10,3,2),
+               ($4,$9,8,2,2),($5,$9,9,2,2),($6,$10,$11,0,0)`,
+        [
+          skuMulti,
+          skuZero,
+          skuReservedBlocked,
+          skuGlobalLow,
+          skuGlobalAvailable,
+          skuFallback,
+          ...locationIds,
+          defaultThreshold,
+        ],
+      );
+
+      const generated = await database.query<{ rows: string }>(
+        `INSERT INTO inventory.stock_balance
+           (sku_id,location_id,on_hand,reserved,blocked)
+         SELECT $1 || '-BENCH-' || lpad(sku_number::text,5,'0'),
+                location_id,
+                40 + (sku_number % 30),
+                sku_number % 3,
+                sku_number % 2
+         FROM generate_series(1,5000) AS sku_number
+         CROSS JOIN unnest($2::uuid[]) AS locations(location_id)`,
+        [tag, locationIds],
+      );
+      expect(generated.rowCount).toBe(20_000);
+      await database.query('ANALYZE inventory.stock_balance');
+      await database.query('ANALYZE inventory.stock_threshold_override');
+
+      const reference = async (
+        filters: {
+          sku?: string;
+          locationId?: string;
+        } = {},
+      ) => {
+        const { rows } = await database.query<{
+          sku_id: string;
+          location_id: string;
+          on_hand: number;
+          reserved: number;
+          blocked: number;
+          available: number;
+          threshold: number;
+        }>(
+          `SELECT balance.sku_id, balance.location_id, balance.on_hand,
+                  balance.reserved, balance.blocked, balance.available,
+                  COALESCE(sku_threshold.umbral_efectivo,
+                           global_threshold.umbral_efectivo,$3)::integer AS threshold
+           FROM inventory.stock_balance AS balance
+           LEFT JOIN LATERAL (
+             SELECT umbral_efectivo
+             FROM inventory.stock_threshold_override
+             WHERE sku_id=balance.sku_id AND location_id IS NULL
+             ORDER BY updated_at DESC,created_at DESC,id DESC
+             LIMIT 1
+           ) AS sku_threshold ON true
+           LEFT JOIN inventory.stock_threshold_override AS global_threshold
+             ON global_threshold.sku_id IS NULL AND global_threshold.location_id IS NULL
+           WHERE ($1::text IS NULL OR balance.sku_id=$1)
+             AND ($2::uuid IS NULL OR balance.location_id=$2)`,
+          [filters.sku ?? null, filters.locationId ?? null, defaultThreshold],
+        );
+        const status = (available: number, threshold: number) =>
+          available <= 0
+            ? 'AGOTADO'
+            : available <= threshold
+              ? 'STOCK_BAJO'
+              : 'DISPONIBLE';
+        const skuGroups = new Map<
+          string,
+          {
+            on_hand: number;
+            reserved: number;
+            blocked: number;
+            available: number;
+            threshold: number;
+          }
+        >();
+        const locations = new Map<
+          string,
+          {
+            on_hand: number;
+            reserved: number;
+            available: number;
+            skusDisponibles: number;
+            skusStockBajo: number;
+            skusAgotados: number;
+          }
+        >();
+        for (const row of rows) {
+          const sku = skuGroups.get(row.sku_id) ?? {
+            on_hand: 0,
+            reserved: 0,
+            blocked: 0,
+            available: 0,
+            threshold: 0,
+          };
+          sku.on_hand += row.on_hand;
+          sku.reserved += row.reserved;
+          sku.blocked += row.blocked;
+          sku.available += row.available;
+          sku.threshold = Math.max(sku.threshold, row.threshold);
+          skuGroups.set(row.sku_id, sku);
+
+          const location = locations.get(row.location_id) ?? {
+            on_hand: 0,
+            reserved: 0,
+            available: 0,
+            skusDisponibles: 0,
+            skusStockBajo: 0,
+            skusAgotados: 0,
+          };
+          location.on_hand += row.on_hand;
+          location.reserved += row.reserved;
+          location.available += row.available;
+          const rowStatus = status(row.available, row.threshold);
+          if (rowStatus === 'DISPONIBLE') location.skusDisponibles++;
+          else if (rowStatus === 'STOCK_BAJO') location.skusStockBajo++;
+          else location.skusAgotados++;
+          locations.set(row.location_id, location);
+        }
+        const total = {
+          totalSkus: skuGroups.size,
+          totalOnHand: 0,
+          totalReserved: 0,
+          totalBlocked: 0,
+          totalAvailable: 0,
+          skusDisponibles: 0,
+          skusStockBajo: 0,
+          skusAgotados: 0,
+        };
+        for (const sku of skuGroups.values()) {
+          total.totalOnHand += sku.on_hand;
+          total.totalReserved += sku.reserved;
+          total.totalBlocked += sku.blocked;
+          total.totalAvailable += sku.available;
+          const skuStatus = status(sku.available, sku.threshold);
+          if (skuStatus === 'DISPONIBLE') total.skusDisponibles++;
+          else if (skuStatus === 'STOCK_BAJO') total.skusStockBajo++;
+          else total.skusAgotados++;
+        }
+        return {
+          ...total,
+          porUbicacion: [...locations.entries()]
+            .map(([location_id, value]) => ({ location_id, ...value }))
+            .sort((left, right) =>
+              left.location_id.localeCompare(right.location_id),
+            ),
+        };
+      };
+
+      const assertEquivalent = async (
+        filters: {
+          sku?: string;
+          locationId?: string;
+        } = {},
+      ) => {
+        const expected = await reference(filters);
+        const actual = await dashboard.obtenerDashboard({
+          sku: filters.sku,
+          locationId: filters.locationId,
+        });
+        expect({
+          totalSkus: actual.totalSkus,
+          totalOnHand: actual.totalOnHand,
+          totalReserved: actual.totalReserved,
+          totalAvailable: actual.totalAvailable,
+          skusDisponibles: actual.skusDisponibles,
+          skusStockBajo: actual.skusStockBajo,
+          skusAgotados: actual.skusAgotados,
+          porUbicacion: actual.porUbicacion,
+        }).toEqual({
+          totalSkus: expected.totalSkus,
+          totalOnHand: expected.totalOnHand,
+          totalReserved: expected.totalReserved,
+          totalAvailable: expected.totalAvailable,
+          skusDisponibles: expected.skusDisponibles,
+          skusStockBajo: expected.skusStockBajo,
+          skusAgotados: expected.skusAgotados,
+          porUbicacion: expected.porUbicacion.map((location) => ({
+            location_id: location.location_id,
+            on_hand: location.on_hand,
+            reserved: location.reserved,
+            available: location.available,
+            skusDisponibles: location.skusDisponibles,
+            skusStockBajo: location.skusStockBajo,
+            skusAgotados: location.skusAgotados,
+          })),
+        });
+        return { expected, actual };
+      };
+
+      const full = await assertEquivalent();
+      const internal = await dashboard.obtenerMetricasInternas();
+      expect(internal).toMatchObject({
+        unidadesFisicas: full.expected.totalOnHand,
+        unidadesReservadas: full.expected.totalReserved,
+        unidadesBloqueadas: full.expected.totalBlocked,
+        unidadesDisponibles: full.expected.totalAvailable,
+        skuPorEstado: {
+          DISPONIBLE: full.expected.skusDisponibles,
+          STOCK_BAJO: full.expected.skusStockBajo,
+          AGOTADO: full.expected.skusAgotados,
+        },
+      });
+      const multi = await assertEquivalent({ sku: skuMulti });
+      expect(multi.actual.totalSkus).toBe(1);
+      expect(multi.actual.totalAvailable).toBe(12);
+      expect(multi.actual.skusDisponibles).toBe(1);
+      expect(multi.actual.porUbicacion).toHaveLength(2);
+      expect(
+        (await assertEquivalent({ locationId: locationIds[0] })).actual
+          .porUbicacion,
+      ).toHaveLength(1);
+      await assertEquivalent({ sku: skuMulti, locationId: locationIds[0] });
+      expect(
+        (await dashboard.obtenerDashboard({ sku: skuZero })).skusAgotados,
+      ).toBe(1);
+      expect(
+        (await dashboard.obtenerDashboard({ sku: skuReservedBlocked }))
+          .totalReserved,
+      ).toBe(3);
+      expect(
+        (await dashboard.obtenerMetricasInternas({ sku: skuReservedBlocked }))
+          .unidadesBloqueadas,
+      ).toBe(2);
+      expect(
+        (await dashboard.obtenerDashboard({ sku: skuGlobalLow })).skusStockBajo,
+      ).toBe(1);
+      expect(
+        (await dashboard.obtenerDashboard({ sku: skuGlobalAvailable }))
+          .skusDisponibles,
+      ).toBe(1);
+
+      const querySpy = vi.spyOn(database, 'query');
+      await dashboard.obtenerDashboard({
+        sku: `${tag}-BENCH-00001`,
+        locationId: locationIds[0],
+      });
+      const aggregateCall = querySpy.mock.calls.find(([sql]) =>
+        sql.includes('WITH sku_threshold AS MATERIALIZED'),
+      );
+      querySpy.mockRestore();
+      expect(aggregateCall).toBeDefined();
+      const [aggregateSql, aggregateParams] = aggregateCall!;
+      const explain = async (sql: string, params: unknown[]) => {
+        const result = await database.query<{
+          'QUERY PLAN': Array<Record<string, unknown>>;
+        }>(`EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) ${sql}`, params);
+        return result.rows[0]['QUERY PLAN'][0] as {
+          Plan: Record<string, unknown>;
+          'Planning Time': number;
+          'Execution Time': number;
+        };
+      };
+      const fullPlan = await explain(aggregateSql, [
+        null,
+        null,
+        aggregateParams?.[2] ?? defaultThreshold,
+      ]);
+      const selectiveParams = [
+        `${tag}-BENCH-00001`,
+        locationIds[0],
+        defaultThreshold,
+      ];
+      const selectivePlan = await explain(aggregateSql, selectiveParams);
+      const planNodes = (
+        node: Record<string, unknown>,
+      ): Record<string, unknown>[] => [
+        node,
+        ...(
+          (node.Plans as Record<string, unknown>[] | undefined) ?? []
+        ).flatMap(planNodes),
+      ];
+      const selectiveNodes = planNodes(selectivePlan.Plan);
+      const indexNames = selectiveNodes
+        .map((node) => node['Index Name'])
+        .filter((name): name is string => typeof name === 'string');
+      expect(indexNames).toContain('pk_stock_balance');
+      console.info(
+        'INVENTORY_C2_DASHBOARD_EXPLAIN ' +
+          JSON.stringify({
+            fixtureRows: 20_000,
+            full: {
+              planningMs: fullPlan['Planning Time'],
+              executionMs: fullPlan['Execution Time'],
+              actualRows: fullPlan.Plan['Actual Rows'],
+              sharedHitBlocks: fullPlan.Plan['Shared Hit Blocks'],
+              sharedReadBlocks: fullPlan.Plan['Shared Read Blocks'],
+            },
+            skuLocationFilter: {
+              planningMs: selectivePlan['Planning Time'],
+              executionMs: selectivePlan['Execution Time'],
+              indexNames,
+            },
+          }),
+      );
+
+      await database.query(
+        'DELETE FROM inventory.stock_threshold_override WHERE id=$1',
+        [globalOverrideId],
+      );
+      const fallback = await dashboard.obtenerDashboard({ sku: skuFallback });
+      await assertEquivalent({ sku: skuFallback });
+      if (defaultThreshold === 0) expect(fallback.skusAgotados).toBe(1);
+      else expect(fallback.skusStockBajo).toBe(1);
+    } finally {
+      await database.query(
+        'DELETE FROM inventory.stock_threshold_override WHERE id = ANY($1::uuid[])',
+        [[globalOverrideId, olderSkuOverrideId, newerSkuOverrideId]],
+      );
+      await database.query(
+        'DELETE FROM inventory.stock_balance WHERE sku_id LIKE $1 OR location_id = ANY($2::uuid[])',
+        [`${tag}%`, locationIds],
+      );
+      await database.query(
+        'DELETE FROM inventory.locations WHERE id = ANY($1::uuid[])',
+        [locationIds],
+      );
+    }
+  }, 120_000);
 
   describe('DATA-004 — ejecución E2E de scripts SQL en PostgreSQL desechable (#14)', () => {
     const locLurin = '9129b578-631e-1735-8427-b683fb524380';

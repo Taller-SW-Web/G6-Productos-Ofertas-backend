@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing';
+import { ServiceUnavailableException } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
@@ -6,10 +7,7 @@ import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
 import { CATALOG_SECURITY_CONFIG } from '../src/catalog-auth.js';
-import {
-  CATALOG_MARKETPLACE_PREVIEW,
-  CATALOG_READ_DEMO,
-} from '../src/catalog-read-demo.js';
+import { CATALOG_READ_DEMO } from '../src/catalog-read-demo.js';
 import { PostgresCatalogRepository } from '../src/postgres-catalog.repository.js';
 import { CommercialService } from '../src/commercial.service.js';
 import { CatalogPricingIdentityProvider } from '../src/catalog-pricing-identity.js';
@@ -35,6 +33,13 @@ describe('Private Pricing SKU context HTTP contract (local signed RS256/JWKS, is
     skuContext: vi.fn(async (_sku: string): Promise<typeof context | null> => ({
       ...context,
     })),
+    skuContexts: vi.fn(async (skus: string[]) =>
+      skus.map((sku) => ({
+        sku,
+        status: 'FOUND',
+        context: { ...context, sku },
+      })),
+    ),
   };
   const commercial = { list: vi.fn(), productById: vi.fn() };
   const credentials = { bearer: vi.fn() };
@@ -66,6 +71,7 @@ describe('Private Pricing SKU context HTTP contract (local signed RS256/JWKS, is
   }
   const path = (sku = context.sku) =>
     '/api/v1/productos/skus/' + encodeURIComponent(sku) + '/contexto';
+  const batchPath = '/api/v1/productos/skus/contexto/lote';
   beforeAll(async () => {
     server = createServer((req, res) => {
       res.setHeader('content-type', 'application/json');
@@ -92,11 +98,9 @@ describe('Private Pricing SKU context HTTP contract (local signed RS256/JWKS, is
         discoveryUrl: origin + '/discovery',
         jwksUrl: origin + '/keys',
       })
-      // Restricted administrative demo and preview never bypass this technical operation.
+      // Restricted administrative reads never bypass this technical operation.
       .overrideProvider(CATALOG_READ_DEMO)
       .useValue({ enabled: false, restricted: true, gatewayIps: ['127.0.0.1'] })
-      .overrideProvider(CATALOG_MARKETPLACE_PREVIEW)
-      .useValue(true)
       .compile();
     app = module.createNestApplication();
     await app.init();
@@ -108,6 +112,13 @@ describe('Private Pricing SKU context HTTP contract (local signed RS256/JWKS, is
   beforeEach(() => {
     vi.clearAllMocks();
     repository.skuContext.mockImplementation(async () => ({ ...context }));
+    repository.skuContexts.mockImplementation(async (skus) =>
+      skus.map((sku) => ({
+        sku,
+        status: 'FOUND',
+        context: { ...context, sku },
+      })),
+    );
   });
   afterEach(() => {
     expect(commercial.list).not.toHaveBeenCalled();
@@ -219,5 +230,87 @@ describe('Private Pricing SKU context HTTP contract (local signed RS256/JWKS, is
       .set('Authorization', 'Bearer ' + parts.join('.'))
       .expect(401);
     expect(repository.skuContext).not.toHaveBeenCalled();
+  });
+
+  it('resolves bounded private batches with exact SKU identity, duplicates and per-item 404 status', async () => {
+    const skus = ['000-leading', 'A/B%2F + ñ', '000-leading', 'missing'];
+    repository.skuContexts.mockResolvedValueOnce([
+      { sku: skus[0]!, status: 'FOUND', context },
+      {
+        sku: skus[1]!,
+        status: 'FOUND',
+        context: { ...context, sku: skus[1]!, isVariant: true },
+      },
+      { sku: skus[2]!, status: 'FOUND', context },
+      { sku: skus[3]!, status: 'SKU_NO_ENCONTRADO', context: null },
+    ]);
+    const response = await request(app.getHttpServer())
+      .post(batchPath)
+      .set('Authorization', 'Bearer ' + token())
+      .send({ skus })
+      .expect(200);
+    expect(response.body.items).toHaveLength(4);
+    expect(
+      response.body.items.map((item: { sku: string }) => item.sku),
+    ).toEqual(skus);
+    expect(response.body.items[1].context).toMatchObject({
+      sku: 'A/B%2F + ñ',
+      isVariant: true,
+    });
+    expect(response.body.items[3]).toEqual({
+      sku: 'missing',
+      status: 'SKU_NO_ENCONTRADO',
+      context: null,
+    });
+    expect(repository.skuContexts).toHaveBeenCalledExactlyOnceWith(skus);
+    expect(repository.skuContext).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing bearer', undefined, 401],
+    ['wrong scope', { scope: 'precios:leer' }, 403],
+    ['wrong client', { sub: 'modulo-marketplace' }, 403],
+    ['wrong audience', { aud: ['api-ventas'] }, 401],
+  ] as const)(
+    'rejects private batch access with %s',
+    async (_label, claims, status) => {
+      const call = request(app.getHttpServer())
+        .post(batchPath)
+        .send({ skus: ['000'] });
+      if (claims !== undefined)
+        call.set('Authorization', 'Bearer ' + token(claims));
+      await call.expect(status);
+      expect(repository.skuContexts).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    {},
+    { skus: [] },
+    { skus: Array(101).fill('sku') },
+    { skus: [''] },
+    { skus: ['x'.repeat(257)] },
+    { skus: ['sku'], extra: true },
+  ])('rejects invalid batch input %j', async (body) => {
+    await request(app.getHttpServer())
+      .post(batchPath)
+      .set('Authorization', 'Bearer ' + token())
+      .send(body)
+      .expect(400);
+    expect(repository.skuContexts).not.toHaveBeenCalled();
+  });
+
+  it('maps batch database failures to a sanitized 503', async () => {
+    repository.skuContexts.mockRejectedValueOnce(
+      new ServiceUnavailableException({ code: 'SERVICIO_NO_DISPONIBLE' }),
+    );
+    const response = await request(app.getHttpServer())
+      .post(batchPath)
+      .set('Authorization', 'Bearer ' + token())
+      .send({ skus: ['000'] })
+      .expect(503);
+    expect(JSON.stringify(response.body)).not.toContain(
+      'sensitive database details',
+    );
   });
 });

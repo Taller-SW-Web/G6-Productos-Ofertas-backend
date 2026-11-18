@@ -33,14 +33,27 @@ describe('configuración de Seguridad de Taxonomy', () => {
       readTaxonomySecurityConfig({ SECURITY_ISSUER: 'https://issuer.example' }),
     ).toThrow();
   });
-  it('activa demo solo explícitamente en test o desarrollo', () => {
-    expect(readTaxonomyDemoConfig({ NODE_ENV: 'test' })).toBe(false);
+
+  it('separa issuer y JWKS simulados de la configuración G7', () => {
     expect(
+      readTaxonomySecurityConfig({
+        G6_SECURITY_MODE: 'SIMULATED_AUTH',
+        SIMULATED_AUTH_ISSUER: 'http://localhost:8080/simulated-auth',
+        SIMULATED_AUTH_JWKS_URL: 'http://127.0.0.1:8081/jwks',
+      }),
+    ).toEqual({
+      issuer: 'http://localhost:8080/simulated-auth',
+      jwksUrl: 'http://127.0.0.1:8081/jwks',
+    });
+  });
+  it('mantiene desactivado el bypass demo heredado', () => {
+    expect(readTaxonomyDemoConfig({ NODE_ENV: 'test' })).toBe(false);
+    expect(() =>
       readTaxonomyDemoConfig({
         NODE_ENV: 'test',
         ALLOW_DEMO_UNAUTHENTICATED: 'true',
       }),
-    ).toBe(true);
+    ).toThrow();
     expect(() =>
       readTaxonomyDemoConfig({
         NODE_ENV: 'production',
@@ -100,6 +113,7 @@ describe('configuración de Seguridad de Taxonomy', () => {
             headers: {},
             method: 'GET',
             path: '/api/v1/categorias',
+            route: { path: '/categorias' },
             socket: { remoteAddress },
           }),
         }),
@@ -121,6 +135,7 @@ describe('configuración de Seguridad de Taxonomy', () => {
           headers: {},
           method: 'GET',
           path: '/api/v1/categorias',
+          route: { path: '/categorias' },
           socket: { remoteAddress: '172.18.0.4' },
         }),
       }),
@@ -152,6 +167,7 @@ describe('configuración de Seguridad de Taxonomy', () => {
           headers: {},
           method: 'GET',
           path: '/api/v1/marcas',
+          route: { path: '/marcas' },
           socket: { remoteAddress: '172.18.0.4' },
         }),
       }),
@@ -425,6 +441,10 @@ import { CategoryReactivationService } from './domain/category-reactivation.serv
 import { CategoryCreateService } from './domain/category-create.service.js';
 import { CategoryUpdateService } from './domain/category-update.service.js';
 import { BrandWriteService } from './domain/brand-write.service.js';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, unlinkSync, rmdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { TaxonomyWriteController } from './taxonomy-write.controller.js';
 
 // Verifies actual Nest guard, JWT signature, JWKS and problem responses.
@@ -622,6 +642,7 @@ describe('listarCategorias y listarMarcas: seguridad HTTP contractual', () => {
       'modulo-marketplace',
       'modulo-chatbot',
       'modulo-retail',
+      'modulo-productos',
     ]) {
       const autorizacion = 'Bearer ' + token({ sub: cliente });
       await request(app.getHttpServer())
@@ -635,7 +656,7 @@ describe('listarCategorias y listarMarcas: seguridad HTTP contractual', () => {
     }
     for (const cliente of [
       'catalog-svc',
-      'modulo-productos',
+      'modulo-seguridad',
       'otro-servicio',
     ]) {
       const autorizacion = 'Bearer ' + token({ sub: cliente });
@@ -712,15 +733,33 @@ describe('listarCategorias y listarMarcas: seguridad HTTP contractual', () => {
       .field('nombre', 'Marca')
       .attach('logo', png, { filename: 'logo.png', contentType: 'image/png' })
       .expect(401);
-    await request(app.getHttpServer())
-      .post('/api/v1/marcas')
-      .set('Authorization', human)
-      .field('nombre', 'Marca')
-      .attach('logo', png, { filename: 'logo.png', contentType: 'image/png' })
-      .expect(201);
-    expect(brandWrite.crear).toHaveBeenCalledWith(
-      expect.objectContaining({ nombre: 'Marca', logoUrl: null }),
-    );
+    const directory = mkdtempSync(join(tmpdir(), 'taxonomy-logo-h4-'));
+    const publicBase = 'https://assets.example.test/brands/';
+    vi.stubEnv('TAXONOMY_LOGO_DIRECTORY', directory);
+    vi.stubEnv('TAXONOMY_LOGO_PUBLIC_BASE_URL', publicBase);
+    try {
+      await request(app.getHttpServer())
+        .post('/api/v1/marcas')
+        .set('Authorization', human)
+        .field('nombre', 'Marca')
+        .attach('logo', png, { filename: 'logo.png', contentType: 'image/png' })
+        .expect(201);
+      expect(brandWrite.crear).toHaveBeenCalledWith(
+        expect.objectContaining({
+          nombre: 'Marca',
+          logoUrl: expect.stringMatching(
+            /^https:\/\/assets\.example\.test\/brands\/[a-f0-9]{64}\.png$/,
+          ),
+        }),
+      );
+      const name = createHash('sha256').update(png).digest('hex') + '.png';
+      const stored = join(directory, name);
+      expect(readFileSync(stored)).toEqual(png);
+      unlinkSync(stored);
+    } finally {
+      vi.unstubAllEnvs();
+      rmdirSync(directory);
+    }
     await request(app.getHttpServer())
       .post('/api/v1/marcas')
       .set('Authorization', human)
@@ -899,6 +938,13 @@ describe('listarCategorias y listarMarcas: seguridad HTTP contractual', () => {
         'Bearer ' +
           token({ tipo: 'acceso', sub: randomUUID(), roles: undefined }),
       )
+      .expect(401);
+    await request(app.getHttpServer())
+      .post(path)
+      .set(
+        'Authorization',
+        'Bearer ' + token({ tipo: 'acceso', sub: randomUUID(), roles: [] }),
+      )
       .expect(403);
   });
   it.each([
@@ -962,10 +1008,10 @@ describe('listarCategorias y listarMarcas: seguridad HTTP contractual', () => {
     expect(pending.body.code).toBe('SERVICIO_NO_DISPONIBLE');
   });
   it.each(['categorias', 'marcas'])(
-    'demo local restringida valida solicitudes a %s',
+    'legacy local demo no omite JWT al consultar %s',
     async (path) => {
       const url = '/api/v1/' + path;
-      await request(demoApp.getHttpServer()).get(url).expect(200);
+      await request(demoApp.getHttpServer()).get(url).expect(401);
       await request(demoApp.getHttpServer())
         .get(url)
         .set('Authorization', 'Bearer ' + token())
@@ -980,6 +1026,7 @@ describe('listarCategorias y listarMarcas: seguridad HTTP contractual', () => {
         .expect(403);
       await request(demoApp.getHttpServer())
         .get(url + '?pagina=1')
+        .set('Authorization', 'Bearer ' + token())
         .expect(400);
       await request(demoApp.getHttpServer()).post(url).expect(401);
       await request(demoApp.getHttpServer())

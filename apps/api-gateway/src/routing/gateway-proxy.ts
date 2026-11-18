@@ -26,7 +26,7 @@ export function matchContractRoute(
   method: string,
   path: string,
 ): ContractRoute | undefined {
-  if (/\\|%2f|%5c|%00/i.test(path)) return undefined;
+  if (/\\|%00/i.test(path)) return undefined;
   const actual = path.split('/');
   try {
     if (actual.some((value) => ['.', '..'].includes(decodeURIComponent(value))))
@@ -41,7 +41,11 @@ export function matchContractRoute(
       route.path
         .split('/')
         .every((part, i) =>
-          part.startsWith('{') ? actual[i].length > 0 : part === actual[i],
+          part.startsWith('{')
+            ? actual[i].length > 0 &&
+              ((part === '{sku}' && method === 'GET') ||
+                !/%2f|%5c/i.test(actual[i]))
+            : part === actual[i],
         ),
   );
 }

@@ -1,10 +1,30 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, count, eq, isNull, or, lte, gt, inArray } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  eq,
+  isNull,
+  or,
+  lte,
+  gt,
+  inArray,
+  sql,
+} from 'drizzle-orm';
 import type { PriceDefinition } from '../domain/price.js';
 import {
   PricingDatabase,
   type PricingTransaction,
 } from './pricing.database.js';
+
+export async function lockGlobalProduct(
+  tx: PricingTransaction,
+  productId: string,
+) {
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtextextended(${'pricing-global-product:' + productId}, 0))`,
+  );
+}
 import {
   prices,
   priceValidities,
@@ -13,6 +33,20 @@ import {
   bulkPriceRows,
 } from './pricing.schema.js';
 import { rethrowPersistenceError } from './persistence.error.js';
+
+export type PriceLookupTarget =
+  { productId: string; sku?: never } | { sku: string; productId?: never };
+
+function definitionWhere(target: PriceLookupTarget, channelId: string | null) {
+  return and(
+    target.productId !== undefined
+      ? eq(prices.productId, target.productId)
+      : eq(prices.sku, target.sku),
+    channelId === null
+      ? isNull(prices.channelId)
+      : eq(prices.channelId, channelId),
+  );
+}
 
 // rows es opcional en EstadoImportacionPrecio; nunca devolver detalle truncado.
 export const MAX_INLINE_IMPORT_ROWS = 1000;
@@ -75,6 +109,108 @@ export class PricingRepository {
     );
   }
 
+  /**
+   * Lee candidatos del lote en una fotografía PostgreSQL. Catálogo conserva
+   * autoridad sobre la relación entre SKU vendible y producto; aquí se agrupan
+   * únicamente las lecturas internas después de validar esos contextos.
+   */
+  readCandidatesBatch(
+    contexts: readonly { productId: string; sku: string }[],
+    channelId: string | null,
+    at: Date,
+  ) {
+    if (!contexts.length) return Promise.resolve([]);
+    const productIds = [
+      ...new Set(contexts.map((context) => context.productId)),
+    ];
+    const skus = [...new Set(contexts.map((context) => context.sku))];
+    return this.transaction(
+      async (tx) => {
+        const rows = await tx
+          .select()
+          .from(prices)
+          .where(
+            and(
+              or(
+                inArray(prices.productId, productIds),
+                inArray(prices.sku, skus),
+              ),
+              channelId === null
+                ? isNull(prices.channelId)
+                : or(eq(prices.channelId, channelId), isNull(prices.channelId)),
+            ),
+          );
+        if (!rows.length)
+          return contexts.map((context) => ({
+            sku: context.sku,
+            definitions: [],
+          }));
+        const snapshots = await tx
+          .select()
+          .from(priceValidities)
+          .where(
+            and(
+              inArray(
+                priceValidities.priceId,
+                rows.map((row) => row.id),
+              ),
+              eq(priceValidities.isCancelled, false),
+              lte(priceValidities.validFrom, at),
+              or(
+                isNull(priceValidities.validUntil),
+                gt(priceValidities.validUntil, at),
+              ),
+            ),
+          );
+        const validitiesByPrice = new Map<string, typeof snapshots>();
+        for (const snapshot of snapshots) {
+          const validities = validitiesByPrice.get(snapshot.priceId) ?? [];
+          validities.push(snapshot);
+          validitiesByPrice.set(snapshot.priceId, validities);
+        }
+        const definitions = rows.map((row) => ({
+          target: (row.productId !== null
+            ? { productId: row.productId, sku: null }
+            : { productId: null, sku: row.sku! }) as PriceDefinition['target'],
+          channelId: row.channelId,
+          priceVersion: row.priceVersion,
+          validities: validitiesByPrice.get(row.id) ?? [],
+        }));
+        const definitionsByProduct = new Map<
+          string,
+          (typeof definitions)[number][]
+        >();
+        const definitionsBySku = new Map<
+          string,
+          (typeof definitions)[number][]
+        >();
+        for (const definition of definitions) {
+          const productId = definition.target.productId;
+          if (productId !== null) {
+            const productDefinitions =
+              definitionsByProduct.get(productId) ?? [];
+            productDefinitions.push(definition);
+            definitionsByProduct.set(productId, productDefinitions);
+          }
+          const sku = definition.target.sku;
+          if (sku !== null) {
+            const skuDefinitions = definitionsBySku.get(sku) ?? [];
+            skuDefinitions.push(definition);
+            definitionsBySku.set(sku, skuDefinitions);
+          }
+        }
+        return contexts.map((context) => ({
+          sku: context.sku,
+          definitions: [
+            ...(definitionsBySku.get(context.sku) ?? []),
+            ...(definitionsByProduct.get(context.productId) ?? []),
+          ],
+        }));
+      },
+      { isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
+  }
+
   // El caller construye snapshot + Outbox/Inbox en el mismo tx; no publicar aquí.
   async transaction<T>(
     operation: (tx: PricingTransaction) => Promise<T>,
@@ -98,25 +234,12 @@ export class PricingRepository {
     }
   }
 
-  async findDefinition(
-    target:
-      { productId: string; sku?: never } | { sku: string; productId?: never },
-    channelId: string | null,
-  ) {
+  async findDefinition(target: PriceLookupTarget, channelId: string | null) {
     const [price] = await this.execute(() =>
       this.database.db
         .select()
         .from(prices)
-        .where(
-          and(
-            target.productId !== undefined
-              ? eq(prices.productId, target.productId)
-              : eq(prices.sku, target.sku),
-            channelId === null
-              ? isNull(prices.channelId)
-              : eq(prices.channelId, channelId),
-          ),
-        ),
+        .where(definitionWhere(target, channelId)),
     );
     return price;
   }
@@ -133,14 +256,16 @@ export class PricingRepository {
 
   // Una fotografía consistente para que el resolver no mezcle dos commits.
   readProduct(productId: string) {
+    return this.readDefinition({ productId }, null);
+  }
+
+  readDefinition(target: PriceLookupTarget, channelId: string | null) {
     return this.transaction(
       async (tx) => {
         const [definition] = await tx
           .select()
           .from(prices)
-          .where(
-            and(eq(prices.productId, productId), isNull(prices.channelId)),
-          );
+          .where(definitionWhere(target, channelId));
         if (!definition) return undefined;
         const validities = await tx
           .select()

@@ -1,3 +1,5 @@
+import { consumeTaxonomyUpdate } from './catalog-taxonomy-message.js';
+import { taxonomyUpdates } from './catalog-taxonomy-update.js';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { CatalogBulkService } from './catalog-bulk.service.js';
 import { CatalogTelemetry } from './catalog-telemetry.js';
@@ -56,6 +58,8 @@ export class CatalogMessageService {
       if (!this.bulk) throw new BlockedCatalogHandler();
       return this.bulk.consume(message);
     }
+    if ((taxonomyUpdates as readonly string[]).includes(message.name))
+      return consumeTaxonomyUpdate(this.database, message);
     if (message.name.startsWith('taxonomy.master.'))
       return consumeMasterMessage(this.database, message, this.telemetry);
     if (!(preparationResults as readonly string[]).includes(message.name))
@@ -116,7 +120,7 @@ export class CatalogMessageService {
       const result =
         message.causation_id !== active.message_id
           ? 'STALE'
-          : check.state === 'COMPLETED'
+          : check.state === 'COMPLETED' || check.state === 'REJECTED'
             ? 'TERMINAL'
             : 'APPLIED';
       const handler = 'catalog.preparation-results.v1';

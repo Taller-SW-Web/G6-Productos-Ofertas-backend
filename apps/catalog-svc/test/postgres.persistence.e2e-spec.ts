@@ -1,3 +1,5 @@
+import { productAttributes, variantAttributes } from '../src/catalog.schema.js';
+import { currentTaxonomyValue } from '../src/catalog-taxonomy-update.js';
 import {
   CatalogBulkService,
   CatalogBulkIdentity,
@@ -21,23 +23,35 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { DisposableCatalogBroker } from './support/disposable-catalog-broker.js';
-import { LegacyDemoList } from './support/legacy-demo-list.js';
+import {
+  candidateValidators,
+  parseCandidateYaml,
+} from './support/openapi-candidate.js';
+import {
+  pinnedInventorySource,
+  INVENTORY_BILATERAL_SHA,
+  pinnedPricingSource,
+  PRICING_HISTORICAL_SHA,
+} from './support/pinned-peer-source.js';
+import { runData002Psql, type Data002Step } from './support/data002-psql.js';
 import { CatalogGatewayHarness } from './support/catalog-gateway-harness.js';
-import { CommercialService } from '../src/commercial.service.js';
-import type { CatalogConfig } from '../src/config.js';
-import type { TaxonomyClient } from '../src/taxonomy.client.js';
-import type { ProductQuery, ProductSummary } from '../src/commercial.types.js';
+import type { ProductSummary } from '../src/commercial.types.js';
 import { CatalogAmqpRuntime } from '../src/catalog-amqp.js';
 import { CatalogTelemetry } from '../src/catalog-telemetry.js';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import {
   CatalogMutationService,
   type CatalogProductCreationPolicy,
 } from '../src/catalog-mutation.service.js';
 import type { CatalogMasterClient } from '../src/catalog-master.client.js';
 import { CatalogMessageService } from '../src/catalog-message.service.js';
+import {
+  HistoricalRecoveryService,
+  readHistoricalRecoveryCapabilities,
+} from '../src/historical-recovery.service.js';
+import { historicalRequests } from '../src/historical-recovery.schema.js';
 import { CatalogQueryRepository } from '../src/catalog-query.repository.js';
 import {
   activeAttempt,
@@ -70,26 +84,58 @@ import {
   outbox,
   skuIdentity,
   skuPhysicalProfiles,
-  productImages,
   variantImages,
 } from '../src/catalog.schema.js';
 
-const dockerAvailable =
-  spawnSync('docker', ['info', '--format', '{{.ServerVersion}}'], {
-    encoding: 'utf8',
-    timeout: 5000,
-    windowsHide: true,
-  }).status === 0 &&
-  spawnSync('openssl', ['version'], {
-    encoding: 'utf8',
-    timeout: 5000,
-    windowsHide: true,
-  }).status === 0;
 const isCi = process.env.CI?.toLowerCase() === 'true';
+
+function checkDockerSupport() {
+  const docker = spawnSync(
+    'docker',
+    ['info', '--format', '{{.ServerVersion}}'],
+    {
+      encoding: 'utf8',
+      timeout: 5000,
+      windowsHide: true,
+    },
+  );
+  const openssl = spawnSync('openssl', ['version'], {
+    encoding: 'utf8',
+    timeout: 5000,
+    windowsHide: true,
+  });
+  return {
+    available: docker.status === 0 && openssl.status === 0,
+    diagnostics: [
+      docker.status === 0
+        ? `Docker ${docker.stdout.trim()}`
+        : `Docker unavailable (${docker.error?.message ?? docker.stderr.trim() ?? `exit ${docker.status}`})`,
+      openssl.status === 0
+        ? openssl.stdout.trim()
+        : `OpenSSL unavailable (${openssl.error?.message ?? openssl.stderr.trim() ?? `exit ${openssl.status}`})`,
+    ],
+  };
+}
+
+let dockerSupport = checkDockerSupport();
+if (isCi && !dockerSupport.available) {
+  // Hosted runners occasionally expose the Docker CLI before the daemon is
+  // ready. Retry readiness; coverage still fails closed if prerequisites stay
+  // unavailable.
+  for (
+    let attempt = 0;
+    attempt < 10 && !dockerSupport.available;
+    attempt += 1
+  ) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+    dockerSupport = checkDockerSupport();
+  }
+}
+const dockerAvailable = dockerSupport.available;
 
 if (isCi && !dockerAvailable) {
   throw new Error(
-    'Catalog persistence E2E requires Docker and OpenSSL in CI; refusing to skip PostgreSQL coverage',
+    `Catalog persistence E2E requires Docker and OpenSSL in CI; refusing to skip PostgreSQL coverage. ${dockerSupport.diagnostics.join('; ')}`,
   );
 }
 
@@ -247,6 +293,26 @@ describe.skipIf(!dockerAvailable)(
         ],
         `CREATE ROLE po_catalog_owner NOLOGIN;\nCREATE ROLE catalog_app LOGIN PASSWORD 'isolated-runtime-password';\nCREATE SCHEMA catalog AUTHORIZATION po_catalog_owner;\nCREATE SCHEMA foreign_context;\nCREATE TABLE foreign_context.private_probe (value text);\nINSERT INTO foreign_context.private_probe VALUES ('isolated');\nSET ROLE po_catalog_owner;\n${migration}\n${barcodeMigration}\nINSERT INTO catalog.products (id,nombre,descripcion,categoria_id,tipo_producto_id,marca_id,sku_base,slug,tiene_variantes) VALUES ('00000000-0000-4000-8000-000000000049','Historical','Before migration','historic-category','historic-type','historic-brand','historic-00049','historic-00049',false);\n${readFileSync(resolve('apps/catalog-svc/migrations/0003_product_publication_history.sql'), 'utf8')}`,
       );
+      command(
+        'docker',
+        [
+          'exec',
+          '-i',
+          container,
+          'psql',
+          '-U',
+          'postgres',
+          '-v',
+          'ON_ERROR_STOP=1',
+        ],
+        'SET ROLE po_catalog_owner;\n' +
+          readFileSync(
+            resolve(
+              'apps/catalog-svc/migrations/0004_historical_preparation_requests.sql',
+            ),
+            'utf8',
+          ),
+      );
       port = command('docker', ['port', container, '5432/tcp'])
         .split(':')
         .at(-1)!;
@@ -305,126 +371,921 @@ describe.skipIf(!dockerAvailable)(
       };
     }
 
-    it('enumerates Marketplace preview snapshots beyond 100 with real PostgreSQL and complete Pricing', async () => {
-      const marker = 'PREVIEW-PAGES-' + randomUUID();
-      const groups = [1, 100, 101, 205] as const;
-      await transactions.run(async (tx) => {
-        for (const size of groups)
-          for (let index = 0; index < size; index++) {
-            const name = `${marker}-${size}-${String(index).padStart(3, '0')}`;
-            const row = await repository.insertProduct(tx, {
-              ...productInput(`${marker}-SKU-${size}-${index}`),
-              nombre: name,
-            });
-            await tx.insert(productImages).values([
-              {
-                product_id: row.id,
-                url: `https://example.test/${size}/${index}/primary.jpg`,
-                principal: true,
-                posicion: 0,
-              },
-              {
-                product_id: row.id,
-                url: `https://example.test/${size}/${index}/secondary.jpg`,
-                principal: false,
-                posicion: 1,
-              },
-            ]);
-          }
-      });
-      const reads = new PostgresCatalogRepository(database);
-      let activePrices = 0,
-        maxConcurrentPrices = 0;
-      const pricing = {
-        currentPrice: async () => {
-          activePrices++;
-          maxConcurrentPrices = Math.max(maxConcurrentPrices, activePrices);
-          await pause(1);
-          activePrices--;
-          return {
-            precio_regular: 10,
-            precio_oferta: null,
-            currency: 'PEN' as const,
-          };
-        },
-      };
-      const service = new CommercialService(
-        reads,
-        {} as TaxonomyClient,
-        { enabled: false },
-        { marketplaceDemoPreview: true } as CatalogConfig,
-        pricing,
-      );
-      for (const size of [0, ...groups]) {
-        const q = size ? `${marker}-${size}-` : marker + '-absent-';
-        const result = await service.list({
-          canal: 'MARKETPLACE',
-          q,
-          pagina: 1,
-          tamanio: 250,
-          orden: 'NOMBRE_ASC',
+    it('TAXONOMY-UPDATES: durable replay, ordering and current labels preserve historical identities', async () => {
+      const messages = new CatalogMessageService(database);
+      const characteristic = randomUUID(),
+        value = randomUUID();
+      const product = (
+        await database.transaction((tx) =>
+          tx
+            .insert(products)
+            .values({
+              ...productInput('tax-update-' + randomUUID()),
+              tiene_variantes: true,
+            })
+            .returning(),
+        )
+      )[0]!;
+      const variant = await database.transaction(async (tx) => {
+        const [child] = await tx
+          .insert(variants)
+          .values({
+            product_id: product.id,
+            sku: 'tax-variant-' + randomUUID(),
+            identifying_key: { [characteristic]: { valor_id: value } },
+          })
+          .returning();
+        await tx.insert(productAttributes).values({
+          product_id: product.id,
+          caracteristica_id: characteristic,
+          nombre_snapshot: 'Color',
+          valor_id: value,
+          valor: 'Azul anterior',
         });
-        expect(result.total).toBe(size);
-        expect(result.items).toHaveLength(size);
-        if (size > 1) {
-          expect(result.items[0]?.name).toBe(`${marker}-${size}-000`);
-          expect(result.items.at(-1)?.name).toBe(
-            `${marker}-${size}-${String(size - 1).padStart(3, '0')}`,
-          );
-          expect(result.items[0]?.images).toEqual([
-            `https://example.test/${size}/0/primary.jpg`,
-            `https://example.test/${size}/0/secondary.jpg`,
-          ]);
-        }
-      }
-      const secondPage = await service.list({
-        canal: 'MARKETPLACE',
-        q: `${marker}-205-`,
-        pagina: 2,
-        tamanio: 10,
-        orden: 'NOMBRE_ASC',
+        await tx.insert(variantAttributes).values({
+          variant_id: child!.id,
+          caracteristica_id: characteristic,
+          nombre_snapshot: 'Color',
+          valor_id: value,
+          valor: 'Azul anterior',
+          es_identificador: true,
+        });
+        await tx.insert(variantImages).values({
+          variant_id: child!.id,
+          url: 'https://example.test/taxonomy.jpg',
+          posicion: 0,
+        });
+        return child!;
       });
-      expect(secondPage).toMatchObject({ total: 205, pagina: 2, tamanio: 10 });
-      expect(secondPage.items[0]?.name).toBe(`${marker}-205-010`);
-      expect(maxConcurrentPrices).toBeLessThanOrEqual(3);
-      const noPrice = new CommercialService(
-        reads,
-        {} as TaxonomyClient,
-        { enabled: false },
-        { marketplaceDemoPreview: true } as CatalogConfig,
-        { currentPrice: async () => null },
-      );
+      const fact = (
+        name: string,
+        data: Record<string, unknown>,
+      ): CatalogEnvelope => ({
+        message_id: randomUUID(),
+        correlation_id: randomUUID(),
+        operation_id: null,
+        causation_id: null,
+        schema_version: 1,
+        occurred_at: new Date().toISOString(),
+        producer: 'taxonomy-svc',
+        kind: 'event',
+        name,
+        data,
+      });
+      const renamed = fact('taxonomy.characteristic-value.updated', {
+        caracteristica_id: characteristic,
+        valor_id: value,
+        nombre: 'Azul vigente',
+        change_type: 'RENAMED',
+        updated_at: '2026-11-13T10:00:00.123456Z',
+      });
       expect(
         (
-          await noPrice.list({
-            canal: 'MARKETPLACE',
-            q: `${marker}-1-`,
-            pagina: 1,
-            tamanio: 10,
-            orden: 'NOMBRE_ASC',
+          await Promise.all([
+            messages.consume(renamed),
+            messages.consume(renamed),
+          ])
+        ).sort(),
+      ).toEqual(['APPLIED', 'DUPLICATE']);
+      expect(
+        await messages.consume({
+          ...renamed,
+          message_id: randomUUID(),
+          data: {
+            ...renamed.data,
+            nombre: 'Viejo',
+            updated_at: '2026-11-13T10:00:00.123455Z',
+          },
+        }),
+      ).toBe('STALE');
+      await expect(
+        messages.consume({
+          ...renamed,
+          data: { ...renamed.data, nombre: 'ID reutilizado' },
+        }),
+      ).rejects.toThrow('INVALID_CATALOG_MESSAGE');
+      await expect(
+        messages.consume({
+          ...renamed,
+          message_id: randomUUID(),
+          data: { ...renamed.data, nombre: 'Versión contradictoria' },
+        }),
+      ).rejects.toThrow('INVALID_CATALOG_MESSAGE');
+      // Actual SELECT projection under the runtime role: no mutation of historical JSON or SKU.
+      const current = await database.read((db) =>
+        db
+          .select({
+            valor: currentTaxonomyValue(productAttributes),
           })
-        ).total,
-      ).toBe(0);
-      const invalidDto = new CommercialService(
-        reads,
-        {} as TaxonomyClient,
-        { enabled: false },
-        { marketplaceDemoPreview: true } as CatalogConfig,
-        { currentPrice: async () => undefined as never },
+          .from(productAttributes)
+          .where(eq(productAttributes.product_id, product.id)),
+      );
+      expect(current[0]!.valor).toBe('Azul vigente');
+      const currentVariant = await database.read((db) =>
+        db
+          .select({
+            valor: currentTaxonomyValue(variantAttributes),
+          })
+          .from(variantAttributes)
+          .where(eq(variantAttributes.variant_id, variant.id)),
+      );
+      expect(currentVariant[0]!.valor).toBe('Azul vigente');
+      const adminQueries = new CatalogQueryRepository(database);
+      expect(await adminQueries.findAdminProduct(product.id)).toMatchObject({
+        atributos: [
+          {
+            caracteristicaId: characteristic,
+            nombre: 'Color',
+            valorId: value,
+            valor: 'Azul vigente',
+          },
+        ],
+      });
+      expect(await adminQueries.listVariants(product.id, 1, 20)).toMatchObject({
+        items: [
+          {
+            variant_id: variant.id,
+            identifying_attributes: [
+              {
+                caracteristica_id: characteristic,
+                nombre: 'Color',
+                valor_id: value,
+                valor: 'Azul vigente',
+              },
+            ],
+          },
+        ],
+      });
+      const commercialReads = new PostgresCatalogRepository(database);
+      expect(
+        await commercialReads.findCandidateBySlug(
+          product.slug,
+          undefined,
+          true,
+        ),
+      ).toMatchObject({
+        attributes: [
+          {
+            caracteristica_id: characteristic,
+            nombre: 'Color',
+            valor_id: value,
+            valor: 'Azul vigente',
+          },
+        ],
+        variants: [
+          {
+            variant_id: variant.id,
+            identifying_attributes: [
+              {
+                caracteristica_id: characteristic,
+                nombre: 'Color',
+                valor_id: value,
+                valor: 'Azul vigente',
+              },
+            ],
+          },
+        ],
+      });
+      expect(
+        (
+          await database.read((db) =>
+            db
+              .select()
+              .from(productAttributes)
+              .where(eq(productAttributes.product_id, product.id)),
+          )
+        )[0]!.valor,
+      ).toBe('Azul anterior');
+      const persisted = (
+        await database.read((db) =>
+          db.select().from(variants).where(eq(variants.id, variant.id)),
+        )
+      )[0]!;
+      expect(persisted.identifying_key).toEqual(variant.identifying_key);
+      expect(persisted.sku).toBe(variant.sku);
+      expect(persisted.catalog_version).toBe(variant.catalog_version);
+      // Reconstructed consumer has no process-local cache; replay survives restart.
+      expect(await new CatalogMessageService(database).consume(renamed)).toBe(
+        'DUPLICATE',
+      );
+      for (const [name, identity, versionKey] of [
+        [
+          'taxonomy.category.updated',
+          { categoria_id: randomUUID() },
+          'version',
+        ],
+        [
+          'taxonomy.product-type-schema.changed',
+          {
+            tipo_producto_id: randomUUID(),
+            caracteristica_id: characteristic,
+            change_type: 'REQUIRED_CHANGED',
+            updated_at: '2026-11-13T10:00:00Z',
+          },
+          'schema_version',
+        ],
+      ] as const) {
+        const update = fact(name, { ...identity, [versionKey]: 7 });
+        expect(await messages.consume(update)).toBe('APPLIED');
+        expect(
+          await messages.consume({
+            ...update,
+            message_id: randomUUID(),
+            data: { ...update.data, [versionKey]: 6 },
+          }),
+        ).toBe('STALE');
+        expect(
+          await messages.consume({ ...update, message_id: randomUUID() }),
+        ).toBe('STALE');
+      }
+      const rolledBack = {
+        ...renamed,
+        message_id: randomUUID(),
+        data: {
+          ...renamed.data,
+          nombre: 'Tras recuperación',
+          updated_at: '2026-11-13T10:00:00.123457Z',
+        },
+      };
+      class RollbackDatabase extends Database {
+        override async transaction<T>(
+          work: (tx: CatalogTransaction) => Promise<T>,
+        ): Promise<T> {
+          return database.transaction(async (tx) => {
+            await work(tx);
+            throw new Error('INJECTED_TRANSACTION_FAILURE');
+          });
+        }
+      }
+      await expect(
+        new CatalogMessageService(new RollbackDatabase()).consume(rolledBack),
+      ).rejects.toThrow('INJECTED_TRANSACTION_FAILURE');
+      expect(
+        await database.read((db) =>
+          db
+            .select()
+            .from(inbox)
+            .where(eq(inbox.message_id, rolledBack.message_id)),
+        ),
+      ).toHaveLength(0);
+      expect(
+        (
+          await database.read((db) =>
+            db
+              .select({ valor: currentTaxonomyValue(productAttributes) })
+              .from(productAttributes)
+              .where(eq(productAttributes.product_id, product.id)),
+          )
+        )[0]!.valor,
+      ).toBe('Azul vigente');
+      expect(await messages.consume(rolledBack)).toBe('APPLIED');
+      const stored = await database.read((db) =>
+        db.select().from(inbox).where(eq(inbox.message_id, renamed.message_id)),
+      );
+      expect(stored).toHaveLength(1);
+      expect(stored[0]!.result).toBe('APPLIED');
+    });
+
+    it('TAXONOMY-UPDATES: real Rabbit deliveries ACK only after durable Inbox and survive consumer restart', async () => {
+      const messages = new CatalogMessageService(database);
+      const facts = [
+        {
+          name: 'taxonomy.category.updated',
+          data: { categoria_id: randomUUID(), version: 0 },
+        },
+        {
+          name: 'taxonomy.product-type-schema.changed',
+          data: {
+            tipo_producto_id: randomUUID(),
+            schema_version: 1,
+            change_type: 'CHARACTERISTIC_ASSOCIATED',
+            caracteristica_id: randomUUID(),
+            updated_at: new Date().toISOString(),
+          },
+        },
+        {
+          name: 'taxonomy.characteristic-value.updated',
+          data: {
+            caracteristica_id: randomUUID(),
+            valor_id: randomUUID(),
+            nombre: 'Etiqueta del broker',
+            change_type: 'RENAMED',
+            updated_at: new Date().toISOString(),
+          },
+        },
+      ].map((fact) => ({
+        message_id: randomUUID(),
+        correlation_id: randomUUID(),
+        schema_version: 1,
+        occurred_at: new Date().toISOString(),
+        producer: 'taxonomy-svc',
+        kind: 'event',
+        ...fact,
+      }));
+      jointRuntime = new CatalogAmqpRuntime(messages, jointBroker.settings);
+      jointRuntime.onModuleInit();
+      try {
+        for (const fact of facts) await jointBroker.taxonomyFact(fact);
+        const deadline = Date.now() + 15000;
+        while (Date.now() < deadline) {
+          const rows = await database.read((db) =>
+            db
+              .select()
+              .from(inbox)
+              .where(
+                inArray(
+                  inbox.message_id,
+                  facts.map((f) => f.message_id),
+                ),
+              ),
+          );
+          if (rows.length === 3) break;
+          await pause(50);
+        }
+        expect(
+          (
+            await database.read((db) =>
+              db
+                .select()
+                .from(inbox)
+                .where(
+                  inArray(
+                    inbox.message_id,
+                    facts.map((f) => f.message_id),
+                  ),
+                ),
+            )
+          ).map((row) => row.result),
+        ).toEqual(['APPLIED', 'APPLIED', 'APPLIED']);
+        expect(jointRuntime.ready).toBe(true);
+        await jointRuntime.onModuleDestroy();
+        jointRuntime = new CatalogAmqpRuntime(
+          new CatalogMessageService(database),
+          jointBroker.settings,
+        );
+        jointRuntime.onModuleInit();
+        for (const fact of facts) await jointBroker.taxonomyFact(fact);
+        await pause(1000);
+        expect(jointRuntime.ready).toBe(true);
+        expect(
+          await database.read((db) =>
+            db
+              .select()
+              .from(inbox)
+              .where(
+                inArray(
+                  inbox.message_id,
+                  facts.map((f) => f.message_id),
+                ),
+              ),
+          ),
+        ).toHaveLength(3);
+        // Invalid payload stays unacknowledged and pauses, with no forged Inbox success.
+        const invalid = { ...facts[0]!, message_id: randomUUID(), data: {} };
+        await jointBroker.taxonomyFact(invalid);
+        const pauseDeadline = Date.now() + 5000;
+        while (jointRuntime.ready && Date.now() < pauseDeadline)
+          await pause(50);
+        expect(jointRuntime.ready).toBe(false);
+        expect(
+          await database.read((db) =>
+            db
+              .select()
+              .from(inbox)
+              .where(eq(inbox.message_id, invalid.message_id)),
+          ),
+        ).toHaveLength(0);
+        // Remove only this deliberately invalid fixture from the disposable broker.
+        expect(
+          (await jointBroker.next('po.catalogo.q')).properties.messageId,
+        ).toBe(invalid.message_id);
+      } finally {
+        await jointRuntime.onModuleDestroy();
+        jointRuntime = undefined;
+      }
+    }, 30000);
+
+    it('BLOCK-A1: historical absence is 503 on HTTP read and 409 on retry, without manufacturing a preparation', async () => {
+      const http = new CatalogGatewayHarness();
+      await http.start(persistenceSettings, { timeoutMs: 300000 });
+      try {
+        const historical = '00000000-0000-4000-8000-000000000049';
+        const before = await requested(historical);
+        expect(before).toEqual([]);
+        const read = await http.call(
+          'GET',
+          '/productos/' + historical + '/preparacion',
+        );
+        expect(read.status).toBe(503);
+        expect(read.body.code).toBe('SERVICIO_NO_DISPONIBLE');
+        for (const dependencia of ['PRICING', 'INVENTARIO']) {
+          const retry = await http.call(
+            'POST',
+            '/productos/' + historical + '/preparacion/reintentar',
+            { dependencia },
+          );
+          expect(retry.status).toBe(409);
+          expect(retry.body.code).toBe('PREPARACION_NO_REINTENTABLE');
+        }
+        expect(await requested(historical)).toEqual(before);
+        expect(
+          await database.read((db) =>
+            db
+              .select()
+              .from(activationChecks)
+              .where(eq(activationChecks.product_id, historical)),
+          ),
+        ).toEqual([]);
+        const created = await http.call('POST', '/productos', createRequest());
+        expect(created.status).toBe(201);
+        const id = String(created.body.product_id);
+        expect(created.body.status).toBe('BORRADOR');
+        expect(
+          (await requested(id)).map((row) => row.event_name).sort(),
+        ).toEqual([
+          'inventory.sku.initialization.requested',
+          'pricing.product.initialization.requested',
+        ]);
+        const preparation = await http.call(
+          'GET',
+          '/productos/' + id + '/preparacion',
+        );
+        expect(preparation.status).toBe(200);
+        expect(preparation.body).toMatchObject({
+          pricing: { status: 'PENDING', manual_retry_allowed: false },
+          inventario: { status: 'PENDING', manual_retry_allowed: false },
+        });
+        // This fixture remains PENDING here; no completion or publication is fabricated.
+      } finally {
+        await http.close();
+      }
+    }, 90000);
+
+    it('BLOCK-A1-CANDIDATE: human capability, atomic historical Inventory admission, receipt replay and isolated Pricing contract block', async () => {
+      const subject = '00000000-0000-4000-8000-000000000050';
+      const denied = new CatalogGatewayHarness();
+      await denied.start(persistenceSettings);
+      try {
+        const response = await denied.call(
+          'POST',
+          '/productos/' + randomUUID() + '/preparacion/recuperar-historica',
+          { solicitudId: randomUUID(), dependencias: ['INVENTARIO'] },
+          denied.token(),
+          true,
+        );
+        expect(response.status).toBe(403);
+      } finally {
+        await denied.close();
+      }
+      const http = new CatalogGatewayHarness();
+      await http.start(persistenceSettings, {}, false, [subject]);
+      try {
+        const historical = await transactions.run((tx) =>
+          repository.insertProduct(tx, productInput('HIST-' + randomUUID())),
+        );
+        const path =
+          '/productos/' + historical.id + '/preparacion/recuperar-historica';
+        const input = {
+          solicitudId: randomUUID(),
+          dependencias: ['INVENTARIO'],
+        };
+        expect((await http.call('POST', path, input, null, true)).status).toBe(
+          401,
+        );
+        expect(
+          (
+            await http.call(
+              'POST',
+              path,
+              input,
+              http.token({ roles: [] }),
+              true,
+            )
+          ).status,
+        ).toBe(403);
+        expect(
+          (
+            await http.call(
+              'POST',
+              path,
+              input,
+              http.token({ sub: randomUUID() }),
+              true,
+            )
+          ).status,
+        ).toBe(403);
+        const blockedId = randomUUID();
+        const blocked = await http.call(
+          'POST',
+          path,
+          {
+            solicitudId: blockedId,
+            dependencias: ['PRICING', 'INVENTARIO'],
+            moneda: 'EUR',
+          },
+          http.token(),
+          true,
+        );
+        expect(blocked.status).toBe(503);
+        expect(blocked.body).toMatchObject({
+          code: 'SERVICIO_NO_DISPONIBLE',
+        });
+        expect(await requested(historical.id)).toEqual([]);
+        expect(
+          await database.read((db) =>
+            db
+              .select()
+              .from(historicalRequests)
+              .where(eq(historicalRequests.request_id, blockedId)),
+          ),
+        ).toEqual([]);
+        const [first, replay] = await Promise.all([
+          http.call('POST', path, input, http.token(), true),
+          http.call('POST', path, input, http.token(), true),
+        ]);
+        expect(first.status).toBe(202);
+        expect(replay.status).toBe(202);
+        const acceptedContract = candidateValidators(
+          await parseCandidateYaml(
+            readFileSync(
+              'apps/catalog-svc/contracts/recuperacion-historica.openapi.candidate.yaml',
+              'utf8',
+            ),
+          ),
+        ).component('HistoricalRecoveryAccepted');
+        expect(
+          acceptedContract(first.body),
+          JSON.stringify(acceptedContract.errors),
+        ).toBe(true);
+        expect(
+          acceptedContract(replay.body),
+          JSON.stringify(acceptedContract.errors),
+        ).toBe(true);
+        expect(first.body).toEqual(replay.body);
+        expect(first.body).toMatchObject({
+          operation_id: input.solicitudId,
+          status: 'ACCEPTED',
+          preparaciones: [
+            {
+              dependencia: 'INVENTARIO',
+              sku: historical.sku_base,
+              variant_id: null,
+            },
+          ],
+        });
+        const messages = await requested(historical.id);
+        expect(messages).toHaveLength(1);
+        expect(messages[0]).toMatchObject({
+          event_name: 'inventory.sku.initialization.requested',
+          causation_id: input.solicitudId,
+          published_at: null,
+          payload: {
+            sku: historical.sku_base,
+            product_id: historical.id,
+            variant_id: null,
+          },
+        });
+        expect(messages[0].payload).not.toHaveProperty('default_location_id');
+        expect(messages[0].payload).not.toHaveProperty('precio_regular');
+        const checks = await database.read((db) =>
+          db
+            .select()
+            .from(activationChecks)
+            .where(eq(activationChecks.product_id, historical.id)),
+        );
+        expect(checks).toHaveLength(1);
+        expect(checks[0]).toMatchObject({
+          state: 'PENDING',
+          dependency: 'INVENTORY',
+          operation_id: first.body.preparaciones[0].operation_id,
+        });
+        expect(
+          (
+            await http.call(
+              'POST',
+              path,
+              { ...input, solicitudId: randomUUID() },
+              http.token(),
+              true,
+            )
+          ).status,
+        ).toBe(409);
+        const other = await transactions.run((tx) =>
+          repository.insertProduct(tx, productInput('HIST-' + randomUUID())),
+        );
+        const conflict = await http.call(
+          'POST',
+          '/productos/' + other.id + '/preparacion/recuperar-historica',
+          input,
+          http.token(),
+          true,
+        );
+        expect(conflict.status).toBe(409);
+        expect(conflict.body.code).toBe('IDEMPOTENCY_CONFLICT');
+        const contenders = await Promise.all([
+          http.call(
+            'POST',
+            '/productos/' + other.id + '/preparacion/recuperar-historica',
+            { ...input, solicitudId: randomUUID() },
+            http.token(),
+            true,
+          ),
+          http.call(
+            'POST',
+            '/productos/' + other.id + '/preparacion/recuperar-historica',
+            { ...input, solicitudId: randomUUID() },
+            http.token(),
+            true,
+          ),
+        ]);
+        expect(contenders.map((item) => item.status).sort()).toEqual([
+          202, 409,
+        ]);
+        expect(await requested(other.id)).toHaveLength(1);
+        const receiptPrivileges = await database.read((db) =>
+          db.execute(sql`
+          SELECT has_table_privilege(current_user,'catalog.historical_preparation_requests','UPDATE') AS can_update,
+            has_table_privilege(current_user,'catalog.historical_preparation_requests','DELETE') AS can_delete
+        `),
+        );
+        expect(receiptPrivileges.rows[0]).toMatchObject({
+          can_update: false,
+          can_delete: false,
+        });
+      } finally {
+        await http.close();
+      }
+    }, 90000);
+
+    it('BLOCK-A1-CANDIDATE: selected physical variants only, complete rollback and terminal outcomes are preserved', async () => {
+      const subject = randomUUID();
+      const service = new HistoricalRecoveryService(
+        transactions,
+        repository,
+        readHistoricalRecoveryCapabilities({
+          CATALOG_HISTORICAL_RECOVERY_ALLOWED_SUBJECTS: subject,
+        }),
+      );
+      const operator = { subject, correlationId: randomUUID() };
+      // Ordinary creation is reused to build an isolated legacy snapshot. Remove
+      // only fixture coordination as schema owner, never shared data or business states.
+      const parent = await mutationService().createProduct(
+        createRequest(true),
+        actor,
+      );
+      const children: Array<
+        Awaited<ReturnType<CatalogMutationService['createVariant']>>
+      > = [];
+      for (const size of ['A', 'B'])
+        children.push(
+          await mutationService().createVariant(
+            parent.product_id,
+            {
+              sku: 'HIST-V-' + randomUUID(),
+              atributosIdentificadores: [
+                { caracteristica_id: 'size', nombre: 'Size', valor: size },
+              ],
+              imagenUrl: 'https://example.test/variant',
+              perfilFisico: fullProfile,
+            },
+            actor,
+          ),
+        );
+      const admin = (query: string) =>
+        command(
+          'docker',
+          [
+            'exec',
+            '-i',
+            container,
+            'psql',
+            '-U',
+            'postgres',
+            '-v',
+            'ON_ERROR_STOP=1',
+          ],
+          query,
+        );
+      admin(
+        "DELETE FROM catalog.activation_checks WHERE product_id='" +
+          parent.product_id +
+          "'; DELETE FROM catalog.outbox WHERE payload->>'product_id'='" +
+          parent.product_id +
+          "';",
+      );
+      const selected = {
+        solicitudId: randomUUID(),
+        dependencias: ['INVENTARIO'],
+        variantIds: [children[0].variant_id],
+      };
+      const receipt = await service.recover(
+        parent.product_id,
+        selected,
+        operator,
+      );
+      expect(receipt.preparaciones).toMatchObject([
+        {
+          sku: children[0].sku,
+          variant_id: children[0].variant_id,
+          dependencia: 'INVENTARIO',
+        },
+      ]);
+      expect(await requested(parent.product_id)).toHaveLength(1);
+      expect((await requested(parent.product_id))[0].payload.sku).not.toBe(
+        parent.sku_base,
       );
       await expect(
-        invalidDto.list({
-          canal: 'MARKETPLACE',
-          q: `${marker}-1-`,
-          pagina: 1,
-          tamanio: 10,
-          orden: 'NOMBRE_ASC',
+        service.recover(
+          parent.product_id,
+          { ...selected, solicitudId: randomUUID(), variantIds: [] },
+          operator,
+        ),
+      ).rejects.toMatchObject({ status: 400 });
+      await expect(
+        service.recover(
+          parent.product_id,
+          {
+            ...selected,
+            solicitudId: randomUUID(),
+            variantIds: [randomUUID()],
+          },
+          operator,
+        ),
+      ).rejects.toMatchObject({ status: 404 });
+      await expect(
+        service.recover(
+          parent.product_id,
+          {
+            ...selected,
+            solicitudId: randomUUID(),
+            variantIds: children.map((child) => child.variant_id),
+          },
+          operator,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(await requested(parent.product_id)).toHaveLength(1);
+      const messages = new CatalogMessageService(database);
+      const original = (await requested(parent.product_id))[0];
+      expect(await messages.consume(resultFor(original, true))).toBe('APPLIED');
+      expect(await messages.consume(resultFor(original))).toBe('TERMINAL');
+      await expect(
+        service.recover(
+          parent.product_id,
+          { ...selected, solicitudId: randomUUID() },
+          operator,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      const secondRequest = {
+        solicitudId: randomUUID(),
+        dependencias: ['INVENTARIO'],
+        variantIds: [children[1].variant_id],
+      };
+      // A failure on the receipt (after checks and Outbox writes) must roll back all.
+      admin(
+        "CREATE FUNCTION catalog.block_historical_fixture() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'isolated receipt failure'; END $$; CREATE TRIGGER block_historical_fixture BEFORE INSERT ON catalog.historical_preparation_requests FOR EACH ROW EXECUTE FUNCTION catalog.block_historical_fixture();",
+      );
+      try {
+        await expect(
+          service.recover(parent.product_id, secondRequest, operator),
+        ).rejects.toBeDefined();
+      } finally {
+        admin(
+          'DROP TRIGGER block_historical_fixture ON catalog.historical_preparation_requests; DROP FUNCTION catalog.block_historical_fixture();',
+        );
+      }
+      expect(await requested(parent.product_id)).toHaveLength(1);
+      expect(
+        await database.read((db) =>
+          db
+            .select()
+            .from(historicalRequests)
+            .where(
+              eq(historicalRequests.request_id, secondRequest.solicitudId),
+            ),
+        ),
+      ).toEqual([]);
+      const second = await service.recover(
+        parent.product_id,
+        secondRequest,
+        operator,
+      );
+      expect(second.preparaciones[0].sku).toBe(children[1].sku);
+      const completed = (await requested(parent.product_id)).find(
+        (row) => row.payload.sku === children[1].sku,
+      )!;
+      expect(await messages.consume(resultFor(completed))).toBe('APPLIED');
+      await expect(
+        service.recover(
+          parent.product_id,
+          { ...secondRequest, solicitudId: randomUUID() },
+          operator,
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      const active = await mutationService().createProduct(
+        createRequest(),
+        actor,
+      );
+      await complete(active.product_id);
+      await mutationService().state(
+        active.product_id,
+        undefined,
+        'activate',
+        {},
+        actor,
+      );
+      await expect(
+        service.recover(
+          active.product_id,
+          { solicitudId: randomUUID(), dependencias: ['INVENTARIO'] },
+          operator,
+        ),
+      ).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'CAMBIO_ESTRUCTURAL_NO_PERMITIDO' },
+      });
+    }, 90000);
+
+    it('BLOCK-A1-MIGRATION: 0004 is additive, owner-only and runtime receipts are SELECT/INSERT only', async () => {
+      const privileges = await database.read((db) =>
+        db.execute(sql`
+        SELECT has_table_privilege(current_user,'catalog.historical_preparation_requests','SELECT') AS can_select,
+          has_table_privilege(current_user,'catalog.historical_preparation_requests','INSERT') AS can_insert,
+          has_table_privilege(current_user,'catalog.historical_preparation_requests','UPDATE') AS can_update,
+          has_table_privilege(current_user,'catalog.historical_preparation_requests','DELETE') AS can_delete,
+          pg_get_userbyid(c.relowner) AS owner, c.relrowsecurity AS rls,
+          NOT EXISTS(SELECT 1 FROM aclexplode(c.relacl) acl WHERE acl.grantee=0) AS no_public_grants
+        FROM pg_class c WHERE c.oid='catalog.historical_preparation_requests'::regclass
+      `),
+      );
+      expect(privileges.rows[0]).toMatchObject({
+        can_select: true,
+        can_insert: true,
+        can_update: false,
+        can_delete: false,
+        owner: 'po_catalog_owner',
+        rls: true,
+        no_public_grants: true,
+      });
+      const migrationSubject = randomUUID();
+      const migrationProduct = await transactions.run((tx) =>
+        repository.insertProduct(tx, productInput('MIGRATION-' + randomUUID())),
+      );
+      const migrationRequest = randomUUID();
+      await new HistoricalRecoveryService(
+        transactions,
+        repository,
+        readHistoricalRecoveryCapabilities({
+          CATALOG_HISTORICAL_RECOVERY_ALLOWED_SUBJECTS: migrationSubject,
         }),
-      ).rejects.toMatchObject({ status: 503 });
-      const literal = (value: string) =>
-        "'" + value.replaceAll("'", "''") + "'";
-      const markerPattern = literal(marker + '-%');
-      command(
+      ).recover(
+        migrationProduct.id,
+        { solicitudId: migrationRequest, dependencias: ['INVENTARIO'] },
+        { subject: migrationSubject, correlationId: randomUUID() },
+      );
+      const [receipt] = await database.read((db) =>
+        db
+          .select()
+          .from(historicalRequests)
+          .where(eq(historicalRequests.request_id, migrationRequest)),
+      );
+      expect(receipt).toBeDefined();
+      await expect(
+        transactions.run((tx) => tx.insert(historicalRequests).values(receipt)),
+      ).rejects.toMatchObject({ sqlState: '23505' });
+      for (const statement of [
+        'UPDATE catalog.historical_preparation_requests SET actor_subject=actor_subject',
+        'DELETE FROM catalog.historical_preparation_requests',
+        'ALTER TABLE catalog.historical_preparation_requests DISABLE ROW LEVEL SECURITY',
+        "INSERT INTO foreign_context.private_probe(value) VALUES ('unauthorized')",
+      ])
+        await expect(
+          transactions.run((tx) => tx.execute(sql.raw(statement))),
+        ).rejects.toMatchObject({ sqlState: '42501' });
+      await expect(
+        transactions.run((tx) =>
+          tx.execute(
+            sql.raw(
+              readFileSync(
+                resolve(
+                  'apps/catalog-svc/migrations/0004_historical_preparation_requests.sql',
+                ),
+                'utf8',
+              ),
+            ),
+          ),
+        ),
+      ).rejects.toMatchObject({ sqlState: '42501' });
+      expect(
+        (
+          await database.read((db) =>
+            db
+              .select()
+              .from(historicalRequests)
+              .where(eq(historicalRequests.request_id, receipt.request_id)),
+          )
+        )[0],
+      ).toEqual(receipt);
+      const otherSchema = command(
         'docker',
         [
           'exec',
@@ -433,13 +1294,1332 @@ describe.skipIf(!dockerAvailable)(
           'psql',
           '-U',
           'postgres',
+          '-At',
           '-v',
           'ON_ERROR_STOP=1',
         ],
-        `SET session_replication_role = replica;
-         DELETE FROM catalog.products WHERE nombre LIKE ${markerPattern};`,
+        'SELECT count(*) FROM foreign_context.private_probe;',
       );
-    }, 120000);
+      expect(otherSchema.trim()).toBe('1');
+    });
+
+    it('BLOCK-A2: consolidated Inventory authenticates completed/rejected, preserves balances, replays and initializes without location', async () => {
+      const peerDirectory = join(directory, 'preparation-peers');
+      mkdirSync(peerDirectory);
+      writeFileSync(join(peerDirectory, 'package.json'), '{"type":"module"}');
+      symlinkSync(
+        resolve('node_modules'),
+        join(peerDirectory, 'node_modules'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+      const inventorySource = pinnedInventorySource(
+        peerDirectory,
+        INVENTORY_BILATERAL_SHA,
+      );
+      const pricingSource = pinnedPricingSource(peerDirectory);
+      const sqlAdmin = (input: string) =>
+        command(
+          'docker',
+          [
+            'exec',
+            '-i',
+            container,
+            'psql',
+            '-U',
+            'postgres',
+            '-v',
+            'ON_ERROR_STOP=1',
+          ],
+          input,
+        );
+      const initial = readFileSync(
+        resolve('apps/catalog-svc/test/fixtures/inventory-initial.sql'),
+        'utf8',
+      );
+      const incremental = readFileSync(
+        resolve('apps/catalog-svc/test/fixtures/inventory-operations.sql'),
+        'utf8',
+      );
+      // Pin copied normative files by Git blob identity, normalizing checkout CRLF.
+      for (const [source, expected] of [
+        [initial, 'ca464fd912e0a76c767ffd5af9c5d83bba92ce42'],
+        [incremental, '78a3c025ad1ae6f7a13072f2f24092e4a60e3f43'],
+      ]) {
+        const bytes = Buffer.from(source.replaceAll('\r\n', '\n'));
+        expect(
+          createHash('sha1')
+            .update('blob ' + bytes.length + '\0')
+            .update(bytes)
+            .digest('hex'),
+        ).toBe(expected);
+      }
+      sqlAdmin(`CREATE ROLE po_pricing_owner NOLOGIN;
+CREATE ROLE pricing_app LOGIN PASSWORD 'isolated-pricing-password';
+CREATE SCHEMA pricing AUTHORIZATION po_pricing_owner;
+CREATE SCHEMA extensions;
+CREATE EXTENSION btree_gist WITH SCHEMA extensions;
+GRANT USAGE ON SCHEMA extensions TO po_pricing_owner;
+SET ROLE po_pricing_owner;
+${readFileSync(resolve(pricingSource, 'apps/pricing-svc/test/fixtures/pricing.sql'), 'utf8')}
+${readFileSync(resolve(pricingSource, 'apps/pricing-svc/migrations/0002_schedule_effective_events.sql'), 'utf8')}
+RESET ROLE;`);
+      sqlAdmin(initial);
+      sqlAdmin('BEGIN;\n' + incremental + '\nCOMMIT;');
+      sqlAdmin(
+        readFileSync(
+          resolve(
+            join(
+              inventorySource,
+              'apps/inventory-svc/migrations/20261104_0001_lifecycle_offline_reconciliation.sql',
+            ),
+          ),
+          'utf8',
+        ),
+      );
+      sqlAdmin(`CREATE ROLE inventory_fixture_app LOGIN PASSWORD 'isolated-inventory-password';
+REVOKE ALL ON SCHEMA inventory FROM PUBLIC;
+GRANT USAGE ON SCHEMA inventory TO inventory_fixture_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA inventory TO inventory_fixture_app;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA inventory TO inventory_fixture_app;
+INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable', 'TIENDA');`);
+      sqlAdmin(
+        "INSERT INTO inventory.locations(code,name,type,active) VALUES ('block-a-second', 'Disposable second', 'TIENDA',false);",
+      );
+      const inspect = (query: string): unknown =>
+        JSON.parse(
+          command(
+            'docker',
+            [
+              'exec',
+              '-i',
+              container,
+              'psql',
+              '-U',
+              'postgres',
+              '-At',
+              '-v',
+              'ON_ERROR_STOP=1',
+            ],
+            query,
+          ),
+        );
+      const peers: ReturnType<typeof spawn>[] = [];
+      const broker = new DisposableCatalogBroker('g6_inventario');
+      const http = new CatalogGatewayHarness();
+      let runtime: CatalogAmqpRuntime | undefined;
+      try {
+        await broker.start();
+        const observation = await broker.observeResults();
+        await http.start(persistenceSettings, { timeoutMs: 300000 }, false, [
+          '00000000-0000-4000-8000-000000000050',
+        ]);
+        const call = async (
+          method: string,
+          path: string,
+          body: unknown,
+          status: number,
+        ) => {
+          const response = await http.call(method, path, body);
+          expect(
+            response.status,
+            method + ' ' + path + ': ' + JSON.stringify(response.body),
+          ).toBe(status);
+          return response.body;
+        };
+        // Inventory runs unmodified from its exact SHA in a separate process.
+        const startPeer = async (
+          peer: 'pricing' | 'inventory',
+          source = process.cwd(),
+        ) => {
+          const build = join(peerDirectory, peer + '-' + peers.length);
+          command(process.execPath, [
+            resolve('node_modules/typescript/bin/tsc'),
+            '-p',
+            resolve(source, 'apps/' + peer + '-svc/tsconfig.app.json'),
+            '--outDir',
+            build,
+            '--tsBuildInfoFile',
+            join(peerDirectory, peer + '-' + peers.length + '.tsbuildinfo'),
+          ]);
+          const env: NodeJS.ProcessEnv = {
+            PATH: process.env.PATH,
+            SystemRoot: process.env.SystemRoot,
+            NODE_ENV: 'test',
+            PGSSLMODE: 'verify-full',
+            PGSSLROOTCERT: caFile,
+            DATABASE_URL:
+              'postgresql://' +
+              (peer === 'pricing' ? 'pricing_app' : 'inventory_fixture_app') +
+              ':isolated-' +
+              peer +
+              '-password@127.0.0.1:' +
+              port +
+              '/postgres',
+            PRICING_SVC_PORT: '3002',
+            PRICING_AMQP_URL: broker.peerUrl('pricing'),
+            PRICING_PRICE_CHANGED_PUBLISH_ENABLED: 'false',
+            RABBITMQ_URL: broker.peerUrl('inventory'),
+            INVENTORY_WORKER_INTERVAL_MS: '250',
+          };
+          const child = spawn(
+            process.execPath,
+            [resolve('apps/catalog-svc/test/support/preparation-peer.mjs')],
+            {
+              cwd: peerDirectory,
+              env,
+              windowsHide: true,
+              stdio: ['pipe', 'pipe', 'pipe'],
+            },
+          );
+          peers.push(child);
+          let ready = false;
+          child.stdout.on('data', (chunk) => {
+            if (String(chunk).includes('PREPARATION_PEER_READY')) ready = true;
+          });
+          child.stderr.resume();
+          child.stdin.end(JSON.stringify({ peer, build }));
+          await expect
+            .poll(() => ready && child.exitCode === null, { timeout: 30000 })
+            .toBe(true);
+          return child;
+        };
+        await startPeer('pricing', pricingSource);
+        await startPeer('inventory', inventorySource);
+        const simple = await call('POST', '/productos', createRequest(), 201);
+        const parent = await call(
+          'POST',
+          '/productos',
+          createRequest(true),
+          201,
+        );
+        const child = await call(
+          'POST',
+          '/productos/' + parent.product_id + '/variantes',
+          {
+            sku: '000-BLOCK-A-' + randomUUID(),
+            atributosIdentificadores: [
+              { caracteristica_id: 'size', nombre: 'Size', valor: 'M' },
+            ],
+            imagenUrl: 'https://example.test/variant',
+            perfilFisico: fullProfile,
+          },
+          201,
+        );
+        sqlAdmin(
+          "INSERT INTO inventory.stock_balance(sku_id,location_id,on_hand,reserved,blocked,stock_version) SELECT '" +
+            String(simple.sku_base) +
+            "', id, 9, 2, 1, 5 FROM inventory.locations;",
+        );
+        const balances = (sku: string) =>
+          inspect(
+            "SELECT coalesce(jsonb_agg(to_jsonb(b) ORDER BY location_id),'[]') FROM inventory.stock_balance b WHERE sku_id='" +
+              sku +
+              "';",
+          );
+        const originalBalances = balances(String(simple.sku_base));
+        // Historical admission uses the real HTTP boundary and the same real
+        // Inventory consumer. No Pricing receipt is fabricated for this product.
+        const historical = await transactions.run((tx) =>
+          repository.insertProduct(tx, productInput('A2-HIST-' + randomUUID())),
+        );
+        const historicalAdmission = await http.call(
+          'POST',
+          '/productos/' + historical.id + '/preparacion/recuperar-historica',
+          { solicitudId: randomUUID(), dependencias: ['INVENTARIO'] },
+          http.token(),
+          true,
+        );
+        expect(historicalAdmission.status).toBe(202);
+        const historicalRequest = (await requested(historical.id))[0];
+        expect(historicalRequest.event_name).toBe(
+          'inventory.sku.initialization.requested',
+        );
+        expect(await requested(historical.id)).toHaveLength(1);
+        for (const id of [
+          String(simple.product_id),
+          String(parent.product_id),
+        ]) {
+          const prep = await call(
+            'GET',
+            '/productos/' + id + '/preparacion',
+            undefined,
+            200,
+          );
+          expect(prep.pricing.status).toBe('PENDING');
+          await call('POST', '/productos/' + id + '/activar', {}, 422);
+        }
+        expect(
+          (await requested(String(parent.product_id)))
+            .map((row) => row.event_name)
+            .sort(),
+        ).toEqual([
+          'inventory.sku.initialization.requested',
+          'pricing.product.initialization.requested',
+        ]);
+        runtime = new CatalogAmqpRuntime(
+          new CatalogMessageService(database),
+          broker.settings,
+        );
+        runtime.onModuleInit();
+        for (const id of [
+          String(simple.product_id),
+          String(parent.product_id),
+        ]) {
+          await expect
+            .poll(
+              async () => {
+                const prep = await http.call(
+                  'GET',
+                  '/productos/' + id + '/preparacion',
+                );
+                return prep.body.pricing.status;
+              },
+              { timeout: 30000 },
+            )
+            .toBe('COMPLETED');
+        }
+        // Inspect messages emitted by the real peers, never fabricated results.
+        const inventoryResults = [];
+        while (inventoryResults.length < 3) {
+          const wire = await broker.next(observation);
+          const envelope = JSON.parse(
+            wire.content.toString('utf8'),
+          ) as CatalogEnvelope;
+          if (
+            envelope.name !== 'inventory.sku.initialization.completed' ||
+            ![simple.product_id, parent.product_id, historical.id].includes(
+              envelope.data.product_id,
+            )
+          )
+            continue;
+          inventoryResults.push(envelope);
+          expect(envelope.schema_version).toBe(2);
+          expect(parseCatalogMessage(envelope)).toEqual(envelope);
+          expect(wire.properties.userId).toBe('g6_inventario');
+          expect(
+            broker.settings.connection!.producerUsers['inventory-svc'],
+          ).toBe('g6_inventario');
+          expect(wire.properties.messageId).toBe(envelope.message_id);
+          expect(wire.properties.correlationId).toBe(envelope.correlation_id);
+          expect(envelope.data.status).toBe('INITIALIZED');
+          const request = (
+            await requested(String(envelope.data.product_id))
+          ).find((row) => row.message_id === envelope.causation_id);
+          expect(request).toBeDefined();
+          expect(envelope.operation_id).toBe(request!.operation_id);
+          expect(envelope.correlation_id).toBe(request!.correlation_id);
+        }
+        expect(
+          inventoryResults.map((result) => result.data.sku).sort(),
+        ).toEqual([simple.sku_base, child.sku, historical.sku_base].sort());
+        await expect
+          .poll(
+            async () =>
+              (
+                await database.read((db) =>
+                  db
+                    .select()
+                    .from(activationChecks)
+                    .where(eq(activationChecks.product_id, historical.id)),
+                )
+              )[0]?.state,
+            { timeout: 30000 },
+          )
+          .toBe('COMPLETED');
+        expect(
+          inventoryResults.find(
+            (result) => result.data.product_id === historical.id,
+          )?.operation_id,
+        ).toBe(historicalAdmission.body.preparaciones[0].operation_id);
+        // Inventory alone cannot complete the product's missing Pricing preparation.
+        await call('POST', '/productos/' + historical.id + '/activar', {}, 422);
+        await expect
+          .poll(
+            async () =>
+              (
+                await http.call(
+                  'GET',
+                  '/productos/' + simple.product_id + '/preparacion',
+                )
+              ).body.inventario.status,
+            { timeout: 30000 },
+          )
+          .toBe('COMPLETED');
+        await expect
+          .poll(
+            async () =>
+              (
+                await http.call(
+                  'GET',
+                  '/productos/' + parent.product_id + '/preparacion',
+                )
+              ).body.variantes[0].inventario.status,
+            { timeout: 30000 },
+          )
+          .toBe('COMPLETED');
+        expect(balances(String(simple.sku_base))).toEqual(originalBalances);
+        expect(
+          inspect(
+            "SELECT count(*)::integer FROM inventory.outbox WHERE event_type='inventory.stock.changed' AND payload->'data'->>'sku'='" +
+              String(simple.sku_base) +
+              "';",
+          ),
+        ).toBe(0);
+        const prep = await call(
+          'GET',
+          '/productos/' + simple.product_id + '/preparacion',
+          undefined,
+          200,
+        );
+        expect(prep.inventario).toMatchObject({
+          status: 'COMPLETED',
+          manual_retry_allowed: false,
+        });
+        await call(
+          'POST',
+          '/productos/' + simple.product_id + '/activar',
+          {},
+          200,
+        );
+        await call(
+          'POST',
+          '/productos/' +
+            parent.product_id +
+            '/variantes/' +
+            child.variant_id +
+            '/activar',
+          undefined,
+          200,
+        );
+        expect(
+          (
+            await database.read((db) =>
+              db
+                .select()
+                .from(products)
+                .where(eq(products.id, String(parent.product_id))),
+            )
+          )[0].estado,
+        ).toBe('BORRADOR');
+        await call(
+          'POST',
+          '/productos/' + parent.product_id + '/activar',
+          {},
+          200,
+        );
+        await call(
+          'POST',
+          '/productos/' + simple.product_id + '/preparacion/reintentar',
+          { dependencia: 'PRICING' },
+          409,
+        );
+        const first = inventoryResults.find(
+          (result) => result.data.sku === simple.sku_base,
+        )!;
+        const request = (await requested(String(simple.product_id))).find(
+          (row) => row.event_name.startsWith('inventory.'),
+        )!;
+        const asCommand = (messageId: string, source = request) => ({
+          message_id: messageId,
+          schema_version: source.schema_version,
+          occurred_at: source.occurred_at.toISOString(),
+          correlation_id: source.correlation_id,
+          operation_id: source.operation_id,
+          causation_id: source.causation_id,
+          producer: 'catalog-svc',
+          kind: 'command',
+          name: source.event_name,
+          data: source.payload,
+        });
+        const parked: Array<{
+          wire: Awaited<ReturnType<typeof broker.next>>;
+          message: CatalogEnvelope;
+        }> = [];
+        const nextResult = async (
+          matches: (message: CatalogEnvelope) => boolean,
+        ) => {
+          const index = parked.findIndex((item) => matches(item.message));
+          if (index >= 0) return parked.splice(index, 1)[0];
+          const deadline = Date.now() + 30000;
+          while (Date.now() < deadline) {
+            const wire = await broker.next(observation);
+            const message = JSON.parse(
+              wire.content.toString(),
+            ) as CatalogEnvelope;
+            if (matches(message)) return { wire, message };
+            parked.push({ wire, message });
+          }
+          throw new Error('Pinned peer result not observed');
+        };
+        // Exact delivery duplicate followed by an operation replay with a new transport ID.
+        await broker.commandEnvelope(asCommand(request.message_id));
+        const replayId = randomUUID();
+        await broker.commandEnvelope(asCommand(replayId));
+        const replay = await nextResult(
+          (message) => message.causation_id === replayId,
+        );
+        expect(replay.wire.properties.userId).toBe('g6_inventario');
+        expect(replay.message.data).toEqual(first.data);
+        expect(replay.message.operation_id).toBe(first.operation_id);
+        expect(
+          inspect(
+            "SELECT count(*)::integer FROM inventory.inventory_operations WHERE operation_id='" +
+              String(first.operation_id) +
+              "';",
+          ),
+        ).toBe(1);
+        expect(balances(String(simple.sku_base))).toEqual(originalBalances);
+        expect(
+          inspect(
+            "SELECT count(*)::integer FROM inventory.outbox WHERE event_type='inventory.stock.changed' AND payload->'data'->>'sku'='" +
+              String(simple.sku_base) +
+              "';",
+          ),
+        ).toBe(0);
+        // Re-publication uses Inventory's actual durable Outbox and actual publisher.
+        sqlAdmin(
+          "UPDATE inventory.outbox SET status='PENDING', published_at=NULL WHERE event_id='" +
+            first.message_id +
+            "';",
+        );
+        const repeated = await nextResult(
+          (message) => message.message_id === first.message_id,
+        );
+        expect(repeated.wire.properties.userId).toBe('g6_inventario');
+        expect(repeated.message).toEqual(first);
+        expect(
+          await database.read((db) =>
+            db
+              .select()
+              .from(inbox)
+              .where(eq(inbox.message_id, first.message_id)),
+          ),
+        ).toHaveLength(1);
+        const forged = { ...first, message_id: randomUUID() };
+        expect(await broker.brokerRejectsFalseUser(forged)).toBe(true);
+        await broker.wrongIdentityResult(forged);
+        await expect.poll(() => runtime!.ready).toBe(false);
+        const preserved = await broker.next('po.catalogo.q');
+        expect(JSON.parse(preserved.content.toString()).message_id).toBe(
+          forged.message_id,
+        );
+        expect(preserved.fields.redelivered).toBe(true);
+        expect(preserved.properties.userId).not.toBe('g6_inventario');
+        expect(
+          await database.read((db) =>
+            db
+              .select()
+              .from(inbox)
+              .where(eq(inbox.message_id, forged.message_id)),
+          ),
+        ).toEqual([]);
+        // Explicit operation-collision fixture, sent as Catalog through the real
+        // broker. Inventory's genuine publisher must reject the original pending
+        // request; no result payload or userId is fabricated.
+        await runtime.onModuleDestroy();
+        runtime = undefined;
+        const rejectedProduct = await call(
+          'POST',
+          '/productos',
+          createRequest(),
+          201,
+        );
+        const collisionRequest = (
+          await requested(String(rejectedProduct.product_id))
+        ).find(
+          (row) => row.event_name === 'inventory.sku.initialization.requested',
+        )!;
+        const collisionId = randomUUID();
+        await broker.commandEnvelope({
+          ...asCommand(collisionId),
+          operation_id: collisionRequest.operation_id,
+          correlation_id: collisionRequest.correlation_id,
+          data: {
+            ...collisionRequest.payload,
+            sku: 'COLLISION-' + randomUUID(),
+          },
+        });
+        const collisionResult = await nextResult(
+          (message) => message.causation_id === collisionId,
+        );
+        // The deliberate collision is not a Catalog result for its active
+        // attempt. With pause-on-invalid recovery it must be explicitly
+        // inspected and disposed by this disposable fixture before resuming.
+        const collisionDelivery = await broker.next('po.catalogo.q');
+        expect(
+          JSON.parse(collisionDelivery.content.toString()).message_id,
+        ).toBe(collisionResult.message.message_id);
+        runtime = new CatalogAmqpRuntime(
+          new CatalogMessageService(database),
+          broker.settings,
+        );
+        runtime.onModuleInit();
+        await expect
+          .poll(
+            async () =>
+              (
+                await http.call(
+                  'GET',
+                  '/productos/' + rejectedProduct.product_id + '/preparacion',
+                )
+              ).body.inventario.status,
+            { timeout: 30000 },
+          )
+          .toBe('REJECTED');
+        const rejectedResult = await nextResult(
+          (message) =>
+            message.name === 'inventory.sku.initialization.rejected' &&
+            message.data.product_id === rejectedProduct.product_id,
+        );
+        expect(rejectedResult.wire.properties.userId).toBe('g6_inventario');
+        expect(rejectedResult.wire.properties.messageId).toBe(
+          rejectedResult.message.message_id,
+        );
+        expect(rejectedResult.wire.properties.correlationId).toBe(
+          rejectedResult.message.correlation_id,
+        );
+        expect(parseCatalogMessage(rejectedResult.message)).toEqual(
+          rejectedResult.message,
+        );
+        const rejectedRequest = (
+          await requested(String(rejectedProduct.product_id))
+        ).find(
+          (row) => row.event_name === 'inventory.sku.initialization.requested',
+        )!;
+        expect(rejectedResult.message.operation_id).toBe(
+          rejectedRequest.operation_id,
+        );
+        expect(rejectedResult.message.correlation_id).toBe(
+          rejectedRequest.correlation_id,
+        );
+        expect(rejectedResult.message.causation_id).toBe(
+          rejectedRequest.message_id,
+        );
+        expect(rejectedResult.message.data.code).toBe('IDEMPOTENCY_CONFLICT');
+        expect(
+          (
+            await call(
+              'GET',
+              '/productos/' + rejectedProduct.product_id + '/preparacion',
+              undefined,
+              200,
+            )
+          ).inventario,
+        ).toMatchObject({
+          status: 'REJECTED',
+          code: 'IDEMPOTENCY_CONFLICT',
+          manual_retry_allowed: false,
+        });
+        // The foreign-SKU result was explicitly inspected and ACKed by the
+        // disposable fixture while Catalog was paused. It never enters Inbox.
+        expect(
+          JSON.parse(collisionDelivery.content.toString()).message_id,
+        ).toBe(collisionResult.message.message_id);
+        expect(
+          await database.read((db) =>
+            db
+              .select()
+              .from(inbox)
+              .where(eq(inbox.message_id, collisionResult.message.message_id)),
+          ),
+        ).toEqual([]);
+        await call(
+          'POST',
+          '/productos/' + rejectedProduct.product_id + '/activar',
+          {},
+          422,
+        );
+        await call(
+          'POST',
+          '/productos/' +
+            rejectedProduct.product_id +
+            '/preparacion/reintentar',
+          { dependencia: 'INVENTARIO' },
+          409,
+        );
+
+        // The same consolidated SHA includes #199; no source overlay or restart
+        // onto a different Inventory implementation is needed.
+        await runtime.onModuleDestroy();
+        runtime = undefined;
+        sqlAdmin('UPDATE inventory.locations SET active=true;');
+        const existing199 = await call(
+          'POST',
+          '/productos',
+          createRequest(),
+          201,
+        );
+        sqlAdmin(
+          "INSERT INTO inventory.stock_balance(sku_id,location_id,on_hand,reserved,blocked,stock_version) SELECT '" +
+            String(existing199.sku_base) +
+            "', id, 11, 3, 2, 7 FROM inventory.locations;",
+        );
+        const before199 = balances(String(existing199.sku_base));
+        const empty199 = await call('POST', '/productos', createRequest(), 201);
+        runtime = new CatalogAmqpRuntime(
+          new CatalogMessageService(database),
+          broker.settings,
+        );
+        runtime.onModuleInit();
+        for (const item of [existing199, empty199]) {
+          const result199 = await nextResult(
+            (message) =>
+              message.name === 'inventory.sku.initialization.completed' &&
+              message.data.product_id === item.product_id,
+          );
+          expect(result199.message.data.status).toBe('INITIALIZED');
+          expect(result199.wire.properties.userId).toBe('g6_inventario');
+          expect(
+            inspect(
+              "SELECT count(*)::integer FROM inventory.outbox WHERE event_type='inventory.stock.changed' AND payload->'data'->>'sku'='" +
+                String(item.sku_base) +
+                "';",
+            ),
+          ).toBe(0);
+        }
+        expect(balances(String(existing199.sku_base))).toEqual(before199);
+        expect(balances(String(empty199.sku_base))).toEqual([]);
+        await expect
+          .poll(
+            async () =>
+              (
+                await call(
+                  'GET',
+                  '/productos/' + existing199.product_id + '/preparacion',
+                  undefined,
+                  200,
+                )
+              ).inventario.status,
+            { timeout: 30000 },
+          )
+          .toBe('COMPLETED');
+        // Integral candidate recovery: reuse this stack, pinned modules and the
+        // ordinary Catalog fixture builders; all legacy reconstruction is test-only.
+        const historicalHttp = new CatalogGatewayHarness();
+        await historicalHttp.start(
+          persistenceSettings,
+          { timeoutMs: 300000 },
+          false,
+          ['00000000-0000-4000-8000-000000000050'],
+          true,
+        );
+        const historyCall = async (
+          path: string,
+          body: unknown,
+          status: number,
+        ) => {
+          const response = await historicalHttp.call(
+            'POST',
+            path,
+            body,
+            historicalHttp.token(),
+            true,
+          );
+          expect(response.status, JSON.stringify(response.body)).toBe(status);
+          return response.body;
+        };
+        const recoverPath = (id: string) =>
+          '/productos/' + id + '/preparacion/recuperar-historica';
+        const checksFor = (id: string) =>
+          database.read((db) =>
+            db
+              .select()
+              .from(activationChecks)
+              .where(eq(activationChecks.product_id, id)),
+          );
+        const waitTerminal = async (id: string, expected: string[]) => {
+          await expect
+            .poll(
+              async () =>
+                (await checksFor(id)).map((check) => check.state).sort(),
+              { timeout: 30000 },
+            )
+            .toEqual(expected.sort());
+        };
+        const monetarySnapshot = () =>
+          inspect(`SELECT jsonb_build_object(
+          'prices',(SELECT coalesce(jsonb_agg(to_jsonb(p) ORDER BY id),'[]') FROM pricing.prices p),
+          'validities',(SELECT coalesce(jsonb_agg(to_jsonb(v) ORDER BY id),'[]') FROM pricing.price_validities v),
+          'schedules',(SELECT coalesce(jsonb_agg(to_jsonb(s) ORDER BY id),'[]') FROM pricing.scheduled_prices s));`);
+        let guarded = false;
+        let extraValidity: string | undefined;
+        let exclusion: string | undefined;
+        try {
+          // Drain the two ordinary creations before installing the monetary guard.
+          for (const item of [existing199, empty199])
+            await expect
+              .poll(
+                async () =>
+                  (await checksFor(String(item.product_id))).find(
+                    (check) => check.dependency === 'PRICING',
+                  )?.state,
+                { timeout: 30000 },
+              )
+              .toBe('COMPLETED');
+          await runtime.onModuleDestroy();
+          runtime = undefined;
+          const legacySimple = await mutationService().createProduct(
+            createRequest(),
+            actor,
+          );
+          const legacyParent = await mutationService().createProduct(
+            createRequest(true),
+            actor,
+          );
+          const legacyVariants: Array<
+            Awaited<ReturnType<CatalogMutationService['createVariant']>>
+          > = [];
+          for (const size of ['H1', 'H2'])
+            legacyVariants.push(
+              await mutationService().createVariant(
+                legacyParent.product_id,
+                {
+                  sku: 'HIST-INTEGRAL-' + randomUUID(),
+                  atributosIdentificadores: [
+                    { caracteristica_id: 'size', nombre: 'Size', valor: size },
+                  ],
+                  imagenUrl: 'https://example.test/historical-variant',
+                  perfilFisico: fullProfile,
+                },
+                actor,
+              ),
+            );
+          const currencyMismatch = await mutationService().createProduct(
+            createRequest(),
+            actor,
+          );
+          const missingPrice = await mutationService().createProduct(
+            createRequest(),
+            actor,
+          );
+          const ambiguousPrice = await mutationService().createProduct(
+            createRequest(),
+            actor,
+          );
+          const outageProduct = await mutationService().createProduct(
+            createRequest(),
+            actor,
+          );
+          const fixtures = [
+            legacySimple,
+            legacyParent,
+            currencyMismatch,
+            missingPrice,
+            ambiguousPrice,
+            outageProduct,
+          ];
+          for (const item of fixtures)
+            sqlAdmin(
+              "DELETE FROM catalog.activation_checks WHERE product_id='" +
+                item.product_id +
+                "'; DELETE FROM catalog.outbox WHERE payload->>'product_id'='" +
+                item.product_id +
+                "';",
+            );
+          const seedPrice = (productId: string) => {
+            const price = randomUUID(),
+              validity = randomUUID();
+            sqlAdmin(`BEGIN;
+              INSERT INTO pricing.prices(id,product_id,sku,channel_id,price_version) VALUES ('${price}','${productId}',NULL,NULL,3);
+              INSERT INTO pricing.price_validities(id,price_id,precio_regular,currency,valid_from,price_version,motivo_cambio,usuario_id)
+              VALUES ('${validity}','${price}',125.50,'USD',now()-interval '1 day',3,'CARGA_HISTORICA','isolated-history');
+              COMMIT;`);
+            return { price, validity };
+          };
+          const originalSimple = seedPrice(legacySimple.product_id);
+          const originalParent = seedPrice(legacyParent.product_id);
+          seedPrice(currencyMismatch.product_id);
+          const ambiguous = seedPrice(ambiguousPrice.product_id);
+          // Explicit corrupt-history fixture, isolated PostgreSQL only. Restore
+          // the exact exclusion after the test; this never alters a migration.
+          exclusion = inspect(
+            "SELECT to_json(pg_get_constraintdef(oid)) FROM pg_constraint WHERE conrelid='pricing.price_validities'::regclass AND conname='ck_price_validities_no_overlap';",
+          ) as string;
+          sqlAdmin(
+            'ALTER TABLE pricing.price_validities DROP CONSTRAINT ck_price_validities_no_overlap;',
+          );
+          const overlappingValidity = randomUUID();
+          extraValidity = ambiguous.validity;
+          sqlAdmin(`BEGIN;
+            UPDATE pricing.prices SET price_version=4 WHERE id='${ambiguous.price}';
+            INSERT INTO pricing.price_validities(id,price_id,precio_regular,currency,valid_from,price_version,motivo_cambio)
+            VALUES ('${overlappingValidity}','${ambiguous.price}',150,'USD',now()-interval '2 hours',4,'ISOLATED_AMBIGUITY');
+            COMMIT;`);
+          const referenceSkus = [
+            legacySimple.sku_base,
+            ...legacyVariants.map((v) => v.sku),
+            currencyMismatch.sku_base,
+            missingPrice.sku_base,
+            ambiguousPrice.sku_base,
+            outageProduct.sku_base,
+          ];
+          for (const sku of referenceSkus)
+            sqlAdmin(
+              "INSERT INTO inventory.stock_balance(sku_id,location_id,on_hand,reserved,blocked,stock_version) SELECT '" +
+                sku +
+                "',id,17,4,2,9 FROM inventory.locations;",
+            );
+          const referenceBalances = () =>
+            referenceSkus.flatMap((sku) => balances(sku) as unknown[]);
+          const balancesBefore = referenceBalances();
+          expect(balancesBefore).toHaveLength(14);
+          const moneyBefore = monetarySnapshot();
+          sqlAdmin(
+            "CREATE FUNCTION pricing.reject_history_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'isolated historical adoption forbids monetary DML'; END $$;",
+          );
+          for (const table of [
+            'prices',
+            'price_validities',
+            'scheduled_prices',
+          ])
+            sqlAdmin(
+              `CREATE TRIGGER forbid_history_write BEFORE INSERT OR UPDATE OR DELETE ON pricing.${table} FOR EACH ROW EXECUTE FUNCTION pricing.reject_history_write();`,
+            );
+          guarded = true;
+          const simpleIntent = {
+            solicitudId: randomUUID(),
+            dependencias: ['PRICING', 'INVENTARIO'],
+            moneda: 'USD',
+          };
+          const admitted = await Promise.all(
+            [1, 2].map(() =>
+              historyCall(
+                recoverPath(legacySimple.product_id),
+                simpleIntent,
+                202,
+              ),
+            ),
+          );
+          expect(admitted[0]).toEqual(admitted[1]);
+          expect(await requested(legacySimple.product_id)).toHaveLength(2);
+          // Receipt replay remains authorized with candidate admission disabled.
+          expect(
+            (
+              await http.call(
+                'POST',
+                recoverPath(legacySimple.product_id),
+                simpleIntent,
+                http.token(),
+                true,
+              )
+            ).body,
+          ).toEqual(admitted[0]);
+          expect(
+            (
+              await http.call(
+                'POST',
+                recoverPath(legacySimple.product_id),
+                { ...simpleIntent, moneda: 'EUR' },
+                http.token(),
+                true,
+              )
+            ).status,
+          ).toBe(409);
+          expect(
+            (
+              await http.call(
+                'POST',
+                recoverPath(legacySimple.product_id),
+                { ...simpleIntent, solicitudId: randomUUID() },
+                http.token(),
+                true,
+              )
+            ).status,
+          ).toBe(503);
+          await historyCall(
+            recoverPath(legacySimple.product_id),
+            { ...simpleIntent, solicitudId: randomUUID() },
+            409,
+          );
+          await historyCall(
+            '/productos/' + legacySimple.product_id + '/activar',
+            {},
+            422,
+          );
+          const parentIntent = {
+            solicitudId: randomUUID(),
+            dependencias: ['PRICING', 'INVENTARIO'],
+            moneda: 'USD',
+            variantIds: legacyVariants.map((v) => v.variant_id),
+          };
+          await historyCall(
+            recoverPath(legacyParent.product_id),
+            { ...parentIntent, variantIds: [randomUUID()] },
+            404,
+          );
+          expect(await requested(legacyParent.product_id)).toHaveLength(0);
+          const competing = await Promise.all(
+            [parentIntent, { ...parentIntent, solicitudId: randomUUID() }].map(
+              (body) =>
+                historicalHttp.call(
+                  'POST',
+                  recoverPath(legacyParent.product_id),
+                  body,
+                  historicalHttp.token(),
+                  true,
+                ),
+            ),
+          );
+          expect(competing.map((r) => r.status).sort()).toEqual([202, 409]);
+          const parentRequests = await requested(legacyParent.product_id);
+          expect(
+            parentRequests.filter((r) => r.event_name.startsWith('pricing.')),
+          ).toHaveLength(1);
+          expect(
+            parentRequests
+              .filter((r) => r.event_name.startsWith('inventory.'))
+              .map((r) => r.payload.sku)
+              .sort(),
+          ).toEqual(legacyVariants.map((v) => v.sku).sort());
+          expect(
+            parentRequests.some(
+              (r) =>
+                r.event_name.startsWith('inventory.') &&
+                r.payload.sku === legacyParent.sku_base,
+            ),
+          ).toBe(false);
+          for (const item of [currencyMismatch, missingPrice, ambiguousPrice])
+            await historyCall(
+              recoverPath(item.product_id),
+              {
+                solicitudId: randomUUID(),
+                dependencias: ['PRICING'],
+                moneda: item === currencyMismatch ? 'EUR' : 'USD',
+              },
+              202,
+            );
+          // An invalid origin with matching business IDs must not complete PENDING.
+          const simpleInventory = (
+            await requested(legacySimple.product_id)
+          ).find((r) => r.event_name.startsWith('inventory.'))!;
+          const badOrigin = {
+            ...first,
+            message_id: randomUUID(),
+            operation_id: simpleInventory.operation_id,
+            causation_id: simpleInventory.message_id,
+            correlation_id: simpleInventory.correlation_id,
+            data: {
+              ...first.data,
+              product_id: legacySimple.product_id,
+              sku: legacySimple.sku_base,
+            },
+          };
+          await broker.wrongIdentityResult(badOrigin);
+          const observedBadOrigin = await nextResult(
+            (message) => message.message_id === badOrigin.message_id,
+          );
+          expect(observedBadOrigin.wire.properties.userId).toBe(
+            'catalog-joint',
+          );
+          expect(observedBadOrigin.message).toEqual(badOrigin);
+          expect(
+            (await checksFor(legacySimple.product_id)).every(
+              (c) => c.state === 'PENDING',
+            ),
+          ).toBe(true);
+          expect(
+            (await requested(legacySimple.product_id)).every(
+              (r) => r.published_at === null,
+            ),
+          ).toBe(true);
+          const badOriginSignals = new CatalogTelemetry();
+          runtime = new CatalogAmqpRuntime(
+            new CatalogMessageService(database),
+            broker.settings,
+            badOriginSignals,
+          );
+          runtime.onModuleInit();
+          await expect
+            .poll(() => badOriginSignals.snapshot().AMQP_CONSUMER_PAUSED)
+            .toBe(1);
+          expect(runtime.ready).toBe(false);
+          const badOriginDelivery = await broker.next('po.catalogo.q');
+          expect(
+            JSON.parse(badOriginDelivery.content.toString()).message_id,
+          ).toBe(badOrigin.message_id);
+          expect(badOriginDelivery.fields.redelivered).toBe(true);
+          expect(badOriginDelivery.properties.userId).toBe('catalog-joint');
+          expect(
+            await database.read((db) =>
+              db
+                .select()
+                .from(inbox)
+                .where(eq(inbox.message_id, badOrigin.message_id)),
+            ),
+          ).toEqual([]);
+          await runtime.onModuleDestroy();
+          runtime = new CatalogAmqpRuntime(
+            new CatalogMessageService(database),
+            broker.settings,
+          );
+          runtime.onModuleInit();
+          for (const item of [legacySimple, legacyParent]) {
+            const expected =
+              item === legacySimple ? originalSimple : originalParent;
+            await waitTerminal(
+              item.product_id,
+              item === legacySimple
+                ? ['COMPLETED', 'COMPLETED']
+                : ['COMPLETED', 'COMPLETED', 'COMPLETED'],
+            );
+            for (const requestedMessage of await requested(item.product_id)) {
+              const delivered = await nextResult(
+                (m) => m.causation_id === requestedMessage.message_id,
+              );
+              expect(delivered.wire.properties.userId).toBe(
+                requestedMessage.event_name.startsWith('pricing.')
+                  ? 'pricing-joint'
+                  : 'g6_inventario',
+              );
+              expect(delivered.wire.properties.messageId).toBe(
+                delivered.message.message_id,
+              );
+              expect(delivered.wire.properties.correlationId).toBe(
+                requestedMessage.correlation_id,
+              );
+              expect(delivered.message.operation_id).toBe(
+                requestedMessage.operation_id,
+              );
+              expect(delivered.message.data.status).toBe(
+                requestedMessage.event_name.startsWith('pricing.')
+                  ? 'READY'
+                  : 'INITIALIZED',
+              );
+              if (requestedMessage.event_name.startsWith('pricing.'))
+                expect(delivered.message.data).toMatchObject({
+                  price_version: 3,
+                  vigencia_id: expected.validity,
+                });
+            }
+          }
+          await historyCall(
+            '/productos/' + legacySimple.product_id + '/activar',
+            {},
+            200,
+          );
+          for (const variant of legacyVariants)
+            await historyCall(
+              '/productos/' +
+                legacyParent.product_id +
+                '/variantes/' +
+                variant.variant_id +
+                '/activar',
+              undefined,
+              200,
+            );
+          await historyCall(
+            '/productos/' + legacyParent.product_id + '/activar',
+            {},
+            200,
+          );
+          expect(
+            await historyCall(
+              recoverPath(legacySimple.product_id),
+              simpleIntent,
+              202,
+            ),
+          ).toEqual(admitted[0]);
+          await historyCall(
+            recoverPath(legacySimple.product_id),
+            { ...simpleIntent, solicitudId: randomUUID() },
+            409,
+          );
+          for (const item of [currencyMismatch, missingPrice, ambiguousPrice]) {
+            await waitTerminal(item.product_id, ['REJECTED']);
+            const [check] = await checksFor(item.product_id);
+            expect(check.result_payload).toMatchObject({
+              status: 'REJECTED',
+              code: 'HISTORICAL_PRICE_CONFLICT',
+              price_version: null,
+              vigencia_id: null,
+            });
+            await historyCall(
+              recoverPath(item.product_id),
+              {
+                solicitudId: randomUUID(),
+                dependencias: ['PRICING'],
+                moneda: 'USD',
+              },
+              409,
+            );
+            await historyCall(
+              '/productos/' + item.product_id + '/activar',
+              {},
+              422,
+            );
+          }
+          // Genuine late result from an operation replay: real Inventory publisher,
+          // foreign causation must be STALE and leave the original result intact.
+          const historyCheckBefore = (
+            await checksFor(legacySimple.product_id)
+          ).find((c) => c.dependency === 'INVENTORY')!;
+          const lateId = randomUUID();
+          await broker.commandEnvelope(asCommand(lateId, simpleInventory));
+          const lateResult = await nextResult((m) => m.causation_id === lateId);
+          expect(lateResult.wire.properties.userId).toBe('g6_inventario');
+          await expect
+            .poll(
+              async () =>
+                (
+                  await database.read((db) =>
+                    db
+                      .select()
+                      .from(inbox)
+                      .where(
+                        eq(inbox.message_id, lateResult.message.message_id),
+                      ),
+                  )
+                )[0]?.result,
+              { timeout: 15000 },
+            )
+            .toBe('STALE');
+          expect(
+            (await checksFor(legacySimple.product_id)).find(
+              (c) => c.dependency === 'INVENTORY',
+            ),
+          ).toEqual(historyCheckBefore);
+          // PostgreSQL failure after check/Outbox writes rolls back the receipt and
+          // the entire admission; same key succeeds later with no partial effect.
+          await runtime.onModuleDestroy();
+          runtime = undefined;
+          const outageIntent = {
+            solicitudId: randomUUID(),
+            dependencias: ['INVENTARIO'],
+          };
+          sqlAdmin(
+            "CREATE FUNCTION catalog.fail_integral_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'isolated receipt failure'; END $$; CREATE TRIGGER fail_integral_receipt BEFORE INSERT ON catalog.historical_preparation_requests FOR EACH ROW EXECUTE FUNCTION catalog.fail_integral_receipt();",
+          );
+          try {
+            await historyCall(
+              recoverPath(outageProduct.product_id),
+              outageIntent,
+              503,
+            );
+          } finally {
+            sqlAdmin(
+              'DROP TRIGGER fail_integral_receipt ON catalog.historical_preparation_requests; DROP FUNCTION catalog.fail_integral_receipt();',
+            );
+          }
+          expect(await checksFor(outageProduct.product_id)).toEqual([]);
+          expect(await requested(outageProduct.product_id)).toEqual([]);
+          for (const peer of peers) peer.kill('SIGTERM');
+          await expect
+            .poll(
+              () =>
+                peers.every(
+                  (p) => p.exitCode !== null || p.signalCode !== null,
+                ),
+              { timeout: 15000 },
+            )
+            .toBe(true);
+          broker.stop();
+          // Commit succeeds while the real broker is down; no fake completion.
+          await historyCall(
+            recoverPath(outageProduct.product_id),
+            outageIntent,
+            202,
+          );
+          runtime = new CatalogAmqpRuntime(
+            new CatalogMessageService(database),
+            broker.settings,
+          );
+          runtime.onModuleInit();
+          await pause(300);
+          expect((await checksFor(outageProduct.product_id))[0].state).toBe(
+            'PENDING',
+          );
+          expect(
+            (await requested(outageProduct.product_id))[0].published_at,
+          ).toBeNull();
+          await runtime.onModuleDestroy();
+          runtime = undefined;
+          await broker.resume();
+          await startPeer('pricing', pricingSource);
+          await startPeer('inventory', inventorySource);
+          runtime = new CatalogAmqpRuntime(
+            new CatalogMessageService(database),
+            broker.settings,
+          );
+          runtime.onModuleInit();
+          await waitTerminal(outageProduct.product_id, ['COMPLETED']);
+          expect(await requested(outageProduct.product_id)).toHaveLength(1);
+          expect(referenceBalances()).toEqual(balancesBefore);
+          expect(monetarySnapshot()).toEqual(moneyBefore);
+          const historicalOperations = (
+            await Promise.all(fixtures.map((f) => requested(f.product_id)))
+          )
+            .flat()
+            .map((r) => "'" + r.operation_id + "'")
+            .join(',');
+          expect(
+            inspect(
+              "SELECT count(*)::integer FROM pricing.outbox WHERE event_name='pricing.price.changed' AND operation_id IN (" +
+                historicalOperations +
+                ');',
+            ),
+          ).toBe(0);
+          expect(
+            inspect(
+              "SELECT count(*)::integer FROM inventory.outbox WHERE event_type='inventory.stock.changed' AND payload->'data'->>'sku' IN (" +
+                referenceSkus.map((sku) => "'" + sku + "'").join(',') +
+                ');',
+            ),
+          ).toBe(0);
+          expect(balances(legacyParent.sku_base)).toEqual([]);
+          console.log(
+            'BLOCK_A1_INTEGRAL_HISTORY_PASS=pricing@' +
+              PRICING_HISTORICAL_SHA +
+              ',inventory@' +
+              INVENTORY_BILATERAL_SHA,
+          );
+        } finally {
+          if (guarded) {
+            for (const table of [
+              'prices',
+              'price_validities',
+              'scheduled_prices',
+            ])
+              sqlAdmin(
+                `DROP TRIGGER forbid_history_write ON pricing.${table};`,
+              );
+            sqlAdmin('DROP FUNCTION pricing.reject_history_write();');
+          }
+          if (extraValidity)
+            sqlAdmin(
+              "DELETE FROM pricing.price_validities WHERE id='" +
+                extraValidity +
+                "';",
+            );
+          if (exclusion)
+            sqlAdmin(
+              'ALTER TABLE pricing.price_validities ADD CONSTRAINT ck_price_validities_no_overlap ' +
+                exclusion +
+                ';',
+            );
+          await historicalHttp.close();
+        }
+        console.log('BLOCK_A2_PINNED_IDENTITY_PASS=' + INVENTORY_BILATERAL_SHA);
+        console.log(
+          'BLOCK_A2_CONSOLIDATED_NO_LOCATION_PASS=' + INVENTORY_BILATERAL_SHA,
+        );
+      } finally {
+        await runtime?.onModuleDestroy();
+        for (const child of peers) {
+          child.kill('SIGTERM');
+          const deadline = Date.now() + 10000;
+          while (
+            child.exitCode === null &&
+            child.signalCode === null &&
+            Date.now() < deadline
+          )
+            await pause(50);
+          if (child.exitCode === null && child.signalCode === null)
+            child.kill('SIGKILL');
+        }
+        await http.close();
+        await broker.close();
+      }
+    }, 240000);
 
     it('reads internal demo drafts and their actual variant photos without exposing them through the ordinary active-only query', async () => {
       const marker = 'DEMO-READ-' + randomUUID();
@@ -497,219 +2677,6 @@ describe.skipIf(!dockerAvailable)(
         await reads.findCandidateByProductId(parent.id, 'MARKETPLACE'),
       ).toBeNull();
     });
-
-    it('PERF-49: compares the frozen N+1 and batched preview on the same PostgreSQL snapshot fixtures', async () => {
-      const marker = 'PERF-' + randomUUID();
-      const missingPrice = new Set<string>();
-      await transactions.run(async (tx) => {
-        for (let i = 0; i < 36; i++) {
-          const row = await repository.insertProduct(tx, {
-            ...productInput(marker + '-' + i),
-            nombre: marker + '-' + String(Math.floor(i / 2)).padStart(2, '0'),
-            categoria_id: i % 2 ? marker : marker + '-other',
-            marca_id: i % 3 ? marker : marker + '-other',
-            tiene_variantes: i % 3 === 0,
-          });
-          if (i % 7 === 0) missingPrice.add(row.id);
-          await repository.insertProductImage(tx, {
-            product_id: row.id,
-            url: 'https://placehold.co/placeholder.png',
-            posicion: 0,
-          });
-          if (i % 3 !== 0) {
-            await repository.insertProductImage(tx, {
-              product_id: row.id,
-              url: 'https://example.test/secondary.png',
-              posicion: 0,
-            });
-            await repository.insertProductImage(tx, {
-              product_id: row.id,
-              url: 'https://example.test/principal.png',
-              posicion: 2,
-              principal: true,
-            });
-            // Preview excludes placeholder subdomains; internal read-demo does not.
-            await repository.insertProductImage(tx, {
-              product_id: row.id,
-              url: 'https://child.placehold.co/invalid.png',
-              posicion: 3,
-            });
-          } else {
-            const child = await repository.insertVariant(tx, {
-              product_id: row.id,
-              sku: marker + '-child-' + i,
-              identifying_key: { size: { valor: i } },
-            });
-            await repository.insertVariantAttribute(tx, {
-              variant_id: child.id,
-              caracteristica_id: 'size',
-              nombre_snapshot: 'Size',
-              valor_id: null,
-              valor: i,
-              es_identificador: true,
-            });
-            for (let j = 0; j < (i === 3 ? 103 : 2); j++)
-              await repository.insertVariantImage(tx, {
-                variant_id: child.id,
-                url:
-                  i % 6 === 0
-                    ? 'http://example.test/invalid.png'
-                    : 'https://example.test/repeated.png',
-                posicion: j,
-              });
-          }
-          for (const caracteristica of ['z', 'a'])
-            await repository.insertProductAttribute(tx, {
-              product_id: row.id,
-              caracteristica_id: caracteristica,
-              nombre_snapshot: caracteristica,
-              valor_id: null,
-              valor: 'Cotton ' + i,
-            });
-        }
-      });
-      let queries = 0,
-        sqlMs = 0;
-      const instrumented = {
-        read: <T>(work: (db: CatalogDatabase) => Promise<T>) =>
-          database.read(async (db) => {
-            const started = performance.now();
-            try {
-              return await work(
-                new Proxy(db, {
-                  get(target, key, receiver) {
-                    if (key === 'transaction')
-                      return (
-                        callback: (tx: CatalogTransaction) => Promise<T>,
-                        config: Parameters<CatalogDatabase['transaction']>[1],
-                      ) =>
-                        target.transaction(
-                          (tx) =>
-                            callback(
-                              new Proxy(tx, {
-                                get(t, k, r) {
-                                  const member = Reflect.get(t, k, r);
-                                  if (k === 'select' || k === 'execute')
-                                    return (...args: unknown[]) => {
-                                      queries++;
-                                      return Reflect.apply(member, t, args);
-                                    };
-                                  return typeof member === 'function'
-                                    ? member.bind(t)
-                                    : member;
-                                },
-                              }),
-                            ),
-                          config,
-                        );
-                    return Reflect.get(target, key, receiver);
-                  },
-                }),
-              );
-            } finally {
-              sqlMs += performance.now() - started;
-            }
-          }),
-      } as Database;
-      const versions = [
-        new LegacyDemoList(instrumented),
-        new PostgresCatalogRepository(instrumented),
-      ];
-      const base: ProductQuery = {
-        canal: 'MARKETPLACE',
-        q: marker,
-        pagina: 1,
-        tamanio: 4,
-        orden: 'NOMBRE_ASC',
-      };
-      for (const tamanio of [4, 24])
-        for (const orden of ['NOMBRE_ASC', 'NOMBRE_DESC'] as const)
-          for (const pagina of [1, 2]) {
-            const results = [];
-            for (const [index, reads] of versions.entries()) {
-              queries = 0;
-              sqlMs = 0;
-              let pricingMs = 0;
-              const signals = new CatalogTelemetry();
-              const measure = signals.measure.bind(signals);
-              signals.measure = async (stage, work, correlation) => {
-                const started = performance.now();
-                try {
-                  return await measure(stage, work, correlation);
-                } finally {
-                  if (stage === 'DEMO_PRICING')
-                    pricingMs = performance.now() - started;
-                }
-              };
-              const service = new CommercialService(
-                reads,
-                {} as TaxonomyClient,
-                { enabled: false },
-                { marketplaceDemoPreview: true } as CatalogConfig,
-                {
-                  currentPrice: async (id) => {
-                    await pause(2);
-                    return missingPrice.has(id)
-                      ? null
-                      : {
-                          precio_regular: 10,
-                          precio_oferta: null,
-                          currency: 'PEN',
-                        };
-                  },
-                },
-                undefined,
-                signals,
-              );
-              const started = performance.now();
-              const response = await service.list({
-                ...base,
-                tamanio,
-                orden,
-                pagina,
-              });
-              const totalMs = performance.now() - started;
-              results.push(response);
-              expect(queries).toBe(index === 0 ? 79 : 4);
-              process.stdout.write(
-                JSON.stringify({
-                  evidence: 'PERF-49-controlled-postgres-pricing-fixture',
-                  environment: 'disposable PostgreSQL 17 Alpine over TLS',
-                  candidateVolume: 36,
-                  method:
-                    'wall clock around repository and deterministic local Pricing fixture; SQL SELECT/execute calls instrumented',
-                  version: index === 0 ? '6278b686-legacy' : 'candidate',
-                  tamanio,
-                  orden,
-                  pagina,
-                  queries,
-                  sqlMs,
-                  pricingMs,
-                  totalMs,
-                  items: response.items.length,
-                  total: response.total,
-                }) + '\n',
-              );
-            }
-            expect(results[1]).toEqual(results[0]);
-            expect(results[1].total).toBe(25);
-          }
-      for (const filter of [
-        { categoriaId: marker },
-        { marcaId: marker },
-        { categoriaId: marker, marcaId: marker },
-        { q: marker + '-absent' },
-      ]) {
-        expect(
-          await versions[1].listDemoCandidates({ ...base, ...filter }, 100),
-        ).toEqual(
-          await versions[0].listDemoCandidates({ ...base, ...filter }, 100),
-        );
-      }
-      await expect(versions[0].listDemoCandidates(base, 35)).rejects.toThrow();
-      expect(await versions[1].listDemoCandidates(base, 35)).toHaveLength(30);
-      expect((await versions[1].listCandidates(base)).items).toEqual([]);
-    }, 30000);
 
     it('JOINT-01: commits aggregate/Outbox, transports requested/results through a real broker, deduplicates Inbox and reconnects', async () => {
       // Seed an internal BORRADOR coordination fixture, not a mocked HTTP or Taxonomy flow.
@@ -1106,233 +3073,99 @@ describe.skipIf(!dockerAvailable)(
         GRANT USAGE ON SCHEMA taxonomy TO po_catalog_owner;
         GRANT SELECT ON ALL TABLES IN SCHEMA taxonomy TO po_catalog_owner;
       `;
-      command(
-        'docker',
-        [
-          'exec',
-          '-i',
-          container,
-          'psql',
-          '-U',
-          'postgres',
-          '-v',
-          'ON_ERROR_STOP=1',
-        ],
-        taxonomyFixture,
-      );
-
       const preflightSql = readFileSync(
         join(catalogDirectory, '001_preflight_readonly.sql'),
         'utf8',
       );
-      const runSql = (input: string) =>
-        spawnSync(
-          'docker',
-          [
-            'exec',
-            '-i',
-            container,
-            'psql',
-            '-X',
-            '-q',
-            '-U',
-            'postgres',
-            '-v',
-            'ON_ERROR_STOP=1',
-          ],
-          {
-            encoding: 'utf8',
-            input,
-            timeout: 120000,
-            windowsHide: true,
-          },
-        );
-      const preflight = command(
-        'docker',
-        [
-          'exec',
-          '-i',
-          container,
-          'psql',
-          '-X',
-          '-At',
-          '-U',
-          'postgres',
-          '-v',
-          'ON_ERROR_STOP=1',
-        ],
-        preflightSql,
-      );
-      expect(preflight).not.toMatch(
-        /FALTA_INACTIVA_O_CARACTERISTICA_INCORRECTA|RELACION_FALTA_O_INACTIVA|DATA002_PREFLIGHT_BLOCKED/,
-      );
-
       const batch = readFileSync(
         join(catalogDirectory, '003_carga_catalogo.sql'),
         'utf8',
       );
-      const existingProductCount = command('docker', [
-        'exec',
-        '-i',
-        container,
-        'psql',
-        '-X',
-        '-At',
-        '-U',
-        'postgres',
-        '-c',
-        'SELECT count(*) FROM catalog.products',
-      ]);
-      const expectPreflightToBlock = (
-        mutation: string,
-        restoration: string,
-      ) => {
-        command(
-          'docker',
-          [
-            'exec',
-            '-i',
-            container,
-            'psql',
-            '-X',
-            '-q',
-            '-U',
-            'postgres',
-            '-v',
-            'ON_ERROR_STOP=1',
-          ],
-          mutation,
-        );
-        for (const sqlText of [preflightSql, batch]) {
-          const result = runSql(sqlText);
-          expect(result.error).toBeUndefined();
-          expect(result.status).not.toBe(0);
-          expect(result.stderr).toContain('DATA002_PREFLIGHT_BLOCKED');
-        }
-        expect(
-          command('docker', [
-            'exec',
-            '-i',
-            container,
-            'psql',
-            '-X',
-            '-At',
-            '-U',
-            'postgres',
-            '-c',
-            'SELECT count(*) FROM catalog.products',
-          ]),
-        ).toBe(existingProductCount);
-        command(
-          'docker',
-          [
-            'exec',
-            '-i',
-            container,
-            'psql',
-            '-X',
-            '-q',
-            '-U',
-            'postgres',
-            '-v',
-            'ON_ERROR_STOP=1',
-          ],
-          restoration,
-        );
-      };
+      const countSql = 'SELECT count(*) FROM catalog.products';
+      const steps: Data002Step[] = [
+        { name: 'fixtures', input: taxonomyFixture },
+        { name: 'preflight', input: preflightSql },
+        { name: 'initial-count', input: countSql },
+      ];
       const brandEntry = Object.entries(manifest.taxonomy.brands).find(
         ([, id]) => id === 'd05cc621-2d16-faa3-f620-19fb3173737c',
       );
       expect(brandEntry).toBeDefined();
-      expectPreflightToBlock(
-        "DELETE FROM taxonomy.brands WHERE id = 'd05cc621-2d16-faa3-f620-19fb3173737c';",
-        `INSERT INTO taxonomy.brands (id, nombre, estado) VALUES (${sqlLiteral(brandEntry![1])}, ${sqlLiteral(brandEntry![0])}, 'ACTIVO');`,
-      );
-      expectPreflightToBlock(
-        "UPDATE taxonomy.product_types SET estado = 'INACTIVO' WHERE id = 'b023a151-d69f-ff9a-483a-678eefe6842e';",
-        "UPDATE taxonomy.product_types SET estado = 'ACTIVO' WHERE id = 'b023a151-d69f-ff9a-483a-678eefe6842e';",
-      );
-      expectPreflightToBlock(
-        "UPDATE taxonomy.product_type_characteristics SET estado = 'INACTIVO' WHERE tipo_producto_id = 'b023a151-d69f-ff9a-483a-678eefe6842e' AND caracteristica_id = 'acee6db1-ba1c-f020-caf8-f439b09556ff';",
-        "UPDATE taxonomy.product_type_characteristics SET estado = 'ACTIVO' WHERE tipo_producto_id = 'b023a151-d69f-ff9a-483a-678eefe6842e' AND caracteristica_id = 'acee6db1-ba1c-f020-caf8-f439b09556ff';",
-      );
-      const executeBatch = () =>
-        command(
-          'docker',
-          [
-            'exec',
-            '-i',
-            container,
-            'psql',
-            '-X',
-            '-q',
-            '-U',
-            'postgres',
-            '-v',
-            'ON_ERROR_STOP=1',
-          ],
-          `SET ROLE po_catalog_owner;\n${batch}`,
-        );
-      executeBatch();
-      executeBatch();
-
-      const postcheck = command(
-        'docker',
+      const negativeCases = [
         [
-          'exec',
-          '-i',
-          container,
-          'psql',
-          '-X',
-          '-At',
-          '-F',
-          '|',
-          '-U',
-          'postgres',
-          '-v',
-          'ON_ERROR_STOP=1',
+          "DELETE FROM taxonomy.brands WHERE id = 'd05cc621-2d16-faa3-f620-19fb3173737c';",
+          `INSERT INTO taxonomy.brands (id, nombre, estado) VALUES (${sqlLiteral(brandEntry![1])}, ${sqlLiteral(brandEntry![0])}, 'ACTIVO');`,
         ],
-        readFileSync(
-          join(catalogDirectory, '004_postcheck_readonly.sql'),
-          'utf8',
-        ),
+        [
+          "UPDATE taxonomy.product_types SET estado = 'INACTIVO' WHERE id = 'b023a151-d69f-ff9a-483a-678eefe6842e';",
+          "UPDATE taxonomy.product_types SET estado = 'ACTIVO' WHERE id = 'b023a151-d69f-ff9a-483a-678eefe6842e';",
+        ],
+        [
+          "UPDATE taxonomy.product_type_characteristics SET estado = 'INACTIVO' WHERE tipo_producto_id = 'b023a151-d69f-ff9a-483a-678eefe6842e' AND caracteristica_id = 'acee6db1-ba1c-f020-caf8-f439b09556ff';",
+          "UPDATE taxonomy.product_type_characteristics SET estado = 'ACTIVO' WHERE tipo_producto_id = 'b023a151-d69f-ff9a-483a-678eefe6842e' AND caracteristica_id = 'acee6db1-ba1c-f020-caf8-f439b09556ff';",
+        ],
+      ];
+      for (const [index, [mutation, restoration]] of negativeCases.entries()) {
+        steps.push(
+          { name: 'mutation-' + index, input: mutation },
+          { name: 'blocked-preflight-' + index, input: preflightSql },
+          { name: 'blocked-batch-' + index, input: batch },
+          { name: 'count-' + index, input: countSql },
+          { name: 'restore-' + index, input: restoration },
+        );
+      }
+      steps.push(
+        { name: 'load', input: `SET ROLE po_catalog_owner;\n${batch}` },
+        { name: 'replay', input: `SET ROLE po_catalog_owner;\n${batch}` },
+        {
+          name: 'postcheck',
+          input: readFileSync(
+            join(catalogDirectory, '004_postcheck_readonly.sql'),
+            'utf8',
+          ),
+        },
+        {
+          name: 'conflict',
+          input: `UPDATE catalog.products SET descripcion = 'different payload' WHERE id = '96c6972f-2bd2-5528-8028-5293fe719db9';\nSET ROLE po_catalog_owner;\n${batch}`,
+        },
       );
-      const postcheckRows = postcheck
-        .split(/\r?\n/)
+      const results = runData002Psql(container, steps);
+      // Every original success/failure remains checked, including restorations.
+      for (const [name, result] of results) {
+        if (name.startsWith('blocked-') || name === 'conflict')
+          expect(result.status, name).not.toBe(0);
+        else expect(result.status, name).toBe(0);
+      }
+      const preflight = results.get('preflight')!.output;
+      expect(preflight).not.toMatch(
+        /FALTA_INACTIVA_O_CARACTERISTICA_INCORRECTA|RELACION_FALTA_O_INACTIVA|DATA002_PREFLIGHT_BLOCKED/,
+      );
+      const existingProductCount = results.get('initial-count')!.output;
+      for (const index of negativeCases.keys()) {
+        for (const name of ['blocked-preflight-', 'blocked-batch-']) {
+          const result = results.get(name + index)!;
+          expect(result.status).not.toBe(0);
+          expect(result.output).toContain('DATA002_PREFLIGHT_BLOCKED');
+        }
+        expect(results.get('count-' + index)!.output).toBe(
+          existingProductCount,
+        );
+      }
+      const postcheckRows = results
+        .get('postcheck')!
+        .output.split(/\r?\n/)
         .filter((row) => row.length > 0);
       expect(postcheckRows).toHaveLength(12);
       expect(postcheckRows.every((row) => row.endsWith('|PASS'))).toBe(true);
       expect(postcheckRows).toContain('productos|15|15|PASS');
       expect(postcheckRows).toContain('variantes|45|45|PASS');
       expect(postcheckRows).toContain('payloads_jsonb_validos|0|0|PASS');
-
-      const conflict = spawnSync(
-        'docker',
-        [
-          'exec',
-          '-i',
-          container,
-          'psql',
-          '-X',
-          '-q',
-          '-U',
-          'postgres',
-          '-v',
-          'ON_ERROR_STOP=1',
-        ],
-        {
-          encoding: 'utf8',
-          input: `UPDATE catalog.products SET descripcion = 'different payload' WHERE id = '96c6972f-2bd2-5528-8028-5293fe719db9';\nSET ROLE po_catalog_owner;\n${batch}`,
-          timeout: 120000,
-          windowsHide: true,
-        },
-      );
-      expect(conflict.error).toBeUndefined();
+      const conflict = results.get('conflict')!;
       expect(conflict.status).not.toBe(0);
-      expect(conflict.stderr).toContain(
+      expect(conflict.output).toContain(
         'DATA-002 contenido diferente en catalog.products',
       );
-    });
+    }, 5000);
 
     // These provider tests use authoritative master fixtures, never shared Taxonomy or Supabase writes.
     function mutationService(
@@ -2258,7 +4091,12 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
         data: {
           product_id: row.payload.product_id,
           ...(pricing
-            ? { sku_base: row.payload.sku_base }
+            ? {
+                sku_base: row.payload.sku_base,
+                ...(!rejected
+                  ? { price_version: 1, vigencia_id: randomUUID() }
+                  : {}),
+              }
             : {
                 sku: row.payload.sku,
                 variant_id: row.payload.variant_id ?? null,
@@ -2266,6 +4104,7 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
           status: rejected ? 'REJECTED' : pricing ? 'READY' : 'INITIALIZED',
           completed_at: new Date().toISOString(),
           code: rejected ? 'FIXTURE_REJECTED' : null,
+          ...(rejected ? { reason: 'FIXTURE_REJECTED' } : {}),
         },
       });
     }
@@ -2278,287 +4117,346 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
         if (!dependency || row.event_name.startsWith(dependency + '.'))
           await messages.consume(resultFor(row));
     }
-    it.each([false, true])(
-      'HTTP-50: all 18 operations with PostgreSQL TLS; restricted demo=%s (Taxonomy/results fixtures)',
-      async (restrictedDemo) => {
-        const http = new CatalogGatewayHarness();
-        await http.start(
-          persistenceSettings,
-          { timeoutMs: 300000 },
-          restrictedDemo,
-        );
-        try {
-          const call = async (
-            method: string,
-            path: string,
-            body: unknown,
-            status: number,
-            code?: string,
-          ) => {
-            const response = await http.call(
-              method,
-              path,
-              body,
-              restrictedDemo ? null : http.token(),
-              restrictedDemo,
-            );
-            expect(
-              response.status,
-              method + ' ' + path + ': ' + JSON.stringify(response.body),
-            ).toBe(status);
-            expect(response.correlation).toBe(http.correlation);
-            if (code) expect(response.body.code).toBe(code);
-            return response.body as Record<string, unknown>;
+    it('HTTP-50: Catalog operations with PostgreSQL TLS and signed G7 identity (Taxonomy/results fixtures)', async () => {
+      const http = new CatalogGatewayHarness();
+      await http.start(persistenceSettings, { timeoutMs: 300000 });
+      try {
+        const manager = http.token({ aud: undefined, scope: undefined });
+        const call = async (
+          method: string,
+          path: string,
+          body: unknown,
+          status: number,
+          code?: string,
+        ) => {
+          const response = await http.call(method, path, body, manager);
+          expect(
+            response.status,
+            method + ' ' + path + ': ' + JSON.stringify(response.body),
+          ).toBe(status);
+          expect(response.correlation).toBe(http.correlation);
+          if (code) expect(response.body.code).toBe(code);
+          return response.body as Record<string, unknown>;
+        };
+        const input = createRequest();
+        input.nombre = 'HTTP-50-' + randomUUID();
+        const product = await call('POST', '/productos', input, 201);
+        const id = String(product.product_id),
+          path = '/productos/' + id;
+        expect(product).toMatchObject({
+          status: 'BORRADOR',
+          sku_base: input.skuBase,
+          catalog_version: 0,
+        });
+        const adminPath = '/productos/administracion/' + id;
+        const admin = await call('GET', adminPath, undefined, 200);
+        expect(admin).toMatchObject({
+          productId: id,
+          estado: 'BORRADOR',
+          catalogVersion: product.catalog_version,
+          skuBase: input.skuBase,
+        });
+        const adminList = '/productos/administracion';
+        const filters = new URLSearchParams({
+          q: input.skuBase,
+          categoriaId: input.categoriaId,
+          marcaId: input.marcaId,
+          pagina: '1',
+          tamanio: '1',
+        });
+        const assertAdminState = async (
+          estado: 'BORRADOR' | 'ACTIVO' | 'INACTIVO',
+          persistedVersion: unknown,
+        ) => {
+          const expected = {
+            productId: id,
+            estado,
+            catalogVersion: persistedVersion,
           };
-          const input = createRequest();
-          input.nombre = 'HTTP-50-' + randomUUID();
-          const product = await call('POST', '/productos', input, 201);
-          const id = String(product.product_id),
-            path = '/productos/' + id;
-          expect(product).toMatchObject({
-            status: 'BORRADOR',
-            sku_base: input.skuBase,
-            catalog_version: 0,
+          expect(await call('GET', adminPath, undefined, 200)).toMatchObject(
+            expected,
+          );
+          expect(
+            await call(
+              'GET',
+              `${adminList}?${filters}&estado=${estado}`,
+              undefined,
+              200,
+            ),
+          ).toMatchObject({
+            items: [expected],
+            meta: { pagina: 1, tamanio: 1, total: 1, totalPaginas: 1 },
           });
-          await call('POST', '/productos', input, 409, 'SKU_DUPLICADO');
-          await call('POST', '/productos', {}, 400, 'VALIDACION');
-          const updated = await call(
-            'PATCH',
-            path,
-            {
-              descripcion: 'HTTP update',
-              catalogVersion: product.catalog_version,
-            },
-            200,
-          );
-          expect(Number(updated.catalog_version)).toBeGreaterThan(
-            Number(product.catalog_version),
-          );
-          await call(
-            'PATCH',
-            path,
-            { nombre: 'stale', catalogVersion: product.catalog_version },
-            409,
-            'VERSION_CONFLICT',
-          );
-          await call('POST', path + '/activar', {}, 422, 'DATOS_INCOMPLETOS');
-          const prep = await call('GET', path + '/preparacion', undefined, 200);
-          expect(prep.pricing).toMatchObject({
-            status: 'PENDING',
-            manual_retry_allowed: false,
-          });
-          await call(
-            'POST',
-            path + '/preparacion/reintentar',
-            { dependencia: 'PRICING' },
-            409,
-            'PREPARACION_NO_REINTENTABLE',
-          );
-          // Explicit fixture of a confirmed, expired publication. No broker send or
-          // completion is inferred from this timestamp; results are applied below.
-          await transactions.run((tx) =>
-            tx
-              .update(outbox)
-              .set({ published_at: new Date(Date.now() - 300001) })
-              .where(
-                and(
-                  sql`${outbox.payload}->>'product_id' = ${id}`,
-                  eq(
-                    outbox.event_name,
-                    'pricing.product.initialization.requested',
-                  ),
+        };
+        await assertAdminState('BORRADOR', product.catalog_version);
+        for (const key of ['categoriaId', 'marcaId']) {
+          const nonMatching = new URLSearchParams(filters);
+          nonMatching.set(key, randomUUID());
+          expect(
+            await call('GET', `${adminList}?${nonMatching}`, undefined, 200),
+          ).toMatchObject({ items: [], meta: { total: 0 } });
+        }
+        const marketplace = await http.call(
+          'GET',
+          path + '?canal=MARKETPLACE',
+          undefined,
+          http.token({
+            tipo: 'servicio',
+            sub: 'modulo-marketplace',
+            scope: 'catalogo:leer',
+            roles: undefined,
+          }),
+        );
+        expect(marketplace.status).toBe(404);
+        await call('POST', '/productos', input, 409, 'SKU_DUPLICADO');
+        await call('POST', '/productos', {}, 400, 'VALIDACION');
+        const updated = await call(
+          'PATCH',
+          path,
+          {
+            descripcion: 'HTTP update',
+            catalogVersion: admin.catalogVersion,
+          },
+          200,
+        );
+        expect(Number(updated.catalog_version)).toBeGreaterThan(
+          Number(product.catalog_version),
+        );
+        expect(await call('GET', adminPath, undefined, 200)).toMatchObject({
+          productId: id,
+          descripcion: 'HTTP update',
+          catalogVersion: updated.catalog_version,
+        });
+        await call(
+          'PATCH',
+          path,
+          { nombre: 'stale', catalogVersion: product.catalog_version },
+          409,
+          'VERSION_CONFLICT',
+        );
+        expect(await call('GET', adminPath, undefined, 200)).toMatchObject({
+          descripcion: 'HTTP update',
+          nombre: input.nombre,
+          catalogVersion: updated.catalog_version,
+        });
+        await call('POST', path + '/activar', {}, 422, 'DATOS_INCOMPLETOS');
+        const prep = await call('GET', path + '/preparacion', undefined, 200);
+        expect(prep.pricing).toMatchObject({
+          status: 'PENDING',
+          manual_retry_allowed: false,
+        });
+        await call(
+          'POST',
+          path + '/preparacion/reintentar',
+          { dependencia: 'PRICING' },
+          409,
+          'PREPARACION_NO_REINTENTABLE',
+        );
+        // Explicit fixture of a confirmed, expired publication. No broker send or
+        // completion is inferred from this timestamp; results are applied below.
+        await transactions.run((tx) =>
+          tx
+            .update(outbox)
+            .set({ published_at: new Date(Date.now() - 300001) })
+            .where(
+              and(
+                sql`${outbox.payload}->>'product_id' = ${id}`,
+                eq(
+                  outbox.event_name,
+                  'pricing.product.initialization.requested',
                 ),
               ),
-          );
-          const original = (await requested(id)).find((row) =>
+            ),
+        );
+        const original = (await requested(id)).find((row) =>
+          row.event_name.startsWith('pricing.'),
+        )!;
+        const accepted = await call(
+          'POST',
+          path + '/preparacion/reintentar',
+          { dependencia: 'PRICING' },
+          202,
+        );
+        expect(accepted).toMatchObject({
+          operation_id: original.operation_id,
+          status: 'ACCEPTED',
+          correlation_id: http.correlation,
+        });
+        await call(
+          'POST',
+          path + '/preparacion/reintentar',
+          { dependencia: 'PRICING' },
+          409,
+          'PREPARACION_NO_REINTENTABLE',
+        );
+        expect(
+          (await requested(id)).filter((row) =>
             row.event_name.startsWith('pricing.'),
-          )!;
-          const accepted = await call(
-            'POST',
-            path + '/preparacion/reintentar',
-            { dependencia: 'PRICING' },
-            202,
-          );
-          expect(accepted).toMatchObject({
-            operation_id: original.operation_id,
-            status: 'ACCEPTED',
-            correlation_id: http.correlation,
-          });
-          await call(
-            'POST',
-            path + '/preparacion/reintentar',
-            { dependencia: 'PRICING' },
-            409,
-            'PREPARACION_NO_REINTENTABLE',
-          );
-          expect(
-            (await requested(id)).filter((row) =>
-              row.event_name.startsWith('pricing.'),
-            ),
-          ).toHaveLength(2);
-          await complete(id);
-          await call('POST', path + '/activar', {}, 200);
-          const detail = await call('GET', path, undefined, 200);
-          expect(detail).toMatchObject({
-            product_id: id,
-            sku_base: input.skuBase,
-            marca: { marca_id: input.marcaId },
-          });
-          await call(
-            'GET',
-            '/productos/por-slug/' + product.slug,
-            undefined,
-            200,
-          );
-          const page = await call(
-            'GET',
-            '/productos?q=' +
-              encodeURIComponent(input.nombre) +
-              '&pagina=1&tamanio=1&estado=ACTIVO',
-            undefined,
-            200,
-          );
-          expect(page).toMatchObject({
-            pagina: 1,
-            tamanio: 1,
-            total: 1,
-            items: [{ product_id: id }],
-          });
-          await call(
-            'GET',
-            '/productos/' + randomUUID(),
-            undefined,
-            404,
-            'PRODUCTO_NO_ENCONTRADO',
-          );
-          await call('POST', path + '/desactivar', {}, 200);
-          await call('GET', path, undefined, 404, 'PRODUCTO_NO_ENCONTRADO');
-          await call('POST', path + '/reactivar', {}, 200);
+          ),
+        ).toHaveLength(2);
+        await complete(id);
+        const active = await call('POST', path + '/activar', {}, 200);
+        await assertAdminState('ACTIVO', active.catalog_version);
+        const detail = await call('GET', path, undefined, 200);
+        expect(detail).toMatchObject({
+          product_id: id,
+          sku_base: input.skuBase,
+          marca: { marca_id: input.marcaId },
+        });
+        await call(
+          'GET',
+          '/productos/por-slug/' + product.slug,
+          undefined,
+          200,
+        );
+        const page = await call(
+          'GET',
+          '/productos?q=' +
+            encodeURIComponent(input.nombre) +
+            '&pagina=1&tamanio=1&estado=ACTIVO',
+          undefined,
+          200,
+        );
+        expect(page).toMatchObject({
+          pagina: 1,
+          tamanio: 1,
+          total: 1,
+          items: [{ product_id: id }],
+        });
+        await call(
+          'GET',
+          '/productos/' + randomUUID(),
+          undefined,
+          404,
+          'PRODUCTO_NO_ENCONTRADO',
+        );
+        const inactive = await call('POST', path + '/desactivar', {}, 200);
+        await assertAdminState('INACTIVO', inactive.catalog_version);
+        await call('GET', path, undefined, 404, 'PRODUCTO_NO_ENCONTRADO');
+        await call('POST', path + '/reactivar', {}, 200);
 
-          const parent = await call(
-            'POST',
-            '/productos',
-            createRequest(true),
-            201,
-          );
-          const parentId = String(parent.product_id),
-            parentPath = '/productos/' + parentId;
-          const variantInput = {
-            sku: '000-HTTP-50-' + randomUUID(),
+        const parent = await call(
+          'POST',
+          '/productos',
+          createRequest(true),
+          201,
+        );
+        const parentId = String(parent.product_id),
+          parentPath = '/productos/' + parentId;
+        const variantInput = {
+          sku: '000-HTTP-50-' + randomUUID(),
+          atributosIdentificadores: [
+            {
+              caracteristica_id: 'size',
+              nombre: 'Size',
+              valor_id: null,
+              valor: 'M',
+            },
+          ],
+          imagenUrl: 'https://example.test/variant.jpg',
+          perfilFisico: fullProfile,
+        };
+        const child = await call(
+          'POST',
+          parentPath + '/variantes',
+          variantInput,
+          201,
+        );
+        const childPath = parentPath + '/variantes/' + child.variant_id;
+        await call(
+          'POST',
+          parentPath + '/variantes',
+          {
+            ...variantInput,
             atributosIdentificadores: [
-              {
-                caracteristica_id: 'size',
-                nombre: 'Size',
-                valor_id: null,
-                valor: 'M',
-              },
+              { ...variantInput.atributosIdentificadores[0], valor: 'L' },
             ],
-            imagenUrl: 'https://example.test/variant.jpg',
-            perfilFisico: fullProfile,
-          };
-          const child = await call(
-            'POST',
-            parentPath + '/variantes',
-            variantInput,
-            201,
-          );
-          const childPath = parentPath + '/variantes/' + child.variant_id;
-          await call(
-            'POST',
-            parentPath + '/variantes',
-            {
-              ...variantInput,
-              atributosIdentificadores: [
-                { ...variantInput.atributosIdentificadores[0], valor: 'L' },
-              ],
-            },
-            409,
-            'SKU_DUPLICADO',
-          );
-          await call(
-            'POST',
-            parentPath + '/variantes',
-            { ...variantInput, sku: randomUUID() },
-            409,
-            'COMBINACION_DUPLICADA',
-          );
-          const variantsPage = await call(
-            'GET',
-            parentPath + '/variantes?estado=BORRADOR&pagina=1&tamanio=1',
-            undefined,
-            200,
-          );
-          expect(variantsPage).toMatchObject({
-            meta: { pagina: 1, tamanio: 1, total: 1, totalPaginas: 1 },
-            items: [{ sku: variantInput.sku }],
-          });
-          await call('GET', childPath, undefined, 200);
-          const edited = await call(
-            'PATCH',
-            childPath,
-            {
-              imagenUrl: 'https://example.test/updated.jpg',
-              catalogVersion: child.catalog_version,
-            },
-            200,
-          );
-          expect(edited.sku).toBe(variantInput.sku);
-          await call(
-            'POST',
-            childPath + '/activar',
-            undefined,
-            422,
-            'DATOS_INCOMPLETOS',
-          );
-          await complete(parentId);
-          await call('POST', childPath + '/activar', undefined, 200);
-          await call('POST', parentPath + '/activar', {}, 200);
-          await call('POST', childPath + '/desactivar', undefined, 200);
-          expect(
-            await database.read(
-              async (db) =>
-                (
-                  await db
-                    .select({ estado: products.estado })
-                    .from(products)
-                    .where(eq(products.id, parentId))
-                )[0],
-            ),
-          ).toEqual({ estado: 'INACTIVO' });
-          await call('POST', childPath + '/reactivar', undefined, 200);
-          await call('POST', parentPath + '/reactivar', {}, 200);
-          await call(
-            'POST',
-            childPath + '/preparacion/reintentar',
-            undefined,
-            409,
-            'PREPARACION_NO_REINTENTABLE',
-          );
-          http.taxonomyAvailable = false;
-          await call(
-            'PATCH',
-            path,
-            { descripcion: 'must roll back' },
-            503,
-            'SERVICIO_NO_DISPONIBLE',
-          );
-          expect(
-            await database.read(
-              async (db) =>
-                (
-                  await db
-                    .select({ description: products.descripcion })
-                    .from(products)
-                    .where(eq(products.id, id))
-                )[0],
-            ),
-          ).toEqual({ description: 'HTTP update' });
-        } finally {
-          await http.close();
-        }
-      },
-      120000,
-    );
+          },
+          409,
+          'SKU_DUPLICADO',
+        );
+        await call(
+          'POST',
+          parentPath + '/variantes',
+          { ...variantInput, sku: randomUUID() },
+          409,
+          'COMBINACION_DUPLICADA',
+        );
+        const variantsPage = await call(
+          'GET',
+          parentPath + '/variantes?estado=BORRADOR&pagina=1&tamanio=1',
+          undefined,
+          200,
+        );
+        expect(variantsPage).toMatchObject({
+          meta: { pagina: 1, tamanio: 1, total: 1, totalPaginas: 1 },
+          items: [{ sku: variantInput.sku }],
+        });
+        await call('GET', childPath, undefined, 200);
+        const edited = await call(
+          'PATCH',
+          childPath,
+          {
+            imagenUrl: 'https://example.test/updated.jpg',
+            catalogVersion: child.catalog_version,
+          },
+          200,
+        );
+        expect(edited.sku).toBe(variantInput.sku);
+        await call(
+          'POST',
+          childPath + '/activar',
+          undefined,
+          422,
+          'DATOS_INCOMPLETOS',
+        );
+        await complete(parentId);
+        await call('POST', childPath + '/activar', undefined, 200);
+        await call('POST', parentPath + '/activar', {}, 200);
+        await call('POST', childPath + '/desactivar', undefined, 200);
+        expect(
+          await database.read(
+            async (db) =>
+              (
+                await db
+                  .select({ estado: products.estado })
+                  .from(products)
+                  .where(eq(products.id, parentId))
+              )[0],
+          ),
+        ).toEqual({ estado: 'INACTIVO' });
+        await call('POST', childPath + '/reactivar', undefined, 200);
+        await call('POST', parentPath + '/reactivar', {}, 200);
+        await call(
+          'POST',
+          childPath + '/preparacion/reintentar',
+          undefined,
+          409,
+          'PREPARACION_NO_REINTENTABLE',
+        );
+        http.taxonomyAvailable = false;
+        await call(
+          'PATCH',
+          path,
+          { descripcion: 'must roll back' },
+          503,
+          'SERVICIO_NO_DISPONIBLE',
+        );
+        expect(
+          await database.read(
+            async (db) =>
+              (
+                await db
+                  .select({ description: products.descripcion })
+                  .from(products)
+                  .where(eq(products.id, id))
+              )[0],
+          ),
+        ).toEqual({ description: 'HTTP update' });
+      } finally {
+        await http.close();
+      }
+    }, 120000);
     it('Q-06: preserves historical NULL, corrects drafts with optimistic concurrency and never clears publication', async () => {
       const service = mutationService();
       const historical = '00000000-0000-4000-8000-000000000049';
@@ -3929,6 +5827,100 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
         intentsBefore,
       );
     });
+    it('applies product-type inclusion/exclusion before exact count and pagination across multiple excluded types', async () => {
+      const service = mutationService();
+      const marker = 'type-filter-' + randomUUID();
+      const definitions = [
+        { type: 'eligible-a', included: true },
+        { type: 'combo-alpha', included: false },
+        { type: 'eligible-b', included: true },
+        { type: 'combo-beta', included: false },
+        { type: 'eligible-c', included: true },
+      ];
+      const productsCreated = [] as Array<{
+        id: string;
+        sku: string;
+        name: string;
+        type: string;
+        included: boolean;
+      }>;
+      for (const [index, definition] of definitions.entries()) {
+        const input = {
+          ...createRequest(),
+          nombre: `${marker}-${index}`,
+          tipoProductoId: definition.type,
+        };
+        const created = await service.createProduct(input, actor);
+        await complete(created.product_id);
+        await service.state(
+          created.product_id,
+          undefined,
+          'activate',
+          {},
+          actor,
+        );
+        productsCreated.push({
+          id: created.product_id,
+          sku: created.sku_base,
+          name: input.nombre,
+          type: definition.type,
+          included: definition.included,
+        });
+      }
+
+      const queries = new CatalogQueryRepository(database);
+      const expected = productsCreated
+        .filter((product) => product.included)
+        .sort((a, b) => a.name.localeCompare(b.name, 'en'));
+      const query = {
+        pagina: 1,
+        tamanio: 2,
+        orden: 'NOMBRE_ASC' as const,
+        q: marker,
+        tipoProductoIdsIncluidos: ['eligible-a', 'eligible-b', 'eligible-c'],
+        tipoProductoIdsExcluidos: ['combo-alpha', 'combo-beta'],
+      };
+      for (const pagina of [1, 2]) {
+        const page = await queries.listAdminProducts({ ...query, pagina });
+        expect(page.meta).toEqual({
+          pagina,
+          tamanio: 2,
+          total: 3,
+          totalPaginas: 2,
+        });
+        expect(page.items.map((item) => item.productId)).toEqual(
+          expected.slice((pagina - 1) * 2, pagina * 2).map((item) => item.id),
+        );
+      }
+      expect(
+        await queries.listAdminProducts({ ...query, pagina: 3 }),
+      ).toMatchObject({ items: [], meta: { total: 3, totalPaginas: 2 } });
+      const commercial = new PostgresCatalogRepository(database);
+      for (const pagina of [1, 2]) {
+        const page = await commercial.listCandidates({
+          canal: 'RETAIL',
+          pagina,
+          tamanio: 2,
+          orden: 'NOMBRE_ASC',
+          q: marker,
+          tipoProductoIdsExcluidos: ['combo-alpha', 'combo-beta'],
+        });
+        expect(page.total).toBe(3);
+        expect(page.items.map((item) => item.product_id)).toEqual(
+          expected.slice((pagina - 1) * 2, pagina * 2).map((item) => item.id),
+        );
+      }
+      process.stdout.write(
+        JSON.stringify({
+          evidence: 'CATALOG-TYPE-FILTER-PAGINATION',
+          products: productsCreated.length,
+          excludedTypes: 2,
+          expectedTotal: expected.length,
+          pages: 2,
+          excludedProductsWereInterleaved: true,
+        }) + '\n',
+      );
+    }, 30000);
     it('D-CAT-01..04: persists multiple exact codes, rejects concurrent/history reuse and preserves retirement audit', async () => {
       const service = mutationService();
       const simple = await service.createProduct(createRequest(), actor);
@@ -4121,6 +6113,90 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
       expect(await reads.skuContext(draft.sku)).toMatchObject({
         active: false,
         eligible: false,
+      });
+      const missingSku = 'missing-' + randomUUID();
+      const batchSkus = [
+        parent.sku_base,
+        active.sku,
+        draft.sku,
+        missingSku,
+        active.sku,
+      ];
+      const contextBatch = await reads.skuContexts(batchSkus);
+      expect(contextBatch.map((item) => item.sku)).toEqual(batchSkus);
+      expect(contextBatch.map((item) => item.status)).toEqual([
+        'FOUND',
+        'FOUND',
+        'FOUND',
+        'SKU_NO_ENCONTRADO',
+        'FOUND',
+      ]);
+      expect(contextBatch[0]?.context).toMatchObject({
+        productId: parent.product_id,
+        isVariant: false,
+        active: true,
+        eligible: false,
+      });
+      expect(contextBatch[1]?.context).toMatchObject({
+        productId: parent.product_id,
+        isVariant: true,
+        active: true,
+        eligible: true,
+      });
+      expect(contextBatch[2]?.context).toMatchObject({
+        isVariant: true,
+        active: false,
+        eligible: false,
+      });
+      expect(contextBatch[3]?.context).toBeNull();
+      const adminBatch = await new CatalogQueryRepository(
+        database,
+      ).resolveAdminSkus(batchSkus);
+      expect(adminBatch.items.map((item) => item.resultado)).toEqual([
+        'NO_ELEGIBLE',
+        'ELEGIBLE',
+        'NO_ELEGIBLE',
+        'NO_ENCONTRADO',
+        'ELEGIBLE',
+      ]);
+      expect(adminBatch.items[0]?.productoPadre).toMatchObject({
+        productId: parent.product_id,
+        estado: 'ACTIVO',
+        tieneVariantes: true,
+      });
+      expect(adminBatch.items[1]?.variante).toMatchObject({
+        variantId: active.variant_id,
+        estado: 'ACTIVA',
+      });
+      const inactive = await service.createProduct(
+        { ...createRequest(), skuBase: '000-' + randomUUID() },
+        actor,
+      );
+      await complete(inactive.product_id);
+      await service.state(
+        inactive.product_id,
+        undefined,
+        'activate',
+        {},
+        actor,
+      );
+      await service.state(
+        inactive.product_id,
+        undefined,
+        'deactivate',
+        {},
+        actor,
+      );
+      expect(
+        (
+          await new CatalogQueryRepository(database).resolveAdminSkus([
+            inactive.sku_base,
+          ])
+        ).items[0],
+      ).toMatchObject({
+        resultado: 'INACTIVO',
+        estado: 'INACTIVO',
+        productoPadre: { estado: 'INACTIVO' },
       });
       expect(await reads.priceCandidates(query)).toEqual([
         { productId: parent.product_id, sku: active.sku },

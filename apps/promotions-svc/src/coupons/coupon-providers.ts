@@ -1,3 +1,4 @@
+import { connectPrivateAmqps } from '../private-amqps.js';
 import type { Provider } from '@nestjs/common';
 import { h4EventAdapters } from './h4-event-adapters.js';
 import { assignedH4Contracts } from './assigned-h4-contract.generated.js';
@@ -102,9 +103,15 @@ export function nativeCouponResources(
     if (closed) throw new Error('COUPON_TRANSPORT_CLOSED');
     if (!opening) {
       const pending = (async () => {
-        const connection = await connect(config.settings.rabbitmqUrl, {
-          timeout: 3000,
-        });
+        if (!config.settings.rabbitmqUrl)
+          throw new Error('AMQP_NOT_CONFIGURED');
+        const connection = await connectPrivateAmqps(
+          connect,
+          config.settings.rabbitmqUrl,
+          {
+            timeout: 3000,
+          },
+        );
         connection.on('error', () => undefined);
         connection.on('close', () => {
           if (opening === pending) opening = undefined;
@@ -137,9 +144,14 @@ export function nativeCouponResources(
     pool,
     openConsumerChannel: async () => {
       if (closed) throw new Error('COUPON_TRANSPORT_CLOSED');
-      const connection = await connect(config.settings.rabbitmqUrl, {
-        timeout: 3000,
-      });
+      if (!config.settings.rabbitmqUrl) throw new Error('AMQP_NOT_CONFIGURED');
+      const connection = await connectPrivateAmqps(
+        connect,
+        config.settings.rabbitmqUrl,
+        {
+          timeout: 3000,
+        },
+      );
       connection.on('error', () => undefined);
       connection.on('close', () => consumers.delete(connection));
       consumers.add(connection);

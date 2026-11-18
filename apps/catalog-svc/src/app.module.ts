@@ -1,3 +1,4 @@
+import { H4SkuListener } from './h4-sku-listener.js';
 import { ReadinessController as CommercialReadinessController } from './readiness.controller.js';
 import { DynamicModule, Module } from '@nestjs/common';
 import { AppController } from './app.controller.js';
@@ -32,11 +33,7 @@ import {
   CatalogMasterClient,
 } from './catalog-master.client.js';
 import { CatalogTelemetry } from './catalog-telemetry.js';
-import {
-  CATALOG_READ_DEMO,
-  CATALOG_MARKETPLACE_PREVIEW,
-  readCatalogReadDemo,
-} from './catalog-read-demo.js';
+import { CATALOG_READ_DEMO, readCatalogReadDemo } from './catalog-read-demo.js';
 import {
   CatalogBulkService,
   CatalogBulkIdentity,
@@ -60,7 +57,6 @@ import {
   CatalogTokenVerifier,
   readCatalogSecurityConfig,
 } from './catalog-auth.js';
-import { DEMO_PRICING, PricingClient } from './pricing.client.js';
 import {
   CatalogPriceFilter,
   CATALOG_PRICING_IDENTITY,
@@ -68,6 +64,14 @@ import {
 import { CatalogPricingIdentityProvider } from './catalog-pricing-identity.js';
 import { BarcodeRepository } from './barcode.repository.js';
 import { BarcodeService } from './barcode.service.js';
+import { HistoricalRecoveryController } from './historical-recovery.controller.js';
+import {
+  HistoricalRecoveryService,
+  HISTORICAL_RECOVERY_CAPABILITIES,
+  HISTORICAL_PRICING_CONTRACT,
+  readHistoricalRecoveryCapabilities,
+} from './historical-recovery.service.js';
+import { readHistoricalPricingContract } from './historical-pricing.contract.js';
 
 @Module({
   imports: [],
@@ -77,9 +81,11 @@ import { BarcodeService } from './barcode.service.js';
     CatalogSkuContextController,
     CatalogQueryController,
     CatalogMutationController,
+    HistoricalRecoveryController,
     ReadinessController,
   ],
   providers: [
+    H4SkuListener,
     AppService,
     Database,
     CatalogTransactionManager,
@@ -97,6 +103,15 @@ import { BarcodeService } from './barcode.service.js';
     BarcodeService,
     CatalogQueryService,
     CatalogMutationService,
+    HistoricalRecoveryService,
+    {
+      provide: HISTORICAL_PRICING_CONTRACT,
+      useFactory: () => readHistoricalPricingContract(),
+    },
+    {
+      provide: HISTORICAL_RECOVERY_CAPABILITIES,
+      useFactory: () => readHistoricalRecoveryCapabilities(),
+    },
     {
       provide: CATALOG_PRODUCT_CREATION_POLICY,
       useValue: approvedCatalogProductPolicy,
@@ -121,11 +136,6 @@ import { BarcodeService } from './barcode.service.js';
     CatalogTokenVerifier,
     CatalogAuthGuard,
     { provide: CATALOG_READ_DEMO, useFactory: () => readCatalogReadDemo() },
-    {
-      provide: CATALOG_MARKETPLACE_PREVIEW,
-      useFactory: () =>
-        process.env.CATALOG_MARKETPLACE_DEMO_PREVIEW_ENABLED === 'true',
-    },
     {
       provide: CATALOG_SECURITY_CONFIG,
       useFactory: () => readCatalogSecurityConfig(process.env),
@@ -152,6 +162,10 @@ export class AppModule {
     return {
       module: AppModule,
       providers: [
+        {
+          provide: HISTORICAL_PRICING_CONTRACT,
+          useValue: config.historicalPricingContract,
+        },
         { provide: CatalogConfig, useValue: config },
         { provide: CATALOG_TAXONOMY_CONFIG, useValue: config.taxonomy },
         { provide: CATALOG_SECURITY_CONFIG, useValue: config.security },
@@ -160,11 +174,9 @@ export class AppModule {
         { provide: CATALOG_POSTGRES_CONFIG, useValue: config.database },
         { provide: CATALOG_READ_DEMO, useValue: config.readDemo },
         {
-          provide: CATALOG_MARKETPLACE_PREVIEW,
-          useValue: config.marketplaceDemoPreview,
+          provide: HISTORICAL_RECOVERY_CAPABILITIES,
+          useValue: config.historicalRecoveryCapabilities,
         },
-        PricingClient,
-        { provide: DEMO_PRICING, useExisting: PricingClient },
       ],
     };
   }

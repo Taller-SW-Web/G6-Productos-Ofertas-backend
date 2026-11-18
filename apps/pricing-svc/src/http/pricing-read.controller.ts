@@ -16,7 +16,11 @@ import {
   PricingReadGuard,
   uuid,
 } from './pricing-read.guard.js';
-import { CommercialPrices, parseCommercialQuery } from './commercial-prices.js';
+import {
+  channels,
+  CommercialPrices,
+  parseCommercialQuery,
+} from './commercial-prices.js';
 import { PricingHttpError, PricingHttpFilter } from './pricing-http.error.js';
 
 function page(query: Record<string, unknown>) {
@@ -42,6 +46,15 @@ function page(query: Record<string, unknown>) {
     ),
     tamanio,
   };
+}
+
+function definitionChannel(query: Record<string, unknown>): string | null {
+  if (Object.keys(query).some((key) => key !== 'channelId'))
+    throw new PricingHttpError(400, 'VALIDACION');
+  const channel = channels.find((name) => name === query.channelId);
+  if (query.channelId !== undefined && channel === undefined)
+    throw new PricingHttpError(400, 'VALIDACION');
+  return channel ?? null;
 }
 
 @Controller('api/v1/precios')
@@ -95,6 +108,25 @@ export class PricingReadController {
     return this.reads.product(productId);
   }
 
+  @Get('administracion/productos/:productoId')
+  adminProductDefinition(
+    @Param('productoId') productId: string,
+    @Query() query: Record<string, unknown>,
+  ) {
+    if (!uuid.test(productId)) throw new PricingHttpError(400, 'VALIDACION');
+    return this.reads.adminDefinition({ productId }, definitionChannel(query));
+  }
+
+  @Get('administracion/skus/:sku')
+  adminSkuDefinition(
+    @Param('sku') sku: string,
+    @Query() query: Record<string, unknown>,
+  ) {
+    if (!sku.trim() || sku.includes('\0'))
+      throw new PricingHttpError(400, 'VALIDACION');
+    return this.reads.adminDefinition({ sku }, definitionChannel(query));
+  }
+
   @Get('productos/:productoId/programaciones')
   productSchedules(
     @Param('productoId') productId: string,
@@ -111,6 +143,34 @@ export class PricingReadController {
   ) {
     const { pagina, tamanio } = page(query);
     return this.reads.schedules({ sku }, pagina, tamanio);
+  }
+
+  @Get('importaciones/:batchId/reporte')
+  async importReport(
+    @Param('batchId') batchId: string,
+    @Query() query: Record<string, unknown>,
+    @Res() response: Response,
+  ) {
+    if (!uuid.test(batchId) || Object.keys(query).length)
+      throw new PricingHttpError(400, 'VALIDACION');
+    const result = await this.reads.imported(batchId);
+    const quote = (value: unknown) =>
+      '"' + String(value ?? '').replace(/"/g, '""') + '"';
+    const lines = [
+      'row_id,sku,status,code',
+      ...(result.rows ?? []).map((row) =>
+        [row.row_id, row.sku, row.status, row.code].map(quote).join(','),
+      ),
+    ];
+    response
+      .type('text/csv')
+      .setHeader(
+        'Content-Disposition',
+        'attachment; filename="reporte-importacion-precios-' +
+          batchId +
+          '.csv"',
+      );
+    return response.status(200).send(lines.join('\r\n') + '\r\n');
   }
 
   @Get('importaciones/:batchId')

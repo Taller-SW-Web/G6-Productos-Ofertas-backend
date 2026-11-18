@@ -32,6 +32,40 @@ export class CatalogQueryController {
       throw new BadRequestException();
   }
 
+  @Get('administracion')
+  @RequireCatalogIdentity({ identity: 'user', roles: ['GESTOR_COMERCIAL'] })
+  listAdminProducts(
+    @Query() query: Record<string, unknown>,
+    @Headers('x-correlation-id') correlationId?: string,
+  ) {
+    this.validateCorrelation(correlationId);
+    return this.service.listAdminProducts(query);
+  }
+
+  @Post('administracion/skus/resolver')
+  @HttpCode(200)
+  @RequireCatalogIdentity({ identity: 'user', roles: ['GESTOR_COMERCIAL'] })
+  resolveAdminSkus(
+    @Body() body: unknown,
+    @Headers('x-correlation-id') correlationId?: string,
+  ) {
+    this.validateCorrelation(correlationId);
+    return this.service.resolveAdminSkus(body);
+  }
+
+  @Get('administracion/:productoId')
+  @RequireCatalogIdentity({ identity: 'user', roles: ['GESTOR_COMERCIAL'] })
+  adminProduct(
+    @Param('productoId') productId: string,
+    @Query() query: Record<string, unknown>,
+    @Headers('x-correlation-id') correlationId?: string,
+  ) {
+    this.validateCorrelation(correlationId);
+    if (!UUID.test(productId) || Object.keys(query).length)
+      throw new BadRequestException();
+    return this.service.adminProduct(productId);
+  }
+
   @Get(':productoId')
   @RequireCatalogIdentity({
     demoRead: true,
@@ -39,7 +73,12 @@ export class CatalogQueryController {
     identity: 'either',
     roles: ['GESTOR_COMERCIAL'],
     scope: 'catalogo:leer',
-    allowedClients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
+    allowedClients: [
+      'modulo-marketplace',
+      'modulo-chatbot',
+      'modulo-retail',
+      'modulo-productos',
+    ],
   })
   product(
     @Param('productoId') productId: string,

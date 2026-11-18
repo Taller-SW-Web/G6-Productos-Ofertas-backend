@@ -1,3 +1,4 @@
+import { taxonomyUpdate, taxonomyUpdates } from './catalog-taxonomy-update.js';
 import { randomUUID } from 'node:crypto';
 import { object } from './catalog-mutation.input.js';
 import {
@@ -174,15 +175,21 @@ export function assertCatalogPublication(message: CatalogEnvelope): void {
       throw new InvalidCatalogMessage();
   }
   if (message.name === 'pricing.product.initialization.requested') {
+    const historical = data.modalidad === 'RECUPERACION_HISTORICA';
     if (
       !UUID.test(String(message.operation_id)) ||
       typeof data.product_id !== 'string' ||
       !data.product_id ||
       typeof data.sku_base !== 'string' ||
       !data.sku_base ||
-      typeof data.precio_regular !== 'number' ||
-      !Number.isFinite(data.precio_regular) ||
-      data.precio_regular <= 0 ||
+      (data.modalidad !== undefined &&
+        data.modalidad !== 'ALTA_PRODUCTO' &&
+        !historical) ||
+      (historical
+        ? Object.hasOwn(data, 'precio_regular')
+        : typeof data.precio_regular !== 'number' ||
+          !Number.isFinite(data.precio_regular) ||
+          data.precio_regular <= 0) ||
       typeof data.moneda !== 'string' ||
       data.moneda.length !== 3 ||
       data.channel_id !== null ||
@@ -241,7 +248,9 @@ export function parseCatalogMessage(value: unknown): CatalogEnvelope {
     !UUID.test(String(value.correlation_id)) ||
     (value.schema_version !== 1 &&
       !(
-        value.name === 'catalog.bulk.upsert.requested' &&
+        (value.name === 'catalog.bulk.upsert.requested' ||
+          value.name === 'inventory.sku.initialization.completed' ||
+          value.name === 'inventory.sku.initialization.rejected') &&
         value.schema_version === 2
       )) ||
     typeof value.occurred_at !== 'string' ||
@@ -297,6 +306,11 @@ export function parseCatalogMessage(value: unknown): CatalogEnvelope {
     )
       throw new InvalidCatalogMessage();
   }
+  if (
+    (taxonomyUpdates as readonly string[]).includes(value.name) &&
+    !taxonomyUpdate(value.name, value.data)
+  )
+    throw new InvalidCatalogMessage();
   if (result) {
     const d = value.data;
     const completed = value.name.endsWith('.completed');
@@ -320,7 +334,12 @@ export function parseCatalogMessage(value: unknown): CatalogEnvelope {
           (d.price_version != null &&
             (!Number.isSafeInteger(d.price_version) ||
               (d.price_version as number) < 1)) ||
-          (d.vigencia_id != null && typeof d.vigencia_id !== 'string')
+          (d.vigencia_id != null && typeof d.vigencia_id !== 'string') ||
+          (completed &&
+            (!Number.isSafeInteger(d.price_version) ||
+              Number(d.price_version) < 1 ||
+              typeof d.vigencia_id !== 'string' ||
+              !d.vigencia_id))
         : typeof d.sku !== 'string' ||
           !d.sku ||
           (d.variant_id != null && typeof d.variant_id !== 'string'))
