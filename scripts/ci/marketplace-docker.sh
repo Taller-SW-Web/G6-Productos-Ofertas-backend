@@ -51,7 +51,7 @@ docker run -d --name "$pg_name" --network "$network" --network-alias postgres \
   -e POSTGRES_PASSWORD=ci-only-admin -v "$scratch/certs:/certs:ro" \
   --entrypoint sh postgres:17-alpine -c \
   'cp /certs/server.key /tmp/server.key; chown postgres:postgres /tmp/server.key; chmod 600 /tmp/server.key; exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/certs/server.crt -c ssl_key_file=/tmp/server.key' >/dev/null
-for attempt in {1..60}; do
+for _ in {1..60}; do
   if docker exec "$pg_name" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then break; fi
   sleep 1
 done
@@ -182,7 +182,7 @@ console.log('PASS: Catalog Drizzle PostgreSQL y Catalog -> Taxonomy HTTP');"
 docker stop "$pg_name" >/dev/null
 "${compose[@]}" exec -T api-gateway node /ci/marketplace-probe.mjs offline
 docker start "$pg_name" >/dev/null
-for attempt in {1..60}; do
+for _ in {1..60}; do
   if "${compose[@]}" exec -T taxonomy-svc node -e "fetch('http://127.0.0.1:3006/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then break; fi
   sleep 1
 done
