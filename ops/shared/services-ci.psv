@@ -1,0 +1,10 @@
+# service|port|port_env
+api-gateway|3000|API_GATEWAY_PORT
+bulk-svc|3008|BULK_SVC_PORT
+catalog-svc|3001|CATALOG_SVC_PORT
+combos-svc|3007|COMBOS_SVC_PORT
+inventory-svc|3005|INVENTORY_SVC_PORT
+price-audit-svc|3003|PRICE_AUDIT_SVC_PORT
+pricing-svc|3002|PRICING_SVC_PORT
+promotions-svc|3004|PROMOTIONS_SVC_PORT
+taxonomy-svc|3006|TAXONOMY_SVC_PORT
