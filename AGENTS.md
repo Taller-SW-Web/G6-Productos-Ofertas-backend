@@ -1,5 +1,11 @@
 # AGENTS.md — Instrucciones operativas para agentes en Backend
 
+## Objetivo vigente — Hito 5
+
+> CI/CD incluyendo revision Seguridad — Evidencia de Pruebas de integración — Evidencia de Pruebas de performance — Uso de API Management y Mecanismo asincrónico entre Microservicios
+
+La meta activa y los cuatro criterios con evidencias separadas están en [Hito 5 de Docs](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/pull/130). Azure Service Bus Basic sigue siendo la norma para mensajería interna H5; APIM/Gateway y la autenticación externa se evidencian por separado.
+
 > **LEER COMPLETO ANTES DE EDITAR.** Este documento rige el desarrollo backend en el monorepo NestJS de **Productos y Ofertas (G6)**.
 
 ---
@@ -169,7 +175,7 @@ CAMBIOS FUERA DEL ALCANCE: <ninguno o justificación expresa>
 ESTADO FINAL: PASS / PARTIAL / BLOCKED
 ```
 
-## G1 Marketplace H4 — documentación operativa obligatoria
+## Acuerdos históricos H4 aplicables a integraciones actuales — lectura obligatoria
 
 Antes de implementar o modificar endpoints consumidos por Marketplace, lee [`integraciones/g1-marketplace/README.md`](integraciones/g1-marketplace/README.md), su [matriz de 25 funciones](integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md) y [plan de pruebas/evidencias](integraciones/g1-marketplace/PRUEBAS_Y_EVIDENCIAS_H4.md), el [acuerdo normativo G1–G6 de Docs PR #94](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/a8d89296b0eac37315ef30a9390f1e4e30933136/integraciones/ACUERDO_G1_G6_H4_2026-10-20.md), la [alineación Marketplace de Docs PR #94](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/a8d89296b0eac37315ef30a9390f1e4e30933136/integraciones/ALINEACION_MARKETPLACE.md) y el OpenAPI de Docs. Esta lectura se suma, no sustituye, a SPEC, DEC-F/ADR, modelo y pruebas del servicio. Registra contrato, código, CI, despliegue, grant y E2E con SHA exacto como estados independientes. No tomes informes históricos como estado actual.
 
