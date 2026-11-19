@@ -7,6 +7,11 @@ import { Database, readDatabaseConfig, parseDatabaseUrl } from './database.js';
 import { DeactivationRecoveryRunner } from './domain/deactivation-integration.ports.js';
 import { TaxonomyAmqpRuntime } from './domain/taxonomy-amqp.runtime.js';
 import {
+  leerServiceBus,
+  TaxonomyServiceBusRuntime,
+  verificarPersistenciaServiceBus,
+} from './domain/taxonomy-service-bus.js';
+import {
   validarEntorno,
   ConfiguracionInvalidaError,
 } from './config/environment.js';
@@ -87,6 +92,7 @@ export async function iniciarTaxonomySvc(
 
   readDatabaseConfig(env);
   const { port, host } = readHttpConfig(env);
+  const serviceBus = leerServiceBus(env);
   const logger = new SanitizedLogger(opciones.logger);
   const app = await NestFactory.create(TaxonomySvcModule.forRuntime(env), {
     logger,
@@ -94,12 +100,15 @@ export async function iniciarTaxonomySvc(
   });
   app.useLogger(logger);
   try {
-    app.get(TaxonomyAmqpRuntime).configurar(env);
+    if (serviceBus) app.get(TaxonomyServiceBusRuntime).configurar(env);
+    else app.get(TaxonomyAmqpRuntime).configurar(env);
     await app.get(Database).verifyIdentity(env);
+    if (serviceBus) await verificarPersistenciaServiceBus(app.get(Database));
     app.enableShutdownHooks();
     await app.listen(port, host);
     app.get(DeactivationRecoveryRunner).iniciar();
-    app.get(TaxonomyAmqpRuntime).iniciar();
+    if (serviceBus) app.get(TaxonomyServiceBusRuntime).iniciar();
+    else app.get(TaxonomyAmqpRuntime).iniciar();
     logger.log({ service: 'taxonomy-svc', code: 'APPLICATION_STARTED' });
     return {
       app,
