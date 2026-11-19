@@ -81,7 +81,8 @@ describe('Taxonomy Service Bus', () => {
     const env = {
       MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
       TAXONOMY_SERVICE_BUS_ENABLED: 'true',
-      SERVICE_BUS_NAMESPACE_FQDN: 'g6-test-namespace.servicebus.windows.net',
+      NODE_ENV: 'test',
+      SERVICE_BUS_NAMESPACE_FQDN: 'g6-sb-test-namespace.servicebus.windows.net',
     };
     expect(leerServiceBus(env)).toEqual({
       namespace: env.SERVICE_BUS_NAMESPACE_FQDN,
@@ -96,6 +97,13 @@ describe('Taxonomy Service Bus', () => {
       leerServiceBus({ ...env, TAXONOMY_SERVICE_BUS_ENABLED: 'false' }),
     ).toThrow();
     expect(() => leerServiceBus({ ...env, NODE_ENV: 'production' })).toThrow();
+    expect(() => leerServiceBus({ ...env, NODE_ENV: 'development' })).toThrow();
+    expect(() =>
+      leerServiceBus({
+        ...env,
+        SERVICE_BUS_NAMESPACE_FQDN: 'g6-shared.servicebus.windows.net',
+      }),
+    ).toThrow();
   });
   it.each([
     'taxonomy.category.updated',

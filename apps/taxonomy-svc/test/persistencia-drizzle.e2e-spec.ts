@@ -147,6 +147,9 @@ describeIntegracion(
           await tx.execute(
             sql`UPDATE taxonomy.outbox SET published_at = now() WHERE published_at IS NULL`,
           );
+          const legacyId = randomUUID();
+          await tx.execute(sql`INSERT INTO taxonomy.outbox (message_id, event_name, kind, correlation_id, occurred_at, payload)
+            VALUES (${legacyId}::uuid, 'taxonomy.category.updated', 'event', ${randomUUID()}::uuid, now(), '{}'::jsonb)`);
           await tx.execute(
             sql.raw(
               readFileSync(
@@ -156,6 +159,20 @@ describeIntegracion(
                 'utf8',
               ),
             ),
+          );
+          const legacy = await tx.execute(
+            sql`SELECT message_id FROM taxonomy.outbox_delivery WHERE message_id = ${legacyId}::uuid`,
+          );
+          expect(legacy.rows).toHaveLength(0);
+          const database = new Database();
+          vi.spyOn(database, 'read').mockImplementation(async (query) =>
+            query(tx as unknown as NodePgDatabase),
+          );
+          await expect(
+            verificarPersistenciaServiceBus(database),
+          ).rejects.toThrow('TAXONOMY_SERVICE_BUS_STORAGE_NOT_READY');
+          await tx.execute(
+            sql`UPDATE taxonomy.outbox SET published_at = now() WHERE message_id = ${legacyId}::uuid`,
           );
           const messageId = randomUUID();
           const correlationId = randomUUID();
@@ -170,10 +187,6 @@ describeIntegracion(
               published_at: null,
             }),
           ]);
-          const database = new Database();
-          vi.spyOn(database, 'read').mockImplementation(async (query) =>
-            query(tx as unknown as NodePgDatabase),
-          );
           await expect(
             verificarPersistenciaServiceBus(database),
           ).resolves.toBeUndefined();

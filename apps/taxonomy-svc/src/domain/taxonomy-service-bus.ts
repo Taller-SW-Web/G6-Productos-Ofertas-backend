@@ -42,7 +42,8 @@ export function leerServiceBus(
     !/^[a-z][a-z0-9-]{4,48}[a-z0-9]\.servicebus\.windows\.net$/i.test(
       namespace,
     ) ||
-    (env.NODE_ENV === 'production' && !clientId) ||
+    env.NODE_ENV !== 'test' ||
+    !namespace.toLowerCase().startsWith('g6-sb-test-') ||
     (clientId !== undefined && !esUuid(clientId)) ||
     env.RABBITMQ_URL ||
     env.TAXONOMY_CATALOG_AMQP_USER
@@ -58,7 +59,14 @@ export async function verificarPersistenciaServiceBus(
     db.execute(sql`
     SELECT CASE WHEN to_regclass('taxonomy.outbox_delivery') IS NULL THEN false ELSE
       has_table_privilege(current_user, 'taxonomy.outbox_delivery', 'SELECT') AND
-      has_table_privilege(current_user, 'taxonomy.outbox_delivery', 'UPDATE') AND EXISTS (
+      has_table_privilege(current_user, 'taxonomy.outbox_delivery', 'UPDATE') AND NOT EXISTS (
+        SELECT 1 FROM taxonomy.outbox o WHERE o.published_at IS NULL AND o.event_name IN (
+          'taxonomy.category.updated', 'taxonomy.product-type-schema.changed',
+          'taxonomy.characteristic-value.updated', 'taxonomy.master.deactivation.check.requested',
+          'taxonomy.master.deactivated', 'taxonomy.master.deactivation.rejected'
+        ) AND NOT EXISTS (SELECT 1 FROM taxonomy.outbox_delivery d
+          WHERE d.message_id = o.message_id AND d.destination = 'g6.catalog.from.taxonomy')
+      ) AND EXISTS (
         SELECT 1 FROM pg_catalog.pg_trigger
         WHERE tgrelid = 'taxonomy.outbox'::regclass
           AND tgname = 'taxonomy_enqueue_catalog_delivery_h5' AND NOT tgisinternal AND tgenabled <> 'D'
