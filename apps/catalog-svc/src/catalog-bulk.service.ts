@@ -24,6 +24,10 @@ import {
 import { CatalogPricingIdentityProvider } from './catalog-pricing-identity.js';
 import { CatalogConfig } from './config.js';
 import { CatalogTokenVerifier } from './catalog-auth.js';
+import {
+  CatalogBulkContentClient,
+  type CatalogBulkContentReference,
+} from './catalog-bulk-content.js';
 
 /** Existing G7 flow, with only the scope already published for Taxonomy reads. */
 @Injectable()
@@ -228,6 +232,7 @@ export class CatalogBulkService {
     private readonly database: Database,
     private readonly mutations: CatalogMutationService,
     private readonly identity: CatalogBulkIdentity,
+    @Optional() private readonly contentClient?: CatalogBulkContentClient,
   ) {}
   private async lock(tx: CatalogTransaction, key: string) {
     await tx.execute(
@@ -391,9 +396,43 @@ export class CatalogBulkService {
     if (
       !UUID.test(String(message.data.batch_id)) ||
       !UUID.test(String(message.data.batch_operation_id)) ||
-      !UUID.test(String(message.operation_id))
+      (message.operation_id != null &&
+        (!UUID.test(message.operation_id) ||
+          (message.schema_version === 3 &&
+            message.operation_id !== message.data.batch_operation_id))) ||
+      (message.schema_version !== 3 && !UUID.test(String(message.operation_id)))
     )
       throw new InvalidCatalogMessage();
+    let claimRequest: BulkRequest | null | undefined;
+    if (message.schema_version === 3) {
+      const reference = message.data.content_ref as CatalogBulkContentReference;
+      if (!this.contentClient) throw new ServiceUnavailableException();
+      const document = await this.contentClient.getDocument(reference);
+      if (
+        !object(document) ||
+        Object.keys(document).length !== 1 ||
+        !Array.isArray(document.rows)
+      )
+        throw new InvalidCatalogMessage();
+      const materialized = {
+        ...message,
+        operation_id: String(message.data.batch_operation_id),
+        schema_version: 2,
+        data: {
+          batch_id: message.data.batch_id,
+          batch_operation_id: message.data.batch_operation_id,
+          template_version: message.data.template_version,
+          mode: message.data.mode,
+          rows: document.rows,
+        },
+      } as CatalogEnvelope;
+      try {
+        claimRequest = parseBulkRequest(materialized);
+      } catch (error) {
+        if (!businessCode(error)) throw error;
+        claimRequest = null;
+      }
+    }
     return this.database.transaction(async (tx) => {
       await this.lock(tx, 'bulk-delivery:' + message.message_id.toLowerCase());
       await this.lock(
@@ -427,11 +466,13 @@ export class CatalogBulkService {
         name = String(old.payload.name);
         result = old.payload.result as Record<string, unknown>;
       } else {
-        let request: BulkRequest | undefined;
-        try {
-          request = parseBulkRequest(message);
-        } catch (error) {
-          if (!businessCode(error)) throw error;
+        let request: BulkRequest | undefined = claimRequest ?? undefined;
+        if (claimRequest === undefined) {
+          try {
+            request = parseBulkRequest(message);
+          } catch (error) {
+            if (!businessCode(error)) throw error;
+          }
         }
         if (!request) {
           name = 'catalog.bulk.upsert.rejected';

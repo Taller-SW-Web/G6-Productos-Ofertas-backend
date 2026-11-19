@@ -3,6 +3,7 @@ import { BulkSvcController } from './bulk-svc.controller.js';
 import { BulkSvcService } from './bulk-svc.service.js';
 import { BulkImportService } from './bulk-import.service.js';
 import { BulkExportService } from './bulk-export.service.js';
+import { BulkContentService } from './bulk-content.service.js';
 import {
   parseBulkEnvironment,
   BULK_ENVIRONMENT,
@@ -16,6 +17,7 @@ import { bulkDatabaseProvider } from './persistence/bulk.database.js';
 import { bulkRepositoryProvider } from './persistence/bulk.repository.js';
 import { BulkStorageService } from './storage/bulk-storage.service.js';
 import { BulkUserBearerGuard } from './auth/bulk-user-bearer.guard.js';
+import { BulkServiceBearerGuard } from './auth/bulk-service-bearer.guard.js';
 import { BulkOutboxRelay } from './messaging/bulk-outbox-relay.js';
 import {
   BULK_AMQP_URL,
@@ -31,9 +33,11 @@ import { BULK_EXPORT_SOURCE } from './export/bulk-export-source.js';
     BulkSvcService,
     BulkImportService,
     BulkExportService,
+    BulkContentService,
     { provide: BULK_EXPORT_SOURCE, useValue: null },
     BulkStorageService,
     BulkUserBearerGuard,
+    BulkServiceBearerGuard,
     BulkOutboxRelay,
     CatalogBulkResultConsumer,
     BulkReadinessService,

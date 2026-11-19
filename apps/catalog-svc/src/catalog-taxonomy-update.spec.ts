@@ -51,6 +51,39 @@ describe('Taxonomy producer contract consumed by Catalog (#48)', () => {
     const value = envelope(fact);
     expect(parseCatalogMessage(value)).toBe(value);
   });
+  it.each([
+    [
+      'absent',
+      (value: ReturnType<typeof envelope>) => {
+        delete value.causation_id;
+        delete value.operation_id;
+      },
+    ],
+    [
+      'null',
+      (value: ReturnType<typeof envelope>) => {
+        value.causation_id = null;
+        value.operation_id = null;
+      },
+    ],
+  ])('accepts optional envelope IDs when %s', (_label, apply) => {
+    const value = envelope();
+    apply(value);
+    expect(parseCatalogMessage(value)).toBe(value);
+  });
+  it.each([
+    ['causation_id', 12],
+    ['operation_id', 'not-a-uuid'],
+    ['operation_id', 12],
+  ])('rejects an invalid present %s', (field, invalid) => {
+    expect(() =>
+      parseCatalogMessage({ ...envelope(), [field]: invalid }),
+    ).toThrow(InvalidCatalogMessage);
+  });
+  it('accepts a present causation_id as the contract-defined string', () => {
+    const value = { ...envelope(), causation_id: 'producer-reference' };
+    expect(parseCatalogMessage(value)).toBe(value);
+  });
   it.each(facts)(
     'rejects missing data for $name before persistence',
     (fact) => {

@@ -127,6 +127,40 @@ export const batchJobs = bulk.table(
   ],
 );
 
+/** Opaque private claim-check identities; Storage paths remain Bulk-owned. */
+export const contentDocuments = bulk.table(
+  'content_documents',
+  {
+    contentId: uuid('content_id').notNull(),
+    batchId: uuid('batch_id').notNull(),
+    batchOperationId: uuid('batch_operation_id').notNull(),
+    contentRef: text('content_ref').notNull(),
+    sha256: text('sha256').notNull(),
+    byteLength: integer('byte_length').notNull(),
+    contentType: text('content_type').notNull().default('application/json'),
+    createdAt: tz('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'pk_content_documents', columns: [t.contentId] }),
+    foreignKey({
+      name: 'fk_content_documents_batch_id',
+      columns: [t.batchId],
+      foreignColumns: [batchJobs.batchId],
+    }).onDelete('restrict'),
+    unique('uq_content_documents_batch_operation').on(
+      t.batchId,
+      t.batchOperationId,
+    ),
+    check('ck_content_documents_sha256', sql`${t.sha256} ~ '^[a-f0-9]{64}$'`),
+    check('ck_content_documents_byte_length', sql`${t.byteLength} > 0`),
+    check(
+      'ck_content_documents_content_type',
+      sql`${t.contentType} = 'application/json'`,
+    ),
+    index('ix_content_documents_batch_id').on(t.batchId),
+  ],
+);
+
 export const batchRows = bulk.table(
   'batch_rows',
   {
@@ -339,6 +373,7 @@ export const inbox = bulk.table(
 export const bulkSchema = {
   fileManifests,
   batchJobs,
+  contentDocuments,
   batchRows,
   rowDomainSteps,
   exportJobs,

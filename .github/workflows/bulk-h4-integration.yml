@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           docker exec "$POSTGRES_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 -c 'CREATE SCHEMA bulk'
-          for file in apps/bulk-svc/test/fixtures/0001_create_bulk_persistence.sql apps/bulk-svc/migrations/0002_export_source_snapshot.sql apps/bulk-svc/migrations/0003_export_claim_lease.sql; do
+          for file in apps/bulk-svc/test/fixtures/0001_create_bulk_persistence.sql apps/bulk-svc/migrations/0002_export_source_snapshot.sql apps/bulk-svc/migrations/0003_export_claim_lease.sql apps/bulk-svc/migrations/0004_catalog_claim_check_content.sql; do
             docker exec -i "$POSTGRES_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 < "$file"
           done
       - name: Ejecutar mensajería Bulk real
