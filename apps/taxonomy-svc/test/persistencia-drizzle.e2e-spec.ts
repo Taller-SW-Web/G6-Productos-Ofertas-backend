@@ -41,6 +41,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { connect, type Channel, type ChannelModel } from 'amqplib';
 import { TaxonomyAmqpRuntime } from '../src/domain/taxonomy-amqp.runtime.js';
+import { verificarPersistenciaServiceBus } from '../src/domain/taxonomy-service-bus.js';
 import { RabbitTaxonomyDesechable } from './rabbitmq-desechable.js';
 import request from 'supertest';
 import type { App } from 'supertest/types';
@@ -137,6 +138,89 @@ describeIntegracion(
       app = new Pool({ connectionString: urlApp });
       dbApp = drizzle(app, { schema: esquemaTaxonomia });
       repo = crearRepositorioDrizzle(urlApp);
+    });
+
+    it('registra entrega H5 con la mutación y recupera un envío ambiguo con el mismo identificador', async () => {
+      const marker = 'ROLLBACK_H5_TEST';
+      await expect(
+        drizzle(admin).transaction(async (tx) => {
+          await tx.execute(
+            sql`UPDATE taxonomy.outbox SET published_at = now() WHERE published_at IS NULL`,
+          );
+          await tx.execute(
+            sql.raw(
+              readFileSync(
+                resolve(
+                  'apps/taxonomy-svc/migrations/0006_service_bus_outbox_delivery.sql',
+                ),
+                'utf8',
+              ),
+            ),
+          );
+          const messageId = randomUUID();
+          const correlationId = randomUUID();
+          await tx.execute(sql`INSERT INTO taxonomy.outbox (message_id, event_name, kind, correlation_id, occurred_at, payload)
+            VALUES (${messageId}::uuid, 'taxonomy.category.updated', 'event', ${correlationId}::uuid, now(), '{}'::jsonb)`);
+          const delivery = await tx.execute(
+            sql`SELECT destination, published_at FROM taxonomy.outbox_delivery WHERE message_id = ${messageId}::uuid`,
+          );
+          expect(delivery.rows).toEqual([
+            expect.objectContaining({
+              destination: 'g6.catalog.from.taxonomy',
+              published_at: null,
+            }),
+          ]);
+          const database = new Database();
+          vi.spyOn(database, 'read').mockImplementation(async (query) =>
+            query(tx as unknown as NodePgDatabase),
+          );
+          await expect(
+            verificarPersistenciaServiceBus(database),
+          ).resolves.toBeUndefined();
+          await tx.execute(
+            sql.raw(`GRANT SELECT ON taxonomy.outbox_delivery TO ${ROL_APP}`),
+          );
+          await tx.execute(sql.raw(`SET LOCAL ROLE ${ROL_APP}`));
+          await expect(
+            verificarPersistenciaServiceBus(database),
+          ).rejects.toThrow('TAXONOMY_SERVICE_BUS_STORAGE_NOT_READY');
+          await tx.execute(sql`RESET ROLE`);
+          await tx.execute(
+            sql.raw(`GRANT UPDATE ON taxonomy.outbox_delivery TO ${ROL_APP}`),
+          );
+          await tx.execute(sql.raw(`SET LOCAL ROLE ${ROL_APP}`));
+          await expect(
+            verificarPersistenciaServiceBus(database),
+          ).resolves.toBeUndefined();
+          await tx.execute(sql`RESET ROLE`);
+          const store = new TaxonomyMessageStore(
+            database,
+            new DeactivationIntentService(database),
+          );
+          await expect(
+            store.publicarUnoServiceBus(async () => {
+              throw new Error('AMBIGUOUS_SEND');
+            }),
+          ).resolves.toBe('PENDIENTE');
+          await expect(
+            store.publicarUnoServiceBus(async () => undefined),
+          ).resolves.toBe('VACIO');
+          await expect(
+            store.publicarUnoServiceBus(async (row) => {
+              expect(row.message_id).toBe(messageId);
+            }),
+          ).resolves.toBe('PUBLICADO');
+          const state = await tx.execute(
+            sql`SELECT d.attempts, d.published_at, o.published_at AS legacy_published FROM taxonomy.outbox_delivery d JOIN taxonomy.outbox o USING (message_id) WHERE d.message_id = ${messageId}::uuid`,
+          );
+          expect(state.rows[0]).toMatchObject({
+            attempts: 2,
+          });
+          expect(state.rows[0]?.published_at).toBeTruthy();
+          expect(state.rows[0]?.legacy_published).toBeTruthy();
+          throw new Error(marker);
+        }),
+      ).rejects.toThrow(marker);
     });
 
     it.each([

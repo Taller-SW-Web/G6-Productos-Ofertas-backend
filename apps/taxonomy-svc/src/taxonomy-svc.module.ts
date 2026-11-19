@@ -26,6 +26,7 @@ import { ProductTypeCharacteristicService } from './domain/product-type-characte
 import { MasterDeactivationRequestService } from './domain/master-deactivation-request.service.js';
 import { DeactivationRecoveryRunner } from './domain/deactivation-integration.ports.js';
 import { TaxonomyAmqpRuntime } from './domain/taxonomy-amqp.runtime.js';
+import { TaxonomyServiceBusRuntime } from './domain/taxonomy-service-bus.js';
 import { TaxonomyMessageStore } from './persistence/taxonomy-message.store.js';
 import { MasterAdminQueryService } from './domain/master-admin-query.service.js';
 import { CharacteristicService } from './domain/characteristic.service.js';
@@ -67,6 +68,7 @@ export interface OpcionesModuloTaxonomy {
     DeactivationIntentService,
     DeactivationRecoveryRunner,
     TaxonomyAmqpRuntime,
+    TaxonomyServiceBusRuntime,
     TaxonomyMessageStore,
     MasterAdminQueryService,
     CharacteristicService,
