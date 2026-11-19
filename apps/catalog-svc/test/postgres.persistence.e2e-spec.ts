@@ -39,6 +39,7 @@ import { runData002Psql, type Data002Step } from './support/data002-psql.js';
 import { CatalogGatewayHarness } from './support/catalog-gateway-harness.js';
 import type { ProductSummary } from '../src/commercial.types.js';
 import { CatalogAmqpRuntime } from '../src/catalog-amqp.js';
+import { relayCatalogDelivery } from '../src/catalog-service-bus-relay.js';
 import { CatalogTelemetry } from '../src/catalog-telemetry.js';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import {
@@ -309,6 +310,13 @@ describe.skipIf(!dockerAvailable)(
           readFileSync(
             resolve(
               'apps/catalog-svc/migrations/0004_historical_preparation_requests.sql',
+            ),
+            'utf8',
+          ) +
+          '\nSET ROLE po_catalog_owner;\n' +
+          readFileSync(
+            resolve(
+              'apps/catalog-svc/migrations-candidate/h5/0001_outbox_delivery.sql',
             ),
             'utf8',
           ),
@@ -3246,7 +3254,10 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         },
       };
     }
-    function bulkHandler(mutations = mutationService()) {
+    function bulkHandler(
+      mutations = mutationService(),
+      contentClient?: { getDocument(reference: unknown): Promise<unknown> },
+    ) {
       const identity = new CatalogBulkIdentity(
         undefined,
         new CatalogTokenVerifier(undefined),
@@ -3254,7 +3265,12 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
       vi.spyOn(identity, 'authorization').mockResolvedValue(
         actor.authorization,
       );
-      return new CatalogBulkService(database, mutations, identity);
+      return new CatalogBulkService(
+        database,
+        mutations,
+        identity,
+        contentClient as never,
+      );
     }
     async function bulkReply(command: CatalogEnvelope) {
       return database.read(
@@ -3330,6 +3346,64 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
       expect((await bulkReply(commandConflict)).payload.code).toBe(
         'IDEMPOTENCY_CONFLICT',
       );
+    });
+    it('BULK V3: authenticates and materializes a verified claim-check before the transactional upsert', async () => {
+      const row = bulkRow();
+      const operation = randomUUID();
+      const reference = {
+        content_id: randomUUID(),
+        sha256: 'a'.repeat(64),
+        byte_length: 128,
+        content_type: 'application/json',
+      };
+      const message: CatalogEnvelope = {
+        message_id: randomUUID(),
+        schema_version: 3,
+        occurred_at: new Date().toISOString(),
+        correlation_id: randomUUID(),
+        causation_id: null,
+        operation_id: operation,
+        producer: 'bulk-svc',
+        kind: 'command',
+        name: 'catalog.bulk.upsert.requested',
+        data: {
+          batch_id: randomUUID(),
+          batch_operation_id: operation,
+          template_version: 2,
+          mode: 'ALTA',
+          content_ref: reference,
+        },
+      };
+      const contentClient = {
+        getDocument: vi.fn().mockResolvedValue({ rows: [row] }),
+      };
+      const service = bulkHandler(mutationService(), contentClient);
+      await expect(service.consume(message)).resolves.toBe('APPLIED');
+      expect(contentClient.getDocument).toHaveBeenCalledWith(reference);
+      const result = await bulkReply(message);
+      expect(result.event_name).toBe('catalog.bulk.upsert.completed');
+      expect(result.payload.results).toMatchObject([
+        { row_operation_id: row.row_operation_id, status: 'COMPLETED' },
+      ]);
+      const storedInput = await database.read((db) =>
+        db
+          .select()
+          .from(inbox)
+          .where(
+            and(
+              eq(inbox.message_id, operation),
+              eq(inbox.handler, 'catalog.bulk.command.v1'),
+            ),
+          ),
+      );
+      expect(storedInput[0]?.payload.input).toMatchObject({
+        content_ref: reference,
+      });
+      expect(
+        await database.read((db) =>
+          db.select().from(products).where(eq(products.sku_base, row.sku_base)),
+        ),
+      ).toHaveLength(1);
     });
     it('BULK: reports a real slug UNIQUE as SLUG_DUPLICADO, never SKU_DUPLICADO, and preserves replay', async () => {
       const existing = await mutationService().createProduct(
@@ -6937,6 +7011,143 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
         vi.unstubAllEnvs();
       }
     });
+    it('H5 real PostgreSQL migration: atomically fans out and recovers a crashed or ambiguous delivery', async () => {
+      const rollbackProductId = randomUUID();
+      const rollbackMessageId = randomUUID();
+      await expect(
+        database.transaction(async (tx) => {
+          await tx.execute(
+            sql`SELECT set_config('catalog.messaging_provider', 'AZURE_SERVICE_BUS', true)`,
+          );
+          await tx.execute(
+            sql`SELECT set_config('catalog.messaging_destinations', 'g6.combos.from.catalog,g6.promotions.from.catalog', true)`,
+          );
+          await tx.insert(products).values({
+            ...productInput('h5-rollback-' + randomUUID()),
+            id: rollbackProductId,
+          });
+          await tx.insert(outbox).values({
+            message_id: rollbackMessageId,
+            event_name: 'catalog.product.deactivated',
+            kind: 'event',
+            correlation_id: randomUUID(),
+            occurred_at: new Date(),
+            payload: {
+              product_id: rollbackProductId,
+              product_version: 1,
+              changed_at: new Date().toISOString(),
+            },
+          });
+          throw new Error('force transaction rollback');
+        }),
+      ).rejects.toThrow('force transaction rollback');
+      const rolledBack = await database.read((db) =>
+        db.execute(sql`
+          SELECT
+            (SELECT count(*) FROM catalog.products WHERE id = ${rollbackProductId}) AS products,
+            (SELECT count(*) FROM catalog.outbox WHERE message_id = ${rollbackMessageId}) AS messages,
+            (SELECT count(*) FROM catalog.outbox_delivery WHERE message_id = ${rollbackMessageId}) AS deliveries
+        `),
+      );
+      expect(rolledBack.rows[0]).toMatchObject({
+        products: '0',
+        messages: '0',
+        deliveries: '0',
+      });
+
+      const productId = randomUUID();
+      const messageId = randomUUID();
+      const timestamp = new Date().toISOString();
+      await database.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT set_config('catalog.messaging_provider', 'AZURE_SERVICE_BUS', true)`,
+        );
+        await tx.execute(
+          sql`SELECT set_config('catalog.messaging_destinations', 'g6.combos.from.catalog,g6.promotions.from.catalog', true)`,
+        );
+        await tx.insert(products).values({
+          ...productInput('h5-delivery-' + randomUUID()),
+          id: productId,
+        });
+        await tx.insert(outbox).values({
+          message_id: messageId,
+          event_name: 'catalog.product.deactivated',
+          kind: 'event',
+          correlation_id: randomUUID(),
+          occurred_at: new Date(timestamp),
+          payload: {
+            product_id: productId,
+            product_version: 1,
+            changed_at: timestamp,
+          },
+        });
+      });
+      const routes = await database.read((db) =>
+        db.execute<{ destination: string }>(sql`
+          SELECT destination FROM catalog.outbox_delivery
+          WHERE message_id = ${messageId} ORDER BY destination
+        `),
+      );
+      expect(routes.rows.map((row) => row.destination)).toEqual([
+        'g6.combos.from.catalog',
+        'g6.promotions.from.catalog',
+      ]);
+
+      const attempted: Array<[string, CatalogEnvelope]> = [];
+      const bus = {
+        publish: vi.fn(
+          async (destination: string, envelope: CatalogEnvelope) => {
+            attempted.push([destination, envelope]);
+            if (attempted.length === 1)
+              throw new Error('ambiguous confirmation');
+          },
+        ),
+      };
+      expect(await relayCatalogDelivery(database, bus)).toBe('RETRY');
+      await database.transaction((tx) =>
+        tx.execute(sql`
+          UPDATE catalog.outbox_delivery SET available_at = now()
+          WHERE message_id = ${messageId} AND published_at IS NULL
+        `),
+      );
+      expect(await relayCatalogDelivery(database, bus)).toBe('CONFIRMED');
+      expect(attempted[1]?.[1].message_id).toBe(attempted[0]?.[1].message_id);
+
+      // Simulate the relay process dying after claim but before publish/ack.
+      const staleLease = randomUUID();
+      await database.transaction((tx) =>
+        tx.execute(sql`
+          UPDATE catalog.outbox_delivery
+          SET attempts = attempts + 1, lease_token = ${staleLease},
+              available_at = now() + interval '60 seconds'
+          WHERE message_id = ${messageId} AND published_at IS NULL
+        `),
+      );
+      await database.transaction((tx) =>
+        tx.execute(sql`
+          UPDATE catalog.outbox_delivery SET available_at = now() - interval '1 second'
+          WHERE message_id = ${messageId} AND lease_token = ${staleLease}
+        `),
+      );
+      expect(await relayCatalogDelivery(database, bus)).toBe('CONFIRMED');
+      const staleAck = await database.transaction((tx) =>
+        tx.execute(sql`
+          UPDATE catalog.outbox_delivery SET published_at = now()
+          WHERE message_id = ${messageId} AND lease_token = ${staleLease}
+        `),
+      );
+      expect(staleAck.rowCount).toBe(0);
+      expect(await relayCatalogDelivery(database, bus)).toBe('EMPTY');
+      const completed = await database.read((db) =>
+        db.execute(sql`
+          SELECT count(*) AS count FROM catalog.outbox_delivery
+          WHERE message_id = ${messageId} AND published_at IS NOT NULL
+        `),
+      );
+      expect(completed.rows[0]?.count).toBe('2');
+      expect(bus.publish).toHaveBeenCalledTimes(3);
+    });
+
     it('keeps Outbox pending without confirm and permits parallel relays without claiming one row twice', async () => {
       const service = mutationService(),
         product = await service.createProduct(createRequest(), actor),
