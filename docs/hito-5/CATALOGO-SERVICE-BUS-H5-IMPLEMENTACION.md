@@ -1,4 +1,4 @@
-# Catalog — integración Service Bus H5
+﻿# Catalog — integración Service Bus H5
 
 ## Resumen y estado
 
@@ -15,7 +15,7 @@ Esta entrega conecta el runtime H5 local de `catalog-svc` con NestJS, valida men
 | Bulk V3 claim-check | IMPLEMENTADO por componentes; prueba endpoint/PostgreSQL aprobada; emisión sigue DESACTIVADA por defecto hasta verificar autorización y despliegue privado |
 | Azure real, RBAC, homologación y despliegue | PENDIENTE_VERIFICACION; no se ejecutó despliegue |
 
-Baseline de trabajo: Backend `master` `c5c19d3b0d19d75a9113083db89533d790b9b0a7`; Docs `master` `f0f8d123c1c9d984c90032827c6ccc94c000c7a0`, AsyncAPI `0.7.0-rc.1` (`SEMIFINAL_G6`). La rama `poma` se avanzó por fast-forward desde el master vigente. Los cambios locales preexistentes en `scripts/seed/mcp/catalog/` y el archivo no rastreado `apps/catalog-svc/prod-ca-2021.crt` se preservaron y no pertenecen a esta entrega.
+Baseline de trabajo: Backend (implementación Catalog/Bulk) SHA c0cbf4df3e8355d6b958ac114966263d1e85f721; Docs master SHA 8355815eec26825edf7f5adac85b98638551b86e; contratos AsyncAPI/OpenAPI 0.7.0-rc.1 (SEMIFINAL_G6). La fuente Docs es el repositorio canónico. Los cambios locales preexistentes en scripts/seed/mcp/catalog/ y apps/catalog-svc/prod-ca-2021.crt se preservaron y no pertenecen a esta entrega.
 
 ## Arquitectura y selección de transporte
 
@@ -47,15 +47,15 @@ Service Bus Peek-Lock
 | Relación | Mensajes | Cola/handler Catalog | Estado local | Dependencia y gate |
 |---|---|---|---|---|
 | R01 Bulk → Catalog | `catalog.bulk.upsert.requested` | `g6.catalog.from.bulk` / `CatalogBulkService.consume` | V1/V2 conservados; V3 consume `content_ref` con identidad de servicio | Endpoint Bulk y Catalog cliente probados por componentes en PostgreSQL/E2E CI; falta verificar autorización y red privada del entorno; no emitir V3 aún |
-| R04 Catalog → Bulk | `catalog.bulk.upsert.completed`, `.rejected` | `g6.bulk.from.catalog` / Outbox trigger y relay | Productor y entrega transaccional implementados; CI PostgreSQL | Consumidor/Inbox Bulk y readiness de cola siguen siendo gate externo |
-| R05 Catalog → Combos | `catalog.product.deactivated`, `catalog.sku.deactivated` | `g6.combos.from.catalog` | Productor y fan-out implementados; CI PostgreSQL | Consumer H5 Combos, RBAC y reconciliación pendientes |
-| R06 Catalog → Inventory | `catalog.sku.deactivated`, `inventory.sku.initialization.requested` | `g6.inventory.from.catalog` | Productor implementado; integración PostgreSQL CI | Consumer H5 Inventory, RBAC y aceptación de cola pendientes |
-| R07 Catalog → Pricing | `catalog.sku.deactivated`, `pricing.product.initialization.requested` | `g6.pricing.from.catalog` | Productor implementado; integración PostgreSQL CI | Consumer H5 Pricing, RBAC y aceptación de cola pendientes |
-| R08 Catalog → Promotions | `catalog.product.deactivated`, `catalog.sku.deactivated` | `g6.promotions.from.catalog` | Productor y fan-out implementados; CI PostgreSQL | Consumer H5 Promotions, RBAC y aceptación de cola pendientes |
-| R09 Catalog → Taxonomy | `catalog.master.deactivation.checked` | `g6.taxonomy.from.catalog` | Productor implementado; E2E Taxonomy–Catalog CI PASS con casos BRAND correlacionados | Consumidor H5, RBAC y habilitación de cola permanecen gate externo |
-| R11 Inventory → Catalog | `inventory.sku.initialization.completed`, `.rejected` | `g6.catalog.from.inventory` / `CatalogMessageService.consume` | Handler conectado; unitarias y E2E general CI | Productor/receiver H5 Inventory, RBAC y prueba Service Bus real pendientes |
-| R15 Pricing → Catalog | `pricing.product.initialization.completed`, `.rejected` | `g6.catalog.from.pricing` / `CatalogMessageService.consume` | Handler conectado; unitarias y E2E general CI | Productor/receiver H5 Pricing, RBAC y prueba Service Bus real pendientes |
-| R18 Taxonomy → Catalog | seis eventos Taxonomy | `g6.catalog.from.taxonomy` / handlers Taxonomy/Master | Handlers conectados; E2E Taxonomy–Catalog CI PASS y pruebas de persistencia | Productor/receiver H5 Taxonomy, RBAC y prueba Service Bus real pendientes |
+| R04 Catalog → Bulk | catalog.bulk.upsert.completed, .rejected | g6.bulk.from.catalog / Outbox trigger y relay | Productor Catalog y entrega transaccional implementados; pruebas PostgreSQL CI | Consumer/Inbox Bulk, readiness, autorización y E2E de esta relación pendientes; flujo no está habilitado |
+| R05 Catalog → Combos | catalog.product.deactivated, catalog.sku.deactivated | g6.combos.from.catalog | Productor y fan-out implementados; CI PostgreSQL | Consumer H5 Combos, RBAC y reconciliación pendientes; relación no habilitada |
+| R06 Catalog → Inventory | catalog.sku.deactivated, inventory.sku.initialization.requested | g6.inventory.from.catalog | Productor implementado; integración PostgreSQL CI | Consumer H5 Inventory por mensaje, RBAC y aceptación de cola pendientes; relación no habilitada |
+| R07 Catalog → Pricing | catalog.sku.deactivated, pricing.product.initialization.requested | g6.pricing.from.catalog | Productor implementado; integración PostgreSQL CI | Consumer H5 Pricing por mensaje, RBAC y aceptación de cola pendientes; relación no habilitada |
+| R08 Catalog → Promotions | catalog.product.deactivated, catalog.sku.deactivated | g6.promotions.from.catalog | Productor y fan-out implementados; CI PostgreSQL | Consumer H5 Promotions, RBAC y aceptación de cola pendientes; relación no habilitada |
+| R09 Catalog → Taxonomy | catalog.master.deactivation.checked | g6.taxonomy.from.catalog | Productor implementado; persistencia Outbox/relay validada en PostgreSQL | No confundir con E2E entrante R18; consumidor/handler Taxonomy, RBAC y prueba de esta relación pendientes |
+| R11 Inventory → Catalog | inventory.sku.initialization.completed, .rejected | g6.catalog.from.inventory / CatalogMessageService.consume | Handlers de aplicación existentes | E2E aislado Taxonomy–Catalog no prueba Inventory→Catalog; productor/receiver H5 Inventory, autorización y prueba del flujo pendientes |
+| R15 Pricing → Catalog | pricing.product.initialization.completed, .rejected | g6.catalog.from.pricing / CatalogMessageService.consume | Handlers de aplicación existentes | E2E Taxonomy–Catalog no prueba Pricing→Catalog; productor/receiver H5 Pricing, autorización y prueba del flujo pendientes |
+| R18 Taxonomy → Catalog | seis eventos Taxonomy | g6.catalog.from.taxonomy / handlers Taxonomy/Master | Handlers conectados; CI E2E Taxonomy–Catalog PASS y persistencia PostgreSQL | Prueba aislada, no Azure Service Bus real; productores/identidad y activación por ambiente pendientes |
 
 `catalog.product.deactivated` y `catalog.sku.deactivated` se guardan juntos cuando un producto simple se da de baja. El SKU vendible se obtiene de `catalog.sku_identity`; no se copia `sku_base`. Para variantes, solo se emite el SKU cambiado y el evento de producto solo si el padre transiciona.
 
@@ -85,18 +85,18 @@ El receptor admite `Uint8Array` (incluido Buffer), cadena JSON y objeto JSON dec
 
 | Prueba | Comando | Resultado en esta entrega | Ambiente/límite |
 |---|---|---|---|
-| Contratos, taxonomy y V3 Catalog | `npx vitest run apps/catalog-svc/src/catalog-taxonomy-update.spec.ts apps/catalog-svc/src/catalog-messages.spec.ts apps/catalog-svc/src/catalog-bulk.spec.ts apps/catalog-svc/src/catalog-bulk-content.spec.ts apps/bulk-svc/src/messaging/catalog-bulk-upsert.spec.ts apps/bulk-svc/src/auth/bulk-service-bearer.guard.spec.ts` | PASS (6 archivos, 111 pruebas) | Local, SHA de implementación `e55009e51542dccb958a635a5406c34a6016cd7e` |
-| TypeScript | `npm run typecheck` | PASS | Local, SHA de implementación anterior |
-| Formato requerido | `npm run format:check` | PASS | Local y CI sobre el SHA de implementación |
-| CI Backend principal | `gh workflow run ci.yml --ref poma -f mode=ci` | unitarias, typecheck, lint, formato, build, contratos, E2E general y Taxonomy–Catalog: PASS | GitHub Actions run `44537701006`, SHA `e55009e51542dccb958a635a5406c34a6016cd7e`; validación de imágenes al momento de editar |
-| E2E Taxonomy–Catalog, barrera BRAND | Job `Probar E2E aislado Taxonomy y Catalog` | PASS; evidencia `result=PASS`, árbol Catalog/Taxonomy y barrera BRAND correlacionada | Run `44537701006`, job `135607430566`; artefacto `taxonomy-catalog-e2e-e55009e51542dccb958a635a5406c34a6016cd7e` |
-| Persistencia/relay Catalog PostgreSQL 17 | `npm run test:e2e` (incluye `apps/catalog-svc/test/postgres.persistence.e2e-spec.ts`) | PASS (100 pruebas PostgreSQL; total E2E 1.048 aprobadas, 268 saltadas por opt-in) | Run `44537701006`, job `135607430630`; Docker PostgreSQL 17 desechable y OpenSSL en runner |
-| Atomicidad, rollback, fan-out, caída tras claim, lease vencido, redelivery y recuperación | Caso `H5 real PostgreSQL migration` dentro de `postgres.persistence.e2e-spec.ts` | PASS incluido en las 100 pruebas PostgreSQL; migración candidata aplicada a la base descartable | Mismo run/job de E2E; no mocks para la base/trigger/relay |
-| Bulk V3 endpoint + persistencia | `apps/bulk-svc/test/bulk-postgres-outage.e2e-spec.ts` dentro de `npm run test:e2e` | PASS (3 pruebas, incluye descarga autenticada y verificación de bytes/hash/longitud); test Storage local de prueba | Run `44537701006`, job E2E general `135607430630` |
-| Bulk relay contra PostgreSQL y RabbitMQ descartables | `npm run test:e2e -- apps/bulk-svc/test/bulk-messaging.e2e-spec.ts` | PASS (16 pruebas) | Run `44537744565`, PostgreSQL de servicio; no es Azure real |
-| Azure Service Bus, Managed Identity y RBAC de ambiente | No ejecutada | PENDIENTE_VERIFICACION | No se proporcionó namespace ni ambiente autorizado |
+| Unitarias Backend | npm run test:unit | PASS: 226 archivos, 2 omitidos; 2.649 pruebas aprobadas, 73 omitidas | GitHub Actions run 44540453944; Backend SHA c0cbf4df3e8355d6b958ac114966263d1e85f721 |
+| TypeScript/build/lint/contracts | CI principal | PASS | GitHub Actions run 44540453944; Backend SHA c0cbf4df3e8355d6b958ac114966263d1e85f721 |
+| Formato requerido | npm run format:check | PASS | GitHub Actions run 44540453944; Backend SHA c0cbf4df3e8355d6b958ac114966263d1e85f721 |
+| CI Backend principal | Workflow ci.yml manual | Todos los jobs obligatorios PASS: unitarias, typecheck, lint, formato, build, contratos, E2E, PostgreSQL, Taxonomy–Catalog e imágenes; benchmark opt-in omitido | [Run 44540453944](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/44540453944); Backend SHA c0cbf4df3e8355d6b958ac114966263d1e85f721 |
+| E2E Taxonomy–Catalog, barrera BRAND | Job Probar E2E aislado Taxonomy y Catalog | PASS; suite completa y barrera BRAND correlacionada. La causa del timeout fue rechazar causation_id ausente, opcional por AsyncAPI; parser corregido sin debilitar validaciones de eventos | Run 44540453944, job 135617061351; PostgreSQL/RabbitMQ de prueba, sin Azure real |
+| Persistencia/relay Catalog PostgreSQL 17 | apps/catalog-svc/test/postgres.persistence.e2e-spec.ts | PASS (100 pruebas PostgreSQL), incluye migración/relay | Run 44540453944, job E2E 135617060323; PostgreSQL 17 Docker desechable |
+| Atomicidad, rollback, fan-out, caída tras claim, lease vencido, redelivery y recuperación | Caso H5 real PostgreSQL migration en postgres.persistence.e2e-spec.ts | PASS en PostgreSQL real; no mocks para base, trigger ni relay | Run 44540453944, job E2E 135617060323 |
+| Bulk V3 endpoint + persistencia | apps/bulk-svc/test/bulk-postgres-outage.e2e-spec.ts y casos de integridad Catalog/Bulk | PASS en CI: bytes, Content-Length, SHA-256, identidad y hash/longitud incorrectos cubiertos | Run 44540453944, Backend SHA c0cbf4d; Storage de prueba, no Azure/Supabase real |
+| Bulk relay contra PostgreSQL y RabbitMQ descartables | workflow Bulk H4 integration | PASS (16 pruebas) | [Run 44537744565](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/44537744565); código Bulk SHA e55009e51542dccb958a635a5406c34a6016cd7e; no es Azure real |
+| Azure Service Bus, Managed Identity y RBAC de ambiente | No ejecutada | PENDIENTE_VERIFICACION | No se proporcionó namespace ni ambiente autorizado; Bulk V3 sigue desactivado |
 
-El run CI automático de la Draft dejó sus jobs `skipped`; por eso se inició el workflow manual `ci.yml` sobre el SHA de implementación y el flujo Bulk separado. La evidencia CI citada se ejecuta sobre el commit de código `e55009e...`; cualquier commit posterior que solo actualice este documento debe conservar esa distinción. La suite local completa no se toma como evidencia: falló en este equipo por ausencia de OpenSSL/Docker y bloqueo de loopback; la suite de CI con PostgreSQL real sí pasó. Azure real, homologación, RBAC de despliegue y despliegue no se probaron.
+El run CI automático asociado a la Draft omitió jobs; por eso se ejecutó CI manual completo en el SHA de código c0cbf4df3e8355d6b958ac114966263d1e85f721. La integración Bulk/PostgreSQL/RabbitMQ del SHA e55009e51542dccb958a635a5406c34a6016cd7e valida esa implementación; CI posterior en c0cbf4d añade las pruebas explícitas de integridad. La suite local completa no se toma como evidencia: falló por ausencia de OpenSSL/Docker y bloqueo de loopback; CI con PostgreSQL real sí pasó. Azure real, homologación, RBAC de despliegue y despliegue no se probaron.
 
 ## Preflight, habilitación y reversión
 
