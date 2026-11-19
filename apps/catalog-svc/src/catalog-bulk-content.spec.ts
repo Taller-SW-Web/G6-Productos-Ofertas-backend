@@ -81,4 +81,22 @@ describe('Catalog private Bulk V3 claim-check client', () => {
     await expect(client().getDocument(reference())).rejects.toThrow();
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
+
+  it('rejects same-length tampered bytes even when headers match the reference', async () => {
+    const tampered = Buffer.from('{"rows":""}', 'utf8');
+    expect(tampered).toHaveLength(bytes.length);
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(tampered, {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'content-length': String(bytes.length),
+            'x-content-sha256': digest,
+          },
+        }),
+    );
+    await expect(client().getDocument(reference())).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
 });
