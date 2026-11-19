@@ -59,7 +59,8 @@ export function readCatalogH5Destinations(
         !catalogDestinationQueues.includes(
           destination as (typeof catalogDestinationQueues)[number],
         ),
-    ) || new Set(destinations).size !== destinations.length
+    ) ||
+    new Set(destinations).size !== destinations.length
   )
     throw new Error('CATALOG_H5_DESTINATIONS inválido.');
   return destinations;

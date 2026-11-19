@@ -33,12 +33,18 @@ describe('Catalog Service Bus candidate', () => {
     const value = { message_id: 'stable', data: { sku: 'SKU-1' } };
     const bytes = Buffer.from(JSON.stringify(value));
     expect(normalizeCatalogServiceBusBody(bytes)).toEqual(value);
-    expect(normalizeCatalogServiceBusBody(bytes.toString('utf8'))).toEqual(value);
+    expect(normalizeCatalogServiceBusBody(bytes.toString('utf8'))).toEqual(
+      value,
+    );
     expect(normalizeCatalogServiceBusBody(value)).toBe(value);
     expect(() => normalizeCatalogServiceBusBody('{invalid')).toThrow();
-    expect(() => normalizeCatalogServiceBusBody(new Uint8Array([0xff]))).toThrow();
+    expect(() =>
+      normalizeCatalogServiceBusBody(new Uint8Array([0xff])),
+    ).toThrow();
     expect(() => normalizeCatalogServiceBusBody([])).toThrow();
-    expect(() => normalizeCatalogServiceBusBody('x'.repeat(256 * 1024 + 1))).toThrow();
+    expect(() =>
+      normalizeCatalogServiceBusBody('x'.repeat(256 * 1024 + 1)),
+    ).toThrow();
   });
   it('defaults to the existing provider and refuses simultaneous activation', () => {
     expect(createCatalogServiceBus({})).toBeUndefined();
@@ -54,7 +60,8 @@ describe('Catalog Service Bus candidate', () => {
     expect(readCatalogH5Destinations({})).toEqual([]);
     expect(
       readCatalogH5Destinations({
-        CATALOG_H5_DESTINATIONS: 'g6.pricing.from.catalog, g6.bulk.from.catalog',
+        CATALOG_H5_DESTINATIONS:
+          'g6.pricing.from.catalog, g6.bulk.from.catalog',
       }),
     ).toEqual(['g6.pricing.from.catalog', 'g6.bulk.from.catalog']);
     expect(() =>

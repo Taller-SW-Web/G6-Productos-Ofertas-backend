@@ -246,14 +246,21 @@ export function parseCatalogMessage(value: unknown): CatalogEnvelope {
     !object(value) ||
     !UUID.test(String(value.message_id)) ||
     !UUID.test(String(value.correlation_id)) ||
-    (value.causation_id !== null && !UUID.test(String(value.causation_id))) ||
-    (value.operation_id !== null && !UUID.test(String(value.operation_id))) ||
+    (value.causation_id !== undefined &&
+      value.causation_id !== null &&
+      typeof value.causation_id !== 'string') ||
+    (value.operation_id !== undefined &&
+      value.operation_id !== null &&
+      (typeof value.operation_id !== 'string' ||
+        !UUID.test(value.operation_id))) ||
     (value.schema_version !== 1 &&
       !(
         (value.name === 'catalog.bulk.upsert.requested' ||
           value.name === 'inventory.sku.initialization.completed' ||
           value.name === 'inventory.sku.initialization.rejected') &&
-        value.schema_version === 2
+        (value.schema_version === 2 ||
+          (value.name === 'catalog.bulk.upsert.requested' &&
+            value.schema_version === 3))
       )) ||
     typeof value.occurred_at !== 'string' ||
     !Number.isFinite(Date.parse(value.occurred_at)) ||
@@ -284,6 +291,31 @@ export function parseCatalogMessage(value: unknown): CatalogEnvelope {
             : 'event')
   )
     throw new InvalidCatalogMessage();
+  if (
+    value.name === 'catalog.bulk.upsert.requested' &&
+    value.schema_version === 3
+  ) {
+    const data = value.data;
+    const reference = data.content_ref;
+    if (
+      Object.keys(data).length !== 5 ||
+      !UUID.test(String(data.batch_id)) ||
+      !UUID.test(String(data.batch_operation_id)) ||
+      (value.operation_id != null &&
+        data.batch_operation_id !== value.operation_id) ||
+      data.template_version !== 2 ||
+      !['ALTA', 'ACTUALIZACION'].includes(String(data.mode)) ||
+      !object(reference) ||
+      Object.keys(reference).length !== 4 ||
+      !UUID.test(String(reference.content_id)) ||
+      typeof reference.sha256 !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(reference.sha256) ||
+      !Number.isSafeInteger(reference.byte_length) ||
+      Number(reference.byte_length) < 1 ||
+      reference.content_type !== 'application/json'
+    )
+      throw new InvalidCatalogMessage();
+  }
   if (value.name.startsWith('taxonomy.master.')) {
     assertMasterData(value.data, value.operation_id);
     if (value.data.entity_type === 'PRODUCT_TYPE_CHARACTERISTIC') {
@@ -323,7 +355,8 @@ export function parseCatalogMessage(value: unknown): CatalogEnvelope {
       : 'REJECTED';
     if (
       !UUID.test(String(value.operation_id)) ||
-      !UUID.test(String(value.causation_id)) ||
+      typeof value.causation_id !== 'string' ||
+      value.causation_id.length === 0 ||
       typeof d.product_id !== 'string' ||
       !d.product_id ||
       d.status !== status ||
