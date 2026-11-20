@@ -7,6 +7,56 @@ import {
   DashboardUbicacion,
 } from '../types/inventory.dto.js';
 
+export interface AlertaStockInterna {
+  alertaId: string;
+  sku: string;
+  ubicacion: {
+    locationId: string;
+    codigo: string;
+    nombre: string;
+    tipo: string;
+  };
+  estado: 'AGOTADO' | 'STOCK_BAJO';
+  available: number;
+  umbralEfectivo: number;
+  observadoEn: string;
+  targetRoute: string;
+}
+
+export interface ListadoAlertasInternasResponse {
+  items: AlertaStockInterna[];
+  meta: {
+    pagina: number;
+    tamanio: number;
+    total: number;
+    totalPaginas: number;
+  };
+}
+
+export interface UbicacionInterna {
+  id: string;
+  code: string;
+  name: string;
+  type: string;
+  active: boolean;
+}
+
+export interface UbicacionesInternasQuery {
+  pagina?: number | string;
+  tamanio?: number | string;
+  soloActivas?: boolean | string;
+}
+
+export interface ListadoUbicacionesInternasResponse {
+  items: UbicacionInterna[];
+  meta: {
+    pagina: number;
+    tamanio: number;
+    total: number;
+    totalPaginas: number;
+  };
+}
+
 type EstadoStock = 'DISPONIBLE' | 'STOCK_BAJO' | 'AGOTADO';
 
 interface SaldoFisicoRow {
@@ -76,10 +126,10 @@ const DASHBOARD_AGGREGATE_SQL = `
     SELECT
       balance.sku_id,
       balance.location_id,
-      balance.on_hand,
-      balance.reserved,
-      balance.blocked,
-      balance.available,
+      COALESCE(balance.on_hand, 0)::integer AS on_hand,
+      COALESCE(balance.reserved, 0)::integer AS reserved,
+      COALESCE(balance.blocked, 0)::integer AS blocked,
+      GREATEST(COALESCE(balance.on_hand, 0) - COALESCE(balance.reserved, 0) - COALESCE(balance.blocked, 0), 0)::integer AS available,
       COALESCE(sku_threshold.umbral_efectivo, global_threshold.umbral_efectivo, $3)::integer AS threshold
     FROM inventory.stock_balance AS balance
     LEFT JOIN sku_threshold
@@ -230,8 +280,12 @@ export class DashboardService {
         const classified = `WITH saldo AS (
           SELECT s.sku_id AS sku, l.id AS "locationId", l.code AS "locationCode",
                  l.name AS "locationName", l.type AS "locationType", l.active AS "locationActive",
-                 sl.active AS "skuActivo", s.on_hand AS "onHand", s.reserved, s.blocked,
-                 s.available, s.stock_version::text AS "stockVersion", s.updated_at AS "updatedAt",
+                 sl.active AS "skuActivo",
+                 COALESCE(s.on_hand, 0) AS "onHand",
+                 COALESCE(s.reserved, 0) AS reserved,
+                 COALESCE(s.blocked, 0) AS blocked,
+                 GREATEST(COALESCE(s.on_hand, 0) - COALESCE(s.reserved, 0) - COALESCE(s.blocked, 0), 0) AS available,
+                 s.stock_version::text AS "stockVersion", s.updated_at AS "updatedAt",
                  COALESCE(
                    (SELECT t.umbral_efectivo FROM inventory.stock_threshold_override t
                     WHERE t.sku_id = s.sku_id AND t.location_id IS NULL),
@@ -293,6 +347,296 @@ export class DashboardService {
     });
     return {
       items,
+      meta: {
+        pagina,
+        tamanio,
+        total,
+        totalPaginas: Math.ceil(total / tamanio),
+      },
+    };
+  }
+
+  /**
+   * Extensión interna INV-H01 (SPEC-016): Alertas operativas derivadas exclusivamente
+   * de saldos confirmados (stock_balance + locations activas + stock_threshold_override).
+   *
+   * Reglas vinculantes:
+   * 1. Solo emite alertas para estados AGOTADO (available = 0) y STOCK_BAJO (0 < available <= umbralEfectivo).
+   * 2. Exige ubicaciones activas (locations.active = true).
+   * 3. No genera alertas para saldos no observados ni inventa filas de alerta en base de datos.
+   * 4. Identidad determinista y estable: `${sku}:${locationId}:${estado}`.
+   * 5. Snapshot tomado una sola vez al inicio de la consulta.
+   * 6. Núcleo interno: el endpoint HTTP permanece apagado hasta autorización contractual de Castilla.
+   */
+  async obtenerAlertasInternas(
+    query: Record<string, unknown> = {},
+    correlationId?: string,
+  ): Promise<ListadoAlertasInternasResponse> {
+    const invalid = (msg?: string) =>
+      ProblemDetailsException.validation(
+        msg ?? 'Parámetros de consulta de alertas inválidos',
+        correlationId,
+      );
+
+    if (
+      Object.keys(query).some(
+        (key) =>
+          !['sku', 'locationId', 'estado', 'pagina', 'tamanio'].includes(key),
+      )
+    ) {
+      throw invalid(
+        'Usar únicamente sku, locationId, estado, pagina o tamanio',
+      );
+    }
+
+    const { sku, locationId, estado } = query;
+    if (
+      estado !== undefined &&
+      estado !== 'STOCK_BAJO' &&
+      estado !== 'AGOTADO'
+    ) {
+      throw invalid(
+        'El filtro de estado de alertas solo admite STOCK_BAJO o AGOTADO',
+      );
+    }
+
+    if (
+      (sku !== undefined &&
+        (typeof sku !== 'string' || !sku.trim() || sku.includes('\0'))) ||
+      (locationId !== undefined &&
+        (typeof locationId !== 'string' ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            locationId,
+          )))
+    ) {
+      throw invalid('sku o locationId con formato inválido');
+    }
+
+    const positiveInt = (value: unknown, fallback: number, max: number) => {
+      if (value === undefined) return fallback;
+      if (
+        typeof value !== 'string' ||
+        !/^[1-9]\d*$/.test(value) ||
+        Number(value) > max
+      )
+        throw invalid('Valores de paginación deben ser enteros positivos');
+      return Number(value);
+    };
+
+    const tamanio = positiveInt(query.tamanio, 20, 100);
+    const pagina = positiveInt(
+      query.pagina,
+      1,
+      Math.floor(Number.MAX_SAFE_INTEGER / tamanio),
+    );
+
+    const snapshotTime = new Date().toISOString();
+    const defaultThreshold = loadInventoryConfig().defaultLowStockThreshold;
+    const params = [
+      sku ?? null,
+      locationId ?? null,
+      defaultThreshold,
+      estado ?? null,
+    ];
+
+    const unavailable = () =>
+      new ProblemDetailsException({
+        type: '/errores/servicio-no-disponible',
+        title: 'Servicio no disponible',
+        status: 503,
+        code: 'SERVICIO_NO_DISPONIBLE',
+        correlationId,
+      });
+
+    const { rows, total } = await this.database
+      .transaction(async (tx) => {
+        await tx.query(
+          'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY',
+        );
+        const classified = `WITH saldo AS (
+          SELECT s.sku_id AS sku, l.id AS "locationId", l.code AS "locationCode",
+                 l.name AS "locationName", l.type AS "locationType", l.active AS "locationActive",
+                 COALESCE(s.on_hand, 0) AS "onHand",
+                 COALESCE(s.reserved, 0) AS reserved,
+                 COALESCE(s.blocked, 0) AS blocked,
+                 GREATEST(COALESCE(s.on_hand, 0) - COALESCE(s.reserved, 0) - COALESCE(s.blocked, 0), 0) AS available,
+                 COALESCE(
+                   (SELECT t.umbral_efectivo FROM inventory.stock_threshold_override t
+                    WHERE t.sku_id = s.sku_id AND t.location_id IS NULL),
+                   global_threshold.umbral_efectivo, $3::int
+                 ) AS "umbralEfectivo"
+          FROM inventory.stock_balance s
+          JOIN inventory.locations l ON l.id = s.location_id
+          LEFT JOIN inventory.stock_threshold_override global_threshold
+            ON global_threshold.sku_id IS NULL AND global_threshold.location_id IS NULL
+          WHERE l.active = true
+            AND ($1::text IS NULL OR s.sku_id = $1)
+            AND ($2::uuid IS NULL OR s.location_id = $2)
+        ), clasificado AS (
+          SELECT saldo.*, CASE
+            WHEN available = 0 THEN 'AGOTADO'
+            WHEN available <= "umbralEfectivo" THEN 'STOCK_BAJO'
+            ELSE 'DISPONIBLE'
+          END AS estado FROM saldo
+        )`;
+        const filter =
+          "FROM clasificado WHERE estado IN ('AGOTADO', 'STOCK_BAJO') AND ($4::text IS NULL OR estado = $4)";
+        const { rows: counts } = await tx.query<{ total: string }>(
+          `${classified} SELECT count(*)::text AS total ${filter}`,
+          params,
+        );
+        const { rows } = await tx.query<{
+          sku: string;
+          locationId: string;
+          locationCode: string;
+          locationName: string;
+          locationType: string;
+          available: number;
+          umbralEfectivo: number;
+          estado: 'AGOTADO' | 'STOCK_BAJO';
+        }>(
+          `${classified} SELECT sku, "locationId", "locationCode", "locationName", "locationType", available, "umbralEfectivo", estado ${filter} ORDER BY sku, "locationId" LIMIT $5 OFFSET $6`,
+          [...params, tamanio, (pagina - 1) * tamanio],
+        );
+        return { rows, total: Number(counts[0]?.total ?? 0) };
+      })
+      .catch(() => {
+        throw unavailable();
+      });
+
+    if (!Number.isSafeInteger(total) || total < 0) throw unavailable();
+
+    const items: AlertaStockInterna[] = rows.map((row) => ({
+      alertaId: `${row.sku}:${row.locationId}:${row.estado}`,
+      sku: row.sku,
+      ubicacion: {
+        locationId: row.locationId,
+        codigo: row.locationCode,
+        nombre: row.locationName,
+        tipo: row.locationType,
+      },
+      estado: row.estado,
+      available: row.available,
+      umbralEfectivo: row.umbralEfectivo,
+      observadoEn: snapshotTime,
+      targetRoute: `/inventario?sku=${encodeURIComponent(row.sku)}&locationId=${encodeURIComponent(row.locationId)}`,
+    }));
+
+    return {
+      items,
+      meta: {
+        pagina,
+        tamanio,
+        total,
+        totalPaginas: Math.ceil(total / tamanio),
+      },
+    };
+  }
+
+  /**
+   * Extensión interna INV-H02 (SPEC-016): Lectura autoritativa de ubicaciones físicas
+   * desde la tabla oficial `inventory.locations`.
+   *
+   * Reglas vinculantes:
+   * 1. Fuente única autoritativa: inventory.locations (no tabla duplicada ni nombres sintéticos).
+   * 2. Respetar unicidad de código, campos reales (id, code, name, type, active).
+   * 3. Semántica de `soloActivas`:
+   *    - true / "true": solamente ubicaciones activas.
+   *    - false / "false" o ausente: todas las ubicaciones.
+   * 4. Paginación server-side (pagina=1, tamanio=20 por defecto, max 100).
+   * 5. Orden determinista por código y nombre.
+   * 6. Conteo y lectura en transacción de snapshot consistente (REPEATABLE READ READ ONLY).
+   * 7. Núcleo interno: el endpoint HTTP permanece apagado hasta autorización contractual de Castilla.
+   */
+  async obtenerUbicacionesInternas(
+    query: UbicacionesInternasQuery = {},
+    correlationId?: string,
+  ): Promise<ListadoUbicacionesInternasResponse> {
+    const invalid = (msg?: string) =>
+      ProblemDetailsException.validation(
+        msg ?? 'Parámetros de consulta de ubicaciones inválidos',
+        correlationId,
+      );
+
+    const allowedKeys = new Set(['pagina', 'tamanio', 'soloActivas']);
+    for (const key of Object.keys(query)) {
+      if (!allowedKeys.has(key)) {
+        throw invalid(`Filtro no permitido: ${key}`);
+      }
+    }
+
+    if (
+      query.soloActivas !== undefined &&
+      typeof query.soloActivas !== 'boolean' &&
+      query.soloActivas !== 'true' &&
+      query.soloActivas !== 'false'
+    ) {
+      throw invalid('Valor de soloActivas inválido');
+    }
+
+    const positiveInt = (value: unknown, fallback: number, max: number) => {
+      if (value === undefined) return fallback;
+      if (
+        (typeof value !== 'string' && typeof value !== 'number') ||
+        !/^[1-9]\d*$/.test(String(value)) ||
+        Number(value) > max
+      )
+        throw invalid('Valores de paginación deben ser enteros positivos');
+      return Number(value);
+    };
+
+    const tamanio = positiveInt(query.tamanio, 20, 100);
+    const pagina = positiveInt(
+      query.pagina,
+      1,
+      Math.floor(Number.MAX_SAFE_INTEGER / tamanio),
+    );
+
+    const soloActivas =
+      query.soloActivas === true || query.soloActivas === 'true';
+
+    const unavailable = () =>
+      new ProblemDetailsException({
+        type: '/errores/servicio-no-disponible',
+        title: 'Servicio no disponible',
+        status: 503,
+        code: 'SERVICIO_NO_DISPONIBLE',
+        correlationId,
+      });
+
+    const { rows, total } = await this.database
+      .transaction(async (tx) => {
+        await tx.query(
+          'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY',
+        );
+        const filter = soloActivas ? 'WHERE active = true' : '';
+        const { rows: counts } = await tx.query<{ total: string }>(
+          `SELECT count(*)::text AS total FROM inventory.locations ${filter}`,
+        );
+        const { rows } = await tx.query<UbicacionInterna>(
+          `SELECT id, code, name, type, active
+           FROM inventory.locations
+           ${filter}
+           ORDER BY code ASC, name ASC
+           LIMIT $1 OFFSET $2`,
+          [tamanio, (pagina - 1) * tamanio],
+        );
+        return { rows, total: Number(counts[0]?.total ?? 0) };
+      })
+      .catch(() => {
+        throw unavailable();
+      });
+
+    if (!Number.isSafeInteger(total) || total < 0) throw unavailable();
+
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        code: r.code,
+        name: r.name,
+        type: r.type,
+        active: Boolean(r.active),
+      })),
       meta: {
         pagina,
         tamanio,
