@@ -136,7 +136,9 @@ describe('DashboardService — Lectura interna de ubicaciones (Extensión H02 / 
     });
 
     await expect(
-      service.obtenerUbicacionesInternas({ soloActivas: 'cualquierCosa' as any }),
+      service.obtenerUbicacionesInternas({
+        soloActivas: 'cualquierCosa' as any,
+      }),
     ).rejects.toMatchObject({
       problem: { status: 400, code: 'VALIDACION' },
     });

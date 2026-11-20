@@ -659,7 +659,9 @@ export class InMemoryDatabaseMock implements IDatabaseService {
         // Cálculo seguro de disponibilidad según componentes físicos (Marco P1)
         const available = Math.max(
           0,
-          Number(b.on_hand ?? 0) - Number(b.reserved ?? 0) - Number(b.blocked ?? 0),
+          Number(b.on_hand ?? 0) -
+            Number(b.reserved ?? 0) -
+            Number(b.blocked ?? 0),
         );
         const estado =
           available === 0
@@ -716,7 +718,10 @@ export class InMemoryDatabaseMock implements IDatabaseService {
       }
 
       if (s.includes('COUNT(*)')) {
-        return { rows: [{ total: String(filtered.length) }] as any, rowCount: 1 };
+        return {
+          rows: [{ total: String(filtered.length) }] as any,
+          rowCount: 1,
+        };
       }
 
       if (s.includes('ORDER BY CODE ASC')) {

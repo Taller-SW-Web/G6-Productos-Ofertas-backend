@@ -3913,7 +3913,7 @@ GRANT inventory_app TO inventory_test;`,
     const skuNormal = `${runTag}-SKU-NORMAL`;
     const skuLow = `${runTag}-SKU-LOW`;
     const skuAgotado = `${runTag}-SKU-AGOTADO`;
-    const skuNullAvailable = `${runTag}-SKU-NULL-AVAIL`;
+    const skuZeroPhysical = `${runTag}-SKU-ZERO-PHYS`;
     const skuExactThreshold = `${runTag}-SKU-EXACT-THRESH`;
     const skuOverride = `${runTag}-SKU-OVERRIDE`;
     const skuInactiveLoc = `${runTag}-SKU-INACTIVE-LOC`;
@@ -3950,22 +3950,25 @@ GRANT inventory_app TO inventory_test;`,
         [overrideId, skuOverride],
       );
 
-      // 3. Insertar saldos de stock para pruebas de alertas y disponibilidad
+      // 3. Insertar saldos de stock para pruebas de alertas y disponibilidad.
+      // IMPORTANTE: "available" es columna GENERATED ALWAYS en PostgreSQL; no se puede insertar.
+      // PostgreSQL la calcula como GREATEST(0, on_hand - reserved - blocked).
+      // on_hand, reserved y blocked son NOT NULL con restricciones no negativas.
       await database.query(
-        `INSERT INTO inventory.stock_balance (sku_id, location_id, on_hand, reserved, blocked, available)
+        `INSERT INTO inventory.stock_balance (sku_id, location_id, on_hand, reserved, blocked)
          VALUES
-           ($1, $7, 30, 0, 0, 30),
-           ($2, $7, 5, 0, 0, 5),
-           ($3, $7, 0, 0, 0, 0),
-           ($4, $7, 0, 0, 0, NULL),
-           ($5, $7, 10, 0, 0, 10),
-           ($6, $7, 4, 0, 0, 4),
-           ($8, $9, 1, 0, 0, 1)`,
+           ($1, $7, 30, 0, 0),
+           ($2, $7,  5, 0, 0),
+           ($3, $7,  0, 0, 0),
+           ($4, $7,  0, 0, 0),
+           ($5, $7, 10, 0, 0),
+           ($6, $7,  4, 0, 0),
+           ($8, $9,  1, 0, 0)`,
         [
           skuNormal,
           skuLow,
           skuAgotado,
-          skuNullAvailable,
+          skuZeroPhysical,
           skuExactThreshold,
           skuOverride,
           activeLocId,
@@ -3998,7 +4001,7 @@ GRANT inventory_app TO inventory_test;`,
       const skus = res.items.map((i) => i.sku);
       expect(skus).toContain(skuLow);
       expect(skus).toContain(skuAgotado);
-      expect(skus).toContain(skuNullAvailable);
+      expect(skus).toContain(skuZeroPhysical);
       expect(skus).toContain(skuExactThreshold);
       expect(skus).not.toContain(skuNormal);
       expect(skus).not.toContain(skuOverride);
@@ -4016,9 +4019,19 @@ GRANT inventory_app TO inventory_test;`,
       expect(exactAlert.umbralEfectivo).toBe(10);
     });
 
-    it('clasifica de forma segura registros con available=NULL en PostgreSQL sin convertirlos en DISPONIBLE', async () => {
+    it('verifica que PostgreSQL calcula available como columna generada (GREATEST(0, on_hand-reserved-blocked)) y clasifica AGOTADO cuando stock físico es cero', async () => {
+      // available es GENERATED ALWAYS AS en PostgreSQL — no se puede insertar.
+      // Con on_hand=0, reserved=0, blocked=0 → available generado = 0 → AGOTADO.
+      // Este test confirma que el valor generado por PG coincide con la clasificación del servicio.
+      const generatedRow = await database.query<{ available: number }>(
+        `SELECT available FROM inventory.stock_balance
+         WHERE sku_id = $1 AND location_id = $2`,
+        [skuZeroPhysical, activeLocId],
+      );
+      expect(generatedRow.rows[0].available).toBe(0);
+
       const res = await dashService.obtenerAlertasInternas({
-        sku: skuNullAvailable,
+        sku: skuZeroPhysical,
         locationId: activeLocId,
       });
 
@@ -4026,7 +4039,7 @@ GRANT inventory_app TO inventory_test;`,
       expect(res.items[0].estado).toBe('AGOTADO');
       expect(res.items[0].available).toBe(0);
       expect(res.items[0].targetRoute).toBe(
-        `/inventario?sku=${encodeURIComponent(skuNullAvailable)}&locationId=${encodeURIComponent(activeLocId)}`,
+        `/inventario?sku=${encodeURIComponent(skuZeroPhysical)}&locationId=${encodeURIComponent(activeLocId)}`,
       );
     });
 
@@ -4078,7 +4091,9 @@ GRANT inventory_app TO inventory_test;`,
         problem: { status: 400, code: 'VALIDACION' },
       });
       await expect(
-        dashService.obtenerAlertasInternas({ filtroInexistente: 'test' } as any),
+        dashService.obtenerAlertasInternas({
+          filtroInexistente: 'test',
+        } as any),
       ).rejects.toMatchObject({
         problem: { status: 400, code: 'VALIDACION' },
       });
@@ -4124,14 +4139,20 @@ GRANT inventory_app TO inventory_test;`,
         soloActivas: false,
         tamanio: 100,
       });
-      expect(todasFalse.items.find((u) => u.id === inactiveLocId)).toBeDefined();
+      expect(
+        todasFalse.items.find((u) => u.id === inactiveLocId),
+      ).toBeDefined();
       expect(todasFalse.items.find((u) => u.id === activeLocId)).toBeDefined();
 
       const todasAusente = await dashService.obtenerUbicacionesInternas({
         tamanio: 100,
       });
-      expect(todasAusente.items.find((u) => u.id === inactiveLocId)).toBeDefined();
-      expect(todasAusente.items.find((u) => u.id === activeLocId)).toBeDefined();
+      expect(
+        todasAusente.items.find((u) => u.id === inactiveLocId),
+      ).toBeDefined();
+      expect(
+        todasAusente.items.find((u) => u.id === activeLocId),
+      ).toBeDefined();
       expect(todasAusente.meta.total).toBe(todasFalse.meta.total);
     });
 
@@ -4147,12 +4168,16 @@ GRANT inventory_app TO inventory_test;`,
         problem: { status: 400, code: 'VALIDACION' },
       });
       await expect(
-        dashService.obtenerUbicacionesInternas({ filtroDesconocido: 'x' } as any),
+        dashService.obtenerUbicacionesInternas({
+          filtroDesconocido: 'x',
+        } as any),
       ).rejects.toMatchObject({
         problem: { status: 400, code: 'VALIDACION' },
       });
       await expect(
-        dashService.obtenerUbicacionesInternas({ soloActivas: 'no-booleano' as any }),
+        dashService.obtenerUbicacionesInternas({
+          soloActivas: 'no-booleano' as any,
+        }),
       ).rejects.toMatchObject({
         problem: { status: 400, code: 'VALIDACION' },
       });

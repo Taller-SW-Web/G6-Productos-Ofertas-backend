@@ -116,7 +116,12 @@ describe('DashboardService — Alertas operativas internas (Extensión H01 / INV
 
     // Con override alto (umbral = 25), NIK en Lurín (available = 18) pasa a ser STOCK_BAJO
     mockDb.thresholdOverrides = [
-      { id: 't-nik-alto', sku_id: skuNik, location_id: null, umbral_efectivo: 25 },
+      {
+        id: 't-nik-alto',
+        sku_id: skuNik,
+        location_id: null,
+        umbral_efectivo: 25,
+      },
     ];
     const resAlto = await service.obtenerAlertasInternas({
       sku: skuNik,
