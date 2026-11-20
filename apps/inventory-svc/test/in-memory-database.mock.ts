@@ -624,21 +624,111 @@ export class InMemoryDatabaseMock implements IDatabaseService {
       return { rows: [], rowCount: 1 };
     }
 
+    // CTE WITH saldo AS (para listarSaldosFisicos y obtenerAlertasInternas)
+    if (s.includes('WITH SALDO AS')) {
+      const skuFilter = params?.[0] as string | null | undefined;
+      const locFilter = params?.[1] as string | null | undefined;
+      const defaultThreshold = Number(params?.[2] ?? 10);
+      const estadoFilter = params?.[3] as string | null | undefined;
+      const onlyActiveLocs = s.includes('L.ACTIVE = TRUE');
+      const onlyAlerts = s.includes("ESTADO IN ('AGOTADO', 'STOCK_BAJO')");
+
+      const items: any[] = [];
+      for (const b of this.stockBalance) {
+        if (skuFilter && b.sku_id !== skuFilter) continue;
+        if (locFilter && b.location_id !== locFilter) continue;
+        const l = this.locations.find((loc) => loc.id === b.location_id);
+        if (!l) continue;
+        if (onlyActiveLocs && !l.active) continue;
+
+        const skuOverride = this.thresholdOverrides.find(
+          (t) =>
+            t.sku_id === b.sku_id &&
+            (t.location_id === null || t.location_id === undefined),
+        );
+        const globalOverride = this.thresholdOverrides.find(
+          (t) =>
+            (t.sku_id === null || t.sku_id === undefined) &&
+            (t.location_id === null || t.location_id === undefined),
+        );
+        const umbralEfectivo =
+          skuOverride?.umbral_efectivo ??
+          globalOverride?.umbral_efectivo ??
+          defaultThreshold;
+
+        const available =
+          b.available ?? Math.max(0, b.on_hand - b.reserved - b.blocked);
+        const estado =
+          available === 0
+            ? 'AGOTADO'
+            : available <= umbralEfectivo
+              ? 'STOCK_BAJO'
+              : 'DISPONIBLE';
+
+        if (onlyAlerts && estado === 'DISPONIBLE') continue;
+        if (estadoFilter && estado !== estadoFilter) continue;
+
+        items.push({
+          sku: b.sku_id,
+          locationId: l.id,
+          locationCode: l.code,
+          locationName: l.name,
+          locationType: l.type,
+          locationActive: l.active,
+          skuActivo: null,
+          onHand: b.on_hand,
+          reserved: b.reserved,
+          blocked: b.blocked,
+          available,
+          stockVersion: String(b.stock_version ?? 1),
+          updatedAt: new Date(),
+          umbralEfectivo,
+          estado,
+        });
+      }
+
+      if (s.includes('COUNT(*)')) {
+        return { rows: [{ total: String(items.length) }] as any, rowCount: 1 };
+      }
+
+      items.sort(
+        (a, b) =>
+          a.sku.localeCompare(b.sku) ||
+          a.locationId.localeCompare(b.locationId),
+      );
+
+      const limit = Number(params?.[4] ?? 20);
+      const offset = Number(params?.[5] ?? 0);
+      const paged = items.slice(offset, offset + limit);
+      return { rows: paged as any, rowCount: paged.length };
+    }
+
     // SELECT from locations
     if (s.includes('FROM INVENTORY.LOCATIONS')) {
-      if (s.includes('ACTIVE = TRUE')) {
-        if (s.includes('WHERE ID = $1')) {
-          const rows = this.locations.filter(
-            (l) => l.id === params?.[0] && l.active,
-          );
-          return { rows: rows as any, rowCount: rows.length };
+      let filtered = [...this.locations];
+      if (s.includes('WHERE ($1::BOOLEAN IS NULL OR ACTIVE = $1)')) {
+        const activeParam = params?.[0];
+        if (activeParam === true) {
+          filtered = filtered.filter((l) => l.active);
+        } else if (activeParam === false) {
+          filtered = filtered.filter((l) => !l.active);
         }
-        return {
-          rows: this.locations.filter((l) => l.active) as any,
-          rowCount: this.locations.length,
-        };
+      } else if (s.includes('ACTIVE = TRUE')) {
+        if (s.includes('WHERE ID = $1')) {
+          filtered = filtered.filter((l) => l.id === params?.[0] && l.active);
+        } else {
+          filtered = filtered.filter((l) => l.active);
+        }
+      } else if (s.includes('WHERE ID = $1')) {
+        filtered = filtered.filter((l) => l.id === params?.[0]);
       }
-      return { rows: this.locations as any, rowCount: this.locations.length };
+      if (s.includes('ORDER BY CODE ASC')) {
+        filtered.sort(
+          (a, b) =>
+            a.code.localeCompare(b.code) || a.name.localeCompare(b.name),
+        );
+      }
+      return { rows: filtered as any, rowCount: filtered.length };
     }
 
     // SELECT from commercial_fulfillment_routes
