@@ -19,7 +19,7 @@ describe('DashboardService — Alertas operativas internas (Extensión H01 / INV
     service = new DashboardService(dbService);
   });
 
-  it('emite alertas solo para saldos en AGOTADO o STOCK_BAJO calculados con umbral efectivo', async () => {
+  it('emite alertas solo para saldos en AGOTADO o STOCK_BAJO calculados con umbral efectivo y enlace /inventario', async () => {
     // Estado inicial mock:
     // NIK en Lurín: on_hand 20, reserved 0, blocked 0 -> available 20 (defaultThreshold 10 -> DISPONIBLE)
     // NIK en Miraflores: on_hand 2, reserved 0, blocked 0 -> available 2 (defaultThreshold 10 -> STOCK_BAJO)
@@ -42,8 +42,9 @@ describe('DashboardService — Alertas operativas internas (Extensión H01 / INV
       expect(item.alertaId).toBe(
         `${item.sku}:${item.ubicacion.locationId}:${item.estado}`,
       );
+      // P1: Target route debe apuntar a /inventario?sku=...&locationId=... codificando parámetros
       expect(item.targetRoute).toBe(
-        `/inventario/saldos?sku=${encodeURIComponent(item.sku)}&locationId=${item.ubicacion.locationId}`,
+        `/inventario?sku=${encodeURIComponent(item.sku)}&locationId=${encodeURIComponent(item.ubicacion.locationId)}`,
       );
       expect(item.observadoEn).toBeDefined();
       expect(item.ubicacion.codigo).toBeDefined();
@@ -56,6 +57,75 @@ describe('DashboardService — Alertas operativas internas (Extensión H01 / INV
     expect(agotadoItem).toBeDefined();
     expect(agotadoItem?.estado).toBe('AGOTADO');
     expect(agotadoItem?.available).toBe(0);
+  });
+
+  it('calcula disponibilidad segura cuando available es NULL en BD y clasifica AGOTADO si stock físico es 0', async () => {
+    // P1: Clasificación segura - available NULL no debe convertirse en DISPONIBLE
+    const adiBalance = mockDb.stockBalance.find(
+      (b) => b.sku_id === skuAdi && b.location_id === locLurin,
+    )!;
+    adiBalance.on_hand = 0;
+    adiBalance.reserved = 0;
+    adiBalance.blocked = 0;
+    adiBalance.available = null as any;
+
+    const res = await service.obtenerAlertasInternas({
+      sku: skuAdi,
+      locationId: locLurin,
+    });
+
+    expect(res.items).toHaveLength(1);
+    expect(res.items[0].estado).toBe('AGOTADO');
+    expect(res.items[0].available).toBe(0);
+  });
+
+  it('clasifica como STOCK_BAJO cuando available coincide exactamente con el umbral efectivo', async () => {
+    // P1: Umbral exacto: available == umbralEfectivo debe ser STOCK_BAJO (available <= umbral)
+    mockDb.thresholdOverrides = [
+      { id: 't-adi', sku_id: skuAdi, location_id: null, umbral_efectivo: 10 },
+    ];
+    const adiBalance = mockDb.stockBalance.find(
+      (b) => b.sku_id === skuAdi && b.location_id === locLurin,
+    )!;
+    adiBalance.on_hand = 10;
+    adiBalance.reserved = 0;
+    adiBalance.blocked = 0;
+    adiBalance.available = 10;
+
+    const res = await service.obtenerAlertasInternas({
+      sku: skuAdi,
+      locationId: locLurin,
+    });
+
+    expect(res.items).toHaveLength(1);
+    expect(res.items[0].estado).toBe('STOCK_BAJO');
+    expect(res.items[0].available).toBe(10);
+    expect(res.items[0].umbralEfectivo).toBe(10);
+  });
+
+  it('respeta override de umbral por SKU sobre el umbral global', async () => {
+    // Ponemos override muy bajo para NIK (umbral = 1)
+    // NIK en Miraflores tiene available = 4. Con umbral 1, 4 > 1 -> queda DISPONIBLE, no debe alertar
+    mockDb.thresholdOverrides = [
+      { id: 't-nik', sku_id: skuNik, location_id: null, umbral_efectivo: 1 },
+    ];
+
+    const res = await service.obtenerAlertasInternas({ sku: skuNik });
+    // Ni Lurín (18) ni Miraflores (4) deben generar alerta ya que ambos superan umbral 1
+    expect(res.items).toHaveLength(0);
+
+    // Con override alto (umbral = 25), NIK en Lurín (available = 18) pasa a ser STOCK_BAJO
+    mockDb.thresholdOverrides = [
+      { id: 't-nik-alto', sku_id: skuNik, location_id: null, umbral_efectivo: 25 },
+    ];
+    const resAlto = await service.obtenerAlertasInternas({
+      sku: skuNik,
+      locationId: locLurin,
+    });
+    expect(resAlto.items).toHaveLength(1);
+    expect(resAlto.items[0].estado).toBe('STOCK_BAJO');
+    expect(resAlto.items[0].available).toBe(18);
+    expect(resAlto.items[0].umbralEfectivo).toBe(25);
   });
 
   it('no emite alerta para ubicación inactiva (locations.active = false)', async () => {
@@ -76,18 +146,6 @@ describe('DashboardService — Alertas operativas internas (Extensión H01 / INV
     });
     expect(res.items).toHaveLength(0);
     expect(res.meta.total).toBe(0);
-  });
-
-  it('respeta override de umbral por SKU sobre el umbral global', async () => {
-    // Ponemos override muy bajo para NIK (umbral = 1)
-    // NIK en Miraflores tiene available = 2. Con umbral 1, 2 > 1 -> queda DISPONIBLE, no debe alertar
-    mockDb.thresholdOverrides = [
-      { id: 't-nik', sku_id: skuNik, location_id: null, umbral_efectivo: 1 },
-    ];
-
-    const res = await service.obtenerAlertasInternas({ sku: skuNik });
-    // Ni Lurín (20) ni Miraflores (2) deben generar alerta ya que ambos superan umbral 1
-    expect(res.items).toHaveLength(0);
   });
 
   it('filtra por estado AGOTADO o STOCK_BAJO', async () => {

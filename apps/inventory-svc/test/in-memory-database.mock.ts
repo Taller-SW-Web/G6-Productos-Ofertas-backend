@@ -656,8 +656,11 @@ export class InMemoryDatabaseMock implements IDatabaseService {
           globalOverride?.umbral_efectivo ??
           defaultThreshold;
 
-        const available =
-          b.available ?? Math.max(0, b.on_hand - b.reserved - b.blocked);
+        // Cálculo seguro de disponibilidad según componentes físicos (Marco P1)
+        const available = Math.max(
+          0,
+          Number(b.on_hand ?? 0) - Number(b.reserved ?? 0) - Number(b.blocked ?? 0),
+        );
         const estado =
           available === 0
             ? 'AGOTADO'
@@ -706,28 +709,29 @@ export class InMemoryDatabaseMock implements IDatabaseService {
     // SELECT from locations
     if (s.includes('FROM INVENTORY.LOCATIONS')) {
       let filtered = [...this.locations];
-      if (s.includes('WHERE ($1::BOOLEAN IS NULL OR ACTIVE = $1)')) {
-        const activeParam = params?.[0];
-        if (activeParam === true) {
-          filtered = filtered.filter((l) => l.active);
-        } else if (activeParam === false) {
-          filtered = filtered.filter((l) => !l.active);
-        }
-      } else if (s.includes('ACTIVE = TRUE')) {
-        if (s.includes('WHERE ID = $1')) {
-          filtered = filtered.filter((l) => l.id === params?.[0] && l.active);
-        } else {
-          filtered = filtered.filter((l) => l.active);
-        }
+      if (s.includes('WHERE ACTIVE = TRUE')) {
+        filtered = filtered.filter((l) => l.active);
       } else if (s.includes('WHERE ID = $1')) {
         filtered = filtered.filter((l) => l.id === params?.[0]);
       }
+
+      if (s.includes('COUNT(*)')) {
+        return { rows: [{ total: String(filtered.length) }] as any, rowCount: 1 };
+      }
+
       if (s.includes('ORDER BY CODE ASC')) {
         filtered.sort(
           (a, b) =>
             a.code.localeCompare(b.code) || a.name.localeCompare(b.name),
         );
       }
+
+      if (s.includes('LIMIT $1 OFFSET $2')) {
+        const limit = Number(params?.[0] ?? 20);
+        const offset = Number(params?.[1] ?? 0);
+        filtered = filtered.slice(offset, offset + limit);
+      }
+
       return { rows: filtered as any, rowCount: filtered.length };
     }
 

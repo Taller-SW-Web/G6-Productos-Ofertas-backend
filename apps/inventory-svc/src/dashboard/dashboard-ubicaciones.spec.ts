@@ -17,10 +17,13 @@ describe('DashboardService — Lectura interna de ubicaciones (Extensión H02 / 
     service = new DashboardService(dbService);
   });
 
-  it('devuelve las ubicaciones autoritativas reales del esquema inventory.locations', async () => {
+  it('devuelve las ubicaciones autoritativas reales del esquema inventory.locations con paginación por defecto', async () => {
     const res = await service.obtenerUbicacionesInternas();
 
-    expect(res.total).toBe(2);
+    expect(res.meta.total).toBe(2);
+    expect(res.meta.pagina).toBe(1);
+    expect(res.meta.tamanio).toBe(20);
+    expect(res.meta.totalPaginas).toBe(1);
     expect(res.items).toHaveLength(2);
 
     const lurin = res.items.find((u) => u.id === locLurin)!;
@@ -38,25 +41,55 @@ describe('DashboardService — Lectura interna de ubicaciones (Extensión H02 / 
     expect(miraflores.active).toBe(true);
   });
 
-  it('permite filtrar por soloActivas (true / false)', async () => {
+  it('respeta la semántica corregida de soloActivas: true = solo activas, false o ausente = todas', async () => {
     // Desactivamos Lurín
     const lurin = mockDb.locations.find((l) => l.id === locLurin)!;
     lurin.active = false;
 
+    // Escenario 1: soloActivas = true -> solo activas (Miraflores)
     const activas = await service.obtenerUbicacionesInternas({
       soloActivas: true,
     });
     expect(activas.items).toHaveLength(1);
     expect(activas.items[0].id).toBe(locMiraflores);
+    expect(activas.meta.total).toBe(1);
 
-    const inactivas = await service.obtenerUbicacionesInternas({
+    // Escenario 2: soloActivas = false -> todas las ubicaciones (activas e inactivas)
+    const todasConFalse = await service.obtenerUbicacionesInternas({
       soloActivas: false,
     });
-    expect(inactivas.items).toHaveLength(1);
-    expect(inactivas.items[0].id).toBe(locLurin);
+    expect(todasConFalse.items).toHaveLength(2);
+    expect(todasConFalse.meta.total).toBe(2);
+    expect(todasConFalse.items.map((i) => i.id)).toContain(locLurin);
+    expect(todasConFalse.items.map((i) => i.id)).toContain(locMiraflores);
 
-    const todas = await service.obtenerUbicacionesInternas({});
-    expect(todas.items).toHaveLength(2);
+    // Escenario 3: soloActivas ausente ({}) -> todas las ubicaciones
+    const todasAusente = await service.obtenerUbicacionesInternas({});
+    expect(todasAusente.items).toHaveLength(2);
+    expect(todasAusente.meta.total).toBe(2);
+  });
+
+  it('soporta paginación server-side con pagina y tamanio determinista', async () => {
+    const pag1 = await service.obtenerUbicacionesInternas({
+      pagina: 1,
+      tamanio: 1,
+    });
+    expect(pag1.items).toHaveLength(1);
+    expect(pag1.items[0].code).toBe('ALM-LURIN');
+    expect(pag1.meta.pagina).toBe(1);
+    expect(pag1.meta.tamanio).toBe(1);
+    expect(pag1.meta.total).toBe(2);
+    expect(pag1.meta.totalPaginas).toBe(2);
+
+    const pag2 = await service.obtenerUbicacionesInternas({
+      pagina: 2,
+      tamanio: 1,
+    });
+    expect(pag2.items).toHaveLength(1);
+    expect(pag2.items[0].code).toBe('TDA-MIRAFLORES');
+    expect(pag2.meta.pagina).toBe(2);
+    expect(pag2.meta.tamanio).toBe(1);
+    expect(pag2.meta.total).toBe(2);
   });
 
   it('devuelve una ubicación válida aunque no posea registros de stock asociados', async () => {
@@ -71,7 +104,7 @@ describe('DashboardService — Lectura interna de ubicaciones (Extensión H02 / 
     });
 
     const res = await service.obtenerUbicacionesInternas();
-    expect(res.total).toBe(3);
+    expect(res.meta.total).toBe(3);
     const trujillo = res.items.find((u) => u.id === nuevaLocId);
     expect(trujillo).toBeDefined();
     expect(trujillo?.name).toBe('Almacén Trujillo');
@@ -81,5 +114,31 @@ describe('DashboardService — Lectura interna de ubicaciones (Extensión H02 / 
     const res = await service.obtenerUbicacionesInternas();
     expect(res.items[0].code).toBe('ALM-LURIN');
     expect(res.items[1].code).toBe('TDA-MIRAFLORES');
+  });
+
+  it('rechaza parámetros inválidos con 400 VALIDACION', async () => {
+    await expect(
+      service.obtenerUbicacionesInternas({ pagina: 0 }),
+    ).rejects.toMatchObject({
+      problem: { status: 400, code: 'VALIDACION' },
+    });
+
+    await expect(
+      service.obtenerUbicacionesInternas({ tamanio: 101 }), // excede max 100
+    ).rejects.toMatchObject({
+      problem: { status: 400, code: 'VALIDACION' },
+    });
+
+    await expect(
+      service.obtenerUbicacionesInternas({ filtroAjeno: 'xyz' } as any),
+    ).rejects.toMatchObject({
+      problem: { status: 400, code: 'VALIDACION' },
+    });
+
+    await expect(
+      service.obtenerUbicacionesInternas({ soloActivas: 'cualquierCosa' as any }),
+    ).rejects.toMatchObject({
+      problem: { status: 400, code: 'VALIDACION' },
+    });
   });
 });
