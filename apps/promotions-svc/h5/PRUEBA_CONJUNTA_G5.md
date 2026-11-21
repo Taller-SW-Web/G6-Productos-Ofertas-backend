@@ -43,7 +43,7 @@ Para `follow`, añadir `follow_type` (`inventario` o `cupones`) y `follow_operat
 
 ## Matriz de los 20 escenarios
 
-Estado real al 21/11/2026. El acceso a Azure ARM verificó la infraestructura candidata de los casos 15/16/20; la cola activa y RBAC asignado son evidencia de control, separada del procesamiento. El ambiente aislado todavía carece de workloads y fixture bilateral autorizada.
+Estado real al 21/11/2026. Azure confirmó la cola y el RBAC para los casos 15/16/20. La identidad administrada de Promotions abrió el enlace de envío y pudo consultar la cola y la DLQ por AMQP sobre WebSocket. Esta comprobación acredita acceso al broker. El ambiente aislado sigue pendiente de los workloads del flujo y de la fixture bilateral autorizada. [Evidencia Azure](VALIDACION.md#preparación-funcional-de-la-integración-g5g6).
 
 | Caso | Comprobación | Ejecución preparada | Estado real |
 |---|---|---|---|
@@ -61,8 +61,8 @@ Estado real al 21/11/2026. El acceso a Azure ARM verificó la infraestructura ca
 | G5-H5-12 | Carrera pago/anulación/vencimiento | Carrera controlada M1 con consultas de reserva | Pendiente bilateral |
 | G5-H5-13 | Pedido/cliente ajeno | `auth` con ID conocido y pedido ajeno | 404 cubierto localmente; pendiente ambiente |
 | G5-H5-14 | JWT válido, ausente, expirado y scope incorrecto | `auth` y smoke privado Inventory/G5 | Pruebas locales con firmas de prueba; pendiente emisión G7 real |
-| G5-H5-15 | Broker/worker caído y recuperación | Pausa autorizada y `follow` al reiniciar | Pendiente runtime aislado; cola y RBAC vistos en Azure |
-| G5-H5-16 | Entrega duplicada o settlement perdido | Trazas de MessageId, receipts y DLQ; `follow` | PostgreSQL local con transporte simulado; pendiente Azure real |
+| G5-H5-15 | Broker/worker caído y recuperación | Pausa autorizada y `follow` al reiniciar | Acceso a Service Bus real verificado. Pendiente caída/reinicio con el worker aislado |
+| G5-H5-16 | Entrega duplicada o settlement perdido | Trazas de MessageId, receipts y DLQ; `follow` | Peek real de cola y DLQ verificado. Duplicados y settlement probados en PostgreSQL local con transporte simulado; pendiente ejecución Azure |
 | G5-H5-17 | Devolución parcial apta | Recepción M2, reintegro y saldo antes/después | Pendiente bilateral |
 | G5-H5-18 | Orden de reemplazo por CAMBIO | M2/M1, reserva y consumo antes de despacho | Pendiente G5/G2 y ambiente |
 | G5-H5-19 | Corte y reversión conciliados | Pausa de admisión, consulta y conciliación por ID | Pendiente bilateral e Infra |
