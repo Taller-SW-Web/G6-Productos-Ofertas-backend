@@ -70,6 +70,9 @@ describe.skipIf(process.env.PROMOTIONS_H5_POSTGRES_TESTS !== '1')(
         await setup.query('BEGIN; SET LOCAL ROLE po_promotions_owner');
         for (const migration of migrations) await setup.query(migration);
         await setup.query(
+          'ALTER DEFAULT PRIVILEGES IN SCHEMA promotions GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO po_promotions_runtime',
+        );
+        await setup.query(
           "SELECT set_config('g6.promotions_h5_runtime_role','po_promotions_runtime',true)",
         );
         for (const name of [

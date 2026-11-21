@@ -19,9 +19,22 @@ BEGIN
     RAISE EXCEPTION 'INVALID_PROMOTIONS_H5_RUNTIME_ROLE';
   END IF;
 
+  -- The schema owner may grant additional table privileges by default.
+  -- Replace direct grants on the new tables with the H5 allowlist only.
+  EXECUTE format(
+    'REVOKE ALL ON promotions.h5_coupon_operations, promotions.h5_coupon_outbox FROM %I',
+    runtime_role.rolname
+  );
   EXECUTE format(
     'GRANT SELECT, INSERT, UPDATE ON promotions.h5_coupon_operations, promotions.h5_coupon_outbox TO %I',
     runtime_role.rolname
   );
+  IF EXISTS (
+    SELECT 1 FROM pg_class
+    WHERE oid IN ('promotions.h5_coupon_operations'::regclass, 'promotions.h5_coupon_outbox'::regclass)
+      AND has_table_privilege(runtime_role.oid, oid, 'DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN')
+  ) THEN
+    RAISE EXCEPTION 'EXCESS_PROMOTIONS_H5_RUNTIME_PRIVILEGES';
+  END IF;
 END
 $migration$;

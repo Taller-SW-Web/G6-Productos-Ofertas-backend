@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { constanciaComercial } from './evidencia-integracion.mjs';
 
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 const sha = /^[a-f0-9]{40}$/i;
@@ -294,12 +295,23 @@ async function main() {
     ensure(bearer, 'REAL_NEGATIVE_G7_TOKENS_REQUIRED');
     await expectStatus('POST', invalid, [403], { body: {}, bearer });
     if (plan.operations?.coupon && order) {
-      await expectStatus(
+      const foreign = await expectStatus(
         'GET',
         statusPath('cupones', operationId('coupon'), order + '-AJENO'),
         [404],
       );
-      await expectStatus('GET', statusPath('cupones', randomUUID()), [404]);
+      const missing = await expectStatus(
+        'GET',
+        statusPath('cupones', randomUUID()),
+        [404],
+      );
+      ensure(
+        foreign?.code === 'OPERACION_CUPON_NO_ENCONTRADA' &&
+          missing?.code === foreign.code &&
+          missing.title === foreign.title,
+        'COUPON_NOT_FOUND_RESPONSES_DIFFER',
+      );
+      report({ event: 'uniform_coupon_not_found' });
     }
     return;
   }
@@ -372,10 +384,12 @@ async function main() {
     return;
   }
   if (action === 'confirm') {
-    ensure(
-      typeof plan.g5_payment_ref === 'string' && plan.g5_payment_ref.trim(),
-      'G5_PAYMENT_REQUIRED',
-    );
+    const payment = await constanciaComercial(plan, 'PAGO_CONFIRMADO');
+    report({
+      event: 'g5_evidence_verified',
+      kind: payment.event,
+      evidence_id: payment.event_id,
+    });
     ensure(
       (await follow('cupones', operationId('coupon'))).status === 'COMPLETED',
       'COUPON_NOT_COMPLETED',
@@ -388,16 +402,18 @@ async function main() {
     return;
   }
 
-  ensure(
-    Number.isFinite(Date.parse(plan.cancelled_at)),
-    'G5_CANCELLATION_TIMESTAMP_REQUIRED',
-  );
+  const cancellation = await constanciaComercial(plan, 'ANULACION_CONFIRMADA');
+  report({
+    event: 'g5_evidence_verified',
+    kind: cancellation.event,
+    evidence_id: cancellation.event_id,
+  });
   const restore = {
     order_id: order,
     operation_id: operationId('restore'),
     consumption_operation_id: operationId('coupon'),
     cancellation_reason: 'ANULACION',
-    cancelled_at: plan.cancelled_at,
+    cancelled_at: cancellation.occurred_at,
   };
   const restored = await submit('cupones', '/cupones/restauraciones', restore);
   ensure(

@@ -1,5 +1,17 @@
 # Validación local Promotions H5
 
+## Reauditoría del HEAD 740cb91
+
+| Comprobación | Resultado |
+|---|---|
+| Supabase de desarrollo | Aplicadas `0001` y `0002`, en una sola transacción y como `po_promotions_owner`, a la base `postgres` del proyecto [Modulo de Productos y Ofertas](https://supabase.com/dashboard/project/slzglmtiyrzygpkiuthf/editor). Confirmadas el 21/11/2026 a las 18:33 de Lima las tablas `promotions.h5_coupon_operations` y `promotions.h5_coupon_outbox`, cinco índices válidos y 17 restricciones validadas. |
+| Permisos efectivos | `po_promotions_dev_runtime` y su login `promotions_dev_login` tienen SELECT/INSERT/UPDATE, sin DELETE, CREATE de esquema ni rol propietario. `anon`, `authenticated` y `PUBLIC` carecen de grants. La transacción limitó los permisos por defecto del propietario exclusivamente en las dos tablas nuevas. El SQL Editor devolvió 42501 al intentar cambiar de identidad al login y al rol runtime. El ejercicio DML y el rechazo de DDL bajo el rol se verificaron en el PostgreSQL descartable de CI. |
+| Procesamiento real G6 | PASS en Azure Container Instances sin IP pública, en `rg-g6-sb-h5-int-fork`, usando el runtime del SHA `740cb914bea3e8e4be362faee0313c02de95d447`, PostgreSQL descartable y `g6.promotions.commands` real con identidad administrada. Arrancó hasta alcanzar disponibilidad del runtime. Admitió una restauración sin consumo previo con worker detenido, recuperó el Outbox al reiniciar, hizo un abandono real por un fallo controlado y completó dos entregas del mismo MessageId tras comprobar el resultado durable. |
+| CD de integración | El CD oficial exige el HEAD vigente de `master`, CI exitosa de push a `master`, el environment GitHub protegido `azure-h5` y Container Apps existentes. El PR sigue en Draft por instrucción de reauditoría. El environment `azure-h5` no está configurado y el grupo aislado aún carece de esos workloads. |
+| Automatización | El job obligatorio de Promotions ejecuta PostgreSQL H5 y conserva el log. La [matriz](PRUEBA_CONJUNTA_G5.md) tiene un runner de evidencias con estados PASS/FAIL/BLOCKED, y pago/anulación requieren constancias firmadas y vinculadas al pedido. |
+
+Trazabilidad de la restauración de prueba. `operation_id=eedaef65-bb68-4393-9b00-626c3fd0b2a1`, `message_id=642f9bd9-d95c-42d4-b637-bd05b95cdbe2`, `correlation_id=3b71ab1e-1502-4780-a059-1c34e61b1a73`. Secuencia `ACCEPTED` → `REJECTED/COUPON_IDENTITY_MISMATCH`, esperada al no existir un consumo asociado. El estado terminal se leyó de SQL antes de cada settlement. Resultado: 1 Inbox, 1 recibo, 0 efectos sobre cupones, 0 mensajes activos, programados o en DLQ después del diagnóstico. Se verificó la eliminación del ejecutor temporal y su base. El consumo comercial y el HTTP autenticado de Gateway requieren el snapshot G5, los JWT de G7 y el despliegue aislado.
+
 ## Preparación funcional de la integración G5–G6
 
 La revisión que contiene esta sección registra `COUPON_H5_FACTS_SOURCE` por DI. Lee la [evidencia privada definida para G5](CONTRATO_EVIDENCIA_CUPON_G5.md) con el cliente G6 `promotions-svc`, exige audiencia `api-ventas`, valida el snapshot y consulta el Catálogo y la reserva de G6. El procesador existente determina elegibilidad y consumo bajo transacción. Las cuatro rutas externas permanecen en OpenAPI 0.7.0-rc.2. El [runner y la matriz de 20 casos](PRUEBA_CONJUNTA_G5.md) registran las comprobaciones por revisión y ambiente.

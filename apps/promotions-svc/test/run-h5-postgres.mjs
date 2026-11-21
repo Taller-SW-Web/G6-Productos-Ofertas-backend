@@ -89,7 +89,21 @@ try {
       if (label !== id) {
         console.error('DISPOSABLE_POSTGRES_OWNERSHIP_MISMATCH');
         process.exitCode = 1;
-      } else docker(['rm', '--force', name]);
+      } else {
+        docker(['rm', '--force', name]);
+        const remaining = docker([
+          'ps',
+          '--all',
+          '--filter',
+          'label=g6.promotions.h5.fixture=' + id,
+          '--format',
+          '{{.Names}}',
+        ]);
+        if (remaining) {
+          console.error('DISPOSABLE_POSTGRES_CLEANUP_NOT_CONFIRMED');
+          process.exitCode = 1;
+        } else console.log('DISPOSABLE_POSTGRES_CLEANUP_CONFIRMED');
+      }
     } catch {
       console.error('DISPOSABLE_POSTGRES_CLEANUP_NOT_CONFIRMED');
       process.exitCode = 1;
