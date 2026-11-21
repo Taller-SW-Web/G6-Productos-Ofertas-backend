@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { PromotionsSvcModule } from './promotions-svc.module.js';
 import { PromotionsConfigService } from './infrastructure/config/promotions-config.js';
 import { PromotionsStartupLogger } from './infrastructure/logging/startup-logger.js';
+import { mountCouponH5JsonParser } from './http/coupon-h5-controller.js';
 
 async function bootstrap() {
   const logger = new PromotionsStartupLogger();
@@ -13,6 +14,7 @@ async function bootstrap() {
       abortOnError: false,
     });
     const config = app.get(PromotionsConfigService).settings;
+    if (config.serviceBus?.couponCommandsEnabled) mountCouponH5JsonParser(app);
     app.enableShutdownHooks();
     await app.listen(config.port, config.listenHost);
     logger.started();

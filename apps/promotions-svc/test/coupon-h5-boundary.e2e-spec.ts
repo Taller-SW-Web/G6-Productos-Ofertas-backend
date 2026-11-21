@@ -3,9 +3,20 @@ import type { INestApplication } from '@nestjs/common';
 import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import request from 'supertest';
 import { PromotionsSvcModule } from '../src/promotions-svc.module.js';
-import { CouponH5Operations } from '../src/coupons/coupon-h5-operations.js';
+import {
+  CouponH5Operations,
+  prepareCouponH5Admission,
+  type CouponH5Admission,
+} from '../src/coupons/coupon-h5-operations.js';
+import {
+  couponH5EnvelopeLimit,
+  encodeCouponH5Envelope,
+} from '../src/coupons/coupon-h5-envelope.js';
 import { CouponH5Runtime } from '../src/coupons/coupon-h5-runtime.js';
-import { CouponH5Controller } from '../src/http/coupon-h5-controller.js';
+import {
+  CouponH5Controller,
+  mountCouponH5JsonParser,
+} from '../src/http/coupon-h5-controller.js';
 import { PromotionsIdentity } from '../src/http/promotions-identity.js';
 import {
   PromotionsConfigService,
@@ -79,10 +90,17 @@ describe('Promotions H5 HTTP contract in isolation', () => {
     completed_at: null,
     result: null,
   };
-  const operations = { admit: vi.fn(), get: vi.fn() };
+  const operations = {
+    admit: vi.fn<(admission: CouponH5Admission) => Promise<unknown>>(),
+    get: vi.fn(),
+  };
   const admissionAvailable = vi.fn();
   const consumePath = '/api/v1/cupones/consumos';
+  const restorePath = '/api/v1/cupones/restauraciones';
   const statusPath = `/api/v1/cupones/operaciones/${operationId}`;
+  const publicKeys = async () => [
+    { ...keys.publicKey.export({ format: 'jwk' }), kid },
+  ];
 
   function token(scope: string, sub = 'modulo-ventas') {
     const iat = Math.floor(Date.now() / 1000);
@@ -111,9 +129,7 @@ describe('Promotions H5 HTTP contract in isolation', () => {
         AUTH_JWKS_URL: `${issuer}/.well-known/jwks.json`,
       }),
     );
-    const identity = new PromotionsIdentity(config, async () => [
-      { ...keys.publicKey.export({ format: 'jwk' }), kid },
-    ]);
+    const identity = new PromotionsIdentity(config, publicKeys);
     const module = await Test.createTestingModule({
       controllers: [CouponH5Controller],
       providers: [
@@ -129,6 +145,7 @@ describe('Promotions H5 HTTP contract in isolation', () => {
       ],
     }).compile();
     app = module.createNestApplication();
+    mountCouponH5JsonParser(app);
     await app.init();
   });
 
@@ -146,15 +163,16 @@ describe('Promotions H5 HTTP contract in isolation', () => {
   it('returns the durable resource on first admission and reuses it on replay', async () => {
     operations.admit
       .mockResolvedValueOnce({ replay: false, snapshot })
-      .mockResolvedValueOnce({ replay: true, snapshot });
+      .mockResolvedValueOnce({ replay: true, snapshot })
+      .mockRejectedValueOnce(new Error('IDEMPOTENCY_CONFLICT'));
     const correlationId = randomUUID();
-    const admit = () =>
+    const admit = (payload = body) =>
       request(app.getHttpServer())
         .post(consumePath)
         .set('Authorization', token('cupones:consumir'))
         .set('Idempotency-Key', operationId)
         .set('X-Correlation-Id', correlationId)
-        .send(body);
+        .send(payload);
     const accepted = await admit()
       .expect(202, snapshot)
       .expect('Retry-After', '2')
@@ -172,6 +190,9 @@ describe('Promotions H5 HTTP contract in isolation', () => {
         }),
       }),
     );
+    await admit({ ...body, coupon_code: 'OTHER' })
+      .expect(409)
+      .expect(({ body }) => expect(body.code).toBe('IDEMPOTENCY_CONFLICT'));
   });
 
   it('separates malformed keys, conflicting UUIDs and authorization failures', async () => {
@@ -278,5 +299,57 @@ describe('Promotions H5 HTTP contract in isolation', () => {
       .send(body)
       .expect(503);
     expect(operations.admit).not.toHaveBeenCalled();
+  });
+
+  it('enforces the complete UTF-8 envelope limit before consulting the runtime or storage', async () => {
+    const correlationId = randomUUID();
+    const restoration = {
+      operation_id: randomUUID(),
+      order_id: orderId,
+      consumption_operation_id: operationId,
+      cancellation_reason: 'a',
+      cancelled_at: '2026-11-21T16:10:00Z',
+    };
+    const small = prepareCouponH5Admission(
+      'RESTAURAR_CUPON',
+      restoration,
+      restoration.operation_id,
+      'modulo-ventas',
+      correlationId,
+    );
+    const remaining =
+      couponH5EnvelopeLimit - encodeCouponH5Envelope(small.command).length;
+    const multibyteCharacters = Math.floor((remaining - 1) / 2);
+    const atLimit =
+      'a' +
+      'é'.repeat(multibyteCharacters) +
+      'a'.repeat(remaining - multibyteCharacters * 2);
+    const post = (reason: string) =>
+      request(app.getHttpServer())
+        .post(restorePath)
+        .set('Authorization', token('cupones:restaurar'))
+        .set('Idempotency-Key', restoration.operation_id)
+        .set('X-Correlation-Id', correlationId)
+        .send({ ...restoration, cancellation_reason: reason });
+    operations.admit.mockResolvedValue({ replay: false, snapshot });
+    await post(atLimit.slice(0, -1)).expect(202);
+    await post(atLimit).expect(202);
+    expect(
+      encodeCouponH5Envelope(operations.admit.mock.calls[0][0].command),
+    ).toHaveLength(couponH5EnvelopeLimit - 1);
+    expect(
+      encodeCouponH5Envelope(operations.admit.mock.calls[1][0].command),
+    ).toHaveLength(couponH5EnvelopeLimit);
+    operations.admit.mockClear();
+    admissionAvailable.mockClear();
+    for (const reason of [atLimit + 'a', atLimit + 'é'.repeat(16 * 1024)]) {
+      await post(reason)
+        .expect(400)
+        .expect('Content-Type', /application\/problem\+json/)
+        .expect('X-Correlation-Id', correlationId)
+        .expect(({ body }) => expect(body.code).toBe('VALIDACION'));
+    }
+    expect(operations.admit).not.toHaveBeenCalled();
+    expect(admissionAvailable).not.toHaveBeenCalled();
   });
 });

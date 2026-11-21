@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import type {
-  ServiceBusReceivedMessage,
-  ServiceBusSender,
+import {
+  isServiceBusError,
+  type ServiceBusReceivedMessage,
+  type ServiceBusSender,
 } from '@azure/service-bus';
 import {
   inPromotionsTransaction,
@@ -9,6 +10,11 @@ import {
 } from '../infrastructure/persistence/sql-transaction.js';
 import { parseCouponCommand, type CouponCommand } from './coupon-command.js';
 import { couponH5Queue, type CouponH5Worker } from './coupon-h5-operations.js';
+import {
+  couponH5EnvelopeLimit,
+  encodeCouponH5Envelope,
+} from './coupon-h5-envelope.js';
+import { PromotionsOperationLogger } from '../infrastructure/logging/operation-logger.js';
 import { record } from './schema-validator.js';
 
 export interface CouponH5Claim {
@@ -87,6 +93,10 @@ export class CouponH5Relay {
       ServiceBusSender,
       'createMessageBatch' | 'sendMessages'
     >,
+    private readonly logger: Pick<
+      PromotionsOperationLogger,
+      'couponH5MessageTooLarge'
+    > = new PromotionsOperationLogger(),
   ) {}
 
   async publishOne(): Promise<
@@ -94,16 +104,31 @@ export class CouponH5Relay {
   > {
     const claim = await this.store.claim();
     if (!claim) return 'empty';
-    let outcome: 'sent' | 'pending' | 'too-large' = 'pending';
+    const body = encodeCouponH5Envelope(claim.command);
+    const outcome =
+      body.length > couponH5EnvelopeLimit
+        ? 'too-large'
+        : await this.send(claim, body);
+    if (!(await this.store.finish(claim, outcome))) return 'lease-lost';
+    if (outcome === 'too-large')
+      this.logger.couponH5MessageTooLarge(
+        claim.command.operation_id,
+        claim.messageId,
+      );
+    return outcome;
+  }
+
+  private async send(
+    claim: CouponH5Claim,
+    body: Buffer,
+  ): Promise<'sent' | 'pending' | 'too-large'> {
     try {
       const batch = await this.sender.createMessageBatch({
-        maxSizeInBytes: 256 * 1024,
+        abortSignal: AbortSignal.timeout(10_000),
       });
       if (
         !batch.tryAddMessage({
-          body: Buffer.from(
-            JSON.stringify({ ...claim.command, producer: 'promotions-svc' }),
-          ),
+          body,
           messageId: claim.messageId,
           correlationId: claim.command.correlation_id,
           subject: claim.command.name,
@@ -116,17 +141,16 @@ export class CouponH5Relay {
           },
         })
       )
-        outcome = 'too-large';
-      else {
-        await this.sender.sendMessages(batch, {
-          abortSignal: AbortSignal.timeout(10_000),
-        });
-        outcome = 'sent';
-      }
-    } catch {
-      /* Ambiguous send retains the same MessageId and pending intent. */
+        return 'too-large';
+      await this.sender.sendMessages(batch, {
+        abortSignal: AbortSignal.timeout(10_000),
+      });
+      return 'sent';
+    } catch (error) {
+      if (isServiceBusError(error) && error.code === 'MessageSizeExceeded')
+        return 'too-large';
+      return 'pending';
     }
-    return (await this.store.finish(claim, outcome)) ? outcome : 'lease-lost';
   }
 }
 

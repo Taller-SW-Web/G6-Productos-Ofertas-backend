@@ -4,9 +4,9 @@ Entrega separada de los adaptadores de Promotions. Continúa #75 y conserva el p
 
 ## Gateway y contratos
 
-- Las tres rutas candidatas de consumo/restauración/consulta de cupón permanecen fuera de Nest/Gateway público. Incorporarlas únicamente tras contrato versionado revisado y definición de cliente/scope/allowlist G7. No añadir lógica de negocio al Gateway.
+- Backend PR #250 registra las tres rutas de cupones en Nest y su enrutamiento en Gateway. El controlador exige el runtime H5 y Gateway exige `GATEWAY_G5_H5_ENABLED` junto con autenticación G7. La versión publicada en Docs es OpenAPI 0.7.0-rc.2. La revisión con rutas de cupones habilitadas y la homologación conjunta siguen pendientes.
 - Resolver arquitectura de las referencias heredadas api-gateway/bff en eventos de Catalog/Pricing/Inventory. Registrar por evento si existe consumidor/handler requerido y cómo se conserva su efecto. No omitirlo, atribuirlo automáticamente a G1 ni crear una cola sin handler aprobado.
-- Coordinar con Inventory #240 la lectura del estado actual de reserva y su autorización; un PR de Inventory no homologa la frontera G5 por sí solo.
+- Inventory #240 aporta la lectura del estado de reserva en master. El PR #250 incluye la evidencia privada, con cliente técnico propio y sin route pública de Gateway. Probar sus permisos con G7 real antes del corte.
 
 ## Infraestructura a preparar y revisar
 
@@ -21,7 +21,7 @@ Namespace de destino por ambiente, región/costo/SKU y workloads deben confirmar
 
 Roles Azure Data Sender/Receiver mínimos al nivel de entidad; sin Data Owner en runtime ni secretos SAS para módulos externos. Verificar que nadie fuera del productor previsto pueda enviar a cada cola. La propiedad producer de un mensaje no autentica por sí sola.
 
-Preparar configuración por servicio, identidades asignadas, ejecución continua/recuperación SQL sin tráfico HTTP, métricas de pendientes/reintentos/DLQ, alertas operativas y procedimiento de replay autorizado. No activar productores compartidos sin sus consumidores obligatorios ni ejecutar migraciones compartidas desde el bootstrap.
+El perfil Azure del PR #250 prepara identidades por servicio y réplicas mínimas. En el ambiente autorizado queda por comprobar la ejecución continua sin tráfico HTTP, las métricas de pendientes/reintentos/DLQ y la alarma por `MESSAGE_TOO_LARGE`. El [procedimiento de cuarentena y recuperación](VALIDACION.md#cuarentena-y-recuperación-operacional) conserva la intención antes de intervenir. La activación de productores requiere todos sus consumidores obligatorios.
 
 ## Criterios de cierre
 

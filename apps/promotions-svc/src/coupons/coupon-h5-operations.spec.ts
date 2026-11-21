@@ -19,6 +19,7 @@ import {
   type CouponH5Claim,
 } from './coupon-h5-delivery.js';
 import type { CouponResult } from './coupon-command.js';
+import { encodeCouponH5Envelope } from './coupon-h5-envelope.js';
 import { couponH5Schemas } from './coupon-h5-contract.generated.js';
 import { matchesSchema } from './schema-validator.js';
 
@@ -428,9 +429,7 @@ describe('H5 relay and manual settlement', () => {
       expect(finish.mock.calls[0][1]).toBe(success ? 'sent' : 'pending');
       expect(f.batch.tryAddMessage.mock.calls[0][0]).toMatchObject({
         messageId: r.command.message_id,
-        body: Buffer.from(
-          JSON.stringify({ ...r.command, producer: 'promotions-svc' }),
-        ),
+        body: encodeCouponH5Envelope(r.command),
       });
     },
   );
@@ -438,6 +437,7 @@ describe('H5 relay and manual settlement', () => {
     const r = request(),
       f = senderFixture(false),
       finish = vi.fn(async () => true);
+    const couponH5MessageTooLarge = vi.fn();
     const relay = new CouponH5Relay(
       {
         claim: async () => ({
@@ -448,9 +448,17 @@ describe('H5 relay and manual settlement', () => {
         finish,
       },
       f.sender,
+      { couponH5MessageTooLarge },
     );
     expect(await relay.publishOne()).toBe('too-large');
     expect(f.send).not.toHaveBeenCalled();
+    expect(couponH5MessageTooLarge).toHaveBeenCalledWith(
+      r.command.operation_id,
+      r.command.message_id,
+    );
+    finish.mockResolvedValueOnce(false);
+    expect(await relay.publishOne()).toBe('lease-lost');
+    expect(couponH5MessageTooLarge).toHaveBeenCalledOnce();
   });
   it('waits for result persistence before completing and does not abandon on settlement failure', async () => {
     const r = request();

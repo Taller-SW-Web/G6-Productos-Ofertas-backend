@@ -33,6 +33,7 @@ import {
 } from './coupon-outbox.js';
 import {
   CouponCommandProcessor,
+  couponH5EvidenceTimeoutMs,
   type CouponEvidenceProvider,
 } from './coupon-transactions.js';
 import { record } from './schema-validator.js';
@@ -251,6 +252,8 @@ export const couponProviders: Provider[] = [
           new CouponCommandProcessor(
             resources.pool,
             new AuthoritativeCouponEvidence(factsSource, inventory),
+            undefined,
+            couponH5EvidenceTimeoutMs,
           ),
         );
       return new CouponH5Runtime(

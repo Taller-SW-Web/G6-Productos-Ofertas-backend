@@ -58,6 +58,17 @@ describe('Private H5 Inventory evidence', () => {
         .query({ order_id: orderId })
         .set('X-Correlation-Id', correlationId);
     await get().expect(401);
+    await get()
+      .set(
+        'Authorization',
+        'Bearer ' +
+          createCryptographicJwt({
+            clientId: 'promotions-svc',
+            scope: 'inventario:reservas:estado:leer',
+            aud: 'wrong-audience',
+          }),
+      )
+      .expect(401);
     await get().set('Authorization', claim('modulo-ventas')).expect(403);
     await get().set('Authorization', claim('modulo-productos')).expect(403);
     await get()

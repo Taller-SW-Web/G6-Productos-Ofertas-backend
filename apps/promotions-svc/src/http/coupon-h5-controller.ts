@@ -6,8 +6,9 @@ import {
   Post,
   Req,
   Res,
+  type INestApplication,
 } from '@nestjs/common';
-import type { Request, Response } from 'express';
+import { json, type NextFunction, type Request, type Response } from 'express';
 import {
   CouponH5Operations,
   prepareCouponH5Admission,
@@ -37,6 +38,57 @@ const problemTitles: Record<string, string> = {
   SERVICIO_NO_DISPONIBLE: 'Servicio temporalmente no disponible',
   ERROR_INTERNO: 'Error interno',
 };
+
+function sendCouponH5Problem(
+  response: Response,
+  problem: PromotionsHttpError,
+  id: string,
+): void {
+  response
+    .status(problem.status)
+    .type('application/problem+json')
+    .json({
+      type: '/errores/' + problem.code.toLowerCase().replaceAll('_', '-'),
+      title: problemTitles[problem.code] ?? 'Error',
+      status: problem.status,
+      code: problem.code,
+      correlationId: id,
+    });
+}
+
+export function mountCouponH5JsonParser(
+  app: Pick<INestApplication, 'use'>,
+): void {
+  const parse = json({ limit: 256 * 1024 });
+  app.use((request: Request, response: Response, next: NextFunction) => {
+    if (
+      request.method !== 'POST' ||
+      !/^\/api\/v1\/cupones\/(consumos|restauraciones)\/?$/i.test(request.path)
+    ) {
+      next();
+      return;
+    }
+    parse(request, response, (error?: unknown) => {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'type' in error &&
+        (error.type === 'entity.too.large' ||
+          error.type === 'entity.parse.failed')
+      ) {
+        const id = correlationId(request);
+        response.set('X-Correlation-Id', id).set('Cache-Control', 'no-store');
+        sendCouponH5Problem(
+          response,
+          new PromotionsHttpError(400, 'VALIDACION'),
+          id,
+        );
+        return;
+      }
+      next(error);
+    });
+  });
+}
 
 function operationError(error: unknown): never {
   if (error instanceof Error) {
@@ -156,16 +208,7 @@ export class CouponH5Controller {
         error instanceof PromotionsHttpError
           ? error
           : new PromotionsHttpError(500, 'ERROR_INTERNO');
-      response
-        .status(problem.status)
-        .type('application/problem+json')
-        .json({
-          type: '/errores/' + problem.code.toLowerCase().replaceAll('_', '-'),
-          title: problemTitles[problem.code] ?? 'Error',
-          status: problem.status,
-          code: problem.code,
-          correlationId: id,
-        });
+      sendCouponH5Problem(response, problem, id);
     }
   }
 }

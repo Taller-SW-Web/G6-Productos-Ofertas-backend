@@ -5,6 +5,7 @@ import {
 } from '../infrastructure/persistence/sql-transaction.js';
 import { couponH5Schemas } from './coupon-h5-contract.generated.js';
 import { couponContracts } from './coupon-contract.generated.js';
+import { validateCouponH5EnvelopeSize } from './coupon-h5-envelope.js';
 import { matchesSchema, record } from './schema-validator.js';
 import {
   canonicalJson,
@@ -41,8 +42,7 @@ function matchesRequest(kind: CouponH5Kind, body: unknown): boolean {
   );
 }
 
-// Candidate application boundary, not an HTTP controller. A future authorized
-// adapter must obtain actor from a verified G7 identity, never from request data.
+// The HTTP adapter obtains the actor from verified G7 identity claims.
 export function prepareCouponH5Admission(
   kind: CouponH5Kind,
   body: unknown,
@@ -81,6 +81,7 @@ export function prepareCouponH5Admission(
     },
     actor,
   );
+  validateCouponH5EnvelopeSize(command);
   return {
     command,
     actor,
@@ -95,19 +96,20 @@ export class CouponH5Operations {
   async admit(
     request: CouponH5Admission,
   ): Promise<{ replay: boolean; snapshot: Record<string, unknown> }> {
+    const c = parseCouponCommand(request.command, request.actor);
+    validateCouponH5EnvelopeSize(c);
+    if (
+      request.actor !== 'modulo-ventas' ||
+      request.fingerprint !== commandFingerprint(c, request.actor) ||
+      request.kind !==
+        (c.name === consumptionName ? 'CONSUMIR_CUPON' : 'RESTAURAR_CUPON') ||
+      !matchesRequest(request.kind, {
+        operation_id: c.operation_id,
+        ...c.data,
+      })
+    )
+      throw new Error('VALIDACION');
     return inPromotionsTransaction(this.pool, async (client) => {
-      const c = parseCouponCommand(request.command, request.actor);
-      if (
-        request.actor !== 'modulo-ventas' ||
-        request.fingerprint !== commandFingerprint(c, request.actor) ||
-        request.kind !==
-          (c.name === consumptionName ? 'CONSUMIR_CUPON' : 'RESTAURAR_CUPON') ||
-        !matchesRequest(request.kind, {
-          operation_id: c.operation_id,
-          ...c.data,
-        })
-      )
-        throw new Error('VALIDACION');
       await client.query(
         "SELECT pg_advisory_xact_lock(hashtextextended('promotions:operation:' || $1,0))",
         [c.operation_id],

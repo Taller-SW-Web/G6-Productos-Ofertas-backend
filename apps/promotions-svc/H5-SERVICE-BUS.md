@@ -90,7 +90,7 @@ $env:PROMOTIONS_H5_TEST_DATABASE_URL='<URL privada de la base local descartable>
 npm run test:e2e -- apps/promotions-svc/test/coupon-h5.postgres.e2e-spec.ts --maxWorkers=1
 ~~~
 
-La prueba SQL cubre rollback de operación/intención, reclamo concurrente, token inválido, lease vencido y envío no confirmado. Su receipt histórico es una fixture técnica mínima; no acredita todo el negocio de cupones. Las pruebas con dobles unitarios no se presentan como PostgreSQL o Azure reales.
+La prueba SQL aplica las migraciones históricas verificadas y las dos candidatas en PostgreSQL descartable. Ejecuta admisión, reintentos, cuarentena y consumo con el procesador de cupones bajo el rol runtime. Azure Service Bus y la fuente comercial se simulan en la suite. La [evidencia y el procedimiento de recuperación](h5/VALIDACION.md) detallan la verificación pendiente en el ambiente autorizado.
 
 ## Coordinación ya enviada
 
@@ -106,7 +106,7 @@ No se atribuyen respuesta, aceptación, grant ni compromiso de otros owners a la
 
 | Responsable | Frontera | Condición concreta |
 |---|---|---|
-| G5/G6 Docs | Tres rutas de cupones | Registrar la revisión documental de G5, acordar límites de tamaño y homologar la ejecución contra la versión publicada |
+| G5/G6 Docs | Tres rutas de cupones | Homologar la ejecución contra la versión publicada y verificar el límite de 240 KiB del envelope completo |
 | G7 | HTTP | Verificar los grants de los scopes dedicados del OpenAPI y probar autorización real con `modulo-ventas` |
 | G5/Inventory/G6 | Reserva y snapshot | Fuente autorizada con hechos durables verificables; mientras tanto evidencia sigue bloqueada |
 | Arquitectura/integración G6 | BFF y productores compartidos | Resolver todos los destinatarios/handlers requeridos antes del corte |

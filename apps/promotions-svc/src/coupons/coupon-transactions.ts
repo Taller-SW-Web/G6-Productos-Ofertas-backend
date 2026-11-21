@@ -9,6 +9,7 @@ import {
 } from './coupon-command.js';
 import { couponContracts } from './coupon-contract.generated.js';
 import { matchesSchema } from './schema-validator.js';
+import { withDeadline } from '../infrastructure/resilience/deadline.js';
 import {
   inPromotionsTransaction,
   type SqlClient,
@@ -48,12 +49,14 @@ const businessErrors = new Set([
   'INVALID_RESTORATION_REQUEST',
 ]);
 const handler = 'coupon-commands-v2';
+export const couponH5EvidenceTimeoutMs = 3000;
 
 export class CouponCommandProcessor<C extends SqlClient = SqlClient> {
   constructor(
     private readonly pool: { connect(): Promise<C> },
     private readonly evidence: CouponEvidenceProvider<C>,
     private readonly clock: () => Date = () => new Date(),
+    private readonly evidenceTimeoutMs = 1000,
   ) {}
 
   async process(value: unknown, actor: string): Promise<CouponResult> {
@@ -186,23 +189,14 @@ export class CouponCommandProcessor<C extends SqlClient = SqlClient> {
     client: C,
     command: CouponCommand,
   ): Promise<Record<string, unknown>> {
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
     let proof: ConsumptionEvidence;
     try {
-      proof = await Promise.race([
-        this.evidence.verify(command, controller.signal),
-        new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(() => {
-            controller.abort();
-            reject(new Error('COUPON_EVIDENCE_UNAVAILABLE'));
-          }, 1000);
-        }),
-      ]);
+      proof = await withDeadline(
+        (signal) => this.evidence.verify(command, signal),
+        this.evidenceTimeoutMs,
+      );
     } catch {
       throw new Error('COUPON_EVIDENCE_UNAVAILABLE');
-    } finally {
-      if (timer) clearTimeout(timer);
     }
     // Await local SQL outside the external-evidence race: a deadline must never
     // release the client while a verifier is still using that transaction.
