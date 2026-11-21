@@ -3208,6 +3208,22 @@ GRANT inventory_app TO inventory_test;`,
       );
     });
 
+    afterAll(async () => {
+      // DATA-004 escribe umbrales en una tabla compartida por el resto del
+      // archivo de integración. Se eliminan al terminar para no contaminar
+      // bloques posteriores (p. ej. la clasificación de alertas del dashboard).
+      await database.query(
+        `DELETE FROM inventory.stock_threshold_override
+         WHERE id IN (
+           'a0000000-0000-0000-0000-000000000001'::uuid,
+           'b0000000-0000-0000-0000-000000000002'::uuid,
+           '0a24fa68-450f-5fa1-827d-78fb5f09fe54'::uuid,
+           '7b49463c-333e-5e63-b8ad-344c20847250'::uuid
+         )
+         OR sku_id IN ('PUM-CLAS-NEG-40', 'ADI-ENT22-AZU-M')`,
+      );
+    });
+
     async function setupBaseline(withConflict = false): Promise<void> {
       await database.query(`DELETE FROM inventory.stock_threshold_override`);
 
@@ -3918,6 +3934,7 @@ GRANT inventory_app TO inventory_test;`,
     const skuOverride = `${runTag}-SKU-OVERRIDE`;
     const skuInactiveLoc = `${runTag}-SKU-INACTIVE-LOC`;
     const overrideId = randomUUID();
+    const globalThresholdId = randomUUID();
 
     beforeAll(async () => {
       // 1. Crear ubicaciones de prueba efímeras: 2 activas y 1 inactiva
@@ -3942,7 +3959,23 @@ GRANT inventory_app TO inventory_test;`,
       );
       emptyLocId = loc3.rows[0].id;
 
-      // 2. Insertar umbral override para skuOverride (umbral = 2)
+      // 2. Fijar un umbral global determinista (10) y verificar que ningún
+      // bloque previo haya dejado un override global ambiente. El contrato
+      // clasifica STOCK_BAJO cuando available > 0 y <= umbral efectivo.
+      const ambientGlobal = await database.query<{ total: number }>(
+        `SELECT count(*)::int AS total
+         FROM inventory.stock_threshold_override
+         WHERE sku_id IS NULL AND location_id IS NULL`,
+      );
+      expect(ambientGlobal.rows[0]?.total).toBe(0);
+      await database.query(
+        `INSERT INTO inventory.stock_threshold_override
+           (id, sku_id, location_id, umbral_efectivo)
+         VALUES ($1, NULL, NULL, 10)`,
+        [globalThresholdId],
+      );
+
+      // 3. Insertar umbral override para skuOverride (umbral = 2)
       await database.query(
         `INSERT INTO inventory.stock_threshold_override
            (id, sku_id, location_id, umbral_efectivo)
@@ -3950,7 +3983,7 @@ GRANT inventory_app TO inventory_test;`,
         [overrideId, skuOverride],
       );
 
-      // 3. Insertar saldos de stock para pruebas de alertas y disponibilidad.
+      // 4. Insertar saldos de stock para pruebas de alertas y disponibilidad.
       // IMPORTANTE: "available" es columna GENERATED ALWAYS en PostgreSQL; no se puede insertar.
       // PostgreSQL la calcula como GREATEST(0, on_hand - reserved - blocked).
       // on_hand, reserved y blocked son NOT NULL con restricciones no negativas.
@@ -3980,8 +4013,8 @@ GRANT inventory_app TO inventory_test;`,
 
     afterAll(async () => {
       await database.query(
-        `DELETE FROM inventory.stock_threshold_override WHERE id = $1`,
-        [overrideId],
+        `DELETE FROM inventory.stock_threshold_override WHERE id IN ($1, $2)`,
+        [overrideId, globalThresholdId],
       );
       await database.query(
         `DELETE FROM inventory.stock_balance WHERE sku_id LIKE $1 OR location_id IN ($2, $3, $4)`,
