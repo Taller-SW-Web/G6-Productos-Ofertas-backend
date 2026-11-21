@@ -16,6 +16,8 @@ Cliente modulo-ventas, tipo servicio, audiencia api-productos: confirmar/concede
 | `modulo-ventas` | GET /api/v1/inventario/reservas/{reservaId}/estado | `inventario:reservas:estado:leer` |
 | `promotions-svc` | GET /api/v1/interno/inventario/reservas/{reservaId}/evidencia-cupon | `inventario:reservas:estado:leer` |
 
+G7 debe registrar y conceder a `promotions-svc` el scope `ventas:pedidos:evidencia-cupon:leer`, audiencia **`api-ventas`**, para la [lectura privada solicitada a G5](CONTRATO_EVIDENCIA_CUPON_G5.md). Según SPEC-17 de G7, la audiencia proviene de la API dueña de los scopes incluidos en el JWT. Se pide confirmar emisión con el secreto del cliente técnico G6 y preservar la identidad separada de `modulo-ventas`. El preflight también exige comprobar los grants existentes de Catálogo y de la secuencia de inventario según OpenAPI.
+
 El lector privado de Inventory exige el sujeto `promotions-svc` aunque Ventas tenga el mismo scope para la ruta externa. Promotions solicita su propio token con una credencial dedicada. Los GET acotan la lectura al pedido y al cliente habilitado. G6 valida firma, emisor, audiencia, expiración, tipo, cliente y scope.
 
 Service Bus es exclusivamente interno G6. Azure RBAC no sustituye scopes G7; no se entregan secretos del bus a otros módulos.

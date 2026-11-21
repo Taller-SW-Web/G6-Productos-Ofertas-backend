@@ -234,6 +234,7 @@ test('G7 deployment renders with nine aligned trust configurations and no anonym
             PROMOTIONS_H5_COUPON_COMMANDS_ENABLED: 'true',
             PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED: 'false',
             PROMOTIONS_H5_SERVICE_CLIENT_SECRET: 'dedicated-isolated-identity',
+            PROMOTIONS_G5_COUPON_EVIDENCE_ORIGIN: 'https://g5.isolated.test',
           }),
     });
   }
@@ -253,6 +254,13 @@ test('G7 deployment renders with nine aligned trust configurations and no anonym
   assert.throws(
     () => makeDeployment(mixed),
     /SERVICE_BUS_PROFILES_MUTUALLY_EXCLUSIVE/,
+  );
+  const insecure = structuredClone(stage);
+  insecure.runtime['promotions-svc'].PROMOTIONS_G5_COUPON_EVIDENCE_ORIGIN =
+    'http://g5.isolated.test';
+  assert.throws(
+    () => makeDeployment(insecure),
+    /G5_H5_ACA_CONFIGURATION_INVALID/,
   );
   delete stage.runtime['promotions-svc'].PROMOTIONS_H5_SERVICE_CLIENT_SECRET;
   assert.throws(() => makeDeployment(stage), /G5_H5_ACA_CONFIGURATION_INVALID/);

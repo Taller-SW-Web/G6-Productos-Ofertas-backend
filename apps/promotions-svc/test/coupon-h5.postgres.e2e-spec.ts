@@ -29,6 +29,9 @@ import {
   encodeCouponH5Envelope,
 } from '../src/coupons/coupon-h5-envelope.js';
 import { PromotionsOperationLogger } from '../src/infrastructure/logging/operation-logger.js';
+import { G5CouponSnapshot } from '../src/coupons/g5-coupon-snapshot.js';
+import { AuthoritativeCouponEvidence } from '../src/coupons/authoritative-coupon-evidence.js';
+import { InventoryCouponEvidence } from '../src/coupons/inventory-coupon-evidence.js';
 import { officialMigrations } from './support/official-migrations.mjs';
 
 // Explicit opt-in against an EMPTY disposable local database, never Supabase or
@@ -515,6 +518,94 @@ describe.skipIf(process.env.PROMOTIONS_H5_POSTGRES_TESTS !== '1')(
       expect(await effects()).toEqual({ inbox: 1, receipts: 1, uses: 1 });
       expect(await store.claim()).toBeUndefined();
     }, 15000);
+
+    it('processes the G5 snapshot adapter through durable G6 coupon eligibility and Inventory evidence', async () => {
+      const first = admission();
+      const { command } = first;
+      await operations.admit(first);
+      const snapshot = {
+        order_id: command.data.order_id,
+        commercial_snapshot_ref: command.data.commercial_snapshot_ref,
+        reservation_id: command.data.reservation_id,
+        effective_at: command.data.effective_at,
+        customer_ref: null,
+        channel_id: command.data.channel_id,
+        coupon_code: command.data.coupon_code,
+        lines: [
+          {
+            sku: 'SYNTHETIC-H5-SKU',
+            product_id: 'synthetic-catalog-product',
+            quantity: 1,
+            currency: 'PEN',
+            regular_price: '79.90',
+            offer_price: null,
+          },
+        ],
+      };
+      // The database, adapter, eligibility engine and coupon effect are real.
+      // External endpoint responses represent the contract, not live homologation.
+      const readSnapshot = vi
+        .fn()
+        .mockResolvedValueOnce({ ...snapshot, order_id: 'WRONG-ORDER' })
+        .mockResolvedValue(snapshot);
+      const source = new G5CouponSnapshot(
+        { read: readSnapshot },
+        { verifyCouponCatalogLines: async () => undefined },
+      );
+      const readInventory = vi.fn(async () => ({
+        order_id: command.data.order_id,
+        reservation_id: command.data.reservation_id,
+        estado_persistido: 'ACTIVA',
+        observed_at: new Date(Date.now() - 1000).toISOString(),
+        expires_at: new Date(Date.now() + 60_000).toISOString(),
+        vigencia_efectiva: 'VIGENTE',
+        permite_pago: true,
+        permite_consumo_cupon: true,
+      }));
+      const worker = new CouponH5Worker(
+        operations,
+        new CouponCommandProcessor(
+          runtime,
+          new AuthoritativeCouponEvidence(
+            source,
+            new InventoryCouponEvidence({ read: readInventory }),
+          ),
+          undefined,
+          couponH5EvidenceTimeoutMs,
+        ),
+      );
+      await expect(worker.process(command)).rejects.toThrow(
+        'COUPON_EVIDENCE_UNAVAILABLE',
+      );
+      expect(readInventory).not.toHaveBeenCalled();
+      expect(
+        await operations.get(
+          command.operation_id,
+          command.data.order_id,
+          first.actor,
+        ),
+      ).toMatchObject({ status: 'ACCEPTED' });
+      await worker.process(command);
+      expect(readInventory).toHaveBeenCalledOnce();
+      expect(
+        await operations.get(
+          command.operation_id,
+          command.data.order_id,
+          first.actor,
+        ),
+      ).toMatchObject({
+        status: 'COMPLETED',
+        result: { consumption_id: expect.stringMatching(/^[a-f0-9-]{36}$/) },
+      });
+      expect(
+        (
+          await pool.query(
+            'SELECT 1 FROM promotions.coupon_uses WHERE order_id=$1',
+            [command.data.order_id],
+          )
+        ).rowCount,
+      ).toBe(1);
+    });
 
     it('grants a dedicated runtime role only the privileges needed for H5 operations', async () => {
       const permissions = await runtime.query(`SELECT

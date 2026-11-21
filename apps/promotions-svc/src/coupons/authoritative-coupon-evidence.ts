@@ -14,13 +14,12 @@ import type {
 
 // Internal verified facts, NOT a new G5/Inventory wire DTO. An authorized source
 // must resolve and bind the durable snapshot and reservation before returning.
-// G5's current pedido DTO alone cannot supply regular/offer prices or prove a
-// reservation. No HTTP endpoint or cross-schema query is inferred here.
+// Inventory remains responsible for verifying the reservation.
 export interface DurableCouponFacts {
   orderId: string;
   reservationId: string;
   commercialSnapshotRef: string;
-  reservationConfirmed: boolean;
+  reservationConfirmed?: boolean;
   snapshotDurable: boolean;
   effectiveAt: string;
   customerRef: string | null;
@@ -58,17 +57,8 @@ export class AuthoritativeCouponEvidence implements CouponEvidenceProvider<PoolC
       throw new Error('COUPON_EVIDENCE_UNAVAILABLE');
     // Read external evidence before acquiring coupon/promotion row locks. The
     // processor bounds this entire call and already serializes order/operation.
-    const inventoryConfirmed = await this.inventory?.confirms(command, signal);
-    if (inventoryConfirmed === false)
-      return {
-        orderId: command.data.order_id,
-        reservationId: command.data.reservation_id!,
-        commercialSnapshotRef: command.data.commercial_snapshot_ref!,
-        reservationConfirmed: false,
-        snapshotDurable: false,
-        eligible: false,
-      };
     const facts = await this.source.read(command, signal);
+    const inventoryConfirmed = await this.inventory?.confirms(command, signal);
     signal.throwIfAborted();
     const proof: ConsumptionEvidence = {
       orderId: facts.orderId,

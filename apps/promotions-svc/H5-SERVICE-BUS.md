@@ -64,7 +64,7 @@ OpenAPI 0.7.0-rc.2 documenta los tres endpoints de cupones como `SEMIFINAL_G6` y
 
 El runtime comprueba los permisos de las tablas y ambos enlaces de la cola antes de aceptar comandos nuevos. Tras arrancar, una caída del broker permite conservar nuevas intenciones mediante commit SQL. Un envío confirmado sin resultado terminal se vuelve elegible tras 60 segundos con el mismo MessageId. El commit terminal detiene el replay aunque se pierda el acuse del broker.
 
-Inventory reutiliza la lectura de estado persistido y la restringe al cliente técnico `promotions-svc`. Su evidencia de reserva se verifica independientemente de los datos del snapshot comercial. Falta el adaptador para la fuente G5 autorizada de ese snapshot, que se conecta mediante `COUPON_H5_FACTS_SOURCE`. Hasta disponer de ella y de la credencial G7 dedicada, el worker no abre el transporte y los POST no confirman admisión.
+Inventory reutiliza la lectura de estado persistido y la restringe al cliente técnico `promotions-svc`. El provider `COUPON_H5_FACTS_SOURCE` conecta la [lectura HTTPS de G5](h5/CONTRATO_EVIDENCIA_CUPON_G5.md) configurada en `PROMOTIONS_G5_COUPON_EVIDENCE_ORIGIN`. Usa la identidad técnica G6 con audiencia `api-ventas`, verifica Catálogo y después confirma la vigencia de la reserva en Inventory, todo dentro del plazo H5 de 3000 ms. Si falta la configuración, el worker queda cerrado. La activación requiere verificar el endpoint y el grant con G5/G7 reales.
 
 ## SQL candidato y prueba reproducible
 

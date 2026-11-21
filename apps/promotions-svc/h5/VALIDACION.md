@@ -1,8 +1,27 @@
 # Validación local Promotions H5
 
-## Corrección de auditoría del 21/11/2026
+## Preparación funcional de la integración G5–G6
 
-[Backend PR #250](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/250) · Backend #242 y #75. La auditoría solicitó cambios sobre `b4d49363476ec6bf96b14426ba91ccf9b63b33a9`. La evidencia local de esta sección corresponde a la revisión que incorpora este documento. Los checks integrales se consultan en [GitHub Actions del PR](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/250/checks).
+La revisión que contiene esta sección registra `COUPON_H5_FACTS_SOURCE` por DI. Lee la [evidencia privada definida para G5](CONTRATO_EVIDENCIA_CUPON_G5.md) con el cliente G6 `promotions-svc`, exige audiencia `api-ventas`, valida el snapshot y consulta el Catálogo y la reserva de G6. El procesador existente determina elegibilidad y consumo bajo transacción. Las cuatro rutas externas permanecen en OpenAPI 0.7.0-rc.2. El [runner y la matriz de 20 casos](PRUEBA_CONJUNTA_G5.md) registran las comprobaciones por revisión y ambiente.
+
+| Nivel | Resultado |
+|---|---|
+| Código implementado | Adaptador HTTPS registrado, contrato estricto, cancelación dentro del presupuesto conjunto de 3000 ms y compatibilidad con los cuatro endpoints externos. El render exige el origen privado cuando se habilita el worker. |
+| Pruebas locales | 217 pruebas focalizadas, 13 E2E HTTP, 10 pruebas en PostgreSQL 17 descartable y 6 pruebas del render de despliegue. El motor, Inbox, Outbox y SQL probaron consumo terminal y rechazo de evidencia inconsistente. La red G5, los tokens G7 y el broker se sustituyen en suites locales por fixtures explícitas. |
+| Azure real, plano de control | Namespace Basic `g6-sb-h5-int-32cdqgbnlk7ow` en `rg-g6-sb-h5-int-fork`. Cola `g6.promotions.commands` activa, máximo de 10 entregas y DLQ observada en 0. La identidad `g6-h5-int-promotions` tiene Data Sender y Data Receiver al nivel de esa cola. El grupo contiene el bus, identidades y alertas, sin apps ni jobs del flujo. |
+| Azure/G7/G6 reales, plano de datos | Pendiente. La comprobación de ARM no prueba conexión, settlement, reinicio ni readiness. GitHub tiene el environment del piloto `azure-h5-pilot-234`; falta el protegido `azure-h5` para el carril normal. [Checks del PR](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/250/checks). |
+
+### Dependencias para ejecutar las pruebas reales
+
+| Responsable | Operación | Evidencia que desbloquea |
+|---|---|---|
+| Michael Orosco, G5 Ventas | [G5 #64](https://github.com/Taller-SW-Web/G5-Ventas-Postventas/issues/64) · lectura comercial y preparación de pedido/pago | Endpoint implementado, origen privado, SHA desplegado y pedido sintético con snapshot inmutable y reserva asociada. |
+| G7 Seguridad | [G7 #107](https://github.com/Taller-SW-Web/Modulo-de-Seguridad/issues/107) · JWT de Ventas y cliente de Promotions | Emisión real con grants de [la solicitud G7](SOLICITUD_REVISION_G7.md), incluido `ventas:pedidos:evidencia-cupon:leer` para `promotions-svc` con audiencia `api-ventas`. |
+| Infra G6 y owner de datos | [Backend #242](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/242) · Gateway, runtime, SQL y Service Bus | Workloads aislados con identidades y orígenes aprobados, migraciones revisadas en SQL aislado, rol verificado y credenciales G7 privadas. Ejecutar primero casos G6 y luego el recorrido bilateral. |
+
+## Corrección de auditoría previa del 21/11/2026
+
+[Backend PR #250](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/250) · Backend #242 y #75. La auditoría solicitó cambios sobre `b4d49363476ec6bf96b14426ba91ccf9b63b33a9`. La evidencia de esta sección corresponde al HEAD anterior `cb6649f4028f7dcf6c6d09344b5f6bb7a34d83bc`, con [CI aprobada en esa revisión](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/44952051980).
 
 | Hallazgo | Evidencia local | Confirmación pendiente |
 |---|---|---|

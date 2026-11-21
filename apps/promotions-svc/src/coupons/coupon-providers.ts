@@ -7,7 +7,9 @@ import { CouponH5Operations, CouponH5Worker } from './coupon-h5-operations.js';
 import { CouponH5DeliveryStore } from './coupon-h5-delivery.js';
 import { CouponH5Runtime } from './coupon-h5-runtime.js';
 import { InventoryCouponEvidence } from './inventory-coupon-evidence.js';
+import { G5CouponSnapshot } from './g5-coupon-snapshot.js';
 import { PROMOTIONS_SERVICE_TOKENS } from '../infrastructure/http/integration-providers.js';
+import { HttpCommercialContext } from '../infrastructure/http/commercial-http.js';
 import {
   InternalHttpReader,
   type ServiceAccessTokenSource,
@@ -212,6 +214,36 @@ export function nativeCouponResources(
 
 export const couponProviders: Provider[] = [
   {
+    provide: COUPON_H5_FACTS_SOURCE,
+    inject: [PromotionsConfigService, PROMOTIONS_SERVICE_TOKENS],
+    useFactory: (
+      config: PromotionsConfigService,
+      tokens: ServiceAccessTokenSource,
+    ) => {
+      const { serviceBus, h5ServiceCredentials, upstreams } = config.settings;
+      const { ventas, catalog } = upstreams;
+      if (
+        !serviceBus?.couponCommandsEnabled ||
+        !ventas ||
+        !catalog ||
+        !h5ServiceCredentials
+      )
+        return undefined;
+      return new G5CouponSnapshot(
+        new InternalHttpReader({
+          origin: ventas,
+          origins: { ventas },
+          getServiceAccessToken: tokens,
+        }),
+        new HttpCommercialContext({
+          origin: catalog,
+          origins: { catalog },
+          getServiceAccessToken: tokens,
+        }),
+      );
+    },
+  },
+  {
     provide: CouponH5Operations,
     inject: [COUPON_RESOURCES],
     useFactory: (resources: CouponResources) =>
@@ -224,7 +256,7 @@ export const couponProviders: Provider[] = [
       COUPON_RESOURCES,
       CouponH5Operations,
       PROMOTIONS_SERVICE_TOKENS,
-      { token: COUPON_H5_FACTS_SOURCE, optional: true },
+      COUPON_H5_FACTS_SOURCE,
     ],
     useFactory: (
       config: PromotionsConfigService,

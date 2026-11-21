@@ -5,6 +5,7 @@ import { withDeadline } from '../resilience/deadline.js';
 import {
   internalOperations,
   type ServiceAccessTokenSource,
+  type ServiceAudience,
 } from './internal-http.js';
 
 interface TokenFlight {
@@ -23,6 +24,7 @@ export function promotionsServiceTokens(
   const pending = new Map<string, TokenFlight>();
   const issue = (
     clientId: string,
+    audience: ServiceAudience,
     scope: string,
     credentials: NonNullable<
       PromotionsConfigService['settings']['serviceCredentials']
@@ -89,7 +91,7 @@ export function promotionsServiceTokens(
       await identity.authorize(
         {
           security: ['serviceBearer'],
-          audience: 'api-productos',
+          audience,
           clients: [clientId],
           scope,
         },
@@ -119,7 +121,7 @@ export function promotionsServiceTokens(
       );
       if (!Number.isFinite(lifetime) || lifetime <= 0) throw new Error();
       signal.throwIfAborted();
-      cache.set(`${clientId}:${scope}`, {
+      cache.set(`${clientId}:${audience}:${scope}`, {
         token: body.accessToken,
         until: Date.now() + lifetime - Math.min(30000, lifetime / 10),
       });
@@ -131,15 +133,16 @@ export function promotionsServiceTokens(
       const operation = Object.hasOwn(internalOperations, request.operationId)
         ? internalOperations[request.operationId]
         : undefined;
+      const audience = operation?.audience ?? 'api-productos';
       if (
-        request.audience !== 'api-productos' ||
         !operation ||
+        request.audience !== audience ||
         operation.scope !== request.scope
       )
         throw new Error();
       const scope = operation.scope;
       const clientId = operation.clientId ?? 'modulo-productos';
-      const key = `${clientId}:${scope}`;
+      const key = `${clientId}:${audience}:${scope}`;
       const credentials = operation.clientId
         ? config.settings.h5ServiceCredentials
         : config.settings.serviceCredentials;
@@ -153,7 +156,7 @@ export function promotionsServiceTokens(
           controller,
           waiters: 0,
           settled: false,
-          promise: issue(clientId, scope, credentials, controller),
+          promise: issue(clientId, audience, scope, credentials, controller),
         };
         pending.set(key, flight);
         const current = flight;

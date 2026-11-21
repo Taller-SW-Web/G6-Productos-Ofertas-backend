@@ -12,6 +12,9 @@ export interface ContractSchema {
   const?: unknown;
   minLength?: number;
   maxLength?: number;
+  minItems?: number;
+  maxItems?: number;
+  items?: ContractSchema;
   minimum?: number;
   maximum?: number;
   pattern?: string;
@@ -73,15 +76,25 @@ export function matchesSchema(value: unknown, schema: ContractSchema): boolean {
       !types.some((type) =>
         type === 'null'
           ? value === null
-          : type === 'object'
-            ? record(value)
-            : type === 'integer'
-              ? Number.isSafeInteger(value)
-              : typeof value === type,
+          : type === 'array'
+            ? Array.isArray(value)
+            : type === 'object'
+              ? record(value)
+              : type === 'integer'
+                ? Number.isSafeInteger(value)
+                : typeof value === type,
       )
     )
       return false;
   }
+  const itemSchema = schema.items;
+  if (
+    Array.isArray(value) &&
+    ((schema.minItems !== undefined && value.length < schema.minItems) ||
+      (schema.maxItems !== undefined && value.length > schema.maxItems) ||
+      (itemSchema && value.some((item) => !matchesSchema(item, itemSchema))))
+  )
+    return false;
   if (typeof value === 'string') {
     if (schema.minLength !== undefined && [...value].length < schema.minLength)
       return false;

@@ -4,6 +4,17 @@ const managedResource =
 const nonzeroUuid =
   /^(?!0{8}-0{4}-0{4}-0{4}-0{12}$)[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const bool = (value) => value === 'true' || value === 'false';
+const httpsOrigin = (value) => {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      (value === url.origin || value === url.origin + '/')
+    );
+  } catch {
+    return false;
+  }
+};
 const fail = () => {
   throw new Error('G5_H5_ACA_CONFIGURATION_INVALID');
 };
@@ -70,7 +81,9 @@ export function validateG5H5Aca(runtime, plan) {
     !bool(promotions.PROMOTIONS_H5_COUPON_COMMANDS_ENABLED) ||
     !bool(promotions.PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED) ||
     (runtime['api-gateway'].GATEWAY_G5_H5_ENABLED === 'true' &&
-      (promotions.PROMOTIONS_H5_COUPON_COMMANDS_ENABLED !== 'true' ||
+      promotions.PROMOTIONS_H5_COUPON_COMMANDS_ENABLED !== 'true') ||
+    (promotions.PROMOTIONS_H5_COUPON_COMMANDS_ENABLED === 'true' &&
+      (!httpsOrigin(promotions.PROMOTIONS_G5_COUPON_EVIDENCE_ORIGIN) ||
         !promotions.PROMOTIONS_H5_SERVICE_CLIENT_SECRET?.trim() ||
         promotions.PROMOTIONS_H5_SERVICE_CLIENT_SECRET ===
           promotions.PROMOTIONS_SERVICE_CLIENT_SECRET))

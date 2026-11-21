@@ -13,6 +13,7 @@ const upstreamVariables = {
   pricing: 'GATEWAY_PRICING_SVC_URL',
   inventory: 'GATEWAY_INVENTORY_SVC_URL',
   taxonomy: 'GATEWAY_TAXONOMY_SVC_URL',
+  ventas: 'PROMOTIONS_G5_COUPON_EVIDENCE_ORIGIN',
 } as const;
 
 const requiredVariables = [

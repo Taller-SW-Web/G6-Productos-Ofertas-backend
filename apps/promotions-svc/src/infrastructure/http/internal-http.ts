@@ -6,8 +6,11 @@ export type InternalOperation =
   | 'obtenerPrecioSku'
   | 'consultarDisponibilidadComercial'
   | 'obtenerEvidenciaReservaCuponInterno'
+  | 'obtenerSnapshotCuponG5'
   | 'obtenerCategoriaAdmin';
-export type Upstream = 'catalog' | 'pricing' | 'inventory' | 'taxonomy';
+export type Upstream =
+  'catalog' | 'pricing' | 'inventory' | 'taxonomy' | 'ventas';
+export type ServiceAudience = 'api-productos' | 'api-ventas';
 export const internalOperations: Readonly<
   Record<
     InternalOperation,
@@ -16,6 +19,7 @@ export const internalOperations: Readonly<
       scope: string;
       missing: string;
       clientId?: 'promotions-svc';
+      audience?: ServiceAudience;
     }>
   >
 > = {
@@ -45,6 +49,13 @@ export const internalOperations: Readonly<
     missing: 'RESERVA_NO_ENCONTRADA',
     clientId: 'promotions-svc',
   },
+  obtenerSnapshotCuponG5: {
+    service: 'ventas',
+    scope: 'ventas:pedidos:evidencia-cupon:leer',
+    missing: '',
+    clientId: 'promotions-svc',
+    audience: 'api-ventas',
+  },
   obtenerCategoriaAdmin: {
     service: 'taxonomy',
     scope: 'catalogo:leer',
@@ -54,7 +65,7 @@ export const internalOperations: Readonly<
 export type ServiceAccessTokenSource = (
   request: {
     operationId: InternalOperation;
-    audience: 'api-productos';
+    audience: ServiceAudience;
     scope: string;
   },
   signal: AbortSignal,
@@ -88,6 +99,7 @@ export function internalOrigin(
     url.hash ||
     url.pathname !== '/' ||
     !['https:', 'http:'].includes(url.protocol) ||
+    (service === 'ventas' && url.protocol !== 'https:') ||
     (demo
       ? !loopback && !privateService
       : url.protocol !== 'https:' && !loopback && !privateService)
@@ -135,15 +147,16 @@ export class InternalHttpReader {
       'X-Correlation-Id': correlationId ?? randomUUID(),
     };
     if (
-      this.options.mode !== 'RESTRICTED_DEMO' &&
-      this.options.mode !== 'PUBLIC_READ_ONLY'
+      spec.service === 'ventas' ||
+      (this.options.mode !== 'RESTRICTED_DEMO' &&
+        this.options.mode !== 'PUBLIC_READ_ONLY')
     ) {
       // Own service credentials only. For HTTP aliases, the deployment must first
       // prove the private network above; an alias string alone proves no secrecy.
       const token = await this.options.getServiceAccessToken?.(
         {
           operationId: operation,
-          audience: 'api-productos',
+          audience: spec.audience ?? 'api-productos',
           scope: spec.scope,
         },
         signal,
@@ -153,16 +166,16 @@ export class InternalHttpReader {
         throw new Error('COMMERCIAL_SESSION_UNAVAILABLE');
       headers.Authorization = 'Bearer ' + token;
     }
-    const response = await fetch(
-      (this.origins[spec.service] ?? this.fallback) + '/api/v1' + path,
-      {
-        signal,
-        redirect: 'error',
-        credentials: 'omit',
-        cache: 'no-store',
-        headers,
-      },
-    );
+    const origin = this.origins[spec.service];
+    if (spec.service === 'ventas' && !origin)
+      throw new Error('COMMERCIAL_HTTP_UNAVAILABLE');
+    const response = await fetch((origin ?? this.fallback) + '/api/v1' + path, {
+      signal,
+      redirect: 'error',
+      credentials: 'omit',
+      cache: 'no-store',
+      headers,
+    });
     if (
       !response.body ||
       !/^application\/(?:json|problem\+json)(?:\s*;|$)/i.test(
@@ -199,6 +212,7 @@ export class InternalHttpReader {
         return null;
       if (
         !response.ok ||
+        (spec.service === 'ventas' && response.status !== 200) ||
         !/^application\/json(?:\s*;|$)/i.test(
           response.headers.get('content-type') ?? '',
         )
