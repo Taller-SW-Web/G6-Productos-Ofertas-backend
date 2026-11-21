@@ -5,12 +5,18 @@ export type InternalOperation =
   | 'obtenerContextoSku'
   | 'obtenerPrecioSku'
   | 'consultarDisponibilidadComercial'
+  | 'obtenerEvidenciaReservaCuponInterno'
   | 'obtenerCategoriaAdmin';
 export type Upstream = 'catalog' | 'pricing' | 'inventory' | 'taxonomy';
 export const internalOperations: Readonly<
   Record<
     InternalOperation,
-    Readonly<{ service: Upstream; scope: string; missing: string }>
+    Readonly<{
+      service: Upstream;
+      scope: string;
+      missing: string;
+      clientId?: 'promotions-svc';
+    }>
   >
 > = {
   obtenerProducto: {
@@ -32,6 +38,12 @@ export const internalOperations: Readonly<
     service: 'inventory',
     scope: 'inventario:disponibilidad:leer',
     missing: '',
+  },
+  obtenerEvidenciaReservaCuponInterno: {
+    service: 'inventory',
+    scope: 'inventario:reservas:estado:leer',
+    missing: 'RESERVA_NO_ENCONTRADA',
+    clientId: 'promotions-svc',
   },
   obtenerCategoriaAdmin: {
     service: 'taxonomy',

@@ -133,6 +133,32 @@ describe('Promotions own G7 client_credentials (explicit contract fixture)', () 
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it('uses only the dedicated Promotions identity for private reservation evidence', async () => {
+    const scope = 'inventario:reservas:estado:leer';
+    const evidence = {
+      ...request,
+      operationId: 'obtenerEvidenciaReservaCuponInterno',
+      scope,
+    } as const;
+    const jwt = token({ sub: 'promotions-svc', scope });
+    const fetcher = vi.fn(async (_url: string, options: RequestInit) => {
+      const params = new URLSearchParams(String(options.body));
+      expect(params.get('client_id')).toBe('promotions-svc');
+      expect(params.get('client_secret')).toBe('synthetic-h5-secret');
+      expect(params.get('scope')).toBe(scope);
+      return response(jwt, { scopes: [scope] });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    expect(await source()(evidence, signal())).toBeNull();
+    expect(fetcher).not.toHaveBeenCalled();
+    const dedicated = source(
+      config({ PROMOTIONS_H5_SERVICE_CLIENT_SECRET: 'synthetic-h5-secret' }),
+    );
+    expect(await dedicated(evidence, signal())).toBe(jwt);
+    expect(await dedicated(evidence, signal())).toBe(jwt);
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
   it('renews before the earlier of JWT expiry and expiresIn', async () => {
     let now = Date.now();
     vi.spyOn(Date, 'now').mockImplementation(() => now);

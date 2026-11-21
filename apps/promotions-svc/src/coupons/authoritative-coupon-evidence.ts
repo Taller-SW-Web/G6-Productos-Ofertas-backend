@@ -6,6 +6,7 @@ import { normalizeCouponCode } from '../domain/promotion-rules.js';
 import { PromotionsRepositories } from '../infrastructure/persistence/repositories.js';
 import * as schema from '../infrastructure/persistence/schema.js';
 import { consumptionName, type CouponCommand } from './coupon-command.js';
+import type { InventoryCouponEvidence } from './inventory-coupon-evidence.js';
 import type {
   ConsumptionEvidence,
   CouponEvidenceProvider,
@@ -34,15 +35,19 @@ export interface CouponDurableFactsSource {
   ): Promise<DurableCouponFacts>;
 }
 
-// Deliberately not registered in Nest: the real facts source/identity remains a
-// specific integration dependency. SQL uses the processor's existing client;
-// there is no second pool, transaction, migration or production fixture.
+export const COUPON_H5_FACTS_SOURCE = Symbol('COUPON_H5_FACTS_SOURCE');
+
+// SQL revalidation uses the processor's transaction. H5 requires Inventory's
+// evidence independently of the commercial snapshot source.
 export class AuthoritativeCouponEvidence implements CouponEvidenceProvider<PoolClient> {
   private readonly prepared = new WeakMap<
     ConsumptionEvidence,
     DurableCouponFacts
   >();
-  constructor(private readonly source: CouponDurableFactsSource) {}
+  constructor(
+    private readonly source: CouponDurableFactsSource,
+    private readonly inventory?: Pick<InventoryCouponEvidence, 'confirms'>,
+  ) {}
 
   async verify(
     command: CouponCommand,
@@ -53,13 +58,24 @@ export class AuthoritativeCouponEvidence implements CouponEvidenceProvider<PoolC
       throw new Error('COUPON_EVIDENCE_UNAVAILABLE');
     // Read external evidence before acquiring coupon/promotion row locks. The
     // processor bounds this entire call and already serializes order/operation.
+    const inventoryConfirmed = await this.inventory?.confirms(command, signal);
+    if (inventoryConfirmed === false)
+      return {
+        orderId: command.data.order_id,
+        reservationId: command.data.reservation_id!,
+        commercialSnapshotRef: command.data.commercial_snapshot_ref!,
+        reservationConfirmed: false,
+        snapshotDurable: false,
+        eligible: false,
+      };
     const facts = await this.source.read(command, signal);
     signal.throwIfAborted();
     const proof: ConsumptionEvidence = {
       orderId: facts.orderId,
       reservationId: facts.reservationId,
       commercialSnapshotRef: facts.commercialSnapshotRef,
-      reservationConfirmed: facts.reservationConfirmed === true,
+      reservationConfirmed:
+        inventoryConfirmed ?? facts.reservationConfirmed === true,
       snapshotDurable: facts.snapshotDurable === true,
       eligible: false,
     };

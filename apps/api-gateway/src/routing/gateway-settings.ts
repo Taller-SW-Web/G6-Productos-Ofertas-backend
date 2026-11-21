@@ -22,6 +22,7 @@ export interface GatewaySettings {
   readonly readOnlyDemoEnabled?: boolean;
   readonly securityMode?: GatewaySecurityMode;
   readonly inventoryLocalGrantsEnabled?: boolean;
+  readonly g5H5Enabled?: boolean;
 }
 
 export function readGatewayPort(env: Readonly<NodeJS.ProcessEnv>): number {
@@ -124,6 +125,12 @@ export function readGatewaySettings(
     const inventoryLocalGrants =
       env.GATEWAY_INVENTORY_LOCAL_GRANTS_ENABLED ?? 'false';
     if (!['true', 'false'].includes(inventoryLocalGrants)) throw new Error();
+    const g5H5Enabled = env.GATEWAY_G5_H5_ENABLED ?? 'false';
+    if (
+      !['true', 'false'].includes(g5H5Enabled) ||
+      (g5H5Enabled === 'true' && securityMode !== 'G7_AUTHENTICATED')
+    )
+      throw new Error();
     const simulated = securityMode === 'SIMULATED_AUTH';
     const issuer = simulated ? env.SIMULATED_AUTH_ISSUER : env.AUTH_ISSUER;
     const jwksUrl = simulated ? env.SIMULATED_AUTH_JWKS_URL : env.AUTH_JWKS_URL;
@@ -136,7 +143,8 @@ export function readGatewaySettings(
     const serviceClientSecret = simulated
       ? undefined
       : env.GATEWAY_SERVICE_CLIENT_SECRET;
-    if (!!issuer !== !!jwksUrl) throw new Error();
+    if (!!issuer !== !!jwksUrl || (g5H5Enabled === 'true' && !issuer))
+      throw new Error();
     if (simulated && (!issuer || !jwksUrl || issuer === env.AUTH_ISSUER))
       throw new Error();
     for (const value of [issuer, jwksUrl, serviceTokenUrl]) {
@@ -184,6 +192,7 @@ export function readGatewaySettings(
       readOnlyDemoEnabled: readOnlyDemoEnabled === 'true',
       securityMode,
       inventoryLocalGrantsEnabled: inventoryLocalGrants === 'true',
+      g5H5Enabled: g5H5Enabled === 'true',
     });
   } catch {
     throw new Error(

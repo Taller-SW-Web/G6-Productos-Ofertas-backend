@@ -208,6 +208,54 @@ test('G7 deployment renders with nine aligned trust configurations and no anonym
   input.runtime['catalog-svc'].SECURITY_ISSUER = 'https://other.contract.test';
   assert.throws(() => makeDeployment(input), /G7_TRUST_MISMATCH/);
   input.runtime['catalog-svc'].SECURITY_ISSUER = issuer;
+  const stage = structuredClone(input);
+  const g5Namespace = 'g6-h5-isolated.servicebus.windows.net';
+  stage.serviceBusG5H5 = { namespace: g5Namespace, identities: {} };
+  for (const [index, service] of [
+    'inventory-svc',
+    'promotions-svc',
+  ].entries()) {
+    const clientId = `33333333-3333-4333-8333-33333333333${index}`;
+    const resourceId = `/subscriptions/22222222-2222-4222-8222-222222222222/resourceGroups/rg-g5-h5-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${service}`;
+    stage.serviceBusG5H5.identities[service] = { clientId, resourceId };
+    delete stage.runtime[service].RABBITMQ_URL;
+    Object.assign(stage.runtime[service], {
+      MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
+      G6_SERVICE_BUS_PRODUCTION_ENABLED: 'true',
+      SERVICE_BUS_NAMESPACE_FQDN: g5Namespace,
+      AZURE_CLIENT_ID: clientId,
+      ...(service === 'inventory-svc'
+        ? {
+            G6_SERVICE_BUS_PILOT_ENABLED: 'true',
+            INVENTORY_SERVICE_BUS_PUBLISH_ENABLED: 'false',
+            INVENTORY_SERVICE_BUS_CONSUME_ENABLED: 'false',
+          }
+        : {
+            PROMOTIONS_H5_COUPON_COMMANDS_ENABLED: 'true',
+            PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED: 'false',
+            PROMOTIONS_H5_SERVICE_CLIENT_SECRET: 'dedicated-isolated-identity',
+          }),
+    });
+  }
+  stage.runtime['api-gateway'].GATEWAY_G5_H5_ENABLED = 'true';
+  const g5 = makeDeployment(stage);
+  for (const app of g5.template.resources.slice(1)) {
+    const identity = stage.serviceBusG5H5.identities[app.name];
+    assert.equal(app.properties.template.scale.minReplicas, identity ? 1 : 0);
+    if (identity)
+      assert.deepEqual(Object.keys(app.identity.userAssignedIdentities), [
+        identity.resourceId,
+      ]);
+    else assert.equal(app.identity, undefined);
+  }
+  const mixed = structuredClone(stage);
+  mixed.serviceBusPilot = { namespace: 'g6-other.servicebus.windows.net' };
+  assert.throws(
+    () => makeDeployment(mixed),
+    /SERVICE_BUS_PROFILES_MUTUALLY_EXCLUSIVE/,
+  );
+  delete stage.runtime['promotions-svc'].PROMOTIONS_H5_SERVICE_CLIENT_SECRET;
+  assert.throws(() => makeDeployment(stage), /G5_H5_ACA_CONFIGURATION_INVALID/);
   const namespace = 'g6-pilot-test.servicebus.windows.net';
   input.serviceBusPilot = { namespace, identities: {} };
   for (const [index, service] of ['pricing-svc', 'price-audit-svc'].entries()) {

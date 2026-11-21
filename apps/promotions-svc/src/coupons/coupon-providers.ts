@@ -2,6 +2,21 @@ import { connectPrivateAmqps } from '../private-amqps.js';
 import type { Provider } from '@nestjs/common';
 import { h4EventAdapters } from './h4-event-adapters.js';
 import { assignedH4Contracts } from './assigned-h4-contract.generated.js';
+import { PromotionsServiceBusEvents } from './service-bus-events.js';
+import { CouponH5Operations, CouponH5Worker } from './coupon-h5-operations.js';
+import { CouponH5DeliveryStore } from './coupon-h5-delivery.js';
+import { CouponH5Runtime } from './coupon-h5-runtime.js';
+import { InventoryCouponEvidence } from './inventory-coupon-evidence.js';
+import { PROMOTIONS_SERVICE_TOKENS } from '../infrastructure/http/integration-providers.js';
+import {
+  InternalHttpReader,
+  type ServiceAccessTokenSource,
+} from '../infrastructure/http/internal-http.js';
+import {
+  AuthoritativeCouponEvidence,
+  COUPON_H5_FACTS_SOURCE,
+  type CouponDurableFactsSource,
+} from './authoritative-coupon-evidence.js';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import type { Pool as PgPool, PoolConfig } from 'pg';
@@ -195,6 +210,64 @@ export function nativeCouponResources(
 }
 
 export const couponProviders: Provider[] = [
+  {
+    provide: CouponH5Operations,
+    inject: [COUPON_RESOURCES],
+    useFactory: (resources: CouponResources) =>
+      new CouponH5Operations(resources.pool),
+  },
+  {
+    provide: CouponH5Runtime,
+    inject: [
+      PromotionsConfigService,
+      COUPON_RESOURCES,
+      CouponH5Operations,
+      PROMOTIONS_SERVICE_TOKENS,
+      { token: COUPON_H5_FACTS_SOURCE, optional: true },
+    ],
+    useFactory: (
+      config: PromotionsConfigService,
+      resources: CouponResources,
+      operations: CouponH5Operations,
+      tokens: ServiceAccessTokenSource,
+      factsSource?: CouponDurableFactsSource,
+    ) => {
+      const origin = config.settings.upstreams.inventory;
+      const inventory =
+        origin && config.settings.h5ServiceCredentials
+          ? new InventoryCouponEvidence(
+              new InternalHttpReader({
+                origin,
+                origins: { inventory: origin },
+                getServiceAccessToken: tokens,
+              }),
+            )
+          : undefined;
+      const worker =
+        factsSource &&
+        inventory &&
+        new CouponH5Worker(
+          operations,
+          new CouponCommandProcessor(
+            resources.pool,
+            new AuthoritativeCouponEvidence(factsSource, inventory),
+          ),
+        );
+      return new CouponH5Runtime(
+        config.settings.serviceBus,
+        new CouponH5DeliveryStore(resources.pool),
+        worker,
+      );
+    },
+  },
+  {
+    provide: PromotionsServiceBusEvents,
+    inject: [PromotionsConfigService, PromotionsAssignedEventDispatcher],
+    useFactory: (
+      config: PromotionsConfigService,
+      dispatcher: PromotionsAssignedEventDispatcher,
+    ) => new PromotionsServiceBusEvents(config.settings.serviceBus, dispatcher),
+  },
   { provide: ASSIGNED_EVENT_ADAPTERS, useValue: h4EventAdapters },
   { provide: PROMOTIONS_BROKER_IDENTITY, useValue: blockedBrokerIdentity },
   {

@@ -16,6 +16,8 @@ import {
 } from './infrastructure/http/integration-providers.js';
 import { promotionsServiceTokens } from './infrastructure/http/service-tokens.js';
 import { couponProviders } from './coupons/coupon-providers.js';
+import { CouponH5Runtime } from './coupons/coupon-h5-runtime.js';
+import { PromotionsServiceBusEvents } from './coupons/service-bus-events.js';
 import {
   PromotionsConfigService,
   readPromotionsEnvironment,
@@ -33,6 +35,7 @@ import {
 } from './http/query-controller.js';
 import { PromotionsQueryService } from './http/query-service.js';
 import { PromotionsWriteController } from './http/write-controller.js';
+import { CouponH5Controller } from './http/coupon-h5-controller.js';
 import { PromotionsWriteService } from './http/write-service.js';
 import { ADMIN_REFERENCES } from './domain/admin-references.js';
 import {
@@ -48,6 +51,7 @@ import {
     PromotionsSvcController,
     PromotionsQueryController,
     PromotionsWriteController,
+    CouponH5Controller,
   ],
   providers: [
     ...couponProviders,
@@ -92,7 +96,11 @@ import {
     },
     {
       provide: PROMOTIONS_DEPENDENCY_PROBES,
-      inject: [PromotionsConfigService],
+      inject: [
+        PromotionsConfigService,
+        PromotionsServiceBusEvents,
+        CouponH5Runtime,
+      ],
       useFactory: nativePromotionsDependencyProbes,
     },
     PromotionsReadinessService,
