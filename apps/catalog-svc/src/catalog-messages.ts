@@ -346,7 +346,11 @@ export function parseCatalogMessage(value: unknown): CatalogEnvelope {
       Object.keys(data).length !== (value.schema_version === 4 ? 6 : 5) ||
       !UUID.test(String(data.batch_id)) ||
       !UUID.test(String(data.batch_operation_id)) ||
-      value.operation_id !== data.batch_operation_id ||
+      (value.schema_version === 4 &&
+        value.operation_id !== data.batch_operation_id) ||
+      (value.schema_version === 3 &&
+        value.operation_id != null &&
+        value.operation_id !== data.batch_operation_id) ||
       data.template_version !== 2 ||
       !['ALTA', 'ACTUALIZACION'].includes(String(data.mode)) ||
       !object(reference) ||
