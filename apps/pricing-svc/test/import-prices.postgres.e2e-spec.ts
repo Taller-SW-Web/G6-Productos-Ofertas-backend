@@ -141,10 +141,17 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
 
     it('prevalida sin escrituras y devuelve errores por fila o por archivo', async () => {
       await seed('preview');
-      const preview = await post(
-        base + '/prevalidar',
-        csv(row('preview'), row('missing')),
-      ).expect(200);
+      const file = csv(row('preview'), row('missing'));
+      const snapshot = () =>
+        postgres.admin!.query(`
+          SELECT (SELECT jsonb_agg(p ORDER BY id) FROM pricing.prices p) AS prices,
+                 (SELECT jsonb_agg(v ORDER BY id) FROM pricing.price_validities v) AS validities,
+                 (SELECT count(*) FROM pricing.bulk_price_jobs) AS jobs,
+                 (SELECT count(*) FROM pricing.bulk_price_rows) AS rows,
+                 (SELECT count(*) FROM pricing.outbox) AS facts
+        `);
+      const before = (await snapshot()).rows;
+      const preview = await post(base + '/prevalidar', file).expect(200);
       expect(preview.body).toEqual({
         valid: false,
         total_rows: 2,
@@ -157,10 +164,28 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
           },
         ],
       });
+      for (const policy of [false, true]) {
+        const result = await post(
+          base + '/prevalidar',
+          Buffer.from(
+            '\uFEFF' + file.toString('utf8').replaceAll('\r\n', '\n'),
+          ),
+          policy,
+        ).expect(200);
+        expect(result.body).toEqual(preview.body);
+      }
       await post(base + '/prevalidar', Buffer.from('otra,cabecera\n')).expect(
         422,
       );
       await post(base + '/prevalidar', Buffer.from([0xff])).expect(400);
+      await post(base + '/prevalidar', csv(row('nul\0sku'))).expect(400);
+      const invalidColumns = await post(
+        base + '/prevalidar',
+        csv('preview,'),
+      ).expect(200);
+      expect(invalidColumns.body.errors).toEqual([
+        { row_id: '2', sku: 'preview', status: 'FAILED', code: 'VALIDACION' },
+      ]);
       await post(base + '/prevalidar', Buffer.alloc(1024 * 1024 + 1)).expect(
         413,
       );
@@ -173,11 +198,7 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
         csv(row('preview'), row('preview')),
       ).expect(200);
       expect(duplicate.body.errors).toHaveLength(2);
-      expect(await version('preview')).toBe('1');
-      expect(
-        (await postgres.admin!.query('SELECT 1 FROM pricing.bulk_price_jobs'))
-          .rowCount,
-      ).toBe(0);
+      expect((await snapshot()).rows).toEqual(before);
     });
 
     it('deniega las cinco mutaciones con identidad revocada antes de tocar PostgreSQL', async () => {
@@ -298,7 +319,13 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
         row('"A,""B"""'),
         row('=formula'),
       );
-      await post(base + '/prevalidar', file, false).expect(400);
+      await post(base + '/prevalidar', file, 'yes').expect(400);
+      await request(app.getHttpServer())
+        .post(base + '/prevalidar')
+        .auth(identity.token(), { type: 'bearer' })
+        .field('unexpected', 'true')
+        .attach('archivo', file, 'precios.csv')
+        .expect(400);
       await post(base, file, 'yes').expect(400);
       await post(base, file, undefined, '').expect(400);
       const admitted = await post(base, file).expect(202);
