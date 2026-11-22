@@ -705,6 +705,7 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
     ];
     const input = {
       batchId,
+      ownerSub: OWNER_A,
       correlationId,
       contentRef: `test://${id()}`,
       format: 'CSV',
