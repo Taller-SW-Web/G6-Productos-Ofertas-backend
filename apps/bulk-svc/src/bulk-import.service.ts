@@ -93,6 +93,21 @@ export class BulkImportService {
     return snapshot;
   }
 
+  async getRetryEligibility(batchId: string, ownerSub: string) {
+    try {
+      return await this.repository.getRetryEligibility(batchId, ownerSub);
+    } catch (error) {
+      if (
+        error instanceof BulkPersistenceError &&
+        error.code === 'FOREIGN_KEY_VIOLATION'
+      )
+        throw new BulkDomainError('BATCH_NOT_FOUND', 'El lote no existe.', {
+          cause: error,
+        });
+      throw mapBulkPersistenceError(error);
+    }
+  }
+
   async findByOwnerAndCorrelation(ownerSub: string, correlationId: string) {
     try {
       return await this.repository.findBatchByOwnerAndCorrelation(
@@ -258,9 +273,19 @@ export class BulkImportService {
     }
   }
 
-  async resumeBatch(batchId: string, ownerSub: string) {
+  async resumeBatch(
+    batchId: string,
+    ownerSub: string,
+    correlationId?: string,
+    motivo: string | null = null,
+  ) {
     try {
-      return await this.repository.requeueBatch(batchId, ownerSub);
+      return await this.repository.requeueBatch(
+        batchId,
+        ownerSub,
+        correlationId,
+        motivo,
+      );
     } catch (error) {
       if (
         error instanceof BulkPersistenceError &&

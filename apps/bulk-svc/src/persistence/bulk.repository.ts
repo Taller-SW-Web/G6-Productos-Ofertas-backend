@@ -4,6 +4,7 @@ import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import {
   batchJobs,
   batchRows,
+  domainAttempts,
   exportJobs,
   fileManifests,
   inbox,
@@ -1404,6 +1405,153 @@ export class BulkPersistenceRepository {
     }
   }
 
+  async getRetryEligibility(
+    batchId: string,
+    ownerSub: string,
+  ): Promise<{
+    protocolo: 'BULK_RETRY_V1';
+    elegible: boolean;
+    pasos: Array<{ row_id: string; dominio: 'CATALOGO' }>;
+    motivo_bloqueo?: string;
+  }> {
+    const blocked = (motivo_bloqueo: string) => ({
+      protocolo: 'BULK_RETRY_V1' as const,
+      elegible: false,
+      pasos: [],
+      motivo_bloqueo,
+    });
+    try {
+      const snapshot = await this.loadBatchSnapshot(batchId, ownerSub);
+      if (!snapshot) throw new BulkPersistenceError('FOREIGN_KEY_VIOLATION');
+      const { batch, rows } = snapshot;
+      if (
+        batch.status !== 'COMPLETED' ||
+        !batch.needsReconciliation ||
+        rows.length === 0
+      )
+        return blocked('LOTE_NO_ELEGIBLE');
+      if (
+        rows.some(({ steps }) =>
+          steps.some((step) => !['COMPLETED', 'FAILED'].includes(step.status)),
+        )
+      )
+        return blocked('PASOS_NO_TERMINALES');
+
+      const [admission] = await this.db
+        .select({ payload: inbox.payload })
+        .from(inbox)
+        .where(
+          and(
+            eq(inbox.messageId, batch.batchId),
+            eq(inbox.handler, 'bulk.import.admission'),
+          ),
+        )
+        .limit(1);
+      const intentRows = Array.isArray(admission?.payload.rows)
+        ? admission.payload.rows.filter(
+            (value): value is Record<string, unknown> =>
+              typeof value === 'object' && value !== null,
+          )
+        : [];
+      const originalCommands = Array.isArray(admission?.payload.catalogCommands)
+        ? admission.payload.catalogCommands.filter(
+            (value): value is Record<string, unknown> =>
+              typeof value === 'object' && value !== null,
+          )
+        : [];
+      const v3Command = originalCommands.find((command) => {
+        const data = command.data as Record<string, unknown> | undefined;
+        return command.schema_version === 3 && !!data?.content_ref;
+      });
+      if (!v3Command) return blocked('DOCUMENTO_ORIGINAL_V3_NO_VERIFICABLE');
+
+      const operationRows = new Map<string, Record<string, unknown>>();
+      for (const intentRow of intentRows) {
+        if (typeof intentRow.rowOperationId === 'string')
+          operationRows.set(intentRow.rowOperationId, intentRow);
+      }
+      const grouped = new Map<string, typeof rows>();
+      for (const persisted of rows) {
+        const intentRow = operationRows.get(persisted.row.rowId);
+        if (!intentRow || typeof intentRow.skuBase !== 'string')
+          return blocked('IDENTIDAD_DE_FILA_NO_VERIFICABLE');
+        grouped.set(intentRow.skuBase, [
+          ...(grouped.get(intentRow.skuBase) ?? []),
+          persisted,
+        ]);
+      }
+
+      const commandData = v3Command.data as Record<string, unknown>;
+      const commandRows = Array.isArray(commandData.rows)
+        ? commandData.rows.filter(
+            (value): value is Record<string, unknown> =>
+              typeof value === 'object' && value !== null,
+          )
+        : [];
+      const commandRowIds = new Set(
+        commandRows.map((row) => row.row_operation_id),
+      );
+      const candidates: Array<{ row_id: string; dominio: 'CATALOGO' }> = [];
+      for (const family of grouped.values()) {
+        const familySteps: Array<{ row_id: string; dominio: 'CATALOGO' }> = [];
+        let eligible = true;
+        for (const persisted of family) {
+          const { row, steps } = persisted;
+          const catalogStep = steps.find((step) => step.domain === 'CATALOGO');
+          if (
+            !row.requiredDomains.includes('CATALOGO') ||
+            row.appliedDomains.length > 0 ||
+            row.status === 'COMPLETED' ||
+            catalogStep?.status !== 'FAILED' ||
+            !commandRowIds.has(row.rowId)
+          ) {
+            eligible = false;
+            break;
+          }
+          const attempts = await this.db
+            .select()
+            .from(domainAttempts)
+            .where(
+              and(
+                eq(domainAttempts.batchRowId, row.id),
+                eq(domainAttempts.domain, 'CATALOGO'),
+              ),
+            )
+            .orderBy(desc(domainAttempts.attemptNumber))
+            .limit(2);
+          const current = attempts[0];
+          if (
+            attempts.length !== 1 ||
+            !current ||
+            current.attemptNumber !== 1 ||
+            current.previousAttemptId !== null ||
+            current.commandAttemptId !== null ||
+            current.businessOperationId !== v3Command.operation_id ||
+            current.status !== 'REJECTED' ||
+            current.effectState !== 'NONE' ||
+            !current.retriable ||
+            !current.receiptMessageId
+          ) {
+            eligible = false;
+            break;
+          }
+          familySteps.push({ row_id: row.rowId, dominio: 'CATALOGO' });
+        }
+        if (eligible && familySteps.length === family.length)
+          candidates.push(...familySteps);
+      }
+      if (candidates.length === 0)
+        return blocked('PROTOCOLO_DOMINIO_NO_HABILITADO');
+      return {
+        protocolo: 'BULK_RETRY_V1',
+        elegible: true,
+        pasos: candidates,
+      };
+    } catch (error) {
+      throw persistenceError(error);
+    }
+  }
+
   async updateWorkflowState(input: UpdateWorkflowStateInput): Promise<void> {
     try {
       await this.db.transaction((tx) => updateWorkflowStateIn(tx, input));
@@ -1426,6 +1574,8 @@ export class BulkPersistenceRepository {
   async requeueBatch(
     batchId: string,
     ownerSub: string,
+    _correlationId?: string,
+    _motivo: string | null = null,
   ): Promise<typeof batchJobs.$inferSelect> {
     try {
       return await this.db.transaction(async (tx) => {

@@ -233,12 +233,10 @@ export class BulkSvcController {
       needs_reconciliation: batch.needsReconciliation,
       ...(process.env.BULK_RETRY_ELIGIBILITY_ENABLED === 'true'
         ? {
-            reanudacion: {
-              protocolo: 'BULK_RETRY_V1',
-              elegible: false,
-              pasos: [],
-              motivo_bloqueo: 'PROTOCOLO_DOMINIO_NO_HABILITADO',
-            },
+            reanudacion: await this.imports.getRetryEligibility(
+              batchId,
+              requireActorSub(request),
+            ),
           }
         : {}),
       rows: rows.map(({ row, steps }) => ({
@@ -305,8 +303,53 @@ export class BulkSvcController {
   async reanudarImportacionGeneral(
     @Param('batchId') batchId: string,
     @Req() request: BulkAuthenticatedRequest,
+    @Headers('x-correlation-id') correlationId: string | undefined,
+    @Body() body: unknown,
   ) {
     assertBatchId(batchId);
+    if (process.env.BULK_RETRY_CATALOG_V1_ENABLED === 'true') {
+      if (
+        !correlationId ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          correlationId,
+        )
+      )
+        throw new BulkDomainError(
+          'INVALID_INPUT',
+          'X-Correlation-Id debe ser un UUID válido.',
+        );
+      if (
+        body !== undefined &&
+        (typeof body !== 'object' ||
+          body === null ||
+          Array.isArray(body) ||
+          Object.keys(body).some((key) => key !== 'motivo'))
+      )
+        throw new BulkDomainError(
+          'INVALID_INPUT',
+          'Body de reanudación inválido.',
+        );
+      const motivo =
+        body && typeof body === 'object' && 'motivo' in body
+          ? Reflect.get(body, 'motivo')
+          : null;
+      if (
+        motivo !== null &&
+        (typeof motivo !== 'string' ||
+          motivo.trim().length < 1 ||
+          motivo.trim().length > 256)
+      )
+        throw new BulkDomainError(
+          'INVALID_INPUT',
+          'motivo debe tener 1–256 caracteres.',
+        );
+      return this.imports.resumeBatch(
+        batchId,
+        requireActorSub(request),
+        correlationId.toLowerCase(),
+        typeof motivo === 'string' ? motivo.trim() : null,
+      );
+    }
     const batch = await this.imports.resumeBatch(
       batchId,
       requireActorSub(request),

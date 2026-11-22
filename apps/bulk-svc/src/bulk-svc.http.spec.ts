@@ -29,6 +29,7 @@ describe('Bulk HTTP import routes (isolated)', () => {
   afterEach(() => {
     delete process.env.BULK_CORRELATION_RECONCILIATION_ENABLED;
     delete process.env.BULK_RETRY_ELIGIBILITY_ENABLED;
+    delete process.env.BULK_RETRY_CATALOG_V1_ENABLED;
   });
 
   it('receives multipart CSV and returns contractual admission DTO; rejects unsupported files', async () => {
@@ -88,6 +89,12 @@ describe('Bulk HTTP import routes (isolated)', () => {
           needsReconciliation: true,
         },
         rows,
+      }),
+      getRetryEligibility: vi.fn().mockResolvedValue({
+        protocolo: 'BULK_RETRY_V1',
+        elegible: false,
+        pasos: [],
+        motivo_bloqueo: 'PROTOCOLO_DOMINIO_NO_HABILITADO',
       }),
       findByOwnerAndCorrelation: vi.fn().mockResolvedValue(batch),
       resumeBatch: vi
@@ -366,6 +373,34 @@ describe('Bulk HTTP import routes (isolated)', () => {
       );
       expect(resumed.status).toBe(409);
       expect(resumed.body.code).toBe('RETRY_PROTOCOL_NOT_APPROVED');
+      process.env.BULK_RETRY_CATALOG_V1_ENABLED = 'true';
+      const missingResumeCorrelation = await request(app.getHttpServer()).post(
+        `/api/v1/carga-masiva/productos/importaciones/${batch.batchId}/reanudar`,
+      );
+      expect(missingResumeCorrelation).toMatchObject({
+        status: 400,
+        body: { code: 'VALIDACION' },
+      });
+      const invalidResumeCorrelation = await request(app.getHttpServer())
+        .post(
+          `/api/v1/carga-masiva/productos/importaciones/${batch.batchId}/reanudar`,
+        )
+        .set('x-correlation-id', 'not-a-uuid');
+      expect(invalidResumeCorrelation).toMatchObject({
+        status: 400,
+        body: { code: 'VALIDACION' },
+      });
+      const validButDisabledResume = await request(app.getHttpServer())
+        .post(
+          `/api/v1/carga-masiva/productos/importaciones/${batch.batchId}/reanudar`,
+        )
+        .set('x-correlation-id', randomUUID())
+        .send({ motivo: null });
+      expect(validButDisabledResume).toMatchObject({
+        status: 409,
+        body: { code: 'RETRY_PROTOCOL_NOT_APPROVED' },
+      });
+      delete process.env.BULK_RETRY_CATALOG_V1_ENABLED;
       expect(imports.getSnapshot).toHaveBeenCalledWith(
         batch.batchId,
         'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',

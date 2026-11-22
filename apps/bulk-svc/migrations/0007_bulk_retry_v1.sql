@@ -1,5 +1,18 @@
 -- Additive durable receipts and commands for BULK_RETRY_V1.
 -- This migration is intentionally not applied to shared Supabase.
+-- Preserve one initial command per operation/event while allowing a new retry
+-- command with the same business operation to be causally distinct.
+ALTER TABLE bulk.outbox
+    DROP CONSTRAINT IF EXISTS uq_outbox_operation_event;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_outbox_initial_operation_event
+    ON bulk.outbox (operation_id, event_name)
+    WHERE causation_id IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_outbox_retry_causation_event
+    ON bulk.outbox (operation_id, event_name, causation_id)
+    WHERE causation_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS bulk.batch_resume_requests (
     id uuid NOT NULL DEFAULT gen_random_uuid(),
     batch_job_id uuid NOT NULL,

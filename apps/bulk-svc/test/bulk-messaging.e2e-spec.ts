@@ -88,6 +88,44 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
     );
     await pool.query(correlationMigration);
     await pool.query(correlationMigration);
+    const retryMigration = readFileSync(
+      resolve(process.cwd(), 'apps/bulk-svc/migrations/0007_bulk_retry_v1.sql'),
+      'utf8',
+    );
+    await pool.query(retryMigration);
+    await pool.query(retryMigration);
+    const retryTables = await pool.query<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'bulk' AND table_name IN ('batch_resume_requests','retry_commands','domain_attempts') ORDER BY table_name",
+    );
+    expect(retryTables.rows.map(({ table_name }) => table_name)).toEqual([
+      'batch_resume_requests',
+      'domain_attempts',
+      'retry_commands',
+    ]);
+    const retryIndexes = await pool.query<{
+      indexname: string;
+      indexdef: string;
+    }>(
+      "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'bulk' AND indexname IN ('uq_outbox_initial_operation_event','uq_outbox_retry_causation_event','uq_batch_resume_requests_batch_correlation','uq_retry_commands_message_id','uq_retry_commands_request_family','uq_domain_attempts_previous_attempt','uq_domain_attempts_row_domain_number') ORDER BY indexname",
+    );
+    expect(retryIndexes.rows).toHaveLength(7);
+    expect(retryIndexes.rows.map(({ indexdef }) => indexdef)).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/\(batch_job_id, correlation_id\)/),
+        expect.stringMatching(
+          /\(operation_id, event_name\).*WHERE \(causation_id IS NULL\)/,
+        ),
+        expect.stringMatching(
+          /\(operation_id, event_name, causation_id\).*WHERE \(causation_id IS NOT NULL\)/,
+        ),
+        expect.stringMatching(/\(resume_request_id, family_key\)/),
+        expect.stringMatching(/\(batch_row_id, domain, attempt_number\)/),
+        expect.stringMatching(/\(message_id\)/),
+        expect.stringMatching(
+          /\(previous_attempt_id\).*WHERE \(previous_attempt_id IS NOT NULL\)/,
+        ),
+      ]),
+    );
     const [legacyBatchOwner] = (
       await pool.query<{ owner_sub: string | null }>(
         'SELECT owner_sub FROM bulk.batch_jobs WHERE batch_id = $1',

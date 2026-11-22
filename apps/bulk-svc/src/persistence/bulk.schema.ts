@@ -318,13 +318,18 @@ export const outbox = bulk.table(
   (t) => [
     primaryKey({ name: 'pk_outbox', columns: [t.id] }),
     unique('uq_outbox_message_id').on(t.messageId),
-    unique('uq_outbox_operation_event').on(t.operationId, t.eventName),
     check('ck_outbox_kind', sql`${t.kind} IN ('command','event','result')`),
     check('ck_outbox_schema_version', sql`${t.schemaVersion} > 0`),
     check('ck_outbox_attempts', sql`${t.attempts} >= 0`),
     // A Catalog command remains pending until its correlated result proves
     // that the primary consumer handled it; confirms alone are insufficient.
     index('ix_outbox_pending').on(t.publishedAt, t.occurredAt),
+    uniqueIndex('uq_outbox_initial_operation_event')
+      .on(t.operationId, t.eventName)
+      .where(sql`${t.causationId} IS NULL`),
+    uniqueIndex('uq_outbox_retry_causation_event')
+      .on(t.operationId, t.eventName, t.causationId)
+      .where(sql`${t.causationId} IS NOT NULL`),
   ],
 );
 
