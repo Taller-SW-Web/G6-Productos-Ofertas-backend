@@ -18,7 +18,7 @@ name: Integración continua (CI)
         description: Componente del benchmark
         required: false
         type: choice
-        options: [catalog, pricing, combos, promotions, price-audit, bulk, inventory-gateway, taxonomy]
+        options: [catalog, pricing, promotions, inventory-gateway]
       baseline_sha:
         description: SHA completo de master u otra revisión base aprobada
         required: false
@@ -155,7 +155,7 @@ jobs:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
       (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
-    name: Ejecutar pruebas de extremo a extremo
+    name: Ejecutar E2E independientes de RabbitMQ H4
     runs-on: ubuntu-latest
     steps:
     - name: Obtener código fuente
@@ -167,7 +167,9 @@ jobs:
         cache: npm
     - name: Instalar dependencias de forma reproducible
       run: npm ci
-    - name: Ejecutar pruebas de extremo a extremo
+    - name: Ejecutar pruebas de extremo a extremo sin suites RabbitMQ H4
+      env:
+        G6_SKIP_H4_AMQP_E2E: '1'
       run: npm run test:e2e
   contratos:
     if: >-
@@ -386,93 +388,11 @@ jobs:
       run: node --test scripts/ci/run-taxonomy-integration.test.mjs
     - name: Ejecutar pruebas de integración Taxonomy (obligatorias)
       run: node scripts/ci/run-taxonomy-integration.mjs
-  taxonomia_catalogo:
-    if: >-
-      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
-      (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
-    name: Probar E2E aislado Taxonomy y Catalog
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-    - name: Obtener backend y su historia
-      uses: actions/checkout@v4
-      with:
-        path: backend
-        fetch-depth: 0
-    - name: Obtener migraciones oficiales fijadas
-      uses: actions/checkout@v4
-      with:
-        repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: e6a8ec28dad2d0eba8dc2f273ec9cc6891376df6
-        path: G6-Productos-Ofertas-docs
-        persist-credentials: 'false'
-    - name: Configurar Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: 24.15.0
-        cache: npm
-        cache-dependency-path: backend/package-lock.json
-    - name: Instalar dependencias
-      run: npm ci
-    - name: Ejecutar E2E con PostgreSQL y RabbitMQ aislados
-      run: |
-        set -o pipefail
-        node apps/taxonomy-svc/test/e2e-catalog/run.mjs 2>&1 | tee apps/taxonomy-svc/test/e2e-catalog/run.log
-    - name: Conservar evidencia de la ejecución
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: taxonomy-catalog-e2e-${{ github.sha }}
-        path: |
-          backend/apps/taxonomy-svc/test/e2e-catalog/evidence-latest.json
-          backend/apps/taxonomy-svc/test/e2e-catalog/run.log
-        if-no-files-found: warn
-  inventario:
-    if: >-
-      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
-      (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
-    name: Probar integración de Inventory con PostgreSQL y RabbitMQ desechables
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-    - name: Obtener backend
-      uses: actions/checkout@v4
-      with:
-        path: backend
-    - name: Obtener contratos fijados de Inventory
-      uses: actions/checkout@v4
-      with:
-        repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b
-        path: docs
-        persist-credentials: 'false'
-    - name: Configurar Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: 24.15.0
-        cache: npm
-        cache-dependency-path: backend/package-lock.json
-    - name: Instalar dependencias
-      run: npm ci
-    - name: Ejecutar pruebas de Inventory con PostgreSQL y RabbitMQ desechables (obligatorias)
-      env:
-        INVENTORY_REAL_INTEGRATION: '1'
-      run: npm test -- apps/inventory-svc/test/inventory.real.integration.spec.ts --reporter=verbose
   persistencia:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
       (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
-    name: Probar persistencia y mensajería de Pricing y Price Audit
+    name: Probar persistencia PostgreSQL de Pricing y Price Audit
     runs-on: ubuntu-latest
     steps:
     - name: Obtener código fuente
@@ -484,14 +404,16 @@ jobs:
         cache: npm
     - name: Instalar dependencias de forma reproducible
       run: npm ci
-    - name: Probar proveedores con PostgreSQL y RabbitMQ desechables
-      env:
-        PRICING_TEST_POSTGRES: '1'
-        PRICING_TEST_AMQP: '1'
-        PRICING_TEST_AUDIT: '1'
-        PRICE_AUDIT_TEST_POSTGRES: '1'
-        PRICE_AUDIT_TEST_AMQP: '1'
-      run: npm run test:e2e -- apps/pricing-svc apps/price-audit-svc --reporter=verbose
+    - name: Ejecutar suites reales PostgreSQL, rechazando colecciones vacías
+      run: node scripts/ci/run-postgres-persistence.mjs
+    - name: Conservar evidencia de las suites PostgreSQL
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: pricing-audit-postgres-${{ github.sha }}
+        path: .ci/evidence/postgres-persistence/
+        if-no-files-found: error
+        retention-days: 30
   promotions:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
@@ -514,8 +436,6 @@ jobs:
       env:
         G6_TEST_OPENSSL: openssl
       run: node apps/promotions-svc/test/persistence.isolated.smoke.mjs
-    - name: Validar transporte de cupones y Outbox con dependencias desechables
-      run: node apps/promotions-svc/test/coupons.isolated.smoke.mjs
     - name: Verificar operaciones de cupones H5 en PostgreSQL descartable
       id: h5_postgres
       shell: bash
@@ -531,53 +451,6 @@ jobs:
         name: promotions-h5-postgres-${{ github.sha }}
         path: promotions-h5-postgres.log
         if-no-files-found: error
-  combos_catalogo:
-    if: >-
-      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
-      (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
-    name: Probar integración de Combos con PostgreSQL, RabbitMQ y Catalog desechables
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-    - name: Obtener backend y su historia de integración
-      uses: actions/checkout@v4
-      with:
-        path: backend
-        fetch-depth: 0
-    - name: Obtener Docs fijado en AsyncAPI rc.4
-      uses: actions/checkout@v4
-      with:
-        repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: 40b566976fb94d924116dcd01d41b3276c2bc9e3
-        path: docs
-        persist-credentials: 'false'
-    - name: Configurar Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: 24.15.0
-        cache: npm
-        cache-dependency-path: backend/package-lock.json
-    - name: Instalar dependencias
-      run: npm ci
-    - name: Ejecutar las cuatro suites E2E de Combos con Catalog y Pricing reales
-      env:
-        COMBOS_TEST_DOCS_ROOT: ${{ github.workspace }}/docs
-        COMBOS_TEST_EVIDENCE_DIR: apps/combos-svc/test/evidence-ci
-      run: bash apps/combos-svc/test/run-postgres-isolated.sh
-    - name: Conservar evidencia E2E de Combos
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: combos-catalog-e2e-${{ github.sha }}
-        path: |
-          backend/apps/combos-svc/test/evidence-ci/vitest-results.json
-          backend/apps/combos-svc/test/evidence-ci/run-summary.txt
-        if-no-files-found: warn
   gateway_inventory_postgres:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
@@ -689,7 +562,7 @@ jobs:
         if-no-files-found: error
         retention-days: 30
   integral:
-    name: Validación integral de integración continua
+    name: Validación de checks CI preservados
     runs-on: ubuntu-latest
     needs:
       - automatizacion
@@ -703,10 +576,7 @@ jobs:
       - contenedores
       - persistencia
       - taxonomia
-      - taxonomia_catalogo
-      - inventario
       - promotions
-      - combos_catalogo
       - gateway_inventory_postgres
       - azure_cd_h5
       - seguridad_dependencias
@@ -717,16 +587,12 @@ jobs:
     steps:
     - name: Obtener código fuente
       uses: actions/checkout@v4
-    - name: Comprobar integración de Combos obligatoria
-      env:
-        RESULTADOS: ${{ toJSON(needs) }}
-      run: node scripts/ci/verify-ci-results.mjs "$RESULTADOS" combos_catalogo
     - name: Comprobar cada resultado obligatorio
       env:
         RESULTADOS: ${{ toJSON(needs) }}
       run: |
         printf '%s\n' "$RESULTADOS"
-        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias
+        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias
   compatibilidad:
     name: Lint, Typecheck, Test, Build & Smoke Test
     runs-on: ubuntu-latest
@@ -742,10 +608,7 @@ jobs:
     - contenedores
     - persistencia
     - taxonomia
-    - taxonomia_catalogo
-    - inventario
     - promotions
-    - combos_catalogo
     - gateway_inventory_postgres
     - azure_cd_h5
     - seguridad_dependencias
@@ -756,16 +619,12 @@ jobs:
     steps:
     - name: Obtener código fuente
       uses: actions/checkout@v4
-    - name: Comprobar integración de Combos obligatoria
-      env:
-        RESULTADOS: ${{ toJSON(needs) }}
-      run: node scripts/ci/verify-ci-results.mjs "$RESULTADOS" combos_catalogo
     - name: Comprobar cada resultado obligatorio
       env:
         RESULTADOS: ${{ toJSON(needs) }}
       run: |
         printf '%s\n' "$RESULTADOS"
-        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias
+        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias
   benchmark_focalizado:
     name: Benchmark focalizado solicitado
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'benchmark'

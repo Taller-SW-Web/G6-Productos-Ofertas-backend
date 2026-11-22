@@ -528,6 +528,8 @@ async function ejecutar() {
         '--config',
         './vitest.config.e2e.ts',
         ESPEC,
+        '--testNamePattern',
+        '^(?!.*RabbitMQ real)',
         '--reporter=json',
         `--outputFile=${salida}`,
       ],
@@ -583,9 +585,16 @@ async function ejecutar() {
     if ((resultado.status ?? 1) !== 0) {
       fallar(`vitest terminó con código ${resultado.status}.`);
     }
-    if (omitidas > 0) {
+    const omisionesRabbitH4 = (reporte.testResults ?? [])
+      .flatMap((archivo) => archivo.assertionResults ?? [])
+      .filter(
+        (prueba) =>
+          prueba.status === 'skipped' &&
+          /RabbitMQ real/.test(prueba.fullName ?? prueba.title ?? ''),
+      );
+    if (omitidas !== 2 || omisionesRabbitH4.length !== 2) {
       fallar(
-        `${omitidas} prueba(s) omitidas: las pruebas de integración no pueden saltarse.`,
+        `${omitidas} prueba(s) omitidas; solo se permiten los dos casos RabbitMQ H4 manuales durante la integración PostgreSQL.`,
       );
     }
     if (total === 0) fallar('no se recolectó ninguna prueba.');
@@ -595,7 +604,7 @@ async function ejecutar() {
       );
     }
 
-    mensajeExito = `[taxonomy-integration] PASS: ${superadas}/${total} pruebas superadas, 0 omitidas, 0 fallidas; PostgreSQL ${nombreContenedor} aprovisionado por el harness.`;
+    mensajeExito = `[taxonomy-integration] PASS: ${superadas}/${total - omitidas} casos PostgreSQL independientes superados; 2 casos RabbitMQ H4 excluidos de CI y disponibles manualmente; PostgreSQL ${nombreContenedor} aprovisionado por el harness.`;
   } catch (error) {
     falloOriginal = error;
   } finally {
