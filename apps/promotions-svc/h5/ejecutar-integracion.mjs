@@ -295,9 +295,19 @@ async function main() {
     ensure(bearer, 'REAL_NEGATIVE_G7_TOKENS_REQUIRED');
     await expectStatus('POST', invalid, [403], { body: {}, bearer });
     if (plan.operations?.coupon && order) {
+      const operation = operationId('coupon');
+      const original = await expectStatus(
+        'GET',
+        statusPath('cupones', operation),
+        [200],
+      );
+      ensure(
+        original?.operation_id === operation && original.order_id === order,
+        'OPERATION_IDENTITY_MISMATCH',
+      );
       const foreign = await expectStatus(
         'GET',
-        statusPath('cupones', operationId('coupon'), order + '-AJENO'),
+        statusPath('cupones', operation, order + '-AJENO'),
         [404],
       );
       const missing = await expectStatus(
@@ -313,7 +323,7 @@ async function main() {
       );
       report({
         event: 'uniform_coupon_not_found',
-        operation_id: operationId('coupon'),
+        operation_id: operation,
       });
     }
     return;

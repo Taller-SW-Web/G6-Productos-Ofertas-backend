@@ -1,5 +1,11 @@
 # Validación local Promotions H5
 
+## Correlación y procedencia para homologación
+
+Las etapas automáticas exigen ambiente, SHA, pedido e identificador del caso. Las regresiones de los casos 01, 08, 10 y 13 incluyen un UUID cruzado aunque exista otro evento ligado a la operación, y un SHA cruzado aunque el resultado aparente ser correcto. El caso 13 además verifica una lectura positiva del pedido original antes de comparar los dos 404.
+
+La matriz consulta el registro del CD oficial de GitHub y compara sus digests con las revisiones activas en Azure antes de ejecutar un caso bilateral. Una constancia se valida contra el momento del despliegue y, para una etapa automatizada aprobable, se comprueba que el conjunto de revisiones no cambió durante la prueba. Las pruebas de este verificador usan respuestas de prueba para el CD y Azure. La revisión de solo lectura encontró el ambiente preparado, sin las cuatro Container Apps ni ejecuciones del CD oficial del flujo. La homologación permanece bloqueada.
+
 ## Cierre de la reauditoría del HEAD 1f00584
 
 - `G5-H5-05` exige un 202 y un `COMPLETED` para la misma operación, además de la constancia bilateral firmada que coincide con el caso, SHA, ambiente y pedido. Se ejecutaron regresiones para constancia ausente, válida, inválida y fallo de la etapa técnica. Los 20 escenarios siguen pendientes de homologación.

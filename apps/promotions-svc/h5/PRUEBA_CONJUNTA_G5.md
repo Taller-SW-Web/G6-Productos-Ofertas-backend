@@ -19,6 +19,12 @@ Plantilla de plan. Sustituir referencias y SHA por evidencia del ambiente. Guard
   "environment": "integration",
   "gateway": "https://gateway-integracion.example.invalid",
   "g6_sha": "<SHA desplegado G6>",
+  "g6_cd_runs": {
+    "api-gateway": "<ID de la ejecución oficial>",
+    "promotions-svc": "<ID de la ejecución oficial>",
+    "inventory-svc": "<ID de la ejecución oficial>",
+    "catalog-svc": "<ID de la ejecución oficial>"
+  },
   "g5_sha": "<SHA desplegado G5>",
   "order_id": "<pedido sintético G5>",
   "customer_ref": "<UUID de cliente sintético>",
@@ -70,6 +76,10 @@ Ejecutar `node apps/promotions-svc/h5/ejecutar-matriz.mjs manifiesto.json result
 Los casos supervisados aceptan `attestation` con el mismo contenedor de firma. Fijar `G5_H5_SESSION_EVIDENCE_PUBLIC_KEY` a la clave pública del responsable de homologación. La constancia incluye `case_id`, `actor`, `environment`, `gateway`, ambos SHA según corresponda, `order_id`, `operation_or_reservation_id`, `observed_at`, `observed`, `status` y `evidence_url` HTTPS sin credenciales ni parámetros. Para un PASS, `observed` debe coincidir con el código esperado de la fila. El responsable firma tras observar la evidencia de los actores involucrados.
 
 Un caso exclusivamente G6 puede obtener PASS con observaciones automáticas suficientes. Si participa G5, G7 o G2, hace falta una constancia válida. Cuando el caso además tiene etapa técnica, el runner exige que esa etapa pase en el mismo ambiente, SHA, pedido y operación o reserva. `G5-H5-05` exige que tanto el 202 como el estado `COMPLETED` correspondan al UUID de consumo firmado. Un fallo técnico conserva `FAIL`. Una constancia ausente o inválida mantiene `BLOCKED`.
+
+Cada observación automática debe coincidir con los metadatos del plan. Para los casos 01, 08 y 13 el runner filtra por el UUID de operación antes de evaluar la evidencia. Para el caso 10 filtra por UUID de reserva. El caso 13 exige una lectura válida del pedido original antes de comparar los dos 404.
+
+Para homologar con G5, G7 o G2, usar el runner desde la red privada con `gh` y `az` autenticados para lectura de los runs, artefactos, variable de suscripción de `azure-h5` y revisiones. El runner consulta cada ejecución de `cd-services-azure.yml` en el repositorio oficial. Exige dispatch exitoso de `master` al SHA del plan, job de despliegue aprobado y el digest del artefacto `azure-image-<servicio>`. Contrasta los cuatro digests con las revisiones activas y saludables de ACA en el grupo aislado. El origen del plan debe coincidir con el FQDN del Gateway, que debe enviar el 100 % del tráfico a esa revisión. Ejecutar mientras los artefactos oficiales estén disponibles. La falta de evidencia o un cambio de revisión antes del cierre deja el caso `BLOCKED`. El reporte conserva los enlaces de runs, revisiones y digests verificados.
 
 ## Matriz de los 20 escenarios
 

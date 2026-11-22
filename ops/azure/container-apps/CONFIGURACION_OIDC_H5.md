@@ -2,7 +2,14 @@
 
 ## Estado y límites de evidencia
 
-Este flujo es un candidato de CD manual. `workflow_dispatch` es el único disparador; no se habilitó `workflow_run`, `push` ni despliegue masivo automático. En este cambio solo se hicieron simulaciones locales. No se autenticó en Azure ni se verificó un recurso remoto. Un éxito de pruebas locales o CI no equivale a integración autenticada, homologación ni despliegue.
+| Capa | Estado |
+|---|---|
+| Ejecutor CD | El workflow manual y sus controles se verificaron con simulaciones en CI. |
+| GitHub y Azure | `azure-h5` protegido, identidad federada `g6-h5-int-github-cd`, rol de CD acotado definido y ambiente ACA aislado `env-g6-h5-int` provisionado en Brazil South. |
+| Destinos y runner | Pendientes las cuatro Container Apps aisladas, la asignación del rol a esos recursos y el runner privado `azure-h5-smoke`. |
+| Despliegue y homologación | Pendientes el despliegue oficial, readiness y smoke del runtime completo, verificación de rollback y casos bilaterales. La restauración anterior fue una prueba temporal de componentes G6. |
+
+`workflow_dispatch` es el único disparador del CD. Los destinos deben existir y pasar el preflight antes de usar el CD con el SHA vigente de `master`.
 
 **Estado del environment:** se creó `azure-h5` en el repositorio oficial. GitHub devolvió política de rama personalizada solo para `master`, required reviewers Axel Cueva y Miguel Taco, prevención de autoaprobación y bypass de administradores deshabilitado. El workflow consulta las reglas reales antes de publicar y antes del login OIDC.
 

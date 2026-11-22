@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { constanciaFirmada } from './evidencia-integracion.mjs';
+import { verificarDespliegue } from './verificar-despliegue.mjs';
 
 const scenarios = [
   ['G6', 'reserve', 'Pedido de prueba y saldo disponible', 'RESERVA_COMPLETED'],
@@ -239,6 +240,7 @@ export async function ejecutarMatriz(
   manifest,
   selected = [],
   execute = executeStage,
+  verifyDeployment = verificarDespliegue,
 ) {
   const recordedAt = new Date().toISOString();
   const results = [];
@@ -293,6 +295,14 @@ export async function ejecutarMatriz(
     if (!ids.length) continue;
     const bilateral = actor !== 'G6';
     const primaryId = stageIdentifier(id, stage, plan);
+    if (bilateral && (fixture.execute === true || fixture.attestation)) {
+      try {
+        row.deployment = await verifyDeployment(plan);
+      } catch {
+        row.reason = 'DESPLIEGUE_OFICIAL_NO_VERIFICADO';
+        continue;
+      }
+    }
     let technicalPassed = false;
     if (fixture.execute === true && stage) {
       const run = execute(stage, fixture.plan);
@@ -324,22 +334,24 @@ export async function ejecutarMatriz(
         continue;
       }
       const observe = observations.get(id);
-      const linkedEvidence =
-        !bilateral ||
-        (uuid.test(primaryId) &&
-          row.evidence.every(
-            (event) =>
-              event.environment === plan.environment &&
-              event.g6_sha === plan.g6_sha &&
-              event.g5_sha === plan.g5_sha &&
-              event.order_id === plan.order_id,
-          ) &&
-          row.evidence.some(
-            (event) =>
-              event.operation_id === primaryId ||
-              event.reservation_id === primaryId,
-          ));
-      if (!linkedEvidence || (observe && !observe(row.evidence, primaryId))) {
+      const metadataMatches = row.evidence.every(
+        (event) =>
+          event.environment === plan.environment &&
+          event.g6_sha === plan.g6_sha &&
+          event.g5_sha === plan.g5_sha &&
+          event.order_id === plan.order_id,
+      );
+      const identifier =
+        stage === 'expired' ? 'reservation_id' : 'operation_id';
+      const linked = row.evidence.filter(
+        (event) => event[identifier] === primaryId,
+      );
+      if (
+        !uuid.test(primaryId) ||
+        !metadataMatches ||
+        !linked.length ||
+        (observe && !observe(linked, primaryId))
+      ) {
         row.status = 'FAIL';
         row.reason = 'OBSERVACION_AUTOMATICA_FALLIDA';
         continue;
@@ -382,6 +394,25 @@ export async function ejecutarMatriz(
         (proof.status === 'PASS' && proof.observed !== expected)
       )
         throw new Error();
+      if (bilateral && proof.status === 'PASS') {
+        if (
+          row.deployment.some(
+            (entry) =>
+              Date.parse(proof.observed_at) < Date.parse(entry.deployed_at),
+          )
+        )
+          throw new Error();
+        if (technicalPassed) {
+          try {
+            const current = await verifyDeployment(plan);
+            if (JSON.stringify(current) !== JSON.stringify(row.deployment))
+              throw new Error();
+          } catch {
+            row.reason = 'DESPLIEGUE_OFICIAL_CAMBIO_O_NO_VERIFICADO';
+            continue;
+          }
+        }
+      }
       Object.assign(row, {
         status: proof.status,
         reason: 'CONSTANCIA_DE_SESION_VALIDADA',

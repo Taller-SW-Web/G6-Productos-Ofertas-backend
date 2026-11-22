@@ -82,8 +82,16 @@ test('clasifica homologación técnica y bilateral', async (t) => {
       signature: sign(null, payload, keys.privateKey).toString('base64url'),
     };
   };
-  const scenario = async (id, record, result) => {
-    const report = await ejecutarMatriz({ [id]: record }, [id], () => result);
+  const deployment = async () => [
+    { deployed_at: '2026-01-01T00:00:00Z', revision: 'fixture' },
+  ];
+  const scenario = async (id, record, result, verify = deployment) => {
+    const report = await ejecutarMatriz(
+      { [id]: record },
+      [id],
+      () => result,
+      verify,
+    );
     assert.equal(report.results.length, 20);
     return report.results.find((row) => row.id === id);
   };
@@ -100,6 +108,35 @@ test('clasifica homologación técnica y bilateral', async (t) => {
       'PASS',
     );
   });
+  await t.test(
+    'sin CD verificable o con cambio de revisión no hay homologación',
+    async () => {
+      const signedFixture = { ...fixture, attestation: signed() };
+      let ran = false;
+      const report = await ejecutarMatriz(
+        { [coupon]: signedFixture },
+        [coupon],
+        () => {
+          ran = true;
+          return validRun;
+        },
+        async () => {
+          throw new Error();
+        },
+      );
+      assert.equal(ran, false);
+      assert.equal(
+        report.results[4].reason,
+        'DESPLIEGUE_OFICIAL_NO_VERIFICADO',
+      );
+      let checks = 0;
+      const row = await scenario(coupon, signedFixture, validRun, async () => [
+        { deployed_at: '2026-01-01T00:00:00Z', revision: String(++checks) },
+      ]);
+      assert.equal(row.status, 'BLOCKED');
+      assert.equal(row.reason, 'DESPLIEGUE_OFICIAL_CAMBIO_O_NO_VERIFICADO');
+    },
+  );
   await t.test(
     'G5-H5-05 conserva el FAIL técnico aunque exista constancia',
     async () => {
@@ -170,12 +207,67 @@ test('clasifica homologación técnica y bilateral', async (t) => {
       const reserve = output({
         event: 'terminal',
         status: 'COMPLETED',
+        operation_id: plan.operations.reserve,
         reservation_id: plan.reservation_id,
       });
       assert.equal(
         (await scenario('G5-H5-01', fixture, reserve)).status,
         'PASS',
       );
+    },
+  );
+  await t.test(
+    'los cuatro casos G6 rechazan un SHA o UUID cruzado aunque haya otro evento relacionado',
+    async () => {
+      const cases = [
+        [
+          'G5-H5-01',
+          'operation_id',
+          plan.operations.reserve,
+          {
+            event: 'terminal',
+            status: 'COMPLETED',
+            reservation_id: plan.reservation_id,
+          },
+        ],
+        [
+          'G5-H5-08',
+          'operation_id',
+          plan.operations.coupon,
+          { method: 'POST', status: 409, code: 'IDEMPOTENCY_CONFLICT' },
+        ],
+        [
+          'G5-H5-10',
+          'reservation_id',
+          plan.reservation_id,
+          { event: 'expiry', estado: 'ACTIVA', vigencia: 'VENCIDA' },
+        ],
+        [
+          'G5-H5-13',
+          'operation_id',
+          plan.operations.coupon,
+          { event: 'uniform_coupon_not_found' },
+        ],
+      ];
+      for (const [id, field, identifier, observation] of cases) {
+        const event = { ...observation, [field]: identifier };
+        assert.equal(
+          (await scenario(id, fixture, output(event))).status,
+          'PASS',
+          id,
+        );
+        for (const wrong of [
+          { [field]: randomUUID() },
+          { g6_sha: 'e'.repeat(40) },
+        ]) {
+          const row = await scenario(
+            id,
+            fixture,
+            output({ [field]: identifier }, { ...event, ...wrong }),
+          );
+          assert.equal(row.status, 'FAIL', id);
+        }
+      }
     },
   );
 });
