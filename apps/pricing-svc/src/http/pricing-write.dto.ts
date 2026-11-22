@@ -60,7 +60,10 @@ function instant(value: unknown): Date {
   return result;
 }
 
-export function parsePriceUpdateRequest(body: unknown): {
+export function parsePriceUpdateRequest(
+  body: unknown,
+  parseMoney = money,
+): {
   channelId: string | null;
   expectedVersion: bigint;
   input: Omit<PriceUpdate, 'usuarioId'>;
@@ -78,8 +81,9 @@ export function parsePriceUpdateRequest(body: unknown): {
     'VALIDACION',
   );
   const regular =
-    body.precioRegular == null ? undefined : money(body.precioRegular);
-  const offer = body.precioOferta == null ? null : money(body.precioOferta);
+    body.precioRegular == null ? undefined : parseMoney(body.precioRegular);
+  const offer =
+    body.precioOferta == null ? null : parseMoney(body.precioOferta);
   requireRule(
     action !== 'ESTABLECER' || offer !== null,
     'ACCION_OFERTA_INVALIDA',

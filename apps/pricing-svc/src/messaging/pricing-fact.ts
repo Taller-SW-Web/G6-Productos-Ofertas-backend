@@ -6,7 +6,8 @@ export type PriceWriteOperation =
   | 'actualizarPrecioSku'
   | 'actualizarPrecioBaseProducto'
   | 'programarPrecioSku'
-  | 'programarPrecioBaseProducto';
+  | 'programarPrecioBaseProducto'
+  | 'crearImportacionPrecios';
 
 export interface PriceFactMetadata {
   actor: string | null;
@@ -15,6 +16,7 @@ export interface PriceFactMetadata {
   operation: PriceWriteOperation;
   productId?: string;
   operationId?: string;
+  batchId?: string;
 }
 
 export interface PricingPriceChangedData {
@@ -116,7 +118,7 @@ export function createPricingPriceChangedFacts(
       reason: next.motivoCambio,
       price_version: priceVersion,
       valid_from: next.validFrom.toISOString(),
-      batch_id: null,
+      batch_id: metadata.batchId ?? null,
       actor: { user_id: metadata.actor, email: null, ip: null },
     } satisfies PricingPriceChangedData as unknown as Record<string, unknown>,
   }));

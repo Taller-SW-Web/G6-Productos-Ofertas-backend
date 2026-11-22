@@ -2,10 +2,16 @@ import { PricingReadController } from './pricing-read.controller.js';
 import { PricingReads } from './pricing-reads.js';
 import { CommercialPrices } from './commercial-prices.js';
 import { PricingHttpError } from './pricing-http.error.js';
+import {
+  PRICING_ACTOR,
+  type PricingAuthenticatedRequest,
+} from './pricing-read.guard.js';
 import type { Response } from 'express';
 
 describe('Read-only persisted Pricing import report', () => {
   const id = '10000000-0000-4000-8000-000000000001';
+  const actor = '10000000-0000-4000-8000-000000000002';
+  const request = { [PRICING_ACTOR]: actor } as PricingAuthenticatedRequest;
   function response() {
     return {
       type() {
@@ -24,46 +30,44 @@ describe('Read-only persisted Pricing import report', () => {
   }
   it('returns CSV with quoted persisted results and never exposes private storage metadata', async () => {
     const reads = {
-      imported: vi.fn(async () => ({
-        rows: [
-          {
-            row_id: 1,
-            sku: 'A,"B"',
-            status: 'FAILED',
-            code: 'VALIDACION',
-            report_uri: 'DO_NOT_LEAK',
-          },
-        ],
-      })),
+      importReport: vi.fn(async () => [
+        {
+          row_id: 1,
+          sku: 'A,"B"',
+          status: 'FAILED',
+          code: 'VALIDACION',
+          report_uri: 'DO_NOT_LEAK',
+        },
+      ]),
     };
     const controller = new PricingReadController(
       reads as unknown as PricingReads,
       {} as CommercialPrices,
     );
-    const result = await controller.importReport(id, {}, response());
+    const result = await controller.importReport(id, request, {}, response());
     expect(result).toBe(
       'row_id,sku,status,code\r\n"1","A,""B""","FAILED","VALIDACION"\r\n',
     );
     expect(String(result)).not.toContain('DO_NOT_LEAK');
-    expect(reads.imported).toHaveBeenCalledExactlyOnceWith(id);
+    expect(reads.importReport).toHaveBeenCalledExactlyOnceWith(id, actor);
   });
   it('validates the identifier and query before querying persisted data', async () => {
-    const reads = { imported: vi.fn() };
+    const reads = { importReport: vi.fn() };
     const controller = new PricingReadController(
       reads as unknown as PricingReads,
       {} as CommercialPrices,
     );
     await expect(
-      controller.importReport('invalid', {}, response()),
+      controller.importReport('invalid', request, {}, response()),
     ).rejects.toMatchObject({ status: 400 });
     await expect(
-      controller.importReport(id, { unexpected: 'true' }, response()),
+      controller.importReport(id, request, { unexpected: 'true' }, response()),
     ).rejects.toMatchObject({ status: 400 });
-    expect(reads.imported).not.toHaveBeenCalled();
+    expect(reads.importReport).not.toHaveBeenCalled();
   });
   it('preserves the contractual absent-import error without inventing a report', async () => {
     const reads = {
-      imported: vi.fn(async () => {
+      importReport: vi.fn(async () => {
         throw new PricingHttpError(404, 'LOTE_NO_ENCONTRADO');
       }),
     };
@@ -72,7 +76,7 @@ describe('Read-only persisted Pricing import report', () => {
       {} as CommercialPrices,
     );
     await expect(
-      controller.importReport(id, {}, response()),
+      controller.importReport(id, request, {}, response()),
     ).rejects.toMatchObject({ status: 404, code: 'LOTE_NO_ENCONTRADO' });
   });
 });

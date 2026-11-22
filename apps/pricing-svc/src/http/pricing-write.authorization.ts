@@ -44,7 +44,7 @@ export class PricingWriteAuthorization {
   ) {}
 
   async authorize(
-    _operation: WriteOperation,
+    _operation: WriteOperation | 'crearImportacionPrecios',
     authorization: string | undefined,
   ): Promise<string> {
     const bearer = /^Bearer ([^\s]+)$/i.exec(authorization ?? '');

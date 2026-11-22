@@ -180,10 +180,13 @@ export const bulkPriceJobs = pricing.table(
     correlationId: uuid('correlation_id').notNull(),
     usuarioId: text('usuario_id'),
     reportUri: text('report_uri'),
+    idempotencyKey: text('idempotency_key'),
+    requestHash: text('request_hash'),
     ...timestamps(),
   },
   (t) => [
     primaryKey({ name: 'pk_bulk_price_jobs', columns: [t.id] }),
+    unique('uq_bulk_price_jobs_actor_key').on(t.usuarioId, t.idempotencyKey),
     check(
       'ck_bulk_price_jobs_counts',
       sql`${t.totalRows} >= 0 AND ${t.completedRows} >= 0 AND ${t.failedRows} >= 0 AND ${t.completedRows} + ${t.failedRows} <= ${t.totalRows}`,
