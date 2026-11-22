@@ -192,5 +192,5 @@ describe.skipIf(!enabled)('Browser HTTP real local: PostgreSQL 17 + Catalog + Ga
   it('runs authenticated real browser reads, UI PATCH, variants, authorization failures, 503 retry and reload', () => {
     expect(gateway?.gatewayOrigin).toBeDefined();
     expect(new URL(gateway!.gatewayOrigin).hostname).toBe('127.0.0.1');
-  }, 1);
+  }, 5_000);
 });
