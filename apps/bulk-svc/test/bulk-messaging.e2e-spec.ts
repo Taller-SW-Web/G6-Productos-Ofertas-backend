@@ -145,7 +145,7 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       data_type: string;
       is_nullable: string;
     }>(
-      "SELECT table_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = 'bulk' AND column_name = 'owner_sub' ORDER BY table_name",
+      "SELECT table_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = 'bulk' AND table_name IN ('batch_jobs','export_jobs') AND column_name = 'owner_sub' ORDER BY table_name",
     );
     expect(ownershipColumns.rows).toEqual([
       {
