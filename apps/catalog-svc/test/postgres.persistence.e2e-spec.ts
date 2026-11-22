@@ -3565,6 +3565,165 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         },
       ]);
     });
+    it('BULK_RETRY_V1: consumes one V4 family after a durable initial V3 retryable receipt and deduplicates redelivery', async () => {
+      const previousResultFlag = process.env.CATALOG_BULK_RESULT_V2_ENABLED;
+      const previousRetryFlag = process.env.CATALOG_BULK_RETRY_V1_ENABLED;
+      process.env.CATALOG_BULK_RESULT_V2_ENABLED = 'true';
+      process.env.CATALOG_BULK_RETRY_V1_ENABLED = 'true';
+      const row = bulkRow();
+      const operation = randomUUID();
+      const correlation = randomUUID();
+      const batchId = randomUUID();
+      const reference = {
+        content_id: randomUUID(),
+        sha256: 'd'.repeat(64),
+        byte_length: 128,
+        content_type: 'application/json',
+      };
+      const original: CatalogEnvelope = {
+        message_id: randomUUID(),
+        schema_version: 3,
+        occurred_at: new Date().toISOString(),
+        correlation_id: correlation,
+        causation_id: null,
+        operation_id: operation,
+        producer: 'bulk-svc',
+        kind: 'command',
+        name: 'catalog.bulk.upsert.requested',
+        data: {
+          batch_id: batchId,
+          batch_operation_id: operation,
+          template_version: 2,
+          mode: 'ALTA',
+          content_ref: reference,
+        },
+      };
+      const contentClient = {
+        getDocument: vi.fn().mockResolvedValue({ rows: [row] }),
+      };
+      const transientIdentity = new CatalogBulkIdentity(
+        undefined,
+        new CatalogTokenVerifier(undefined),
+      );
+      vi.spyOn(
+        transientIdentity,
+        'authorizationForBulkRetry',
+      ).mockRejectedValue(new CatalogIdentityAcquisitionError('TRANSIENT'));
+      const initialService = new CatalogBulkService(
+        database,
+        mutationService(),
+        transientIdentity,
+        contentClient as never,
+      );
+      try {
+        await expect(initialService.consume(original)).resolves.toBe('APPLIED');
+        const initialReply = await bulkReply(original);
+        const initialAttempt = (
+          initialReply.payload.results as Array<Record<string, unknown>>
+        )[0]!;
+        expect(initialAttempt).toMatchObject({
+          status: 'REJECTED',
+          effect_state: 'NONE',
+          retriable: true,
+          attempt_number: 1,
+        });
+        const commandAttemptId = randomUUID();
+        const newAttemptId = randomUUID();
+        const retryCorrelation = randomUUID();
+        const retry: CatalogEnvelope = {
+          message_id: randomUUID(),
+          schema_version: 4,
+          occurred_at: new Date().toISOString(),
+          correlation_id: retryCorrelation,
+          causation_id: original.message_id,
+          operation_id: operation,
+          producer: 'bulk-svc',
+          kind: 'command',
+          name: 'catalog.bulk.upsert.requested',
+          data: {
+            batch_id: batchId,
+            batch_operation_id: operation,
+            template_version: 2,
+            mode: 'ALTA',
+            content_ref: reference,
+            retry: {
+              protocol: 'BULK_RETRY_V1',
+              command_attempt_id: commandAttemptId,
+              attempt_number: 2,
+              previous_command_message_id: original.message_id,
+              rows: [
+                {
+                  row_operation_id: row.row_operation_id,
+                  attempt_id: newAttemptId,
+                  previous_attempt_id: String(initialAttempt.attempt_id),
+                },
+              ],
+            },
+          },
+        };
+        const retryService = bulkHandler(mutationService(), contentClient);
+        await expect(retryService.consume(retry)).resolves.toBe('APPLIED');
+        const retryReply = await bulkReply(retry);
+        expect(retryReply.schema_version).toBe(2);
+        expect(retryReply.payload).toMatchObject({
+          command_attempt_id: commandAttemptId,
+          results: [
+            {
+              row_operation_id: row.row_operation_id,
+              attempt_id: newAttemptId,
+              attempt_number: 2,
+              status: 'COMPLETED',
+              effect_state: 'APPLIED',
+              retriable: false,
+            },
+          ],
+        });
+        await expect(retryService.consume(retry)).resolves.toBe('DUPLICATE');
+        expect(
+          await database.read((db) =>
+            db
+              .select()
+              .from(products)
+              .where(eq(products.sku_base, row.sku_base)),
+          ),
+        ).toHaveLength(1);
+        expect(
+          await database.read((db) =>
+            db
+              .select()
+              .from(bulkRetryAttemptReceipts)
+              .where(
+                eq(
+                  bulkRetryAttemptReceipts.rowOperationId,
+                  row.row_operation_id,
+                ),
+              )
+              .orderBy(bulkRetryAttemptReceipts.attemptNumber),
+          ),
+        ).toMatchObject([
+          {
+            attemptNumber: 1,
+            status: 'REJECTED',
+            effectState: 'NONE',
+            retriable: true,
+          },
+          {
+            attemptNumber: 2,
+            status: 'COMPLETED',
+            effectState: 'APPLIED',
+            retriable: false,
+            previousAttemptId: initialAttempt.attempt_id,
+          },
+        ]);
+      } finally {
+        if (previousResultFlag === undefined)
+          delete process.env.CATALOG_BULK_RESULT_V2_ENABLED;
+        else process.env.CATALOG_BULK_RESULT_V2_ENABLED = previousResultFlag;
+        if (previousRetryFlag === undefined)
+          delete process.env.CATALOG_BULK_RETRY_V1_ENABLED;
+        else process.env.CATALOG_BULK_RETRY_V1_ENABLED = previousRetryFlag;
+      }
+    });
     it('BULK: reports a real slug UNIQUE as SLUG_DUPLICADO, never SKU_DUPLICADO, and preserves replay', async () => {
       const existing = await mutationService().createProduct(
         createRequest(),

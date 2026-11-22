@@ -524,6 +524,13 @@ export class CatalogBulkService {
         .from(outbox)
         .where(eq(outbox.message_id, previous.receiptMessageId))
         .limit(1);
+      const priorDelivery = await this.previous(
+        tx,
+        retry.previous_command_message_id,
+        DELIVERY,
+      );
+      const priorCommand = priorDelivery?.payload as
+        CatalogEnvelope | undefined;
       const priorRows = Array.isArray(priorResult?.payload.results)
         ? priorResult.payload.results
         : [];
@@ -539,8 +546,11 @@ export class CatalogBulkService {
         original.batchOperationId !== request.batch_operation_id ||
         original.payloadHash !== reference.sha256 ||
         !priorResult ||
+        !priorDelivery ||
+        priorDelivery.correlation_id !== priorResult.correlation_id ||
+        priorCommand?.data.batch_id !== request.batch_id ||
+        priorCommand?.data.batch_operation_id !== request.batch_operation_id ||
         priorResult.schema_version !== 2 ||
-        priorResult.correlation_id !== message.correlation_id ||
         priorResult.causation_id !== retry.previous_command_message_id ||
         priorResult.payload.command_attempt_id !== previous.commandAttemptId ||
         priorResult.event_name !== 'catalog.bulk.upsert.completed' ||
