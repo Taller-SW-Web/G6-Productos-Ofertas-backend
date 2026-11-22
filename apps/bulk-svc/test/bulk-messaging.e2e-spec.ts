@@ -55,15 +55,51 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
     );
     expect(Number(version.rows[0]?.server_version_num)).toBeLessThan(180000);
     await pool.query('SELECT 1 FROM bulk.inbox LIMIT 0');
+    const [legacyManifest] = (
+      await pool.query<{ id: string }>(
+        "INSERT INTO bulk.file_manifests (role, format, content_ref) VALUES ('ENTRADA_IMPORTACION', 'CSV', 'legacy://bulk/ownership-migration') RETURNING id",
+      )
+    ).rows;
+    const legacyBatchId = id();
+    const legacyExportId = id();
     await pool.query(
-      readFileSync(
-        resolve(
-          process.cwd(),
-          'apps/bulk-svc/migrations/0005_actor_ownership.sql',
-        ),
-        'utf8',
-      ),
+      'INSERT INTO bulk.batch_jobs (batch_id, input_file_id, template_version, correlation_id) VALUES ($1, $2, 2, $3)',
+      [legacyBatchId, legacyManifest!.id, id()],
     );
+    await pool.query(
+      "INSERT INTO bulk.export_jobs (export_id, format) VALUES ($1, 'CSV')",
+      [legacyExportId],
+    );
+    const ownershipMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        'apps/bulk-svc/migrations/0005_actor_ownership.sql',
+      ),
+      'utf8',
+    );
+    await pool.query(ownershipMigration);
+    await pool.query(ownershipMigration);
+    const [legacyBatchOwner] = (
+      await pool.query<{ owner_sub: string | null }>(
+        'SELECT owner_sub FROM bulk.batch_jobs WHERE batch_id = $1',
+        [legacyBatchId],
+      )
+    ).rows;
+    const [legacyExportOwner] = (
+      await pool.query<{ owner_sub: string | null }>(
+        'SELECT owner_sub FROM bulk.export_jobs WHERE export_id = $1',
+        [legacyExportId],
+      )
+    ).rows;
+    expect(legacyBatchOwner?.owner_sub).toBeNull();
+    expect(legacyExportOwner?.owner_sub).toBeNull();
+    const indexes = await pool.query<{ indexname: string }>(
+      "SELECT indexname FROM pg_indexes WHERE schemaname = 'bulk' AND indexname IN ('ix_batch_jobs_owner_created_at', 'ix_export_jobs_owner_created_at')",
+    );
+    expect(indexes.rows.map(({ indexname }) => indexname).sort()).toEqual([
+      'ix_batch_jobs_owner_created_at',
+      'ix_export_jobs_owner_created_at',
+    ]);
     await pool.query(
       'TRUNCATE bulk.inbox, bulk.outbox, bulk.row_domain_steps, bulk.batch_rows, bulk.export_jobs, bulk.batch_jobs, bulk.file_manifests CASCADE',
     );
