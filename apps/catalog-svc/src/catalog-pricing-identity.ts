@@ -11,6 +11,11 @@ import type { CatalogPricingIdentity } from './catalog-price-filter.js';
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
+export class CatalogIdentityAcquisitionError extends Error {
+  constructor(readonly classification: 'TRANSIENT' | 'PERMANENT' | 'UNKNOWN') {
+    super(`CATALOG_IDENTITY_${classification}`);
+  }
+}
 async function json(response: Response) {
   if (
     response.status !== 200 ||
@@ -86,6 +91,18 @@ export class CatalogPricingIdentityProvider implements CatalogPricingIdentity {
           scope: this.scope,
         }).toString(),
       });
+      if (response.status === 503) {
+        await response.body?.cancel();
+        throw new CatalogIdentityAcquisitionError('TRANSIENT');
+      }
+      if (response.status === 401 || response.status === 403) {
+        await response.body?.cancel();
+        throw new CatalogIdentityAcquisitionError('PERMANENT');
+      }
+      if (response.status !== 200) {
+        await response.body?.cancel();
+        throw new CatalogIdentityAcquisitionError('UNKNOWN');
+      }
       const body = await json(response);
       if (
         !record(body) ||
@@ -97,7 +114,7 @@ export class CatalogPricingIdentityProvider implements CatalogPricingIdentity {
         !body.scopes.every((s) => typeof s === 'string') ||
         !body.scopes.includes(this.scope)
       )
-        throw new Error();
+        throw new CatalogIdentityAcquisitionError('PERMANENT');
       const principal = await this.verifier.verify(body.accessToken);
       const grantedScopes = body.scopes;
       if (
@@ -115,13 +132,15 @@ export class CatalogPricingIdentityProvider implements CatalogPricingIdentity {
           'utf8',
         ),
       );
-      if (!record(claims) || typeof claims.exp !== 'number') throw new Error();
+      if (!record(claims) || typeof claims.exp !== 'number')
+        throw new CatalogIdentityAcquisitionError('PERMANENT');
       const now = Date.now(),
         lifetime = Math.min(
           (body.expiresIn as number) * 1000,
           claims.exp * 1000 - now,
         );
-      if (!Number.isFinite(lifetime) || lifetime <= 0) throw new Error();
+      if (!Number.isFinite(lifetime) || lifetime <= 0)
+        throw new CatalogIdentityAcquisitionError('PERMANENT');
       signal.throwIfAborted();
       return {
         authorization: 'Bearer ' + body.accessToken,
@@ -130,8 +149,20 @@ export class CatalogPricingIdentityProvider implements CatalogPricingIdentity {
     };
     try {
       return await aborted(request(), signal);
-    } catch {
-      throw new ServiceUnavailableException();
+    } catch (error) {
+      if (error instanceof CatalogIdentityAcquisitionError) throw error;
+      if (
+        signal.aborted &&
+        signal.reason instanceof Error &&
+        ['AbortError', 'TimeoutError'].includes(signal.reason.name)
+      )
+        throw new CatalogIdentityAcquisitionError('TRANSIENT');
+      if (
+        error instanceof Error &&
+        ['AbortError', 'TimeoutError'].includes(error.name)
+      )
+        throw new CatalogIdentityAcquisitionError('TRANSIENT');
+      throw new CatalogIdentityAcquisitionError('UNKNOWN');
     }
   }
   async authorization(signal: AbortSignal): Promise<string> {
@@ -151,6 +182,31 @@ export class CatalogPricingIdentityProvider implements CatalogPricingIdentity {
       return (await aborted(this.loading, signal)).authorization;
     } catch {
       throw new ServiceUnavailableException();
+    }
+  }
+  async authorizationForBulkRetry(signal: AbortSignal): Promise<string> {
+    signal.throwIfAborted();
+    if (this.cached && this.cached.expiresAt > Date.now())
+      return this.cached.authorization;
+    if (!this.loading)
+      this.loading = this.issue()
+        .then((value) => {
+          this.cached = value;
+          return value;
+        })
+        .finally(() => {
+          this.loading = undefined;
+        });
+    try {
+      return (await aborted(this.loading, signal)).authorization;
+    } catch (error) {
+      if (error instanceof CatalogIdentityAcquisitionError) throw error;
+      if (
+        error instanceof Error &&
+        ['AbortError', 'TimeoutError'].includes(error.name)
+      )
+        throw new CatalogIdentityAcquisitionError('TRANSIENT');
+      throw new CatalogIdentityAcquisitionError('UNKNOWN');
     }
   }
 }

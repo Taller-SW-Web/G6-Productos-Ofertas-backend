@@ -56,9 +56,12 @@ import { historicalRequests } from '../src/historical-recovery.schema.js';
 import { CatalogQueryRepository } from '../src/catalog-query.repository.js';
 import {
   activeAttempt,
+  assertCatalogPublication,
+  initialBulkAttemptId,
   parseCatalogMessage,
   UUID,
 } from '../src/catalog-messages.js';
+import { CatalogIdentityAcquisitionError } from '../src/catalog-pricing-identity.js';
 import type { Attribute } from '../src/commercial.types.js';
 import { CatalogPersistenceError } from '../src/database-errors.js';
 import {
@@ -78,6 +81,7 @@ import {
 } from '../src/catalog-master-barriers.js';
 import {
   products,
+  bulkRetryAttemptReceipts,
   variants,
   masterBarriers,
   inbox,
@@ -280,6 +284,12 @@ describe.skipIf(!dockerAvailable)(
         resolve('apps/catalog-svc/migrations/0002_create_sku_barcodes.sql'),
         'utf8',
       );
+      const retryReceiptMigration = readFileSync(
+        resolve(
+          'apps/catalog-svc/migrations-candidate/h5/0002_bulk_retry_receipts.sql',
+        ),
+        'utf8',
+      );
       command(
         'docker',
         [
@@ -292,7 +302,7 @@ describe.skipIf(!dockerAvailable)(
           '-v',
           'ON_ERROR_STOP=1',
         ],
-        `CREATE ROLE po_catalog_owner NOLOGIN;\nCREATE ROLE catalog_app LOGIN PASSWORD 'isolated-runtime-password';\nCREATE SCHEMA catalog AUTHORIZATION po_catalog_owner;\nCREATE SCHEMA foreign_context;\nCREATE TABLE foreign_context.private_probe (value text);\nINSERT INTO foreign_context.private_probe VALUES ('isolated');\nSET ROLE po_catalog_owner;\n${migration}\n${barcodeMigration}\nINSERT INTO catalog.products (id,nombre,descripcion,categoria_id,tipo_producto_id,marca_id,sku_base,slug,tiene_variantes) VALUES ('00000000-0000-4000-8000-000000000049','Historical','Before migration','historic-category','historic-type','historic-brand','historic-00049','historic-00049',false);\n${readFileSync(resolve('apps/catalog-svc/migrations/0003_product_publication_history.sql'), 'utf8')}`,
+        `CREATE ROLE po_catalog_owner NOLOGIN;\nCREATE ROLE catalog_app LOGIN PASSWORD 'isolated-runtime-password';\nCREATE SCHEMA catalog AUTHORIZATION po_catalog_owner;\nCREATE SCHEMA foreign_context;\nCREATE TABLE foreign_context.private_probe (value text);\nINSERT INTO foreign_context.private_probe VALUES ('isolated');\nSET ROLE po_catalog_owner;\n${migration}\n${barcodeMigration}\n${retryReceiptMigration}\nINSERT INTO catalog.products (id,nombre,descripcion,categoria_id,tipo_producto_id,marca_id,sku_base,slug,tiene_variantes) VALUES ('00000000-0000-4000-8000-000000000049','Historical','Before migration','historic-category','historic-type','historic-brand','historic-00049','historic-00049',false);\n${readFileSync(resolve('apps/catalog-svc/migrations/0003_product_publication_history.sql'), 'utf8')}`,
       );
       command(
         'docker',
@@ -3262,7 +3272,7 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         undefined,
         new CatalogTokenVerifier(undefined),
       );
-      vi.spyOn(identity, 'authorization').mockResolvedValue(
+      vi.spyOn(identity, 'authorizationForBulkRetry').mockResolvedValue(
         actor.authorization,
       );
       return new CatalogBulkService(
@@ -3348,6 +3358,8 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
       );
     });
     it('BULK V3: authenticates and materializes a verified claim-check before the transactional upsert', async () => {
+      const previousFlag = process.env.CATALOG_BULK_RESULT_V2_ENABLED;
+      process.env.CATALOG_BULK_RESULT_V2_ENABLED = 'true';
       const row = bulkRow();
       const operation = randomUUID();
       const reference = {
@@ -3378,12 +3390,46 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         getDocument: vi.fn().mockResolvedValue({ rows: [row] }),
       };
       const service = bulkHandler(mutationService(), contentClient);
-      await expect(service.consume(message)).resolves.toBe('APPLIED');
+      try {
+        await expect(service.consume(message)).resolves.toBe('APPLIED');
+      } finally {
+        if (previousFlag === undefined)
+          delete process.env.CATALOG_BULK_RESULT_V2_ENABLED;
+        else process.env.CATALOG_BULK_RESULT_V2_ENABLED = previousFlag;
+      }
       expect(contentClient.getDocument).toHaveBeenCalledWith(reference);
       const result = await bulkReply(message);
       expect(result.event_name).toBe('catalog.bulk.upsert.completed');
+      expect(result.schema_version).toBe(2);
+      expect(result.payload).toMatchObject({ command_attempt_id: null });
       expect(result.payload.results).toMatchObject([
-        { row_operation_id: row.row_operation_id, status: 'COMPLETED' },
+        {
+          row_operation_id: row.row_operation_id,
+          status: 'COMPLETED',
+          attempt_number: 1,
+          effect_state: 'APPLIED',
+          retriable: false,
+        },
+      ]);
+      expect(
+        await database.read((db) =>
+          db
+            .select()
+            .from(bulkRetryAttemptReceipts)
+            .where(
+              eq(bulkRetryAttemptReceipts.rowOperationId, row.row_operation_id),
+            ),
+        ),
+      ).toMatchObject([
+        {
+          attemptNumber: 1,
+          status: 'COMPLETED',
+          effectState: 'APPLIED',
+          retriable: false,
+          commandAttemptId: null,
+          previousAttemptId: null,
+          originalAttemptId: null,
+        },
       ]);
       const storedInput = await database.read((db) =>
         db
@@ -3404,6 +3450,120 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
           db.select().from(products).where(eq(products.sku_base, row.sku_base)),
         ),
       ).toHaveLength(1);
+    });
+    it('BULK V3 result V2: records only a pre-mutation identity outage and leaves all commercial tables unchanged', async () => {
+      const previousFlag = process.env.CATALOG_BULK_RESULT_V2_ENABLED;
+      process.env.CATALOG_BULK_RESULT_V2_ENABLED = 'true';
+      const row = bulkRow();
+      const operation = randomUUID();
+      const batchId = randomUUID();
+      const correlationId = randomUUID();
+      const reference = {
+        content_id: randomUUID(),
+        sha256: 'b'.repeat(64),
+        byte_length: 128,
+        content_type: 'application/json',
+      };
+      const message: CatalogEnvelope = {
+        message_id: randomUUID(),
+        schema_version: 3,
+        occurred_at: new Date().toISOString(),
+        correlation_id: correlationId,
+        causation_id: null,
+        operation_id: operation,
+        producer: 'bulk-svc',
+        kind: 'command',
+        name: 'catalog.bulk.upsert.requested',
+        data: {
+          batch_id: batchId,
+          batch_operation_id: operation,
+          template_version: 2,
+          mode: 'ALTA',
+          content_ref: reference,
+        },
+      };
+      const snapshot = async () =>
+        database.read(async (db) => {
+          const result = await db.execute(sql`SELECT jsonb_build_object(
+            'products', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.products t), '[]'::jsonb),
+            'variants', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.variants t), '[]'::jsonb),
+            'sku_identity', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.sku_identity t), '[]'::jsonb),
+            'product_images', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.product_images t), '[]'::jsonb),
+            'variant_images', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.variant_images t), '[]'::jsonb),
+            'product_attribute_values', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.product_attribute_values t), '[]'::jsonb),
+            'variant_attribute_values', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.variant_attribute_values t), '[]'::jsonb),
+            'product_identifying_characteristics', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.product_identifying_characteristics t), '[]'::jsonb),
+            'sku_physical_profiles', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.sku_physical_profiles t), '[]'::jsonb),
+            'activation_checks', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.activation_checks t), '[]'::jsonb)
+          ) AS snapshot`);
+          return result.rows[0]?.snapshot;
+        });
+      const before = await snapshot();
+      const identity = new CatalogBulkIdentity(
+        undefined,
+        new CatalogTokenVerifier(undefined),
+      );
+      vi.spyOn(identity, 'authorizationForBulkRetry').mockRejectedValue(
+        new CatalogIdentityAcquisitionError('TRANSIENT'),
+      );
+      const service = new CatalogBulkService(
+        database,
+        mutationService(),
+        identity,
+        { getDocument: vi.fn().mockResolvedValue({ rows: [row] }) } as never,
+      );
+      try {
+        await expect(service.consume(message)).resolves.toBe('APPLIED');
+      } finally {
+        if (previousFlag === undefined)
+          delete process.env.CATALOG_BULK_RESULT_V2_ENABLED;
+        else process.env.CATALOG_BULK_RESULT_V2_ENABLED = previousFlag;
+      }
+      expect(await snapshot()).toEqual(before);
+      const stored = await bulkReply(message);
+      const reply: CatalogEnvelope = {
+        message_id: stored.message_id,
+        schema_version: stored.schema_version,
+        occurred_at: stored.occurred_at.toISOString(),
+        correlation_id: stored.correlation_id,
+        causation_id: stored.causation_id,
+        operation_id: stored.operation_id,
+        producer: 'catalog-svc',
+        kind: 'result',
+        name: stored.event_name,
+        data: stored.payload,
+      };
+      expect(() => assertCatalogPublication(reply)).not.toThrow();
+      expect(reply.data.results).toMatchObject([
+        {
+          row_operation_id: row.row_operation_id,
+          attempt_id: initialBulkAttemptId(operation, row.row_operation_id),
+          attempt_number: 1,
+          status: 'REJECTED',
+          effect_state: 'NONE',
+          retriable: true,
+          code: 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE',
+        },
+      ]);
+      expect(
+        await database.read((db) =>
+          db
+            .select()
+            .from(bulkRetryAttemptReceipts)
+            .where(
+              eq(bulkRetryAttemptReceipts.rowOperationId, row.row_operation_id),
+            ),
+        ),
+      ).toMatchObject([
+        {
+          status: 'REJECTED',
+          effectState: 'NONE',
+          retriable: true,
+          errorCode: 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE',
+          attemptNumber: 1,
+          receiptMessageId: stored.message_id,
+        },
+      ]);
     });
     it('BULK: reports a real slug UNIQUE as SLUG_DUPLICADO, never SKU_DUPLICADO, and preserves replay', async () => {
       const existing = await mutationService().createProduct(

@@ -265,8 +265,11 @@ describe('catalog Drizzle schema', () => {
         'batch_operation_id',
         'row_operation_id',
         'previous_attempt_id',
+        'original_attempt_id',
+        'receipt_message_id',
         'attempt_number',
         'payload_hash',
+        'intent_hash',
         'status',
         'effect_state',
         'retriable',
@@ -345,8 +348,8 @@ describe('catalog Drizzle schema', () => {
       ),
     ).toContain('uq_catalog_bulk_retry_command_message');
     expect(
-      getTableConfig(bulkRetryAttemptReceipts).uniqueConstraints.map(
-        (key) => key.name,
+      getTableConfig(bulkRetryAttemptReceipts).indexes.map(
+        (key) => key.config.name,
       ),
     ).toContain('uq_catalog_bulk_retry_previous_attempt');
   });

@@ -3,6 +3,7 @@ import {
   activeAttempt,
   assertCatalogPublication,
   envelope,
+  initialBulkAttemptId,
   InvalidCatalogMessage,
   manualRetryAllowed,
   parseCatalogMessage,
@@ -125,6 +126,123 @@ describe('Catalog preparation message contract and retry identity', () => {
   });
   it('validates typed results and preserves SKU identity', () => {
     expect(parseCatalogMessage(result()).data.sku).toBe('0000123');
+  });
+  it('derives a stable versioned initial attempt identity and validates V2 receipts', () => {
+    const operationId = randomUUID();
+    const rowOperationId = randomUUID();
+    const attemptId = initialBulkAttemptId(operationId, rowOperationId);
+    expect(initialBulkAttemptId(operationId, rowOperationId)).toBe(attemptId);
+    expect(attemptId).toMatch(/^[0-9a-f-]{36}$/);
+    const message = envelope(
+      'catalog.bulk.upsert.completed',
+      {
+        batch_id: randomUUID(),
+        batch_operation_id: operationId,
+        command_attempt_id: null,
+        results: [
+          {
+            row_number: 2,
+            row_operation_id: rowOperationId,
+            product_id: randomUUID(),
+            sku_base: 'SKU-A',
+            attempt_id: attemptId,
+            attempt_number: 1,
+            status: 'COMPLETED',
+            effect_state: 'APPLIED',
+            retriable: false,
+            code: null,
+          },
+        ],
+      },
+      randomUUID(),
+      operationId,
+      randomUUID(),
+      2,
+    );
+    expect(() => assertCatalogPublication(message)).not.toThrow();
+    expect(() =>
+      envelope(
+        'catalog.bulk.upsert.completed',
+        {
+          ...message.data,
+          results: [
+            {
+              ...(message.data.results as Record<string, unknown>[])[0],
+              status: 'REJECTED',
+              effect_state: 'UNKNOWN',
+              retriable: true,
+              code: 'INTERNAL_ERROR',
+            },
+          ],
+        },
+        message.correlation_id,
+        operationId,
+        randomUUID(),
+        2,
+      ),
+    ).toThrow(InvalidCatalogMessage);
+  });
+  it('validates the strict V4 envelope and preserves command causation', () => {
+    const operationId = randomUUID();
+    const previousCommandMessageId = randomUUID();
+    const command: CatalogEnvelope = {
+      message_id: randomUUID(),
+      schema_version: 4,
+      occurred_at: new Date().toISOString(),
+      correlation_id: randomUUID(),
+      causation_id: previousCommandMessageId,
+      operation_id: operationId,
+      producer: 'bulk-svc',
+      kind: 'command',
+      name: 'catalog.bulk.upsert.requested',
+      data: {
+        batch_id: randomUUID(),
+        batch_operation_id: operationId,
+        template_version: 2,
+        mode: 'ALTA',
+        content_ref: {
+          content_id: randomUUID(),
+          sha256: 'c'.repeat(64),
+          byte_length: 1200,
+          content_type: 'application/json',
+        },
+        retry: {
+          protocol: 'BULK_RETRY_V1',
+          command_attempt_id: randomUUID(),
+          attempt_number: 2,
+          previous_command_message_id: previousCommandMessageId,
+          rows: [
+            {
+              row_operation_id: randomUUID(),
+              attempt_id: randomUUID(),
+              previous_attempt_id: randomUUID(),
+            },
+          ],
+        },
+      },
+    };
+    expect(parseCatalogMessage(command)).toEqual(command);
+    expect(() =>
+      parseCatalogMessage({
+        ...command,
+        causation_id: randomUUID(),
+      }),
+    ).toThrow(InvalidCatalogMessage);
+    expect(() =>
+      parseCatalogMessage({
+        ...command,
+        data: {
+          ...command.data,
+          retry: {
+            ...(command.data.retry as Record<string, unknown>),
+            rows: [
+              ...(command.data.retry as { rows: unknown[] }).rows,
+              ...(command.data.retry as { rows: unknown[] }).rows,
+            ],
+          },
+        },
+      }),
+    ).toThrow(InvalidCatalogMessage);
   });
   it('requires real Pricing receipt identifiers before accepting COMPLETED', () => {
     const message = {
