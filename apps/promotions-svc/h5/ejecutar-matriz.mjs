@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { constanciaFirmada } from './evidencia-integracion.mjs';
 
 const scenarios = [
@@ -138,10 +138,30 @@ const observations = new Map([
       ),
   ],
   [
+    'G5-H5-02',
+    (events, operation) =>
+      events.some(
+        (e) =>
+          e.operation_id === operation &&
+          e.event === 'terminal' &&
+          e.status === 'REJECTED',
+      ),
+  ],
+  [
     'G5-H5-05',
-    (events) =>
-      events.some((e) => e.method === 'POST' && e.status === 202) &&
-      events.some((e) => e.event === 'terminal' && e.status === 'COMPLETED'),
+    (events, operation) =>
+      events.some(
+        (e) =>
+          e.operation_id === operation &&
+          e.method === 'POST' &&
+          e.status === 202,
+      ) &&
+      events.some(
+        (e) =>
+          e.operation_id === operation &&
+          e.event === 'terminal' &&
+          e.status === 'COMPLETED',
+      ),
   ],
   [
     'G5-H5-08',
@@ -164,10 +184,41 @@ const observations = new Map([
       ),
   ],
   [
+    'G5-H5-11',
+    (events) =>
+      events.some((e) => e.event === 'expiry' && e.estado === 'EXPIRADA'),
+  ],
+  [
     'G5-H5-13',
     (events) => events.some((e) => e.event === 'uniform_coupon_not_found'),
   ],
 ]);
+
+const missingPreconditions = new Set([
+  'AUTHORIZED_INTEGRATION_ORIGIN_AND_G6_SHA_REQUIRED',
+  'G7_VENTAS_TOKEN_REQUIRED',
+  'INTEGRATION_MUTATIONS_NOT_APPROVED',
+  'G5_SHA_AND_ORDER_REQUIRED',
+  'RESERVATION_AND_ORDER_REQUIRED',
+  'REAL_NEGATIVE_G7_TOKENS_REQUIRED',
+  'G5_SNAPSHOT_REQUIRED',
+  'G5_SIGNED_BUSINESS_EVIDENCE_REQUIRED',
+]);
+
+function stageIdentifier(id, stage, plan) {
+  if (stage === 'expired') return plan.reservation_id;
+  if (stage === 'follow') return plan.follow_operation_id;
+  if (stage === 'auth') return plan.operations?.coupon;
+  if (stage === 'cancel')
+    return plan.operations?.[id === 'G5-H5-04' ? 'release' : 'restore'];
+  return plan.operations?.[stage];
+}
+
+const executeStage = (stage, plan) =>
+  spawnSync(process.execPath, [runner, stage, plan], {
+    encoding: 'utf8',
+    timeout: 420_000,
+  });
 
 function httpsEvidence(value) {
   try {
@@ -184,17 +235,11 @@ function httpsEvidence(value) {
   }
 }
 
-async function main() {
-  const [manifestPath, resultPath, ...selected] = process.argv.slice(2);
-  if (
-    !manifestPath ||
-    !resultPath ||
-    selected.some((id) => !scenarios.some((_, i) => idOf(i) === id))
-  )
-    throw new Error(
-      'Uso: ejecutar-matriz.mjs <manifest.json> <resultado.json> [G5-H5-NN ...]',
-    );
-  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+export async function ejecutarMatriz(
+  manifest,
+  selected = [],
+  execute = executeStage,
+) {
   const recordedAt = new Date().toISOString();
   const results = [];
   for (const [
@@ -246,34 +291,71 @@ async function main() {
       identifiers: ids,
     });
     if (!ids.length) continue;
+    const bilateral = actor !== 'G6';
+    const primaryId = stageIdentifier(id, stage, plan);
+    let technicalPassed = false;
     if (fixture.execute === true && stage) {
-      const run = spawnSync(process.execPath, [runner, stage, fixture.plan], {
-        encoding: 'utf8',
-        timeout: 420_000,
-      });
-      row.evidence = String(run.stdout ?? '')
-        .trim()
-        .split(/\r?\n/)
-        .filter(Boolean)
-        .map((line) => JSON.parse(line));
+      const run = execute(stage, fixture.plan);
       const detail = /"code":"([A-Z0-9_]+)"/.exec(
         String(run.stderr ?? ''),
       )?.[1];
       if (run.status !== 0) {
-        const blocked =
-          /^G5_|^G7_|^REAL_NEGATIVE_G7_|^AUTHORIZED_|^INTEGRATION_MUTATIONS_|^RESERVATION_AND_ORDER_/.test(
-            detail ?? '',
-          );
+        const blocked = !run.error && missingPreconditions.has(detail);
         row.status = blocked ? 'BLOCKED' : 'FAIL';
         row.reason = detail ?? 'FALLO_EJECUCION';
         continue;
       }
-      if (observations.has(id)) {
-        row.status = observations.get(id)(row.evidence) ? 'PASS' : 'FAIL';
+      try {
+        row.evidence = String(run.stdout ?? '')
+          .trim()
+          .split(/\r?\n/)
+          .filter(Boolean)
+          .map((line) => JSON.parse(line));
+        if (
+          row.evidence.some(
+            (event) =>
+              !event || typeof event !== 'object' || Array.isArray(event),
+          )
+        )
+          throw new Error();
+      } catch {
+        row.status = 'FAIL';
+        row.reason = 'EVIDENCIA_TECNICA_INVALIDA';
+        continue;
+      }
+      const observe = observations.get(id);
+      const linkedEvidence =
+        !bilateral ||
+        (uuid.test(primaryId) &&
+          row.evidence.every(
+            (event) =>
+              event.environment === plan.environment &&
+              event.g6_sha === plan.g6_sha &&
+              event.g5_sha === plan.g5_sha &&
+              event.order_id === plan.order_id,
+          ) &&
+          row.evidence.some(
+            (event) =>
+              event.operation_id === primaryId ||
+              event.reservation_id === primaryId,
+          ));
+      if (!linkedEvidence || (observe && !observe(row.evidence, primaryId))) {
+        row.status = 'FAIL';
+        row.reason = 'OBSERVACION_AUTOMATICA_FALLIDA';
+        continue;
+      }
+      technicalPassed = true;
+      if (observe && !bilateral) {
+        row.status = 'PASS';
         row.reason = 'OBSERVACION_AUTOMATICA';
         continue;
       }
     }
+    if (bilateral && stage && !technicalPassed) {
+      row.reason = 'FALTA_EJECUCION_TECNICA';
+      continue;
+    }
+    if (bilateral) row.reason = 'FALTA_CONSTANCIA_BILATERAL';
     if (!fixture.attestation) continue;
     try {
       const proof = await constanciaFirmada(
@@ -289,7 +371,10 @@ async function main() {
         proof.g6_sha !== plan.g6_sha ||
         proof.g5_sha !== plan.g5_sha ||
         proof.order_id !== plan.order_id ||
-        !ids.includes(proof.operation_or_reservation_id) ||
+        (bilateral && stage
+          ? !uuid.test(primaryId) ||
+            proof.operation_or_reservation_id !== primaryId
+          : !ids.includes(proof.operation_or_reservation_id)) ||
         !Number.isFinite(Date.parse(proof.observed_at)) ||
         Date.parse(proof.observed_at) > Date.now() ||
         !httpsEvidence(proof.evidence_url) ||
@@ -309,24 +394,38 @@ async function main() {
       row.reason = 'CONSTANCIA_DE_SESION_INVALIDA';
     }
   }
-  await writeFile(
-    resultPath,
-    JSON.stringify({ recorded_at: recordedAt, results }, null, 2) + '\n',
-    { flag: 'wx' },
-  );
+  return { recorded_at: recordedAt, results };
+}
+
+async function main() {
+  const [manifestPath, resultPath, ...selected] = process.argv.slice(2);
+  if (
+    !manifestPath ||
+    !resultPath ||
+    selected.some((id) => !scenarios.some((_, i) => idOf(i) === id))
+  )
+    throw new Error(
+      'Uso: ejecutar-matriz.mjs <manifest.json> <resultado.json> [G5-H5-NN ...]',
+    );
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  const report = await ejecutarMatriz(manifest, selected);
+  await writeFile(resultPath, JSON.stringify(report, null, 2) + '\n', {
+    flag: 'wx',
+  });
   const counts = Object.fromEntries(
     ['PASS', 'FAIL', 'BLOCKED'].map((status) => [
       status,
-      results.filter((r) => r.status === status).length,
+      report.results.filter((r) => r.status === status).length,
     ]),
   );
   console.log(JSON.stringify(counts));
   process.exitCode = counts.FAIL ? 1 : counts.BLOCKED ? 2 : 0;
 }
 
-main().catch(() => {
-  console.error(
-    'No se pudo generar el reporte H5. Revisar argumentos, manifiesto y ruta de salida nueva.',
-  );
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  main().catch(() => {
+    console.error(
+      'No se pudo generar el reporte H5. Revisar argumentos, manifiesto y ruta de salida nueva.',
+    );
+    process.exitCode = 1;
+  });

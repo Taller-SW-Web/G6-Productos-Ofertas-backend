@@ -311,7 +311,10 @@ async function main() {
           missing.title === foreign.title,
         'COUPON_NOT_FOUND_RESPONSES_DIFFER',
       );
-      report({ event: 'uniform_coupon_not_found' });
+      report({
+        event: 'uniform_coupon_not_found',
+        operation_id: operationId('coupon'),
+      });
     }
     return;
   }
@@ -337,6 +340,7 @@ async function main() {
     );
     report({
       event: 'expiry',
+      reservation_id: result.reservation_id,
       estado: result.estado_persistido,
       vigencia: result.vigencia_efectiva,
     });

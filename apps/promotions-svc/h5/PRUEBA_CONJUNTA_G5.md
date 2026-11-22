@@ -46,11 +46,30 @@ Para `confirm` y `cancel`, acordar con G5 su clave pública Ed25519 PEM por un c
 
 El contenido firmado lleva `issuer: "G5"`, `environment: "integration"`, `event` (`PAGO_CONFIRMADO` o `ANULACION_CONFIRMADA`), `event_id` persistido por G5, `occurred_at` original, `gateway` (origen HTTPS exacto), `order_id`, `reservation_id`, `coupon_operation_id`, `g5_sha` y `g6_sha`. Es un formato de evidencia para el runner. Los endpoints G6 no cambian.
 
+Generar la clave de prueba en el entorno controlado de quien firma. Distribuir únicamente el PEM público y su huella SHA-256 por un canal autenticado ya acordado. La contraparte compara la huella antes de configurar el runner. Mantener la clave privada cifrada en custodia G5.
+
+```sh
+openssl genpkey -algorithm ED25519 -aes-256-cbc -out g5-h5.private.pem
+openssl pkey -in g5-h5.private.pem -pubout -out g5-h5.public.pem
+openssl pkey -pubin -in g5-h5.public.pem -outform DER -out g5-h5.public.der
+openssl dgst -sha256 g5-h5.public.der
+```
+
+Después de verificar el hecho en G5, guardar los campos constatados en `evento.json` UTF-8 y firmar exactamente esos bytes. No editar el archivo después de firmarlo. Copiar el objeto resultante a `g5_evidence` en el plan privado.
+
+```sh
+openssl pkeyutl -sign -rawin -inkey g5-h5.private.pem -in evento.json -out evento.firma
+openssl pkeyutl -verify -rawin -pubin -inkey g5-h5.public.pem -in evento.json -sigfile evento.firma
+node --input-type=module -e 'import {readFileSync as read} from "node:fs"; console.log(JSON.stringify({payload:read("evento.json").toString("base64url"),signature:read("evento.firma").toString("base64url")}));' > constancia.json
+```
+
 ### Reporte reproducible
 
 Ejecutar `node apps/promotions-svc/h5/ejecutar-matriz.mjs manifiesto.json resultado-nuevo.json [G5-H5-NN ...]`. El manifiesto indexa por caso, por ejemplo `{"G5-H5-01":{"plan":"caso01.json","execute":true}}`. El runner produce las 20 filas, con actor, precondiciones, resultado esperado y estado. Adjunta SHA, ambiente, IDs y observaciones cuando se dispone de un plan válido. El reporte usa un archivo nuevo. Devuelve código 1 si falla un caso y 2 si quedan casos bloqueados.
 
-Los casos supervisados aceptan `attestation` con el mismo contenedor de firma. Fijar `G5_H5_SESSION_EVIDENCE_PUBLIC_KEY` a la clave pública del responsable de homologación. La constancia incluye `case_id`, `actor`, `environment`, `gateway`, ambos SHA según corresponda, `order_id`, `operation_or_reservation_id`, `observed_at`, `observed`, `status` y `evidence_url` HTTPS sin credenciales ni parámetros. Para un PASS, `observed` debe coincidir con el código esperado de la fila. El responsable firma tras observar la evidencia de los actores involucrados. Una etapa automatizada exitosa no acredita por sí sola un caso bilateral.
+Los casos supervisados aceptan `attestation` con el mismo contenedor de firma. Fijar `G5_H5_SESSION_EVIDENCE_PUBLIC_KEY` a la clave pública del responsable de homologación. La constancia incluye `case_id`, `actor`, `environment`, `gateway`, ambos SHA según corresponda, `order_id`, `operation_or_reservation_id`, `observed_at`, `observed`, `status` y `evidence_url` HTTPS sin credenciales ni parámetros. Para un PASS, `observed` debe coincidir con el código esperado de la fila. El responsable firma tras observar la evidencia de los actores involucrados.
+
+Un caso exclusivamente G6 puede obtener PASS con observaciones automáticas suficientes. Si participa G5, G7 o G2, hace falta una constancia válida. Cuando el caso además tiene etapa técnica, el runner exige que esa etapa pase en el mismo ambiente, SHA, pedido y operación o reserva. `G5-H5-05` exige que tanto el 202 como el estado `COMPLETED` correspondan al UUID de consumo firmado. Un fallo técnico conserva `FAIL`. Una constancia ausente o inválida mantiene `BLOCKED`.
 
 ## Matriz de los 20 escenarios
 
@@ -62,7 +81,7 @@ Estado real al 21/11/2026. Los 20 casos completos quedan `BLOCKED` hasta que se 
 | G5-H5-02 | Reserva rechazada y M1 evita cupón/pago | `reserve` negativo + verificación M1 | Pendiente G5 y ambiente |
 | G5-H5-03 | Confirmación de consumo de stock | `confirm` tras pago G5 | Pendiente bilateral |
 | G5-H5-04 | Liberación por anulación | `cancel` y seguimiento M1 | Pendiente bilateral |
-| G5-H5-05 | Cupón y GET terminal | `coupon` | Cubierto localmente con SQL real y dependencias externas simuladas; pendiente snapshot G5 y ambiente |
+| G5-H5-05 | Cupón y GET terminal | `coupon` y constancia bilateral firmada | BLOCKED. Pendiente snapshot de G5 y constancia vinculada a la ejecución real |
 | G5-H5-06 | Restauración del consumo original | `cancel` con fecha original y política | Pendiente bilateral |
 | G5-H5-07 | Pérdida de respuesta del POST | `follow` y mismo plan; corte de red coordinado | Reintento local cubierto; pendiente ambiente |
 | G5-H5-08 | Identidad reutilizada con otro contenido | Conflicto del paso `coupon` | 409 cubierto localmente; pendiente ambiente |

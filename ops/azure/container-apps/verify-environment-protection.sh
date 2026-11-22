@@ -17,6 +17,11 @@ esac
 environment_path="repos/${repository}/environments/${environment_name}"
 branch_policies_path="${environment_path}/deployment-branch-policies"
 gh api -H 'X-GitHub-Api-Version: 2022-11-28' "$environment_path" >/dev/null || fail 'el environment no existe o no se pudo leer'
+if [[ "$environment_name" == azure-h5 ]]; then
+  admin_bypass="$(gh api -H 'X-GitHub-Api-Version: 2022-11-28' "$environment_path" --jq '.can_admins_bypass | tostring')" ||
+    fail 'no se pudo verificar el bypass de administradores'
+  [[ "$admin_bypass" == false ]] || fail 'el environment permite omitir protecciones o no declara esa regla'
+fi
 reviewer_filter='[.protection_rules[]? | select(.type == "required_reviewers")] | if length == 1 and .[0].prevent_self_review == true and (.[0].reviewers | length > 0) then 1 else 0 end'
 if [[ "$environment_name" == azure-h5-pilot-234 ]]; then
   reviewer_filter='[.protection_rules[]? | select(.type == "required_reviewers")] | if length == 1 and .[0].prevent_self_review == false and (.[0].reviewers | length == 1) and .[0].reviewers[0].type == "User" and .[0].reviewers[0].reviewer.id == 129343979 then 1 else 0 end'
@@ -32,5 +37,10 @@ branch_mode="$(gh api -H 'X-GitHub-Api-Version: 2022-11-28' "$environment_path" 
 branch_patterns="$(gh api -H 'X-GitHub-Api-Version: 2022-11-28' "$branch_policies_path" --jq '[.branch_policies[].name] | sort | join(",")')" \
   || fail 'no se pudieron consultar las ramas autorizadas'
 [[ "$branch_patterns" == master ]] || fail "la única rama autorizada debe ser master (actual: ${branch_patterns:-ninguna})"
+if [[ "$environment_name" == azure-h5 ]]; then
+  branch_types="$(gh api -H 'X-GitHub-Api-Version: 2022-11-28' "$branch_policies_path" --jq '[.branch_policies[].type] | join(",")')" ||
+    fail 'no se pudo verificar el tipo de referencia permitido'
+  [[ "$branch_types" == branch ]] || fail 'master debe ser una rama'
+fi
 
 printf 'PASS: %s tiene la revision exigida por su politica y unicamente master; excepcion #234 solo para Pricing/Audit.\n' "$environment_name"

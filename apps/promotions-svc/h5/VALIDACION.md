@@ -1,5 +1,13 @@
 # Validación local Promotions H5
 
+## Cierre de la reauditoría del HEAD 1f00584
+
+- `G5-H5-05` exige un 202 y un `COMPLETED` para la misma operación, además de la constancia bilateral firmada que coincide con el caso, SHA, ambiente y pedido. Se ejecutaron regresiones para constancia ausente, válida, inválida y fallo de la etapa técnica. Los 20 escenarios siguen pendientes de homologación.
+- La [salida depurada de la restauración Azure](evidencia-azure-restauracion.json) conserva el SHA del runtime, los digests de las imágenes, la huella del runner y los ID de operación, mensaje y correlación. Los IDs de Activity Log enlazan la creación y eliminación exitosa del ejecutor temporal. `REJECTED/COUPON_IDENTITY_MISMATCH` era el resultado esperado de una restauración sin consumo previo.
+- Las migraciones verificadas en el HEAD anterior siguen aplicadas. Esta reauditoría conserva las comprobaciones existentes de SQL y Service Bus.
+- GitHub `azure-h5` verificado con revisión obligatoria, autoaprobación y bypass de administrador deshabilitados, y solo la rama `master`. Tiene las variables de la identidad administrada nueva `g6-h5-int-github-cd`, federada exclusivamente con ese environment.
+- Azure `env-g6-h5-int` provisionado en Brazil South, grupo no productivo `rg-g6-sb-h5-int-fork`, con acceso público deshabilitado. Se eligió Brazil South por la cuota de un ambiente en Chile Central y para coincidir con la región de Supabase de desarrollo. El rol de CD se definió para el grupo aislado. Quedan pendientes las cuatro Container Apps de destino, la asignación del rol a esos recursos y el runner privado de smoke. El ejecutor selecciona ese grupo en el carril normal. Conserva los controles de procedencia y el destino del piloto.
+
 ## Reauditoría del HEAD 740cb91
 
 | Comprobación | Resultado |
