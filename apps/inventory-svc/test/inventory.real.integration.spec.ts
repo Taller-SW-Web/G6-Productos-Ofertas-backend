@@ -3208,6 +3208,22 @@ GRANT inventory_app TO inventory_test;`,
       );
     });
 
+    afterAll(async () => {
+      // DATA-004 escribe umbrales en una tabla compartida por el resto del
+      // archivo de integración. Se eliminan al terminar para no contaminar
+      // bloques posteriores (p. ej. la clasificación de alertas del dashboard).
+      await database.query(
+        `DELETE FROM inventory.stock_threshold_override
+         WHERE id IN (
+           'a0000000-0000-0000-0000-000000000001'::uuid,
+           'b0000000-0000-0000-0000-000000000002'::uuid,
+           '0a24fa68-450f-5fa1-827d-78fb5f09fe54'::uuid,
+           '7b49463c-333e-5e63-b8ad-344c20847250'::uuid
+         )
+         OR sku_id IN ('PUM-CLAS-NEG-40', 'ADI-ENT22-AZU-M')`,
+      );
+    });
+
     async function setupBaseline(withConflict = false): Promise<void> {
       await database.query(`DELETE FROM inventory.stock_threshold_override`);
 
@@ -3901,6 +3917,403 @@ GRANT inventory_app TO inventory_test;`,
       // Tercer publishOne: no quedan entregas pendientes
       const res3 = await relay.publishOne();
       expect(res3).toBe('empty');
+    });
+  });
+
+  describe('DashboardService — alertas y ubicaciones internas H01/H02 en PostgreSQL 17 descartable', () => {
+    const dashService = new DashboardService(database);
+    const runTag = `dash-${randomUUID().slice(0, 8)}`;
+    let activeLocId: string;
+    let inactiveLocId: string;
+    let emptyLocId: string;
+    const skuNormal = `${runTag}-SKU-NORMAL`;
+    const skuLow = `${runTag}-SKU-LOW`;
+    const skuAgotado = `${runTag}-SKU-AGOTADO`;
+    const skuZeroPhysical = `${runTag}-SKU-ZERO-PHYS`;
+    const skuExactThreshold = `${runTag}-SKU-EXACT-THRESH`;
+    const skuOverride = `${runTag}-SKU-OVERRIDE`;
+    const skuInactiveLoc = `${runTag}-SKU-INACTIVE-LOC`;
+    const overrideId = randomUUID();
+    const globalThresholdId = randomUUID();
+
+    beforeAll(async () => {
+      // 1. Crear ubicaciones de prueba efímeras: 2 activas y 1 inactiva
+      const loc1 = await database.query<{ id: string }>(
+        `INSERT INTO inventory.locations(code, name, type, active)
+         VALUES ($1, $2, 'TIENDA', true) RETURNING id`,
+        [`A-${runTag}-LOC-1`, `Active Location ${runTag}`],
+      );
+      activeLocId = loc1.rows[0].id;
+
+      const loc2 = await database.query<{ id: string }>(
+        `INSERT INTO inventory.locations(code, name, type, active)
+         VALUES ($1, $2, 'TIENDA', false) RETURNING id`,
+        [`B-${runTag}-LOC-2`, `Inactive Location ${runTag}`],
+      );
+      inactiveLocId = loc2.rows[0].id;
+
+      const loc3 = await database.query<{ id: string }>(
+        `INSERT INTO inventory.locations(code, name, type, active)
+         VALUES ($1, $2, 'ALMACEN', true) RETURNING id`,
+        [`C-${runTag}-LOC-3`, `Empty Location ${runTag}`],
+      );
+      emptyLocId = loc3.rows[0].id;
+
+      // 2. Fijar un umbral global determinista (10) y verificar que ningún
+      // bloque previo haya dejado un override global ambiente. El contrato
+      // clasifica STOCK_BAJO cuando available > 0 y <= umbral efectivo.
+      const ambientGlobal = await database.query<{ total: number }>(
+        `SELECT count(*)::int AS total
+         FROM inventory.stock_threshold_override
+         WHERE sku_id IS NULL AND location_id IS NULL`,
+      );
+      expect(ambientGlobal.rows[0]?.total).toBe(0);
+      await database.query(
+        `INSERT INTO inventory.stock_threshold_override
+           (id, sku_id, location_id, umbral_efectivo)
+         VALUES ($1, NULL, NULL, 10)`,
+        [globalThresholdId],
+      );
+
+      // 3. Insertar umbral override para skuOverride (umbral = 2)
+      await database.query(
+        `INSERT INTO inventory.stock_threshold_override
+           (id, sku_id, location_id, umbral_efectivo)
+         VALUES ($1, $2, NULL, 2)`,
+        [overrideId, skuOverride],
+      );
+
+      // 4. Insertar saldos de stock para pruebas de alertas y disponibilidad.
+      // IMPORTANTE: "available" es columna GENERATED ALWAYS en PostgreSQL; no se puede insertar.
+      // PostgreSQL la calcula como GREATEST(0, on_hand - reserved - blocked).
+      // on_hand, reserved y blocked son NOT NULL con restricciones no negativas.
+      await database.query(
+        `INSERT INTO inventory.stock_balance (sku_id, location_id, on_hand, reserved, blocked)
+         VALUES
+           ($1, $7, 30, 0, 0),
+           ($2, $7,  5, 0, 0),
+           ($3, $7,  0, 0, 0),
+           ($4, $7,  0, 0, 0),
+           ($5, $7, 10, 0, 0),
+           ($6, $7,  4, 0, 0),
+           ($8, $9,  1, 0, 0)`,
+        [
+          skuNormal,
+          skuLow,
+          skuAgotado,
+          skuZeroPhysical,
+          skuExactThreshold,
+          skuOverride,
+          activeLocId,
+          skuInactiveLoc,
+          inactiveLocId,
+        ],
+      );
+    });
+
+    afterAll(async () => {
+      await database.query(
+        `DELETE FROM inventory.stock_threshold_override WHERE id IN ($1, $2)`,
+        [overrideId, globalThresholdId],
+      );
+      await database.query(
+        `DELETE FROM inventory.stock_balance WHERE sku_id LIKE $1 OR location_id IN ($2, $3, $4)`,
+        [`${runTag}%`, activeLocId, inactiveLocId, emptyLocId],
+      );
+      await database.query(
+        `DELETE FROM inventory.locations WHERE id IN ($1, $2, $3)`,
+        [activeLocId, inactiveLocId, emptyLocId],
+      );
+    });
+
+    it('clasifica alertas correctamente en PostgreSQL real: normal/disponible (sin alerta), stock bajo, agotado y umbral exacto', async () => {
+      const res = await dashService.obtenerAlertasInternas({
+        locationId: activeLocId,
+      });
+
+      const skus = res.items.map((i) => i.sku);
+      expect(skus).toContain(skuLow);
+      expect(skus).toContain(skuAgotado);
+      expect(skus).toContain(skuZeroPhysical);
+      expect(skus).toContain(skuExactThreshold);
+      expect(skus).not.toContain(skuNormal);
+      expect(skus).not.toContain(skuOverride);
+
+      const lowAlert = res.items.find((i) => i.sku === skuLow)!;
+      expect(lowAlert.estado).toBe('STOCK_BAJO');
+      expect(lowAlert.available).toBe(5);
+      expect(lowAlert.targetRoute).toBe(
+        `/inventario?sku=${encodeURIComponent(skuLow)}&locationId=${encodeURIComponent(activeLocId)}`,
+      );
+
+      const exactAlert = res.items.find((i) => i.sku === skuExactThreshold)!;
+      expect(exactAlert.estado).toBe('STOCK_BAJO');
+      expect(exactAlert.available).toBe(10);
+      expect(exactAlert.umbralEfectivo).toBe(10);
+    });
+
+    it('verifica que PostgreSQL calcula available como columna generada (GREATEST(0, on_hand-reserved-blocked)) y clasifica AGOTADO cuando stock físico es cero', async () => {
+      // available es GENERATED ALWAYS AS en PostgreSQL — no se puede insertar.
+      // Con on_hand=0, reserved=0, blocked=0 → available generado = 0 → AGOTADO.
+      // Este test confirma que el valor generado por PG coincide con la clasificación del servicio.
+      const generatedRow = await database.query<{ available: number }>(
+        `SELECT available FROM inventory.stock_balance
+         WHERE sku_id = $1 AND location_id = $2`,
+        [skuZeroPhysical, activeLocId],
+      );
+      expect(generatedRow.rows[0].available).toBe(0);
+
+      const res = await dashService.obtenerAlertasInternas({
+        sku: skuZeroPhysical,
+        locationId: activeLocId,
+      });
+
+      expect(res.items).toHaveLength(1);
+      expect(res.items[0].estado).toBe('AGOTADO');
+      expect(res.items[0].available).toBe(0);
+      expect(res.items[0].targetRoute).toBe(
+        `/inventario?sku=${encodeURIComponent(skuZeroPhysical)}&locationId=${encodeURIComponent(activeLocId)}`,
+      );
+    });
+
+    it('no emite alertas para saldos en ubicaciones inactivas (active=false)', async () => {
+      const res = await dashService.obtenerAlertasInternas({
+        locationId: inactiveLocId,
+      });
+      expect(res.items).toHaveLength(0);
+      expect(res.meta.total).toBe(0);
+    });
+
+    it('pagina alertas H01 entre páginas consecutivas sin duplicados y con meta consistente', async () => {
+      const todas = await dashService.obtenerAlertasInternas({
+        locationId: activeLocId,
+        tamanio: 100,
+      });
+      expect(todas.meta.total).toBe(4);
+      expect(todas.items).toHaveLength(4);
+
+      const tamanio = 2;
+      const totalPaginas = Math.ceil(todas.meta.total / tamanio);
+      expect(totalPaginas).toBe(2);
+
+      const vistos = new Set<string>();
+      for (let pagina = 1; pagina <= totalPaginas; pagina += 1) {
+        const res = await dashService.obtenerAlertasInternas({
+          locationId: activeLocId,
+          pagina,
+          tamanio,
+        });
+        expect(res.meta.pagina).toBe(pagina);
+        expect(res.meta.tamanio).toBe(tamanio);
+        expect(res.meta.total).toBe(todas.meta.total);
+        expect(res.meta.totalPaginas).toBe(totalPaginas);
+        expect(res.items).toHaveLength(tamanio);
+        for (const item of res.items) {
+          expect(vistos.has(item.alertaId)).toBe(false);
+          vistos.add(item.alertaId);
+        }
+      }
+      expect(vistos.size).toBe(todas.meta.total);
+    });
+
+    it('acepta pagina y tamanio como cadenas decimales válidas en alertas H01', async () => {
+      const res = await dashService.obtenerAlertasInternas({
+        locationId: activeLocId,
+        pagina: '1',
+        tamanio: '2',
+      });
+      expect(res.meta.pagina).toBe(1);
+      expect(res.meta.tamanio).toBe(2);
+      expect(res.meta.total).toBe(4);
+      expect(res.meta.totalPaginas).toBe(2);
+      expect(res.items).toHaveLength(2);
+    });
+
+    it('filtra alertas H01 por AGOTADO y STOCK_BAJO en PostgreSQL real', async () => {
+      const agotados = await dashService.obtenerAlertasInternas({
+        locationId: activeLocId,
+        estado: 'AGOTADO',
+        tamanio: 100,
+      });
+      expect(agotados.items).toHaveLength(2);
+      expect(agotados.items.every((i) => i.estado === 'AGOTADO')).toBe(true);
+      expect(agotados.items.map((i) => i.sku).sort()).toEqual(
+        [skuAgotado, skuZeroPhysical].sort(),
+      );
+      expect(agotados.meta.total).toBe(2);
+
+      const bajos = await dashService.obtenerAlertasInternas({
+        locationId: activeLocId,
+        estado: 'STOCK_BAJO',
+        tamanio: 100,
+      });
+      expect(bajos.items).toHaveLength(2);
+      expect(bajos.items.every((i) => i.estado === 'STOCK_BAJO')).toBe(true);
+      expect(bajos.items.map((i) => i.sku).sort()).toEqual(
+        [skuLow, skuExactThreshold].sort(),
+      );
+      expect(bajos.meta.total).toBe(2);
+    });
+
+    it('rechaza paginación inválida en alertas H01 con 400 VALIDACION', async () => {
+      const invalidos: Array<Record<string, unknown>> = [
+        { pagina: 0 },
+        { pagina: -1 },
+        { pagina: 1.5 },
+        { pagina: Number.NaN },
+        { pagina: Number.POSITIVE_INFINITY },
+        { pagina: '1.5' },
+        { pagina: 'abc' },
+        { tamanio: 0 },
+        { tamanio: 101 },
+        { tamanio: 1.5 },
+        { tamanio: Number.NaN },
+        { tamanio: Number.POSITIVE_INFINITY },
+        { tamanio: 'abc' },
+      ];
+
+      for (const query of invalidos) {
+        await expect(
+          dashService.obtenerAlertasInternas({
+            locationId: activeLocId,
+            ...query,
+          }),
+        ).rejects.toMatchObject({
+          problem: { status: 400, code: 'VALIDACION' },
+        });
+      }
+    });
+
+    it('respeta override de umbral por SKU sobre el umbral global en PostgreSQL real', async () => {
+      const resSinAlerta = await dashService.obtenerAlertasInternas({
+        sku: skuOverride,
+        locationId: activeLocId,
+      });
+      expect(resSinAlerta.items).toHaveLength(0);
+
+      await database.query(
+        `UPDATE inventory.stock_threshold_override SET umbral_efectivo = 5 WHERE id = $1`,
+        [overrideId],
+      );
+      const resConAlerta = await dashService.obtenerAlertasInternas({
+        sku: skuOverride,
+        locationId: activeLocId,
+      });
+      expect(resConAlerta.items).toHaveLength(1);
+      expect(resConAlerta.items[0].estado).toBe('STOCK_BAJO');
+      expect(resConAlerta.items[0].umbralEfectivo).toBe(5);
+    });
+
+    it('devuelve total 0 y lista vacía ante ausencia de registros coincidentes', async () => {
+      const res = await dashService.obtenerAlertasInternas({
+        sku: `NON-EXISTENT-SKU-${randomUUID()}`,
+      });
+      expect(res.items).toEqual([]);
+      expect(res.meta.total).toBe(0);
+    });
+
+    it('rechaza filtros inválidos en alertas con 400 VALIDACION', async () => {
+      await expect(
+        dashService.obtenerAlertasInternas({ estado: 'DISPONIBLE' }),
+      ).rejects.toMatchObject({
+        problem: { status: 400, code: 'VALIDACION' },
+      });
+      await expect(
+        dashService.obtenerAlertasInternas({ estado: 'DESCONOCIDO' }),
+      ).rejects.toMatchObject({
+        problem: { status: 400, code: 'VALIDACION' },
+      });
+      await expect(
+        dashService.obtenerAlertasInternas({
+          filtroInexistente: 'test',
+        } as any),
+      ).rejects.toMatchObject({
+        problem: { status: 400, code: 'VALIDACION' },
+      });
+    });
+
+    it('devuelve ubicaciones autoritativas con paginación consistente (REPEATABLE READ) e incluye ubicaciones sin stock', async () => {
+      const pag1 = await dashService.obtenerUbicacionesInternas({
+        pagina: 1,
+        tamanio: 1,
+      });
+      expect(pag1.items).toHaveLength(1);
+      expect(pag1.meta.pagina).toBe(1);
+      expect(pag1.meta.tamanio).toBe(1);
+      expect(pag1.meta.total).toBeGreaterThanOrEqual(3);
+      expect(pag1.meta.totalPaginas).toBeGreaterThanOrEqual(3);
+
+      const pag2 = await dashService.obtenerUbicacionesInternas({
+        pagina: 2,
+        tamanio: 1,
+      });
+      expect(pag2.items).toHaveLength(1);
+      expect(pag2.meta.pagina).toBe(2);
+      expect(pag2.items[0].id).not.toBe(pag1.items[0].id);
+
+      const todas = await dashService.obtenerUbicacionesInternas({
+        tamanio: 100,
+      });
+      const emptyFound = todas.items.find((u) => u.id === emptyLocId);
+      expect(emptyFound).toBeDefined();
+      expect(emptyFound?.name).toBe(`Empty Location ${runTag}`);
+    });
+
+    it('respeta la semántica exacta de soloActivas en PostgreSQL real: true = solo activas, false o ausente = todas', async () => {
+      const activas = await dashService.obtenerUbicacionesInternas({
+        soloActivas: true,
+        tamanio: 100,
+      });
+      expect(activas.items.every((u) => u.active === true)).toBe(true);
+      expect(activas.items.find((u) => u.id === inactiveLocId)).toBeUndefined();
+      expect(activas.items.find((u) => u.id === activeLocId)).toBeDefined();
+
+      const todasFalse = await dashService.obtenerUbicacionesInternas({
+        soloActivas: false,
+        tamanio: 100,
+      });
+      expect(
+        todasFalse.items.find((u) => u.id === inactiveLocId),
+      ).toBeDefined();
+      expect(todasFalse.items.find((u) => u.id === activeLocId)).toBeDefined();
+
+      const todasAusente = await dashService.obtenerUbicacionesInternas({
+        tamanio: 100,
+      });
+      expect(
+        todasAusente.items.find((u) => u.id === inactiveLocId),
+      ).toBeDefined();
+      expect(
+        todasAusente.items.find((u) => u.id === activeLocId),
+      ).toBeDefined();
+      expect(todasAusente.meta.total).toBe(todasFalse.meta.total);
+    });
+
+    it('rechaza parámetros de consulta inválidos en ubicaciones con 400 VALIDACION', async () => {
+      await expect(
+        dashService.obtenerUbicacionesInternas({ pagina: 0 }),
+      ).rejects.toMatchObject({
+        problem: { status: 400, code: 'VALIDACION' },
+      });
+      await expect(
+        dashService.obtenerUbicacionesInternas({ tamanio: 101 }),
+      ).rejects.toMatchObject({
+        problem: { status: 400, code: 'VALIDACION' },
+      });
+      await expect(
+        dashService.obtenerUbicacionesInternas({
+          filtroDesconocido: 'x',
+        } as any),
+      ).rejects.toMatchObject({
+        problem: { status: 400, code: 'VALIDACION' },
+      });
+      await expect(
+        dashService.obtenerUbicacionesInternas({
+          soloActivas: 'no-booleano' as any,
+        }),
+      ).rejects.toMatchObject({
+        problem: { status: 400, code: 'VALIDACION' },
+      });
     });
   });
 });
