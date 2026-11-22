@@ -44,6 +44,7 @@ export class CatalogConfig {
   readonly historicalPricingContract: HistoricalPricingContract | null;
   readonly pricingOrigin?: string;
   readonly serviceCredentials?: CatalogServiceCredentials;
+  readonly bulkContentCredentials?: CatalogServiceCredentials;
 
   constructor(env: Record<string, string | undefined>) {
     this.readDemo = readCatalogReadDemo(env);
@@ -108,6 +109,18 @@ export class CatalogConfig {
         'CATALOG_SERVICE_TOKEN_URL y CATALOG_SERVICE_CLIENT_SECRET deben configurarse juntos con el emisor autorizado.',
       );
     }
+    let bulkContentCredentials: CatalogServiceCredentials | undefined;
+    try {
+      bulkContentCredentials = readCatalogServiceCredentials(
+        env,
+        security?.issuer,
+        'CATALOG_BULK_CONTENT',
+      );
+    } catch {
+      errors.push(
+        'CATALOG_BULK_CONTENT_TOKEN_URL y CATALOG_BULK_CONTENT_CLIENT_SECRET deben configurarse juntos con el emisor autorizado.',
+      );
+    }
     const preview = env.CATALOG_MARKETPLACE_DEMO_PREVIEW_ENABLED;
     if (preview !== undefined && !['true', 'false'].includes(preview)) {
       errors.push(
@@ -168,6 +181,7 @@ export class CatalogConfig {
     this.preparation = Object.freeze(preparation);
     this.pricingOrigin = pricingOrigin;
     this.serviceCredentials = serviceCredentials;
+    this.bulkContentCredentials = bulkContentCredentials;
     Object.freeze(this);
   }
 }

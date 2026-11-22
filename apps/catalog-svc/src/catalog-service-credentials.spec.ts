@@ -40,4 +40,22 @@ describe('Catalog own G7 service credentials configuration', () => {
       }
     },
   );
+
+  it('keeps Bulk content credentials independent from the Pricing client secret', () => {
+    const env = {
+      ...good,
+      CATALOG_BULK_CONTENT_TOKEN_URL: issuer + '/token',
+      CATALOG_BULK_CONTENT_CLIENT_SECRET: 'bulk-only-fixture',
+    };
+    expect(readCatalogServiceCredentials(env, issuer)).toEqual({
+      tokenUrl: issuer + '/token',
+      clientSecret: 'private-fixture',
+    });
+    expect(
+      readCatalogServiceCredentials(env, issuer, 'CATALOG_BULK_CONTENT'),
+    ).toEqual({
+      tokenUrl: issuer + '/token',
+      clientSecret: 'bulk-only-fixture',
+    });
+  });
 });

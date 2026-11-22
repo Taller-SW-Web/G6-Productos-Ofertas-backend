@@ -7,10 +7,15 @@ import {
   type BulkRow,
   type BulkRowResult,
 } from '../src/catalog-bulk.service.js';
+import {
+  CatalogBulkContentClient,
+  CatalogBulkContentIdentity,
+} from '../src/catalog-bulk-content.js';
 import { CatalogTokenVerifier } from '../src/catalog-auth.js';
 import { HttpException, ServiceUnavailableException } from '@nestjs/common';
 import type { CatalogEnvelope } from '../src/catalog-messages.js';
 import { spawn, spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
 import {
   writeFileSync,
   symlinkSync,
@@ -3246,7 +3251,10 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         },
       };
     }
-    function bulkHandler(mutations = mutationService()) {
+    function bulkHandler(
+      mutations = mutationService(),
+      contentClient?: { getDocument: (reference: unknown) => Promise<unknown> },
+    ) {
       const identity = new CatalogBulkIdentity(
         undefined,
         new CatalogTokenVerifier(undefined),
@@ -3254,7 +3262,12 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
       vi.spyOn(identity, 'authorization').mockResolvedValue(
         actor.authorization,
       );
-      return new CatalogBulkService(database, mutations, identity);
+      return new CatalogBulkService(
+        database,
+        mutations,
+        identity,
+        contentClient as never,
+      );
     }
     async function bulkReply(command: CatalogEnvelope) {
       return database.read(
@@ -3331,6 +3344,252 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         'IDEMPOTENCY_CONFLICT',
       );
     });
+    it('BULK V3: replays an applied operation without downloading its claim-check document again', async () => {
+      const row = bulkRow();
+      const operationId = randomUUID();
+      const batchId = randomUUID();
+      const getDocument = vi.fn().mockResolvedValue({ rows: [row] });
+      const service = bulkHandler(mutationService(), { getDocument });
+      const message: CatalogEnvelope = {
+        message_id: randomUUID(),
+        schema_version: 3,
+        occurred_at: new Date().toISOString(),
+        correlation_id: randomUUID(),
+        causation_id: null,
+        operation_id: operationId,
+        producer: 'bulk-svc',
+        kind: 'command',
+        name: 'catalog.bulk.upsert.requested',
+        data: {
+          batch_id: batchId,
+          batch_operation_id: operationId,
+          template_version: 2,
+          mode: 'ALTA',
+          content_ref: {
+            content_id: randomUUID(),
+            sha256: 'a'.repeat(64),
+            byte_length: 300 * 1024,
+            content_type: 'application/json',
+          },
+        },
+      };
+      await expect(service.consume(message)).resolves.toBe('APPLIED');
+      expect(getDocument).toHaveBeenCalledOnce();
+      const replay = { ...message, message_id: randomUUID() };
+      getDocument.mockRejectedValue(new Error('original document unavailable'));
+      await expect(service.consume(replay)).resolves.toBe('APPLIED');
+      expect(getDocument).toHaveBeenCalledOnce();
+      expect((await bulkReply(replay)).payload).toMatchObject({
+        batch_id: batchId,
+      });
+    });
+    it('BULK V3: downloads a valid >256 KiB claim-check over private HTTP and commits rows, result, and receipts in PostgreSQL', async () => {
+      const row = bulkRow({
+        ...createRequest(),
+        // OpenAPI requires a non-empty string and places no maximum on the
+        // description. Exercise the 50 MiB claim-check flow with one ordinary
+        // Catalog product row whose document exceeds the former 256 KiB limit.
+        descripcion: 'x'.repeat(300 * 1024),
+      });
+      const documentBytes = Buffer.from(
+        JSON.stringify({ rows: [row] }),
+        'utf8',
+      );
+      const digest = createHash('sha256').update(documentBytes).digest('hex');
+      expect(documentBytes.byteLength).toBeGreaterThan(256 * 1024);
+
+      const contentId = randomUUID();
+      const requests: Array<{
+        method?: string;
+        url?: string;
+        authorization?: string;
+        accept?: string;
+      }> = [];
+      const contentServer = createServer((request, response) => {
+        requests.push({
+          method: request.method,
+          url: request.url,
+          authorization: request.headers.authorization,
+          accept: request.headers.accept,
+        });
+        if (
+          request.method !== 'GET' ||
+          request.url !== `/interno/carga-masiva/contenidos/${contentId}` ||
+          request.headers.authorization !==
+            'Bearer private-bulk-content-fixture' ||
+          request.headers.accept !== 'application/json'
+        ) {
+          response.writeHead(403).end('{}');
+          return;
+        }
+        response.writeHead(200, {
+          'content-type': 'application/json',
+          'content-length': String(documentBytes.byteLength),
+          'x-content-sha256': digest,
+        });
+        response.end(documentBytes);
+      });
+
+      const previousOrigin = process.env.CATALOG_BULK_CONTENTS_URL;
+      const previousNodeEnv = process.env.NODE_ENV;
+      try {
+        await new Promise<void>((resolve, reject) => {
+          contentServer.once('error', reject);
+          contentServer.listen(0, '127.0.0.1', resolve);
+        });
+        const address = contentServer.address();
+        if (!address || typeof address === 'string')
+          throw new Error('Private content fixture did not bind loopback');
+        process.env.NODE_ENV = 'test';
+        process.env.CATALOG_BULK_CONTENTS_URL = `http://127.0.0.1:${address.port}`;
+
+        const contentIdentity = new CatalogBulkContentIdentity(
+          undefined,
+          new CatalogTokenVerifier(undefined),
+        );
+        vi.spyOn(contentIdentity, 'authorization').mockResolvedValue(
+          'Bearer private-bulk-content-fixture',
+        );
+        const service = bulkHandler(
+          mutationService(),
+          new CatalogBulkContentClient(contentIdentity),
+        );
+        const operationId = randomUUID();
+        const batchId = randomUUID();
+        const messageId = randomUUID();
+        const message: CatalogEnvelope = {
+          message_id: messageId,
+          schema_version: 3,
+          occurred_at: new Date().toISOString(),
+          correlation_id: randomUUID(),
+          causation_id: null,
+          operation_id: operationId,
+          producer: 'bulk-svc',
+          kind: 'command',
+          name: 'catalog.bulk.upsert.requested',
+          data: {
+            batch_id: batchId,
+            batch_operation_id: operationId,
+            template_version: 2,
+            mode: 'ALTA',
+            content_ref: {
+              content_id: contentId,
+              sha256: digest,
+              byte_length: documentBytes.byteLength,
+              content_type: 'application/json',
+            },
+          },
+        };
+
+        await expect(service.consume(message)).resolves.toBe('APPLIED');
+        expect(requests).toEqual([
+          {
+            method: 'GET',
+            url: `/interno/carga-masiva/contenidos/${contentId}`,
+            authorization: 'Bearer private-bulk-content-fixture',
+            accept: 'application/json',
+          },
+        ]);
+
+        const storedProduct = await database.read(
+          async (db) =>
+            (
+              await db
+                .select()
+                .from(products)
+                .where(eq(products.sku_base, row.sku_base))
+            )[0],
+        );
+        expect(storedProduct).toMatchObject({
+          sku_base: row.sku_base,
+          descripcion: row.product.descripcion,
+        });
+        const storedIdentity = await database.read((db) =>
+          db
+            .select()
+            .from(skuIdentity)
+            .where(eq(skuIdentity.sku, row.sku_base)),
+        );
+        expect(storedIdentity).toHaveLength(1);
+
+        const reply = await bulkReply(message);
+        expect(reply.event_name).toBe('catalog.bulk.upsert.completed');
+        expect(reply.payload).toMatchObject({
+          batch_id: batchId,
+          batch_operation_id: operationId,
+          results: [
+            {
+              row_operation_id: row.row_operation_id,
+              product_id: storedProduct!.id,
+              sku_base: row.sku_base,
+              status: 'COMPLETED',
+              code: null,
+            },
+          ],
+        });
+
+        const receipts = await database.read((db) =>
+          db
+            .select()
+            .from(inbox)
+            .where(
+              and(
+                inArray(inbox.message_id, [
+                  operationId,
+                  row.row_operation_id,
+                  messageId,
+                ]),
+                inArray(inbox.handler, [
+                  'catalog.bulk.command.v1',
+                  'catalog.bulk.row.v1',
+                  'catalog.bulk.delivery.v1',
+                ]),
+              ),
+            ),
+        );
+        expect(receipts).toHaveLength(3);
+        expect(receipts).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              message_id: operationId,
+              handler: 'catalog.bulk.command.v1',
+              result: 'APPLIED',
+            }),
+            expect.objectContaining({
+              message_id: row.row_operation_id,
+              handler: 'catalog.bulk.row.v1',
+              result: 'APPLIED',
+            }),
+            expect.objectContaining({
+              message_id: messageId,
+              handler: 'catalog.bulk.delivery.v1',
+              result: 'APPLIED',
+            }),
+          ]),
+        );
+
+        await expect(service.consume(message)).resolves.toBe('DUPLICATE');
+        expect(requests).toHaveLength(1);
+        expect(
+          await database.read((db) =>
+            db
+              .select()
+              .from(products)
+              .where(eq(products.sku_base, row.sku_base)),
+          ),
+        ).toHaveLength(1);
+      } finally {
+        if (previousOrigin === undefined)
+          delete process.env.CATALOG_BULK_CONTENTS_URL;
+        else process.env.CATALOG_BULK_CONTENTS_URL = previousOrigin;
+        if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = previousNodeEnv;
+        contentServer.closeAllConnections();
+        await new Promise<void>((resolve) =>
+          contentServer.close(() => resolve()),
+        );
+      }
+    }, 60000);
     it('BULK: reports a real slug UNIQUE as SLUG_DUPLICADO, never SKU_DUPLICADO, and preserves replay', async () => {
       const existing = await mutationService().createProduct(
         createRequest(),
@@ -6591,7 +6850,7 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
         ),
       ).toMatchObject({ status: 'ACTIVO', catalog_version: 2 });
     });
-    it('persists the exact product deactivation event once under concurrent retries', async () => {
+    it('persists product and sellable-SKU deactivation atomically once under retries', async () => {
       const service = mutationService();
       const product = await service.createProduct(createRequest(), actor);
       await complete(product.product_id, 'pricing');
@@ -6640,6 +6899,22 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
           )
         )[0]?.estado,
       ).toBe('ACTIVO');
+      expect(
+        await database.read((db) =>
+          db
+            .select()
+            .from(outbox)
+            .where(
+              and(
+                sql`${outbox.payload}->>'product_id' = ${product.product_id}`,
+                inArray(outbox.event_name, [
+                  'catalog.sku.deactivated',
+                  'catalog.product.deactivated',
+                ]),
+              ),
+            ),
+        ),
+      ).toHaveLength(0);
       rollbackFixtureSql(
         'DROP TRIGGER test_reject_product_deactivation ON catalog.outbox',
       );
@@ -6662,23 +6937,57 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
           .from(outbox)
           .where(
             and(
-              eq(outbox.event_name, 'catalog.product.deactivated'),
               sql`${outbox.payload}->>'product_id' = ${product.product_id}`,
+              inArray(outbox.event_name, [
+                'catalog.sku.deactivated',
+                'catalog.product.deactivated',
+              ]),
             ),
           ),
       );
-      expect(events).toHaveLength(1);
-      expect(Object.keys(events[0]!.payload).sort()).toEqual([
+      expect(events).toHaveLength(2);
+      expect(new Set(events.map((event) => event.message_id)).size).toBe(2);
+      const skuEvents = events.filter(
+          (event) => event.event_name === 'catalog.sku.deactivated',
+        ),
+        productEvents = events.filter(
+          (event) => event.event_name === 'catalog.product.deactivated',
+        ),
+        identities = await database.read((db) =>
+          db
+            .select()
+            .from(skuIdentity)
+            .where(eq(skuIdentity.product_id, product.product_id)),
+        );
+      expect(skuEvents).toHaveLength(1);
+      expect(productEvents).toHaveLength(1);
+      expect(identities).toHaveLength(1);
+      const skuEvent = skuEvents[0]!,
+        productEvent = productEvents[0]!;
+      expect(Object.keys(skuEvent.payload).sort()).toEqual([
+        'changed_at',
+        'product_id',
+        'sku',
+        'sku_version',
+      ]);
+      expect(skuEvent.payload).toEqual({
+        product_id: product.product_id,
+        sku: identities[0]!.sku,
+        sku_version: Number(persisted!.catalog_version),
+        changed_at: persisted!.updated_at.toISOString(),
+      });
+      expect(Object.keys(productEvent.payload).sort()).toEqual([
         'changed_at',
         'product_id',
         'product_version',
       ]);
-      expect(events[0]!.payload).toEqual({
+      expect(productEvent.payload).toEqual({
         product_id: product.product_id,
         product_version: Number(persisted!.catalog_version),
         changed_at: persisted!.updated_at.toISOString(),
       });
-      expect(events[0]!.correlation_id).toBe(actor.correlationId);
+      expect(skuEvent.correlation_id).toBe(actor.correlationId);
+      expect(productEvent.correlation_id).toBe(actor.correlationId);
     });
 
     it('serializes last-variant deactivation and preserves independent parent/child reactivation', async () => {

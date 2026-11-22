@@ -24,6 +24,10 @@ import {
 import { CatalogPricingIdentityProvider } from './catalog-pricing-identity.js';
 import { CatalogConfig } from './config.js';
 import { CatalogTokenVerifier } from './catalog-auth.js';
+import {
+  CatalogBulkContentClient,
+  type CatalogBulkContentReference,
+} from './catalog-bulk-content.js';
 
 /** Existing G7 flow, with only the scope already published for Taxonomy reads. */
 @Injectable()
@@ -228,6 +232,7 @@ export class CatalogBulkService {
     private readonly database: Database,
     private readonly mutations: CatalogMutationService,
     private readonly identity: CatalogBulkIdentity,
+    @Optional() private readonly contentClient?: CatalogBulkContentClient,
   ) {}
   private async lock(tx: CatalogTransaction, key: string) {
     await tx.execute(
@@ -258,6 +263,77 @@ export class CatalogBulkService {
       operation_id: message.operation_id,
       payload,
       result: 'APPLIED',
+    });
+  }
+  private async persistReply(
+    tx: CatalogTransaction,
+    message: CatalogEnvelope,
+    name: string,
+    result: Record<string, unknown>,
+  ) {
+    const reply = envelope(
+      name,
+      result,
+      message.correlation_id,
+      String(message.data.batch_operation_id),
+      message.message_id,
+    );
+    await tx.insert(outbox).values({
+      message_id: reply.message_id,
+      event_name: reply.name,
+      kind: reply.kind,
+      schema_version: reply.schema_version,
+      correlation_id: reply.correlation_id,
+      operation_id: reply.operation_id,
+      causation_id: reply.causation_id,
+      occurred_at: new Date(reply.occurred_at),
+      payload: reply.data,
+    });
+    await this.remember(tx, message.message_id, DELIVERY, message, message);
+  }
+  /**
+   * Avoid downloading claim-check content for an already delivered message or
+   * an operation whose durable result is already known. The apply transaction
+   * repeats both receipt checks after content retrieval while holding the same
+   * advisory locks, closing the race with concurrent first deliveries.
+   */
+  private async preflight(
+    message: CatalogEnvelope,
+  ): Promise<'APPLIED' | 'DUPLICATE' | undefined> {
+    return this.database.transaction(async (tx) => {
+      await this.lock(tx, 'bulk-delivery:' + message.message_id.toLowerCase());
+      await this.lock(
+        tx,
+        'bulk-command:' + String(message.data.batch_operation_id).toLowerCase(),
+      );
+      const delivered = await this.previous(tx, message.message_id, DELIVERY);
+      if (delivered) {
+        if (canonicalBulk(delivered.payload) !== canonicalBulk(message))
+          throw new InvalidCatalogMessage();
+        return 'DUPLICATE';
+      }
+      const old = await this.previous(
+        tx,
+        String(message.data.batch_operation_id),
+        COMMAND,
+      );
+      if (!old) return undefined;
+      if (canonicalBulk(old.payload.input) !== canonicalBulk(message.data)) {
+        await this.persistReply(tx, message, 'catalog.bulk.upsert.rejected', {
+          batch_id: message.data.batch_id,
+          batch_operation_id: message.data.batch_operation_id,
+          code: 'IDEMPOTENCY_CONFLICT',
+          detail: 'La identidad del comando ya corresponde a otra intención.',
+        });
+        return 'APPLIED';
+      }
+      await this.persistReply(
+        tx,
+        message,
+        String(old.payload.name),
+        old.payload.result as Record<string, unknown>,
+      );
+      return 'APPLIED';
     });
   }
   private semantic(request: BulkRequest, row: BulkRow) {
@@ -391,9 +467,45 @@ export class CatalogBulkService {
     if (
       !UUID.test(String(message.data.batch_id)) ||
       !UUID.test(String(message.data.batch_operation_id)) ||
-      !UUID.test(String(message.operation_id))
+      (message.operation_id != null &&
+        (!UUID.test(message.operation_id) ||
+          (message.schema_version === 3 &&
+            message.operation_id !== message.data.batch_operation_id))) ||
+      (message.schema_version !== 3 && !UUID.test(String(message.operation_id)))
     )
       throw new InvalidCatalogMessage();
+    const prior = await this.preflight(message);
+    if (prior) return prior;
+    let claimRequest: BulkRequest | null | undefined;
+    if (message.schema_version === 3) {
+      const reference = message.data.content_ref as CatalogBulkContentReference;
+      if (!this.contentClient) throw new ServiceUnavailableException();
+      const document = await this.contentClient.getDocument(reference);
+      if (
+        !object(document) ||
+        Object.keys(document).length !== 1 ||
+        !Array.isArray(document.rows)
+      )
+        throw new InvalidCatalogMessage();
+      const materialized = {
+        ...message,
+        operation_id: String(message.data.batch_operation_id),
+        schema_version: 2,
+        data: {
+          batch_id: message.data.batch_id,
+          batch_operation_id: message.data.batch_operation_id,
+          template_version: message.data.template_version,
+          mode: message.data.mode,
+          rows: document.rows,
+        },
+      } as CatalogEnvelope;
+      try {
+        claimRequest = parseBulkRequest(materialized);
+      } catch (error) {
+        if (!businessCode(error)) throw error;
+        claimRequest = null;
+      }
+    }
     return this.database.transaction(async (tx) => {
       await this.lock(tx, 'bulk-delivery:' + message.message_id.toLowerCase());
       await this.lock(
@@ -427,11 +539,13 @@ export class CatalogBulkService {
         name = String(old.payload.name);
         result = old.payload.result as Record<string, unknown>;
       } else {
-        let request: BulkRequest | undefined;
-        try {
-          request = parseBulkRequest(message);
-        } catch (error) {
-          if (!businessCode(error)) throw error;
+        let request: BulkRequest | undefined = claimRequest ?? undefined;
+        if (claimRequest === undefined) {
+          try {
+            request = parseBulkRequest(message);
+          } catch (error) {
+            if (!businessCode(error)) throw error;
+          }
         }
         if (!request) {
           name = 'catalog.bulk.upsert.rejected';
@@ -536,25 +650,9 @@ export class CatalogBulkService {
           { input: message.data, name, result },
         );
       }
-      const reply = envelope(
-        name,
-        result,
-        message.correlation_id,
-        String(message.data.batch_operation_id),
-        message.message_id,
-      );
-      await tx.insert(outbox).values({
-        message_id: reply.message_id,
-        event_name: reply.name,
-        kind: reply.kind,
-        schema_version: reply.schema_version,
-        correlation_id: reply.correlation_id,
-        operation_id: reply.operation_id,
-        causation_id: reply.causation_id,
-        occurred_at: new Date(reply.occurred_at),
-        payload: reply.data,
-      });
-      await this.remember(tx, message.message_id, DELIVERY, message, message);
+      // Receipt checks above are repeated here under the transaction locks
+      // after any V3 content download, before applying effects.
+      await this.persistReply(tx, message, name, result);
       return 'APPLIED';
     });
   }
