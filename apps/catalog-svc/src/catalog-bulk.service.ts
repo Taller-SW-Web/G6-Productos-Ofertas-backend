@@ -711,6 +711,20 @@ export class CatalogBulkService {
       2,
       receiptMessageId,
     );
+    // The attempt receipt has a foreign key to this command attempt. Persist
+    // the command receipt first; both records and the result Outbox remain in
+    // the same transaction, so this does not expose a partial completion.
+    await tx.insert(bulkRetryCommandReceipts).values({
+      commandAttemptId: retry.command_attempt_id,
+      messageId: message.message_id,
+      batchId: request.batch_id,
+      batchOperationId: request.batch_operation_id,
+      previousCommandMessageId: retry.previous_command_message_id,
+      payloadHash: retryPayloadHash,
+      resultMessageId: result.message_id,
+      resultPayload: result.data,
+      completedAt: new Date(),
+    });
     for (const entry of priorAttempts) {
       const rowResult = v2Results.find(
         (candidate) =>
@@ -734,17 +748,6 @@ export class CatalogBulkService {
         errorCode: rowResult.code,
       });
     }
-    await tx.insert(bulkRetryCommandReceipts).values({
-      commandAttemptId: retry.command_attempt_id,
-      messageId: message.message_id,
-      batchId: request.batch_id,
-      batchOperationId: request.batch_operation_id,
-      previousCommandMessageId: retry.previous_command_message_id,
-      payloadHash: retryPayloadHash,
-      resultMessageId: result.message_id,
-      resultPayload: result.data,
-      completedAt: new Date(),
-    });
     await tx.insert(outbox).values({
       message_id: result.message_id,
       event_name: result.name,
