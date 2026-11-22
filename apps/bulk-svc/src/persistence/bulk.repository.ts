@@ -854,11 +854,13 @@ export class BulkPersistenceRepository {
   async recordCatalogBulkResult(
     input: CatalogBulkResultInput,
   ): Promise<{ processed: boolean; result: string }> {
+    if (input.payload.schema_version === 2)
+      return this.recordCatalogBulkResultV2(input);
     const messageHandler = 'bulk.catalog.bulk-upsert.result';
     try {
       return await this.db.transaction(async (tx) => {
         const envelope = input.payload;
-        const data = envelope.data as Record<string, unknown> | undefined;
+        const data = envelope.data as Record<string, unknown>;
         if (
           !data ||
           envelope.message_id !== input.messageId ||
@@ -1249,6 +1251,530 @@ export class BulkPersistenceRepository {
             ),
           );
         return { processed: true, result: outcome };
+      });
+    } catch (error) {
+      if (error instanceof BulkDomainError) throw error;
+      throw persistenceError(error);
+    }
+  }
+
+  private async recordCatalogBulkResultV2(
+    input: CatalogBulkResultInput,
+  ): Promise<{ processed: boolean; result: string }> {
+    const messageHandler = 'bulk.catalog.bulk-upsert.result';
+    try {
+      return await this.db.transaction(async (tx) => {
+        const envelope = input.payload;
+        const data = envelope.data as Record<string, unknown>;
+        if (
+          !data ||
+          envelope.message_id !== input.messageId ||
+          envelope.operation_id !== input.operationId ||
+          envelope.causation_id !== input.causationId ||
+          envelope.correlation_id !== input.correlationId ||
+          envelope.name !== input.eventName ||
+          envelope.producer !== 'catalog-svc' ||
+          envelope.kind !== 'result' ||
+          envelope.schema_version !== 2 ||
+          !Array.isArray(data.results) ||
+          data.results.length === 0 ||
+          !Array.isArray(data.results) ||
+          ![
+            'catalog.bulk.upsert.completed',
+            'catalog.bulk.upsert.rejected',
+          ].includes(input.eventName)
+        )
+          domainFailure(
+            'INVALID_INPUT',
+            'Catalog V2 result envelope is incomplete.',
+          );
+        const commandAttemptId = data.command_attempt_id;
+        if (commandAttemptId !== null && typeof commandAttemptId !== 'string')
+          domainFailure(
+            'INVALID_INPUT',
+            'Catalog V2 command_attempt_id is invalid.',
+          );
+        const [batch] = await tx
+          .select()
+          .from(batchJobs)
+          .where(eq(batchJobs.batchId, String(data.batch_id)))
+          .for('update')
+          .limit(1);
+        if (!batch)
+          domainFailure('INVALID_INPUT', 'Catalog result batch is unknown.');
+        const [admission] = await tx
+          .select()
+          .from(inbox)
+          .where(
+            and(
+              eq(inbox.messageId, batch.batchId),
+              eq(inbox.handler, 'bulk.import.admission'),
+            ),
+          )
+          .limit(1);
+        if (!admission)
+          domainFailure(
+            'PERSISTENCE_FAILURE',
+            'Admitted batch intent is missing.',
+          );
+        const admissionRows = Array.isArray(admission.payload.rows)
+          ? admission.payload.rows
+          : [];
+        const normalized = new Map<string, Record<string, unknown>>();
+        for (const value of admissionRows) {
+          if (typeof value !== 'object' || value === null) continue;
+          const row = value as Record<string, unknown>;
+          const rowOperationId = row.rowOperationId;
+          if (
+            typeof rowOperationId !== 'string' ||
+            row.rowId !== rowOperationId ||
+            normalized.has(rowOperationId)
+          )
+            domainFailure(
+              'INVALID_INPUT',
+              'Normalized admitted row identities are inconsistent.',
+            );
+          normalized.set(String(rowOperationId), row);
+        }
+        let commandData: Record<string, unknown> | undefined;
+        let retryRows: Array<Record<string, unknown>> = [];
+        if (typeof commandAttemptId === 'string') {
+          const [retry] = await tx
+            .select()
+            .from(retryCommands)
+            .where(eq(retryCommands.commandAttemptId, commandAttemptId))
+            .for('update')
+            .limit(1);
+          const [command] = await tx
+            .select()
+            .from(outbox)
+            .where(
+              and(
+                eq(outbox.messageId, input.causationId),
+                eq(outbox.schemaVersion, 4),
+              ),
+            )
+            .for('update')
+            .limit(1);
+          commandData = command?.payload.data as
+            Record<string, unknown> | undefined;
+          const retryData = commandData?.retry as
+            Record<string, unknown> | undefined;
+          retryRows = Array.isArray(retryData?.rows)
+            ? retryData.rows.filter(
+                (row): row is Record<string, unknown> =>
+                  typeof row === 'object' && row !== null,
+              )
+            : [];
+          if (
+            !retry ||
+            !command ||
+            retry.messageId !== input.causationId ||
+            retry.businessOperationId !== input.operationId ||
+            retry.batchJobId !== batch.id ||
+            command.operationId !== input.operationId ||
+            command.correlationId !== input.correlationId ||
+            retryData?.command_attempt_id !== commandAttemptId ||
+            retryData?.previous_command_message_id !== command.causationId ||
+            data.batch_operation_id !== input.operationId
+          )
+            domainFailure(
+              'INVALID_INPUT',
+              'Catalog V2 retry causation does not match its Outbox command.',
+            );
+        } else {
+          const commands = Array.isArray(admission.payload.catalogCommands)
+            ? admission.payload.catalogCommands
+            : [];
+          const originals = commands.filter(
+            (value) =>
+              typeof value === 'object' &&
+              value !== null &&
+              Reflect.get(value, 'schema_version') === 3 &&
+              Reflect.get(value, 'message_id') === input.causationId &&
+              Reflect.get(value, 'operation_id') === input.operationId,
+          );
+          const original = originals[0] as Record<string, unknown> | undefined;
+          commandData = original?.data as Record<string, unknown> | undefined;
+          if (
+            originals.length !== 1 ||
+            !commandData ||
+            envelope.correlation_id !== batch.correlationId ||
+            data.batch_operation_id !== input.operationId ||
+            commands.filter(
+              (value) =>
+                typeof value === 'object' &&
+                value !== null &&
+                Reflect.get(value, 'schema_version') === 3,
+            ).length !== 1
+          )
+            domainFailure(
+              'INVALID_INPUT',
+              'Catalog initial V2 result has no unique admitted V3 command.',
+            );
+        }
+        const [previousMessage] = await tx
+          .select()
+          .from(inbox)
+          .where(
+            and(
+              eq(inbox.messageId, input.messageId),
+              eq(inbox.handler, messageHandler),
+            ),
+          )
+          .limit(1);
+        if (previousMessage) {
+          if (
+            canonicalJson(previousMessage.payload) !==
+            canonicalJson(input.payload)
+          )
+            domainFailure(
+              'IDEMPOTENCY_CONFLICT',
+              'Catalog V2 message_id was reused with a different payload.',
+            );
+          return { processed: false, result: previousMessage.result };
+        }
+        if (input.eventName !== 'catalog.bulk.upsert.completed')
+          domainFailure(
+            'INVALID_INPUT',
+            'Command-level Catalog V2 rejection lacks per-row receipts.',
+          );
+        const resultRows = data.results as Array<Record<string, unknown>>;
+        if (
+          resultRows.some(
+            (result) =>
+              typeof result.row_operation_id !== 'string' ||
+              !normalized.has(result.row_operation_id),
+          )
+        )
+          domainFailure(
+            'INVALID_INPUT',
+            'Catalog V2 result contains a row outside the admitted intent.',
+          );
+        const expectedOperations =
+          typeof commandAttemptId === 'string'
+            ? retryRows.map((row) => row.row_operation_id)
+            : [...normalized.keys()];
+        const actualOperations = resultRows.map((row) => row.row_operation_id);
+        if (
+          new Set(actualOperations).size !== actualOperations.length ||
+          [...expectedOperations].sort().join('|') !==
+            [...actualOperations].sort().join('|')
+        )
+          domainFailure(
+            'INVALID_INPUT',
+            'Catalog V2 result does not cover exactly its command rows.',
+          );
+        const [existingMessage] = await tx
+          .select()
+          .from(inbox)
+          .where(
+            and(
+              eq(inbox.messageId, input.messageId),
+              eq(inbox.handler, messageHandler),
+            ),
+          )
+          .limit(1);
+        if (existingMessage)
+          return { processed: false, result: existingMessage.result };
+        for (const result of resultRows) {
+          const operationId = String(result.row_operation_id);
+          const source = normalized.get(operationId)!;
+          if (
+            Number(source.rowNumber) !== result.row_number ||
+            source.skuBase !== result.sku_base ||
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+              String(result.attempt_id),
+            ) ||
+            !Number.isSafeInteger(result.attempt_number) ||
+            !['COMPLETED', 'REJECTED'].includes(String(result.status)) ||
+            !['NONE', 'APPLIED', 'UNKNOWN'].includes(
+              String(result.effect_state),
+            ) ||
+            typeof result.retriable !== 'boolean' ||
+            (result.status === 'COMPLETED' &&
+              (result.effect_state !== 'APPLIED' ||
+                result.retriable ||
+                result.code !== null)) ||
+            (result.status === 'REJECTED' &&
+              (result.effect_state === 'APPLIED' ||
+                typeof result.code !== 'string' ||
+                (result.retriable &&
+                  (result.effect_state !== 'NONE' ||
+                    result.code !== 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE'))))
+          )
+            domainFailure(
+              'INVALID_INPUT',
+              'Catalog V2 attempt receipt is inconsistent.',
+            );
+          const [row] = await tx
+            .select()
+            .from(batchRows)
+            .where(
+              and(
+                eq(batchRows.batchJobId, batch.id),
+                eq(batchRows.rowId, String(source.rowId)),
+              ),
+            )
+            .for('update')
+            .limit(1);
+          if (!row)
+            domainFailure(
+              'INVALID_INPUT',
+              'Catalog V2 result row is not persisted.',
+            );
+          const [currentAttempt] = await tx
+            .select()
+            .from(domainAttempts)
+            .where(
+              and(
+                eq(domainAttempts.batchRowId, row.id),
+                eq(domainAttempts.domain, 'CATALOGO'),
+              ),
+            )
+            .orderBy(desc(domainAttempts.attemptNumber))
+            .for('update')
+            .limit(1);
+          const attemptNumber = Number(result.attempt_number);
+          let previousAttemptId: string | null = null;
+          if (typeof commandAttemptId === 'string') {
+            const matchingRetryRow = retryRows.find(
+              (candidate) => candidate.row_operation_id === operationId,
+            );
+            if (!matchingRetryRow)
+              domainFailure('INVALID_INPUT', 'Catalog V2 retry row is absent.');
+            if (
+              matchingRetryRow!.attempt_id !== result.attempt_id ||
+              !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+                String(matchingRetryRow!.previous_attempt_id),
+              )
+            )
+              domainFailure(
+                'INVALID_INPUT',
+                'Catalog V2 attempt identity does not match the retry command.',
+              );
+            previousAttemptId = String(matchingRetryRow!.previous_attempt_id);
+            if (
+              currentAttempt &&
+              currentAttempt.attemptNumber > attemptNumber
+            ) {
+              const [oldAttempt] = await tx
+                .select()
+                .from(domainAttempts)
+                .where(eq(domainAttempts.attemptId, String(result.attempt_id)))
+                .limit(1);
+              if (!oldAttempt)
+                domainFailure(
+                  'INVALID_INPUT',
+                  'A tardy Catalog result has no durable attempt.',
+                );
+              await tx
+                .insert(inbox)
+                .values({
+                  messageId: input.messageId,
+                  handler: `bulk.catalog-result-attempt:${result.attempt_id}`,
+                  eventName: input.eventName,
+                  correlationId: input.correlationId,
+                  payload: { stale: true, result },
+                  result: 'STALE',
+                });
+              continue;
+            }
+            if (
+              !currentAttempt ||
+              currentAttempt.attemptId !== result.attempt_id ||
+              currentAttempt.commandAttemptId !== commandAttemptId ||
+              currentAttempt.previousAttemptId !== previousAttemptId ||
+              attemptNumber !== currentAttempt.attemptNumber
+            )
+              domainFailure(
+                'INVALID_INPUT',
+                'Catalog V2 result does not extend the current attempt chain.',
+              );
+          } else if (
+            currentAttempt &&
+            currentAttempt.attemptNumber > attemptNumber
+          ) {
+            const [oldAttempt] = await tx
+              .select()
+              .from(domainAttempts)
+              .where(eq(domainAttempts.attemptId, String(result.attempt_id)))
+              .limit(1);
+            if (!oldAttempt)
+              domainFailure(
+                'INVALID_INPUT',
+                'A tardy initial Catalog result has no durable attempt.',
+              );
+            await tx
+              .insert(inbox)
+              .values({
+                messageId: input.messageId,
+                handler: `bulk.catalog-result-attempt:${result.attempt_id}`,
+                eventName: input.eventName,
+                correlationId: input.correlationId,
+                payload: { stale: true, result },
+                result: 'STALE',
+              });
+            continue;
+          } else if (attemptNumber !== 1 || currentAttempt) {
+            domainFailure(
+              'INVALID_INPUT',
+              'Catalog initial V2 result conflicts with an existing attempt.',
+            );
+          }
+          if (currentAttempt && currentAttempt.attemptNumber > attemptNumber) {
+            await tx
+              .insert(inbox)
+              .values({
+                messageId: input.messageId,
+                handler: `bulk.catalog-result-attempt:${result.attempt_id}`,
+                eventName: input.eventName,
+                correlationId: input.correlationId,
+                payload: { stale: true, result },
+                result: 'STALE',
+              });
+            continue;
+          }
+          const attemptValues = {
+            attemptId: String(result.attempt_id),
+            batchRowId: row.id,
+            domain: 'CATALOGO',
+            businessOperationId: String(data.batch_operation_id),
+            attemptNumber,
+            previousAttemptId,
+            commandAttemptId:
+              typeof commandAttemptId === 'string' ? commandAttemptId : null,
+            status: result.status === 'COMPLETED' ? 'COMPLETED' : 'REJECTED',
+            effectState: String(result.effect_state),
+            retriable: result.retriable === true,
+            receiptMessageId: input.messageId,
+            errorCode: typeof result.code === 'string' ? result.code : null,
+            updatedAt: new Date(),
+          } as const;
+          if (typeof commandAttemptId === 'string') {
+            await tx
+              .update(domainAttempts)
+              .set(attemptValues)
+              .where(eq(domainAttempts.attemptId, String(result.attempt_id)));
+          } else {
+            await tx.insert(domainAttempts).values(attemptValues);
+          }
+          const [step] = await tx
+            .select()
+            .from(rowDomainSteps)
+            .where(
+              and(
+                eq(rowDomainSteps.batchRowId, row.id),
+                eq(rowDomainSteps.domain, 'CATALOGO'),
+              ),
+            )
+            .for('update')
+            .limit(1);
+          if (!step || !row.requiredDomains.includes('CATALOGO'))
+            domainFailure(
+              'INVALID_INPUT',
+              'Catalog V2 result has no matching workflow step.',
+            );
+          if (step.status === 'COMPLETED')
+            domainFailure(
+              'INVALID_TRANSITION',
+              'Catalog V2 result cannot revert a completed step.',
+            );
+          const pendingSteps = await tx
+            .select()
+            .from(rowDomainSteps)
+            .where(eq(rowDomainSteps.batchRowId, row.id));
+          const status: BulkStepStatus =
+            result.status === 'COMPLETED' ? 'COMPLETED' : 'FAILED';
+          const changes: WorkflowStepChange[] = [
+            {
+              domain: 'CATALOGO',
+              status,
+              errorCode: status === 'FAILED' ? String(result.code) : null,
+              errorDetail: null,
+            },
+          ];
+          if (status === 'FAILED')
+            for (const dependency of pendingSteps)
+              if (
+                dependency.domain !== 'CATALOGO' &&
+                dependency.status === 'PENDING'
+              )
+                changes.push({
+                  domain: dependency.domain as BulkDomain,
+                  status: 'FAILED',
+                  errorCode: 'DEPENDENCY_REJECTED',
+                  errorDetail:
+                    'Catalog rechazó la fila; el paso dependiente no se ejecutó.',
+                });
+          const statusByDomain = new Map(
+            changes.map((change) => [change.domain, change.status]),
+          );
+          const allTerminal = row.requiredDomains.every((domain) =>
+            ['COMPLETED', 'FAILED'].includes(
+              String(
+                statusByDomain.get(domain as BulkDomain) ??
+                  pendingSteps.find((candidate) => candidate.domain === domain)
+                    ?.status,
+              ),
+            ),
+          );
+          const allCompleted = row.requiredDomains.every(
+            (domain) =>
+              (statusByDomain.get(domain as BulkDomain) ??
+                pendingSteps.find((candidate) => candidate.domain === domain)
+                  ?.status) === 'COMPLETED',
+          );
+          await updateWorkflowStateIn(tx, {
+            batchId: batch.batchId,
+            rowId: row.rowId,
+            steps: changes,
+            status: !allTerminal
+              ? 'PROCESSING'
+              : allCompleted
+                ? 'COMPLETED'
+                : 'FAILED',
+            failedDomain: status === 'FAILED' ? 'CATALOGO' : null,
+            errorCode: status === 'FAILED' ? String(result.code) : null,
+          });
+          await tx
+            .insert(inbox)
+            .values({
+              messageId: input.messageId,
+              handler: `bulk.catalog-result-attempt:${result.attempt_id}`,
+              eventName: input.eventName,
+              correlationId: input.correlationId,
+              payload: {
+                batchId: batch.batchId,
+                batchOperationId: data.batch_operation_id,
+                result,
+              },
+              result: String(result.status),
+            });
+        }
+        await tx
+          .insert(inbox)
+          .values({
+            messageId: input.messageId,
+            handler: messageHandler,
+            eventName: input.eventName,
+            correlationId: input.correlationId,
+            payload: input.payload,
+            result: 'RESULTS_APPLIED',
+          });
+        await tx
+          .update(outbox)
+          .set({
+            publishedAt: sql`coalesce(${outbox.publishedAt}, now())`,
+            lastError: null,
+          })
+          .where(
+            and(
+              eq(outbox.messageId, input.causationId),
+              eq(outbox.eventName, 'catalog.bulk.upsert.requested'),
+            ),
+          );
+        return { processed: true, result: 'RESULTS_APPLIED' };
       });
     } catch (error) {
       if (error instanceof BulkDomainError) throw error;

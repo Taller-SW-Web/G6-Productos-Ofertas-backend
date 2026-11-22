@@ -26,6 +26,7 @@ import {
   inbox,
   outbox,
   rowDomainSteps,
+  retryCommands,
 } from './bulk.schema.js';
 import { BulkPersistenceError } from './bulk.persistence.errors.js';
 import {
@@ -2016,7 +2017,14 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
           format: 'CSV',
           templateVersion: 2,
           contentRef,
-          rows: [{ rowId, rowOperationId: rowId, skuBase: 'SKU-RETRY' }],
+          rows: [
+            {
+              rowNumber: 2,
+              rowId,
+              rowOperationId: rowId,
+              skuBase: 'SKU-RETRY',
+            },
+          ],
           catalogCommands: [command],
         },
       });
@@ -2110,11 +2118,58 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
         status: 'PENDING',
         previousAttemptId: initialAttemptId,
       });
+      const [retryCommand] = await database
+        .select()
+        .from(retryCommands)
+        .where(
+          eq(
+            retryCommands.commandAttemptId,
+            retryAttempt[0]!.commandAttemptId!,
+          ),
+        );
+      const resultMessageId = randomUUID();
+      await repository.recordCatalogBulkResult({
+        messageId: resultMessageId,
+        operationId,
+        causationId: retryCommand!.messageId,
+        eventName: 'catalog.bulk.upsert.completed',
+        correlationId: retryCorrelationId,
+        payload: {
+          message_id: resultMessageId,
+          schema_version: 2,
+          occurred_at: new Date().toISOString(),
+          correlation_id: retryCorrelationId,
+          causation_id: retryCommand!.messageId,
+          operation_id: operationId,
+          producer: 'catalog-svc',
+          kind: 'result',
+          name: 'catalog.bulk.upsert.completed',
+          data: {
+            batch_id: batchId,
+            batch_operation_id: operationId,
+            command_attempt_id: retryCommand!.commandAttemptId,
+            results: [
+              {
+                row_number: 2,
+                row_operation_id: rowId,
+                product_id: randomUUID(),
+                sku_base: 'SKU-RETRY',
+                status: 'COMPLETED',
+                code: null,
+                attempt_id: retryAttempt[0]!.attemptId,
+                attempt_number: 2,
+                effect_state: 'APPLIED',
+                retriable: false,
+              },
+            ],
+          },
+        },
+      });
       const [resumed] = await database
         .select()
         .from(batchJobs)
         .where(eq(batchJobs.batchId, batchId));
-      expect(resumed?.status).toBe('PROCESSING');
+      expect(resumed?.status).toBe('COMPLETED');
     } finally {
       if (previousBucket === undefined) delete process.env.BULK_STORAGE_BUCKET;
       else process.env.BULK_STORAGE_BUCKET = previousBucket;
