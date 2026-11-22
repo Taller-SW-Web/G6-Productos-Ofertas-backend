@@ -86,6 +86,29 @@ describe.skipIf(!enabled)('Browser HTTP real local: PostgreSQL 17 + Catalog + Ga
     }, browserJwt);
     if (variantWrite.status !== 201) throw new Error(`Gateway/PostgreSQL variant write failed (${variantWrite.status}): ${JSON.stringify(variantWrite.body)}`);
     const variantId = String(variantWrite.body.variant_id);
+    const concurrentVariantSku = `E2E-VARIANT-RACE-${randomUUID()}`;
+    const concurrentVariantWrite = await gateway.call('POST', `/productos/${variantProductId}/variantes`, {
+      sku: concurrentVariantSku,
+      atributosIdentificadores: [{ caracteristica_id: 'size', nombre: 'Size', valor: 'L' }],
+      atributosNoIdentificadores: [],
+      imagenUrl: 'https://example.test/catalog-e2e-variant-race',
+    }, browserJwt);
+    if (concurrentVariantWrite.status !== 201) throw new Error(`Gateway/PostgreSQL concurrent variant write failed (${concurrentVariantWrite.status}): ${JSON.stringify(concurrentVariantWrite.body)}`);
+    const concurrentVariantId = String(concurrentVariantWrite.body.variant_id);
+    // Seed the existing activation prerequisites in disposable PostgreSQL so
+    // both variants become valid ACTIVA fixtures before testing deactivation.
+    sql(`
+      INSERT INTO catalog.sku_physical_profiles (sku_identity_id, peso_kg, largo_cm, ancho_cm, alto_cm)
+      SELECT identity.id, 0.3, 35, 25, 3
+      FROM catalog.sku_identity identity
+      WHERE identity.variant_id IN ('${variantId}', '${concurrentVariantId}');
+      UPDATE catalog.activation_checks
+      SET state = 'COMPLETED', result_payload = '{"status":"COMPLETED"}'::jsonb,
+        result_message_id = gen_random_uuid()
+      WHERE variant_id IN ('${variantId}', '${concurrentVariantId}')
+        AND dependency = 'INVENTORY';
+      UPDATE catalog.variants SET estado = 'ACTIVA' WHERE id IN ('${variantId}', '${concurrentVariantId}');
+    `);
     gateway.taxonomyFailuresRemaining = 3;
     const unauthenticated = await gateway.call('GET', '/productos/administracion', undefined, null);
     if (![401, 403].includes(unauthenticated.status)) throw new Error(`Gateway accepted an unauthenticated administrative read (${unauthenticated.status}).`);
@@ -96,24 +119,34 @@ describe.skipIf(!enabled)('Browser HTTP real local: PostgreSQL 17 + Catalog + Ga
     gateway.taxonomyFailuresRemaining = 3;
     const browserPort = 8200 + Math.floor(Math.random() * 3000);
     const proxyTrace: string[] = [];
+    let delayedConcurrentVariantMutation = false;
     browserProxy = createServer((request, response) => {
-      const targetOrigin = request.url?.startsWith('/api/v1/') ? gateway!.gatewayOrigin : `http://127.0.0.1:${vitePort}`;
-      const target = new URL(request.url ?? '/', targetOrigin);
-      proxyTrace.push(`${request.method} ${request.url} -> ${targetOrigin}`);
-      const outgoing = httpRequest(target, {
-        method: request.method,
-        headers: { ...request.headers, host: target.host },
-      }, incoming => {
-        proxyTrace.push(`${request.method} ${request.url} <- ${incoming.statusCode}`);
-        response.writeHead(incoming.statusCode ?? 502, incoming.statusMessage, incoming.headers);
-        incoming.pipe(response);
-      });
-      outgoing.on('error', error => {
-        proxyTrace.push(`${request.method} ${request.url} failed: ${error.message}`);
-        if (!response.headersSent) response.writeHead(502, { 'content-type': 'text/plain' });
-        response.end(`Local E2E proxy failed: ${error.message}`);
-      });
-      request.pipe(outgoing);
+      const forward = () => {
+        const targetOrigin = request.url?.startsWith('/api/v1/') ? gateway!.gatewayOrigin : `http://127.0.0.1:${vitePort}`;
+        const target = new URL(request.url ?? '/', targetOrigin);
+        proxyTrace.push(`${request.method} ${request.url} -> ${targetOrigin}`);
+        const outgoing = httpRequest(target, {
+          method: request.method,
+          headers: { ...request.headers, host: target.host },
+        }, incoming => {
+          proxyTrace.push(`${request.method} ${request.url} <- ${incoming.statusCode}`);
+          response.writeHead(incoming.statusCode ?? 502, incoming.statusMessage, incoming.headers);
+          incoming.pipe(response);
+        });
+        outgoing.on('error', error => {
+          proxyTrace.push(`${request.method} ${request.url} failed: ${error.message}`);
+          if (!response.headersSent) response.writeHead(502, { 'content-type': 'text/plain' });
+          response.end(`Local E2E proxy failed: ${error.message}`);
+        });
+        request.pipe(outgoing);
+      };
+      if (!delayedConcurrentVariantMutation && request.method === 'POST' && request.url?.endsWith(`/variantes/${concurrentVariantId}/desactivar`)) {
+        delayedConcurrentVariantMutation = true;
+        proxyTrace.push(`POST ${request.url} delayed 500ms to overlap browser tabs`);
+        void pause(500).then(forward);
+        return;
+      }
+      forward();
     });
     browserProxy.listen(browserPort, '127.0.0.1');
     await new Promise<void>((resolve, reject) => {
@@ -125,7 +158,7 @@ describe.skipIf(!enabled)('Browser HTTP real local: PostgreSQL 17 + Catalog + Ga
     const browser = spawn(process.execPath, [join(frontend, 'node_modules', 'playwright', 'cli.js'), 'test', '--config', 'tests/catalog-http-real.config.ts', 'tests/catalog-http-real.spec.ts'], {
       cwd: frontend,
       windowsHide: true,
-      env: { ...process.env, NODE_ENV: 'test', CATALOG_REAL_BROWSER_ORIGIN: browserOrigin, CATALOG_REAL_JWT: browserJwt, CATALOG_REAL_FORBIDDEN_JWT: gateway.token({ roles: [] }), CATALOG_REAL_PRODUCT_ID: writtenId, CATALOG_REAL_VARIANT_PRODUCT_ID: variantProductId, CATALOG_REAL_VARIANT_ID: variantId, CATALOG_REAL_VARIANT_SKU: variantSku, CATALOG_REAL_CORRELATION_ID: gateway.correlation, CATALOG_REAL_VITE_PORT: String(vitePort), CATALOG_REAL_BROWSER_PORT: String(browserPort) },
+      env: { ...process.env, NODE_ENV: 'test', CATALOG_REAL_BROWSER_ORIGIN: browserOrigin, CATALOG_REAL_JWT: browserJwt, CATALOG_REAL_FORBIDDEN_JWT: gateway.token({ roles: [] }), CATALOG_REAL_PRODUCT_ID: writtenId, CATALOG_REAL_VARIANT_PRODUCT_ID: variantProductId, CATALOG_REAL_VARIANT_ID: variantId, CATALOG_REAL_VARIANT_SKU: variantSku, CATALOG_REAL_CONCURRENT_VARIANT_ID: concurrentVariantId, CATALOG_REAL_CONCURRENT_VARIANT_SKU: concurrentVariantSku, CATALOG_REAL_DELAY_VARIANT_ID: concurrentVariantId, CATALOG_REAL_CORRELATION_ID: gateway.correlation, CATALOG_REAL_VITE_PORT: String(vitePort), CATALOG_REAL_BROWSER_PORT: String(browserPort) },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let browserStdout = '';

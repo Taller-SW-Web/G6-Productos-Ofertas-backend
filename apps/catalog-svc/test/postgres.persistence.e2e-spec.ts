@@ -7,10 +7,15 @@ import {
   type BulkRow,
   type BulkRowResult,
 } from '../src/catalog-bulk.service.js';
+import {
+  CatalogBulkContentClient,
+  CatalogBulkContentIdentity,
+} from '../src/catalog-bulk-content.js';
 import { CatalogTokenVerifier } from '../src/catalog-auth.js';
 import { HttpException, ServiceUnavailableException } from '@nestjs/common';
 import type { CatalogEnvelope } from '../src/catalog-messages.js';
 import { spawn, spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
 import {
   writeFileSync,
   symlinkSync,
@@ -3359,6 +3364,195 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
       expect(getDocument).toHaveBeenCalledOnce();
       expect((await bulkReply(replay)).payload).toMatchObject({ batch_id: batchId });
     });
+    it('BULK V3: downloads a valid >256 KiB claim-check over private HTTP and commits rows, result, and receipts in PostgreSQL', async () => {
+      const row = bulkRow({
+        ...createRequest(),
+        // OpenAPI requires a non-empty string and places no maximum on the
+        // description. Exercise the 50 MiB claim-check flow with one ordinary
+        // Catalog product row whose document exceeds the former 256 KiB limit.
+        descripcion: 'x'.repeat(300 * 1024),
+      });
+      const documentBytes = Buffer.from(JSON.stringify({ rows: [row] }), 'utf8');
+      const digest = createHash('sha256').update(documentBytes).digest('hex');
+      expect(documentBytes.byteLength).toBeGreaterThan(256 * 1024);
+
+      const contentId = randomUUID();
+      const requests: Array<{
+        method?: string;
+        url?: string;
+        authorization?: string;
+        accept?: string;
+      }> = [];
+      const contentServer = createServer((request, response) => {
+        requests.push({
+          method: request.method,
+          url: request.url,
+          authorization: request.headers.authorization,
+          accept: request.headers.accept,
+        });
+        if (
+          request.method !== 'GET' ||
+          request.url !== `/interno/carga-masiva/contenidos/${contentId}` ||
+          request.headers.authorization !== 'Bearer private-bulk-content-fixture' ||
+          request.headers.accept !== 'application/json'
+        ) {
+          response.writeHead(403).end('{}');
+          return;
+        }
+        response.writeHead(200, {
+          'content-type': 'application/json',
+          'content-length': String(documentBytes.byteLength),
+          'x-content-sha256': digest,
+        });
+        response.end(documentBytes);
+      });
+
+      const previousOrigin = process.env.CATALOG_BULK_CONTENTS_URL;
+      const previousNodeEnv = process.env.NODE_ENV;
+      try {
+        await new Promise<void>((resolve, reject) => {
+          contentServer.once('error', reject);
+          contentServer.listen(0, '127.0.0.1', resolve);
+        });
+        const address = contentServer.address();
+        if (!address || typeof address === 'string')
+          throw new Error('Private content fixture did not bind loopback');
+        process.env.NODE_ENV = 'test';
+        process.env.CATALOG_BULK_CONTENTS_URL = `http://127.0.0.1:${address.port}`;
+
+        const contentIdentity = new CatalogBulkContentIdentity(
+          undefined,
+          new CatalogTokenVerifier(undefined),
+        );
+        vi.spyOn(contentIdentity, 'authorization').mockResolvedValue(
+          'Bearer private-bulk-content-fixture',
+        );
+        const service = bulkHandler(
+          mutationService(),
+          new CatalogBulkContentClient(contentIdentity),
+        );
+        const operationId = randomUUID();
+        const batchId = randomUUID();
+        const messageId = randomUUID();
+        const message: CatalogEnvelope = {
+          message_id: messageId,
+          schema_version: 3,
+          occurred_at: new Date().toISOString(),
+          correlation_id: randomUUID(),
+          causation_id: null,
+          operation_id: operationId,
+          producer: 'bulk-svc',
+          kind: 'command',
+          name: 'catalog.bulk.upsert.requested',
+          data: {
+            batch_id: batchId,
+            batch_operation_id: operationId,
+            template_version: 2,
+            mode: 'ALTA',
+            content_ref: {
+              content_id: contentId,
+              sha256: digest,
+              byte_length: documentBytes.byteLength,
+              content_type: 'application/json',
+            },
+          },
+        };
+
+        await expect(service.consume(message)).resolves.toBe('APPLIED');
+        expect(requests).toEqual([
+          {
+            method: 'GET',
+            url: `/interno/carga-masiva/contenidos/${contentId}`,
+            authorization: 'Bearer private-bulk-content-fixture',
+            accept: 'application/json',
+          },
+        ]);
+
+        const storedProduct = await database.read(async (db) =>
+          (await db.select().from(products).where(eq(products.sku_base, row.sku_base)))[0],
+        );
+        expect(storedProduct).toMatchObject({
+          sku_base: row.sku_base,
+          descripcion: row.product.descripcion,
+        });
+        const storedIdentity = await database.read((db) =>
+          db.select().from(skuIdentity).where(eq(skuIdentity.sku, row.sku_base)),
+        );
+        expect(storedIdentity).toHaveLength(1);
+
+        const reply = await bulkReply(message);
+        expect(reply.event_name).toBe('catalog.bulk.upsert.completed');
+        expect(reply.payload).toMatchObject({
+          batch_id: batchId,
+          batch_operation_id: operationId,
+          results: [
+            {
+              row_operation_id: row.row_operation_id,
+              product_id: storedProduct!.id,
+              sku_base: row.sku_base,
+              status: 'COMPLETED',
+              code: null,
+            },
+          ],
+        });
+
+        const receipts = await database.read((db) =>
+          db
+            .select()
+            .from(inbox)
+            .where(
+              and(
+                inArray(inbox.message_id, [
+                  operationId,
+                  row.row_operation_id,
+                  messageId,
+                ]),
+                inArray(inbox.handler, [
+                  'catalog.bulk.command.v1',
+                  'catalog.bulk.row.v1',
+                  'catalog.bulk.delivery.v1',
+                ]),
+              ),
+            ),
+        );
+        expect(receipts).toHaveLength(3);
+        expect(receipts).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              message_id: operationId,
+              handler: 'catalog.bulk.command.v1',
+              result: 'APPLIED',
+            }),
+            expect.objectContaining({
+              message_id: row.row_operation_id,
+              handler: 'catalog.bulk.row.v1',
+              result: 'APPLIED',
+            }),
+            expect.objectContaining({
+              message_id: messageId,
+              handler: 'catalog.bulk.delivery.v1',
+              result: 'APPLIED',
+            }),
+          ]),
+        );
+
+        await expect(service.consume(message)).resolves.toBe('DUPLICATE');
+        expect(requests).toHaveLength(1);
+        expect(
+          await database.read((db) =>
+            db.select().from(products).where(eq(products.sku_base, row.sku_base)),
+          ),
+        ).toHaveLength(1);
+      } finally {
+        if (previousOrigin === undefined)
+          delete process.env.CATALOG_BULK_CONTENTS_URL;
+        else process.env.CATALOG_BULK_CONTENTS_URL = previousOrigin;
+        if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = previousNodeEnv;
+        contentServer.closeAllConnections();
+        await new Promise<void>((resolve) => contentServer.close(() => resolve()));
+      }
+    }, 60000);
     it('BULK: reports a real slug UNIQUE as SLUG_DUPLICADO, never SKU_DUPLICADO, and preserves replay', async () => {
       const existing = await mutationService().createProduct(
         createRequest(),
