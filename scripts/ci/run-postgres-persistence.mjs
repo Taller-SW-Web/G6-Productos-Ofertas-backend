@@ -13,6 +13,11 @@ const suites = [
     enabled: 'PRICING_TEST_POSTGRES',
   },
   {
+    name: 'Pricing import PostgreSQL',
+    file: 'apps/pricing-svc/test/import-prices.postgres.e2e-spec.ts',
+    enabled: 'PRICING_TEST_POSTGRES',
+  },
+  {
     name: 'Price Audit PostgreSQL',
     file: 'apps/price-audit-svc/test/provider.postgres.e2e-spec.ts',
     enabled: 'PRICE_AUDIT_TEST_POSTGRES',

@@ -11,6 +11,8 @@ const summary = readFileSync('scripts/performance/summarize-selection.mjs', 'utf
 const draftTests = readFileSync('scripts/ci/draft-ready-policy.test.mjs', 'utf8');
 const e2eConfig = readFileSync('vitest.config.e2e.ts', 'utf8');
 const taxonomyRunner = readFileSync('scripts/ci/run-taxonomy-integration.mjs', 'utf8');
+const catalogRunner = readFileSync('scripts/ci/run-catalog-postgres.mjs', 'utf8');
+const catalogPersistenceSuite = readFileSync('apps/catalog-svc/test/postgres.persistence.e2e-spec.ts', 'utf8');
 const ciTests = readFileSync('.github/workflows/ci.yml', 'utf8');
 
 for (const job of ['taxonomia_catalogo', 'inventario', 'combos_catalogo']) {
@@ -18,6 +20,26 @@ for (const job of ['taxonomia_catalogo', 'inventario', 'combos_catalogo']) {
   assert.doesNotMatch(ci, new RegExp(`^\\s+- ${job}$`, 'm'), `${job} removed from needs`);
 }
 assert.match(ci, /^  taxonomia:/m, 'the real PostgreSQL taxonomy job remains');
+assert.match(ci, /^  catalogo_postgres:/m, 'the partial Catalog PostgreSQL job remains');
+assert.match(ci, /run-catalog-postgres\.mjs/);
+assert.match(ci, /catalogo_postgres/);
+assert.match(catalogRunner, /expectedTitles/);
+assert.match(catalogRunner, /numPassedTests/);
+assert.match(catalogRunner, /G6_CATALOG_POSTGRES_CI/);
+assert.match(catalogRunner, /originalHistoricalSuiteCases: 47/);
+assert.match(catalogRunner, /fullOriginalHistoricalSuiteExecuted: false/);
+for (const title of [
+  'creates simple and variant products atomically with the correct preparation and Outbox intents',
+  'rolls back operation failures and reports deferred aggregate constraints at commit',
+  'persists the exact product deactivation event once under concurrent retries',
+  'reads contractual preparation, variants and physical SKU data from the committed aggregate',
+]) {
+  assert.ok(catalogRunner.includes(title), `Catalog partial suite selects ${title}`);
+  assert.ok(catalogPersistenceSuite.includes(title), `Catalog historical suite retains ${title}`);
+}
+assert.match(catalogPersistenceSuite, /if \(!postgresCiOnly\) await jointBroker\.start\(\)/);
+assert.match(persistence, /import-prices\.postgres\.e2e-spec\.ts/);
+assert.match(persistence, /enabled: 'PRICING_TEST_POSTGRES'/);
 assert.match(ci, /^  gateway_inventory_postgres:/m);
 assert.match(ci, /options: \[catalog, pricing, promotions, inventory-gateway\]/);
 assert.match(ci, /name: Validación de checks CI preservados/);

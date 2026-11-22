@@ -88,6 +88,7 @@ import {
 } from '../src/catalog.schema.js';
 
 const isCi = process.env.CI?.toLowerCase() === 'true';
+const postgresCiOnly = process.env.G6_CATALOG_POSTGRES_CI === '1';
 
 function checkDockerSupport() {
   const docker = spawnSync(
@@ -334,12 +335,12 @@ describe.skipIf(!dockerAvailable)(
       database = new Database(persistenceSettings);
       transactions = new CatalogTransactionManager(database);
       await database.verifyIdentity();
-      await jointBroker.start();
+      if (!postgresCiOnly) await jointBroker.start();
     }, 180000);
 
     afterAll(async () => {
       await jointRuntime?.onModuleDestroy();
-      await jointBroker.close();
+      if (!postgresCiOnly) await jointBroker.close();
       if (!closed) await database?.onModuleDestroy();
       spawnSync('docker', ['rm', '--force', container], {
         timeout: 15000,

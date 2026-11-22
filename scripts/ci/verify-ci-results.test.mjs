@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const checker = fileURLToPath(new URL('./verify-ci-results.mjs', import.meta.url));
-const required = ['tipos', 'unitarias', 'persistencia', 'taxonomia', 'promotions', 'gateway_inventory_postgres', 'azure_cd_h5', 'seguridad_dependencias'];
+const required = ['tipos', 'unitarias', 'persistencia', 'taxonomia', 'catalogo_postgres', 'promotions', 'gateway_inventory_postgres', 'azure_cd_h5', 'seguridad_dependencias'];
 const allSuccessful = () => Object.fromEntries(required.map((job) => [job, { result: 'success' }]));
 function run(results) {
   return spawnSync(process.execPath, [checker, JSON.stringify(results), ...required], { encoding: 'utf8' });

@@ -388,6 +388,35 @@ jobs:
       run: node --test scripts/ci/run-taxonomy-integration.test.mjs
     - name: Ejecutar pruebas de integración Taxonomy (obligatorias)
       run: node scripts/ci/run-taxonomy-integration.mjs
+  catalogo_postgres:
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
+    name: Probar cobertura parcial de Catalog con PostgreSQL 17 TLS
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+    - name: Obtener código fuente
+      uses: actions/checkout@v4
+    - name: Configurar Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 24.15.0
+        cache: npm
+    - name: Instalar dependencias de forma reproducible
+      run: npm ci
+    - name: Ejecutar casos Catalog PostgreSQL independientes de RabbitMQ
+      run: node scripts/ci/run-catalog-postgres.mjs
+    - name: Conservar evidencia parcial por SHA
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: catalog-postgres-partial-${{ github.sha }}
+        path: .ci/evidence/catalog-postgres-ci/
+        if-no-files-found: error
+        retention-days: 30
   persistencia:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
@@ -576,6 +605,7 @@ jobs:
       - contenedores
       - persistencia
       - taxonomia
+      - catalogo_postgres
       - promotions
       - gateway_inventory_postgres
       - azure_cd_h5
@@ -592,7 +622,7 @@ jobs:
         RESULTADOS: ${{ toJSON(needs) }}
       run: |
         printf '%s\n' "$RESULTADOS"
-        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias
+        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia catalogo_postgres promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias
   compatibilidad:
     name: Lint, Typecheck, Test, Build & Smoke Test
     runs-on: ubuntu-latest
@@ -608,6 +638,7 @@ jobs:
     - contenedores
     - persistencia
     - taxonomia
+    - catalogo_postgres
     - promotions
     - gateway_inventory_postgres
     - azure_cd_h5
@@ -624,7 +655,7 @@ jobs:
         RESULTADOS: ${{ toJSON(needs) }}
       run: |
         printf '%s\n' "$RESULTADOS"
-        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias
+        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia catalogo_postgres promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias
   benchmark_focalizado:
     name: Benchmark focalizado solicitado
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'benchmark'
