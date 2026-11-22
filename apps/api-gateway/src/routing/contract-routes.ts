@@ -5195,6 +5195,12 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
         name: 'x-correlation-id',
         required: false,
       },
+      {
+        name: 'idempotency-key',
+        required: true,
+        minLength: 1,
+        maxLength: 128,
+      },
     ],
     requestTypes: ['multipart/form-data'],
     responses: {
@@ -5205,7 +5211,7 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
       },
       '400': {
         types: ['application/problem+json'],
-        codes: ['ARCHIVO_INVALIDO'],
+        codes: ['ARCHIVO_INVALIDO', 'VALIDACION'],
         headers: [],
       },
       '401': {
@@ -5216,6 +5222,11 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
       '403': {
         types: ['application/problem+json'],
         codes: ['SCOPE_INSUFICIENTE'],
+        headers: [],
+      },
+      '409': {
+        types: ['application/problem+json'],
+        codes: ['IDEMPOTENCY_CONFLICT'],
         headers: [],
       },
       '413': {

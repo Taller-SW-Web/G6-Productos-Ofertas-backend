@@ -736,6 +736,68 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
     );
   });
 
+  it('keeps the Pricing admission key and contractual 409 through the multipart proxy', async () => {
+    const path = '/api/v1/precios/importaciones';
+    const token = signed.token({
+      tipo: 'acceso',
+      sub: '11111111-1111-1111-1111-111111111111',
+      roles: ['GESTOR_COMERCIAL'],
+    });
+    const upload = (key?: string) => {
+      const test = request(app.getHttpServer())
+        .post(path)
+        .auth(token, { type: 'bearer' });
+      if (key !== undefined) test.set('Idempotency-Key', key);
+      return test
+        .field('allow_partial', 'false')
+        .attach('archivo', Buffer.from('sku\nSKU-TEST\n'), 'precios.csv');
+    };
+    await request(app.getHttpServer()).post(path).expect(401);
+    await request(app.getHttpServer())
+      .post(path)
+      .auth(
+        signed.token({
+          tipo: 'acceso',
+          sub: '11111111-1111-1111-1111-111111111111',
+          roles: [],
+        }),
+        { type: 'bearer' },
+      )
+      .expect(403);
+    expect(calls).toHaveLength(0);
+    const authorize = vi
+      .spyOn(signed.identity, 'authorize')
+      .mockResolvedValue(undefined);
+    try {
+      await upload().expect(400);
+      await upload('A'.repeat(129)).expect(400);
+      expect(calls).toHaveLength(0);
+      const key = 'Intent-'.padEnd(128, 'x');
+      reply.status = 202;
+      await upload(key).expect(202);
+      expect(calls[0].headers['idempotency-key']).toBe(key);
+      expect(calls[0].body).toContain('SKU-TEST');
+      expect(calls[0].body).toContain('name="allow_partial"');
+      expect(authorize).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          role: 'GESTOR_COMERCIAL',
+          introspection: true,
+        }),
+        `Bearer ${token}`,
+      );
+      reply.status = 409;
+      reply.type = 'application/problem+json';
+      reply.body = '{"code":"IDEMPOTENCY_CONFLICT"}';
+      const conflict = await upload(key)
+        .expect(409)
+        .expect('content-type', /application\/problem\+json/);
+      expect(conflict.body.code).toBe('IDEMPOTENCY_CONFLICT');
+      expect(calls[1].headers['idempotency-key']).toBe(key);
+    } finally {
+      authorize.mockRestore();
+    }
+  });
+
   it.each([
     '/api/v1/carga-masiva/productos/importaciones',
     '/api/v1/precios/importaciones/prevalidar',
