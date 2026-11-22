@@ -2,10 +2,16 @@ import { PricingReadController } from './pricing-read.controller.js';
 import { PricingReads } from './pricing-reads.js';
 import { CommercialPrices } from './commercial-prices.js';
 import { PricingHttpError } from './pricing-http.error.js';
+import {
+  PRICING_ACTOR,
+  type PricingAuthenticatedRequest,
+} from './pricing-read.guard.js';
 import type { Response } from 'express';
 
 describe('Read-only persisted Pricing import report', () => {
   const id = '10000000-0000-4000-8000-000000000001';
+  const actor = '10000000-0000-4000-8000-000000000002';
+  const request = { [PRICING_ACTOR]: actor } as PricingAuthenticatedRequest;
   function response() {
     return {
       type() {
@@ -38,12 +44,12 @@ describe('Read-only persisted Pricing import report', () => {
       reads as unknown as PricingReads,
       {} as CommercialPrices,
     );
-    const result = await controller.importReport(id, {}, response());
+    const result = await controller.importReport(id, request, {}, response());
     expect(result).toBe(
       'row_id,sku,status,code\r\n"1","A,""B""","FAILED","VALIDACION"\r\n',
     );
     expect(String(result)).not.toContain('DO_NOT_LEAK');
-    expect(reads.importReport).toHaveBeenCalledExactlyOnceWith(id);
+    expect(reads.importReport).toHaveBeenCalledExactlyOnceWith(id, actor);
   });
   it('validates the identifier and query before querying persisted data', async () => {
     const reads = { importReport: vi.fn() };
@@ -52,10 +58,10 @@ describe('Read-only persisted Pricing import report', () => {
       {} as CommercialPrices,
     );
     await expect(
-      controller.importReport('invalid', {}, response()),
+      controller.importReport('invalid', request, {}, response()),
     ).rejects.toMatchObject({ status: 400 });
     await expect(
-      controller.importReport(id, { unexpected: 'true' }, response()),
+      controller.importReport(id, request, { unexpected: 'true' }, response()),
     ).rejects.toMatchObject({ status: 400 });
     expect(reads.importReport).not.toHaveBeenCalled();
   });
@@ -70,7 +76,7 @@ describe('Read-only persisted Pricing import report', () => {
       {} as CommercialPrices,
     );
     await expect(
-      controller.importReport(id, {}, response()),
+      controller.importReport(id, request, {}, response()),
     ).rejects.toMatchObject({ status: 404, code: 'LOTE_NO_ENCONTRADO' });
   });
 });

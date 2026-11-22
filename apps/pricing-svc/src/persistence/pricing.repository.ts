@@ -356,7 +356,7 @@ export class PricingRepository {
     );
   }
 
-  readImport(batchId: string) {
+  readImport(batchId: string, actor: string) {
     return this.transaction(
       async (tx) => {
         const [job] = await tx
@@ -369,7 +369,12 @@ export class PricingRepository {
             failedRows: bulkPriceJobs.failedRows,
           })
           .from(bulkPriceJobs)
-          .where(eq(bulkPriceJobs.id, batchId));
+          .where(
+            and(
+              eq(bulkPriceJobs.id, batchId),
+              eq(bulkPriceJobs.usuarioId, actor),
+            ),
+          );
         if (!job) return undefined;
         const rows = await tx
           .select({
@@ -380,7 +385,11 @@ export class PricingRepository {
           })
           .from(bulkPriceRows)
           .where(eq(bulkPriceRows.batchId, batchId))
-          .orderBy(asc(bulkPriceRows.rowId))
+          // Old batches may also carry opaque row identifiers.
+          .orderBy(
+            sql`CASE WHEN ${bulkPriceRows.rowId} ~ '^[0-9]+$' THEN ${bulkPriceRows.rowId}::numeric END NULLS LAST`,
+            asc(bulkPriceRows.rowId),
+          )
           .limit(MAX_INLINE_IMPORT_ROWS + 1);
         return {
           job,
@@ -391,24 +400,35 @@ export class PricingRepository {
     );
   }
 
-  readImportReport(batchId: string) {
+  readImportReport(batchId: string, actor: string) {
     return this.transaction(
       async (tx) => {
         const [job] = await tx
           .select({ id: bulkPriceJobs.id })
           .from(bulkPriceJobs)
-          .where(eq(bulkPriceJobs.id, batchId));
+          .where(
+            and(
+              eq(bulkPriceJobs.id, batchId),
+              eq(bulkPriceJobs.usuarioId, actor),
+            ),
+          );
         if (!job) return undefined;
-        return tx
-          .select({
-            rowId: bulkPriceRows.rowId,
-            sku: bulkPriceRows.sku,
-            status: bulkPriceRows.status,
-            code: bulkPriceRows.code,
-          })
-          .from(bulkPriceRows)
-          .where(eq(bulkPriceRows.batchId, batchId))
-          .orderBy(asc(bulkPriceRows.rowId));
+        return (
+          tx
+            .select({
+              rowId: bulkPriceRows.rowId,
+              sku: bulkPriceRows.sku,
+              status: bulkPriceRows.status,
+              code: bulkPriceRows.code,
+            })
+            .from(bulkPriceRows)
+            .where(eq(bulkPriceRows.batchId, batchId))
+            // Old batches may also carry opaque row identifiers.
+            .orderBy(
+              sql`CASE WHEN ${bulkPriceRows.rowId} ~ '^[0-9]+$' THEN ${bulkPriceRows.rowId}::numeric END NULLS LAST`,
+              asc(bulkPriceRows.rowId),
+            )
+        );
       },
       { isolationLevel: 'repeatable read', accessMode: 'read only' },
     );

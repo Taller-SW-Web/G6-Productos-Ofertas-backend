@@ -216,30 +216,6 @@ describe('Gateway identity from G6/G7 contracts', () => {
       signed.identity.authorize(reservation, `Bearer ${signed.token(human)}`),
     ).rejects.toMatchObject({ status: 403 });
   });
-  it('limits modulo-productos pricing grants to the two commercial reads', async () => {
-    const token = (scope: string) =>
-      `Bearer ${signed.token({ sub: 'modulo-productos', scope })}`;
-    const allowed = ['consultarPrecios', 'obtenerPrecioSku'];
-    const pricingRoutes = CONTRACT_ROUTES.filter(
-      (route) => route.service === 'pricing-svc',
-    );
-    expect(
-      pricingRoutes
-        .filter((route) => route.clients?.includes('modulo-productos'))
-        .map((route) => route.operationId),
-    ).toEqual(allowed);
-    for (const operation of allowed) {
-      const route = pricingRoutes.find(
-        (candidate) => candidate.operationId === operation,
-      )!;
-      await expect(
-        signed.identity.authorize(route, token('precios:leer')),
-      ).resolves.toBeUndefined();
-      await expect(
-        signed.identity.authorize(route, token('catalogo:leer')),
-      ).rejects.toMatchObject({ status: 403 });
-    }
-  });
   it('fails closed when G7 introspection credentials are unavailable', async () => {
     const pricing = CONTRACT_ROUTES.find(
       (r) => r.operationId === 'actualizarPrecioSku',

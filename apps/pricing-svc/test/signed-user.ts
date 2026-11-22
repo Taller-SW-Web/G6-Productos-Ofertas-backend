@@ -7,6 +7,7 @@ export class SignedUser {
   private readonly pair = generateKeyPairSync('rsa', { modulusLength: 2048 });
   private server?: Server;
   issuer = '';
+  readonly actorId = '74ed2f19-7e70-4915-a6f6-bbc691b82587';
   readonly jwk = {
     ...this.pair.publicKey.export({ format: 'jwk' }),
     kid: 'pricing-fixture',
@@ -55,7 +56,7 @@ export class SignedUser {
             introspect(token)
               ? {
                   activo: true,
-                  sub: '74ed2f19-7e70-4915-a6f6-bbc691b82587',
+                  sub: this.actorId,
                   roles: ['GESTOR_COMERCIAL'],
                   permisos: [],
                   tipo: 'acceso',
@@ -91,7 +92,7 @@ export class SignedUser {
     const content = `${encode({ alg: 'RS256', kid: 'pricing-fixture', typ: 'JWT', ...header })}.${encode(
       {
         iss: this.issuer,
-        sub: '74ed2f19-7e70-4915-a6f6-bbc691b82587',
+        sub: this.actorId,
         tipo: 'acceso',
         iat: now,
         exp: now + 300,

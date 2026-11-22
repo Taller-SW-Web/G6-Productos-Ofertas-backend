@@ -21,6 +21,8 @@ export function record(value: unknown): value is Record<string, unknown> {
 }
 export const uuid =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const PRICING_ACTOR = Symbol('pricing-actor');
+export type PricingAuthenticatedRequest = Request & { [PRICING_ACTOR]: string };
 export const COMMERCIAL_PRICING_READ = 'pricing:commercial-read';
 
 function decode(value: string): unknown {
@@ -40,7 +42,9 @@ export class PricingReadGuard implements CanActivate {
   constructor(@Inject(PRICING_CONFIG) private readonly config: PricingConfig) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest<Request>();
+    const request = context
+      .switchToHttp()
+      .getRequest<PricingAuthenticatedRequest>();
     const response = context.switchToHttp().getResponse<Response>();
     const correlation = request.headers['x-correlation-id'];
     response.setHeader(
@@ -70,8 +74,6 @@ export class PricingReadGuard implements CanActivate {
         product: 'obtenerPrecioBaseProducto',
         productSchedules: 'listarProgramacionesPrecioProducto',
         skuSchedules: 'listarProgramacionesPrecioSku',
-        imported: 'obtenerImportacionPrecios',
-        importReport: 'descargarReporteImportacionPrecios',
       } as Readonly<Record<string, string>>
     )[handler?.name];
     if (
@@ -88,11 +90,12 @@ export class PricingReadGuard implements CanActivate {
       request.headers.authorization ?? '',
     );
     if (!bearer) throw new PricingHttpError(401, 'TOKEN_INVALIDO');
-    await this.authorize(
+    const claims = await this.authorize(
       bearer[1],
       !!handler &&
         Reflect.getMetadata(COMMERCIAL_PRICING_READ, handler) === true,
     );
+    if (typeof claims.sub === 'string') request[PRICING_ACTOR] = claims.sub;
     return true;
   }
 

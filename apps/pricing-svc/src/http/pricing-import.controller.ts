@@ -38,16 +38,22 @@ class PricingImportFilter extends PricingHttpFilter {
 function upload(
   file: { buffer: Buffer } | undefined,
   body: Record<string, unknown> | undefined,
+  admission = false,
 ) {
+  const allowPartial = body?.allow_partial;
   if (
     !file ||
-    Object.keys(body ?? {}).length !== 1 ||
-    (body?.allow_partial !== 'true' && body?.allow_partial !== 'false')
+    Object.keys(body ?? {}).some(
+      (field) => !admission || field !== 'allow_partial',
+    ) ||
+    (allowPartial !== undefined &&
+      allowPartial !== 'true' &&
+      allowPartial !== 'false')
   )
     throw new PricingHttpError(400, 'ARCHIVO_INVALIDO');
   if (file.buffer.length > PRICE_IMPORT_MAX_BYTES)
     throw new PricingHttpError(413, 'ARCHIVO_EXCEDE_LIMITE');
-  return { file: file.buffer, allowPartial: body.allow_partial === 'true' };
+  return { file: file.buffer, allowPartial: allowPartial === 'true' };
 }
 
 @Controller('api/v1/precios/importaciones')
@@ -99,7 +105,7 @@ export class PricingImportController {
     );
     if (!key || !/^[!-~]{1,128}$/.test(key) || key.includes(','))
       throw new PricingHttpError(400, 'ARCHIVO_INVALIDO');
-    const request = upload(file, body);
+    const request = upload(file, body, true);
     return this.imports.admit(
       request.file,
       request.allowPartial,

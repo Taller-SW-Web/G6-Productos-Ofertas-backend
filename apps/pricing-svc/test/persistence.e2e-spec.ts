@@ -1909,7 +1909,7 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
             allowPartial: false,
             totalRows: 1,
             correlationId: randomUUID(),
-            usuarioId: 'fixture-sensitive-actor',
+            usuarioId: identity.actorId,
             reportUri: 'https://private.invalid/secret',
           })
           .returning();
@@ -1936,7 +1936,7 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
         rows: [{ row_id: '1', sku: '0001', status: 'PENDING' }],
       });
       expect(response.text).not.toMatch(/fixture-sensitive|private.invalid/);
-      const selected = await repository.readImport(job.id);
+      const selected = await repository.readImport(job.id, identity.actorId);
       expect(Object.keys(selected!.rows![0]).sort()).toEqual([
         'code',
         'rowId',
@@ -1957,6 +1957,7 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
           .values({
             allowPartial: false,
             totalRows: MAX_INLINE_IMPORT_ROWS + 1,
+            usuarioId: identity.actorId,
             correlationId: randomUUID(),
           })
           .returning();
@@ -1965,14 +1966,14 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
           FROM generate_series(1,${MAX_INLINE_IMPORT_ROWS}) AS value`);
         return job;
       });
-      const boundary = await repository.readImport(job.id);
+      const boundary = await repository.readImport(job.id, identity.actorId);
       expect(boundary!.rows).toHaveLength(MAX_INLINE_IMPORT_ROWS);
       await repository.transaction((tx) =>
         tx
           .insert(bulkPriceRows)
           .values({ batchId: job.id, rowId: 'extra', rowInput: {} }),
       );
-      const result = await repository.readImport(job.id);
+      const result = await repository.readImport(job.id, identity.actorId);
       expect(result!.rows).toBeUndefined();
       const response = await request(app!.getHttpServer())
         .get(`/api/v1/precios/importaciones/${job.id}`)

@@ -108,14 +108,20 @@ describe('PricingRepository: transacciones Drizzle', () => {
         ],
       })
       .mockResolvedValueOnce({ rows: [] });
-    await repository.readImport('4d96e3ac-cd5b-4ce7-9b8d-e8dc3f93313b');
+    await repository.readImport(
+      '4d96e3ac-cd5b-4ce7-9b8d-e8dc3f93313b',
+      'fixture-actor',
+    );
     const selects = client.query.mock.calls
       .map(([query]) => (typeof query === 'string' ? query : query.text))
       .filter((query) => query.startsWith('select'));
     expect(selects).toHaveLength(2);
     expect(selects[1]).toMatch(/^select "row_id", "sku", "status", "code"/);
     expect(selects[1]).toContain('limit');
-    expect(selects.join(' ')).not.toMatch(
+    expect(selects[0]).toMatch(/where .*usuario_id.*= \$2/);
+    expect(
+      selects.map((query) => query.split(' from ')[0]).join(' '),
+    ).not.toMatch(
       /row_input|detail|report_uri|usuario_id|created_at|updated_at/,
     );
   });

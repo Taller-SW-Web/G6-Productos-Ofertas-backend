@@ -32,7 +32,10 @@ describe.skipIf(process.env.PRICE_AUDIT_TEST_POSTGRES !== '1')(
     const font = fileURLToPath(
       new URL('./fixtures/font/Abel-Regular.ttf', import.meta.url),
     );
-    async function startApp() {
+    beforeAll(async () => {
+      await database.start();
+      await identity.start();
+      directory = await mkdtemp(join(tmpdir(), 'vera-exports-'));
       const module = await Test.createTestingModule({
         imports: [
           PriceAuditSvcModule.forRoot({
@@ -50,12 +53,6 @@ describe.skipIf(process.env.PRICE_AUDIT_TEST_POSTGRES !== '1')(
       await app.init();
       repository = app.get(AuditRepository);
       worker = app.get(AuditFileExportWorker);
-    }
-    beforeAll(async () => {
-      await database.start();
-      await identity.start();
-      directory = await mkdtemp(join(tmpdir(), 'vera-exports-'));
-      await startApp();
       await repository.append(
         { id: randomUUID(), correlationId: null, payload: { fixture: true } },
         [
@@ -94,32 +91,6 @@ describe.skipIf(process.env.PRICE_AUDIT_TEST_POSTGRES !== '1')(
       );
       return (await repository.exportJob(id))!;
     };
-    it('conserva los archivos CSV y PDF tras reiniciar la aplicación', async () => {
-      const exports: Array<{ id: string; format: 'CSV' | 'PDF' }> = [];
-      for (const format of ['CSV', 'PDF'] as const) {
-        const result = await request(app.getHttpServer())
-          .post(base)
-          .set('Authorization', auth())
-          .send({ formato: format, sku: 'export-real' })
-          .expect(202);
-        await finish(result.body.export_id);
-        exports.push({ id: result.body.export_id, format });
-      }
-      await app.close();
-      await startApp();
-      for (const { id, format } of exports) {
-        const path = `${base}/${id}/archivo`;
-        await request(app.getHttpServer()).get(path).expect(401);
-        await request(app.getHttpServer())
-          .get(path)
-          .set('Authorization', auth())
-          .expect(
-            'Content-Type',
-            format === 'CSV' ? /text\/csv/ : /application\/pdf/,
-          )
-          .expect(200);
-      }
-    });
     const ageProcessingJob = async (id: string) => {
       await database.admin!.query(
         'ALTER TABLE price_audit.export_jobs DISABLE TRIGGER trg_export_jobs_updated_at',

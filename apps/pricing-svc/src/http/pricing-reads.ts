@@ -132,8 +132,8 @@ export class PricingReads {
     };
   }
 
-  async imported(batchId: string) {
-    const result = await this.repository.readImport(batchId);
+  async imported(batchId: string, actor: string) {
+    const result = await this.repository.readImport(batchId, actor);
     if (!result) throw new PricingHttpError(404, 'LOTE_NO_ENCONTRADO');
     const { job, rows } = result;
     return {
@@ -163,8 +163,8 @@ export class PricingReads {
     };
   }
 
-  async importReport(batchId: string) {
-    const rows = await this.repository.readImportReport(batchId);
+  async importReport(batchId: string, actor: string) {
+    const rows = await this.repository.readImportReport(batchId, actor);
     if (!rows) throw new PricingHttpError(404, 'LOTE_NO_ENCONTRADO');
     return rows.map((row) => ({
       row_id: row.rowId,

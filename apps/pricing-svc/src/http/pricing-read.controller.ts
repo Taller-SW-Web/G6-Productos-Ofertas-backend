@@ -8,12 +8,15 @@ import {
   UseGuards,
   SetMetadata,
   Res,
+  Req,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { PricingReads } from './pricing-reads.js';
 import {
   COMMERCIAL_PRICING_READ,
   PricingReadGuard,
+  PRICING_ACTOR,
+  type PricingAuthenticatedRequest,
   uuid,
 } from './pricing-read.guard.js';
 import {
@@ -148,12 +151,13 @@ export class PricingReadController {
   @Get('importaciones/:batchId/reporte')
   async importReport(
     @Param('batchId') batchId: string,
+    @Req() request: PricingAuthenticatedRequest,
     @Query() query: Record<string, unknown>,
     @Res() response: Response,
   ) {
     if (!uuid.test(batchId) || Object.keys(query).length)
       throw new PricingHttpError(400, 'VALIDACION');
-    const rows = await this.reads.importReport(batchId);
+    const rows = await this.reads.importReport(batchId, request[PRICING_ACTOR]);
     const quote = (value: unknown) => {
       const text = String(value ?? '');
       const safe = /^[\s]*[=+\-@\t\r\n]/u.test(text) ? "'" + text : text;
@@ -179,10 +183,11 @@ export class PricingReadController {
   @Get('importaciones/:batchId')
   imported(
     @Param('batchId') batchId: string,
+    @Req() request: PricingAuthenticatedRequest,
     @Query() query: Record<string, unknown>,
   ) {
     if (!uuid.test(batchId) || Object.keys(query).length)
       throw new PricingHttpError(400, 'VALIDACION');
-    return this.reads.imported(batchId);
+    return this.reads.imported(batchId, request[PRICING_ACTOR]);
   }
 }
