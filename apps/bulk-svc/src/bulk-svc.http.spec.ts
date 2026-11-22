@@ -1,6 +1,11 @@
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { createSign, generateKeyPairSync, randomUUID } from 'node:crypto';
+import {
+  createHash,
+  createSign,
+  generateKeyPairSync,
+  randomUUID,
+} from 'node:crypto';
 import { BulkSvcController } from './bulk-svc.controller.js';
 import { BulkSvcService } from './bulk-svc.service.js';
 import { BulkReadinessService } from './health/bulk-readiness.service.js';
@@ -251,6 +256,12 @@ describe('Bulk HTTP import routes (isolated)', () => {
       expect(accepted.body.correlation_id).toBe(
         imports.receiveImport.mock.calls[0]?.[0].correlationId,
       );
+      const contentHash = createHash('sha256').update(csv).digest('hex');
+      const fallbackDigest = createHash('sha256')
+        .update(contentHash)
+        .digest('hex');
+      const fallbackUuid = `${fallbackDigest.slice(0, 8)}-${fallbackDigest.slice(8, 12)}-4${fallbackDigest.slice(13, 16)}-8${fallbackDigest.slice(17, 20)}-${fallbackDigest.slice(20, 32)}`;
+      expect(accepted.body.correlation_id).toBe(fallbackUuid);
       const replay = await request(app.getHttpServer())
         .post('/api/v1/carga-masiva/productos/importaciones')
         .field('template_version', '2')

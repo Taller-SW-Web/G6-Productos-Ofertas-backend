@@ -149,11 +149,7 @@ export class BulkSvcController {
     const ownerSub = requireActorSub(request).toLowerCase();
     const correlationId =
       correlation === undefined
-        ? uuidFromDigest(
-            createHash('sha256')
-              .update(`${ownerSub}:${contentHash}`)
-              .digest('hex'),
-          )
+        ? uuidFromDigest(createHash('sha256').update(contentHash).digest('hex'))
         : correlation.toLowerCase();
     const parsed = parseBulkTemplate(file.buffer, format);
     const batchId = uuidFromDigest(
