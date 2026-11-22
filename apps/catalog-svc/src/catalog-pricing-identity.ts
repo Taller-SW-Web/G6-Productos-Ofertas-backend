@@ -62,11 +62,14 @@ export class CatalogPricingIdentityProvider implements CatalogPricingIdentity {
   constructor(
     @Optional()
     @Inject(CatalogConfig)
-    private readonly config: CatalogConfig | undefined,
+    protected readonly config: CatalogConfig | undefined,
     private readonly verifier: CatalogTokenVerifier,
   ) {}
+  protected get credentials() {
+    return this.config?.serviceCredentials;
+  }
   private async issue() {
-    const credentials = this.config?.serviceCredentials;
+    const credentials = this.credentials;
     if (!credentials || !this.config?.security)
       throw new ServiceUnavailableException();
     const signal = AbortSignal.timeout(5000);

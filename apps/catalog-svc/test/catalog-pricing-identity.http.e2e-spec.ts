@@ -1,4 +1,5 @@
 import { CatalogBulkIdentity } from '../src/catalog-bulk.service.js';
+import { CatalogBulkContentIdentity } from '../src/catalog-bulk-content.js';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
@@ -201,6 +202,59 @@ describe('Catalog own modulo-productos token via G7 HTTP contract and real local
         new CatalogTokenVerifier(security),
       ).authorization(AbortSignal.timeout(5000)),
     ).rejects.toMatchObject({ status: 503 });
+  });
+  it('Bulk content uses independent catalog-svc credentials and the published content-read scope', async () => {
+    const security = {
+      issuer: origin,
+      discoveryUrl: origin + '/discovery',
+      jwksUrl: origin + '/keys',
+    };
+    const config = {
+      security,
+      serviceCredentials: {
+        tokenUrl: origin + '/api/v1/auth/token',
+        clientSecret: 'pricing-secret-must-not-be-used',
+      },
+      bulkContentCredentials: {
+        tokenUrl: origin + '/api/v1/auth/token',
+        clientSecret: 'bulk-content-secret',
+      },
+    } as CatalogConfig;
+    issuedScope = 'carga-masiva:contenidos:leer';
+    tokenPatch = { sub: 'catalog-svc' };
+    const identity = new CatalogBulkContentIdentity(
+      config,
+      new CatalogTokenVerifier(security),
+    );
+    expect(await identity.authorization(AbortSignal.timeout(5000))).toMatch(/^Bearer /);
+    expect(forms.at(-1)?.get('client_id')).toBe('catalog-svc');
+    expect(forms.at(-1)?.get('client_secret')).toBe('bulk-content-secret');
+    expect(forms.at(-1)?.get('client_secret')).not.toBe('pricing-secret-must-not-be-used');
+    expect(forms.at(-1)?.get('scope')).toBe('carga-masiva:contenidos:leer');
+  });
+  it.each([
+    { sub: 'pricing-svc', scope: 'carga-masiva:contenidos:leer' },
+    { sub: 'catalog-svc', scope: 'precios:leer' },
+  ])('Bulk content rejects a token with the wrong service identity/scope ($sub, $scope)', async ({ sub, scope }) => {
+    const security = {
+      issuer: origin,
+      discoveryUrl: origin + '/discovery',
+      jwksUrl: origin + '/keys',
+    };
+    const config = {
+      security,
+      bulkContentCredentials: {
+        tokenUrl: origin + '/api/v1/auth/token',
+        clientSecret: 'bulk-content-secret',
+      },
+    } as CatalogConfig;
+    issuedScope = scope;
+    tokenPatch = { sub };
+    const identity = new CatalogBulkContentIdentity(
+      config,
+      new CatalogTokenVerifier(security),
+    );
+    await expect(identity.authorization(AbortSignal.timeout(5000))).rejects.toMatchObject({ status: 503 });
   });
   it('acquires one own bearer for concurrent batches, verifies RSA/JWKS and caches until expiry', async () => {
     const candidates = Array.from({ length: 201 }, (_, i) => ({

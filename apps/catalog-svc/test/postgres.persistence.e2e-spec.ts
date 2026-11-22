@@ -3246,7 +3246,10 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         },
       };
     }
-    function bulkHandler(mutations = mutationService()) {
+    function bulkHandler(
+      mutations = mutationService(),
+      contentClient?: { getDocument: (reference: unknown) => Promise<unknown> },
+    ) {
       const identity = new CatalogBulkIdentity(
         undefined,
         new CatalogTokenVerifier(undefined),
@@ -3254,7 +3257,7 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
       vi.spyOn(identity, 'authorization').mockResolvedValue(
         actor.authorization,
       );
-      return new CatalogBulkService(database, mutations, identity);
+      return new CatalogBulkService(database, mutations, identity, contentClient as never);
     }
     async function bulkReply(command: CatalogEnvelope) {
       return database.read(
@@ -3330,6 +3333,31 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
       expect((await bulkReply(commandConflict)).payload.code).toBe(
         'IDEMPOTENCY_CONFLICT',
       );
+    });
+    it('BULK V3: replays an applied operation without downloading its claim-check document again', async () => {
+      const row = bulkRow();
+      const operationId = randomUUID();
+      const batchId = randomUUID();
+      const getDocument = vi.fn().mockResolvedValue({ rows: [row] });
+      const service = bulkHandler(mutationService(), { getDocument });
+      const message: CatalogEnvelope = {
+        message_id: randomUUID(), schema_version: 3,
+        occurred_at: new Date().toISOString(), correlation_id: randomUUID(),
+        causation_id: null, operation_id: operationId, producer: 'bulk-svc',
+        kind: 'command', name: 'catalog.bulk.upsert.requested',
+        data: {
+          batch_id: batchId, batch_operation_id: operationId,
+          template_version: 2, mode: 'ALTA',
+          content_ref: { content_id: randomUUID(), sha256: 'a'.repeat(64), byte_length: 300 * 1024, content_type: 'application/json' },
+        },
+      };
+      await expect(service.consume(message)).resolves.toBe('APPLIED');
+      expect(getDocument).toHaveBeenCalledOnce();
+      const replay = { ...message, message_id: randomUUID() };
+      getDocument.mockRejectedValue(new Error('original document unavailable'));
+      await expect(service.consume(replay)).resolves.toBe('APPLIED');
+      expect(getDocument).toHaveBeenCalledOnce();
+      expect((await bulkReply(replay)).payload).toMatchObject({ batch_id: batchId });
     });
     it('BULK: reports a real slug UNIQUE as SLUG_DUPLICADO, never SKU_DUPLICADO, and preserves replay', async () => {
       const existing = await mutationService().createProduct(
@@ -6591,7 +6619,7 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
         ),
       ).toMatchObject({ status: 'ACTIVO', catalog_version: 2 });
     });
-    it('persists the exact product deactivation event once under concurrent retries', async () => {
+    it('persists product and sellable-SKU deactivation atomically once under retries', async () => {
       const service = mutationService();
       const product = await service.createProduct(createRequest(), actor);
       await complete(product.product_id, 'pricing');
@@ -6640,6 +6668,22 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
           )
         )[0]?.estado,
       ).toBe('ACTIVO');
+      expect(
+        await database.read((db) =>
+          db
+            .select()
+            .from(outbox)
+            .where(
+              and(
+                sql`${outbox.payload}->>'product_id' = ${product.product_id}`,
+                inArray(outbox.event_name, [
+                  'catalog.sku.deactivated',
+                  'catalog.product.deactivated',
+                ]),
+              ),
+            ),
+        ),
+      ).toHaveLength(0);
       rollbackFixtureSql(
         'DROP TRIGGER test_reject_product_deactivation ON catalog.outbox',
       );
@@ -6662,23 +6706,56 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
           .from(outbox)
           .where(
             and(
-              eq(outbox.event_name, 'catalog.product.deactivated'),
               sql`${outbox.payload}->>'product_id' = ${product.product_id}`,
+              inArray(outbox.event_name, [
+                'catalog.sku.deactivated',
+                'catalog.product.deactivated',
+              ]),
             ),
           ),
       );
-      expect(events).toHaveLength(1);
-      expect(Object.keys(events[0]!.payload).sort()).toEqual([
+      expect(events).toHaveLength(2);
+      expect(new Set(events.map((event) => event.message_id)).size).toBe(2);
+      const skuEvents = events.filter(
+          (event) => event.event_name === 'catalog.sku.deactivated',
+        ),
+        productEvents = events.filter(
+          (event) => event.event_name === 'catalog.product.deactivated',
+        ),
+        identities = await database.read((db) =>
+          db
+            .select()
+            .from(skuIdentity)
+            .where(eq(skuIdentity.product_id, product.product_id)),
+        );
+      expect(skuEvents).toHaveLength(1);
+      expect(productEvents).toHaveLength(1);
+      expect(identities).toHaveLength(1);
+      const skuEvent = skuEvents[0]!, productEvent = productEvents[0]!;
+      expect(Object.keys(skuEvent.payload).sort()).toEqual([
+        'changed_at',
+        'product_id',
+        'sku',
+        'sku_version',
+      ]);
+      expect(skuEvent.payload).toEqual({
+        product_id: product.product_id,
+        sku: identities[0]!.sku,
+        sku_version: Number(persisted!.catalog_version),
+        changed_at: persisted!.updated_at.toISOString(),
+      });
+      expect(Object.keys(productEvent.payload).sort()).toEqual([
         'changed_at',
         'product_id',
         'product_version',
       ]);
-      expect(events[0]!.payload).toEqual({
+      expect(productEvent.payload).toEqual({
         product_id: product.product_id,
         product_version: Number(persisted!.catalog_version),
         changed_at: persisted!.updated_at.toISOString(),
       });
-      expect(events[0]!.correlation_id).toBe(actor.correlationId);
+      expect(skuEvent.correlation_id).toBe(actor.correlationId);
+      expect(productEvent.correlation_id).toBe(actor.correlationId);
     });
 
     it('serializes last-variant deactivation and preserves independent parent/child reactivation', async () => {

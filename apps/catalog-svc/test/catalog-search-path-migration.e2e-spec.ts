@@ -51,7 +51,7 @@ describe('CAT-D04: PostgreSQL 17 disposable search_path migration', () => {
     expect(before).toHaveLength(8);
     expect(before.every(fn => fn.config === null)).toBe(true);
     const up = readFileSync(resolve('apps/catalog-svc/migrations/0005_catalog_function_search_path.sql'), 'utf8');
-    psql(`SET ROLE po_catalog_owner;\n${up}`);
+    psql(`BEGIN; SET LOCAL ROLE po_catalog_owner;\n${up}\nCOMMIT;`);
     const upgraded = snapshot() as Array<Record<string, unknown>>;
     expect(upgraded.map(({ config: _config, ...rest }) => rest)).toEqual(before.map(({ config: _config, ...rest }) => rest));
     expect(upgraded.every(fn => Array.isArray(fn.config) && (fn.config as string[]).includes('search_path=pg_catalog, catalog'))).toBe(true);
@@ -70,7 +70,7 @@ describe('CAT-D04: PostgreSQL 17 disposable search_path migration', () => {
     END $negative$;`);
 
     const down = readFileSync(resolve('apps/catalog-svc/migrations/rollback/0005_catalog_function_search_path.sql'), 'utf8');
-    psql(`SET ROLE po_catalog_owner;\n${down}`);
+    psql(`BEGIN; SET LOCAL ROLE po_catalog_owner;\n${down}\nCOMMIT;`);
     const rolledBack = snapshot() as Array<Record<string, unknown>>;
     expect(rolledBack).toEqual(before);
   }, 90_000);

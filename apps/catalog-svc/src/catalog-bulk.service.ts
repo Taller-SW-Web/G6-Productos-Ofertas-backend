@@ -265,6 +265,77 @@ export class CatalogBulkService {
       result: 'APPLIED',
     });
   }
+  private async persistReply(
+    tx: CatalogTransaction,
+    message: CatalogEnvelope,
+    name: string,
+    result: Record<string, unknown>,
+  ) {
+    const reply = envelope(
+      name,
+      result,
+      message.correlation_id,
+      String(message.data.batch_operation_id),
+      message.message_id,
+    );
+    await tx.insert(outbox).values({
+      message_id: reply.message_id,
+      event_name: reply.name,
+      kind: reply.kind,
+      schema_version: reply.schema_version,
+      correlation_id: reply.correlation_id,
+      operation_id: reply.operation_id,
+      causation_id: reply.causation_id,
+      occurred_at: new Date(reply.occurred_at),
+      payload: reply.data,
+    });
+    await this.remember(tx, message.message_id, DELIVERY, message, message);
+  }
+  /**
+   * Avoid downloading claim-check content for an already delivered message or
+   * an operation whose durable result is already known. The apply transaction
+   * repeats both receipt checks after content retrieval while holding the same
+   * advisory locks, closing the race with concurrent first deliveries.
+   */
+  private async preflight(
+    message: CatalogEnvelope,
+  ): Promise<'APPLIED' | 'DUPLICATE' | undefined> {
+    return this.database.transaction(async (tx) => {
+      await this.lock(tx, 'bulk-delivery:' + message.message_id.toLowerCase());
+      await this.lock(
+        tx,
+        'bulk-command:' + String(message.data.batch_operation_id).toLowerCase(),
+      );
+      const delivered = await this.previous(tx, message.message_id, DELIVERY);
+      if (delivered) {
+        if (canonicalBulk(delivered.payload) !== canonicalBulk(message))
+          throw new InvalidCatalogMessage();
+        return 'DUPLICATE';
+      }
+      const old = await this.previous(
+        tx,
+        String(message.data.batch_operation_id),
+        COMMAND,
+      );
+      if (!old) return undefined;
+      if (canonicalBulk(old.payload.input) !== canonicalBulk(message.data)) {
+        await this.persistReply(tx, message, 'catalog.bulk.upsert.rejected', {
+          batch_id: message.data.batch_id,
+          batch_operation_id: message.data.batch_operation_id,
+          code: 'IDEMPOTENCY_CONFLICT',
+          detail: 'La identidad del comando ya corresponde a otra intención.',
+        });
+        return 'APPLIED';
+      }
+      await this.persistReply(
+        tx,
+        message,
+        String(old.payload.name),
+        old.payload.result as Record<string, unknown>,
+      );
+      return 'APPLIED';
+    });
+  }
   private semantic(request: BulkRequest, row: BulkRow) {
     return { batch_id: request.batch_id, mode: request.mode, row };
   }
@@ -403,6 +474,8 @@ export class CatalogBulkService {
       (message.schema_version !== 3 && !UUID.test(String(message.operation_id)))
     )
       throw new InvalidCatalogMessage();
+    const prior = await this.preflight(message);
+    if (prior) return prior;
     let claimRequest: BulkRequest | null | undefined;
     if (message.schema_version === 3) {
       const reference = message.data.content_ref as CatalogBulkContentReference;
@@ -577,25 +650,9 @@ export class CatalogBulkService {
           { input: message.data, name, result },
         );
       }
-      const reply = envelope(
-        name,
-        result,
-        message.correlation_id,
-        String(message.data.batch_operation_id),
-        message.message_id,
-      );
-      await tx.insert(outbox).values({
-        message_id: reply.message_id,
-        event_name: reply.name,
-        kind: reply.kind,
-        schema_version: reply.schema_version,
-        correlation_id: reply.correlation_id,
-        operation_id: reply.operation_id,
-        causation_id: reply.causation_id,
-        occurred_at: new Date(reply.occurred_at),
-        payload: reply.data,
-      });
-      await this.remember(tx, message.message_id, DELIVERY, message, message);
+      // Receipt checks above are repeated here under the transaction locks
+      // after any V3 content download, before applying effects.
+      await this.persistReply(tx, message, name, result);
       return 'APPLIED';
     });
   }

@@ -1,6 +1,8 @@
 -- Catalog D04: pin only the eight Catalog functions whose tracked definition
 -- has no function-level search_path. Owners, grants and bodies stay unchanged.
--- The owner-only precondition guarantees rollback restores the prior default.
+-- Supabase connects the SQL session as postgres; run this file inside a
+-- transaction after `SET LOCAL ROLE po_catalog_owner` (then COMMIT). The
+-- owner-only precondition guarantees rollback restores the prior default.
 DO $guard$
 DECLARE target text;
 BEGIN

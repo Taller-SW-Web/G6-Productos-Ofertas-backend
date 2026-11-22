@@ -40,6 +40,8 @@ export class CatalogGatewayHarness {
   private readonly keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
   readonly correlation = randomUUID();
   taxonomyAvailable = true;
+  /** Disposable browser E2E fault injection for a recoverable 503, never production code. */
+  taxonomyFailuresRemaining = 0;
 
   get gatewayOrigin() {
     if (!this.base) throw new Error('Gateway harness has not started');
@@ -98,7 +100,14 @@ export class CatalogGatewayHarness {
               },
             ],
           };
-        else if (!this.taxonomyAvailable) {
+        else if (
+          this.taxonomyFailuresRemaining > 0 &&
+          ['/api/v1/categorias/administracion', '/api/v1/marcas/administracion', '/api/v1/tipos-producto'].includes(new URL(req.url ?? '/', this.origin).pathname)
+        ) {
+          this.taxonomyFailuresRemaining--;
+          res.statusCode = 503;
+          body = { code: 'SERVICIO_NO_DISPONIBLE' };
+        } else if (!this.taxonomyAvailable) {
           res.statusCode = 503;
           body = {};
         } else if (

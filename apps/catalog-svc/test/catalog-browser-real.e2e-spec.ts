@@ -66,18 +66,39 @@ describe.skipIf(!enabled)('Browser HTTP real local: PostgreSQL 17 + Catalog + Ga
     if (adminDetail.status !== 200 || adminDetail.body.productId !== writtenId) throw new Error(`Gateway local administrative detail failed (${adminDetail.status}): ${JSON.stringify(adminDetail.body)}`);
     const updated = await gateway.call('PATCH', `/productos/${writtenId}`, { descripcion: 'Disposable PostgreSQL updated', catalogVersion: adminDetail.body.catalogVersion }, browserJwt);
     if (updated.status !== 200) throw new Error(`Gateway local PATCH failed (${updated.status}): ${JSON.stringify(updated.body)}`);
+    const variantProductWrite = await gateway.call('POST', '/productos', {
+      nombre: 'Gateway E2E variant product', descripcion: 'Variant fixture for Chromium',
+      categoriaId: 'category-fixture', tipoProductoId: 'type-fixture', marcaId: 'brand-fixture',
+      skuBase: `E2E-VARIANT-GROUP-${randomUUID()}`, tieneVariantes: true, precioBaseInicial: 20,
+      imagenes: [{ url: 'https://example.test/catalog-e2e-variant' }],
+    }, browserJwt);
+    if (variantProductWrite.status !== 201) throw new Error(`Gateway/PostgreSQL variant product write failed (${variantProductWrite.status}): ${JSON.stringify(variantProductWrite.body)}`);
+    const variantProductId = String(variantProductWrite.body.product_id);
+    const variantSku = `E2E-VARIANT-${randomUUID()}`;
+    const variantWrite = await gateway.call('POST', `/productos/${variantProductId}/variantes`, {
+      sku: variantSku, atributosIdentificadores: [], atributosNoIdentificadores: [],
+      imagenUrl: 'https://example.test/catalog-e2e-variant-sku',
+    }, browserJwt);
+    if (variantWrite.status !== 201) throw new Error(`Gateway/PostgreSQL variant write failed (${variantWrite.status}): ${JSON.stringify(variantWrite.body)}`);
+    const variantId = String(variantWrite.body.variant_id);
+    gateway.taxonomyFailuresRemaining = 3;
     const unauthenticated = await gateway.call('GET', '/productos/administracion', undefined, null);
     if (![401, 403].includes(unauthenticated.status)) throw new Error(`Gateway accepted an unauthenticated administrative read (${unauthenticated.status}).`);
+    const forbidden = await gateway.call('GET', '/productos/administracion', undefined, gateway.token({ roles: [] }));
+    if (forbidden.status !== 403) throw new Error(`Gateway did not reject a roleless administrative identity (${forbidden.status}).`);
+    const missing = await gateway.call('GET', `/productos/administracion/${randomUUID()}`, undefined, browserJwt);
+    if (missing.status !== 404) throw new Error(`Gateway did not return 404 for an absent administrative product (${missing.status}).`);
+    gateway.taxonomyFailuresRemaining = 3;
     const browser = spawnSync(process.execPath, [join(frontend, 'node_modules', 'playwright', 'cli.js'), 'test', '--config', 'tests/catalog-http-real.config.ts', 'tests/catalog-http-real.spec.ts'], {
       cwd: frontend,
       encoding: 'utf8',
       timeout: 180_000,
       windowsHide: true,
-      env: { ...process.env, NODE_ENV: 'test', CATALOG_REAL_GATEWAY_ORIGIN: gateway.gatewayOrigin, CATALOG_REAL_JWT: browserJwt, CATALOG_REAL_CORRELATION_ID: gateway.correlation, CATALOG_REAL_VITE_PORT: String(5200 + Math.floor(Math.random() * 3000)) },
+      env: { ...process.env, NODE_ENV: 'test', CATALOG_REAL_GATEWAY_ORIGIN: gateway.gatewayOrigin, CATALOG_REAL_JWT: browserJwt, CATALOG_REAL_FORBIDDEN_JWT: gateway.token({ roles: [] }), CATALOG_REAL_PRODUCT_ID: writtenId, CATALOG_REAL_VARIANT_PRODUCT_ID: variantProductId, CATALOG_REAL_VARIANT_ID: variantId, CATALOG_REAL_VARIANT_SKU: variantSku, CATALOG_REAL_CORRELATION_ID: gateway.correlation, CATALOG_REAL_VITE_PORT: String(5200 + Math.floor(Math.random() * 3000)) },
     });
     if (browser.status !== 0) throw new Error(`Chromium/Gateway/Catalog HTTP real falló (${browser.status}).\n${browser.stdout.slice(-3000)}\n${browser.stderr.slice(-1500)}`);
     console.info(browser.stdout.trim());
-  }, 240_000);
+  }, 300_000);
 
   afterAll(async () => {
     await gateway?.close();
@@ -88,7 +109,8 @@ describe.skipIf(!enabled)('Browser HTTP real local: PostgreSQL 17 + Catalog + Ga
     }
   }, 30_000);
 
-  it('runs authenticated real HTTP admin GET and product POST/PATCH, and rejects no-JWT traffic', () => {
-    expect(gateway?.gatewayOrigin).toMatch(/^http:\/\/127\.0\.0\.1:/);
+  it('runs authenticated real browser reads, UI PATCH, variants, authorization failures, 503 retry and reload', () => {
+    expect(gateway?.gatewayOrigin).toBeDefined();
+    expect(new URL(gateway!.gatewayOrigin).hostname).toBe('127.0.0.1');
   }, 1);
 });

@@ -17,10 +17,6 @@ function bulkOrigin(env: Record<string, string | undefined> = process.env) {
     env.NODE_ENV === 'test' &&
     url.protocol === 'http:' &&
     ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-  const privateDns =
-    url.protocol === 'http:' &&
-    url.hostname === 'bulk-svc' &&
-    url.port === '3001';
   const azureInternal =
     url.protocol === 'https:' &&
     url.port === '' &&
@@ -28,7 +24,7 @@ function bulkOrigin(env: Record<string, string | undefined> = process.env) {
       url.hostname,
     );
   if (
-    (!loopback && !privateDns && !azureInternal) ||
+    (!loopback && !azureInternal) ||
     url.username ||
     url.password ||
     url.pathname !== '/' ||
@@ -74,6 +70,9 @@ export class CatalogBulkContentIdentity extends CatalogPricingIdentityProvider {
   }
   protected override get scope() {
     return 'carga-masiva:contenidos:leer';
+  }
+  protected override get credentials() {
+    return this.config?.bulkContentCredentials;
   }
 }
 

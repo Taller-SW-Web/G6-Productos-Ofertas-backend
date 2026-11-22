@@ -1,5 +1,7 @@
 -- Rollback for 0005: restore the tracked 0001 state, where these eight
 -- functions have no function-level proconfig and inherit the caller default.
+-- Supabase connects as postgres; execute inside a transaction after
+-- `SET LOCAL ROLE po_catalog_owner`, then COMMIT.
 DO $guard$
 DECLARE target text;
 BEGIN
