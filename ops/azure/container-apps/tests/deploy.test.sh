@@ -64,7 +64,7 @@ MOCK_RESOURCE_GROUP=rg-g6-sb-h5-int-fork H5_DEPLOY_ENVIRONMENT=azure-h5 \
 if H5_DEPLOY_ENVIRONMENT=production bash "$DEPLOY" --inspect api-gateway "$PREVIOUS" >/dev/null 2>&1; then
   fail 'acepta un environment fuera de la allowlist'
 fi
-if H5_DEPLOY_ENVIRONMENT= bash "$DEPLOY" --inspect api-gateway "$PREVIOUS" >/dev/null 2>&1; then
+if H5_DEPLOY_ENVIRONMENT='' bash "$DEPLOY" --inspect api-gateway "$PREVIOUS" >/dev/null 2>&1; then
   fail 'acepta un environment ausente'
 fi
 printf 'PASS: azure-h5 usa su destino aislado y el ejecutor rechaza otros environments\n'
