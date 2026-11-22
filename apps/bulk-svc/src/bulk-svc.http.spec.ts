@@ -234,6 +234,12 @@ describe('Bulk HTTP import routes (isolated)', () => {
         `/api/v1/carga-masiva/productos/importaciones/${batch.batchId}/reporte`,
       );
       expect(report.status).toBe(200);
+      expect(report.headers['content-type']).toMatch(
+        /^text\/csv; charset=utf-8/i,
+      );
+      expect(report.headers['content-disposition']).toBe(
+        `attachment; filename="reporte-importacion-${batch.batchId}.csv"`,
+      );
       expect(report.text).toContain('PRICE_REJECTED');
       const resumed = await request(app.getHttpServer()).post(
         `/api/v1/carga-masiva/productos/importaciones/${batch.batchId}/reanudar`,

@@ -230,10 +230,12 @@ export class BulkSvcController {
           .join(','),
       ),
     ];
-    return response
-      .status(200)
-      .type('text/csv')
-      .send(`${lines.join('\r\n')}\r\n`);
+    response.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="reporte-importacion-${batchId}.csv"`,
+    );
+    return response.status(200).send(`${lines.join('\r\n')}\r\n`);
   }
 
   @UseGuards(BulkUserBearerGuard)
