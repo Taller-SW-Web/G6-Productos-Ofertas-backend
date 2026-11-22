@@ -1,8 +1,8 @@
 -- Bulk actor ownership for private imports and export jobs.
 -- Existing rows stay NULL because their authenticated owner cannot be recovered safely.
--- Forward rollback strategy: retain these nullable columns/indexes after deploy;
--- reverting to a build that ignores them is safe, but dropping them after new
--- owner assignments would erase isolation data and therefore is not a safe rollback.
+-- Rollback policy: retain this migration and run only service versions that still
+-- enforce actor ownership on every read. Never roll back to code that reads jobs
+-- by UUID without checking owner_sub. Do not infer owners for historical rows.
 ALTER TABLE bulk.batch_jobs
     ADD COLUMN IF NOT EXISTS owner_sub uuid;
 

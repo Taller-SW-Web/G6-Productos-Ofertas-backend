@@ -93,12 +93,38 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
     ).rows;
     expect(legacyBatchOwner?.owner_sub).toBeNull();
     expect(legacyExportOwner?.owner_sub).toBeNull();
-    const indexes = await pool.query<{ indexname: string }>(
-      "SELECT indexname FROM pg_indexes WHERE schemaname = 'bulk' AND indexname IN ('ix_batch_jobs_owner_created_at', 'ix_export_jobs_owner_created_at')",
+    const ownershipColumns = await pool.query<{
+      table_name: string;
+      data_type: string;
+      is_nullable: string;
+    }>(
+      "SELECT table_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = 'bulk' AND column_name = 'owner_sub' ORDER BY table_name",
     );
-    expect(indexes.rows.map(({ indexname }) => indexname).sort()).toEqual([
+    expect(ownershipColumns.rows).toEqual([
+      {
+        table_name: 'batch_jobs',
+        data_type: 'uuid',
+        is_nullable: 'YES',
+      },
+      {
+        table_name: 'export_jobs',
+        data_type: 'uuid',
+        is_nullable: 'YES',
+      },
+    ]);
+    const indexes = await pool.query<{
+      indexname: string;
+      indexdef: string;
+    }>(
+      "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'bulk' AND indexname IN ('ix_batch_jobs_owner_created_at', 'ix_export_jobs_owner_created_at') ORDER BY indexname",
+    );
+    expect(indexes.rows.map(({ indexname }) => indexname)).toEqual([
       'ix_batch_jobs_owner_created_at',
       'ix_export_jobs_owner_created_at',
+    ]);
+    expect(indexes.rows.map(({ indexdef }) => indexdef)).toEqual([
+      expect.stringMatching(/\(owner_sub, created_at\)/),
+      expect.stringMatching(/\(owner_sub, created_at\)/),
     ]);
     await pool.query(
       'TRUNCATE bulk.inbox, bulk.outbox, bulk.row_domain_steps, bulk.batch_rows, bulk.export_jobs, bulk.batch_jobs, bulk.file_manifests CASCADE',
