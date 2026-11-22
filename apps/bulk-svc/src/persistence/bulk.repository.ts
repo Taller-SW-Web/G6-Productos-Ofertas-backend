@@ -1273,15 +1273,21 @@ export class BulkPersistenceRepository {
     ownerSub: string,
   ): Promise<Record<string, unknown> | null> {
     try {
+      const [ownedBatch] = await this.db
+        .select({ id: batchJobs.id })
+        .from(batchJobs)
+        .where(
+          and(eq(batchJobs.batchId, batchId), eq(batchJobs.ownerSub, ownerSub)),
+        )
+        .limit(1);
+      if (!ownedBatch) return null;
       const [receipt] = await this.db
         .select({ payload: inbox.payload })
         .from(inbox)
-        .innerJoin(batchJobs, eq(batchJobs.batchId, inbox.messageId))
         .where(
           and(
             eq(inbox.messageId, batchId),
             eq(inbox.handler, 'bulk.import.admission'),
-            eq(batchJobs.ownerSub, ownerSub),
           ),
         )
         .limit(1);
