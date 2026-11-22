@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { createServer, request as httpRequest, type Server } from 'node:http';
 import { setTimeout as pause } from 'node:timers/promises';
 import { CatalogGatewayHarness } from './support/catalog-gateway-harness.js';
 import { readPostgresSettings, type PostgresSettings } from '../src/database.js';
@@ -17,6 +18,7 @@ describe.skipIf(!enabled)('Browser HTTP real local: PostgreSQL 17 + Catalog + Ga
   let cert = '';
   let settings: PostgresSettings;
   let gateway: CatalogGatewayHarness | undefined;
+  let browserProxy: Server | undefined;
 
   const command = (name: string, args: string[], input?: string) => {
     const result = spawnSync(name, args, { input, encoding: 'utf8', timeout: 60_000, windowsHide: true });
@@ -48,6 +50,7 @@ describe.skipIf(!enabled)('Browser HTTP real local: PostgreSQL 17 + Catalog + Ga
     const port = command('docker', ['port', container, '5432/tcp']).split(':').at(-1);
     if (!port || !/^\d+$/.test(port)) throw new Error('PostgreSQL no quedó publicado en un puerto local válido.');
     settings = readPostgresSettings({ NODE_ENV: 'test', PGHOST: 'localhost', G6_CONNECT_HOST: '127.0.0.1', PGPORT: port, PGDATABASE: 'postgres', PGUSER: 'catalog_app', PGPASSWORD: 'isolated-runtime-password', PGSSLMODE: 'verify-full', PGSSLROOTCERT: cert, G6_DATABASE_SCHEMA: 'catalog', G6_EXPECTED_ROLE: 'catalog_app', G6_CONNECTION_MODE: 'direct' });
+    const vitePort = 5200 + Math.floor(Math.random() * 3000);
     gateway = new CatalogGatewayHarness();
     await gateway.start(settings, {}, false, [], false, true);
     const directRead = await gateway.call('GET', '/productos/administracion', undefined, gateway.token(), true);
@@ -76,7 +79,9 @@ describe.skipIf(!enabled)('Browser HTTP real local: PostgreSQL 17 + Catalog + Ga
     const variantProductId = String(variantProductWrite.body.product_id);
     const variantSku = `E2E-VARIANT-${randomUUID()}`;
     const variantWrite = await gateway.call('POST', `/productos/${variantProductId}/variantes`, {
-      sku: variantSku, atributosIdentificadores: [], atributosNoIdentificadores: [],
+      sku: variantSku,
+      atributosIdentificadores: [{ caracteristica_id: 'size', nombre: 'Size', valor: 'M' }],
+      atributosNoIdentificadores: [],
       imagenUrl: 'https://example.test/catalog-e2e-variant-sku',
     }, browserJwt);
     if (variantWrite.status !== 201) throw new Error(`Gateway/PostgreSQL variant write failed (${variantWrite.status}): ${JSON.stringify(variantWrite.body)}`);
@@ -89,18 +94,60 @@ describe.skipIf(!enabled)('Browser HTTP real local: PostgreSQL 17 + Catalog + Ga
     const missing = await gateway.call('GET', `/productos/administracion/${randomUUID()}`, undefined, browserJwt);
     if (missing.status !== 404) throw new Error(`Gateway did not return 404 for an absent administrative product (${missing.status}).`);
     gateway.taxonomyFailuresRemaining = 3;
-    const browser = spawnSync(process.execPath, [join(frontend, 'node_modules', 'playwright', 'cli.js'), 'test', '--config', 'tests/catalog-http-real.config.ts', 'tests/catalog-http-real.spec.ts'], {
-      cwd: frontend,
-      encoding: 'utf8',
-      timeout: 180_000,
-      windowsHide: true,
-      env: { ...process.env, NODE_ENV: 'test', CATALOG_REAL_GATEWAY_ORIGIN: gateway.gatewayOrigin, CATALOG_REAL_JWT: browserJwt, CATALOG_REAL_FORBIDDEN_JWT: gateway.token({ roles: [] }), CATALOG_REAL_PRODUCT_ID: writtenId, CATALOG_REAL_VARIANT_PRODUCT_ID: variantProductId, CATALOG_REAL_VARIANT_ID: variantId, CATALOG_REAL_VARIANT_SKU: variantSku, CATALOG_REAL_CORRELATION_ID: gateway.correlation, CATALOG_REAL_VITE_PORT: String(5200 + Math.floor(Math.random() * 3000)) },
+    const browserPort = 8200 + Math.floor(Math.random() * 3000);
+    const proxyTrace: string[] = [];
+    browserProxy = createServer((request, response) => {
+      const targetOrigin = request.url?.startsWith('/api/v1/') ? gateway!.gatewayOrigin : `http://127.0.0.1:${vitePort}`;
+      const target = new URL(request.url ?? '/', targetOrigin);
+      proxyTrace.push(`${request.method} ${request.url} -> ${targetOrigin}`);
+      const outgoing = httpRequest(target, {
+        method: request.method,
+        headers: { ...request.headers, host: target.host },
+      }, incoming => {
+        proxyTrace.push(`${request.method} ${request.url} <- ${incoming.statusCode}`);
+        response.writeHead(incoming.statusCode ?? 502, incoming.statusMessage, incoming.headers);
+        incoming.pipe(response);
+      });
+      outgoing.on('error', error => {
+        proxyTrace.push(`${request.method} ${request.url} failed: ${error.message}`);
+        if (!response.headersSent) response.writeHead(502, { 'content-type': 'text/plain' });
+        response.end(`Local E2E proxy failed: ${error.message}`);
+      });
+      request.pipe(outgoing);
     });
-    if (browser.status !== 0) throw new Error(`Chromium/Gateway/Catalog HTTP real falló (${browser.status}).\n${browser.stdout.slice(-3000)}\n${browser.stderr.slice(-1500)}`);
-    console.info(browser.stdout.trim());
+    browserProxy.listen(browserPort, '127.0.0.1');
+    await new Promise<void>((resolve, reject) => {
+      browserProxy!.once('listening', resolve);
+      browserProxy!.once('error', reject);
+    });
+    const browserOrigin = `http://127.0.0.1:${browserPort}`;
+    console.info(`[catalog-browser-proxy] listening ${browserOrigin}; Vite http://127.0.0.1:${vitePort}; Gateway ${gateway.gatewayOrigin}`);
+    const browser = spawn(process.execPath, [join(frontend, 'node_modules', 'playwright', 'cli.js'), 'test', '--config', 'tests/catalog-http-real.config.ts', 'tests/catalog-http-real.spec.ts'], {
+      cwd: frontend,
+      windowsHide: true,
+      env: { ...process.env, NODE_ENV: 'test', CATALOG_REAL_BROWSER_ORIGIN: browserOrigin, CATALOG_REAL_JWT: browserJwt, CATALOG_REAL_FORBIDDEN_JWT: gateway.token({ roles: [] }), CATALOG_REAL_PRODUCT_ID: writtenId, CATALOG_REAL_VARIANT_PRODUCT_ID: variantProductId, CATALOG_REAL_VARIANT_ID: variantId, CATALOG_REAL_VARIANT_SKU: variantSku, CATALOG_REAL_CORRELATION_ID: gateway.correlation, CATALOG_REAL_VITE_PORT: String(vitePort), CATALOG_REAL_BROWSER_PORT: String(browserPort) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let browserStdout = '';
+    let browserStderr = '';
+    browser.stdout?.setEncoding('utf8').on('data', chunk => { browserStdout += chunk; });
+    browser.stderr?.setEncoding('utf8').on('data', chunk => { browserStderr += chunk; });
+    const browserStatus = await new Promise<number>((resolve, reject) => {
+      const timeout = setTimeout(() => { browser.kill(); reject(new Error('Chromium local E2E superó el límite de 180 segundos.')); }, 180_000);
+      browser.once('error', error => { clearTimeout(timeout); reject(error); });
+      browser.once('exit', code => { clearTimeout(timeout); resolve(code ?? 1); });
+    });
+    if (browserStatus !== 0) {
+      const bridgeTrace = browserStdout.split(/\r?\n/).filter(line => line.includes('[catalog-http-real-bridge]')).join('\n');
+      const bridgeFile = join(directory, 'frontend-bridge.log');
+      const bridgeFileTrace = existsSync(bridgeFile) ? readFileSync(bridgeFile, 'utf8') : 'No hubo traza del middleware Vite.';
+      throw new Error(`Chromium/Gateway/Catalog HTTP real falló (${browserStatus}).\nProxy trace:\n${proxyTrace.join('\n') || 'sin solicitudes recibidas'}\n${bridgeTrace}\n${bridgeFileTrace}\n${browserStdout.slice(-3000)}\n${browserStderr.slice(-1500)}`);
+    }
+    console.info(browserStdout.trim());
   }, 300_000);
 
   afterAll(async () => {
+    await new Promise<void>(resolve => browserProxy?.close(() => resolve()) ?? resolve());
     await gateway?.close();
     spawnSync('docker', ['rm', '--force', container], { timeout: 20_000, windowsHide: true, stdio: 'ignore' });
     if (directory) {

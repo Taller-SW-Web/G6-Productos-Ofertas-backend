@@ -207,6 +207,14 @@ export class CatalogGatewayHarness {
               },
             ],
           };
+        else if (req.url === '/api/v1/caracteristicas/size')
+          body = {
+            caracteristicaId: 'size',
+            nombre: 'Size',
+            estado: 'ACTIVO',
+            tipo: 'TEXTO',
+            unidadMedida: null,
+          };
         else {
           res.statusCode = 404;
           body = {};
