@@ -755,7 +755,10 @@ export class CatalogBulkService {
       !UUID.test(String(message.data.batch_id)) ||
       !UUID.test(String(message.data.batch_operation_id)) ||
       (message.operation_id != null && !UUID.test(message.operation_id)) ||
-      ((message.schema_version === 3 || message.schema_version === 4) &&
+      (message.schema_version === 4 &&
+        message.operation_id !== message.data.batch_operation_id) ||
+      (message.schema_version === 3 &&
+        message.operation_id != null &&
         message.operation_id !== message.data.batch_operation_id) ||
       (message.schema_version !== 3 &&
         message.schema_version !== 4 &&
