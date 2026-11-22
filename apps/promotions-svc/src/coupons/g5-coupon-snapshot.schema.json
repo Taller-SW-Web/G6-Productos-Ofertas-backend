@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Evidencia comercial privada de cupón G5–G6 H5",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "order_id",
+    "commercial_snapshot_ref",
+    "reservation_id",
+    "effective_at",
+    "customer_ref",
+    "channel_id",
+    "coupon_code",
+    "lines"
+  ],
+  "properties": {
+    "order_id": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "commercial_snapshot_ref": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "reservation_id": { "type": "string", "format": "uuid" },
+    "effective_at": { "type": "string", "format": "date-time" },
+    "customer_ref": { "type": ["string", "null"], "format": "uuid" },
+    "channel_id": {
+      "type": "string",
+      "enum": ["MARKETPLACE", "CHATBOT", "RETAIL"]
+    },
+    "coupon_code": { "type": "string", "minLength": 1, "pattern": "\\S" },
+    "lines": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sku",
+          "product_id",
+          "quantity",
+          "currency",
+          "regular_price",
+          "offer_price"
+        ],
+        "properties": {
+          "sku": { "type": "string", "minLength": 1, "pattern": "\\S" },
+          "product_id": { "type": "string", "minLength": 1, "pattern": "\\S" },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+          "regular_price": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,6})?$",
+            "maxLength": 24
+          },
+          "offer_price": {
+            "type": ["string", "null"],
+            "pattern": "^(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,6})?$",
+            "maxLength": 24
+          }
+        }
+      }
+    }
+  }
+}

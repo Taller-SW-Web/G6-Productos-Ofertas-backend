@@ -11,7 +11,7 @@ describe('Phase 1 exact operation policy and JWT coexistence', () => {
   it('permits exactly the academic matrix except unimplemented multipart prevalidation', () => {
     const expected = readFileSync(
       new URL(
-        '../../../../ops/oracle/H4-MATRIZ-OPERACIONES-FASE1.csv',
+        '../../../../docs/hito-4/H4-MATRIZ-OPERACIONES-FASE1.csv',
         import.meta.url,
       ),
       'utf8',

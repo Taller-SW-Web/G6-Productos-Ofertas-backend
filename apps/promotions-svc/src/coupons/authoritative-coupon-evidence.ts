@@ -6,6 +6,7 @@ import { normalizeCouponCode } from '../domain/promotion-rules.js';
 import { PromotionsRepositories } from '../infrastructure/persistence/repositories.js';
 import * as schema from '../infrastructure/persistence/schema.js';
 import { consumptionName, type CouponCommand } from './coupon-command.js';
+import type { InventoryCouponEvidence } from './inventory-coupon-evidence.js';
 import type {
   ConsumptionEvidence,
   CouponEvidenceProvider,
@@ -13,13 +14,12 @@ import type {
 
 // Internal verified facts, NOT a new G5/Inventory wire DTO. An authorized source
 // must resolve and bind the durable snapshot and reservation before returning.
-// G5's current pedido DTO alone cannot supply regular/offer prices or prove a
-// reservation. No HTTP endpoint or cross-schema query is inferred here.
+// Inventory remains responsible for verifying the reservation.
 export interface DurableCouponFacts {
   orderId: string;
   reservationId: string;
   commercialSnapshotRef: string;
-  reservationConfirmed: boolean;
+  reservationConfirmed?: boolean;
   snapshotDurable: boolean;
   effectiveAt: string;
   customerRef: string | null;
@@ -34,15 +34,19 @@ export interface CouponDurableFactsSource {
   ): Promise<DurableCouponFacts>;
 }
 
-// Deliberately not registered in Nest: the real facts source/identity remains a
-// specific integration dependency. SQL uses the processor's existing client;
-// there is no second pool, transaction, migration or production fixture.
+export const COUPON_H5_FACTS_SOURCE = Symbol('COUPON_H5_FACTS_SOURCE');
+
+// SQL revalidation uses the processor's transaction. H5 requires Inventory's
+// evidence independently of the commercial snapshot source.
 export class AuthoritativeCouponEvidence implements CouponEvidenceProvider<PoolClient> {
   private readonly prepared = new WeakMap<
     ConsumptionEvidence,
     DurableCouponFacts
   >();
-  constructor(private readonly source: CouponDurableFactsSource) {}
+  constructor(
+    private readonly source: CouponDurableFactsSource,
+    private readonly inventory?: Pick<InventoryCouponEvidence, 'confirms'>,
+  ) {}
 
   async verify(
     command: CouponCommand,
@@ -54,12 +58,14 @@ export class AuthoritativeCouponEvidence implements CouponEvidenceProvider<PoolC
     // Read external evidence before acquiring coupon/promotion row locks. The
     // processor bounds this entire call and already serializes order/operation.
     const facts = await this.source.read(command, signal);
+    const inventoryConfirmed = await this.inventory?.confirms(command, signal);
     signal.throwIfAborted();
     const proof: ConsumptionEvidence = {
       orderId: facts.orderId,
       reservationId: facts.reservationId,
       commercialSnapshotRef: facts.commercialSnapshotRef,
-      reservationConfirmed: facts.reservationConfirmed === true,
+      reservationConfirmed:
+        inventoryConfirmed ?? facts.reservationConfirmed === true,
       snapshotDurable: facts.snapshotDurable === true,
       eligible: false,
     };

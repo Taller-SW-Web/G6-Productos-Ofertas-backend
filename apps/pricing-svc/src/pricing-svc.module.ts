@@ -24,6 +24,7 @@ import {
 import { createH4CatalogClient } from './http/h4-catalog-client.js';
 import { CatalogServiceToken } from './http/catalog-token.js';
 import { PricingOutboxRelay } from './messaging/outbox-relay.js';
+import { PricingServiceBusRuntime } from './messaging/service-bus-relay.js';
 import { createPricingPriceChangedFacts } from './messaging/pricing-fact.js';
 import { PricingWriteAuthorization } from './http/pricing-write.authorization.js';
 import { PricingScheduleReconciler } from './messaging/schedule-reconciler.js';
@@ -56,6 +57,7 @@ import {
     PricingImports,
     CommercialPrices,
     PricingOutboxRelay,
+    PricingServiceBusRuntime,
     PricingScheduleReconciler,
     PricingProductInitialization,
     CatalogSkuDeactivated,

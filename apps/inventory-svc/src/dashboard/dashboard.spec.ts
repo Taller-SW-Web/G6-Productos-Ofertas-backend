@@ -195,4 +195,67 @@ describe('DashboardService — indicadores y distribución (SPEC-016)', () => {
       service.obtenerDashboard({ productoId: 'prod-1' }),
     ).rejects.toMatchObject({ problem: { status: 400, code: 'VALIDACION' } });
   });
+
+  describe('listarSaldosFisicos (INV-B03)', () => {
+    it('devuelve saldos físicos con campos de ubicación real del JOIN y calcula estados', async () => {
+      const res = await service.listarSaldosFisicos({});
+
+      expect(res.meta.total).toBe(4); // 4 saldos en mockDb
+      expect(res.items).toHaveLength(4);
+
+      for (const item of res.items) {
+        expect(item.sku).toBeDefined();
+        expect(item.ubicacion.locationId).toBeDefined();
+        expect(item.ubicacion.codigo).toMatch(/^ALM-|^TDA-/);
+        expect(item.ubicacion.nombre).toBeDefined();
+        expect(['DISPONIBLE', 'STOCK_BAJO', 'AGOTADO']).toContain(item.estado);
+        expect(item.stockVersion).toBeGreaterThanOrEqual(1);
+      }
+    });
+
+    it('respeta paginación y orden determinista sin duplicados entre páginas', async () => {
+      const p1 = await service.listarSaldosFisicos({
+        pagina: '1',
+        tamanio: '2',
+      });
+      expect(p1.items).toHaveLength(2);
+      expect(p1.meta.pagina).toBe(1);
+      expect(p1.meta.tamanio).toBe(2);
+      expect(p1.meta.totalPaginas).toBe(2);
+
+      const p2 = await service.listarSaldosFisicos({
+        pagina: '2',
+        tamanio: '2',
+      });
+      expect(p2.items).toHaveLength(2);
+      expect(p2.meta.pagina).toBe(2);
+
+      const keys1 = p1.items.map((i) => `${i.sku}:${i.ubicacion.locationId}`);
+      const keys2 = p2.items.map((i) => `${i.sku}:${i.ubicacion.locationId}`);
+      // Ningún item de la página 1 debe repetirse en la página 2
+      expect(keys1.some((k) => keys2.includes(k))).toBe(false);
+    });
+
+    it('filtra correctamente por SKU, ubicación y estado', async () => {
+      const porSku = await service.listarSaldosFisicos({ sku: skuNik });
+      expect(porSku.items.every((i) => i.sku === skuNik)).toBe(true);
+
+      const porLoc = await service.listarSaldosFisicos({
+        locationId: locLurin,
+      });
+      expect(
+        porLoc.items.every((i) => i.ubicacion.locationId === locLurin),
+      ).toBe(true);
+    });
+
+    it('rechaza parámetros inválidos con 400 VALIDACION', async () => {
+      await expect(
+        service.listarSaldosFisicos({ locationId: 'no-es-uuid' }),
+      ).rejects.toMatchObject({ problem: { status: 400, code: 'VALIDACION' } });
+
+      await expect(
+        service.listarSaldosFisicos({ estado: 'ESTADO_INVALIDO' }),
+      ).rejects.toMatchObject({ problem: { status: 400, code: 'VALIDACION' } });
+    });
+  });
 });

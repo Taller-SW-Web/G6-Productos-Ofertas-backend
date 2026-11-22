@@ -4,9 +4,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 WORKFLOW="$ROOT/.github/workflows/cd-services-azure.yml"
 CI_WORKFLOW="$ROOT/.github/workflows/ci.yml"
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
-for required in 'workflow_dispatch:' 'environment: azure-h5' 'id-token: write' 'cancel-in-progress: false' 'max-parallel: 1' 'packages: write' 'azure/login@v2' 'container-apps/deploy.sh' 'smoke-service.sh' 'reconcile-recovery.sh' 'g6-azure-h5-' 'publish-g6-ghcr-' 'ops/shared/ensure-ghcr-sha-image.sh'; do
+for required in 'workflow_dispatch:' 'azure-h5-pilot-234' 'PILOT_SELF_REVIEW_SCOPE_REJECTED' 'id-token: write' 'cancel-in-progress: false' 'max-parallel: 1' 'packages: write' 'azure/login@v2' 'container-apps/deploy.sh' 'smoke-service.sh' 'reconcile-recovery.sh' 'g6-azure-h5-' 'publish-g6-ghcr-' 'ops/shared/ensure-ghcr-sha-image.sh'; do
   grep -Fq "$required" "$WORKFLOW" || fail "falta $required"
 done
+grep -Fq "|| 'azure-h5'" "$WORKFLOW" || fail 'falta el environment normal por defecto'
 if grep -Eq '^[[:space:]]+workflow_run:' "$WORKFLOW"; then fail 'CD no debe desplegar automáticamente'; fi
 if grep -Fq 'ops/oracle/' "$WORKFLOW"; then fail 'CD Azure conserva dependencia operativa Oracle'; fi
 grep -Fq "github.repository == 'Taller-SW-Web/G6-Productos-Ofertas-backend'" "$WORKFLOW" || fail 'repositorio oficial no fijado'
@@ -23,8 +24,8 @@ prepare_gate_line="$(grep -nF 'Preflight read-only de protección azure-h5 antes
 security_job_line="$(grep -n '^  security:' "$WORKFLOW" | cut -d: -f1)"
 publish_job_line="$(grep -n '^  publish:' "$WORKFLOW" | cut -d: -f1)"
 [[ -n "$prepare_gate_line" && -n "$security_job_line" && -n "$publish_job_line" && "$prepare_gate_line" -lt "$security_job_line" && "$security_job_line" -lt "$publish_job_line" ]] || fail 'preflight del environment no bloquea antes de GHCR'
-deploy_gate_line="$(grep -nF 'Revalidar reglas reales del environment inmediatamente antes de OIDC' "$WORKFLOW" | head -n 1 | cut -d: -f1)"
-deploy_login_line="$(grep -nF 'Autenticar en Azure mediante OIDC' "$WORKFLOW" | head -n 1 | cut -d: -f1)"
+deploy_gate_line="$(grep -nFx '      - name: Revalidar reglas reales del environment inmediatamente antes de OIDC' "$WORKFLOW" | cut -d: -f1)"
+deploy_login_line="$(grep -nFx '      - name: Autenticar en Azure mediante OIDC' "$WORKFLOW" | cut -d: -f1)"
 recovery_gate_line="$(grep -nF 'Revalidar reglas reales del environment inmediatamente antes de OIDC para recuperación' "$WORKFLOW" | cut -d: -f1)"
 recovery_login_line="$(grep -nF 'Autenticar en Azure mediante OIDC para recuperación' "$WORKFLOW" | head -n 1 | cut -d: -f1)"
 [[ -n "$deploy_gate_line" && -n "$deploy_login_line" && "$deploy_gate_line" -lt "$deploy_login_line" ]] || fail 'el deploy autentica antes de revalidar protección'

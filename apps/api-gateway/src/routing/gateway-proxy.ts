@@ -4,6 +4,7 @@ import { finished } from 'node:stream/promises';
 import { Inject, Injectable } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { CONTRACT_ROUTES } from './contract-routes.js';
+import { G5_H5_ROUTES } from './g5-h5-routes.js';
 import {
   GatewayFailure,
   GatewayIdentity,
@@ -17,14 +18,20 @@ import { streamedRequest } from './streamed-request.js';
 import { streamFileResponse } from './streamed-response.js';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const routes = [...CONTRACT_ROUTES].sort(
-  (a, b) =>
-    (a.path.match(/\{/g)?.length ?? 0) - (b.path.match(/\{/g)?.length ?? 0),
+function bySpecificity(a: ContractRoute, b: ContractRoute): number {
+  return (
+    (a.path.match(/\{/g)?.length ?? 0) - (b.path.match(/\{/g)?.length ?? 0)
+  );
+}
+const routes = [...CONTRACT_ROUTES].sort(bySpecificity);
+const routesWithG5H5 = [...CONTRACT_ROUTES, ...G5_H5_ROUTES].sort(
+  bySpecificity,
 );
 
 export function matchContractRoute(
   method: string,
   path: string,
+  g5H5Enabled = false,
 ): ContractRoute | undefined {
   if (/\\|%00/i.test(path)) return undefined;
   const actual = path.split('/');
@@ -34,7 +41,7 @@ export function matchContractRoute(
   } catch {
     return undefined;
   }
-  return routes.find(
+  return (g5H5Enabled ? routesWithG5H5 : routes).find(
     (route) =>
       route.method === method &&
       route.path.split('/').length === actual.length &&
@@ -128,7 +135,12 @@ export class GatewayProxy {
 
   async forward(req: Request, res: Response): Promise<void> {
     const path = req.originalUrl.split('?')[0];
-    const route = matchContractRoute(req.method, path);
+    const route = matchContractRoute(
+      req.method,
+      path,
+      this.settings.securityMode === 'G7_AUTHENTICATED' &&
+        this.settings.g5H5Enabled === true,
+    );
     if (!route) {
       res.status(404).end();
       return;

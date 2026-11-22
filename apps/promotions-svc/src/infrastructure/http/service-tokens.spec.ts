@@ -133,6 +133,75 @@ describe('Promotions own G7 client_credentials (explicit contract fixture)', () 
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it('uses only the dedicated Promotions identity for private reservation evidence', async () => {
+    const scope = 'inventario:reservas:estado:leer';
+    const evidence = {
+      ...request,
+      operationId: 'obtenerEvidenciaReservaCuponInterno',
+      scope,
+    } as const;
+    const jwt = token({ sub: 'promotions-svc', scope });
+    const fetcher = vi.fn(async (_url: string, options: RequestInit) => {
+      const params = new URLSearchParams(String(options.body));
+      expect(params.get('client_id')).toBe('promotions-svc');
+      expect(params.get('client_secret')).toBe('synthetic-h5-secret');
+      expect(params.get('scope')).toBe(scope);
+      return response(jwt, { scopes: [scope] });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    expect(await source()(evidence, signal())).toBeNull();
+    expect(fetcher).not.toHaveBeenCalled();
+    const dedicated = source(
+      config({ PROMOTIONS_H5_SERVICE_CLIENT_SECRET: 'synthetic-h5-secret' }),
+    );
+    expect(await dedicated(evidence, signal())).toBe(jwt);
+    expect(await dedicated(evidence, signal())).toBe(jwt);
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it('requires the G7 Ventas audience and scope on the dedicated Promotions token', async () => {
+    const scope = 'ventas:pedidos:evidencia-cupon:leer';
+    const request = {
+      operationId: 'obtenerSnapshotCuponG5',
+      audience: 'api-ventas',
+      scope,
+    } as const;
+    const jwt = token({
+      sub: 'promotions-svc',
+      aud: ['api-productos', 'api-ventas'],
+      scope,
+    });
+    const fetcher = vi.fn(async (_url: string, options: RequestInit) => {
+      expect(
+        Object.fromEntries(new URLSearchParams(String(options.body))),
+      ).toEqual({
+        grant_type: 'client_credentials',
+        client_id: 'promotions-svc',
+        client_secret: 'synthetic-h5-secret',
+        scope,
+      });
+      return response(jwt, { scopes: [scope] });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    expect(await source()(request, signal())).toBeNull();
+    expect(fetcher).not.toHaveBeenCalled();
+    const settings = config({
+      PROMOTIONS_H5_SERVICE_CLIENT_SECRET: 'synthetic-h5-secret',
+    });
+    fetcher.mockResolvedValueOnce(
+      response(token({ sub: 'promotions-svc', scope }), { scopes: [scope] }),
+    );
+    const dedicated = source(settings);
+    await expect(dedicated(request, signal())).rejects.toThrow(
+      'PROMOTIONS_SERVICE_TOKEN_UNAVAILABLE',
+    );
+    expect(await dedicated(request, signal())).toBe(jwt);
+    await expect(
+      dedicated({ ...request, audience: 'api-productos' }, signal()),
+    ).rejects.toThrow('PROMOTIONS_SERVICE_TOKEN_UNAVAILABLE');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it('renews before the earlier of JWT expiry and expiresIn', async () => {
     let now = Date.now();
     vi.spyOn(Date, 'now').mockImplementation(() => now);

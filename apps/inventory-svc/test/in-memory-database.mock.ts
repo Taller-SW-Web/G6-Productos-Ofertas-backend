@@ -191,6 +191,7 @@ export class InMemoryDatabaseMock implements IDatabaseService {
   operations: OperationRow[] = [];
   kardex: KardexRow[] = [];
   outbox: OutboxRow[] = [];
+  outboxDeliveries: any[] = [];
   inbox: InboxEntity[] = [];
   commercialRoutes: CommercialRouteRow[] = [];
   thresholdOverrides: ThresholdOverrideRow[] = [];
@@ -290,6 +291,7 @@ export class InMemoryDatabaseMock implements IDatabaseService {
       operations: JSON.parse(JSON.stringify(this.operations)),
       kardex: JSON.parse(JSON.stringify(this.kardex)),
       outbox: JSON.parse(JSON.stringify(this.outbox)),
+      outboxDeliveries: JSON.parse(JSON.stringify(this.outboxDeliveries)),
       inbox: structuredClone(this.inbox),
       commercialRoutes: JSON.parse(JSON.stringify(this.commercialRoutes)),
       thresholdOverrides: JSON.parse(JSON.stringify(this.thresholdOverrides)),
@@ -311,6 +313,7 @@ export class InMemoryDatabaseMock implements IDatabaseService {
     this.operations = snapshot.operations;
     this.kardex = snapshot.kardex;
     this.outbox = snapshot.outbox;
+    this.outboxDeliveries = snapshot.outboxDeliveries || [];
     this.inbox = snapshot.inbox;
     this.commercialRoutes = snapshot.commercialRoutes;
     this.thresholdOverrides = snapshot.thresholdOverrides;
@@ -621,21 +624,122 @@ export class InMemoryDatabaseMock implements IDatabaseService {
       return { rows: [], rowCount: 1 };
     }
 
+    // CTE WITH saldo AS (para listarSaldosFisicos y obtenerAlertasInternas)
+    if (s.includes('WITH SALDO AS')) {
+      const skuFilter = params?.[0] as string | null | undefined;
+      const locFilter = params?.[1] as string | null | undefined;
+      const defaultThreshold = Number(params?.[2] ?? 10);
+      const estadoFilter = params?.[3] as string | null | undefined;
+      const onlyActiveLocs = s.includes('L.ACTIVE = TRUE');
+      const onlyAlerts = s.includes("ESTADO IN ('AGOTADO', 'STOCK_BAJO')");
+
+      const items: any[] = [];
+      for (const b of this.stockBalance) {
+        if (skuFilter && b.sku_id !== skuFilter) continue;
+        if (locFilter && b.location_id !== locFilter) continue;
+        const l = this.locations.find((loc) => loc.id === b.location_id);
+        if (!l) continue;
+        if (onlyActiveLocs && !l.active) continue;
+
+        const skuOverride = this.thresholdOverrides.find(
+          (t) =>
+            t.sku_id === b.sku_id &&
+            (t.location_id === null || t.location_id === undefined),
+        );
+        const globalOverride = this.thresholdOverrides.find(
+          (t) =>
+            (t.sku_id === null || t.sku_id === undefined) &&
+            (t.location_id === null || t.location_id === undefined),
+        );
+        const umbralEfectivo =
+          skuOverride?.umbral_efectivo ??
+          globalOverride?.umbral_efectivo ??
+          defaultThreshold;
+
+        // Cálculo seguro de disponibilidad según componentes físicos (Marco P1)
+        const available = Math.max(
+          0,
+          Number(b.on_hand ?? 0) -
+            Number(b.reserved ?? 0) -
+            Number(b.blocked ?? 0),
+        );
+        const estado =
+          available === 0
+            ? 'AGOTADO'
+            : available <= umbralEfectivo
+              ? 'STOCK_BAJO'
+              : 'DISPONIBLE';
+
+        if (onlyAlerts && estado === 'DISPONIBLE') continue;
+        if (estadoFilter && estado !== estadoFilter) continue;
+
+        items.push({
+          sku: b.sku_id,
+          locationId: l.id,
+          locationCode: l.code,
+          locationName: l.name,
+          locationType: l.type,
+          locationActive: l.active,
+          skuActivo: null,
+          onHand: b.on_hand,
+          reserved: b.reserved,
+          blocked: b.blocked,
+          available,
+          stockVersion: String(b.stock_version ?? 1),
+          updatedAt: new Date(),
+          umbralEfectivo,
+          estado,
+        });
+      }
+
+      if (s.includes('COUNT(*)')) {
+        return { rows: [{ total: String(items.length) }] as any, rowCount: 1 };
+      }
+
+      items.sort(
+        (a, b) =>
+          a.sku.localeCompare(b.sku) ||
+          a.locationId.localeCompare(b.locationId),
+      );
+
+      const limit = Number(params?.[4] ?? 20);
+      const offset = Number(params?.[5] ?? 0);
+      const paged = items.slice(offset, offset + limit);
+      return { rows: paged as any, rowCount: paged.length };
+    }
+
     // SELECT from locations
     if (s.includes('FROM INVENTORY.LOCATIONS')) {
-      if (s.includes('ACTIVE = TRUE')) {
-        if (s.includes('WHERE ID = $1')) {
-          const rows = this.locations.filter(
-            (l) => l.id === params?.[0] && l.active,
-          );
-          return { rows: rows as any, rowCount: rows.length };
-        }
+      let filtered = [...this.locations];
+      if (s.includes('WHERE ACTIVE = TRUE')) {
+        filtered = filtered.filter((l) => l.active);
+      } else if (s.includes('WHERE ID = $1')) {
+        filtered = filtered.filter((l) => l.id === params?.[0]);
+      }
+
+      if (s.includes('COUNT(*)')) {
         return {
-          rows: this.locations.filter((l) => l.active) as any,
-          rowCount: this.locations.length,
+          rows: [{ total: String(filtered.length) }] as any,
+          rowCount: 1,
         };
       }
-      return { rows: this.locations as any, rowCount: this.locations.length };
+
+      if (s.includes('ORDER BY CODE ASC')) {
+        filtered.sort(
+          (a, b) =>
+            a.code.localeCompare(b.code) ||
+            a.name.localeCompare(b.name) ||
+            a.id.localeCompare(b.id),
+        );
+      }
+
+      if (s.includes('LIMIT $1 OFFSET $2')) {
+        const limit = Number(params?.[0] ?? 20);
+        const offset = Number(params?.[1] ?? 0);
+        filtered = filtered.slice(offset, offset + limit);
+      }
+
+      return { rows: filtered as any, rowCount: filtered.length };
     }
 
     // SELECT from commercial_fulfillment_routes
@@ -1412,7 +1516,10 @@ export class InMemoryDatabaseMock implements IDatabaseService {
     }
 
     // INSERT INTO outbox
-    if (s.startsWith('INSERT INTO INVENTORY.OUTBOX')) {
+    if (
+      s.startsWith('INSERT INTO INVENTORY.OUTBOX') &&
+      !s.startsWith('INSERT INTO INVENTORY.OUTBOX_DELIVERY')
+    ) {
       const row: OutboxRow = {
         id: 'outbox-' + Math.random().toString(36).substring(2),
         event_id: params?.[0],
@@ -1440,6 +1547,90 @@ export class InMemoryDatabaseMock implements IDatabaseService {
         target.published_at = new Date().toISOString();
       }
       return { rows: [], rowCount: 1 };
+    }
+
+    // INSERT INTO outbox_delivery
+    if (
+      s.includes('INVENTORY.OUTBOX_DELIVERY') &&
+      s.startsWith('INSERT INTO')
+    ) {
+      const message_id = params?.[0];
+      const destination = params?.[1];
+      const existing = this.outboxDeliveries.find(
+        (d) => d.message_id === message_id && d.destination === destination,
+      );
+      if (!existing) {
+        const row = {
+          message_id,
+          destination,
+          route_version: 1,
+          transport: 'AZURE_SERVICE_BUS',
+          created_at: new Date().toISOString(),
+          next_attempt_at: new Date().toISOString(),
+          attempts: 0,
+          lease_token: null,
+          lease_until: null,
+          sent_at: null,
+          last_error: null,
+        };
+        this.outboxDeliveries.push(row);
+        return { rows: [row] as any, rowCount: 1 };
+      }
+      return { rows: [existing] as any, rowCount: 1 };
+    }
+
+    // SELECT outbox_delivery FOR UPDATE SKIP LOCKED
+    if (
+      s.includes('FROM INVENTORY.OUTBOX_DELIVERY') &&
+      s.startsWith('SELECT')
+    ) {
+      const candidate = this.outboxDeliveries.find(
+        (d) =>
+          !d.sent_at &&
+          d.last_error !== 'MESSAGE_EXCEEDS_256KB' &&
+          d.last_error !== 'INVALID_OUTBOX_CONTRACT',
+      );
+      return {
+        rows: candidate ? ([candidate] as any) : [],
+        rowCount: candidate ? 1 : 0,
+      };
+    }
+
+    // UPDATE outbox_delivery
+    if (s.startsWith('UPDATE INVENTORY.OUTBOX_DELIVERY')) {
+      if (s.includes('LEASE_TOKEN = $1')) {
+        const token = params?.[0];
+        const message_id = params?.[1];
+        const destination = params?.[2];
+        const d = this.outboxDeliveries.find(
+          (x) => x.message_id === message_id && x.destination === destination,
+        );
+        if (d) {
+          d.lease_token = token;
+          d.lease_until = new Date(Date.now() + 30000).toISOString();
+          d.attempts++;
+        }
+        return { rows: d ? ([d] as any) : [], rowCount: d ? 1 : 0 };
+      }
+      if (s.includes('SENT_AT = CASE WHEN $1')) {
+        const confirmed = params?.[0];
+        const lastError = params?.[1];
+        const message_id = params?.[2];
+        const destination = params?.[3];
+        const d = this.outboxDeliveries.find(
+          (x) => x.message_id === message_id && x.destination === destination,
+        );
+        if (d) {
+          d.lease_token = null;
+          d.lease_until = null;
+          d.sent_at = confirmed ? new Date().toISOString() : null;
+          d.last_error = lastError;
+        }
+        return {
+          rows: d ? ([{ message_id }] as any) : [],
+          rowCount: d ? 1 : 0,
+        };
+      }
     }
 
     return { rows: [], rowCount: 0 };

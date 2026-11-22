@@ -1,4 +1,6 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { PRICING_CONFIG, type PricingConfig } from '../config/environment.js';
+import { insertPricingFacts } from '../messaging/service-bus-deliveries.js';
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import {
@@ -40,6 +42,7 @@ export type PriceFactSource =
 export class PricingMutations {
   constructor(
     @Inject(PricingRepository) private readonly repository: PricingRepository,
+    @Optional() @Inject(PRICING_CONFIG) private readonly config?: PricingConfig,
   ) {}
 
   update(
@@ -50,8 +53,92 @@ export class PricingMutations {
     now: Date,
     fact: PriceFactSource,
   ) {
-    return this.repository.transaction((tx) =>
-      this.updateInTransaction(
+    return this.repository.transaction(async (tx) => {
+      await this.lockSkuAndRejectDeactivated(tx, target);
+      if (target.productId !== undefined && channelId === null)
+        await lockGlobalProduct(tx, target.productId);
+      const loaded = await this.loadMaybe(tx, target, channelId);
+      if (!loaded) {
+        requireRule(expectedVersion === 0n, 'PRECIO_NO_ENCONTRADO');
+        const regular = input.precioRegular;
+        requireRule(
+          regular !== undefined && regular !== null,
+          'PRECIO_INVALIDO',
+        );
+        const offer =
+          input.accionPrecioOferta === 'ESTABLECER'
+            ? (input.precioOferta ?? null)
+            : null;
+        const terms = {
+          precioRegular: regular,
+          precioOferta: offer,
+          currency: input.currency,
+          motivoCambio: input.motivoCambio,
+          usuarioId: input.usuarioId,
+        };
+        validateTerms(terms);
+        const targetDefinition = {
+          productId: target.productId ?? null,
+          sku: target.sku ?? null,
+        };
+        const definition: PriceDefinition = {
+          target: targetDefinition as PriceDefinition['target'],
+          channelId,
+          priceVersion: 1n,
+          validities: [
+            {
+              ...terms,
+              validFrom: now,
+              validUntil: null,
+              priceVersion: 1n,
+              isCancelled: false,
+            },
+          ],
+        };
+        const [row] = await tx
+          .insert(prices)
+          .values({
+            productId: targetDefinition.productId,
+            sku: targetDefinition.sku,
+            channelId,
+          })
+          .onConflictDoNothing()
+          .returning();
+        requireRule(row !== undefined, 'VERSION_CONFLICT');
+        const [stored] = await tx
+          .insert(priceValidities)
+          .values({ ...definition.validities[0], priceId: row.id })
+          .returning();
+        const before: PriceDefinition = {
+          target: definition.target,
+          channelId,
+          priceVersion: 0n,
+          validities: [],
+        };
+        const facts =
+          typeof fact === 'function' ? fact(before, definition) : fact;
+        const rows = Array.isArray(facts) ? facts : [facts];
+        if (rows.length)
+          await insertPricingFacts(
+            tx,
+            rows.map((item) => ({
+              ...item,
+              eventName: 'pricing.price.changed',
+              kind: 'event' as const,
+              schemaVersion: 1,
+              occurredAt: now,
+            })),
+            this.config?.serviceBus !== undefined,
+          );
+        return {
+          definition,
+          validityId: stored.id,
+          tipoOperacion: 'CREACION' as const,
+        };
+      }
+      const { row, definition } = loaded;
+      const result = changePrice(definition, input, expectedVersion, now);
+      const stored = await this.persist(
         tx,
         target,
         channelId,
@@ -313,7 +400,8 @@ export class PricingMutations {
     if (facts) {
       const rows = Array.isArray(facts) ? facts : [facts];
       if (rows.length)
-        await tx.insert(outbox).values(
+        await insertPricingFacts(
+          tx,
           rows.map((fact) => ({
             ...fact,
             eventName: 'pricing.price.changed',
@@ -321,6 +409,7 @@ export class PricingMutations {
             schemaVersion: 1,
             occurredAt: now,
           })),
+          this.config?.serviceBus !== undefined,
         );
     }
     return stored;

@@ -1,5 +1,11 @@
 # AGENTS.md — Instrucciones operativas para agentes en Backend
 
+## Objetivo vigente — Hito 5
+
+> CI/CD incluyendo revision Seguridad — Evidencia de Pruebas de integración — Evidencia de Pruebas de performance — Uso de API Management y Mecanismo asincrónico entre Microservicios
+
+La meta activa y los cuatro criterios con evidencias separadas están en [Hito 5 de Docs](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/pull/130). Azure Service Bus Basic sigue siendo la norma para mensajería interna H5; APIM/Gateway y la autenticación externa se evidencian por separado.
+
 > **LEER COMPLETO ANTES DE EDITAR.** Este documento rige el desarrollo backend en el monorepo NestJS de **Productos y Ofertas (G6)**.
 
 ---
@@ -9,32 +15,35 @@
 Prohibido escribir código antes de completar los pasos 1 a 6:
 
 1. **LEER `AGENTS.md` COMPLETO** antes de editar cualquier archivo.
-2. **Identificar la rama actual:** debe ser tu rama personal asignada.
-3. **Leer el Issue asignado** y comprender todos sus criterios de aceptación.
-4. **Identificar microservicio, owner y archivos autorizados:** verificar matriz de ownership.
+2. **Identificar la rama actual:** debe ser una rama personal permanente o una rama temporal conforme a esta política.
+3. **Identificar el Issue o tarea concreta:** si existe un Issue, revisar sus criterios; si no existe, documentar objetivo, motivación, alcance, criterios de aceptación, pruebas e impactos en el PR.
+4. **Identificar microservicio, responsables primarios y archivos afectados:** consultar la matriz como guía de conocimiento y contacto, no como permiso exclusivo.
 5. **Consultar los contratos normativos correspondientes** en el repositorio de documentación.
-6. Para toda implementación o modificación del modo demo, antes de cambiar código es obligatorio leer `ops/oracle/H4-MODO-DEMO-AUTH-REVERSIBLE.md` y Backend [#144](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/144).
+6. Para toda implementación o modificación del modo demo, consulta la política vigente de seguridad progresiva en Docs y Backend [#144](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/issues/144). La guía Oracle H4 es histórica y ya no es una lectura operativa obligatoria.
 7. **Realizar únicamente los cambios solicitados:** sin refactors extra ni archivos fuera de scope.
 8. **Ejecutar pruebas:** pruebas enfocadas primero, luego validaciones generales.
 9. **Revisar `git diff`:** verificar cambios exactos y ausencia de whitespace errors.
 10. **Reportar resultados y bloqueos:** según el formato de reporte obligatorio.
 
-### Lectura obligatoria para preparación Oracle
+### Mensajería H5 — norma obligatoria para nuevas integraciones
 
-Antes de modificar un microservicio, además de leer `AGENTS.md` y el Issue asignado, consulta los contratos OpenAPI, AsyncAPI y DEC-F aplicables, y estas guías de despliegue:
+Para tareas de mensajería Hito 5, la arquitectura vigente es **Azure Service Bus Basic para comunicación interna entre bounded contexts G6**. G1–G5 se integran con G6 mediante HTTP autenticado a través de APIM/Gateway; G7 conserva la autoridad de identidad y grants. **No añadas dependencias, colas, handlers ni configuración RabbitMQ/AMQP para implementar H5.** No publiques el mismo efecto comercial por ambos brokers salvo que una estrategia de transición explícita haya sido aprobada y probada. Basic no tiene topics/subscriptions: modela una entrega independiente por destinatario con Outbox, Inbox e idempotencia durables.
 
-1. `ops/oracle/GUIA_DEVTEAM.md`.
-2. `ops/oracle/CONTRATO_DESPLIEGUE.md`.
-3. `ops/oracle/servicios/<servicio>.md`.
-4. `ops/oracle/MATRIZ_DEPENDENCIAS.md`.
-5. `ops/oracle/RABBITMQ_COMPATIBILIDAD.md`, cuando el servicio use o proponga AMQP.
-6. `ops/oracle/CHECKLIST_PREDEPLOY.md`.
+RabbitMQ, AsyncAPI H4 y sus procedimientos siguen siendo necesarios para mantener, recuperar y probar regresiones del runtime heredado durante la compatibilidad transitoria. La infraestructura Oracle/VM y Compose fue retirada del carril operativo; sus evidencias se conservan como historia. Ninguna referencia H4 autoriza inferir colas, routing keys, variables de entorno o handlers Service Bus. Conserva intactos los contratos y fixtures H4 salvo autorización explícita de contrato.
 
-Un microservicio no puede declararse `READY_FOR_DEPLOY` sin evidencias asociadas a su SHA que demuestren el cumplimiento de todos los requisitos aplicables de compilación, configuración, persistencia, mensajería, seguridad, contratos, Docker y readiness. Un bloqueo específico de AMQP no debe impedir el desarrollo independiente de funcionalidades HTTP o de persistencia dentro del alcance autorizado.
+#### Orden obligatorio de lectura para tareas H5
+
+1. Esta sección y la tarea/Issue; identifica servicio owner, alcance y PR solapados.
+2. Docs [ADR-H5-SERVICE-BUS-BASIC.md](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/master/arquitectura/decisiones/ADR-H5-SERVICE-BUS-BASIC.md) y [TOPOLOGIA-SERVICE-BUS-BASIC-H5.md](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/master/contratos/eventos/TOPOLOGIA-SERVICE-BUS-BASIC-H5.md).
+3. Docs [PLAN-MIGRACION-MENSAJERIA-H5.md](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/master/integraciones/PLAN-MIGRACION-MENSAJERIA-H5.md), [MATRIZ-EXTERNOS-ASYNCAPI-H5.md](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/master/integraciones/MATRIZ-EXTERNOS-ASYNCAPI-H5.md), [INVENTARIO-40-MENSAJES-H5.md](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/master/contratos/eventos/INVENTARIO-40-MENSAJES-H5.md) y la [matriz ejecutable H5](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/master/integraciones/MATRIZ-IMPLEMENTACION-SERVICE-BUS-H5.md).
+4. Las SPEC, DEC-F, modelo/persistencia, pruebas y contratos HTTP/AsyncAPI aplicables. AsyncAPI H4 es referencia semántica histórica, no diseño de transporte H5.
+5. Si la tarea toca el runtime heredado H4, consulta los contratos y las guías de compatibilidad RabbitMQ aplicables; para H5 no las uses para diseñar transporte.
+
+La matriz H5 es la fuente única de seguimiento por flujo. Contrasta cada fila con el SHA actual del Backend y evidencia reproducible antes de cambiar su estado; una propuesta, fixture o piloto aislado no equivale a habilitación general. El piloto #234 Pricing → Service Bus Basic → Price Audit está documentado en `docs/hito-5/CIERRE_PILOTO_234.md` y `docs/hito-5/EJECUCION_AZURE_SERVICE_BUS.md`: es evidencia parcial de ese recorrido/ambiente y no demuestra migración global, aprovisionamiento compartido, producción, homologación G5, autorización G7 ni retiro de RabbitMQ.
 
 ---
 
-## 2. Política definitiva de ramas
+## 2. Política de colaboración y ramas
 
 - **Ramas personales permanentes:**
   - `castilla`
@@ -43,18 +52,34 @@ Un microservicio no puede declararse `READY_FOR_DEPLOY` sin evidencias asociadas
   - `lopez`
   - `vera`
   - `taco`
-- Cada desarrollador trabaja y continúa trabajando exclusivamente en su rama personal.
-- Puede implementar múltiples Issues y abrir sucesivos PRs hacia `master` desde ella.
-- **PROHIBIDO:** crear ramas `feat/...`, `fix/...` o ramas nuevas automáticas.
-- **PROHIBIDO:** sincronizaciones masivas automáticas desde `master`, `rebase`, `git push --force`, `git reset --hard` o merges destructivos.
-- `infra/foundation` es una excepción temporal ya existente para la Foundation inicial (PR #2), **no** una convención para desarrolladores.
-- Los PRs deben mantener alcance pequeño, atómico y específico.
+- Son el espacio preferente de desarrollo de cada integrante. No se eliminan en la limpieza ordinaria de PRs y pueden usarse para PRs sucesivos a `master`.
+- Antes de comenzar otro trabajo en una rama personal, sincronízala de forma segura con `master`. Mantén cada PR cohesivo: no acumules ni mezcles cambios independientes.
+
+### Ramas temporales
+
+La convención obligatoria para ramas nuevas de trabajo es `trabajo/<desarrollador>/<descripcion-en-kebab-case>`, por ejemplo `trabajo/poma/correccion-azure-service-bus` o `trabajo/vera/optimizar-consultas-pricing`.
+
+- Cualquier desarrollador puede crear varias ramas temporales y no necesita un Issue asignado para hacerlo.
+- Parte del `master` actualizado, salvo que exista una dependencia explícita y documentada.
+- Cada rama representa un propósito identificable y cada trabajo independiente tiene su propio PR, preferentemente hacia `master`.
+- Se permite `git worktree` para desarrollar en paralelo.
+- No crees ramas con prefijos de herramientas o agentes como `codex/`, `claude/`, `gemini/` o `antigravity/`.
+- Esta convención rige ramas nuevas; no renombres ramas históricas ni alteres PRs existentes automáticamente.
+- No uses `git push --force`, `git reset --hard` ni merges destructivos, ni sobrescribas trabajo ajeno. Sincroniza de forma segura y respeta CI y protecciones de `master`.
+
+### Issues y tareas
+
+Todo desarrollador puede atender cualquier Issue, incluso si está asignado a otra persona o no tiene asignación. También puede ayudar a un compañero o iniciar una corrección, optimización, refactorización justificada o mejora sin Issue previo. Puede mantener varios PRs independientes abiertos. Si no existe Issue, documenta en el PR el objetivo, motivación, alcance, criterios de aceptación, pruebas e impactos posibles. Crear una rama o abrir un PR no autoriza su aprobación, merge ni despliegue.
+
+### Limpieza de ramas
+
+Tras fusionar un PR temporal, confirma el merge y que la rama no sea necesaria para otro PR abierto o trabajo dependiente; luego elimina la rama temporal local y remota cuando corresponda. Las ramas temporales abandonadas pueden eliminarse tras comprobar que no contienen cambios pendientes por conservar. Nunca elimines ramas personales permanentes mediante esta limpieza ni configures una eliminación automática indiscriminada que las afecte.
 
 ---
 
 ## 3. Matriz de ownership de aplicaciones
 
-| Rama | Aplicaciones propias autorizadas |
+| Rama | Aplicaciones de responsabilidad primaria y conocimiento técnico |
 |---|---|
 | `castilla` | `apps/bulk-svc`, `apps/combos-svc` |
 | `poma` | `apps/catalog-svc` |
@@ -63,10 +88,11 @@ Un microservicio no puede declararse `READY_FOR_DEPLOY` sin evidencias asociadas
 | `vera` | `apps/pricing-svc`, `apps/price-audit-svc` |
 | `taco` | `apps/inventory-svc` |
 
-- **`apps/api-gateway`:** componente transversal; NO debe ser modificado libremente. Requiere Issue explícito y coordinación con arquitectura e integración.
-- **Archivos globales:** `libs/`, `.github/`, dependencias en `package.json`, scripts y configuración del monorepo (`nest-cli.json`, `tsconfig*.json`) son compartidos y requieren autorización expresa en el Issue.
-- **Límite estricto:** un agente no puede modificar otra aplicación para resolver un problema de la propia.
-- Si detectas necesidad de modificar archivos fuera de tu ownership, detén esa parte, repórtala como dependencia y continúa solo las partes autorizadas e independientes.
+- Esta matriz identifica responsables primarios, experiencia y puntos de contacto; no concede ni limita permisos exclusivos de edición. Cualquier desarrollador puede colaborar transversalmente en esos servicios.
+- Antes de iniciar trabajo que pueda solaparse, comprueba Issues y PRs existentes y comunica la intervención cuando corresponda. No se requiere autorización general del responsable primario para comenzar.
+- **`apps/api-gateway`:** componente transversal de alto impacto; su modificación requiere coordinación y revisión proporcional con arquitectura e integración, pero no exige crear previamente un Issue.
+- **Archivos globales:** `libs/`, `.github/`, dependencias en `package.json`, scripts y configuración del monorepo (`nest-cli.json`, `tsconfig*.json`) son compartidos; requieren revisión de los responsables pertinentes según el impacto y controles del repositorio, no una asignación exclusiva.
+- La colaboración no autoriza modificar unilateralmente contratos normativos, decisiones arquitectónicas aceptadas, permisos de seguridad, secretos, infraestructura productiva ni responsabilidades de otros módulos. Conserva la revisión, aprobación y homologación aplicables.
 
 ---
 
@@ -88,7 +114,7 @@ Un microservicio no puede declararse `READY_FOR_DEPLOY` sin evidencias asociadas
 
 - Las DEC-F-001 a DEC-F-015 adoptadas por G6 son obligatorias para la implementación interna en el bounded context al que corresponda cada regla o invariante. Consulta el [registro DEC-F](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/942bf7322eb388fe5b0fcc9c5a565152e1099139/arquitectura/decisiones/REGISTRO_DEC_F.md), su [matriz de trazabilidad](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/942bf7322eb388fe5b0fcc9c5a565152e1099139/arquitectura/decisiones/MATRIZ_TRAZABILIDAD_DEC_F.md) y la [matriz intermodular de backend](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/942bf7322eb388fe5b0fcc9c5a565152e1099139/integraciones/MATRIZ_INTERMODULAR_BACKEND.md). Antes de cambiar código, identifica las decisiones aplicables y sus fuentes normativas; no amplíes su contenido por inferencia ni crees DEC-F-016 o posteriores sin aprobación expresa de Marco.
 - Clasifica cada alcance de trabajo con un estado operativo:
-  - **`IMPLEMENTAR_AHORA`:** lógica, invariantes, persistencia y pruebas internas de G6 están definidas y pueden desarrollarse dentro del ownership autorizado.
+  - **`IMPLEMENTAR_AHORA`:** lógica, invariantes, persistencia y pruebas internas de G6 están definidas y pueden desarrollarse dentro del bounded context, con la revisión aplicable.
   - **`IMPLEMENTAR_PARCIAL`:** implementa lo interno ya definido y mantén aislada la frontera de integración que depende de una resolución externa.
   - **`BLOQUEADO_ESPECÍFICO`:** detén solo la operación, autorización, contrato compartido o secuencia que depende de la respuesta externa. Registra el owner que debe responder, la operación afectada y la condición exacta que permitirá desbloquearla.
 - Una discrepancia intermodular que afecte una integración no paraliza el microservicio completo. Continúa el trabajo autónomo de G6 y no atribuyas ownership, aceptación externa, permisos ni homologación a otro módulo.
@@ -101,7 +127,7 @@ Un microservicio no puede declararse `READY_FOR_DEPLOY` sin evidencias asociadas
 
 ## 5. Protocolo para agentes de menor capacidad
 
-1. Resolver una tarea concreta cada vez; no abarcar múltiples objetivos en paralelo.
+1. Mantener cada rama y PR enfocados en una tarea cohesiva; se permiten varias tareas y PRs independientes en paralelo.
 2. Leer solo los archivos estrictamente necesarios para el cambio.
 3. No reconstruir archivos completos si basta una edición localizada.
 4. No realizar refactors adicionales ni actualizar dependencias sin autorización.
@@ -126,7 +152,7 @@ Un microservicio no puede declararse `READY_FOR_DEPLOY` sin evidencias asociadas
 Todo agente debe estructurar su respuesta final con:
 
 ```text
-RAMA Y ISSUE: <rama> | <issue>
+RAMA Y ISSUE: <rama> | <issue o SIN ISSUE>
 ARCHIVOS MODIFICADOS: <lista de rutas>
 CAMBIOS REALIZADOS: <resumen conciso de cambios>
 COMANDOS EJECUTADOS: <comando y resultado real: PASS/FAIL/NO EJECUTADO>
@@ -136,6 +162,17 @@ CAMBIOS FUERA DEL ALCANCE: <ninguno o justificación expresa>
 ESTADO FINAL: PASS / PARTIAL / BLOCKED
 ```
 
-## G1 Marketplace H4 — documentación operativa obligatoria
+## Acuerdos históricos H4 aplicables a integraciones actuales — lectura obligatoria
 
 Antes de implementar o modificar endpoints consumidos por Marketplace, lee [`integraciones/g1-marketplace/README.md`](integraciones/g1-marketplace/README.md), su [matriz de 25 funciones](integraciones/g1-marketplace/MATRIZ_OPERACIONES_H4.md) y [plan de pruebas/evidencias](integraciones/g1-marketplace/PRUEBAS_Y_EVIDENCIAS_H4.md), el [acuerdo normativo G1–G6 de Docs PR #94](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/a8d89296b0eac37315ef30a9390f1e4e30933136/integraciones/ACUERDO_G1_G6_H4_2026-10-20.md), la [alineación Marketplace de Docs PR #94](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-docs/blob/a8d89296b0eac37315ef30a9390f1e4e30933136/integraciones/ALINEACION_MARKETPLACE.md) y el OpenAPI de Docs. Esta lectura se suma, no sustituye, a SPEC, DEC-F/ADR, modelo y pruebas del servicio. Registra contrato, código, CI, despliegue, grant y E2E con SHA exacto como estados independientes. No tomes informes históricos como estado actual.
+
+
+## Política CI Draft → Ready
+
+- Abre los PR en Draft y mantenlos así durante la implementación, las pruebas focalizadas y las correcciones. Al completar la implementación, comunica el enlace del PR, el HEAD SHA, el resumen de cambios y las pruebas realizadas para dejarlo disponible para revisión.
+- Mientras haya observaciones obligatorias del auditor, el PR permanece en Draft. Corrige en el mismo PR, publica los cambios y comunica que están listos para nueva revisión. Repite hasta que no queden observaciones bloqueantes. Las recomendaciones opcionales o clasificadas expresamente como no bloqueantes no impiden avanzar.
+- Terminar el desarrollo o superar pruebas locales no equivale a aprobar la implementación propia. Solo pasa el PR a Ready for Review cuando se haya comunicado que la revisión terminó satisfactoriamente y exista autorización para continuar. No se exige formato, documento ni registro adicional para comunicar observaciones o autorización.
+- Si después de una revisión favorable haces una corrección sustancial, comunícala antes de avanzar para determinar si requiere otra revisión. No repitas auditorías completas por cambios menores que no alteren los aspectos técnicos evaluados, salvo indicación expresa.
+- No se ejecutan suites locales completas de manera rutinaria; usa pruebas focalizadas para depurar. La validación integral obligatoria se ejecuta en GitHub Actions al pasar el PR a Ready for Review. El PR no se considera validado hasta que todos los checks obligatorios pasen para la revisión actual.
+- Si CI requiere cambios de código, vuelve a Draft durante las correcciones y solicita nueva revisión cuando corresponda. Cada commit nuevo en Ready invalida los resultados anteriores y vuelve a ejecutar CI; al volver a Draft, las suites pesadas quedan diferidas. Toda evidencia identifica el código y SHA probados.
+- Una revisión técnica favorable no autoriza el merge. El merge requiere checks obligatorios satisfactorios, cumplimiento de las protecciones de GitHub y la autorización correspondiente. No se hace merge con checks pendientes o fallidos. Ready for Review no autoriza despliegues de producción.

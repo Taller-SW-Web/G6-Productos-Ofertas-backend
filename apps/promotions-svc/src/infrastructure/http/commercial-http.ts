@@ -9,6 +9,7 @@ import {
   type BasketRequest,
   type CommercialContext,
   type CommercialReadContext,
+  type ResolvedLine,
 } from '../../domain/commercial-context.js';
 import { Decimal } from '../../domain/decimal.js';
 import { validInstant } from '../../domain/date-time.js';
@@ -145,6 +146,45 @@ export class HttpCommercialContext implements CommercialContext {
       throw new Error('INVALID_PRICE_CONTEXT');
     text(row.vigencia_id);
     return { regular, offer, currency };
+  }
+
+  async verifyCouponCatalogLines(
+    lines: readonly Pick<ResolvedLine, 'sku' | 'productId'>[],
+    channelId: string,
+    correlationId: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    commercialChannel(channelId);
+    const products = new Map<
+      string,
+      ReturnType<HttpCommercialContext['product']>
+    >();
+    await limitedReads(lines, signal, async ({ sku, productId }, bounded) => {
+      let product = products.get(productId);
+      if (!product) {
+        product = this.product(productId, channelId, bounded, correlationId);
+        products.set(productId, product);
+      }
+      const visible = await product;
+      if (!visible?.skus.includes(sku)) throw new CommercialInputError();
+      const context = object(
+        await this.read(
+          'obtenerContextoSku',
+          '/productos/skus/' + encodeURIComponent(sku) + '/contexto',
+          bounded,
+          false,
+          correlationId,
+        ),
+      );
+      if (
+        context.sku !== sku ||
+        context.productId !== productId ||
+        context.isVariant !== visible.hasVariants ||
+        context.active !== true ||
+        context.eligible !== true
+      )
+        throw new CommercialInputError();
+    });
   }
 
   basket(

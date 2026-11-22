@@ -20,7 +20,9 @@ export class PromotionsSvcController {
   @Get('health/ready')
   async getReadiness(@Res() response: Response) {
     const result = await this.readiness.check(
-      this.config.settings.couponRuntimeEnabled,
+      this.config.settings.couponRuntimeEnabled ||
+        this.config.settings.serviceBus?.eventsEnabled === true ||
+        this.config.settings.serviceBus?.couponCommandsEnabled === true,
     );
     return response.status(result.status === 'ready' ? 200 : 503).json(result);
   }

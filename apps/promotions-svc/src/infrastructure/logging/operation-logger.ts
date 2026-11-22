@@ -65,6 +65,19 @@ export class PromotionsOperationLogger {
       broker: result.dependencies.broker,
     });
   }
+
+  couponH5MessageTooLarge(operationId: string, messageId: string): void {
+    if (!isUuid(operationId) || !isUuid(messageId)) return;
+    this.emit({
+      timestamp: new Date().toISOString(),
+      level: 'error',
+      service: 'promotions-svc',
+      code: 'MESSAGE_TOO_LARGE',
+      operation_id: operationId,
+      message_id: messageId,
+    });
+  }
+
   private emit(value: Record<string, unknown>): void {
     try {
       this.write(JSON.stringify(value));

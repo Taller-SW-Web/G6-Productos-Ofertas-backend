@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { InventorySvcController } from './inventory-svc.controller.js';
 import { InventoryController } from './inventory.controller.js';
+import { InventoryCouponEvidenceController } from './inventory-coupon-evidence.controller.js';
 import { InventoryAdminController } from './inventory-admin.controller.js';
 import { InventorySvcService } from './inventory-svc.service.js';
 import { DatabaseService } from './database/database.service.js';
@@ -20,6 +21,8 @@ import { TrasladosService } from './traslados/traslados.service.js';
 import { InventoryCommandService } from './inbox/inventory-command.service.js';
 import { InventoryConsumerService } from './inbox/inventory-consumer.service.js';
 import { DrizzleInboxRepository } from './repositories/drizzle/drizzle-inbox.repository.js';
+import { InventoryServiceBusRuntime } from './messaging/service-bus-relay.js';
+import { InventoryServiceBusConsumerRuntime } from './messaging/service-bus-consumer.js';
 
 import { DrizzleLocationsRepository } from './repositories/drizzle/drizzle-locations.repository.js';
 import { DrizzleCommercialRoutesRepository } from './repositories/drizzle/drizzle-commercial-routes.repository.js';
@@ -59,6 +62,7 @@ import { OfflineReconciliationService } from './conciliacion/offline-reconciliat
   controllers: [
     InventorySvcController,
     InventoryController,
+    InventoryCouponEvidenceController,
     InventoryAdminController,
   ],
   providers: [
@@ -82,6 +86,8 @@ import { OfflineReconciliationService } from './conciliacion/offline-reconciliat
     InventoryWorkersService,
     InventoryCommandService,
     InventoryConsumerService,
+    InventoryServiceBusRuntime,
+    InventoryServiceBusConsumerRuntime,
     AbsoluteStockAdjustmentService,
     OfflineReconciliationService,
     { provide: INBOX_REPOSITORY, useClass: DrizzleInboxRepository },

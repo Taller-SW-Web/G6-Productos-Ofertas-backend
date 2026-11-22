@@ -2,9 +2,15 @@
 set -Eeuo pipefail
 umask 077
 
-readonly RESOURCE_GROUP='rg-g6-aca-chile'
 readonly REPOSITORY='ghcr.io/taller-sw-web/g6-productos-ofertas-backend'
 fail() { printf 'Despliegue Azure fallido: %s\n' "$1" >&2; exit 1; }
+
+case "${H5_DEPLOY_ENVIRONMENT:-}" in
+  azure-h5) resource_group='rg-g6-sb-h5-int-fork' ;;
+  azure-h5-pilot-234) resource_group='rg-g6-aca-chile' ;;
+  *) fail 'environment fuera de la allowlist de destinos H5' ;;
+esac
+readonly RESOURCE_GROUP="$resource_group"
 
 mode=deploy
 if [[ "${1:-}" == --restore ]]; then

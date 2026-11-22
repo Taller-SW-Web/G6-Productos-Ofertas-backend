@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the G1 H4 matrix against the canonical Docs OpenAPI."""
+"""Validate compatibility of H4-origin operations against the current canonical OpenAPI."""
 from __future__ import annotations
 
 import argparse

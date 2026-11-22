@@ -3,6 +3,27 @@ set -Eeuo pipefail
 # Entorno efímero de prueba. No acepta URLs/credenciales de Supabase.
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
+use_prebuilt="${G6_MARKETPLACE_USE_PREBUILT:-false}"
+case "$use_prebuilt" in
+  true)
+    catalog_image='g6-service:catalog-svc-ci'
+    taxonomy_image='g6-service:taxonomy-svc-ci'
+    for image in "$catalog_image" "$taxonomy_image"; do
+      if ! docker image inspect "$image" >/dev/null 2>&1; then
+        printf 'FALLO: G6_MARKETPLACE_USE_PREBUILT=true requiere la imagen local %s; no se reconstruirá.\n' "$image" >&2
+        exit 1
+      fi
+    done
+    ;;
+  false)
+    catalog_image=''
+    taxonomy_image=''
+    ;;
+  *)
+    printf 'FALLO: G6_MARKETPLACE_USE_PREBUILT debe ser true o false.\n' >&2
+    exit 2
+    ;;
+esac
 scratch="$(mktemp -d)"
 project="g6-mkt-ci-${RANDOM}"
 network="${project}-db"
@@ -30,7 +51,7 @@ docker run -d --name "$pg_name" --network "$network" --network-alias postgres \
   -e POSTGRES_PASSWORD=ci-only-admin -v "$scratch/certs:/certs:ro" \
   --entrypoint sh postgres:17-alpine -c \
   'cp /certs/server.key /tmp/server.key; chown postgres:postgres /tmp/server.key; chmod 600 /tmp/server.key; exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/certs/server.crt -c ssl_key_file=/tmp/server.key' >/dev/null
-for attempt in {1..60}; do
+for _ in {1..60}; do
   if docker exec "$pg_name" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then break; fi
   sleep 1
 done
@@ -75,6 +96,18 @@ services:
     volumes:
       - $scratch/certs:/certs:ro
       - $root/scripts/ci:/ci:ro
+EOF
+if [[ "$use_prebuilt" == true ]]; then
+  cat >> "$scratch/override.yml" <<EOF
+  catalog-svc:
+    image: $catalog_image
+    build: null
+  taxonomy-svc:
+    image: $taxonomy_image
+    build: null
+EOF
+fi
+cat >> "$scratch/override.yml" <<EOF
 networks:
   database-access:
     external: true
@@ -86,22 +119,32 @@ export G6_CATALOG_ENV_FILE="$scratch/catalog.env"
 export G6_TAXONOMY_CA_FILE="$scratch/certs/ca.crt"
 export G6_CATALOG_CA_FILE="$scratch/certs/ca.crt"
 export G6_GATEWAY_HOST_PORT=0
-"${compose[@]}" build
+if [[ "$use_prebuilt" == true ]]; then
+  "${compose[@]}" build api-gateway
+else
+  catalog_image="$project-catalog-svc"
+  taxonomy_image="$project-taxonomy-svc"
+  "${compose[@]}" build
+fi
 # Arranque sin configuración: falla, sin sustituir el smoke positivo posterior.
 for service in taxonomy catalog; do
-  image="$project-${service}-svc"
+  if [[ "$service" == catalog ]]; then image="$catalog_image"; else image="$taxonomy_image"; fi
   set +e
   output="$(docker run --rm "$image" 2>&1)"
   code=$?
   set -e
   [[ "$code" -ne 0 && "$output" == *APPLICATION_START_FAILED* ]]
 done
-"${compose[@]}" up -d --wait --wait-timeout 90
+if [[ "$use_prebuilt" == true ]]; then
+  "${compose[@]}" up --no-build -d --wait --wait-timeout 90
+else
+  "${compose[@]}" up -d --wait --wait-timeout 90
+fi
 service_network="${project}_services"
 docker run -d --name "$issuer" --network "$service_network" --network-alias issuer \
   -v "$scratch/certs:/certs:ro" -v "$root/scripts/ci:/ci:ro" \
   --entrypoint node "$project-api-gateway" /ci/issuer.mjs >/dev/null
-for attempt in {1..30}; do
+for _ in {1..30}; do
   if "${compose[@]}" exec -T api-gateway node -e "fetch('https://issuer:3443/keys').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then break; fi
   sleep 1
 done
@@ -139,7 +182,7 @@ console.log('PASS: Catalog Drizzle PostgreSQL y Catalog -> Taxonomy HTTP');"
 docker stop "$pg_name" >/dev/null
 "${compose[@]}" exec -T api-gateway node /ci/marketplace-probe.mjs offline
 docker start "$pg_name" >/dev/null
-for attempt in {1..60}; do
+for _ in {1..60}; do
   if "${compose[@]}" exec -T taxonomy-svc node -e "fetch('http://127.0.0.1:3006/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then break; fi
   sleep 1
 done
