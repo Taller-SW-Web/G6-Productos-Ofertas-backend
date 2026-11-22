@@ -51,7 +51,9 @@ describe('Catalog own G7 service credentials configuration', () => {
       tokenUrl: issuer + '/token',
       clientSecret: 'private-fixture',
     });
-    expect(readCatalogServiceCredentials(env, issuer, 'CATALOG_BULK_CONTENT')).toEqual({
+    expect(
+      readCatalogServiceCredentials(env, issuer, 'CATALOG_BULK_CONTENT'),
+    ).toEqual({
       tokenUrl: issuer + '/token',
       clientSecret: 'bulk-only-fixture',
     });

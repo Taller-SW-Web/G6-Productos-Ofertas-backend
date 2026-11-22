@@ -102,7 +102,11 @@ export class CatalogGatewayHarness {
           };
         else if (
           this.taxonomyFailuresRemaining > 0 &&
-          ['/api/v1/categorias/administracion', '/api/v1/marcas/administracion', '/api/v1/tipos-producto'].includes(new URL(req.url ?? '/', this.origin).pathname)
+          [
+            '/api/v1/categorias/administracion',
+            '/api/v1/marcas/administracion',
+            '/api/v1/tipos-producto',
+          ].includes(new URL(req.url ?? '/', this.origin).pathname)
         ) {
           this.taxonomyFailuresRemaining--;
           res.statusCode = 503;
@@ -119,7 +123,9 @@ export class CatalogGatewayHarness {
               ? req.headers.authorization !== 'Bearer taxonomy-service-fixture'
               : !req.headers.authorization?.startsWith('Bearer ')) ||
           (traceHttp
-            ? !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(req.headers['x-correlation-id'] ?? ''))
+            ? !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                String(req.headers['x-correlation-id'] ?? ''),
+              )
             : req.headers['x-correlation-id'] !== this.correlation)
         ) {
           res.statusCode = 401;
@@ -154,16 +160,25 @@ export class CatalogGatewayHarness {
           };
         else if (
           req.method === 'GET' &&
-          ['/api/v1/categorias/administracion', '/api/v1/marcas/administracion', '/api/v1/tipos-producto'].includes(new URL(req.url ?? '/', this.origin).pathname)
+          [
+            '/api/v1/categorias/administracion',
+            '/api/v1/marcas/administracion',
+            '/api/v1/tipos-producto',
+          ].includes(new URL(req.url ?? '/', this.origin).pathname)
         ) {
           const url = new URL(req.url ?? '/', this.origin);
           const page = Number(url.searchParams.get('pagina') ?? '1');
           const size = Number(url.searchParams.get('tamanio') ?? '200');
-          body = { items: [], meta: { pagina: page, tamanio: size, total: 0, totalPaginas: 0 } };
+          body = {
+            items: [],
+            meta: { pagina: page, tamanio: size, total: 0, totalPaginas: 0 },
+          };
         } else if (
           req.method === 'GET' &&
-          new URL(req.url ?? '/', this.origin).pathname === '/api/v1/categorias/arbol'
-        ) body = [];
+          new URL(req.url ?? '/', this.origin).pathname ===
+            '/api/v1/categorias/arbol'
+        )
+          body = [];
         else if (req.url === '/api/v1/categorias/category-fixture')
           body = {
             categoriaId: 'category-fixture',
@@ -286,7 +301,11 @@ export class CatalogGatewayHarness {
       this.catalog.use(catalogCorrelation);
       if (traceHttp)
         this.catalog.use((request, response, next) => {
-          response.on('finish', () => console.info(`[catalog-browser-http] ${request.method} ${request.url} -> ${response.statusCode}`));
+          response.on('finish', () =>
+            console.info(
+              `[catalog-browser-http] ${request.method} ${request.url} -> ${response.statusCode}`,
+            ),
+          );
           next();
         });
       await this.catalog.listen(0, '127.0.0.1');
@@ -321,7 +340,10 @@ export class CatalogGatewayHarness {
       // Test configuration injection permits ephemeral loopback JWKS. Production
       // settings validation is unchanged; identity verifier/proxy are not replaced.
       const settings = {
-        upstreams: { 'catalog-svc': await this.catalog.getUrl(), 'taxonomy-svc': this.origin },
+        upstreams: {
+          'catalog-svc': await this.catalog.getUrl(),
+          'taxonomy-svc': this.origin,
+        },
         issuer: this.origin,
         jwksUrl: this.origin + '/jwks',
         timeoutMs: traceHttp ? 30000 : 5000,

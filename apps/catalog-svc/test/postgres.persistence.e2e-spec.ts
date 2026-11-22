@@ -3262,7 +3262,12 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
       vi.spyOn(identity, 'authorization').mockResolvedValue(
         actor.authorization,
       );
-      return new CatalogBulkService(database, mutations, identity, contentClient as never);
+      return new CatalogBulkService(
+        database,
+        mutations,
+        identity,
+        contentClient as never,
+      );
     }
     async function bulkReply(command: CatalogEnvelope) {
       return database.read(
@@ -3346,14 +3351,26 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
       const getDocument = vi.fn().mockResolvedValue({ rows: [row] });
       const service = bulkHandler(mutationService(), { getDocument });
       const message: CatalogEnvelope = {
-        message_id: randomUUID(), schema_version: 3,
-        occurred_at: new Date().toISOString(), correlation_id: randomUUID(),
-        causation_id: null, operation_id: operationId, producer: 'bulk-svc',
-        kind: 'command', name: 'catalog.bulk.upsert.requested',
+        message_id: randomUUID(),
+        schema_version: 3,
+        occurred_at: new Date().toISOString(),
+        correlation_id: randomUUID(),
+        causation_id: null,
+        operation_id: operationId,
+        producer: 'bulk-svc',
+        kind: 'command',
+        name: 'catalog.bulk.upsert.requested',
         data: {
-          batch_id: batchId, batch_operation_id: operationId,
-          template_version: 2, mode: 'ALTA',
-          content_ref: { content_id: randomUUID(), sha256: 'a'.repeat(64), byte_length: 300 * 1024, content_type: 'application/json' },
+          batch_id: batchId,
+          batch_operation_id: operationId,
+          template_version: 2,
+          mode: 'ALTA',
+          content_ref: {
+            content_id: randomUUID(),
+            sha256: 'a'.repeat(64),
+            byte_length: 300 * 1024,
+            content_type: 'application/json',
+          },
         },
       };
       await expect(service.consume(message)).resolves.toBe('APPLIED');
@@ -3362,7 +3379,9 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
       getDocument.mockRejectedValue(new Error('original document unavailable'));
       await expect(service.consume(replay)).resolves.toBe('APPLIED');
       expect(getDocument).toHaveBeenCalledOnce();
-      expect((await bulkReply(replay)).payload).toMatchObject({ batch_id: batchId });
+      expect((await bulkReply(replay)).payload).toMatchObject({
+        batch_id: batchId,
+      });
     });
     it('BULK V3: downloads a valid >256 KiB claim-check over private HTTP and commits rows, result, and receipts in PostgreSQL', async () => {
       const row = bulkRow({
@@ -3372,7 +3391,10 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         // Catalog product row whose document exceeds the former 256 KiB limit.
         descripcion: 'x'.repeat(300 * 1024),
       });
-      const documentBytes = Buffer.from(JSON.stringify({ rows: [row] }), 'utf8');
+      const documentBytes = Buffer.from(
+        JSON.stringify({ rows: [row] }),
+        'utf8',
+      );
       const digest = createHash('sha256').update(documentBytes).digest('hex');
       expect(documentBytes.byteLength).toBeGreaterThan(256 * 1024);
 
@@ -3393,7 +3415,8 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         if (
           request.method !== 'GET' ||
           request.url !== `/interno/carga-masiva/contenidos/${contentId}` ||
-          request.headers.authorization !== 'Bearer private-bulk-content-fixture' ||
+          request.headers.authorization !==
+            'Bearer private-bulk-content-fixture' ||
           request.headers.accept !== 'application/json'
         ) {
           response.writeHead(403).end('{}');
@@ -3468,15 +3491,24 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
           },
         ]);
 
-        const storedProduct = await database.read(async (db) =>
-          (await db.select().from(products).where(eq(products.sku_base, row.sku_base)))[0],
+        const storedProduct = await database.read(
+          async (db) =>
+            (
+              await db
+                .select()
+                .from(products)
+                .where(eq(products.sku_base, row.sku_base))
+            )[0],
         );
         expect(storedProduct).toMatchObject({
           sku_base: row.sku_base,
           descripcion: row.product.descripcion,
         });
         const storedIdentity = await database.read((db) =>
-          db.select().from(skuIdentity).where(eq(skuIdentity.sku, row.sku_base)),
+          db
+            .select()
+            .from(skuIdentity)
+            .where(eq(skuIdentity.sku, row.sku_base)),
         );
         expect(storedIdentity).toHaveLength(1);
 
@@ -3540,7 +3572,10 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         expect(requests).toHaveLength(1);
         expect(
           await database.read((db) =>
-            db.select().from(products).where(eq(products.sku_base, row.sku_base)),
+            db
+              .select()
+              .from(products)
+              .where(eq(products.sku_base, row.sku_base)),
           ),
         ).toHaveLength(1);
       } finally {
@@ -3550,7 +3585,9 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
         else process.env.NODE_ENV = previousNodeEnv;
         contentServer.closeAllConnections();
-        await new Promise<void>((resolve) => contentServer.close(() => resolve()));
+        await new Promise<void>((resolve) =>
+          contentServer.close(() => resolve()),
+        );
       }
     }, 60000);
     it('BULK: reports a real slug UNIQUE as SLUG_DUPLICADO, never SKU_DUPLICADO, and preserves replay', async () => {
@@ -6925,7 +6962,8 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
       expect(skuEvents).toHaveLength(1);
       expect(productEvents).toHaveLength(1);
       expect(identities).toHaveLength(1);
-      const skuEvent = skuEvents[0]!, productEvent = productEvents[0]!;
+      const skuEvent = skuEvents[0]!,
+        productEvent = productEvents[0]!;
       expect(Object.keys(skuEvent.payload).sort()).toEqual([
         'changed_at',
         'product_id',
