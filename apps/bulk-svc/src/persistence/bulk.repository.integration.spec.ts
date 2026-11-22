@@ -2170,6 +2170,42 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
         .from(batchJobs)
         .where(eq(batchJobs.batchId, batchId));
       expect(resumed?.status).toBe('COMPLETED');
+      const contradictoryMessageId = randomUUID();
+      await expect(
+        repository.recordCatalogBulkResult({
+          messageId: contradictoryMessageId,
+          operationId,
+          causationId: retryCommand!.messageId,
+          eventName: 'catalog.bulk.upsert.rejected',
+          correlationId: retryCorrelationId,
+          payload: {
+            message_id: contradictoryMessageId,
+            schema_version: 2,
+            occurred_at: new Date().toISOString(),
+            correlation_id: retryCorrelationId,
+            causation_id: retryCommand!.messageId,
+            operation_id: operationId,
+            producer: 'catalog-svc',
+            kind: 'result',
+            name: 'catalog.bulk.upsert.rejected',
+            data: {
+              batch_id: batchId,
+              batch_operation_id: operationId,
+              command_attempt_id: retryCommand!.commandAttemptId,
+              code: 'UNEXPECTED_REJECTION',
+              detail: 'Contradice el recibo V2 ya aplicado.',
+            },
+          },
+        }),
+      ).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
+      const [preservedAttempt] = await database
+        .select()
+        .from(domainAttempts)
+        .where(eq(domainAttempts.attemptId, retryAttempt[0]!.attemptId));
+      expect(preservedAttempt).toMatchObject({
+        status: 'COMPLETED',
+        effectState: 'APPLIED',
+      });
     } finally {
       if (previousBucket === undefined) delete process.env.BULK_STORAGE_BUCKET;
       else process.env.BULK_STORAGE_BUCKET = previousBucket;

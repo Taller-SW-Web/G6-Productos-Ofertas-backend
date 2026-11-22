@@ -1276,9 +1276,12 @@ export class BulkPersistenceRepository {
           envelope.producer !== 'catalog-svc' ||
           envelope.kind !== 'result' ||
           envelope.schema_version !== 2 ||
-          !Array.isArray(data.results) ||
-          data.results.length === 0 ||
-          !Array.isArray(data.results) ||
+          (input.eventName === 'catalog.bulk.upsert.completed' &&
+            (!Array.isArray(data.results) || data.results.length === 0)) ||
+          (input.eventName === 'catalog.bulk.upsert.rejected' &&
+            (typeof data.code !== 'string' ||
+              typeof data.detail !== 'string' ||
+              Array.isArray(data.results))) ||
           ![
             'catalog.bulk.upsert.completed',
             'catalog.bulk.upsert.rejected',
@@ -1444,11 +1447,177 @@ export class BulkPersistenceRepository {
             );
           return { processed: false, result: previousMessage.result };
         }
-        if (input.eventName !== 'catalog.bulk.upsert.completed')
-          domainFailure(
-            'INVALID_INPUT',
-            'Command-level Catalog V2 rejection lacks per-row receipts.',
-          );
+        if (input.eventName === 'catalog.bulk.upsert.rejected') {
+          const operationIds =
+            typeof commandAttemptId === 'string'
+              ? retryRows.map((row) => String(row.row_operation_id))
+              : [...normalized.keys()];
+          if (typeof commandAttemptId === 'string') {
+            const familyOperations = [...normalized.entries()]
+              .filter(([, row]) => row.skuBase === retryFamilyKey)
+              .map(([operationId]) => operationId)
+              .sort();
+            if (
+              familyOperations.length !== operationIds.length ||
+              familyOperations.join('|') !== [...operationIds].sort().join('|')
+            )
+              domainFailure(
+                'INVALID_INPUT',
+                'Rejected retry command does not cover a complete SKU family.',
+              );
+          }
+          for (const operationId of operationIds) {
+            const source = normalized.get(operationId);
+            if (!source)
+              domainFailure(
+                'INVALID_INPUT',
+                'Rejected Catalog command references an unknown row.',
+              );
+            const [row] = await tx
+              .select()
+              .from(batchRows)
+              .where(
+                and(
+                  eq(batchRows.batchJobId, batch.id),
+                  eq(batchRows.rowId, String(source!.rowId)),
+                ),
+              )
+              .for('update')
+              .limit(1);
+            if (!row)
+              domainFailure(
+                'INVALID_INPUT',
+                'Rejected Catalog command row is not persisted.',
+              );
+            const [currentAttempt] = await tx
+              .select()
+              .from(domainAttempts)
+              .where(
+                and(
+                  eq(domainAttempts.batchRowId, row.id),
+                  eq(domainAttempts.domain, 'CATALOGO'),
+                ),
+              )
+              .orderBy(desc(domainAttempts.attemptNumber))
+              .for('update')
+              .limit(1);
+            if (typeof commandAttemptId === 'string') {
+              const retryRow = retryRows.find(
+                (candidate) => candidate.row_operation_id === operationId,
+              );
+              if (
+                !retryRow ||
+                currentAttempt?.attemptId !== retryRow.attempt_id ||
+                currentAttempt.commandAttemptId !== commandAttemptId
+              )
+                domainFailure(
+                  'INVALID_INPUT',
+                  'Rejected retry result does not match the current attempt.',
+                );
+              await tx
+                .update(domainAttempts)
+                .set({
+                  status: 'UNKNOWN',
+                  effectState: 'UNKNOWN',
+                  retriable: false,
+                  receiptMessageId: input.messageId,
+                  errorCode: String(data.code),
+                  updatedAt: new Date(),
+                })
+                .where(
+                  eq(domainAttempts.attemptId, String(retryRow!.attempt_id)),
+                );
+            } else if (currentAttempt && currentAttempt.attemptNumber > 1) {
+              continue;
+            }
+            const steps = await tx
+              .select()
+              .from(rowDomainSteps)
+              .where(eq(rowDomainSteps.batchRowId, row.id));
+            const catalogStep = steps.find(
+              (step) => step.domain === 'CATALOGO',
+            );
+            if (!catalogStep || catalogStep.status === 'COMPLETED')
+              domainFailure(
+                'INVALID_TRANSITION',
+                'Rejected Catalog command cannot overwrite a completed step.',
+              );
+            const changes: WorkflowStepChange[] = [
+              {
+                domain: 'CATALOGO',
+                status: 'FAILED',
+                errorCode: String(data.code),
+                errorDetail: String(data.detail),
+              },
+            ];
+            for (const dependency of steps)
+              if (
+                dependency.domain !== 'CATALOGO' &&
+                dependency.status === 'PENDING'
+              )
+                changes.push({
+                  domain: dependency.domain as BulkDomain,
+                  status: 'FAILED',
+                  errorCode: 'DEPENDENCY_REJECTED',
+                  errorDetail:
+                    'Catalog rechazó el comando; el paso dependiente no se ejecutó.',
+                });
+            const changedStatuses = new Map(
+              changes.map((change) => [change.domain, change.status]),
+            );
+            const allTerminal = row.requiredDomains.every((domain) =>
+              ['COMPLETED', 'FAILED'].includes(
+                String(
+                  changedStatuses.get(domain as BulkDomain) ??
+                    steps.find((step) => step.domain === domain)?.status,
+                ),
+              ),
+            );
+            const allCompleted = row.requiredDomains.every(
+              (domain) =>
+                (changedStatuses.get(domain as BulkDomain) ??
+                  steps.find((step) => step.domain === domain)?.status) ===
+                'COMPLETED',
+            );
+            const rowStatus: BulkRowStatus = !allTerminal
+              ? 'PROCESSING'
+              : allCompleted
+                ? 'COMPLETED'
+                : 'FAILED';
+            await updateWorkflowStateIn(tx, {
+              batchId: batch.batchId,
+              rowId: row.rowId,
+              steps: changes,
+              status: rowStatus,
+              failedDomain: rowStatus === 'FAILED' ? 'CATALOGO' : null,
+              errorCode: rowStatus === 'FAILED' ? String(data.code) : null,
+              errorDetail: rowStatus === 'FAILED' ? String(data.detail) : null,
+            });
+          }
+          await tx
+            .insert(inbox)
+            .values({
+              messageId: input.messageId,
+              handler: messageHandler,
+              eventName: input.eventName,
+              correlationId: input.correlationId,
+              payload: input.payload,
+              result: 'COMMAND_REJECTED_UNKNOWN_EFFECT',
+            });
+          await tx
+            .update(outbox)
+            .set({
+              publishedAt: sql`coalesce(${outbox.publishedAt}, now())`,
+              lastError: null,
+            })
+            .where(
+              and(
+                eq(outbox.messageId, input.causationId),
+                eq(outbox.eventName, 'catalog.bulk.upsert.requested'),
+              ),
+            );
+          return { processed: true, result: 'COMMAND_REJECTED_UNKNOWN_EFFECT' };
+        }
         const resultRows = data.results as Array<Record<string, unknown>>;
         if (
           resultRows.some(
