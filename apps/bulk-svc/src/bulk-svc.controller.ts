@@ -350,16 +350,7 @@ export class BulkSvcController {
         typeof motivo === 'string' ? motivo.trim() : null,
       );
     }
-    const batch = await this.imports.resumeBatch(
-      batchId,
-      requireActorSub(request),
-    );
-    return {
-      batch_id: batch.batchId,
-      status: batch.status,
-      template_version: batch.templateVersion,
-      correlation_id: batch.correlationId,
-    };
+    return this.imports.resumeBatch(batchId, requireActorSub(request));
   }
 
   @UseGuards(BulkUserBearerGuard)

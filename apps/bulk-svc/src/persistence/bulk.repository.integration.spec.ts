@@ -20,6 +20,7 @@ import {
   bulkSchema,
   batchJobs,
   batchRows,
+  domainAttempts,
   exportJobs,
   fileManifests,
   inbox,
@@ -1952,6 +1953,175 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       appliedDomains: ['CATALOGO'],
       needsReconciliation: true,
     });
+  });
+
+  it('calculates Catalog V3 eligibility from normalized admitted rows and a real attempt receipt', async () => {
+    const previousBucket = process.env.BULK_STORAGE_BUCKET;
+    const previousRetryFlag = process.env.BULK_RETRY_CATALOG_V1_ENABLED;
+    process.env.BULK_STORAGE_BUCKET = 'bulk-retry-test';
+    process.env.BULK_RETRY_CATALOG_V1_ENABLED = 'true';
+    const batchId = randomUUID();
+    const correlationId = randomUUID();
+    const operationId = randomUUID();
+    const messageId = randomUUID();
+    const receiptMessageId = randomUUID();
+    const retryCorrelationId = randomUUID();
+    const initialAttemptId = randomUUID();
+    const rowId = randomUUID();
+    const contentRef = `supabase://bulk-retry-test/imports/${batchId}.json`;
+    const command = {
+      message_id: messageId,
+      schema_version: 3,
+      occurred_at: new Date().toISOString(),
+      correlation_id: correlationId,
+      causation_id: null,
+      operation_id: operationId,
+      producer: 'bulk-svc',
+      kind: 'command',
+      name: 'catalog.bulk.upsert.requested',
+      data: {
+        batch_id: batchId,
+        batch_operation_id: operationId,
+        template_version: 2,
+        mode: 'ALTA',
+        content_ref: {
+          content_id: randomUUID(),
+          sha256: 'a'.repeat(64),
+          byte_length: 128,
+          content_type: 'application/json',
+        },
+      },
+    };
+    try {
+      const created = await repository.createImportBatch({
+        batchId,
+        ownerSub: TEST_OWNER_SUB,
+        correlationId,
+        templateVersion: 2,
+        inputFile: { format: 'CSV', contentRef },
+        rows: [{ rowId, requiredDomains: ['CATALOGO'] }],
+        catalogCommands: [
+          {
+            messageId,
+            eventName: command.name,
+            kind: 'command',
+            schemaVersion: 3,
+            correlationId,
+            operationId,
+            occurredAt: new Date(command.occurred_at),
+            payload: command,
+          },
+        ],
+        admissionIntent: {
+          format: 'CSV',
+          templateVersion: 2,
+          contentRef,
+          rows: [{ rowId, rowOperationId: rowId, skuBase: 'SKU-RETRY' }],
+          catalogCommands: [command],
+        },
+      });
+      await database
+        .update(batchJobs)
+        .set({
+          status: 'COMPLETED',
+          failedRows: 1,
+          completedRows: 0,
+          needsReconciliation: true,
+        })
+        .where(eq(batchJobs.id, created.batch.id));
+      await database
+        .update(batchRows)
+        .set({
+          status: 'FAILED',
+          failedDomain: 'CATALOGO',
+          errorCode: 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE',
+        })
+        .where(eq(batchRows.id, created.rows[0]!.row.id));
+      await database
+        .update(rowDomainSteps)
+        .set({
+          status: 'FAILED',
+          errorCode: 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE',
+        })
+        .where(eq(rowDomainSteps.batchRowId, created.rows[0]!.row.id));
+      await database.insert(domainAttempts).values({
+        attemptId: initialAttemptId,
+        batchRowId: created.rows[0]!.row.id,
+        domain: 'CATALOGO',
+        businessOperationId: operationId,
+        attemptNumber: 1,
+        status: 'REJECTED',
+        effectState: 'NONE',
+        retriable: true,
+        receiptMessageId,
+      });
+
+      await expect(
+        repository.getRetryEligibility(batchId, TEST_OWNER_SUB),
+      ).resolves.toEqual({
+        protocolo: 'BULK_RETRY_V1',
+        elegible: true,
+        pasos: [{ row_id: rowId, dominio: 'CATALOGO' }],
+        motivo_bloqueo: null,
+      });
+      const [first, replay] = await Promise.all([
+        repository.requeueBatch(
+          batchId,
+          TEST_OWNER_SUB,
+          retryCorrelationId,
+          'reintento autorizado',
+        ),
+        repository.requeueBatch(
+          batchId,
+          TEST_OWNER_SUB,
+          retryCorrelationId,
+          'reintento autorizado',
+        ),
+      ]);
+      expect(replay).toEqual(first);
+      expect(first).toEqual({
+        batch_id: batchId,
+        status: 'PROCESSING',
+        template_version: 2,
+        correlation_id: retryCorrelationId,
+      });
+      await expect(
+        repository.requeueBatch(
+          batchId,
+          TEST_OWNER_SUB,
+          retryCorrelationId,
+          'motivo distinto',
+        ),
+      ).rejects.toMatchObject({ code: 'UNIQUE_CONFLICT' });
+      const retryOutbox = await database
+        .select()
+        .from(outbox)
+        .where(eq(outbox.schemaVersion, 4));
+      expect(retryOutbox).toHaveLength(1);
+      expect(retryOutbox[0]?.causationId).toBe(messageId);
+      expect(retryOutbox[0]?.operationId).toBe(operationId);
+      const retryAttempt = await database
+        .select()
+        .from(domainAttempts)
+        .where(eq(domainAttempts.previousAttemptId, initialAttemptId));
+      expect(retryAttempt).toHaveLength(1);
+      expect(retryAttempt[0]).toMatchObject({
+        attemptNumber: 2,
+        status: 'PENDING',
+        previousAttemptId: initialAttemptId,
+      });
+      const [resumed] = await database
+        .select()
+        .from(batchJobs)
+        .where(eq(batchJobs.batchId, batchId));
+      expect(resumed?.status).toBe('PROCESSING');
+    } finally {
+      if (previousBucket === undefined) delete process.env.BULK_STORAGE_BUCKET;
+      else process.env.BULK_STORAGE_BUCKET = previousBucket;
+      if (previousRetryFlag === undefined)
+        delete process.env.BULK_RETRY_CATALOG_V1_ENABLED;
+      else process.env.BULK_RETRY_CATALOG_V1_ENABLED = previousRetryFlag;
+    }
   });
 
   it('keeps a pricing failure open until already-started Inventory work reports its result', async () => {
