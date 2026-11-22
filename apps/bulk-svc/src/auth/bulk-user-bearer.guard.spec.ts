@@ -53,6 +53,54 @@ describe('Bulk H4 userBearer and reversible demo policy', () => {
     ).rejects.toThrow('TOKEN_INVALIDO');
   });
 
+  it('accepts api-productos audience as a string or string list and rejects missing/other audiences', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+    });
+    process.env.G7_JWT_PUBLIC_KEY = publicKey
+      .export({ type: 'spki', format: 'pem' })
+      .toString();
+    process.env.G7_JWT_ISSUER = 'audience-test-issuer';
+    const token = (audience: unknown, includeAudience = true) => {
+      const encode = (value: object) =>
+        Buffer.from(JSON.stringify(value)).toString('base64url');
+      const header = encode({ alg: 'RS256', typ: 'JWT' });
+      const claims = encode({
+        iss: 'audience-test-issuer',
+        sub: randomUUID(),
+        tipo: 'acceso',
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 600,
+        jti: randomUUID(),
+        roles: ['GESTOR_COMERCIAL'],
+        ...(includeAudience ? { aud: audience } : {}),
+      });
+      const signer = createSign('RSA-SHA256');
+      signer.update(`${header}.${claims}`);
+      return `${header}.${claims}.${signer.sign(privateKey, 'base64url')}`;
+    };
+    const guard = new BulkUserBearerGuard();
+    for (const audience of ['api-productos', ['api-productos', 'api-otra']]) {
+      const { context } = executionContext({
+        authorization: `Bearer ${token(audience)}`,
+      });
+      await expect(guard.canActivate(context)).resolves.toBe(true);
+    }
+    for (const invalid of [
+      token(undefined, false),
+      token('api-otra'),
+      token(['api-otra']),
+      token(['api-productos', 42]),
+    ]) {
+      const { context } = executionContext({
+        authorization: `Bearer ${invalid}`,
+      });
+      await expect(guard.canActivate(context)).rejects.toThrow(
+        'TOKEN_INVALIDO',
+      );
+    }
+  });
+
   it('rejects an otherwise valid locally signed RS256 token whose nbf is in the future', async () => {
     const { privateKey, publicKey } = generateKeyPairSync('rsa', {
       modulusLength: 2048,
@@ -144,6 +192,7 @@ describe('Bulk H4 userBearer and reversible demo policy', () => {
     const claims = encode({
       iss: issuer,
       sub: subject,
+      aud: 'api-productos',
       tipo: 'acceso',
       iat: Math.floor(Date.now() / 1000),
       exp: Math.floor(Date.now() / 1000) + 60,

@@ -60,7 +60,14 @@ describe('Bulk HTTP import routes (isolated)', () => {
       },
     ];
     const imports = {
-      receiveImport: vi.fn().mockResolvedValue({ batch }),
+      receiveImport: vi.fn(
+        async (input: { correlationId: string; batchId: string }) => ({
+          batch: {
+            ...batch,
+            correlationId: input.correlationId,
+          },
+        }),
+      ),
       getSnapshot: vi.fn().mockResolvedValue({
         batch: {
           ...batch,
@@ -84,6 +91,7 @@ describe('Bulk HTTP import routes (isolated)', () => {
     const unavailableExportId = '66666666-6666-4666-8666-666666666666';
     const storage = {
       put: vi.fn().mockResolvedValue('supabase://private/imports/test.csv'),
+      delete: vi.fn(),
       get: vi.fn(async (contentRef: string) => {
         if (contentRef.endsWith('/unavailable.csv'))
           throw new BulkDomainError('STORAGE_UNAVAILABLE', 'storage down');
@@ -232,11 +240,17 @@ describe('Bulk HTTP import routes (isolated)', () => {
         status: 'QUEUED',
         template_version: 2,
       });
+      expect(accepted.body.correlation_id).toBe(
+        imports.receiveImport.mock.calls[0]?.[0].correlationId,
+      );
       const replay = await request(app.getHttpServer())
         .post('/api/v1/carga-masiva/productos/importaciones')
         .field('template_version', '2')
         .attach('archivo', csv, 'items.csv');
       expect(replay.status).toBe(202);
+      expect(replay.body.correlation_id).toBe(
+        imports.receiveImport.mock.calls[1]?.[0].correlationId,
+      );
       expect(storage.put).toHaveBeenCalledTimes(2);
       expect(imports.receiveImport.mock.calls[1]?.[0]).toMatchObject({
         batchId: imports.receiveImport.mock.calls[0]?.[0].batchId,
@@ -364,6 +378,24 @@ describe('Bulk HTTP import routes (isolated)', () => {
       expect(invalid.headers['content-type']).toContain(
         'application/problem+json',
       );
+
+      for (const failure of [
+        new BulkDomainError(
+          'PERSISTENCE_FAILURE',
+          'SQL transaction rolled back.',
+        ),
+        new Error('Commit outcome is ambiguous.'),
+      ]) {
+        imports.receiveImport.mockRejectedValueOnce(failure);
+        const notDurablyAdmitted = await request(app.getHttpServer())
+          .post('/api/v1/carga-masiva/productos/importaciones')
+          .set('x-correlation-id', randomUUID())
+          .field('template_version', '2')
+          .attach('archivo', csv, 'items.csv');
+        expect(notDurablyAdmitted.status).not.toBe(202);
+      }
+      expect(storage.put).toHaveBeenCalled();
+      expect(storage.delete).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }
@@ -390,6 +422,7 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
     const token = (
       roles: string[],
       sub = '00000000-0000-4000-8000-000000000001',
+      audience: string | string[] | null = 'api-productos',
     ) => {
       const encode = (value: object) =>
         Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -397,6 +430,7 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
       const claims = encode({
         iss: 'bulk-http-test-issuer',
         sub,
+        ...(audience === null ? {} : { aud: audience }),
         tipo: 'acceso',
         iat: Math.floor(Date.now() / 1000),
         exp: Math.floor(Date.now() / 1000) + 600,
@@ -418,7 +452,7 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
             batchId: input.batchId,
             status: 'QUEUED',
             templateVersion: 2,
-            correlationId: '22222222-2222-4222-8222-222222222222',
+            correlationId: input.correlationId,
           },
         }),
       ),
@@ -464,11 +498,38 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
             .send({ formato: 'CSV' })
         ).status,
       ).toBe(403);
+      for (const audience of [null, 'api-otra']) {
+        const invalidAudience = await request(app.getHttpServer())
+          .post(route)
+          .set(
+            'authorization',
+            `Bearer ${token(['GESTOR_COMERCIAL'], undefined, audience)}`,
+          )
+          .send({ formato: 'CSV' });
+        expect(invalidAudience).toMatchObject({
+          status: 401,
+          body: { code: 'TOKEN_INVALIDO' },
+        });
+      }
       expect(
         (
           await request(app.getHttpServer())
             .post(route)
             .set('authorization', `Bearer ${token(['GESTOR_COMERCIAL'])}`)
+            .send({ formato: 'CSV' })
+        ).status,
+      ).toBe(202);
+      expect(
+        (
+          await request(app.getHttpServer())
+            .post(route)
+            .set(
+              'authorization',
+              `Bearer ${token(['GESTOR_COMERCIAL'], undefined, [
+                'api-productos',
+                'otra-api',
+              ])}`,
+            )
             .send({ formato: 'CSV' })
         ).status,
       ).toBe(202);
@@ -513,6 +574,11 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
         separateIntent.status,
         otherActor.status,
       ]).toEqual([202, 202, 202, 202]);
+      expect(identical.body.correlation_id).toBe(correlationA);
+      expect(replay.body.correlation_id).toBe(correlationA);
+      expect(separateIntent.body.correlation_id).toBe(correlationB);
+      expect(separateIntent.body.correlation_id).not.toBe(correlationA);
+      expect(otherActor.body.correlation_id).toBe(correlationA);
       const admissions = imports.receiveImport.mock.calls.map(
         ([input]) => input,
       );

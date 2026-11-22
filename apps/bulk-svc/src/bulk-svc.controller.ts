@@ -176,7 +176,7 @@ export class BulkSvcController {
       batch_id: result.batch.batchId,
       status: 'QUEUED',
       template_version: result.batch.templateVersion,
-      correlation_id: result.batch.correlationId,
+      correlation_id: correlationId,
     });
   }
 

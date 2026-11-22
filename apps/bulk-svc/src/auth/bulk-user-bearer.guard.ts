@@ -100,6 +100,7 @@ export class BulkUserBearerGuard implements CanActivate {
     if (
       claims.iss !== issuer ||
       claims.tipo !== 'acceso' ||
+      !hasProductsAudience(claims.aud) ||
       typeof claims.sub !== 'string' ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
         claims.sub,
@@ -121,4 +122,13 @@ export class BulkUserBearerGuard implements CanActivate {
     (request as BulkAuthenticatedRequest).bulkActorSub = claims.sub as string;
     return true;
   }
+}
+
+function hasProductsAudience(audience: unknown): boolean {
+  if (typeof audience === 'string') return audience === 'api-productos';
+  return (
+    Array.isArray(audience) &&
+    audience.every((entry) => typeof entry === 'string') &&
+    audience.includes('api-productos')
+  );
 }
