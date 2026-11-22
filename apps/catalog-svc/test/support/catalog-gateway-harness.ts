@@ -41,6 +41,11 @@ export class CatalogGatewayHarness {
   readonly correlation = randomUUID();
   taxonomyAvailable = true;
 
+  get gatewayOrigin() {
+    if (!this.base) throw new Error('Gateway harness has not started');
+    return this.base;
+  }
+
   token(claims: Record<string, unknown> = {}, wrongSignature = false): string {
     const now = Math.floor(Date.now() / 1000);
     const header = Buffer.from(
@@ -71,9 +76,12 @@ export class CatalogGatewayHarness {
     restrictedDemo = false,
     historicalSubjects: readonly string[] = [],
     historicalPricingCandidate = false,
+    traceHttp = false,
   ): Promise<void> {
     try {
       this.upstream = createServer((req, res) => {
+        if (traceHttp && (req.url === '/jwks' || req.url === '/discovery'))
+          console.info(`[catalog-browser-jwks] ${req.url}`);
         res.setHeader('content-type', 'application/json');
         res.setHeader('cache-control', 'max-age=60');
         let body: unknown;
@@ -101,7 +109,9 @@ export class CatalogGatewayHarness {
             : restrictedDemo
               ? req.headers.authorization !== 'Bearer taxonomy-service-fixture'
               : !req.headers.authorization?.startsWith('Bearer ')) ||
-          req.headers['x-correlation-id'] !== this.correlation
+          (traceHttp
+            ? !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(req.headers['x-correlation-id'] ?? ''))
+            : req.headers['x-correlation-id'] !== this.correlation)
         ) {
           res.statusCode = 401;
           body = {};
@@ -133,6 +143,18 @@ export class CatalogGatewayHarness {
               },
             ],
           };
+        else if (
+          req.method === 'GET' &&
+          ['/api/v1/categorias/administracion', '/api/v1/marcas/administracion', '/api/v1/tipos-producto'].includes(new URL(req.url ?? '/', this.origin).pathname)
+        ) {
+          const url = new URL(req.url ?? '/', this.origin);
+          const page = Number(url.searchParams.get('pagina') ?? '1');
+          const size = Number(url.searchParams.get('tamanio') ?? '200');
+          body = { items: [], meta: { pagina: page, tamanio: size, total: 0, totalPaginas: 0 } };
+        } else if (
+          req.method === 'GET' &&
+          new URL(req.url ?? '/', this.origin).pathname === '/api/v1/categorias/arbol'
+        ) body = [];
         else if (req.url === '/api/v1/categorias/category-fixture')
           body = {
             categoriaId: 'category-fixture',
@@ -245,6 +267,11 @@ export class CatalogGatewayHarness {
         .compile();
       this.catalog = module.createNestApplication({ logger: false });
       this.catalog.use(catalogCorrelation);
+      if (traceHttp)
+        this.catalog.use((request, response, next) => {
+          response.on('finish', () => console.info(`[catalog-browser-http] ${request.method} ${request.url} -> ${response.statusCode}`));
+          next();
+        });
       await this.catalog.listen(0, '127.0.0.1');
       if (restrictedDemo) return; // Direct private HTTP: does not claim Gateway demo integration.
       this.directory = mkdtempSync(join(tmpdir(), 'catalog-auth-gateway-'));
@@ -277,10 +304,10 @@ export class CatalogGatewayHarness {
       // Test configuration injection permits ephemeral loopback JWKS. Production
       // settings validation is unchanged; identity verifier/proxy are not replaced.
       const settings = {
-        upstreams: { 'catalog-svc': await this.catalog.getUrl() },
+        upstreams: { 'catalog-svc': await this.catalog.getUrl(), 'taxonomy-svc': this.origin },
         issuer: this.origin,
         jwksUrl: this.origin + '/jwks',
-        timeoutMs: 5000,
+        timeoutMs: traceHttp ? 30000 : 5000,
         maxBytes: 1024 * 1024,
         publicOperations: [],
         demoNoAuthEnabled: false,
@@ -288,8 +315,10 @@ export class CatalogGatewayHarness {
       const code = `import {Test} from ${url(resolve('node_modules/@nestjs/testing/index.js'))};
         import {ApiGatewayModule} from ${url(join(output, 'api-gateway.module.js'))};
         import {GATEWAY_SETTINGS} from ${url(join(output, 'routing/gateway-settings.js'))};
+        import {matchContractRoute} from ${url(join(output, 'routing/gateway-proxy.js'))};
         const module=await Test.createTestingModule({imports:[ApiGatewayModule]}).overrideProvider(GATEWAY_SETTINGS).useValue(${JSON.stringify(settings)}).compile();
         const app=module.createNestApplication({bodyParser:false,logger:false});
+        app.use((req,res,next)=>{res.on('finish',()=>{const route=matchContractRoute(req.method,req.originalUrl.split('?')[0]);console.log('[gateway-browser-http] '+req.method+' '+req.originalUrl+' svc='+(route?.service??'none')+' upstream='+Boolean(route&&${JSON.stringify(settings.upstreams)}[route.service])+' ct='+(req.headers['content-type']??'none')+' auth='+(req.headers.authorization?'present':'absent')+' auth-count='+req.rawHeaders.filter((h,i)=>i%2===0&&h.toLowerCase()==='authorization').length+' -> '+res.statusCode)});next()});
         app.enableShutdownHooks();await app.listen(0,'127.0.0.1');console.log(await app.getUrl());`;
       this.gateway = spawn(
         process.execPath,
@@ -307,6 +336,8 @@ export class CatalogGatewayHarness {
       let stdout = '';
       this.gateway.stdout?.on('data', (chunk) => {
         stdout += String(chunk);
+        for (const line of String(chunk).split(/\r?\n/))
+          if (line.startsWith('[gateway-browser-http]')) console.info(line);
       });
       // Discard process diagnostics rather than printing any request/token.
       this.gateway.stderr?.resume();

@@ -51,6 +51,9 @@ async function aborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
 }
 @Injectable()
 export class CatalogPricingIdentityProvider implements CatalogPricingIdentity {
+  protected get clientId(): string {
+    return 'modulo-productos';
+  }
   protected get scope(): string {
     return 'precios:leer';
   }
@@ -78,7 +81,7 @@ export class CatalogPricingIdentityProvider implements CatalogPricingIdentity {
         },
         body: new URLSearchParams({
           grant_type: 'client_credentials',
-          client_id: 'modulo-productos',
+          client_id: this.clientId,
           client_secret: credentials.clientSecret,
           scope: this.scope,
         }).toString(),
@@ -99,7 +102,7 @@ export class CatalogPricingIdentityProvider implements CatalogPricingIdentity {
       const grantedScopes = body.scopes;
       if (
         principal.kind !== 'service' ||
-        principal.subject !== 'modulo-productos' ||
+        principal.subject !== this.clientId ||
         !principal.audiences.includes('api-productos') ||
         !principal.scopes.includes(this.scope) ||
         principal.scopes.length !== body.scopes.length ||
