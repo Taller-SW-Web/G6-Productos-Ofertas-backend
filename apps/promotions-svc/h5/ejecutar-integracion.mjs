@@ -155,6 +155,7 @@ async function main() {
             event: 'terminal',
             operation_id: id,
             status: data.status,
+            completed_at: data.completed_at,
             reservation_id: data.reservation_id,
             expires_at: data.expires_at,
           });

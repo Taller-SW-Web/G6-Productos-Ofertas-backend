@@ -195,16 +195,92 @@ const observations = new Map([
   ],
 ]);
 
-const missingPreconditions = new Set([
-  'AUTHORIZED_INTEGRATION_ORIGIN_AND_G6_SHA_REQUIRED',
-  'G7_VENTAS_TOKEN_REQUIRED',
-  'INTEGRATION_MUTATIONS_NOT_APPROVED',
-  'G5_SHA_AND_ORDER_REQUIRED',
-  'RESERVATION_AND_ORDER_REQUIRED',
-  'REAL_NEGATIVE_G7_TOKENS_REQUIRED',
-  'G5_SNAPSHOT_REQUIRED',
-  'G5_SIGNED_BUSINESS_EVIDENCE_REQUIRED',
-]);
+const supervisedRuntimeCases = new Set(['G5-H5-07', 'G5-H5-15', 'G5-H5-16']);
+const terminalStatuses = new Set(['COMPLETED', 'REJECTED']);
+
+function ordered(...timestamps) {
+  const times = timestamps.map((timestamp) =>
+    typeof timestamp === 'string' ? Date.parse(timestamp) : NaN,
+  );
+  return times.every(
+    (time, index) =>
+      Number.isFinite(time) && (index === 0 || time > times[index - 1]),
+  );
+}
+
+function runtimeEvidenceMatches(id, proof, terminal, afterDeployment) {
+  const facts = proof.runtime_evidence;
+  if (!facts || !terminal || facts.operation_id !== terminal.operation_id)
+    return false;
+  if (id === 'G5-H5-07') {
+    return (
+      terminal.status === 'COMPLETED' &&
+      facts.request_operation_id === terminal.operation_id &&
+      facts.recovered_operation_id === terminal.operation_id &&
+      facts.operation_rows === 1 &&
+      facts.effect_count === 1 &&
+      ordered(
+        afterDeployment,
+        facts.response_lost_at,
+        facts.recovered_at,
+        proof.observed_at,
+      )
+    );
+  }
+  if (id === 'G5-H5-15') {
+    return (
+      uuid.test(facts.message_id) &&
+      facts.outbox_pending_message_id === facts.message_id &&
+      facts.outbox_recovered_message_id === facts.message_id &&
+      typeof facts.worker_before === 'string' &&
+      facts.worker_before.trim() !== '' &&
+      typeof facts.worker_after === 'string' &&
+      facts.worker_after.trim() !== '' &&
+      facts.worker_before !== facts.worker_after &&
+      Date.parse(facts.terminal_at) === Date.parse(terminal.completed_at) &&
+      ordered(
+        afterDeployment,
+        facts.outbox_pending_at,
+        facts.worker_restarted_at,
+      ) &&
+      ordered(
+        afterDeployment,
+        facts.worker_stopped_at,
+        facts.worker_restarted_at,
+        facts.outbox_recovered_at,
+        facts.terminal_at,
+        proof.observed_at,
+      )
+    );
+  }
+  const { deliveries } = facts;
+  return (
+    terminal.status === 'COMPLETED' &&
+    uuid.test(facts.message_id) &&
+    facts.inbox_message_id === facts.message_id &&
+    facts.inbox_rows === 1 &&
+    facts.effect_count === 1 &&
+    Array.isArray(deliveries) &&
+    deliveries.length >= 2 &&
+    deliveries.every(
+      (delivery) =>
+        delivery?.message_id === facts.message_id &&
+        typeof delivery.trace_id === 'string' &&
+        /^[A-Za-z0-9_.:-]{1,128}$/.test(delivery.trace_id) &&
+        ['COMPLETED', 'LOCK_LOST', 'ABANDONED', 'UNCONFIRMED'].includes(
+          delivery.settlement,
+        ),
+    ) &&
+    new Set(deliveries.map((delivery) => delivery.trace_id)).size ===
+      deliveries.length &&
+    ordered(
+      afterDeployment,
+      ...deliveries.map((delivery) => delivery.observed_at),
+      proof.observed_at,
+    ) &&
+    deliveries.at(-1).settlement === 'COMPLETED'
+  );
+}
 
 function stageIdentifier(id, stage, plan) {
   if (stage === 'expired') return plan.reservation_id;
@@ -257,6 +333,7 @@ export async function ejecutarMatriz(
       preconditions,
       expected,
       status: 'BLOCKED',
+      technical_status: 'NOT_RUN',
       reason: 'FALTA_EJECUCION_O_CONSTANCIA',
       recorded_at: recordedAt,
     };
@@ -295,23 +372,29 @@ export async function ejecutarMatriz(
     if (!ids.length) continue;
     const bilateral = actor !== 'G6';
     const primaryId = stageIdentifier(id, stage, plan);
-    if (bilateral && (fixture.execute === true || fixture.attestation)) {
-      try {
-        row.deployment = await verifyDeployment(plan);
-      } catch {
-        row.reason = 'DESPLIEGUE_OFICIAL_NO_VERIFICADO';
-        continue;
-      }
+    if (stage !== null && fixture.execute !== true) {
+      row.reason = 'FALTA_EJECUCION_TECNICA';
+      continue;
+    }
+    if (stage === null && !fixture.attestation) continue;
+    try {
+      row.deployment = await verifyDeployment(plan);
+    } catch {
+      row.reason = 'DESPLIEGUE_OFICIAL_NO_VERIFICADO';
+      continue;
     }
     let technicalPassed = false;
-    if (fixture.execute === true && stage) {
+    let terminal;
+    const observe = observations.get(id);
+    const needsRuntime = supervisedRuntimeCases.has(id);
+    if (stage !== null) {
       const run = execute(stage, fixture.plan);
+      row.technical_status = 'FAIL';
       const detail = /"code":"([A-Z0-9_]+)"/.exec(
         String(run.stderr ?? ''),
       )?.[1];
       if (run.status !== 0) {
-        const blocked = !run.error && missingPreconditions.has(detail);
-        row.status = blocked ? 'BLOCKED' : 'FAIL';
+        row.status = 'FAIL';
         row.reason = detail ?? 'FALLO_EJECUCION';
         continue;
       }
@@ -333,7 +416,6 @@ export async function ejecutarMatriz(
         row.reason = 'EVIDENCIA_TECNICA_INVALIDA';
         continue;
       }
-      const observe = observations.get(id);
       const metadataMatches = row.evidence.every(
         (event) =>
           event.environment === plan.environment &&
@@ -346,84 +428,115 @@ export async function ejecutarMatriz(
       const linked = row.evidence.filter(
         (event) => event[identifier] === primaryId,
       );
+      terminal = linked.find(
+        (event) =>
+          event.event === 'terminal' && terminalStatuses.has(event.status),
+      );
       if (
         !uuid.test(primaryId) ||
         !metadataMatches ||
         !linked.length ||
-        (observe && !observe(linked, primaryId))
+        (observe && !observe(linked, primaryId)) ||
+        (needsRuntime && !terminal)
       ) {
         row.status = 'FAIL';
         row.reason = 'OBSERVACION_AUTOMATICA_FALLIDA';
         continue;
       }
       technicalPassed = true;
-      if (observe && !bilateral) {
-        row.status = 'PASS';
-        row.reason = 'OBSERVACION_AUTOMATICA';
-        continue;
-      }
+      row.technical_status = 'PASS';
     }
-    if (bilateral && stage && !technicalPassed) {
+    if (stage !== null && !technicalPassed) {
       row.reason = 'FALTA_EJECUCION_TECNICA';
       continue;
     }
-    if (bilateral) row.reason = 'FALTA_CONSTANCIA_BILATERAL';
-    if (!fixture.attestation) continue;
-    try {
-      const proof = await constanciaFirmada(
-        fixture.attestation,
-        'G5_H5_SESSION_EVIDENCE_PUBLIC_KEY',
-        'CONSTANCIA_DE_SESION_INVALIDA',
-      );
-      if (
-        proof?.case_id !== id ||
-        proof.actor !== actor ||
-        proof.environment !== 'integration' ||
-        proof.gateway !== new URL(plan.gateway).origin ||
-        proof.g6_sha !== plan.g6_sha ||
-        proof.g5_sha !== plan.g5_sha ||
-        proof.order_id !== plan.order_id ||
-        (bilateral && stage
-          ? !uuid.test(primaryId) ||
-            proof.operation_or_reservation_id !== primaryId
-          : !ids.includes(proof.operation_or_reservation_id)) ||
-        !Number.isFinite(Date.parse(proof.observed_at)) ||
-        Date.parse(proof.observed_at) > Date.now() ||
-        !httpsEvidence(proof.evidence_url) ||
-        !['PASS', 'FAIL', 'BLOCKED'].includes(proof.status) ||
-        (proof.status === 'PASS' && proof.observed !== expected)
-      )
-        throw new Error();
-      if (bilateral && proof.status === 'PASS') {
+    const requiresProof = bilateral || needsRuntime || !observe;
+    let proof;
+    if (requiresProof) {
+      row.reason = needsRuntime
+        ? 'FALTA_EVIDENCIA_RUNTIME_SUPERVISADA'
+        : bilateral
+          ? 'FALTA_CONSTANCIA_BILATERAL'
+          : 'FALTA_CONSTANCIA_SUPERVISADA';
+      if (!fixture.attestation) continue;
+      try {
+        proof = await constanciaFirmada(
+          fixture.attestation,
+          'G5_H5_SESSION_EVIDENCE_PUBLIC_KEY',
+          'CONSTANCIA_DE_SESION_INVALIDA',
+        );
         if (
-          row.deployment.some(
-            (entry) =>
-              Date.parse(proof.observed_at) < Date.parse(entry.deployed_at),
-          )
+          proof?.case_id !== id ||
+          proof.actor !== actor ||
+          proof.environment !== 'integration' ||
+          proof.gateway !== new URL(plan.gateway).origin ||
+          proof.g6_sha !== plan.g6_sha ||
+          proof.g5_sha !== plan.g5_sha ||
+          proof.order_id !== plan.order_id ||
+          (stage !== null
+            ? !uuid.test(primaryId) ||
+              proof.operation_or_reservation_id !== primaryId
+            : !ids.includes(proof.operation_or_reservation_id)) ||
+          !Number.isFinite(Date.parse(proof.observed_at)) ||
+          Date.parse(proof.observed_at) > Date.now() ||
+          !httpsEvidence(proof.evidence_url) ||
+          !['PASS', 'FAIL', 'BLOCKED'].includes(proof.status) ||
+          (proof.status === 'PASS' && proof.observed !== expected)
         )
           throw new Error();
-        if (technicalPassed) {
-          try {
-            const current = await verifyDeployment(plan);
-            if (JSON.stringify(current) !== JSON.stringify(row.deployment))
-              throw new Error();
-          } catch {
-            row.reason = 'DESPLIEGUE_OFICIAL_CAMBIO_O_NO_VERIFICADO';
+        if (proof.status === 'PASS') {
+          if (
+            row.deployment.some(
+              (entry) =>
+                Date.parse(proof.observed_at) < Date.parse(entry.deployed_at),
+            )
+          )
+            throw new Error();
+          const afterDeployment = row.deployment.reduce(
+            (latest, entry) =>
+              Date.parse(entry.deployed_at) > Date.parse(latest)
+                ? entry.deployed_at
+                : latest,
+            row.deployment[0].deployed_at,
+          );
+          if (
+            needsRuntime &&
+            !runtimeEvidenceMatches(id, proof, terminal, afterDeployment)
+          ) {
+            row.reason = 'EVIDENCIA_RUNTIME_INSUFICIENTE';
             continue;
           }
         }
+        Object.assign(row, {
+          observed_at: proof.observed_at,
+          observed: proof.observed,
+          evidence_url: proof.evidence_url,
+          evidence_identifier: proof.operation_or_reservation_id,
+        });
+      } catch {
+        row.reason = 'CONSTANCIA_DE_SESION_INVALIDA';
+        continue;
       }
-      Object.assign(row, {
-        status: proof.status,
-        reason: 'CONSTANCIA_DE_SESION_VALIDADA',
-        observed_at: proof.observed_at,
-        observed: proof.observed,
-        evidence_url: proof.evidence_url,
-        evidence_identifier: proof.operation_or_reservation_id,
-      });
-    } catch {
-      row.reason = 'CONSTANCIA_DE_SESION_INVALIDA';
     }
+    if (proof && proof.status !== 'PASS') {
+      row.status = proof.status;
+      row.reason = 'CONSTANCIA_DE_SESION_VALIDADA';
+      continue;
+    }
+    if (technicalPassed) {
+      try {
+        const current = await verifyDeployment(plan);
+        if (JSON.stringify(current) !== JSON.stringify(row.deployment))
+          throw new Error();
+      } catch {
+        row.reason = 'DESPLIEGUE_OFICIAL_CAMBIO_O_NO_VERIFICADO';
+        continue;
+      }
+    }
+    row.status = 'PASS';
+    row.reason = proof
+      ? 'CONSTANCIA_DE_SESION_VALIDADA'
+      : 'OBSERVACION_AUTOMATICA';
   }
   return { recorded_at: recordedAt, results };
 }

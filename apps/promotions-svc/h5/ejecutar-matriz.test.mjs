@@ -15,6 +15,8 @@ test('clasifica homologación técnica y bilateral', async (t) => {
     g6_sha: '2'.repeat(40),
     order_id: 'PED-AUDITADO',
     reservation_id: randomUUID(),
+    follow_type: 'cupones',
+    follow_operation_id: randomUUID(),
     operations: { reserve: randomUUID(), coupon: randomUUID() },
   };
   const planPath = join(dir, 'plan.json');
@@ -96,6 +98,203 @@ test('clasifica homologación técnica y bilateral', async (t) => {
     return report.results.find((row) => row.id === id);
   };
   const validRun = output(admission, completion);
+  const operation = plan.follow_operation_id;
+  const message = randomUUID();
+  const observed = {
+    'G5-H5-07': 'INTENCION_UNICA_RECUPERADA',
+    'G5-H5-15': 'OUTBOX_RECUPERADO_TRAS_REINICIO',
+    'G5-H5-16': 'UN_EFECTO_Y_SETTLEMENT',
+  };
+  const completed = {
+    event: 'terminal',
+    operation_id: operation,
+    status: 'COMPLETED',
+    completed_at: '2026-01-02T00:05:00Z',
+  };
+  const facts = {
+    'G5-H5-07': {
+      operation_id: operation,
+      request_operation_id: operation,
+      recovered_operation_id: operation,
+      operation_rows: 1,
+      effect_count: 1,
+      response_lost_at: '2026-01-02T00:01:00Z',
+      recovered_at: '2026-01-02T00:05:00Z',
+    },
+    'G5-H5-15': {
+      operation_id: operation,
+      message_id: message,
+      outbox_pending_message_id: message,
+      outbox_recovered_message_id: message,
+      worker_before: 'worker-a',
+      worker_after: 'worker-b',
+      outbox_pending_at: '2026-01-02T00:01:00Z',
+      worker_stopped_at: '2026-01-02T00:02:00Z',
+      worker_restarted_at: '2026-01-02T00:03:00Z',
+      outbox_recovered_at: '2026-01-02T00:04:00Z',
+      terminal_at: completed.completed_at,
+    },
+    'G5-H5-16': {
+      operation_id: operation,
+      message_id: message,
+      inbox_message_id: message,
+      inbox_rows: 1,
+      effect_count: 1,
+      deliveries: [
+        {
+          trace_id: 'trace-1',
+          message_id: message,
+          settlement: 'LOCK_LOST',
+          observed_at: '2026-01-02T00:06:00Z',
+        },
+        {
+          trace_id: 'trace-2',
+          message_id: message,
+          settlement: 'COMPLETED',
+          observed_at: '2026-01-02T00:07:00Z',
+        },
+      ],
+    },
+  };
+  const runtimeProof = (id, runtime = facts[id]) =>
+    signed({
+      case_id: id,
+      actor: 'G6',
+      observed: observed[id],
+      runtime_evidence: runtime,
+      operation_or_reservation_id: operation,
+    });
+  const followRun = output(completed);
+  await t.test(
+    'ningún caso con etapa aprueba si execute no está habilitado, incluso 07 con firma válida',
+    async () => {
+      const empty = await ejecutarMatriz({});
+      let executed = 0;
+      const records = Object.fromEntries(
+        empty.results
+          .filter((row) => row.stage !== null)
+          .map((row) => [
+            row.id,
+            {
+              ...fixture,
+              execute: false,
+              attestation:
+                row.id === 'G5-H5-07'
+                  ? runtimeProof(row.id)
+                  : signed({
+                      case_id: row.id,
+                      actor: row.actor,
+                      observed: row.expected,
+                    }),
+            },
+          ]),
+      );
+      const report = await ejecutarMatriz(
+        records,
+        [],
+        () => {
+          executed++;
+          return followRun;
+        },
+        deployment,
+      );
+      assert.equal(executed, 0);
+      for (const row of report.results.filter((r) => r.stage !== null)) {
+        assert.equal(row.status, 'BLOCKED', row.id);
+        assert.equal(row.reason, 'FALTA_EJECUCION_TECNICA', row.id);
+        assert.equal(row.technical_status, 'NOT_RUN', row.id);
+      }
+    },
+  );
+  await t.test(
+    '07, 15 y 16 requieren hechos específicos con firma, ejecución y CD',
+    async () => {
+      const incomplete = {
+        'G5-H5-07': { recovered_operation_id: randomUUID() },
+        'G5-H5-15': { worker_after: facts['G5-H5-15'].worker_before },
+        'G5-H5-16': {
+          deliveries: [
+            facts['G5-H5-16'].deliveries[0],
+            {
+              ...facts['G5-H5-16'].deliveries[1],
+              message_id: randomUUID(),
+            },
+          ],
+        },
+      };
+      for (const id of Object.keys(facts)) {
+        assert.equal(
+          (await scenario(id, fixture, followRun)).status,
+          'BLOCKED',
+          id,
+        );
+        assert.equal(
+          (
+            await scenario(
+              id,
+              { ...fixture, attestation: runtimeProof(id, {}) },
+              followRun,
+            )
+          ).status,
+          'BLOCKED',
+          id,
+        );
+        const crossed = { ...facts[id], ...incomplete[id] };
+        assert.equal(
+          (
+            await scenario(
+              id,
+              { ...fixture, attestation: runtimeProof(id, crossed) },
+              followRun,
+            )
+          ).status,
+          'BLOCKED',
+          id,
+        );
+
+        const verified = { ...fixture, attestation: runtimeProof(id) };
+        const passed = await scenario(id, verified, followRun);
+        assert.equal(passed.status, 'PASS', id);
+        assert.equal(passed.technical_status, 'PASS', id);
+        assert.equal(
+          (
+            await scenario(id, verified, {
+              status: 1,
+              stderr: '{"code":"TERMINAL_TIMEOUT_REUSE_OPERATION_ID"}',
+            })
+          ).status,
+          'FAIL',
+          id,
+        );
+        assert.equal(
+          (
+            await scenario(id, verified, followRun, async () => {
+              throw new Error();
+            })
+          ).status,
+          'BLOCKED',
+          id,
+        );
+      }
+    },
+  );
+  await t.test(
+    'un PASS automático G6 tampoco puede sustituir al CD oficial',
+    async () => {
+      const reserve = output({
+        event: 'terminal',
+        status: 'COMPLETED',
+        operation_id: plan.operations.reserve,
+        reservation_id: plan.reservation_id,
+      });
+      const row = await scenario('G5-H5-01', fixture, reserve, async () => {
+        throw new Error();
+      });
+      assert.equal(row.status, 'BLOCKED');
+      assert.equal(row.technical_status, 'NOT_RUN');
+      assert.equal(row.reason, 'DESPLIEGUE_OFICIAL_NO_VERIFICADO');
+    },
+  );
   await t.test('G5-H5-05 sin constancia queda BLOCKED', async () => {
     const row = await scenario(coupon, fixture, validRun);
     assert.equal(row.status, 'BLOCKED');

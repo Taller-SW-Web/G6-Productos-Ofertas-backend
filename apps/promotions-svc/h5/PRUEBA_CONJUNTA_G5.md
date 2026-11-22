@@ -75,11 +75,19 @@ Ejecutar `node apps/promotions-svc/h5/ejecutar-matriz.mjs manifiesto.json result
 
 Los casos supervisados aceptan `attestation` con el mismo contenedor de firma. Fijar `G5_H5_SESSION_EVIDENCE_PUBLIC_KEY` a la clave pública del responsable de homologación. La constancia incluye `case_id`, `actor`, `environment`, `gateway`, ambos SHA según corresponda, `order_id`, `operation_or_reservation_id`, `observed_at`, `observed`, `status` y `evidence_url` HTTPS sin credenciales ni parámetros. Para un PASS, `observed` debe coincidir con el código esperado de la fila. El responsable firma tras observar la evidencia de los actores involucrados.
 
-Un caso exclusivamente G6 puede obtener PASS con observaciones automáticas suficientes. Si participa G5, G7 o G2, hace falta una constancia válida. Cuando el caso además tiene etapa técnica, el runner exige que esa etapa pase en el mismo ambiente, SHA, pedido y operación o reserva. `G5-H5-05` exige que tanto el 202 como el estado `COMPLETED` correspondan al UUID de consumo firmado. Un fallo técnico conserva `FAIL`. Una constancia ausente o inválida mantiene `BLOCKED`.
+Todo caso con etapa exige `execute: true` en el manifiesto, ejecución de esa etapa y una observación técnica satisfactoria para el mismo ambiente, SHA, pedido y UUID de operación o reserva. Sin ejecución queda `BLOCKED`. Un fallo de ejecución queda `FAIL` incluso con constancia válida. Si participa G5, G7 o G2, también hace falta una constancia válida. `G5-H5-05` exige que tanto el 202 como `COMPLETED` correspondan al UUID de consumo firmado. El reporte registra `technical_status` (`NOT_RUN`, `FAIL` o `PASS`) para la etapa y `status` para la homologación.
 
 Cada observación automática debe coincidir con los metadatos del plan. Para los casos 01, 08 y 13 el runner filtra por el UUID de operación antes de evaluar la evidencia. Para el caso 10 filtra por UUID de reserva. El caso 13 exige una lectura válida del pedido original antes de comparar los dos 404.
 
-Para homologar con G5, G7 o G2, usar el runner desde la red privada con `gh` y `az` autenticados para lectura de los runs, artefactos, variable de suscripción de `azure-h5` y revisiones. El runner consulta cada ejecución de `cd-services-azure.yml` en el repositorio oficial. Exige dispatch exitoso de `master` al SHA del plan, job de despliegue aprobado y el digest del artefacto `azure-image-<servicio>`. Contrasta los cuatro digests con las revisiones activas y saludables de ACA en el grupo aislado. El origen del plan debe coincidir con el FQDN del Gateway, que debe enviar el 100 % del tráfico a esa revisión. Ejecutar mientras los artefactos oficiales estén disponibles. La falta de evidencia o un cambio de revisión antes del cierre deja el caso `BLOCKED`. El reporte conserva los enlaces de runs, revisiones y digests verificados.
+Para homologar cualquier caso, usar el runner desde la red privada con `gh` y `az` autenticados para lectura de los runs, artefactos, variable de suscripción de `azure-h5` y revisiones. El runner consulta cada ejecución de `cd-services-azure.yml` en el repositorio oficial. Exige dispatch exitoso de `master` al SHA del plan, job de despliegue aprobado y el digest del artefacto `azure-image-<servicio>`. Contrasta los cuatro digests con las revisiones activas y saludables de ACA en el grupo aislado. El origen del plan debe coincidir con el FQDN del Gateway, que debe enviar el 100 % del tráfico a esa revisión. Ejecutar mientras los artefactos oficiales estén disponibles. La falta de evidencia o un cambio de revisión durante la etapa deja el caso `BLOCKED`. El reporte conserva los enlaces de runs, revisiones y digests verificados. Las pruebas locales se registran en [Validación local](VALIDACION.md).
+
+Los casos 07, 15 y 16 requieren `follow` terminal y constancia supervisada con `runtime_evidence` firmado. Usar `operation_id` del `follow` y marcas horarias del ambiente posteriores al despliegue y anteriores a `observed_at`. Conservar en `evidence_url` las trazas depuradas y los conteos obtenidos en lectura autorizada. El supervisor verifica estos hechos antes de firmar:
+
+| Caso | Campos de `runtime_evidence` y hechos que acreditan |
+|---|---|
+| G5-H5-07 | `request_operation_id` y `recovered_operation_id` coinciden con `operation_id`. `response_lost_at` precede a `recovered_at`, la operación queda `COMPLETED` y la lectura durable confirma `operation_rows: 1` y `effect_count: 1`. |
+| G5-H5-15 | `message_id`, `outbox_pending_message_id` y `outbox_recovered_message_id` coinciden. Registrar `outbox_pending_at` antes del reinicio, `worker_before` y `worker_after` distintos, y la secuencia `worker_stopped_at`, `worker_restarted_at`, `outbox_recovered_at` y `terminal_at`. Este último coincide con `completed_at` del resultado terminal. |
+| G5-H5-16 | `inbox_message_id` coincide con `message_id`. Cada entrada de `deliveries` incluye ese `message_id`, un `trace_id` distinto, `observed_at` y el `settlement` observado. Se exigen dos o más entregas y la última queda `COMPLETED`. La operación queda `COMPLETED` y la lectura durable confirma `inbox_rows: 1` y `effect_count: 1`. |
 
 ## Matriz de los 20 escenarios
 
@@ -93,7 +101,7 @@ Estado real al 21/11/2026. Los 20 casos completos quedan `BLOCKED` hasta que se 
 | G5-H5-04 | Liberación por anulación | `cancel` y seguimiento M1 | Pendiente bilateral |
 | G5-H5-05 | Cupón y GET terminal | `coupon` y constancia bilateral firmada | BLOCKED. Pendiente snapshot de G5 y constancia vinculada a la ejecución real |
 | G5-H5-06 | Restauración del consumo original | `cancel` con fecha original y política | Pendiente bilateral |
-| G5-H5-07 | Pérdida de respuesta del POST | `follow` y mismo plan; corte de red coordinado | Reintento local cubierto; pendiente ambiente |
+| G5-H5-07 | Pérdida de respuesta del POST | `follow` y mismo UUID, con pérdida de respuesta y conteos firmados | BLOCKED. Reintento cubierto localmente. Pendiente evidencia del ambiente aislado |
 | G5-H5-08 | Identidad reutilizada con otro contenido | Conflicto del paso `coupon` | 409 cubierto localmente; pendiente ambiente |
 | G5-H5-09 | Reinicio de G5 | Reinicio M1 y `follow` | Pendiente bilateral |
 | G5-H5-10 | ACTIVA y vencida | `expired` antes del barrido | Pendiente fixture y ambiente |
@@ -101,8 +109,8 @@ Estado real al 21/11/2026. Los 20 casos completos quedan `BLOCKED` hasta que se 
 | G5-H5-12 | Carrera pago/anulación/vencimiento | Carrera controlada M1 con consultas de reserva | Pendiente bilateral |
 | G5-H5-13 | Pedido/cliente ajeno | `auth` con ID conocido y pedido ajeno | 404 cubierto localmente; pendiente ambiente |
 | G5-H5-14 | JWT válido, ausente, expirado y scope incorrecto | `auth` y smoke privado Inventory/G5 | Pruebas locales con firmas de prueba; pendiente emisión G7 real |
-| G5-H5-15 | Broker/worker caído y recuperación | Pausa autorizada y `follow` al reiniciar | Runtime temporal recuperó Outbox tras reinicio y Service Bus reentregó tras abandono. Falta el recorrido por Gateway aislado |
-| G5-H5-16 | Entrega duplicada o settlement perdido | Trazas de MessageId, receipts y DLQ; `follow` | Mismo MessageId y dos settlements reales, con una fila Inbox y un recibo. Falta la verificación del efecto comercial en el entorno bilateral |
+| G5-H5-15 | Broker/worker caído y recuperación | Outbox pendiente, reinicio, recuperación y `follow` terminal correlacionados | BLOCKED. Recuperación observada en el runtime temporal. Pendiente recorrido en Gateway aislado |
+| G5-H5-16 | Entrega duplicada o settlement perdido | Entregas del mismo MessageId, un Inbox y un efecto comercial, más `follow` | BLOCKED. Duplicado y settlement observados en el runtime temporal. Pendiente efecto comercial en el ambiente aislado |
 | G5-H5-17 | Devolución parcial apta | Recepción M2, reintegro y saldo antes/después | Pendiente bilateral |
 | G5-H5-18 | Orden de reemplazo por CAMBIO | M2/M1, reserva y consumo antes de despacho | Pendiente G5/G2 y ambiente |
 | G5-H5-19 | Corte y reversión conciliados | Pausa de admisión, consulta y conciliación por ID | Pendiente bilateral e Infra |

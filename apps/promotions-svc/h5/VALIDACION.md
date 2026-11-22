@@ -4,7 +4,9 @@
 
 Las etapas automáticas exigen ambiente, SHA, pedido e identificador del caso. Las regresiones de los casos 01, 08, 10 y 13 incluyen un UUID cruzado aunque exista otro evento ligado a la operación, y un SHA cruzado aunque el resultado aparente ser correcto. El caso 13 además verifica una lectura positiva del pedido original antes de comparar los dos 404.
 
-La matriz consulta el registro del CD oficial de GitHub y compara sus digests con las revisiones activas en Azure antes de ejecutar un caso bilateral. Una constancia se valida contra el momento del despliegue y, para una etapa automatizada aprobable, se comprueba que el conjunto de revisiones no cambió durante la prueba. Las pruebas de este verificador usan respuestas de prueba para el CD y Azure. La revisión de solo lectura encontró el ambiente preparado, sin las cuatro Container Apps ni ejecuciones del CD oficial del flujo. La homologación permanece bloqueada.
+La matriz verifica el CD oficial y los digests de las revisiones activas para todos los casos, incluidos los exclusivos G6. Antes de asignar PASS a un caso con etapa, comprueba que la etapa se ejecutó y pasó y que el conjunto de revisiones sigue siendo el mismo. Una constancia de aprobación debe corresponder a observaciones posteriores al despliegue.
+
+Las regresiones locales cubren todos los casos con etapa y `execute: false`, una constancia válida junto a una etapa fallida y la ausencia de CD verificable. Para 07, 15 y 16 comprueban que la evidencia ausente, genérica o cruzada impide aprobar y que los hechos específicos firmados junto con el seguimiento terminal permiten PASS. Las pruebas usan respuestas controladas para CD y Azure. Los 20 casos permanecen `BLOCKED` en el ambiente de homologación.
 
 ## Cierre de la reauditoría del HEAD 1f00584
 
