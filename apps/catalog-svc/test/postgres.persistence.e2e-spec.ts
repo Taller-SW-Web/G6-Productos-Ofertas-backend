@@ -3615,6 +3615,22 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         transientIdentity,
         contentClient as never,
       );
+      const commercialRows = () =>
+        database.read(async (db) => ({
+          products: await db
+            .select()
+            .from(products)
+            .where(eq(products.sku_base, row.sku_base)),
+          variants: await db
+            .select()
+            .from(variants)
+            .where(eq(variants.sku, row.sku_base)),
+          skuIdentity: await db
+            .select()
+            .from(skuIdentity)
+            .where(eq(skuIdentity.sku, row.sku_base)),
+        }));
+      const beforeRejectedAttempt = await commercialRows();
       try {
         await expect(initialService.consume(original)).resolves.toBe('APPLIED');
         const initialReply = await bulkReply(original);
@@ -3627,6 +3643,7 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
           retriable: true,
           attempt_number: 1,
         });
+        expect(await commercialRows()).toEqual(beforeRejectedAttempt);
         const commandAttemptId = randomUUID();
         const newAttemptId = randomUUID();
         const retryCorrelation = randomUUID();
