@@ -146,7 +146,7 @@ export class BulkSvcController {
         'INVALID_INPUT',
         'X-Correlation-Id debe ser un UUID válido.',
       );
-    const ownerSub = requireActorSub(request);
+    const ownerSub = requireActorSub(request).toLowerCase();
     const correlationId =
       correlation === undefined
         ? uuidFromDigest(
@@ -204,7 +204,7 @@ export class BulkSvcController {
     )
       throw new BulkDomainError('INVALID_INPUT', 'correlationId inválido.');
     const batch = await this.imports.findByOwnerAndCorrelation(
-      requireActorSub(request),
+      requireActorSub(request).toLowerCase(),
       correlationId.toLowerCase(),
     );
     if (!batch)

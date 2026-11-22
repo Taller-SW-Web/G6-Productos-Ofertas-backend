@@ -664,6 +664,10 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
       const replay = await submit(actorA, correlationA.toUpperCase());
       const separateIntent = await submit(actorA, correlationB.toUpperCase());
       const otherActor = await submit(actorB, correlationA);
+      const sameActorCanonicalized = await submit(
+        actorA.toUpperCase(),
+        correlationA,
+      );
       const invalidIdentity = await submit(actorA, 'not-a-uuid');
       expect([
         identical.status,
@@ -676,11 +680,14 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
       expect(separateIntent.body.correlation_id).toBe(correlationB);
       expect(separateIntent.body.correlation_id).not.toBe(correlationA);
       expect(otherActor.body.correlation_id).toBe(correlationA);
+      expect(sameActorCanonicalized.body.batch_id).toBe(
+        identical.body.batch_id,
+      );
       expect(invalidIdentity).toMatchObject({
         status: 400,
         body: { code: 'VALIDACION' },
       });
-      expect(imports.receiveImport).toHaveBeenCalledTimes(4);
+      expect(imports.receiveImport).toHaveBeenCalledTimes(5);
       const admissions = imports.receiveImport.mock.calls.map(
         ([input]) => input,
       );
@@ -689,11 +696,14 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
       expect(admissions[2]?.batchId).not.toBe(admissions[0]?.batchId);
       expect(admissions[2]?.correlationId).toBe(correlationB);
       expect(admissions[3]?.batchId).not.toBe(admissions[0]?.batchId);
+      expect(admissions[4]?.batchId).toBe(admissions[0]?.batchId);
+      expect(admissions[4]?.ownerSub).toBe(actorA);
       expect(admissions.map(({ ownerSub }) => ownerSub)).toEqual([
         actorA,
         actorA,
         actorA,
         actorB,
+        actorA,
       ]);
     } finally {
       await app.close();
