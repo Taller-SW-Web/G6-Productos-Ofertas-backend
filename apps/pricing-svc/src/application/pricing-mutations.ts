@@ -53,101 +53,118 @@ export class PricingMutations {
     now: Date,
     fact: PriceFactSource,
   ) {
-    return this.repository.transaction(async (tx) => {
-      await this.lockSkuAndRejectDeactivated(tx, target);
-      if (target.productId !== undefined && channelId === null)
-        await lockGlobalProduct(tx, target.productId);
-      const loaded = await this.loadMaybe(tx, target, channelId);
-      if (!loaded) {
-        requireRule(expectedVersion === 0n, 'PRECIO_NO_ENCONTRADO');
-        const regular = input.precioRegular;
-        requireRule(
-          regular !== undefined && regular !== null,
-          'PRECIO_INVALIDO',
-        );
-        const offer =
-          input.accionPrecioOferta === 'ESTABLECER'
-            ? (input.precioOferta ?? null)
-            : null;
-        const terms = {
-          precioRegular: regular,
-          precioOferta: offer,
-          currency: input.currency,
-          motivoCambio: input.motivoCambio,
-          usuarioId: input.usuarioId,
-        };
-        validateTerms(terms);
-        const targetDefinition = {
-          productId: target.productId ?? null,
-          sku: target.sku ?? null,
-        };
-        const definition: PriceDefinition = {
-          target: targetDefinition as PriceDefinition['target'],
-          channelId,
-          priceVersion: 1n,
-          validities: [
-            {
-              ...terms,
-              validFrom: now,
-              validUntil: null,
-              priceVersion: 1n,
-              isCancelled: false,
-            },
-          ],
-        };
-        const [row] = await tx
-          .insert(prices)
-          .values({
-            productId: targetDefinition.productId,
-            sku: targetDefinition.sku,
-            channelId,
-          })
-          .onConflictDoNothing()
-          .returning();
-        requireRule(row !== undefined, 'VERSION_CONFLICT');
-        const [stored] = await tx
-          .insert(priceValidities)
-          .values({ ...definition.validities[0], priceId: row.id })
-          .returning();
-        const before: PriceDefinition = {
-          target: definition.target,
-          channelId,
-          priceVersion: 0n,
-          validities: [],
-        };
-        const facts =
-          typeof fact === 'function' ? fact(before, definition) : fact;
-        const rows = Array.isArray(facts) ? facts : [facts];
-        if (rows.length)
-          await insertPricingFacts(
-            tx,
-            rows.map((item) => ({
-              ...item,
-              eventName: 'pricing.price.changed',
-              kind: 'event' as const,
-              schemaVersion: 1,
-              occurredAt: now,
-            })),
-            this.config?.serviceBus !== undefined,
-          );
-        return {
-          definition,
-          validityId: stored.id,
-          tipoOperacion: 'CREACION' as const,
-        };
-      }
-      const { row, definition } = loaded;
-      const result = changePrice(definition, input, expectedVersion, now);
-      const stored = await this.persist(
+    return this.repository.transaction((tx) =>
+      this.updateInTransaction(
         tx,
-        row.id,
-        result.definition,
+        target,
+        channelId,
+        input,
         expectedVersion,
         now,
-        typeof fact === 'function' ? fact(definition, result.definition) : fact,
-      );
-      return { ...result, validityId: stored.id };
-    });
+        fact,
+      ),
+    );
+  }
+
+  async updateInTransaction(
+    tx: PricingTransaction,
+    target: Target,
+    channelId: string | null,
+    input: PriceUpdate,
+    expectedVersion: bigint,
+    now: Date,
+    fact: PriceFactSource,
+  ) {
+    await this.lockSkuAndRejectDeactivated(tx, target);
+    if (target.productId !== undefined && channelId === null)
+      await lockGlobalProduct(tx, target.productId);
+    const loaded = await this.loadMaybe(tx, target, channelId);
+    if (!loaded) {
+      requireRule(expectedVersion === 0n, 'PRECIO_NO_ENCONTRADO');
+      const regular = input.precioRegular;
+      requireRule(regular !== undefined && regular !== null, 'PRECIO_INVALIDO');
+      const offer =
+        input.accionPrecioOferta === 'ESTABLECER'
+          ? (input.precioOferta ?? null)
+          : null;
+      const terms = {
+        precioRegular: regular,
+        precioOferta: offer,
+        currency: input.currency,
+        motivoCambio: input.motivoCambio,
+        usuarioId: input.usuarioId,
+      };
+      validateTerms(terms);
+      const targetDefinition = {
+        productId: target.productId ?? null,
+        sku: target.sku ?? null,
+      };
+      const definition: PriceDefinition = {
+        target: targetDefinition as PriceDefinition['target'],
+        channelId,
+        priceVersion: 1n,
+        validities: [
+          {
+            ...terms,
+            validFrom: now,
+            validUntil: null,
+            priceVersion: 1n,
+            isCancelled: false,
+          },
+        ],
+      };
+      const [row] = await tx
+        .insert(prices)
+        .values({
+          productId: targetDefinition.productId,
+          sku: targetDefinition.sku,
+          channelId,
+        })
+        .onConflictDoNothing()
+        .returning();
+      requireRule(row !== undefined, 'VERSION_CONFLICT');
+      const [stored] = await tx
+        .insert(priceValidities)
+        .values({ ...definition.validities[0], priceId: row.id })
+        .returning();
+      const before: PriceDefinition = {
+        target: definition.target,
+        channelId,
+        priceVersion: 0n,
+        validities: [],
+      };
+      const facts =
+        typeof fact === 'function' ? fact(before, definition) : fact;
+      const rows = Array.isArray(facts) ? facts : [facts];
+      if (rows.length)
+        await insertPricingFacts(
+          tx,
+          rows.map((item) => ({
+            ...item,
+            eventName: 'pricing.price.changed',
+            kind: 'event' as const,
+            schemaVersion: 1,
+            occurredAt: now,
+          })),
+          this.config?.serviceBus !== undefined,
+        );
+      return {
+        definition,
+        validityId: stored.id,
+        tipoOperacion: 'CREACION' as const,
+      };
+    }
+    const { row, definition } = loaded;
+    const result = changePrice(definition, input, expectedVersion, now);
+    const stored = await this.persist(
+      tx,
+      row.id,
+      result.definition,
+      expectedVersion,
+      now,
+      typeof fact === 'function' ? fact(definition, result.definition) : fact,
+    );
+    return { ...result, validityId: stored.id };
   }
 
   schedule(

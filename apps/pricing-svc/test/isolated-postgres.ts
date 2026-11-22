@@ -114,6 +114,15 @@ export class IsolatedPostgres {
       await this.admin.query('ROLLBACK');
       throw error;
     }
+    await this.admin.query(
+      await readFile(
+        new URL(
+          '../migrations/0004_price_import_idempotency.sql',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    );
     this.runtimeUrl = `postgresql://pricing_app:${password}@127.0.0.1:${port}/pricing_test`;
   }
 
