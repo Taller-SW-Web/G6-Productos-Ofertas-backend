@@ -269,8 +269,8 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
          (SELECT count(*) FROM bulk.file_manifests WHERE id = $2)::text AS manifests,
          (SELECT count(*) FROM bulk.batch_rows WHERE batch_job_id = $3)::text AS rows,
          (SELECT count(*) FROM bulk.row_domain_steps WHERE batch_row_id IN (SELECT id FROM bulk.batch_rows WHERE batch_job_id = $3))::text AS steps,
-         (SELECT count(*) FROM bulk.inbox WHERE message_id = $1 AND handler = 'bulk.import.admission')::text AS inbox,
-         (SELECT count(*) FROM bulk.outbox WHERE message_id = $4)::text AS outbox`,
+         (SELECT count(*) FROM bulk.inbox WHERE message_id = $1::text AND handler = 'bulk.import.admission')::text AS inbox,
+         (SELECT count(*) FROM bulk.outbox WHERE message_id = $4::text)::text AS outbox`,
       [batchId, first.manifest.id, first.batch.id, commandId],
     );
     expect(counts.rows[0]).toEqual({
