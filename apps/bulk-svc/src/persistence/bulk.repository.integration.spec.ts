@@ -34,6 +34,7 @@ import {
 
 const testUrl = process.env.BULK_TEST_DATABASE_URL;
 const integration = testUrl ? describe : describe.skip;
+const TEST_OWNER_SUB = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 let pool: Pool;
 let repository: BulkPersistenceRepository;
 let database: ReturnType<typeof drizzle<typeof bulkSchema>>;
@@ -100,6 +101,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
   ) =>
     repository.createImportBatch({
       batchId: randomUUID(),
+      ownerSub: TEST_OWNER_SUB,
       templateVersion: 2,
       correlationId: randomUUID(),
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -138,6 +140,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const rowB = randomUUID();
     await repository.createImportBatch({
       batchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId,
       templateVersion: 2,
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -181,6 +184,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const rejectedRow = randomUUID();
     await repository.createImportBatch({
       batchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId,
       templateVersion: 2,
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -239,6 +243,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const commandRejectedCorrelationId = randomUUID();
     await repository.createImportBatch({
       batchId: commandRejectedBatchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId: commandRejectedCorrelationId,
       templateVersion: 2,
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -354,6 +359,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     try {
       await repository.createImportBatch({
         batchId,
+        ownerSub: TEST_OWNER_SUB,
         templateVersion: 2,
         correlationId: randomUUID(),
         inputFile: { format: 'CSV', contentRef: ref },
@@ -382,6 +388,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     await expect(
       repository.createImportBatch({
         batchId,
+        ownerSub: TEST_OWNER_SUB,
         templateVersion: 2,
         correlationId: randomUUID(),
         inputFile: { format: 'CSV', contentRef: ref },
@@ -421,6 +428,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       await expect(
         repository.createImportBatch({
           batchId,
+          ownerSub: TEST_OWNER_SUB,
           templateVersion: 2,
           correlationId: randomUUID(),
           inputFile: { format: 'CSV', contentRef: ref },
@@ -480,6 +488,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     ).rejects.toBeInstanceOf(Error);
     const job = await repository.createExportJob({
       exportId: randomUUID(),
+      ownerSub: TEST_OWNER_SUB,
       format: 'CSV',
     });
     await expect(
@@ -496,6 +505,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     try {
       const job = await repository.createExportJob({
         exportId: randomUUID(),
+        ownerSub: TEST_OWNER_SUB,
         format: 'CSV',
       });
       const snapshot = {
@@ -632,11 +642,14 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       });
     const service = new BulkExportService(repository, storage as never, source);
     try {
-      const accepted = await service.create('CSV');
+      const accepted = await service.create('CSV', TEST_OWNER_SUB);
       const job = await waitForExport(accepted.export_id, 'COMPLETED');
       expect(completeSpy).toHaveBeenCalledTimes(1);
       expect(job.outputFileId).toBeTruthy();
-      const download = await service.download(accepted.export_id);
+      const download = await service.download(
+        accepted.export_id,
+        TEST_OWNER_SUB,
+      );
       expect(
         await repository.isExportArtifactReferenced(
           download.manifest.contentRef,
@@ -738,7 +751,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       source,
     );
     try {
-      const accepted = await service.create('CSV');
+      const accepted = await service.create('CSV', TEST_OWNER_SUB);
       await vi.waitFor(() => expect(referenceReads).toEqual([false]), {
         timeout: 5_000,
       });
@@ -773,7 +786,10 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       }
       expect(job?.status).toBe('COMPLETED');
       expect(job.outputFileId).toBeTruthy();
-      const downloaded = await service.download(accepted.export_id);
+      const downloaded = await service.download(
+        accepted.export_id,
+        TEST_OWNER_SUB,
+      );
       expect(downloaded.manifest.contentRef).toBe(ref);
       expect(await storage.get(ref)).toBeInstanceOf(Buffer);
       expect(removed).toEqual([]);
@@ -831,7 +847,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     );
     const service = new BulkExportService(repository, storage as never, source);
     try {
-      const accepted = await service.create('CSV');
+      const accepted = await service.create('CSV', TEST_OWNER_SUB);
       await vi.waitFor(() => expect(removed.length).toBe(1), {
         timeout: 5_000,
       });
@@ -860,6 +876,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
   it('persists and conditionally advances an export without exposing partial output', async () => {
     const job = await repository.createExportJob({
       exportId: randomUUID(),
+      ownerSub: TEST_OWNER_SUB,
       format: 'XLSX',
     });
     expect(job.status).toBe('QUEUED');
@@ -898,6 +915,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     try {
       const created = await workerA.createExportJob({
         exportId,
+        ownerSub: TEST_OWNER_SUB,
         format: 'CSV',
       });
       const first = await workerA.claimQueuedExportJob(exportId);
@@ -966,7 +984,11 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const workerB = new BulkPersistenceRepository(database);
     const exportId = randomUUID();
     let renewing = true;
-    const created = await workerA.createExportJob({ exportId, format: 'CSV' });
+    const created = await workerA.createExportJob({
+      exportId,
+      ownerSub: TEST_OWNER_SUB,
+      format: 'CSV',
+    });
     const first = await workerA.claimQueuedExportJob(exportId);
     expect(first).not.toBeNull();
     const renew = setInterval(() => {
@@ -1056,7 +1078,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       const before = await pool.query(
         "SELECT count(*)::int AS count FROM bulk.file_manifests WHERE role = 'RESULTADO_EXPORTACION'",
       );
-      const accepted = await service.create('CSV');
+      const accepted = await service.create('CSV', TEST_OWNER_SUB);
       const terminal = await waitForExport(
         accepted.export_id,
         'FAILED_GENERAL',
@@ -1078,6 +1100,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
   it('recovers a stale PROCESSING export after service restart without publishing an artifact', async () => {
     const job = await repository.createExportJob({
       exportId: randomUUID(),
+      ownerSub: TEST_OWNER_SUB,
       format: 'XLSX',
     });
     await repository.claimQueuedExportJob(job.exportId);
@@ -1499,7 +1522,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       steps: [{ domain: 'CATALOGO', status: 'COMPLETED' }],
     });
     await expect(
-      repository.requeueBatch(created.batch.batchId),
+      repository.requeueBatch(created.batch.batchId, TEST_OWNER_SUB),
     ).rejects.toMatchObject({ code: 'NOT_CONFIGURED' });
     expect(
       await repository.findBatchByBatchId(created.batch.batchId),
@@ -1527,7 +1550,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       ]),
     );
     await expect(
-      repository.requeueBatch(created.batch.batchId),
+      repository.requeueBatch(created.batch.batchId, TEST_OWNER_SUB),
     ).rejects.toMatchObject({ code: 'NOT_CONFIGURED' });
   });
 
@@ -1542,6 +1565,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     };
     const input = {
       batchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId,
       templateVersion: 2,
       inputFile: {
@@ -1598,6 +1622,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     };
     const created = await repository.createImportBatch({
       batchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId,
       templateVersion: 2,
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -1693,6 +1718,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const correlationId = randomUUID();
     await repository.createImportBatch({
       batchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId,
       templateVersion: 2,
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -1754,6 +1780,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const operationId = randomUUID();
     await repository.createImportBatch({
       batchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId,
       templateVersion: 2,
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -1800,7 +1827,9 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       errorDetail: 'retryable',
     };
     await repository.recordDomainResult(rejected);
-    await expect(repository.requeueBatch(batchId)).rejects.toMatchObject({
+    await expect(
+      repository.requeueBatch(batchId, TEST_OWNER_SUB),
+    ).rejects.toMatchObject({
       code: 'NOT_CONFIGURED',
     });
     expect(await repository.recordDomainResult(rejected)).toMatchObject({
@@ -1843,6 +1872,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const correlationId = randomUUID();
     await repository.createImportBatch({
       batchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId,
       templateVersion: 2,
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -1929,6 +1959,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const rejectedRow = randomUUID();
     await repository.createImportBatch({
       batchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId,
       templateVersion: 2,
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -2076,7 +2107,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       needsReconciliation: true,
     });
     await expect(
-      repository.requeueBatch(created.batch.batchId),
+      repository.requeueBatch(created.batch.batchId, TEST_OWNER_SUB),
     ).rejects.toMatchObject({ code: 'NOT_CONFIGURED' });
     expect(
       (await repository.listBatchRows(created.batch.batchId))[0],

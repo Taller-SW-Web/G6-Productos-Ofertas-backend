@@ -38,6 +38,7 @@ export interface ImportRowInput {
 }
 export interface CreateImportBatchInput {
   batchId: string;
+  ownerSub: string;
   templateVersion: number;
   correlationId: string;
   inputFile: Omit<FileManifestInput, 'role'>;
@@ -71,6 +72,7 @@ export interface UpdateWorkflowStateInput {
 }
 export interface CreateExportJobInput {
   exportId: string;
+  ownerSub: string;
   format: BulkFileFormat;
 }
 export interface ExportSnapshotMetadata {
@@ -209,6 +211,8 @@ export class BulkPersistenceRepository {
           .for('update')
           .limit(1);
         if (existingBatch) {
+          if (existingBatch.ownerSub !== input.ownerSub)
+            throw new BulkPersistenceError('FOREIGN_KEY_VIOLATION');
           const [intentReceipt] = await tx
             .select()
             .from(inbox)
@@ -295,6 +299,7 @@ export class BulkPersistenceRepository {
           .insert(batchJobs)
           .values({
             batchId: input.batchId,
+            ownerSub: input.ownerSub,
             inputFileId: manifest.id,
             status: 'QUEUED',
             templateVersion: input.templateVersion,
@@ -1265,15 +1270,18 @@ export class BulkPersistenceRepository {
 
   async findImportAdmissionIntent(
     batchId: string,
+    ownerSub: string,
   ): Promise<Record<string, unknown> | null> {
     try {
       const [receipt] = await this.db
         .select({ payload: inbox.payload })
         .from(inbox)
+        .innerJoin(batchJobs, eq(batchJobs.batchId, inbox.messageId))
         .where(
           and(
             eq(inbox.messageId, batchId),
             eq(inbox.handler, 'bulk.import.admission'),
+            eq(batchJobs.ownerSub, ownerSub),
           ),
         )
         .limit(1);
@@ -1321,7 +1329,10 @@ export class BulkPersistenceRepository {
     }
   }
 
-  async loadBatchSnapshot(batchId: string): Promise<{
+  async loadBatchSnapshot(
+    batchId: string,
+    ownerSub: string,
+  ): Promise<{
     batch: typeof batchJobs.$inferSelect;
     rows: Array<{
       row: typeof batchRows.$inferSelect;
@@ -1334,7 +1345,9 @@ export class BulkPersistenceRepository {
         .from(batchJobs)
         .leftJoin(batchRows, eq(batchRows.batchJobId, batchJobs.id))
         .leftJoin(rowDomainSteps, eq(rowDomainSteps.batchRowId, batchRows.id))
-        .where(eq(batchJobs.batchId, batchId))
+        .where(
+          and(eq(batchJobs.batchId, batchId), eq(batchJobs.ownerSub, ownerSub)),
+        )
         .orderBy(
           asc(batchRows.createdAt),
           asc(batchRows.id),
@@ -1372,14 +1385,32 @@ export class BulkPersistenceRepository {
     }
   }
 
-  /** Refuses to reopen failed rows until an approved domain retry can be emitted. */
-  async requeueBatch(batchId: string): Promise<typeof batchJobs.$inferSelect> {
+  /**
+   * Refuses to reopen failed rows until an approved domain retry can be emitted.
+   * Unlock requires a versioned contract update for the affected domain that
+   * defines stable business operation identity versus attempt/message identity,
+   * preserves correlation and causation, and specifies how a consumer returns
+   * its durable prior receipt on replay. Only after that domain owner accepts
+   * the protocol may Bulk atomically lock the batch/rows, create the approved
+   * next-attempt outbox intent, and preserve all already-applied steps. Tests
+   * must prove identical replay, ambiguous timeout reconciliation, rejected
+   * prior receipt, no second commercial effect, and concurrent requeue safety.
+   */
+  async requeueBatch(
+    batchId: string,
+    ownerSub: string,
+  ): Promise<typeof batchJobs.$inferSelect> {
     try {
       return await this.db.transaction(async (tx) => {
         const [batch] = await tx
           .select()
           .from(batchJobs)
-          .where(eq(batchJobs.batchId, batchId))
+          .where(
+            and(
+              eq(batchJobs.batchId, batchId),
+              eq(batchJobs.ownerSub, ownerSub),
+            ),
+          )
           .for('update')
           .limit(1);
         if (!batch) throw new BulkPersistenceError('FOREIGN_KEY_VIOLATION');
@@ -1423,7 +1454,11 @@ export class BulkPersistenceRepository {
     try {
       const [job] = await this.db
         .insert(exportJobs)
-        .values({ exportId: input.exportId, format: input.format })
+        .values({
+          exportId: input.exportId,
+          ownerSub: input.ownerSub,
+          format: input.format,
+        })
         .returning();
       if (!job) throw new Error('Export insert returned no row');
       return job;
@@ -1440,6 +1475,27 @@ export class BulkPersistenceRepository {
         .select()
         .from(exportJobs)
         .where(eq(exportJobs.exportId, exportId))
+        .limit(1);
+      return job ?? null;
+    } catch (error) {
+      throw persistenceError(error);
+    }
+  }
+
+  async findOwnedExportJobByExportId(
+    exportId: string,
+    ownerSub: string,
+  ): Promise<typeof exportJobs.$inferSelect | null> {
+    try {
+      const [job] = await this.db
+        .select()
+        .from(exportJobs)
+        .where(
+          and(
+            eq(exportJobs.exportId, exportId),
+            eq(exportJobs.ownerSub, ownerSub),
+          ),
+        )
         .limit(1);
       return job ?? null;
     } catch (error) {

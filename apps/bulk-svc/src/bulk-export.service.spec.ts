@@ -8,6 +8,7 @@ import type {
 } from './export/bulk-export-source.js';
 
 describe('BulkExportService (isolated)', () => {
+  const ownerSub = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   it('persists valid admission and closes missing-source jobs without output', async () => {
     const job = {
       exportId: randomUUID(),
@@ -19,9 +20,14 @@ describe('BulkExportService (isolated)', () => {
     };
     const repository = {
       createExportJob: vi.fn(
-        async (input: { exportId: string; format: string }) => ({
+        async (input: {
+          exportId: string;
+          ownerSub: string;
+          format: string;
+        }) => ({
           ...job,
           exportId: input.exportId,
+          ownerSub: input.ownerSub,
           format: input.format,
         }),
       ),
@@ -36,9 +42,10 @@ describe('BulkExportService (isolated)', () => {
       listQueuedExportJobs: vi.fn().mockResolvedValue([]),
     };
     const service = new BulkExportService(repository as never);
-    const accepted = await service.create('CSV');
+    const accepted = await service.create('CSV', ownerSub);
     expect(repository.createExportJob).toHaveBeenCalledWith({
       exportId: accepted.export_id,
+      ownerSub,
       format: 'CSV',
     });
     expect(accepted).toMatchObject({
@@ -59,7 +66,9 @@ describe('BulkExportService (isolated)', () => {
   it('rejects unsupported formats before persistence', async () => {
     const repository = { createExportJob: vi.fn() };
     const service = new BulkExportService(repository as never);
-    await expect(service.create('PDF' as never)).rejects.toMatchObject({
+    await expect(
+      service.create('PDF' as never, ownerSub),
+    ).rejects.toMatchObject({
       code: 'INVALID_INPUT',
     });
     expect(repository.createExportJob).not.toHaveBeenCalled();
@@ -208,6 +217,7 @@ describe('BulkExportService (isolated)', () => {
       const repository = {
         createExportJob: vi.fn(async (input) => {
           job.exportId = input.exportId;
+          job.ownerSub = input.ownerSub;
           return job;
         }),
         claimQueuedExportJob: vi.fn(async () => {
@@ -216,6 +226,9 @@ describe('BulkExportService (isolated)', () => {
         }),
         isExportClaimCurrent: vi.fn(async () => true),
         findExportJobByExportId: vi.fn(async () => job),
+        findOwnedExportJobByExportId: vi.fn(async (exportId, actorSub) =>
+          job.exportId === exportId && job.ownerSub === actorSub ? job : null,
+        ),
         completeExportJob: vi.fn(async (_id, input, _fence, snapshot) => {
           manifest = {
             id: 'manifest-1',
@@ -262,7 +275,7 @@ describe('BulkExportService (isolated)', () => {
         source,
       );
       try {
-        await service.create(format);
+        await service.create(format, ownerSub);
         await vi.waitFor(() => expect(job.status).toBe('COMPLETED'));
         expect(source.catalog).toHaveBeenCalledTimes(2);
         expect(source.pricing).toHaveBeenCalledTimes(2);
@@ -287,7 +300,7 @@ describe('BulkExportService (isolated)', () => {
             requested_at: job.createdAt.toISOString(),
           },
         });
-        const downloaded = await service.download(job.exportId);
+        const downloaded = await service.download(job.exportId, ownerSub);
         const delivered = await storage.get(downloaded.manifest.contentRef);
         expect(delivered).toEqual(bytes);
         if (format === 'CSV') {

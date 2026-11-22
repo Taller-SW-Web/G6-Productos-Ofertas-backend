@@ -67,6 +67,8 @@ export const batchJobs = bulk.table(
   {
     id: uuid('id').defaultRandom().notNull(),
     batchId: uuid('batch_id').notNull(),
+    // Nullable only for historical rows; public reads never expose null-owned jobs.
+    ownerSub: uuid('owner_sub'),
     inputFileId: uuid('input_file_id').notNull(),
     reportFileId: uuid('report_file_id'),
     status: jobStatus('status').notNull().default('QUEUED'),
@@ -94,6 +96,7 @@ export const batchJobs = bulk.table(
       foreignColumns: [fileManifests.id],
     }).onDelete('restrict'),
     unique('uq_batch_jobs_batch_id').on(t.batchId),
+    index('ix_batch_jobs_owner_created_at').on(t.ownerSub, t.createdAt),
     unique('uq_batch_jobs_report_file_id').on(t.reportFileId),
     check('ck_batch_jobs_template_version', sql`${t.templateVersion} > 0`),
     check('ck_batch_jobs_total_rows', sql`${t.totalRows} >= 0`),
@@ -259,6 +262,8 @@ export const exportJobs = bulk.table(
   {
     id: uuid('id').defaultRandom().notNull(),
     exportId: uuid('export_id').notNull(),
+    // Nullable only for historical rows; public reads never expose null-owned jobs.
+    ownerSub: uuid('owner_sub'),
     status: jobStatus('status').notNull().default('QUEUED'),
     format: text('format').notNull(),
     outputFileId: uuid('output_file_id'),
@@ -276,6 +281,7 @@ export const exportJobs = bulk.table(
       foreignColumns: [fileManifests.id],
     }).onDelete('restrict'),
     unique('uq_export_jobs_export_id').on(t.exportId),
+    index('ix_export_jobs_owner_created_at').on(t.ownerSub, t.createdAt),
     unique('uq_export_jobs_output_file_id').on(t.outputFileId),
     check('ck_export_jobs_format', sql`${t.format} IN ('CSV','XLSX')`),
     check(

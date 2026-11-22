@@ -114,6 +114,7 @@ describe('bulk Drizzle schema', () => {
       steps.columns.find((column) => column.name === 'status')?.getSQLType(),
     ).toBe('step_status');
     expect(jobs.indexes.map((index) => index.config.name)).toEqual([
+      'ix_batch_jobs_owner_created_at',
       'ix_batch_jobs_input_file_id',
       'ix_batch_jobs_status_created_at',
       'ix_batch_jobs_reconciliation',
@@ -124,5 +125,8 @@ describe('bulk Drizzle schema', () => {
       'ix_batch_rows_failed_domain',
     ]);
     expect(getTableConfig(exportJobs).foreignKeys).toHaveLength(1);
+    expect(
+      getTableConfig(exportJobs).indexes.map((index) => index.config.name),
+    ).toContain('ix_export_jobs_owner_created_at');
   });
 });

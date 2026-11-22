@@ -10,6 +10,11 @@ import { BulkExportService } from './bulk-export.service.js';
 import { BulkDomainError } from './domain/bulk.domain-error.js';
 import { BulkUserBearerGuard } from './auth/bulk-user-bearer.guard.js';
 import { BulkProblemFilter } from './http/bulk-problem.filter.js';
+import type {
+  NextFunction,
+  Request as ExpressRequest,
+  Response as ExpressResponse,
+} from 'express';
 import {
   createBulkTemplateCsv,
   BULK_TEMPLATE_HEADERS,
@@ -36,7 +41,7 @@ describe('Bulk HTTP import routes (isolated)', () => {
           failedDomain: 'PRICING',
           needsReconciliation: true,
           errorCode: 'PRICE_REJECTED',
-          errorDetail: 'error estable',
+          errorDetail: ' \t=HYPERLINK("https://bad.test","open")',
         },
         steps: [
           {
@@ -74,8 +79,16 @@ describe('Bulk HTTP import routes (isolated)', () => {
           ),
         ),
     };
+    const downloadedCsv = Buffer.from('product_id\r\nprod-1\r\n', 'utf8');
+    const completedExportId = '55555555-5555-4555-8555-555555555555';
+    const unavailableExportId = '66666666-6666-4666-8666-666666666666';
     const storage = {
       put: vi.fn().mockResolvedValue('supabase://private/imports/test.csv'),
+      get: vi.fn(async (contentRef: string) => {
+        if (contentRef.endsWith('/unavailable.csv'))
+          throw new BulkDomainError('STORAGE_UNAVAILABLE', 'storage down');
+        return downloadedCsv;
+      }),
     };
     const module = await Test.createTestingModule({
       controllers: [BulkSvcController],
@@ -104,11 +117,29 @@ describe('Bulk HTTP import routes (isolated)', () => {
                 formato: 'CSV',
               };
             }),
-            download: vi
-              .fn()
-              .mockRejectedValue(
-                new BulkDomainError('EXPORT_NOT_READY', 'not ready'),
-              ),
+            download: vi.fn(async (id: string) => {
+              if (id === completedExportId)
+                return {
+                  job: { exportId: id, format: 'CSV', status: 'COMPLETED' },
+                  manifest: {
+                    contentRef: 'supabase://private/exports/complete.csv',
+                    role: 'RESULTADO_EXPORTACION',
+                    format: 'CSV',
+                  },
+                };
+              if (id === unavailableExportId)
+                return {
+                  job: { exportId: id, format: 'CSV', status: 'COMPLETED' },
+                  manifest: {
+                    contentRef: 'supabase://private/exports/unavailable.csv',
+                    role: 'RESULTADO_EXPORTACION',
+                    format: 'CSV',
+                  },
+                };
+              if (id === '77777777-7777-4777-8777-777777777777')
+                throw new BulkDomainError('EXPORT_NOT_FOUND', 'missing');
+              throw new BulkDomainError('EXPORT_NOT_READY', 'not ready');
+            }),
           },
         },
         {
@@ -122,6 +153,14 @@ describe('Bulk HTTP import routes (isolated)', () => {
       .compile();
     const app = module.createNestApplication();
     app.useGlobalFilters(new BulkProblemFilter());
+    app.use(
+      (req: ExpressRequest, _res: ExpressResponse, next: NextFunction) => {
+        Object.assign(req, {
+          bulkActorSub: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        });
+        next();
+      },
+    );
     await app.init();
     try {
       const template = await request(app.getHttpServer()).get(
@@ -241,12 +280,17 @@ describe('Bulk HTTP import routes (isolated)', () => {
         `attachment; filename="reporte-importacion-${batch.batchId}.csv"`,
       );
       expect(report.text).toContain('PRICE_REJECTED');
+      expect(report.text).toContain("' \t=HYPERLINK");
+      expect(report.text).toContain('""https://bad.test""');
       const resumed = await request(app.getHttpServer()).post(
         `/api/v1/carga-masiva/productos/importaciones/${batch.batchId}/reanudar`,
       );
       expect(resumed.status).toBe(503);
       expect(resumed.body.code).toBe('SERVICIO_NO_DISPONIBLE');
-      expect(imports.getSnapshot).toHaveBeenCalledWith(batch.batchId);
+      expect(imports.getSnapshot).toHaveBeenCalledWith(
+        batch.batchId,
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      );
 
       const exportCreated = await request(app.getHttpServer())
         .post('/api/v1/carga-masiva/productos/exportaciones')
@@ -268,6 +312,27 @@ describe('Bulk HTTP import routes (isolated)', () => {
           )
         ).status,
       ).toBe(503);
+      const downloaded = await request(app.getHttpServer()).get(
+        `/api/v1/carga-masiva/productos/exportaciones/${completedExportId}/archivo`,
+      );
+      expect(downloaded.status).toBe(200);
+      expect(downloaded.headers['content-type']).toMatch(/^text\/csv/i);
+      expect(downloaded.headers['content-disposition']).toContain(
+        `${completedExportId}.csv`,
+      );
+      expect(downloaded.text).toBe(downloadedCsv.toString('utf8'));
+      const unavailable = await request(app.getHttpServer()).get(
+        `/api/v1/carga-masiva/productos/exportaciones/${unavailableExportId}/archivo`,
+      );
+      expect(unavailable.status).toBe(503);
+      expect(unavailable.body.code).toBe('SERVICIO_NO_DISPONIBLE');
+      const missing = await request(app.getHttpServer()).get(
+        '/api/v1/carga-masiva/productos/exportaciones/77777777-7777-4777-8777-777777777777/archivo',
+      );
+      expect(missing).toMatchObject({
+        status: 404,
+        body: { code: 'LOTE_NO_ENCONTRADO' },
+      });
       expect(
         (
           await request(app.getHttpServer()).get(
@@ -322,13 +387,16 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
       .export({ type: 'spki', format: 'pem' })
       .toString();
     process.env.G7_JWT_ISSUER = 'bulk-http-test-issuer';
-    const token = (roles: string[]) => {
+    const token = (
+      roles: string[],
+      sub = '00000000-0000-4000-8000-000000000001',
+    ) => {
       const encode = (value: object) =>
         Buffer.from(JSON.stringify(value)).toString('base64url');
       const header = encode({ alg: 'RS256', typ: 'JWT' });
       const claims = encode({
         iss: 'bulk-http-test-issuer',
-        sub: '00000000-0000-4000-8000-000000000001',
+        sub,
         tipo: 'acceso',
         iat: Math.floor(Date.now() / 1000),
         exp: Math.floor(Date.now() / 1000) + 600,
@@ -339,12 +407,33 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
       signer.update(`${header}.${claims}`);
       return `${header}.${claims}.${signer.sign(privateKey, 'base64url')}`;
     };
+    const imports = {
+      receiveImport: vi.fn(
+        async (input: {
+          batchId: string;
+          ownerSub: string;
+          correlationId: string;
+        }) => ({
+          batch: {
+            batchId: input.batchId,
+            status: 'QUEUED',
+            templateVersion: 2,
+            correlationId: '22222222-2222-4222-8222-222222222222',
+          },
+        }),
+      ),
+    };
     const module = await Test.createTestingModule({
       controllers: [BulkSvcController],
       providers: [
         BulkSvcService,
-        { provide: BulkImportService, useValue: {} },
-        { provide: BulkStorageService, useValue: {} },
+        { provide: BulkImportService, useValue: imports },
+        {
+          provide: BulkStorageService,
+          useValue: {
+            put: vi.fn().mockResolvedValue('private://imports/file.csv'),
+          },
+        },
         {
           provide: BulkExportService,
           useValue: { create: vi.fn().mockResolvedValue({ status: 'QUEUED' }) },
@@ -383,6 +472,61 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
             .send({ formato: 'CSV' })
         ).status,
       ).toBe(202);
+      const actorA = '00000000-0000-4000-8000-000000000001';
+      const actorB = '00000000-0000-4000-8000-000000000002';
+      const correlationA = '11111111-1111-4111-8111-111111111111';
+      const correlationB = '22222222-2222-4222-8222-222222222222';
+      const csvValues = [
+        'ALTA',
+        '',
+        '',
+        'SKU',
+        '',
+        'Nombre',
+        'Descripcion',
+        'cat',
+        'marca',
+        'tipo',
+        'false',
+        '1',
+        '[]',
+        '',
+        '',
+        '0',
+      ];
+      const csv = Buffer.from(
+        `${BULK_TEMPLATE_HEADERS.join(',')}\r\n${csvValues.join(',')}\r\n`,
+      );
+      const submit = (sub: string, correlationId: string) =>
+        request(app.getHttpServer())
+          .post('/api/v1/carga-masiva/productos/importaciones')
+          .set('authorization', `Bearer ${token(['GESTOR_COMERCIAL'], sub)}`)
+          .set('x-correlation-id', correlationId)
+          .attach('archivo', csv, 'items.csv');
+      const identical = await submit(actorA, correlationA);
+      const replay = await submit(actorA, correlationA);
+      const separateIntent = await submit(actorA, correlationB);
+      const otherActor = await submit(actorB, correlationA);
+      expect([
+        identical.status,
+        replay.status,
+        separateIntent.status,
+        otherActor.status,
+      ]).toEqual([202, 202, 202, 202]);
+      const admissions = imports.receiveImport.mock.calls.map(
+        ([input]) => input,
+      );
+      expect(admissions[0]?.batchId).toBe(admissions[1]?.batchId);
+      expect(admissions[0]?.correlationId).toBe(admissions[1]?.correlationId);
+      expect(admissions[2]?.batchId).not.toBe(admissions[0]?.batchId);
+      expect(admissions[2]?.correlationId).toBe(correlationB);
+      expect(admissions[3]?.batchId).not.toBe(admissions[0]?.batchId);
+      expect(admissions.map(({ ownerSub }) => ownerSub)).toEqual([
+        actorA,
+        actorA,
+        actorA,
+        actorB,
+      ]);
     } finally {
       await app.close();
     }

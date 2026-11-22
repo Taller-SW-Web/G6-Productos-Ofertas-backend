@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import {
@@ -22,6 +24,8 @@ const databaseUrl = process.env.BULK_TEST_DATABASE_URL;
 const integration =
   databaseUrl && process.env.NODE_ENV === 'test' ? describe : describe.skip;
 const id = () => randomUUID();
+const OWNER_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const OWNER_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const fingerprint = (value: unknown) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const replayInFlight = new Set<Promise<void>>();
@@ -51,6 +55,15 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
     );
     expect(Number(version.rows[0]?.server_version_num)).toBeLessThan(180000);
     await pool.query('SELECT 1 FROM bulk.inbox LIMIT 0');
+    await pool.query(
+      readFileSync(
+        resolve(
+          process.cwd(),
+          'apps/bulk-svc/migrations/0005_actor_ownership.sql',
+        ),
+        'utf8',
+      ),
+    );
     await pool.query(
       'TRUNCATE bulk.inbox, bulk.outbox, bulk.row_domain_steps, bulk.batch_rows, bulk.export_jobs, bulk.batch_jobs, bulk.file_manifests CASCADE',
     );
@@ -119,11 +132,32 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       templateVersion: 2,
       correlationId,
       batchId,
+      ownerSub: OWNER_A,
       contentRef: `test://${id()}`,
     };
     const admitted = await service.receiveImport(importInput);
     expect(admitted.parsed.rows).toHaveLength(1);
     expect(admitted.parsed.rows[0]?.variant).toBeNull();
+    expect(
+      await repository.findImportAdmissionIntent(batchId, OWNER_A),
+    ).not.toBeNull();
+    expect(
+      await repository.findImportAdmissionIntent(batchId, OWNER_B),
+    ).toBeNull();
+    expect(await repository.loadBatchSnapshot(batchId, OWNER_A)).not.toBeNull();
+    expect(await repository.loadBatchSnapshot(batchId, OWNER_B)).toBeNull();
+    const exportId = id();
+    await repository.createExportJob({
+      exportId,
+      ownerSub: OWNER_A,
+      format: 'CSV',
+    });
+    expect(
+      await repository.findOwnedExportJobByExportId(exportId, OWNER_A),
+    ).not.toBeNull();
+    expect(
+      await repository.findOwnedExportJobByExportId(exportId, OWNER_B),
+    ).toBeNull();
     const command = (await repository.findPendingOutbox(10)).find(
       (item) => item.correlationId === correlationId,
     );
@@ -186,11 +220,15 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       templateVersion: 2,
       correlationId,
       batchId,
+      ownerSub: OWNER_A,
       contentRef: `test://${id()}`,
     };
     const service = new BulkImportService(repository);
     await service.receiveImport(input);
-    const admission = await repository.findImportAdmissionIntent(batchId);
+    const admission = await repository.findImportAdmissionIntent(
+      batchId,
+      OWNER_A,
+    );
     const original = (
       admission!.catalogCommands as Array<Record<string, unknown>>
     )[0]!;
@@ -211,7 +249,7 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
     });
 
     await service.receiveImport(input);
-    const replay = await repository.findImportAdmissionIntent(batchId);
+    const replay = await repository.findImportAdmissionIntent(batchId, OWNER_A);
     expect(replay?.catalogCommands).toEqual([original]);
     const pending = (await repository.findPendingOutbox(10)).filter(
       (item) => item.correlationId === correlationId,
@@ -425,6 +463,7 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       templateVersion: 2,
       correlationId,
       batchId,
+      ownerSub: OWNER_A,
       contentRef: `test://${id()}`,
     });
     const row = admitted.parsed.rows[0]!;
@@ -531,6 +570,7 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       templateVersion: 2,
       correlationId: correlationIds[index],
       batchId: batchIds[index],
+      ownerSub: OWNER_A,
       contentRef: 'test://same-csv-file',
     });
 
@@ -553,7 +593,9 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
     );
 
     const admittedCommands = await Promise.all(
-      batchIds.map((batchId) => repository.findImportAdmissionIntent(batchId)),
+      batchIds.map((batchId) =>
+        repository.findImportAdmissionIntent(batchId, OWNER_A),
+      ),
     );
     const envelopes = admittedCommands.map(
       (intent) =>
@@ -646,7 +688,7 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
     expect(
       await Promise.all(
         batchIds.map((batchId) =>
-          repository.findImportAdmissionIntent(batchId),
+          repository.findImportAdmissionIntent(batchId, OWNER_A),
         ),
       ),
     ).toEqual(admittedCommands);

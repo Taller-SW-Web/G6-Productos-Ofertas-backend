@@ -32,6 +32,7 @@ export class BulkImportService {
     bytes: Buffer;
     format: 'CSV' | 'XLSX';
     templateVersion: number;
+    ownerSub: string;
     correlationId: string;
     contentRef: string;
     batchId?: string;
@@ -77,6 +78,7 @@ export class BulkImportService {
       contentRef: input.contentRef,
       format: input.format,
       templateVersion: parsed.templateVersion,
+      ownerSub: input.ownerSub,
       rows,
       intentRows: parsed.rows,
       catalogCommandVersion: commandV2 ? 2 : 1,
@@ -84,8 +86,8 @@ export class BulkImportService {
     return { ...result, parsed };
   }
 
-  async getSnapshot(batchId: string) {
-    const snapshot = await this.repository.loadBatchSnapshot(batchId);
+  async getSnapshot(batchId: string, ownerSub: string) {
+    const snapshot = await this.repository.loadBatchSnapshot(batchId, ownerSub);
     if (!snapshot)
       throw new BulkDomainError('BATCH_NOT_FOUND', 'El lote no existe.');
     return snapshot;
@@ -93,6 +95,7 @@ export class BulkImportService {
 
   async createImport(input: {
     batchId: string;
+    ownerSub: string;
     correlationId: string;
     contentRef: string;
     format: string;
@@ -144,6 +147,7 @@ export class BulkImportService {
     try {
       priorAdmission = await this.repository.findImportAdmissionIntent(
         input.batchId,
+        input.ownerSub,
       );
     } catch (error) {
       throw mapBulkPersistenceError(error);
@@ -168,6 +172,7 @@ export class BulkImportService {
     try {
       return await this.repository.createImportBatch({
         batchId: input.batchId,
+        ownerSub: input.ownerSub,
         correlationId: input.correlationId,
         templateVersion: input.templateVersion,
         inputFile: {
@@ -242,9 +247,9 @@ export class BulkImportService {
     }
   }
 
-  async resumeBatch(batchId: string) {
+  async resumeBatch(batchId: string, ownerSub: string) {
     try {
-      return await this.repository.requeueBatch(batchId);
+      return await this.repository.requeueBatch(batchId, ownerSub);
     } catch (error) {
       if (
         error instanceof BulkPersistenceError &&

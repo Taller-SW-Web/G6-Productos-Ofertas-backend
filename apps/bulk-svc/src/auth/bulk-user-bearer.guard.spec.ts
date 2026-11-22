@@ -140,9 +140,10 @@ describe('Bulk H4 userBearer and reversible demo policy', () => {
     const encode = (value: object) =>
       Buffer.from(JSON.stringify(value)).toString('base64url');
     const header = encode({ alg: 'RS256', typ: 'JWT', kid: 'bulk-sim-key' });
+    const subject = randomUUID();
     const claims = encode({
       iss: issuer,
-      sub: randomUUID(),
+      sub: subject,
       tipo: 'acceso',
       iat: Math.floor(Date.now() / 1000),
       exp: Math.floor(Date.now() / 1000) + 60,
@@ -152,10 +153,13 @@ describe('Bulk H4 userBearer and reversible demo policy', () => {
     const signer = createSign('RSA-SHA256');
     signer.update(`${header}.${claims}`);
     const token = `${header}.${claims}.${signer.sign(privateKey, 'base64url')}`;
-    const { context } = executionContext({ authorization: `Bearer ${token}` });
+    const { context, request } = executionContext({
+      authorization: `Bearer ${token}`,
+    });
     await expect(new BulkUserBearerGuard().canActivate(context)).resolves.toBe(
       true,
     );
+    expect(Reflect.get(request, 'bulkActorSub')).toBe(subject);
 
     process.env.G6_SECURITY_MODE = 'G7_AUTHENTICATED';
     process.env.G7_JWT_ISSUER = 'https://g7.test/issuer';

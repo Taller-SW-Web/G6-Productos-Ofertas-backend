@@ -74,7 +74,7 @@ export class BulkExportService implements OnModuleInit, OnModuleDestroy {
     this.retryTimers.clear();
   }
 
-  async create(format: ExportFormat) {
+  async create(format: ExportFormat, ownerSub: string) {
     if (format !== 'CSV' && format !== 'XLSX') {
       throw new BulkDomainError(
         'INVALID_INPUT',
@@ -83,7 +83,11 @@ export class BulkExportService implements OnModuleInit, OnModuleDestroy {
     }
     try {
       const exportId = randomUUID();
-      const job = await this.repository.createExportJob({ exportId, format });
+      const job = await this.repository.createExportJob({
+        exportId,
+        ownerSub,
+        format,
+      });
       this.schedule(exportId);
       return this.toDto(job);
     } catch (error) {
@@ -91,10 +95,13 @@ export class BulkExportService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async get(exportId: string) {
+  async get(exportId: string, ownerSub: string) {
     assertExportId(exportId);
     try {
-      const job = await this.repository.findExportJobByExportId(exportId);
+      const job = await this.repository.findOwnedExportJobByExportId(
+        exportId,
+        ownerSub,
+      );
       if (!job)
         throw new BulkDomainError(
           'EXPORT_NOT_FOUND',
@@ -106,10 +113,13 @@ export class BulkExportService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async download(exportId: string) {
+  async download(exportId: string, ownerSub: string) {
     assertExportId(exportId);
     try {
-      const job = await this.repository.findExportJobByExportId(exportId);
+      const job = await this.repository.findOwnedExportJobByExportId(
+        exportId,
+        ownerSub,
+      );
       if (!job)
         throw new BulkDomainError(
           'EXPORT_NOT_FOUND',

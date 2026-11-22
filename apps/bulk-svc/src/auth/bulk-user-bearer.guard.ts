@@ -11,6 +11,8 @@ import {
 import type { Request } from 'express';
 import { isPhase1PublicRead } from '../phase1-public-reads.js';
 
+export type BulkAuthenticatedRequest = Request & { bulkActorSub?: string };
+
 @Injectable()
 export class BulkUserBearerGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -116,6 +118,7 @@ export class BulkUserBearerGuard implements CanActivate {
       throw new UnauthorizedException('TOKEN_INVALIDO');
     if (!(claims.roles as string[]).includes('GESTOR_COMERCIAL'))
       throw new ForbiddenException('SCOPE_INSUFICIENTE');
+    (request as BulkAuthenticatedRequest).bulkActorSub = claims.sub as string;
     return true;
   }
 }
