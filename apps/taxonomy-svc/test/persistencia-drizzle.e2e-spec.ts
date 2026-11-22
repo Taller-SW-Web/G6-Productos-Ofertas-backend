@@ -2993,7 +2993,12 @@ describeIntegracion(
             esperado: 'REJECTED',
             result: 'IN_USE',
           },
-          { status: 'FAILED', reason: null, esperado: 'REJECTED', result: null },
+          {
+            status: 'FAILED',
+            reason: null,
+            esperado: 'REJECTED',
+            result: null,
+          },
         ] as const) {
           await admin.query(
             'UPDATE taxonomy.master_deactivation_operations SET status = $2, reason = $3 WHERE operation_id = $1',
