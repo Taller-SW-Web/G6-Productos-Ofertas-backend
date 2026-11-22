@@ -79,6 +79,15 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
     );
     await pool.query(ownershipMigration);
     await pool.query(ownershipMigration);
+    const correlationMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        'apps/bulk-svc/migrations/0006_owner_correlation_identity.sql',
+      ),
+      'utf8',
+    );
+    await pool.query(correlationMigration);
+    await pool.query(correlationMigration);
     const [legacyBatchOwner] = (
       await pool.query<{ owner_sub: string | null }>(
         'SELECT owner_sub FROM bulk.batch_jobs WHERE batch_id = $1',
@@ -116,15 +125,19 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       indexname: string;
       indexdef: string;
     }>(
-      "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'bulk' AND indexname IN ('ix_batch_jobs_owner_created_at', 'ix_export_jobs_owner_created_at') ORDER BY indexname",
+      "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = 'bulk' AND indexname IN ('ix_batch_jobs_owner_created_at', 'ix_export_jobs_owner_created_at', 'uq_batch_jobs_owner_correlation') ORDER BY indexname",
     );
     expect(indexes.rows.map(({ indexname }) => indexname)).toEqual([
       'ix_batch_jobs_owner_created_at',
       'ix_export_jobs_owner_created_at',
+      'uq_batch_jobs_owner_correlation',
     ]);
     expect(indexes.rows.map(({ indexdef }) => indexdef)).toEqual([
       expect.stringMatching(/\(owner_sub, created_at\)/),
       expect.stringMatching(/\(owner_sub, created_at\)/),
+      expect.stringMatching(
+        /UNIQUE.*\(owner_sub, correlation_id\).*WHERE \(owner_sub IS NOT NULL\)/i,
+      ),
     ]);
     await pool.query(
       'TRUNCATE bulk.inbox, bulk.outbox, bulk.row_domain_steps, bulk.batch_rows, bulk.export_jobs, bulk.batch_jobs, bulk.file_manifests CASCADE',
@@ -151,6 +164,159 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       return task;
     };
     await consumer.onModuleInit();
+  });
+
+  it('preflight rejects duplicate owner/correlation rows without deleting or reassigning them', async () => {
+    const client = await pool.connect();
+    const migration = readFileSync(
+      resolve(
+        process.cwd(),
+        'apps/bulk-svc/migrations/0006_owner_correlation_identity.sql',
+      ),
+      'utf8',
+    );
+    const owner = id();
+    const correlation = id();
+    try {
+      await client.query('BEGIN');
+      await client.query('SAVEPOINT duplicate_preflight');
+      await client.query('DROP INDEX bulk.uq_batch_jobs_owner_correlation');
+      const manifest = await client.query<{ id: string }>(
+        "INSERT INTO bulk.file_manifests (role, format, content_ref) VALUES ('ENTRADA_IMPORTACION', 'CSV', 'test://duplicate-migration') RETURNING id",
+      );
+      for (const batchId of [id(), id()])
+        await client.query(
+          'INSERT INTO bulk.batch_jobs (batch_id, owner_sub, input_file_id, template_version, correlation_id) VALUES ($1, $2, $3, 2, $4)',
+          [batchId, owner, manifest.rows[0]!.id, correlation],
+        );
+      await client.query('SAVEPOINT migration_attempt');
+      await expect(client.query(migration)).rejects.toMatchObject({
+        code: '23505',
+      });
+      await client.query('ROLLBACK TO SAVEPOINT migration_attempt');
+      const duplicates = await client.query<{ count: string }>(
+        'SELECT count(*) FROM bulk.batch_jobs WHERE owner_sub = $1 AND correlation_id = $2',
+        [owner, correlation],
+      );
+      expect(duplicates.rows[0]?.count).toBe('2');
+      await client.query('ROLLBACK TO SAVEPOINT duplicate_preflight');
+      await client.query('ROLLBACK');
+    } finally {
+      client.release();
+    }
+    await pool.query(migration);
+  });
+
+  it('deduplicates concurrent replay and recovers an admission after a lost response', async () => {
+    const ownerSub = id();
+    const correlationId = id();
+    const batchId = id();
+    const rowId = id();
+    const commandId = id();
+    const operationId = id();
+    const intent = {
+      format: 'CSV',
+      templateVersion: 2,
+      sha256: 'same-original-bytes',
+    };
+    const input = {
+      batchId,
+      ownerSub,
+      correlationId,
+      templateVersion: 2,
+      inputFile: { format: 'CSV' as const, contentRef: 'test://same-bytes' },
+      rows: [{ rowId, requiredDomains: ['CATALOGO' as const] }],
+      admissionIntent: intent,
+      catalogCommands: [
+        {
+          messageId: commandId,
+          eventName: 'catalog.bulk.upsert.requested',
+          kind: 'command' as const,
+          schemaVersion: 1,
+          correlationId,
+          operationId,
+          occurredAt: new Date(),
+          payload: { operation_id: operationId },
+        },
+      ],
+    };
+    const [first, concurrentReplay] = await Promise.all([
+      repository.createImportBatch(input),
+      repository.createImportBatch(input),
+    ]);
+    expect(concurrentReplay.batch.id).toBe(first.batch.id);
+    expect(concurrentReplay.manifest.id).toBe(first.manifest.id);
+
+    // Model the client losing the 202 after SQL commit, then reconciling via GET.
+    const reconciled = await repository.findBatchByOwnerAndCorrelation(
+      ownerSub,
+      correlationId,
+    );
+    expect(reconciled).toMatchObject({ batchId, correlationId });
+    const replayAfterTimeout = await repository.createImportBatch(input);
+    expect(replayAfterTimeout.batch.id).toBe(first.batch.id);
+
+    const counts = await pool.query<{
+      batches: string;
+      manifests: string;
+      rows: string;
+      steps: string;
+      inbox: string;
+      outbox: string;
+    }>(
+      `SELECT
+         (SELECT count(*) FROM bulk.batch_jobs WHERE batch_id = $1)::text AS batches,
+         (SELECT count(*) FROM bulk.file_manifests WHERE id = $2)::text AS manifests,
+         (SELECT count(*) FROM bulk.batch_rows WHERE batch_job_id = $3)::text AS rows,
+         (SELECT count(*) FROM bulk.row_domain_steps WHERE batch_row_id IN (SELECT id FROM bulk.batch_rows WHERE batch_job_id = $3))::text AS steps,
+         (SELECT count(*) FROM bulk.inbox WHERE message_id = $1 AND handler = 'bulk.import.admission')::text AS inbox,
+         (SELECT count(*) FROM bulk.outbox WHERE message_id = $4)::text AS outbox`,
+      [batchId, first.manifest.id, first.batch.id, commandId],
+    );
+    expect(counts.rows[0]).toEqual({
+      batches: '1',
+      manifests: '1',
+      rows: '1',
+      steps: '1',
+      inbox: '1',
+      outbox: '1',
+    });
+
+    await expect(
+      repository.createImportBatch({
+        ...input,
+        batchId: id(),
+        admissionIntent: { ...intent, sha256: 'different-bytes' },
+      }),
+    ).rejects.toMatchObject({ code: 'UNIQUE_CONFLICT' });
+
+    const separateCorrelation = id();
+    const separateIntent = await repository.createImportBatch({
+      ...input,
+      batchId: id(),
+      correlationId: separateCorrelation,
+      inputFile: { format: 'CSV', contentRef: 'test://same-bytes' },
+      rows: [{ rowId: id(), requiredDomains: ['CATALOGO'] }],
+      admissionIntent: intent,
+      catalogCommands: [],
+    });
+    expect(separateIntent.batch.batchId).not.toBe(batchId);
+
+    const otherOwnerSub = id();
+    const otherOwnerIntent = await repository.createImportBatch({
+      ...input,
+      batchId: id(),
+      ownerSub: otherOwnerSub,
+      inputFile: { format: 'CSV', contentRef: 'test://same-bytes' },
+      rows: [{ rowId: id(), requiredDomains: ['CATALOGO'] }],
+      catalogCommands: [],
+    });
+    expect(
+      await repository.findBatchByOwnerAndCorrelation(
+        otherOwnerSub,
+        correlationId,
+      ),
+    ).toMatchObject({ batchId: otherOwnerIntent.batch.batchId });
   });
 
   afterEach(async () => {

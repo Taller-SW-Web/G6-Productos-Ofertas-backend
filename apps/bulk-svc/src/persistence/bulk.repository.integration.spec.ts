@@ -1603,6 +1603,94 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     ).toHaveLength(1);
   });
 
+  it('looks up an import by the validated actor and canonical correlation only', async () => {
+    const correlationId = randomUUID();
+    const rowId = randomUUID();
+    const first = await repository.createImportBatch({
+      batchId: randomUUID(),
+      ownerSub: TEST_OWNER_SUB,
+      correlationId,
+      templateVersion: 2,
+      inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
+      rows: [{ rowId, requiredDomains: ['CATALOGO'] }],
+    });
+    expect(
+      await repository.findBatchByOwnerAndCorrelation(
+        TEST_OWNER_SUB,
+        correlationId,
+      ),
+    ).toMatchObject({
+      batchId: first.batch.batchId,
+      correlationId,
+      status: 'QUEUED',
+    });
+    expect(
+      await repository.findBatchByOwnerAndCorrelation(
+        randomUUID(),
+        correlationId,
+      ),
+    ).toBeNull();
+    expect(
+      await repository.findBatchByOwnerAndCorrelation(
+        TEST_OWNER_SUB,
+        randomUUID(),
+      ),
+    ).toBeNull();
+  });
+
+  it('serializes concurrent replay and permits separate intentions over identical bytes', async () => {
+    const ownerSub = TEST_OWNER_SUB;
+    const correlationId = randomUUID();
+    const batchId = randomUUID();
+    const rowId = randomUUID();
+    const sharedInput = {
+      batchId,
+      ownerSub,
+      correlationId,
+      templateVersion: 2,
+      inputFile: { format: 'CSV' as const, contentRef: 'test://same-bytes' },
+      rows: [{ rowId, requiredDomains: ['CATALOGO' as const] }],
+      admissionIntent: { format: 'CSV', templateVersion: 2, sha256: 'same' },
+    };
+    const [first, replay] = await Promise.all([
+      repository.createImportBatch(sharedInput),
+      repository.createImportBatch(sharedInput),
+    ]);
+    expect(first.batch.id).toBe(replay.batch.id);
+    expect(first.manifest.id).toBe(replay.manifest.id);
+    expect(
+      await database
+        .select()
+        .from(batchJobs)
+        .where(eq(batchJobs.batchId, batchId)),
+    ).toHaveLength(1);
+
+    const separate = await repository.createImportBatch({
+      ...sharedInput,
+      batchId: randomUUID(),
+      correlationId: randomUUID(),
+      rows: [{ rowId: randomUUID(), requiredDomains: ['CATALOGO'] }],
+    });
+    expect(separate.batch.batchId).not.toBe(first.batch.batchId);
+    expect(separate.manifest.contentRef).toBe(first.manifest.contentRef);
+
+    const otherOwnerSub = randomUUID();
+    const otherActor = await repository.createImportBatch({
+      ...sharedInput,
+      batchId: randomUUID(),
+      ownerSub: otherOwnerSub,
+      inputFile: { format: 'CSV', contentRef: 'test://same-bytes' },
+      rows: [{ rowId: randomUUID(), requiredDomains: ['CATALOGO'] }],
+    });
+    expect(otherActor.batch.batchId).not.toBe(first.batch.batchId);
+    expect(
+      await repository.findBatchByOwnerAndCorrelation(
+        otherOwnerSub,
+        correlationId,
+      ),
+    ).toMatchObject({ batchId: otherActor.batch.batchId });
+  });
+
   it('waits for each SKU and stock adjustment and deduplicates equivalent operation results durably', async () => {
     const rowId = randomUUID();
     const batchId = randomUUID();

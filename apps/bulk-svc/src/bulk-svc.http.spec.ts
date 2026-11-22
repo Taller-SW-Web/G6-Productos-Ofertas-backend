@@ -21,7 +21,14 @@ import {
 } from './domain/bulk-template-v2.js';
 
 describe('Bulk HTTP import routes (isolated)', () => {
+  afterEach(() => {
+    delete process.env.BULK_CORRELATION_RECONCILIATION_ENABLED;
+    delete process.env.BULK_RETRY_ELIGIBILITY_ENABLED;
+  });
+
   it('receives multipart CSV and returns contractual admission DTO; rejects unsupported files', async () => {
+    process.env.BULK_CORRELATION_RECONCILIATION_ENABLED = 'true';
+    process.env.BULK_RETRY_ELIGIBILITY_ENABLED = 'true';
     const batch = {
       batchId: '11111111-1111-4111-8111-111111111111',
       status: 'QUEUED',
@@ -77,11 +84,12 @@ describe('Bulk HTTP import routes (isolated)', () => {
         },
         rows,
       }),
+      findByOwnerAndCorrelation: vi.fn().mockResolvedValue(batch),
       resumeBatch: vi
         .fn()
         .mockRejectedValue(
           new BulkDomainError(
-            'DEPENDENCY_PENDING',
+            'RETRY_PROTOCOL_NOT_APPROVED',
             'A new attempt is not approved.',
           ),
         ),
@@ -283,6 +291,52 @@ describe('Bulk HTTP import routes (isolated)', () => {
           { dominio: 'PRICING', status: 'FAILED' },
         ],
       });
+      expect(status.body.reanudacion).toEqual({
+        protocolo: 'BULK_RETRY_V1',
+        elegible: false,
+        pasos: [],
+        motivo_bloqueo: 'PROTOCOLO_DOMINIO_NO_HABILITADO',
+      });
+      const correlationRoute =
+        '/api/v1/carga-masiva/productos/importaciones/por-correlacion/22222222-2222-4222-8222-222222222222';
+      const reconciled = await request(app.getHttpServer()).get(
+        correlationRoute,
+      );
+      expect(reconciled).toMatchObject({
+        status: 200,
+        headers: { 'cache-control': 'no-store' },
+        body: {
+          batch_id: batch.batchId,
+          correlation_id: batch.correlationId,
+          status: 'QUEUED',
+          template_version: 2,
+        },
+      });
+      expect(imports.findByOwnerAndCorrelation).toHaveBeenCalledWith(
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        '22222222-2222-4222-8222-222222222222',
+      );
+      const invalidCorrelation = await request(app.getHttpServer()).get(
+        '/api/v1/carga-masiva/productos/importaciones/por-correlacion/not-a-uuid',
+      );
+      expect(invalidCorrelation).toMatchObject({
+        status: 400,
+        body: { code: 'VALIDACION' },
+      });
+      imports.findByOwnerAndCorrelation.mockResolvedValueOnce(null);
+      const notFoundCorrelation = await request(app.getHttpServer()).get(
+        correlationRoute,
+      );
+      expect(notFoundCorrelation).toMatchObject({
+        status: 404,
+        body: { code: 'LOTE_NO_ENCONTRADO' },
+      });
+      delete process.env.BULK_CORRELATION_RECONCILIATION_ENABLED;
+      const disabledCorrelation = await request(app.getHttpServer()).get(
+        correlationRoute,
+      );
+      expect(disabledCorrelation.status).toBe(404);
+      process.env.BULK_CORRELATION_RECONCILIATION_ENABLED = 'true';
       const report = await request(app.getHttpServer()).get(
         `/api/v1/carga-masiva/productos/importaciones/${batch.batchId}/reporte`,
       );
@@ -299,8 +353,8 @@ describe('Bulk HTTP import routes (isolated)', () => {
       const resumed = await request(app.getHttpServer()).post(
         `/api/v1/carga-masiva/productos/importaciones/${batch.batchId}/reanudar`,
       );
-      expect(resumed.status).toBe(503);
-      expect(resumed.body.code).toBe('SERVICIO_NO_DISPONIBLE');
+      expect(resumed.status).toBe(409);
+      expect(resumed.body.code).toBe('RETRY_PROTOCOL_NOT_APPROVED');
       expect(imports.getSnapshot).toHaveBeenCalledWith(
         batch.batchId,
         'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -408,9 +462,11 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
     delete process.env.BULK_DEMO_GATEWAY_IPS;
     delete process.env.G7_JWT_PUBLIC_KEY;
     delete process.env.G7_JWT_ISSUER;
+    delete process.env.BULK_CORRELATION_RECONCILIATION_ENABLED;
   });
 
   it('rejects missing identity and insufficient role, then admits a signed authorized user', async () => {
+    process.env.BULK_CORRELATION_RECONCILIATION_ENABLED = 'true';
     const { privateKey, publicKey } = generateKeyPairSync('rsa', {
       modulusLength: 2048,
     });
@@ -456,6 +512,17 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
           },
         }),
       ),
+      findByOwnerAndCorrelation: vi.fn(
+        async (ownerSub: string, correlationId: string) =>
+          ownerSub === '00000000-0000-4000-8000-000000000001'
+            ? {
+                batchId: '99999999-9999-4999-8999-999999999999',
+                correlationId,
+                status: 'QUEUED',
+                templateVersion: 2,
+              }
+            : null,
+      ),
     };
     const module = await Test.createTestingModule({
       controllers: [BulkSvcController],
@@ -483,6 +550,8 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
     await app.init();
     try {
       const route = '/api/v1/carga-masiva/productos/exportaciones';
+      const reconciliationRoute =
+        '/api/v1/carga-masiva/productos/importaciones/por-correlacion/22222222-2222-4222-8222-222222222222';
       expect(
         (
           await request(app.getHttpServer())
@@ -498,6 +567,9 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
             .send({ formato: 'CSV' })
         ).status,
       ).toBe(403);
+      expect(
+        (await request(app.getHttpServer()).get(reconciliationRoute)).body,
+      ).toMatchObject({ code: 'TOKEN_INVALIDO', status: 401 });
       for (const audience of [null, 'api-otra']) {
         const invalidAudience = await request(app.getHttpServer())
           .post(route)
@@ -519,6 +591,30 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
             .send({ formato: 'CSV' })
         ).status,
       ).toBe(202);
+      const reconciled = await request(app.getHttpServer())
+        .get(reconciliationRoute)
+        .set(
+          'authorization',
+          `Bearer ${token(['GESTOR_COMERCIAL'], '00000000-0000-4000-8000-000000000001')}`,
+        );
+      expect(reconciled).toMatchObject({
+        status: 200,
+        body: { batch_id: '99999999-9999-4999-8999-999999999999' },
+      });
+      expect(imports.findByOwnerAndCorrelation).toHaveBeenCalledWith(
+        '00000000-0000-4000-8000-000000000001',
+        '22222222-2222-4222-8222-222222222222',
+      );
+      const otherActorReconciliation = await request(app.getHttpServer())
+        .get(reconciliationRoute)
+        .set(
+          'authorization',
+          `Bearer ${token(['GESTOR_COMERCIAL'], '00000000-0000-4000-8000-000000000002')}`,
+        );
+      expect(otherActorReconciliation).toMatchObject({
+        status: 404,
+        body: { code: 'LOTE_NO_ENCONTRADO' },
+      });
       expect(
         (
           await request(app.getHttpServer())
@@ -565,9 +661,10 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
           .set('x-correlation-id', correlationId)
           .attach('archivo', csv, 'items.csv');
       const identical = await submit(actorA, correlationA);
-      const replay = await submit(actorA, correlationA);
-      const separateIntent = await submit(actorA, correlationB);
+      const replay = await submit(actorA, correlationA.toUpperCase());
+      const separateIntent = await submit(actorA, correlationB.toUpperCase());
       const otherActor = await submit(actorB, correlationA);
+      const invalidIdentity = await submit(actorA, 'not-a-uuid');
       expect([
         identical.status,
         replay.status,
@@ -579,6 +676,11 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
       expect(separateIntent.body.correlation_id).toBe(correlationB);
       expect(separateIntent.body.correlation_id).not.toBe(correlationA);
       expect(otherActor.body.correlation_id).toBe(correlationA);
+      expect(invalidIdentity).toMatchObject({
+        status: 400,
+        body: { code: 'VALIDACION' },
+      });
+      expect(imports.receiveImport).toHaveBeenCalledTimes(4);
       const admissions = imports.receiveImport.mock.calls.map(
         ([input]) => input,
       );

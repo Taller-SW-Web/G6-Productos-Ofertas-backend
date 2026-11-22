@@ -10,6 +10,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
@@ -96,6 +97,9 @@ export const batchJobs = bulk.table(
       foreignColumns: [fileManifests.id],
     }).onDelete('restrict'),
     unique('uq_batch_jobs_batch_id').on(t.batchId),
+    uniqueIndex('uq_batch_jobs_owner_correlation')
+      .on(t.ownerSub, t.correlationId)
+      .where(sql`${t.ownerSub} IS NOT NULL`),
     index('ix_batch_jobs_owner_created_at').on(t.ownerSub, t.createdAt),
     unique('uq_batch_jobs_report_file_id').on(t.reportFileId),
     check('ck_batch_jobs_template_version', sql`${t.templateVersion} > 0`),

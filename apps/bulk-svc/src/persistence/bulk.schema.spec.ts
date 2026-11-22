@@ -114,6 +114,7 @@ describe('bulk Drizzle schema', () => {
       steps.columns.find((column) => column.name === 'status')?.getSQLType(),
     ).toBe('step_status');
     expect(jobs.indexes.map((index) => index.config.name)).toEqual([
+      'uq_batch_jobs_owner_correlation',
       'ix_batch_jobs_owner_created_at',
       'ix_batch_jobs_input_file_id',
       'ix_batch_jobs_status_created_at',

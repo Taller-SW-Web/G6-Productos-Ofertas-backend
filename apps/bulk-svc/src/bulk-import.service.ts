@@ -93,6 +93,17 @@ export class BulkImportService {
     return snapshot;
   }
 
+  async findByOwnerAndCorrelation(ownerSub: string, correlationId: string) {
+    try {
+      return await this.repository.findBatchByOwnerAndCorrelation(
+        ownerSub,
+        correlationId,
+      );
+    } catch (error) {
+      throw mapBulkPersistenceError(error);
+    }
+  }
+
   async createImport(input: {
     batchId: string;
     ownerSub: string;
@@ -263,9 +274,19 @@ export class BulkImportService {
         error instanceof BulkPersistenceError &&
         error.code === 'CHECK_VIOLATION'
       ) {
-        throw new BulkDomainError('INVALID_TRANSITION', error.message, {
+        throw new BulkDomainError('RETRY_NOT_ELIGIBLE', error.message, {
           cause: error,
         });
+      }
+      if (
+        error instanceof BulkPersistenceError &&
+        error.code === 'NOT_CONFIGURED'
+      ) {
+        throw new BulkDomainError(
+          'RETRY_PROTOCOL_NOT_APPROVED',
+          'El protocolo de reanudación no está aprobado.',
+          { cause: error },
+        );
       }
       throw mapBulkPersistenceError(error);
     }

@@ -139,19 +139,23 @@ export class BulkSvcController {
         'template_version debe ser 2 cuando se informa.',
       );
     const contentHash = createHash('sha256').update(file.buffer).digest('hex');
-    const correlationId =
-      correlation &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        correlation,
-      )
-        ? correlation
-        : uuidFromDigest(
-            createHash('sha256')
-              .update(correlation ?? contentHash)
-              .digest('hex'),
-          );
-    const parsed = parseBulkTemplate(file.buffer, format);
+    const uuidPattern =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (correlation !== undefined && !uuidPattern.test(correlation))
+      throw new BulkDomainError(
+        'INVALID_INPUT',
+        'X-Correlation-Id debe ser un UUID válido.',
+      );
     const ownerSub = requireActorSub(request);
+    const correlationId =
+      correlation === undefined
+        ? uuidFromDigest(
+            createHash('sha256')
+              .update(`${ownerSub}:${contentHash}`)
+              .digest('hex'),
+          )
+        : correlation.toLowerCase();
+    const parsed = parseBulkTemplate(file.buffer, format);
     const batchId = uuidFromDigest(
       createHash('sha256')
         .update(`bulk-import:${ownerSub}:${correlationId}`)
@@ -181,6 +185,39 @@ export class BulkSvcController {
   }
 
   @UseGuards(BulkUserBearerGuard)
+  @Get(
+    'api/v1/carga-masiva/productos/importaciones/por-correlacion/:correlationId',
+  )
+  async conciliarImportacionGeneralPorCorrelacion(
+    @Param('correlationId') correlationId: string,
+    @Req() request: BulkAuthenticatedRequest,
+    @Res() response: Response,
+  ) {
+    response.setHeader('Cache-Control', 'no-store');
+    // Provisional API extension: keep disabled until the central contract is approved.
+    if (process.env.BULK_CORRELATION_RECONCILIATION_ENABLED !== 'true')
+      throw new BulkDomainError('BATCH_NOT_FOUND', 'El lote no existe.');
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        correlationId,
+      )
+    )
+      throw new BulkDomainError('INVALID_INPUT', 'correlationId inválido.');
+    const batch = await this.imports.findByOwnerAndCorrelation(
+      requireActorSub(request),
+      correlationId.toLowerCase(),
+    );
+    if (!batch)
+      throw new BulkDomainError('BATCH_NOT_FOUND', 'El lote no existe.');
+    return response.status(200).json({
+      batch_id: batch.batchId,
+      correlation_id: batch.correlationId,
+      status: batch.status,
+      template_version: 2,
+    });
+  }
+
+  @UseGuards(BulkUserBearerGuard)
   @Get('api/v1/carga-masiva/productos/importaciones/:batchId')
   async obtenerImportacionGeneralProductos(
     @Param('batchId') batchId: string,
@@ -198,6 +235,16 @@ export class BulkSvcController {
       completed_rows: batch.completedRows,
       failed_rows: batch.failedRows,
       needs_reconciliation: batch.needsReconciliation,
+      ...(process.env.BULK_RETRY_ELIGIBILITY_ENABLED === 'true'
+        ? {
+            reanudacion: {
+              protocolo: 'BULK_RETRY_V1',
+              elegible: false,
+              pasos: [],
+              motivo_bloqueo: 'PROTOCOLO_DOMINIO_NO_HABILITADO',
+            },
+          }
+        : {}),
       rows: rows.map(({ row, steps }) => ({
         row_id: row.rowId,
         status: row.status,

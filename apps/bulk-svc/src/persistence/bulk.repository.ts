@@ -1297,6 +1297,27 @@ export class BulkPersistenceRepository {
     }
   }
 
+  async findBatchByOwnerAndCorrelation(
+    ownerSub: string,
+    correlationId: string,
+  ): Promise<typeof batchJobs.$inferSelect | null> {
+    try {
+      const [batch] = await this.db
+        .select()
+        .from(batchJobs)
+        .where(
+          and(
+            eq(batchJobs.ownerSub, ownerSub),
+            eq(batchJobs.correlationId, correlationId),
+          ),
+        )
+        .limit(1);
+      return batch ?? null;
+    } catch (error) {
+      throw persistenceError(error);
+    }
+  }
+
   async listBatchRows(
     batchId: string,
   ): Promise<Array<typeof batchRows.$inferSelect>> {
