@@ -415,8 +415,8 @@ export class DashboardService {
     const positiveInt = (value: unknown, fallback: number, max: number) => {
       if (value === undefined) return fallback;
       if (
-        typeof value !== 'string' ||
-        !/^[1-9]\d*$/.test(value) ||
+        (typeof value !== 'string' && typeof value !== 'number') ||
+        !/^[1-9]\d*$/.test(String(value)) ||
         Number(value) > max
       )
         throw invalid('Valores de paginación deben ser enteros positivos');
@@ -617,7 +617,7 @@ export class DashboardService {
           `SELECT id, code, name, type, active
            FROM inventory.locations
            ${filter}
-           ORDER BY code ASC, name ASC
+           ORDER BY code ASC, name ASC, id ASC
            LIMIT $1 OFFSET $2`,
           [tamanio, (pagina - 1) * tamanio],
         );

@@ -4084,6 +4084,106 @@ GRANT inventory_app TO inventory_test;`,
       expect(res.meta.total).toBe(0);
     });
 
+    it('pagina alertas H01 entre páginas consecutivas sin duplicados y con meta consistente', async () => {
+      const todas = await dashService.obtenerAlertasInternas({
+        locationId: activeLocId,
+        tamanio: 100,
+      });
+      expect(todas.meta.total).toBe(4);
+      expect(todas.items).toHaveLength(4);
+
+      const tamanio = 2;
+      const totalPaginas = Math.ceil(todas.meta.total / tamanio);
+      expect(totalPaginas).toBe(2);
+
+      const vistos = new Set<string>();
+      for (let pagina = 1; pagina <= totalPaginas; pagina += 1) {
+        const res = await dashService.obtenerAlertasInternas({
+          locationId: activeLocId,
+          pagina,
+          tamanio,
+        });
+        expect(res.meta.pagina).toBe(pagina);
+        expect(res.meta.tamanio).toBe(tamanio);
+        expect(res.meta.total).toBe(todas.meta.total);
+        expect(res.meta.totalPaginas).toBe(totalPaginas);
+        expect(res.items).toHaveLength(tamanio);
+        for (const item of res.items) {
+          expect(vistos.has(item.alertaId)).toBe(false);
+          vistos.add(item.alertaId);
+        }
+      }
+      expect(vistos.size).toBe(todas.meta.total);
+    });
+
+    it('acepta pagina y tamanio como cadenas decimales válidas en alertas H01', async () => {
+      const res = await dashService.obtenerAlertasInternas({
+        locationId: activeLocId,
+        pagina: '1',
+        tamanio: '2',
+      });
+      expect(res.meta.pagina).toBe(1);
+      expect(res.meta.tamanio).toBe(2);
+      expect(res.meta.total).toBe(4);
+      expect(res.meta.totalPaginas).toBe(2);
+      expect(res.items).toHaveLength(2);
+    });
+
+    it('filtra alertas H01 por AGOTADO y STOCK_BAJO en PostgreSQL real', async () => {
+      const agotados = await dashService.obtenerAlertasInternas({
+        locationId: activeLocId,
+        estado: 'AGOTADO',
+        tamanio: 100,
+      });
+      expect(agotados.items).toHaveLength(2);
+      expect(agotados.items.every((i) => i.estado === 'AGOTADO')).toBe(true);
+      expect(agotados.items.map((i) => i.sku).sort()).toEqual(
+        [skuAgotado, skuZeroPhysical].sort(),
+      );
+      expect(agotados.meta.total).toBe(2);
+
+      const bajos = await dashService.obtenerAlertasInternas({
+        locationId: activeLocId,
+        estado: 'STOCK_BAJO',
+        tamanio: 100,
+      });
+      expect(bajos.items).toHaveLength(2);
+      expect(bajos.items.every((i) => i.estado === 'STOCK_BAJO')).toBe(true);
+      expect(bajos.items.map((i) => i.sku).sort()).toEqual(
+        [skuLow, skuExactThreshold].sort(),
+      );
+      expect(bajos.meta.total).toBe(2);
+    });
+
+    it('rechaza paginación inválida en alertas H01 con 400 VALIDACION', async () => {
+      const invalidos: Array<Record<string, unknown>> = [
+        { pagina: 0 },
+        { pagina: -1 },
+        { pagina: 1.5 },
+        { pagina: Number.NaN },
+        { pagina: Number.POSITIVE_INFINITY },
+        { pagina: '1.5' },
+        { pagina: 'abc' },
+        { tamanio: 0 },
+        { tamanio: 101 },
+        { tamanio: 1.5 },
+        { tamanio: Number.NaN },
+        { tamanio: Number.POSITIVE_INFINITY },
+        { tamanio: 'abc' },
+      ];
+
+      for (const query of invalidos) {
+        await expect(
+          dashService.obtenerAlertasInternas({
+            locationId: activeLocId,
+            ...query,
+          }),
+        ).rejects.toMatchObject({
+          problem: { status: 400, code: 'VALIDACION' },
+        });
+      }
+    });
+
     it('respeta override de umbral por SKU sobre el umbral global en PostgreSQL real', async () => {
       const resSinAlerta = await dashService.obtenerAlertasInternas({
         sku: skuOverride,

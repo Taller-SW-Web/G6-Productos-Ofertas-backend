@@ -727,7 +727,9 @@ export class InMemoryDatabaseMock implements IDatabaseService {
       if (s.includes('ORDER BY CODE ASC')) {
         filtered.sort(
           (a, b) =>
-            a.code.localeCompare(b.code) || a.name.localeCompare(b.name),
+            a.code.localeCompare(b.code) ||
+            a.name.localeCompare(b.name) ||
+            a.id.localeCompare(b.id),
         );
       }
 

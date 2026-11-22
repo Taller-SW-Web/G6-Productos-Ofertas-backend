@@ -110,7 +110,7 @@ describe('DashboardService — Lectura interna de ubicaciones (Extensión H02 / 
     expect(trujillo?.name).toBe('Almacén Trujillo');
   });
 
-  it('ordena de forma determinista por code ASC, name ASC', async () => {
+  it('ordena de forma determinista por code ASC, name ASC, id ASC', async () => {
     const res = await service.obtenerUbicacionesInternas();
     expect(res.items[0].code).toBe('ALM-LURIN');
     expect(res.items[1].code).toBe('TDA-MIRAFLORES');

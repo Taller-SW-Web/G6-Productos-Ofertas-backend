@@ -196,7 +196,7 @@ describe('DashboardService — Alertas operativas internas (Extensión H01 / INV
     });
   });
 
-  it('respeta paginación server-side y límites seguros', async () => {
+  it('respeta paginación server-side, acepta números y rechaza valores inválidos', async () => {
     const res = await service.obtenerAlertasInternas({
       pagina: '1',
       tamanio: '1',
@@ -204,6 +204,14 @@ describe('DashboardService — Alertas operativas internas (Extensión H01 / INV
     expect(res.meta.pagina).toBe(1);
     expect(res.meta.tamanio).toBe(1);
     expect(res.items.length).toBeLessThanOrEqual(1);
+
+    const numerica = await service.obtenerAlertasInternas({
+      pagina: 1,
+      tamanio: 1,
+    });
+    expect(numerica.meta.pagina).toBe(1);
+    expect(numerica.meta.tamanio).toBe(1);
+    expect(numerica.items.length).toBeLessThanOrEqual(1);
 
     await expect(
       service.obtenerAlertasInternas({ pagina: '0' }),
@@ -216,5 +224,26 @@ describe('DashboardService — Alertas operativas internas (Extensión H01 / INV
     ).rejects.toMatchObject({
       problem: { status: 400, code: 'VALIDACION' },
     });
+
+    for (const valor of [
+      0,
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      '1.5',
+      'abc',
+    ]) {
+      await expect(
+        service.obtenerAlertasInternas({ pagina: valor }),
+      ).rejects.toMatchObject({
+        problem: { status: 400, code: 'VALIDACION' },
+      });
+      await expect(
+        service.obtenerAlertasInternas({ tamanio: valor }),
+      ).rejects.toMatchObject({
+        problem: { status: 400, code: 'VALIDACION' },
+      });
+    }
   });
 });
