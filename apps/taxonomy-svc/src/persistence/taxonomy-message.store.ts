@@ -75,6 +75,7 @@ export function parseChecked(value: unknown): CheckedEnvelope {
 @Injectable()
 export class TaxonomyMessageStore {
   private cursorOutbox: { fecha: string; id: string } | null = null;
+  private cursorServiceBus: { fecha: string; id: string } | null = null;
   constructor(
     private readonly database: Database,
     private readonly intentos: DeactivationIntentService,
@@ -179,6 +180,57 @@ export class TaxonomyMessageStore {
       }),
     );
     this.cursorOutbox = resultado.cursor;
+    return resultado.estado;
+  }
+
+  async publicarUnoServiceBus(
+    publicar: (row: Record<string, unknown>) => Promise<void>,
+  ): Promise<'VACIO' | 'PENDIENTE' | 'PUBLICADO'> {
+    const cursor = this.cursorServiceBus;
+    const resultado = await this.database.read((db) =>
+      db.transaction(async (tx) => {
+        // El lock de outbox también serializa con el relay H4 durante la transición.
+        const result = await tx.execute(sql`
+        SELECT o.id, o.message_id, o.event_name, o.kind, o.correlation_id, o.payload,
+               o.occurred_at::text AS cursor_fecha
+        FROM taxonomy.outbox o JOIN taxonomy.outbox_delivery d ON d.message_id = o.message_id
+        WHERE d.destination = 'g6.catalog.from.taxonomy' AND d.published_at IS NULL
+          AND o.published_at IS NULL
+          AND (${cursor?.fecha ?? null}::timestamptz IS NULL OR
+               (o.occurred_at, o.id) > (${cursor?.fecha ?? null}::timestamptz, ${cursor?.id ?? null}::uuid))
+          AND NOT EXISTS (
+            SELECT 1 FROM taxonomy.outbox anterior WHERE anterior.operation_id = o.operation_id
+              AND anterior.published_at IS NULL AND (anterior.occurred_at, anterior.id) < (o.occurred_at, o.id)
+          )
+        ORDER BY o.occurred_at, o.id LIMIT 1 FOR UPDATE OF o, d SKIP LOCKED
+      `);
+        const row = result.rows[0];
+        if (!row) return { estado: 'VACIO' as const, cursor: null };
+        if (
+          typeof row.cursor_fecha !== 'string' ||
+          typeof row.id !== 'string' ||
+          typeof row.message_id !== 'string'
+        )
+          throw new Error('INVALID_OUTBOX_CURSOR');
+        const siguiente = { fecha: row.cursor_fecha, id: row.id };
+        try {
+          await publicar(row);
+        } catch {
+          await tx.execute(
+            sql`UPDATE taxonomy.outbox_delivery SET attempts = attempts + 1, last_error = 'SERVICE_BUS_PUBLISH_UNCONFIRMED' WHERE message_id = ${row.message_id}::uuid AND destination = 'g6.catalog.from.taxonomy'`,
+          );
+          return { estado: 'PENDIENTE' as const, cursor: siguiente };
+        }
+        await tx.execute(
+          sql`UPDATE taxonomy.outbox_delivery SET published_at = statement_timestamp(), attempts = attempts + 1, last_error = NULL WHERE message_id = ${row.message_id}::uuid AND destination = 'g6.catalog.from.taxonomy'`,
+        );
+        await tx.execute(
+          sql`UPDATE taxonomy.outbox SET published_at = statement_timestamp(), attempts = attempts + 1, last_error = NULL WHERE id = ${row.id}::uuid`,
+        );
+        return { estado: 'PUBLICADO' as const, cursor: siguiente };
+      }),
+    );
+    this.cursorServiceBus = resultado.cursor;
     return resultado.estado;
   }
 }

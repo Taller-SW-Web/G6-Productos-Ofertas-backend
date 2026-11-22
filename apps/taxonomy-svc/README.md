@@ -2,6 +2,16 @@
 
 Microservicio de taxonomía (categorías y marcas) del backend G6.
 
+## Service Bus H5: candidato Taxonomy–Catalog
+
+El transporte H5 es optativo y está desactivado por defecto. Hasta homologar el consumidor de Catalog, su selección se limita a `NODE_ENV=test`, un namespace desechable con prefijo `g6-sb-test-`, `MESSAGING_PROVIDER=AZURE_SERVICE_BUS` y `TAXONOMY_SERVICE_BUS_ENABLED=true`. `SERVICE_BUS_NAMESPACE_FQDN` contiene el hostname y `AZURE_CLIENT_ID` selecciona una identidad administrada. El runtime rechaza desarrollo y producción; quitar esta restricción requiere un cambio revisado después de cumplir los gates de corte. No se admiten simultáneamente las variables RabbitMQ de Taxonomy. El servicio no crea colas ni asigna permisos.
+
+La migración aditiva `0006_service_bus_outbox_delivery.sql` crea una entrega por mensaje y destinatario en la misma transacción de Outbox, sin backfill ni replay históricos. Antes de activar H5, el owner de BD debe revisar y aplicar la migración por el procedimiento aprobado, conceder a la identidad PostgreSQL de Taxonomy `SELECT` y `UPDATE` sobre la tabla nueva, y verificar el trigger y su propietario. El arranque H5 comprueba tabla, permisos, trigger y ausencia de eventos pendientes sin entrega; no ejecuta SQL de migración. El corte requiere además detener coordinadamente los productores H4, conciliar entregas ambiguas y comprobar los permisos Azure mínimos para `g6.catalog.from.taxonomy` y `g6.taxonomy.from.catalog`.
+
+El relay cubre `taxonomy.category.updated`, `taxonomy.product-type-schema.changed`, `taxonomy.characteristic-value.updated`, `taxonomy.master.deactivation.check.requested`, `taxonomy.master.deactivated` y `taxonomy.master.deactivation.rejected`; el consumidor recibe `catalog.master.deactivation.checked`. La confirmación de envío precede a marcar la entrega y un resultado se confirma al broker después del commit de Inbox. Los reintentos conservan `message_id`; expiración, correlación y estados terminales permanecen gobernados por las reglas existentes. Un envío ambiguo puede duplicarse y exige Inbox idempotente en Catalog.
+
+**Pendiente:** Poma y el owner de infraestructura deben verificar el contrato y la interoperabilidad de las dos colas con identidades y broker aislados; también faltan evidencia de reinicio y redelivery en Service Bus real, RBAC, DLQ, monitorización y autorización de corte. El estado de readiness actual solo acredita PostgreSQL y el runtime AMQP heredado; no acredita la conexión o permisos de Service Bus. La topología H5 es candidata y ninguna prueba local implica despliegue u homologación.
+
 ## Consultas HTTP: estado del issue #37
 
 `listarCategorias` y `listarMarcas` consultan registros activos del esquema propio. OpenAPI 0.6.0-rc.2 exige `serviceBearer`, audiencia `api-productos` y scope `catalogo:leer` para ambas operaciones. El guard valida JWT de servicio con firma RS256 mediante discovery y JWKS, emisor, caducidad, audiencia y scope; responde 401 para credenciales inválidas, 403 ante scope insuficiente y 503 cuando Seguridad no está disponible. Configure `SECURITY_ISSUER`, `SECURITY_DISCOVERY_URL` y `SECURITY_JWKS_URL` juntos; sin configuración el acceso autenticado falla cerrado. El registro y grant del scope en Seguridad siguen pendientes. Las pruebas locales de lectura no acreditan autenticación, homologación externa ni despliegue.
