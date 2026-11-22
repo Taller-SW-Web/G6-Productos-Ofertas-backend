@@ -1338,6 +1338,7 @@ export class BulkPersistenceRepository {
         }
         let commandData: Record<string, unknown> | undefined;
         let retryRows: Array<Record<string, unknown>> = [];
+        let retryFamilyKey: string | null = null;
         if (typeof commandAttemptId === 'string') {
           const [retry] = await tx
             .select()
@@ -1360,6 +1361,7 @@ export class BulkPersistenceRepository {
             Record<string, unknown> | undefined;
           const retryData = commandData?.retry as
             Record<string, unknown> | undefined;
+          retryFamilyKey = retry?.familyKey ?? null;
           retryRows = Array.isArray(retryData?.rows)
             ? retryData.rows.filter(
                 (row): row is Record<string, unknown> =>
@@ -1374,8 +1376,14 @@ export class BulkPersistenceRepository {
             retry.batchJobId !== batch.id ||
             command.operationId !== input.operationId ||
             command.correlationId !== input.correlationId ||
+            commandData?.batch_id !== batch.batchId ||
+            commandData?.batch_operation_id !== input.operationId ||
+            retryData?.attempt_number !== retry?.attemptNumber ||
             retryData?.command_attempt_id !== commandAttemptId ||
             retryData?.previous_command_message_id !== command.causationId ||
+            createHash('sha256')
+              .update(canonicalJson(command.payload))
+              .digest('hex') !== retry.payloadHash ||
             data.batch_operation_id !== input.operationId
           )
             domainFailure(
@@ -1399,6 +1407,8 @@ export class BulkPersistenceRepository {
           if (
             originals.length !== 1 ||
             !commandData ||
+            commandData.batch_id !== batch.batchId ||
+            commandData.batch_operation_id !== input.operationId ||
             envelope.correlation_id !== batch.correlationId ||
             data.batch_operation_id !== input.operationId ||
             commands.filter(
@@ -1455,6 +1465,21 @@ export class BulkPersistenceRepository {
           typeof commandAttemptId === 'string'
             ? retryRows.map((row) => row.row_operation_id)
             : [...normalized.keys()];
+        if (typeof commandAttemptId === 'string') {
+          const familyOperations = [...normalized.entries()]
+            .filter(([, row]) => row.skuBase === retryFamilyKey)
+            .map(([operationId]) => operationId)
+            .sort();
+          if (
+            familyOperations.length !== expectedOperations.length ||
+            familyOperations.join('|') !==
+              [...expectedOperations].sort().join('|')
+          )
+            domainFailure(
+              'INVALID_INPUT',
+              'Catalog V2 retry command is not a complete SKU family.',
+            );
+        }
         const actualOperations = resultRows.map((row) => row.row_operation_id);
         if (
           new Set(actualOperations).size !== actualOperations.length ||
@@ -1568,16 +1593,14 @@ export class BulkPersistenceRepository {
                   'INVALID_INPUT',
                   'A tardy Catalog result has no durable attempt.',
                 );
-              await tx
-                .insert(inbox)
-                .values({
-                  messageId: input.messageId,
-                  handler: `bulk.catalog-result-attempt:${result.attempt_id}`,
-                  eventName: input.eventName,
-                  correlationId: input.correlationId,
-                  payload: { stale: true, result },
-                  result: 'STALE',
-                });
+              await tx.insert(inbox).values({
+                messageId: input.messageId,
+                handler: `bulk.catalog-result-attempt:${result.attempt_id}`,
+                eventName: input.eventName,
+                correlationId: input.correlationId,
+                payload: { stale: true, result },
+                result: 'STALE',
+              });
               continue;
             }
             if (
@@ -1605,16 +1628,14 @@ export class BulkPersistenceRepository {
                 'INVALID_INPUT',
                 'A tardy initial Catalog result has no durable attempt.',
               );
-            await tx
-              .insert(inbox)
-              .values({
-                messageId: input.messageId,
-                handler: `bulk.catalog-result-attempt:${result.attempt_id}`,
-                eventName: input.eventName,
-                correlationId: input.correlationId,
-                payload: { stale: true, result },
-                result: 'STALE',
-              });
+            await tx.insert(inbox).values({
+              messageId: input.messageId,
+              handler: `bulk.catalog-result-attempt:${result.attempt_id}`,
+              eventName: input.eventName,
+              correlationId: input.correlationId,
+              payload: { stale: true, result },
+              result: 'STALE',
+            });
             continue;
           } else if (attemptNumber !== 1 || currentAttempt) {
             domainFailure(
@@ -1623,16 +1644,14 @@ export class BulkPersistenceRepository {
             );
           }
           if (currentAttempt && currentAttempt.attemptNumber > attemptNumber) {
-            await tx
-              .insert(inbox)
-              .values({
-                messageId: input.messageId,
-                handler: `bulk.catalog-result-attempt:${result.attempt_id}`,
-                eventName: input.eventName,
-                correlationId: input.correlationId,
-                payload: { stale: true, result },
-                result: 'STALE',
-              });
+            await tx.insert(inbox).values({
+              messageId: input.messageId,
+              handler: `bulk.catalog-result-attempt:${result.attempt_id}`,
+              eventName: input.eventName,
+              correlationId: input.correlationId,
+              payload: { stale: true, result },
+              result: 'STALE',
+            });
             continue;
           }
           const attemptValues = {
@@ -1737,31 +1756,27 @@ export class BulkPersistenceRepository {
             failedDomain: status === 'FAILED' ? 'CATALOGO' : null,
             errorCode: status === 'FAILED' ? String(result.code) : null,
           });
-          await tx
-            .insert(inbox)
-            .values({
-              messageId: input.messageId,
-              handler: `bulk.catalog-result-attempt:${result.attempt_id}`,
-              eventName: input.eventName,
-              correlationId: input.correlationId,
-              payload: {
-                batchId: batch.batchId,
-                batchOperationId: data.batch_operation_id,
-                result,
-              },
-              result: String(result.status),
-            });
-        }
-        await tx
-          .insert(inbox)
-          .values({
+          await tx.insert(inbox).values({
             messageId: input.messageId,
-            handler: messageHandler,
+            handler: `bulk.catalog-result-attempt:${result.attempt_id}`,
             eventName: input.eventName,
             correlationId: input.correlationId,
-            payload: input.payload,
-            result: 'RESULTS_APPLIED',
+            payload: {
+              batchId: batch.batchId,
+              batchOperationId: data.batch_operation_id,
+              result,
+            },
+            result: String(result.status),
           });
+        }
+        await tx.insert(inbox).values({
+          messageId: input.messageId,
+          handler: messageHandler,
+          eventName: input.eventName,
+          correlationId: input.correlationId,
+          payload: input.payload,
+          result: 'RESULTS_APPLIED',
+        });
         await tx
           .update(outbox)
           .set({
