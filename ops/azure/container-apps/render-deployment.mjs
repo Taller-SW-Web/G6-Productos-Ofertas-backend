@@ -1,5 +1,6 @@
 import { validatePhase3Runtime } from './phase3-preflight.mjs';
 import { validateAcaPilot } from '../service-bus/aca-pilot.mjs';
+import { validateG5H5Aca } from '../service-bus/aca-g5-h5.mjs';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -108,6 +109,7 @@ export function makeDeployment({
   caddyImage,
   enablePublicReads = false,
   serviceBusPilot,
+  serviceBusG5H5,
 }) {
   if (!registryUser || !registryPassword)
     fail('REGISTRY_READ_CREDENTIALS_REQUIRED');
@@ -189,7 +191,11 @@ export function makeDeployment({
     );
   }
   if (mode === 'G7_AUTHENTICATED') validatePhase3Runtime(cleanRuntime);
-  const pilotIdentities = validateAcaPilot(cleanRuntime, serviceBusPilot);
+  if (serviceBusPilot && serviceBusG5H5)
+    fail('SERVICE_BUS_PROFILES_MUTUALLY_EXCLUSIVE');
+  const managedIdentities = serviceBusG5H5
+    ? validateG5H5Aca(cleanRuntime, serviceBusG5H5)
+    : validateAcaPilot(cleanRuntime, serviceBusPilot);
   const resources = [
     {
       type: 'Microsoft.App/managedEnvironments',
@@ -316,8 +322,8 @@ export function makeDeployment({
       apiVersion,
       name: service,
       location: 'chilecentral',
-      ...(pilotIdentities?.[service]
-        ? { identity: pilotIdentities[service] }
+      ...(managedIdentities?.[service]
+        ? { identity: managedIdentities[service] }
         : {}),
       tags: {
         project: 'g6-phase1-aca',
@@ -358,7 +364,7 @@ export function makeDeployment({
           containers,
           volumes,
           scale: {
-            minReplicas: pilotIdentities?.[service] ? 1 : 0,
+            minReplicas: managedIdentities?.[service] ? 1 : 0,
             maxReplicas: 1,
             rules: [
               { name: 'http', http: { metadata: { concurrentRequests: '5' } } },
@@ -449,6 +455,13 @@ if (
       registryUser: option('--registry-user'),
       registryPassword: process.env.G6_GHCR_PULL_TOKEN,
       caddyImage: option('--caddy-image'),
+      ...(option('--service-bus-g5-h5')
+        ? {
+            serviceBusG5H5: JSON.parse(
+              readFileSync(option('--service-bus-g5-h5'), 'utf8'),
+            ),
+          }
+        : {}),
       enablePublicReads: args.includes('--enable-public-reads'),
       ...(option('--service-bus-pilot')
         ? {

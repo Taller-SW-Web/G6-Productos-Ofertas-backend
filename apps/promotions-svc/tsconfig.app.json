@@ -6,6 +6,6 @@
     "rootDir": "./src",
     "outDir": "../../dist/apps/promotions-svc"
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "src/coupons/g5-coupon-snapshot.schema.json"],
   "exclude": ["node_modules", "dist", "test", "**/*spec.ts"]
 }

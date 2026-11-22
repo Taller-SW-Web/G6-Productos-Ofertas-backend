@@ -2,9 +2,16 @@
 
 ## Estado y límites de evidencia
 
-Este flujo es un candidato de CD manual. `workflow_dispatch` es el único disparador; no se habilitó `workflow_run`, `push` ni despliegue masivo automático. En este cambio solo se hicieron simulaciones locales. No se autenticó en Azure ni se verificó un recurso remoto. Un éxito de pruebas locales o CI no equivale a integración autenticada, homologación ni despliegue.
+| Capa | Estado |
+|---|---|
+| Ejecutor CD | El workflow manual y sus controles se verificaron con simulaciones en CI. |
+| GitHub y Azure | `azure-h5` protegido, identidad federada `g6-h5-int-github-cd`, rol de CD acotado definido y ambiente ACA aislado `env-g6-h5-int` provisionado en Brazil South. |
+| Destinos y runner | Pendientes las cuatro Container Apps aisladas, la asignación del rol a esos recursos y el runner privado `azure-h5-smoke`. |
+| Despliegue y homologación | Pendientes el despliegue oficial, readiness y smoke del runtime completo, verificación de rollback y casos bilaterales. La restauración anterior fue una prueba temporal de componentes G6. |
 
-**Bloqueo operativo actual:** la consulta de solo lectura a GitHub API devolvió `404` para `azure-h5`; actualmente no existe. GitHub puede crear un environment faltante al ejecutar un job que lo referencia y dejarlo sin protección. Antes del login OIDC, el workflow vuelve a consultar las reglas reales mediante la API y falla si falta cualquiera. No se ha creado ni modificado el environment desde este PR.
+`workflow_dispatch` es el único disparador del CD. Los destinos deben existir y pasar el preflight antes de usar el CD con el SHA vigente de `master`.
+
+**Estado del environment:** se creó `azure-h5` en el repositorio oficial. GitHub devolvió política de rama personalizada solo para `master`, required reviewers Axel Cueva y Miguel Taco, prevención de autoaprobación y bypass de administradores deshabilitado. El workflow consulta las reglas reales antes de publicar y antes del login OIDC.
 
 El workflow se detiene si no puede comprobar el repositorio, SHA, CI, digest, variables Azure o el estado/configuración de la Container App. No crea apps ni cambia recursos auxiliares.
 
@@ -28,12 +35,12 @@ El owner de Azure/Repository debe revisar manualmente `Settings > Environments >
 
 1. Required reviewers incluye al menos una persona/equipo responsable.
 2. La opción de prevenir autoaprobaciones está activada.
-3. La política de deployment branches/tags permite únicamente `master`.
-4. Guardar la configuración y verificar que la API de GitHub devuelve las tres propiedades anteriores.
+3. La política de ramas permite exclusivamente la rama `master`.
+4. Impedir el bypass de administradores y verificar las cuatro propiedades por API.
 
 GitHub puede crear automáticamente un environment referenciado que aún no existe y dejarlo sin estas reglas. Por eso `environment: azure-h5` por sí solo no prueba aprobación humana. El workflow hace una consulta `GET` y falla antes del login OIDC ante un environment ausente, reviewers vacíos, autoaprobación permitida o una política distinta de `master`. La aprobación humana solo queda activa tras la configuración externa del owner; este PR no la configura ni declara que ya esté activa.
 
-Crear/configurar el environment y permitir despliegues desde `master` únicamente es una operación del owner, fuera de este cambio.
+La preparación del environment se hizo desde la cuenta administradora del repositorio. La revisión del deployment requiere una persona distinta de quien lo inicia.
 
 Configurar una identidad de Microsoft Entra dedicada. Su credencial federada debe usar:
 
@@ -44,6 +51,8 @@ Configurar una identidad de Microsoft Entra dedicada. Su credencial federada deb
 | Subject | `repo:Taller-SW-Web/G6-Productos-Ofertas-backend:environment:azure-h5` |
 
 Variables requeridas del environment (no secretos): `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID`. La verificación de reglas usa el token de workflow con `actions: read`. El runner autorizado de smoke se registra en GitHub Actions con las etiquetas `self-hosted`, `linux` y `azure-h5-smoke`; no publicar servicios privados solo para habilitar pruebas. Sin environment protegido, variables Azure, runner privado o federación válidos, la validación queda bloqueada. No almacenar claves de service principal.
+
+La identidad `g6-h5-int-github-cd` y su federación se prepararon en el grupo aislado. El destino ACA `env-g6-h5-int` está en Brazil South con acceso público deshabilitado. El rol `G6 H5 Integration ACA Image Maintainer` queda disponible en ese grupo para asignación acotada a las apps a preparar. El despliegue y smoke requieren las apps de integración, sus referencias de configuración y el runner privado.
 
 Asignar a la identidad un rol personalizado en el scope del resource group de ACA que permita como mínimo lectura/escritura de Container Apps, lectura de revisiones, lectura de Managed Environments y lectura del resource group. No dar permisos de crear/eliminar ni roles `Owner`/`Contributor` por defecto. `Microsoft.App/containerApps/write` permite cambios amplios de la app; no restringe por sí solo la escritura al campo de imagen. El executor aplica comparación de configuración y el revisor debe inspeccionar el cambio y la auditoría de Azure.
 
@@ -78,7 +87,7 @@ No usar una ruta que escriba datos. Si una prueba funcional necesita fixture/ide
 5. Revisar digest inmutable, etiquetas OCI, nombre de app/contenedor, revisión, estado/readiness y comparación de configuración.
 6. Consultar el resultado por separado: imagen GHCR, deploy ACA, smoke, rollback, integración autenticada y homologación. No inferir un estado de otro.
 
-El resource group y las apps se descubren/validan mediante lectura antes de actualizar; si el nombre o identidad histórica no coincide, se bloquea la operación. Para Gateway se valida la presencia del contenedor auxiliar `caddy` y la comparación conserva su imagen/configuración. Variables, secretos referenciados, ingress, escala, probes y volúmenes están incluidos en la comparación normalizada. No se usa `az containerapp create/delete`.
+El ejecutor fija el destino por environment. `azure-h5` selecciona exclusivamente `rg-g6-sb-h5-int-fork`. La excepción histórica `azure-h5-pilot-234` conserva su grupo y allowlist. Deploy, inspección y recuperación comparten el selector, con rechazo para un environment ausente o desconocido. Para Gateway se valida el contenedor auxiliar `caddy`. Los secretos referenciados, ingress, escala, probes y volúmenes quedan incluidos en la comparación normalizada. La creación de los destinos es una preparación separada.
 
 ## Rollback y recuperación
 
@@ -90,7 +99,7 @@ No se ha probado rollback en Azure real. Las pruebas con Azure CLI simulado no p
 
 ## Pendientes antes de autorizar un primer despliegue
 
-- Owner Azure/Repository: configurar required reviewers, prevención de autoaprobación y restricción exclusiva a `master` en `azure-h5`. Este bloqueo sigue abierto hasta verificar la configuración en GitHub; el workflow solo la lee y falla cerrado.
+- Owner Azure/Repository: verificar los destinos aislados y asignar el rol OIDC al alcance de los recursos de despliegue cuando existan. El environment GitHub protegido y las tres variables de identidad ya están configurados.
 - Owner de red/operación: disponer el runner self-hosted `azure-h5-smoke` dentro de la red autorizada y sin ingress público para endpoints privados.
 - Seguridad/owner de dependencias: remediar findings y obtener auditoría limpia; el gate del workflow bloquea publicación mientras `npm audit` falle.
 - Owner de cada servicio: confirmar app/container name y endpoint de readiness en Azure contra la configuración vigente.

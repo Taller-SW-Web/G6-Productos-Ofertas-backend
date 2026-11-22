@@ -16,7 +16,7 @@ cat > "$TEMP/bin/az" <<'MOCK'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 state="${MOCK_STATE:?}"
-[[ "$*" == *'--resource-group rg-g6-aca-chile'* ]] || { echo 'wrong resource group' >&2; exit 61; }
+[[ "$*" == *"--resource-group ${MOCK_RESOURCE_GROUP:-rg-g6-aca-chile}"* ]] || { echo 'wrong resource group' >&2; exit 61; }
 if [[ "${1:-}" == containerapp && "${2:-}" == show ]]; then cat "$state"; exit 0; fi
 if [[ "${1:-}" == containerapp && "${2:-}" == revision && "${3:-}" == show ]]; then
   jq -c --arg startup "${MOCK_STARTUP:-false}" '(.revisionPolls += 1) | if $startup == "true" and .revisionPolls == 1 then .revision.properties.runningState="Processing" elif $startup == "true" and .revisionPolls >= 2 then .revision.properties.runningState="Running" else . end | .revision' "$state"
@@ -51,12 +51,23 @@ chmod +x "$TEMP/bin/az"
 export PATH="$TEMP/bin:$PATH" MOCK_STATE="$TEMP/state.json" ACA_POLL_ATTEMPTS=2 ACA_POLL_INTERVAL_SECONDS=0
 export DEPLOY_RECEIPT="$TEMP/gateway.receipt"
 export MOCK_STARTUP=true
+export H5_DEPLOY_ENVIRONMENT=azure-h5-pilot-234
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
 if bash "$DEPLOY" bad-service "$TARGET" >/dev/null 2>&1; then fail 'servicio no autorizado'; fi
 if bash "$DEPLOY" api-gateway "${TARGET%api-gateway@*}catalog-svc@${TARGET##*@}" >/dev/null 2>&1; then fail 'imagen de otro servicio'; fi
 if bash "$DEPLOY" api-gateway "${TARGET%@*}" >/dev/null 2>&1; then fail 'imagen sin digest'; fi
 printf 'PASS: rechaza servicio, paquete cruzado e imagen sin digest\n'
+MOCK_RESOURCE_GROUP=rg-g6-sb-h5-int-fork H5_DEPLOY_ENVIRONMENT=azure-h5 \
+  bash "$DEPLOY" --inspect api-gateway "$PREVIOUS" > "$TEMP/isolated.log" 2>&1 ||
+  { cat "$TEMP/isolated.log"; fail 'azure-h5 no consultó su grupo aislado'; }
+if H5_DEPLOY_ENVIRONMENT=production bash "$DEPLOY" --inspect api-gateway "$PREVIOUS" >/dev/null 2>&1; then
+  fail 'acepta un environment fuera de la allowlist'
+fi
+if H5_DEPLOY_ENVIRONMENT='' bash "$DEPLOY" --inspect api-gateway "$PREVIOUS" >/dev/null 2>&1; then
+  fail 'acepta un environment ausente'
+fi
+printf 'PASS: azure-h5 usa su destino aislado y el ejecutor rechaza otros environments\n'
 
 if bash "$DEPLOY" api-gateway "$TARGET" > "$TEMP/deploy.log" 2>&1; then :; else cat "$TEMP/deploy.log"; fail 'despliegue esperado'; fi
 grep -Fq 'modo=running réplicas=1 salud=Healthy' "$TEMP/deploy.log" || fail 'arranque Processing→Running no se verificó'

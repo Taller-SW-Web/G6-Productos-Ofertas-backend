@@ -1,0 +1,121 @@
+import { Test } from '@nestjs/testing';
+import request from 'supertest';
+import type { INestApplication } from '@nestjs/common';
+import { ApiGatewayModule } from '../src/api-gateway.module.js';
+import { GatewayIdentity } from '../src/routing/gateway-identity.js';
+import {
+  GATEWAY_SETTINGS,
+  readGatewaySettings,
+  type GatewaySettings,
+} from '../src/routing/gateway-settings.js';
+import { G5_H5_ROUTES } from '../src/routing/g5-h5-routes.js';
+import { createSignedIdentity } from './support/signed-identity.js';
+
+describe('G5 H5 routes behind authenticated Gateway opt-in', () => {
+  let app: INestApplication;
+  const upstream = vi.fn();
+  const settings = {
+    securityMode: 'G7_AUTHENTICATED',
+    g5H5Enabled: false,
+    upstreams: {
+      'inventory-svc': 'https://inventory.fixture.test',
+      'promotions-svc': 'https://promotions.fixture.test',
+    },
+    demoNoAuthEnabled: false,
+    publicOperations: [],
+    timeoutMs: 3000,
+    maxBytes: 10000,
+  } satisfies GatewaySettings;
+  const signed = createSignedIdentity(settings);
+  const token = (scope: string) =>
+    signed.token({ sub: 'modulo-ventas', scope });
+
+  beforeAll(async () => {
+    const module = await Test.createTestingModule({
+      imports: [ApiGatewayModule],
+    })
+      .overrideProvider(GATEWAY_SETTINGS)
+      .useValue(settings)
+      .overrideProvider(GatewayIdentity)
+      .useValue(signed.identity)
+      .compile();
+    app = module.createNestApplication({ bodyParser: false });
+    await app.init();
+  });
+  afterAll(async () => app?.close());
+  beforeEach(() => {
+    settings.g5H5Enabled = false;
+    upstream.mockReset();
+    vi.stubGlobal('fetch', upstream);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('rejects opt-in without configured G7 and keeps candidate routes off by default', async () => {
+    expect(() =>
+      readGatewaySettings({
+        GATEWAY_G5_H5_ENABLED: 'true',
+        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+      }),
+    ).toThrow();
+    expect(() =>
+      readGatewaySettings({ GATEWAY_G5_H5_ENABLED: 'true' }),
+    ).toThrow();
+    await request(app.getHttpServer())
+      .post('/api/v1/cupones/consumos')
+      .expect(404);
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it('forwards 202 with the opaque order location, retry header and idempotency key', async () => {
+    settings.g5H5Enabled = true;
+    const location =
+      '/api/v1/cupones/operaciones/11111111-1111-4111-8111-111111111111?order_id=PED+1';
+    upstream.mockResolvedValue(
+      Response.json(
+        {},
+        { status: 202, headers: { Location: location, 'Retry-After': '2' } },
+      ),
+    );
+    await request(app.getHttpServer())
+      .post('/api/v1/cupones/consumos')
+      .set('Authorization', 'Bearer ' + token('cupones:consumir'))
+      .set('Idempotency-Key', '11111111-1111-4111-8111-111111111111')
+      .send({})
+      .expect(202)
+      .expect('Location', location)
+      .expect('Retry-After', '2');
+    const [url, options] = upstream.mock.calls[0];
+    expect(url.href).toBe(
+      'https://promotions.fixture.test/api/v1/cupones/consumos',
+    );
+    expect(options.headers['idempotency-key']).toBe(
+      '11111111-1111-4111-8111-111111111111',
+    );
+  });
+
+  it('insists on each operation scope and never proxies the private Inventory reader', async () => {
+    settings.g5H5Enabled = true;
+    for (const route of G5_H5_ROUTES) {
+      const path = route.path.replace(
+        /\{[^}]+\}/g,
+        '11111111-1111-4111-8111-111111111111',
+      );
+      const client = request(app.getHttpServer());
+      const send =
+        route.method === 'POST' ? client.post(path) : client.get(path);
+      await send
+        .set('Authorization', 'Bearer ' + token('cupones:validar'))
+        .expect(403);
+    }
+    await request(app.getHttpServer())
+      .get(
+        '/api/v1/interno/inventario/reservas/11111111-1111-4111-8111-111111111111/evidencia-cupon',
+      )
+      .set(
+        'Authorization',
+        'Bearer ' + token('inventario:reservas:estado:leer'),
+      )
+      .expect(404);
+    expect(upstream).not.toHaveBeenCalled();
+  });
+});

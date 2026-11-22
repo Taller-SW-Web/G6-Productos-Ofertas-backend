@@ -5,6 +5,7 @@ import { withDeadline } from '../resilience/deadline.js';
 import {
   internalOperations,
   type ServiceAccessTokenSource,
+  type ServiceAudience,
 } from './internal-http.js';
 
 interface TokenFlight {
@@ -14,8 +15,7 @@ interface TokenFlight {
   settled: boolean;
 }
 
-// G7 emitirTokenServicio / TokenServicio; G6 INT-01/04. Credentials identify
-// modulo-productos and never come from a browser bearer. No grant is inferred.
+// Credentials identify the client allowed by each operation. They never come from a caller bearer.
 export function promotionsServiceTokens(
   config: PromotionsConfigService,
   identity: PromotionsIdentity,
@@ -23,6 +23,8 @@ export function promotionsServiceTokens(
   const cache = new Map<string, { token: string; until: number }>();
   const pending = new Map<string, TokenFlight>();
   const issue = (
+    clientId: string,
+    audience: ServiceAudience,
     scope: string,
     credentials: NonNullable<
       PromotionsConfigService['settings']['serviceCredentials']
@@ -43,7 +45,7 @@ export function promotionsServiceTokens(
         },
         body: new URLSearchParams({
           grant_type: 'client_credentials',
-          client_id: 'modulo-productos',
+          client_id: clientId,
           client_secret: credentials.clientSecret,
           scope,
         }).toString(),
@@ -89,8 +91,8 @@ export function promotionsServiceTokens(
       await identity.authorize(
         {
           security: ['serviceBearer'],
-          audience: 'api-productos',
-          clients: ['modulo-productos'],
+          audience,
+          clients: [clientId],
           scope,
         },
         'Bearer ' + body.accessToken,
@@ -119,7 +121,7 @@ export function promotionsServiceTokens(
       );
       if (!Number.isFinite(lifetime) || lifetime <= 0) throw new Error();
       signal.throwIfAborted();
-      cache.set(scope, {
+      cache.set(`${clientId}:${audience}:${scope}`, {
         token: body.accessToken,
         until: Date.now() + lifetime - Math.min(30000, lifetime / 10),
       });
@@ -131,31 +133,36 @@ export function promotionsServiceTokens(
       const operation = Object.hasOwn(internalOperations, request.operationId)
         ? internalOperations[request.operationId]
         : undefined;
+      const audience = operation?.audience ?? 'api-productos';
       if (
-        request.audience !== 'api-productos' ||
         !operation ||
+        request.audience !== audience ||
         operation.scope !== request.scope
       )
         throw new Error();
       const scope = operation.scope;
-      const credentials = config.settings.serviceCredentials;
+      const clientId = operation.clientId ?? 'modulo-productos';
+      const key = `${clientId}:${audience}:${scope}`;
+      const credentials = operation.clientId
+        ? config.settings.h5ServiceCredentials
+        : config.settings.serviceCredentials;
       if (!credentials || config.settings.localDemoEnabled) return null;
-      const cached = cache.get(scope);
+      const cached = cache.get(key);
       if (cached && cached.until > Date.now()) return cached.token;
-      let flight = pending.get(scope);
+      let flight = pending.get(key);
       if (!flight) {
         const controller = new AbortController();
         flight = {
           controller,
           waiters: 0,
           settled: false,
-          promise: issue(scope, credentials, controller),
+          promise: issue(clientId, audience, scope, credentials, controller),
         };
-        pending.set(scope, flight);
+        pending.set(key, flight);
         const current = flight;
         const finish = () => {
           current.settled = true;
-          if (pending.get(scope) === current) pending.delete(scope);
+          if (pending.get(key) === current) pending.delete(key);
         };
         // Both branches handle settlement; no detached rejecting promise.
         void current.promise.then(finish, finish);
@@ -180,7 +187,7 @@ export function promotionsServiceTokens(
         // A caller owns its wait, not other callers' transport. Last cancellation
         // removes the flight immediately so a retry need not join aborted work.
         if (!current.settled && current.waiters === 0) {
-          if (pending.get(scope) === current) pending.delete(scope);
+          if (pending.get(key) === current) pending.delete(key);
           current.controller.abort();
         }
       }

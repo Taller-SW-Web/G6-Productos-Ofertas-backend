@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { InventorySvcController } from './inventory-svc.controller.js';
 import { InventoryController } from './inventory.controller.js';
+import { InventoryCouponEvidenceController } from './inventory-coupon-evidence.controller.js';
 import { InventoryAdminController } from './inventory-admin.controller.js';
 import { InventorySvcService } from './inventory-svc.service.js';
 import { DatabaseService } from './database/database.service.js';
@@ -61,6 +62,7 @@ import { OfflineReconciliationService } from './conciliacion/offline-reconciliat
   controllers: [
     InventorySvcController,
     InventoryController,
+    InventoryCouponEvidenceController,
     InventoryAdminController,
   ],
   providers: [

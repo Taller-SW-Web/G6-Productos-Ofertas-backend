@@ -24,8 +24,8 @@ prepare_gate_line="$(grep -nF 'Preflight read-only de protección azure-h5 antes
 security_job_line="$(grep -n '^  security:' "$WORKFLOW" | cut -d: -f1)"
 publish_job_line="$(grep -n '^  publish:' "$WORKFLOW" | cut -d: -f1)"
 [[ -n "$prepare_gate_line" && -n "$security_job_line" && -n "$publish_job_line" && "$prepare_gate_line" -lt "$security_job_line" && "$security_job_line" -lt "$publish_job_line" ]] || fail 'preflight del environment no bloquea antes de GHCR'
-deploy_gate_line="$(grep -nF 'Revalidar reglas reales del environment inmediatamente antes de OIDC' "$WORKFLOW" | head -n 1 | cut -d: -f1)"
-deploy_login_line="$(grep -nF 'Autenticar en Azure mediante OIDC' "$WORKFLOW" | head -n 1 | cut -d: -f1)"
+deploy_gate_line="$(grep -nFx '      - name: Revalidar reglas reales del environment inmediatamente antes de OIDC' "$WORKFLOW" | cut -d: -f1)"
+deploy_login_line="$(grep -nFx '      - name: Autenticar en Azure mediante OIDC' "$WORKFLOW" | cut -d: -f1)"
 recovery_gate_line="$(grep -nF 'Revalidar reglas reales del environment inmediatamente antes de OIDC para recuperación' "$WORKFLOW" | cut -d: -f1)"
 recovery_login_line="$(grep -nF 'Autenticar en Azure mediante OIDC para recuperación' "$WORKFLOW" | head -n 1 | cut -d: -f1)"
 [[ -n "$deploy_gate_line" && -n "$deploy_login_line" && "$deploy_gate_line" -lt "$deploy_login_line" ]] || fail 'el deploy autentica antes de revalidar protección'

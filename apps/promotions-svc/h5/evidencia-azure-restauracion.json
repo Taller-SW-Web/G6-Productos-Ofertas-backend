@@ -1,0 +1,83 @@
+{
+  "execution": "g6-h5-worker-0j2blcxvk",
+  "environment": "rg-g6-sb-h5-int-fork",
+  "runtime_source_sha": "740cb914bea3e8e4be362faee0313c02de95d447",
+  "transport": "Azure Service Bus Basic",
+  "queue": "g6.promotions.commands",
+  "identity": "g6-h5-int-promotions",
+  "images": {
+    "runner": "node:24.15.0-alpine@sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f",
+    "postgres": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24"
+  },
+  "executed_runner_sha256": "6c45d8cf0bce670ddb6b5c48046dd8fec25d7a835f1be1e5e3a2c30d82d14e0d",
+  "azure_activity": {
+    "create": {
+      "correlation_id": "54b28b90-f9f1-471a-9309-9496a551b1aa",
+      "status": "Succeeded",
+      "utc": "2026-11-21T23:37:34.2343218Z"
+    },
+    "delete": {
+      "correlation_id": "57dc5221-190c-4604-9772-646b28ff41d5",
+      "status": "Succeeded",
+      "utc": "2026-11-21T23:38:56.4025149Z"
+    }
+  },
+  "output": [
+    {
+      "step": "admission",
+      "sha": "740cb914bea3e8e4be362faee0313c02de95d447",
+      "environment": "rg-g6-sb-h5-int-fork",
+      "operation_id": "eedaef65-bb68-4393-9b00-626c3fd0b2a1",
+      "message_id": "642f9bd9-d95c-42d4-b637-bd05b95cdbe2",
+      "correlation_id": "3b71ab1e-1502-4780-a059-1c34e61b1a73",
+      "status": "ACCEPTED",
+      "outbox": true
+    },
+    {
+      "step": "settlement",
+      "sha": "740cb914bea3e8e4be362faee0313c02de95d447",
+      "environment": "rg-g6-sb-h5-int-fork",
+      "operation_id": "eedaef65-bb68-4393-9b00-626c3fd0b2a1",
+      "message_id": "642f9bd9-d95c-42d4-b637-bd05b95cdbe2",
+      "correlation_id": "3b71ab1e-1502-4780-a059-1c34e61b1a73",
+      "deliveries": 1,
+      "terminal": "REJECTED",
+      "result_code": "COUPON_IDENTITY_MISMATCH"
+    },
+    {
+      "step": "settlement",
+      "sha": "740cb914bea3e8e4be362faee0313c02de95d447",
+      "environment": "rg-g6-sb-h5-int-fork",
+      "operation_id": "eedaef65-bb68-4393-9b00-626c3fd0b2a1",
+      "message_id": "642f9bd9-d95c-42d4-b637-bd05b95cdbe2",
+      "correlation_id": "3b71ab1e-1502-4780-a059-1c34e61b1a73",
+      "deliveries": 2,
+      "terminal": "REJECTED",
+      "result_code": "COUPON_IDENTITY_MISMATCH"
+    },
+    {
+      "step": "result",
+      "sha": "740cb914bea3e8e4be362faee0313c02de95d447",
+      "environment": "rg-g6-sb-h5-int-fork",
+      "operation_id": "eedaef65-bb68-4393-9b00-626c3fd0b2a1",
+      "message_id": "642f9bd9-d95c-42d4-b637-bd05b95cdbe2",
+      "correlation_id": "3b71ab1e-1502-4780-a059-1c34e61b1a73",
+      "status": "PASS",
+      "runtime_restarts": 1,
+      "abandoned": 1,
+      "settled": 2,
+      "inbox_rows": 1,
+      "receipt_rows": 1,
+      "coupon_effects": 0
+    }
+  ],
+  "cleanup": {
+    "runner_exit": 0,
+    "postgres_exit": 0,
+    "active": 0,
+    "dead_letter": 0,
+    "scheduled": 0,
+    "container_group_removed": true
+  },
+  "expectation": "La restauración sin consumo previo debe quedar REJECTED/COUPON_IDENTITY_MISMATCH. El consumo comercial no forma parte de esta ejecución."
+}

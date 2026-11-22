@@ -1,0 +1,263 @@
+// Four external G5 routes from Docs OpenAPI 0.7.0-rc.2 at 937b7deb.
+import type { ContractRoute } from './contract-route.js';
+
+export const G5_H5_ROUTES: readonly ContractRoute[] = [
+  {
+    method: 'POST',
+    path: '/api/v1/cupones/consumos',
+    operationId: 'admitirConsumoCuponH5',
+    service: 'promotions-svc',
+    security: ['serviceBearer'],
+    scope: 'cupones:consumir',
+    audience: 'api-productos',
+    clients: ['modulo-ventas'],
+    introspection: false,
+    headers: [
+      {
+        name: 'idempotency-key',
+        required: true,
+      },
+      {
+        name: 'x-correlation-id',
+        required: false,
+      },
+    ],
+    requestTypes: ['application/json'],
+    responses: {
+      '200': {
+        types: ['application/json'],
+        codes: [],
+        headers: [],
+      },
+      '202': {
+        types: ['application/json'],
+        codes: [],
+        headers: ['location', 'retry-after'],
+      },
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
+      '401': {
+        types: ['application/problem+json'],
+        codes: ['TOKEN_INVALIDO'],
+        headers: [],
+      },
+      '403': {
+        types: ['application/problem+json'],
+        codes: ['SCOPE_INSUFICIENTE'],
+        headers: [],
+      },
+      '409': {
+        types: ['application/problem+json'],
+        codes: ['IDEMPOTENCY_CONFLICT'],
+        headers: [],
+      },
+      '429': {
+        types: ['application/problem+json'],
+        codes: ['RATE_LIMIT_EXCEDIDO'],
+        headers: [],
+      },
+      '500': {
+        types: ['application/problem+json'],
+        codes: ['ERROR_INTERNO'],
+        headers: [],
+      },
+      '503': {
+        types: ['application/problem+json'],
+        codes: ['SERVICIO_NO_DISPONIBLE'],
+        headers: [],
+      },
+    },
+  },
+  {
+    method: 'POST',
+    path: '/api/v1/cupones/restauraciones',
+    operationId: 'admitirRestauracionCuponH5',
+    service: 'promotions-svc',
+    security: ['serviceBearer'],
+    scope: 'cupones:restaurar',
+    audience: 'api-productos',
+    clients: ['modulo-ventas'],
+    introspection: false,
+    headers: [
+      {
+        name: 'idempotency-key',
+        required: true,
+      },
+      {
+        name: 'x-correlation-id',
+        required: false,
+      },
+    ],
+    requestTypes: ['application/json'],
+    responses: {
+      '200': {
+        types: ['application/json'],
+        codes: [],
+        headers: [],
+      },
+      '202': {
+        types: ['application/json'],
+        codes: [],
+        headers: ['location', 'retry-after'],
+      },
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
+      '401': {
+        types: ['application/problem+json'],
+        codes: ['TOKEN_INVALIDO'],
+        headers: [],
+      },
+      '403': {
+        types: ['application/problem+json'],
+        codes: ['SCOPE_INSUFICIENTE'],
+        headers: [],
+      },
+      '409': {
+        types: ['application/problem+json'],
+        codes: ['IDEMPOTENCY_CONFLICT'],
+        headers: [],
+      },
+      '429': {
+        types: ['application/problem+json'],
+        codes: ['RATE_LIMIT_EXCEDIDO'],
+        headers: [],
+      },
+      '500': {
+        types: ['application/problem+json'],
+        codes: ['ERROR_INTERNO'],
+        headers: [],
+      },
+      '503': {
+        types: ['application/problem+json'],
+        codes: ['SERVICIO_NO_DISPONIBLE'],
+        headers: [],
+      },
+    },
+  },
+  {
+    method: 'GET',
+    path: '/api/v1/cupones/operaciones/{operationId}',
+    operationId: 'obtenerOperacionCuponH5',
+    service: 'promotions-svc',
+    security: ['serviceBearer'],
+    scope: 'cupones:operaciones:leer',
+    audience: 'api-productos',
+    clients: ['modulo-ventas'],
+    introspection: false,
+    headers: [
+      {
+        name: 'x-correlation-id',
+        required: false,
+      },
+    ],
+    requestTypes: [],
+    responses: {
+      '200': {
+        types: ['application/json'],
+        codes: [],
+        headers: [],
+      },
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
+      '401': {
+        types: ['application/problem+json'],
+        codes: ['TOKEN_INVALIDO'],
+        headers: [],
+      },
+      '403': {
+        types: ['application/problem+json'],
+        codes: ['SCOPE_INSUFICIENTE'],
+        headers: [],
+      },
+      '404': {
+        types: ['application/problem+json'],
+        codes: ['OPERACION_CUPON_NO_ENCONTRADA'],
+        headers: [],
+      },
+      '429': {
+        types: ['application/problem+json'],
+        codes: ['RATE_LIMIT_EXCEDIDO'],
+        headers: [],
+      },
+      '500': {
+        types: ['application/problem+json'],
+        codes: ['ERROR_INTERNO'],
+        headers: [],
+      },
+      '503': {
+        types: ['application/problem+json'],
+        codes: ['SERVICIO_NO_DISPONIBLE'],
+        headers: [],
+      },
+    },
+  },
+  {
+    method: 'GET',
+    path: '/api/v1/inventario/reservas/{reservaId}/estado',
+    operationId: 'obtenerEstadoReservaH5',
+    service: 'inventory-svc',
+    security: ['serviceBearer'],
+    scope: 'inventario:reservas:estado:leer',
+    audience: 'api-productos',
+    clients: ['modulo-ventas'],
+    introspection: false,
+    headers: [
+      {
+        name: 'x-correlation-id',
+        required: false,
+      },
+    ],
+    requestTypes: [],
+    responses: {
+      '200': {
+        types: ['application/json'],
+        codes: [],
+        headers: [],
+      },
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
+      '401': {
+        types: ['application/problem+json'],
+        codes: ['TOKEN_INVALIDO'],
+        headers: [],
+      },
+      '403': {
+        types: ['application/problem+json'],
+        codes: ['SCOPE_INSUFICIENTE'],
+        headers: [],
+      },
+      '404': {
+        types: ['application/problem+json'],
+        codes: ['RESERVA_NO_ENCONTRADA'],
+        headers: [],
+      },
+      '429': {
+        types: ['application/problem+json'],
+        codes: ['RATE_LIMIT_EXCEDIDO'],
+        headers: [],
+      },
+      '500': {
+        types: ['application/problem+json'],
+        codes: ['ERROR_INTERNO'],
+        headers: [],
+      },
+      '503': {
+        types: ['application/problem+json'],
+        codes: ['SERVICIO_NO_DISPONIBLE'],
+        headers: [],
+      },
+    },
+  },
+];

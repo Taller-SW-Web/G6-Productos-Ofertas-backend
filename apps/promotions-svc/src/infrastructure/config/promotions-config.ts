@@ -4,11 +4,16 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { parseEnv } from 'node:util';
 import { internalOrigin, type Upstream } from '../http/internal-http.js';
+import {
+  readPromotionsServiceBus,
+  type PromotionsServiceBusConfig,
+} from '../../coupons/service-bus-config.js';
 const upstreamVariables = {
   catalog: 'GATEWAY_CATALOG_SVC_URL',
   pricing: 'GATEWAY_PRICING_SVC_URL',
   inventory: 'GATEWAY_INVENTORY_SVC_URL',
   taxonomy: 'GATEWAY_TAXONOMY_SVC_URL',
+  ventas: 'PROMOTIONS_G5_COUPON_EVIDENCE_ORIGIN',
 } as const;
 
 const requiredVariables = [
@@ -40,6 +45,7 @@ type ConfigurationVariable =
   | 'AUTH_JWKS_URL'
   | 'PROMOTIONS_SERVICE_TOKEN_URL'
   | 'PROMOTIONS_SERVICE_CLIENT_SECRET'
+  | 'PROMOTIONS_H5_SERVICE_CLIENT_SECRET'
   | 'ENV_FILE';
 
 export class PromotionsConfigurationError extends Error {
@@ -71,6 +77,7 @@ export interface PromotionsConfiguration {
     readonly connectionMode: 'session';
   };
   readonly rabbitmqUrl?: string;
+  readonly serviceBus?: PromotionsServiceBusConfig;
   readonly dependencyProbesEnabled: boolean;
   readonly couponRuntimeEnabled: boolean;
   readonly localDemoEnabled: boolean;
@@ -80,6 +87,7 @@ export interface PromotionsConfiguration {
     tokenUrl: string;
     clientSecret: string;
   }>;
+  readonly h5ServiceCredentials?: PromotionsConfiguration['serviceCredentials'];
   readonly upstreams: Readonly<Partial<Record<Upstream, string>>>;
 }
 
@@ -133,6 +141,7 @@ export function validatePromotionsConfiguration(
   }
   let auth: PromotionsConfiguration['auth'];
   let serviceCredentials: PromotionsConfiguration['serviceCredentials'];
+  let h5ServiceCredentials: PromotionsConfiguration['h5ServiceCredentials'];
   if (selectedIssuer !== undefined || selectedJwks !== undefined) {
     for (const [name, value] of [
       ['AUTH_ISSUER', selectedIssuer],
@@ -189,6 +198,22 @@ export function validatePromotionsConfiguration(
       invalid.add('PROMOTIONS_SERVICE_CLIENT_SECRET');
     }
   }
+  const h5Secret = environment.PROMOTIONS_H5_SERVICE_CLIENT_SECRET;
+  if (h5Secret !== undefined) {
+    if (
+      securityMode !== 'G7_AUTHENTICATED' ||
+      !serviceCredentials ||
+      !h5Secret.trim() ||
+      /[\r\n\0]/.test(h5Secret) ||
+      h5Secret === serviceCredentials.clientSecret
+    )
+      invalid.add('PROMOTIONS_H5_SERVICE_CLIENT_SECRET');
+    else
+      h5ServiceCredentials = Object.freeze({
+        tokenUrl: serviceCredentials.tokenUrl,
+        clientSecret: h5Secret,
+      });
+  }
   const enabled = (name: ConfigurationVariable): boolean => {
     const value = environment[name] ?? 'false';
     if (!['true', 'false'].includes(value)) invalid.add(name);
@@ -198,6 +223,7 @@ export function validatePromotionsConfiguration(
     'PROMOTIONS_DEPENDENCY_PROBES_ENABLED',
   );
   const couponRuntimeEnabled = enabled('PROMOTIONS_COUPON_RUNTIME_ENABLED');
+  const serviceBus = readPromotionsServiceBus(environment);
   const localDemoEnabled = enabled('GATEWAY_DEMO_NO_AUTH_ENABLED');
   if (localDemoEnabled) invalid.add('GATEWAY_DEMO_NO_AUTH_ENABLED');
   const upstreams: Partial<Record<Upstream, string>> = {};
@@ -217,7 +243,8 @@ export function validatePromotionsConfiguration(
     requiredVariables.map((name) => {
       const value = environment[name] ?? '';
       if (
-        (!value.trim() && !(httpOnly && name === 'RABBITMQ_URL')) ||
+        (!value.trim() &&
+          !((httpOnly || serviceBus) && name === 'RABBITMQ_URL')) ||
         value.includes('\0')
       )
         invalid.add(name);
@@ -261,7 +288,7 @@ export function validatePromotionsConfiguration(
   } catch {
     invalid.add('PGSSLROOTCERT');
   }
-  if (required.RABBITMQ_URL || !httpOnly)
+  if (!serviceBus && (required.RABBITMQ_URL || !httpOnly))
     try {
       const broker = new URL(required.RABBITMQ_URL);
       if (
@@ -297,12 +324,14 @@ export function validatePromotionsConfiguration(
       connectionMode: 'session' as const,
     }),
     rabbitmqUrl: required.RABBITMQ_URL || undefined,
+    serviceBus,
     dependencyProbesEnabled,
     couponRuntimeEnabled,
     localDemoEnabled: false,
     listenHost: '::',
     auth,
     serviceCredentials,
+    h5ServiceCredentials,
     upstreams: Object.freeze(upstreams),
   });
 }
