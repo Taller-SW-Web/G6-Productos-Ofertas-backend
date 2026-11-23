@@ -1,11 +1,19 @@
 [CmdletBinding()]
 param(
   [string]$ManifestPath = (Join-Path $env:LOCALAPPDATA 'G6\h5-runtime-preflight\parameters.private.json'),
+  [string]$BicepTemplatePath = (Join-Path $PSScriptRoot '..\container-apps\h5-isolated-five-apps.bicep'),
   [switch]$ProbePostgres,
-  [switch]$ProbeG7Token
+  [switch]$ProbeG7Token,
+  [switch]$ProbeGhcr,
+  [switch]$SkipExternalProbes,
+  [switch]$JsonOutput,
+  [string]$EnvironmentDefaultDomain = '',
+  [string]$PsqlPath = 'psql'
 )
 
 $ErrorActionPreference = 'Stop'
+$coreModule = Join-Path $PSScriptRoot 'H5Preflight.Core.psm1'
+Import-Module $coreModule -Force
 $services = @('api-gateway', 'catalog-svc', 'inventory-svc', 'pricing-svc', 'promotions-svc')
 $results = [System.Collections.Generic.List[object]]::new()
 function Add-Result([string]$Check, [string]$Status, [string]$Detail) {
@@ -58,6 +66,20 @@ catch {
 }
 Add-Result 'private-manifest' 'PRESENT' 'Bicep parameters are read locally; values are never printed.'
 
+$manifestErrors = @(Test-H5ManifestEnvironment $manifest)
+$manifestCompletenessErrors = @(Test-H5ManifestCompleteness $manifest)
+$fatalManifestErrors = @($manifestErrors | Where-Object { $_ -like 'ENVIRONMENT_RESERVED*' -or $_ -like 'ENVIRONMENT_COLLISION*' -or $_ -like 'POSTGRES_CA_INVALID*' })
+$manifestValid = $manifestErrors.Count -eq 0 -and $manifestCompletenessErrors.Count -eq 0
+$manifestStatus = if ($fatalManifestErrors.Count) { 'FAIL' } elseif ($manifestValid) { 'PASS' } else { 'PENDING' }
+$manifestDetail = if ($fatalManifestErrors.Count) { $fatalManifestErrors -join ', ' } elseif ($manifestCompletenessErrors.Count) { $manifestCompletenessErrors -join ', ' } else { 'No reserved variables or collisions; manifest values meet parser and Bicep parameter requirements.' }
+Add-Result 'h5-aca-effective-configuration' $manifestStatus $manifestDetail
+$guardedValues = $null
+if (Test-Path -LiteralPath $BicepTemplatePath -PathType Leaf) {
+  $guardErrors = @(Test-H5GuardedEnvironment (Get-Content -LiteralPath $BicepTemplatePath -Raw))
+  if ($guardErrors.Count -eq 0) { $guardedValues = Get-H5GuardedEnvironment (Get-Content -LiteralPath $BicepTemplatePath -Raw) }
+  Add-Result 'official-bicep-guarded-env' $(if ($guardErrors.Count -eq 0) { 'PASS' } else { 'FAIL' }) $(if ($guardErrors.Count) { $guardErrors -join ', ' } else { 'Reserved values match the approved five-app template.' })
+} else { Add-Result 'official-bicep-guarded-env' 'UNAVAILABLE' 'Official Bicep template is not present at the supplied local path; effective bootstrap cannot PASS.' }
+
 $runtime = @{}
 foreach ($service in $services) { $runtime[$service] = Get-AppEnvironment $manifest $service }
 $sourceSha = [string](Get-ParameterValue $manifest 'sourceSha')
@@ -71,23 +93,42 @@ $promotion = $runtime['promotions-svc']
 $issuer = [string]$gateway.AUTH_ISSUER
 $discoveryUrl = 'https://g7-auth-service.onrender.com/api/v1/auth/.well-known/openid-configuration'
 $jwksUrl = [string]$gateway.AUTH_JWKS_URL
+$g7Config = @(
+  @([string]$gateway.AUTH_ISSUER,[string]$gateway.AUTH_JWKS_URL),
+  @([string]$runtime['catalog-svc'].SECURITY_ISSUER,[string]$runtime['catalog-svc'].SECURITY_JWKS_URL),
+  @([string]$runtime['inventory-svc'].G7_JWT_ISSUER,[string]$runtime['inventory-svc'].G7_JWT_JWKS_URL),
+  @([string]$runtime['pricing-svc'].AUTH_ISSUER,[string]$runtime['pricing-svc'].AUTH_JWKS_URL),
+  @([string]$promotion.AUTH_ISSUER,[string]$promotion.AUTH_JWKS_URL)
+)
+$g7ParserConfigOk = $true
+foreach ($pair in $g7Config) { if ($pair[0] -cne 'https://g7-auth-service.onrender.com/api/v1/auth' -or $pair[1] -cne 'https://g7-auth-service.onrender.com/api/v1/auth/.well-known/jwks.json') { $g7ParserConfigOk = $false } }
+Add-Result 'g7-five-service-parser-configuration' $(if ($g7ParserConfigOk) { 'PASS' } else { 'PENDING' }) 'Issuer/JWKS values checked against the recognized parser keys for all five services.'
 $discoveryOk = $false
 $jwksOk = $false
 try {
-  if ((Is-HttpsUrl $discoveryUrl) -and (Is-HttpsUrl $jwksUrl)) {
+  if (-not $SkipExternalProbes -and (Is-HttpsUrl $discoveryUrl) -and (Is-HttpsUrl $jwksUrl)) {
     $discovery = Invoke-RestMethod -Uri $discoveryUrl -Method Get -TimeoutSec 20
     $jwks = Invoke-RestMethod -Uri $jwksUrl -Method Get -TimeoutSec 20
     $discoveryOk = $discovery.issuer -ceq $issuer -and $discovery.jwks_uri -ceq $jwksUrl
     $jwksOk = @($jwks.keys).Count -gt 0
   }
 } catch { }
-Add-Result 'g7-discovery-issuer-and-jwks' $(if ($discoveryOk -and $jwksOk) { 'PASS' } else { 'FAIL' }) 'Public metadata only; no token or grant is inferred.'
+Add-Result 'g7-discovery-issuer-and-jwks' $(if ($SkipExternalProbes) { 'NOT_RUN' } elseif ($discoveryOk -and $jwksOk) { 'PASS' } else { 'UNAVAILABLE' }) 'Public metadata only; no token or grant is inferred.'
+
+$contractScopes = @()
+if ($ProbeG7Token -and -not $SkipExternalProbes) {
+  $docsRepo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..\..\docs'))
+  try {
+    $openApiText = git -C $docsRepo show 'origin/master:contratos/http/openapi.yaml' 2>$null
+    if ($LASTEXITCODE -eq 0) { $contractScopes = @(Get-H5ContractScopes ($openApiText -join "`n")) }
+  } catch { $contractScopes = @() }
+}
 
 $promotionsSecret = Get-AppSecret $manifest 'promotions-svc' 'promotions-svc-client-secret'
 $clientIdOk = $true # G7 client_id is intentionally fixed below; the Bicep parameter is a different Azure managed identity GUID.
 $clientSecretAvailable = -not [string]::IsNullOrWhiteSpace($promotionsSecret)
 Add-Result 'g7-promotions-svc-client-secret' $(if ($clientIdOk -and $clientSecretAvailable) { 'AVAILABLE' } else { 'EXTERNAL_DEPENDENCY' }) 'Client ID is promotions-svc; never substitute modulo-ventas.'
-if ($ProbeG7Token -and $clientIdOk -and $clientSecretAvailable -and $discoveryOk) {
+if ($ProbeG7Token -and $clientIdOk -and $clientSecretAvailable -and $discoveryOk -and $g7ParserConfigOk -and $contractScopes.Count -gt 0 -and -not $SkipExternalProbes) {
   try {
     $tokenBody = @{
       grant_type = 'client_credentials'
@@ -96,30 +137,37 @@ if ($ProbeG7Token -and $clientIdOk -and $clientSecretAvailable -and $discoveryOk
     }
     $tokenResponse = Invoke-RestMethod -Uri 'https://g7-auth-service.onrender.com/api/v1/auth/token' -Method Post -ContentType 'application/x-www-form-urlencoded' -Body $tokenBody -TimeoutSec 20
     $jwt = [string]$tokenResponse.accessToken
-    $parts = $jwt.Split('.')
-    if ($parts.Count -ne 3 -or $tokenResponse.tokenType -cne 'Bearer') { throw 'invalid-token-response' }
-    $payloadText = $parts[1].Replace('-', '+').Replace('_', '/')
-    while (($payloadText.Length % 4) -ne 0) { $payloadText += '=' }
-    $claims = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payloadText)) | ConvertFrom-Json
-    $audiences = @($claims.aud)
-    $scopes = @(([string]$claims.scope -split '\s+') | Where-Object { $_ })
-    $tokenClient = if ($claims.client_id) { [string]$claims.client_id } else { [string]$claims.sub }
-    $validToken = [string]$claims.iss -ceq $issuer -and $audiences -contains 'api-productos' -and $tokenClient -ceq 'promotions-svc' -and [long]$claims.exp -gt [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -and -not ($scopes -contains 'ventas:pedidos:evidencia-cupon:leer')
-    $safeScopes = @($scopes | Where-Object { $_ -match '^[a-z0-9:_-]+$' } | Sort-Object -Unique) -join ','
-    Add-Result 'g7-promotions-svc-token' $(if ($validToken) { 'PASS' } else { 'FAIL' }) ("iss/sub/aud/exp checked; scopes=" + $safeScopes + '; JWT suppressed.')
-    $tokenResponse = $null; $jwt = $null; $claims = $null; $parts = $null; $tokenBody.client_secret = $null
+    $validToken = $tokenResponse.tokenType -ceq 'Bearer' -and (Test-H5JwtSignatureAndClaims $jwt $jwks $issuer 'promotions-svc' $contractScopes)
+    Add-Result 'g7-promotions-svc-token' $(if ($validToken) { 'PASS' } else { 'FAIL' }) 'JWKS signature, issuer, expiry, api-productos audience, client and OpenAPI scopes checked; api-ventas token is not substituted; JWT suppressed.'
+    $tokenResponse = $null; $jwt = $null; $tokenBody.client_secret = $null
   } catch { Add-Result 'g7-promotions-svc-token' 'FAIL' 'Token issuance/claims check failed; response and credentials suppressed.' }
 } elseif ($ProbeG7Token) {
-  Add-Result 'g7-promotions-svc-token' 'NOT_RUN' 'Authorized promotions-svc client secret or verified discovery is unavailable.'
+  Add-Result 'g7-promotions-svc-token' 'NOT_RUN' 'Authorized promotions-svc secret, verified metadata, five parser configs or current Docs OpenAPI scope set is unavailable.'
 }
 
 $gatewayUpstreams = @('GATEWAY_CATALOG_SVC_URL','GATEWAY_INVENTORY_SVC_URL','GATEWAY_PRICING_SVC_URL','GATEWAY_PROMOTIONS_SVC_URL')
+$environmentDomainStatus = 'NOT_RUN'
+if (-not $EnvironmentDefaultDomain -and -not $SkipExternalProbes) {
+  try {
+    $environmentName = [string](Get-ParameterValue $manifest 'environmentName')
+    $environmentOutput = az containerapp env show --resource-group rg-g6-sb-h5-int-fork --name $environmentName -o json 2>$null | Out-String
+    if ($LASTEXITCODE -eq 0) { $EnvironmentDefaultDomain = [string](($environmentOutput | ConvertFrom-Json).properties.defaultDomain); $environmentDomainStatus = if ($EnvironmentDefaultDomain) { 'PASS' } else { 'UNAVAILABLE' } }
+    else { $environmentDomainStatus = 'UNAVAILABLE' }
+  } catch { $environmentDomainStatus = 'UNAVAILABLE' }
+} elseif ($EnvironmentDefaultDomain) { $environmentDomainStatus = 'PASS' }
+Add-Result 'azure-environment-private-domain' $environmentDomainStatus 'Default domain retrieved from the existing managed environment; value suppressed.'
 $upstreamStatus = 'PASS'
-foreach ($name in $gatewayUpstreams) {
+foreach ($index in 0..($gatewayUpstreams.Count - 1)) {
+  $name = $gatewayUpstreams[$index]
   $value = [string]$gateway[$name]
-  if (-not (Is-HttpsUrl $value) -or ([uri]$value).AbsolutePath -ne '/') { $upstreamStatus = 'PENDING' }
+  $target = @('catalog-svc','inventory-svc','pricing-svc','promotions-svc')[$index]
+  $expected = if ($EnvironmentDefaultDomain) { "https://${target}.internal.${EnvironmentDefaultDomain}" } else { '' }
+  if (-not (Is-HttpsUrl $value) -or ([uri]$value).AbsolutePath -ne '/' -or -not $expected -or $value -cne $expected) { $upstreamStatus = if ($environmentDomainStatus -eq 'UNAVAILABLE') { 'UNAVAILABLE' } else { 'PENDING' } }
 }
-Add-Result 'gateway-four-private-https-upstreams' $upstreamStatus 'Configured values must be isolated ACA private origins; endpoints were not contacted.'
+Add-Result 'gateway-four-private-https-upstreams' $upstreamStatus 'All four configured values must exactly match https://<app>.internal.<environment-default-domain>; endpoints were not contacted.'
+$pricingCatalogExpected = if ($EnvironmentDefaultDomain) { "https://catalog-svc.internal.${EnvironmentDefaultDomain}" } else { '' }
+$pricingCatalogValue = [string]$runtime['pricing-svc'].PRICING_CATALOG_URL
+Add-Result 'pricing-private-catalog-dependency' $(if ($pricingCatalogExpected -and $pricingCatalogValue -ceq $pricingCatalogExpected) { 'PASS' } elseif ($environmentDomainStatus -eq 'UNAVAILABLE') { 'UNAVAILABLE' } else { 'PENDING' }) 'PRICING_CATALOG_URL must match the Catalog origin in the isolated ACA environment.'
 
 foreach ($service in @('catalog-svc','inventory-svc','pricing-svc','promotions-svc')) {
   $envMap = $runtime[$service]
@@ -127,7 +175,7 @@ foreach ($service in @('catalog-svc','inventory-svc','pricing-svc','promotions-s
     'catalog-svc' { @('PGHOST','PGPORT','PGDATABASE','PGUSER','PGPASSWORD','PGSSLROOTCERT','G6_EXPECTED_ROLE','G6_CONNECTION_MODE') }
     'inventory-svc' { @('PGHOST','PGDATABASE','PGUSER','PGPASSWORD','PGSSLROOTCERT') }
     'pricing-svc' { @('DATABASE_URL','PGSSLROOTCERT') }
-    'promotions-svc' { @('PGHOST','PGPORT','PGDATABASE','PGUSER','PGPASSWORD','PGSSLROOTCERT','SERVICE_BUS_NAMESPACE_FQDN','AZURE_CLIENT_ID') }
+    'promotions-svc' { @('PGHOST','PGPORT','PGDATABASE','PGUSER','PGPASSWORD','PGSSLROOTCERT') }
   }
   $missing = @($required | Where-Object { -not (Has-Value $envMap $_) })
   $tlsOk = switch ($service) {
@@ -137,26 +185,16 @@ foreach ($service in @('catalog-svc','inventory-svc','pricing-svc','promotions-s
     'promotions-svc' { [string]$envMap.PGSSLMODE -ceq 'verify-full' }
   }
   $caPath = [string]$envMap.PGSSLROOTCERT
-  if ($service -eq 'pricing-svc' -and -not $caPath -and $envMap.DATABASE_URL) {
-    try { $query = [System.Web.HttpUtility]::ParseQueryString(([uri]$envMap.DATABASE_URL).Query); $caPath = [string]$query['sslrootcert'] } catch { }
-  }
-  $caOk = $false
-  if ($caPath -and (Test-Path -LiteralPath $caPath -PathType Leaf)) {
-    try {
-      $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromPemFile($caPath)
-      $caOk = $null -ne $cert
-      $cert.Dispose()
-    } catch { }
-  }
+  $caPem = Get-AppSecret $manifest $service 'postgres-ca'
+  $caOk = $caPath -ceq '/etc/ssl/postgres/ca.crt' -and (Test-H5PemCertificate $caPem)
   $configStatus = if ($missing.Count -gt 0 -or -not $tlsOk -or -not $caOk) { 'PENDING' } else { 'READY_TO_PROBE' }
-  $detail = if ($missing.Count) { 'Missing: ' + ($missing -join ', ') } elseif (-not $tlsOk) { 'TLS must be verify-full.' } elseif (-not $caOk) { 'Configured CA path is absent or not a PEM certificate.' } else { 'Local values validated; database access still requires a live probe.' }
+  $detail = if ($missing.Count) { 'Missing: ' + ($missing -join ', ') } elseif (-not $tlsOk) { 'TLS must be verify-full.' } elseif (-not $caOk) { 'Mounted ACA CA path or private X.509 postgres-ca secret is absent/invalid.' } else { 'Private PEM validated; local connection still requires verify-full probe.' }
   Add-Result ($service + '-postgres-configuration') $configStatus $detail
 
   if ($ProbePostgres -and $configStatus -eq 'READY_TO_PROBE') {
-    $psql = Get-Command psql -ErrorAction SilentlyContinue
+    $psql = Get-Command $PsqlPath -ErrorAction SilentlyContinue
     if (-not $psql) { Add-Result ($service + '-postgres-readonly-login') 'NOT_RUN' 'psql is not installed; no database connection attempted.'; continue }
     $schema = switch ($service) { 'catalog-svc' { 'catalog' } 'inventory-svc' { 'inventory' } 'pricing-svc' { 'pricing' } 'promotions-svc' { 'promotions' } }
-    $table = switch ($service) { 'catalog-svc' { 'outbox_delivery' } 'inventory-svc' { 'outbox_delivery' } 'pricing-svc' { 'outbox_delivery' } 'promotions-svc' { 'h5_coupon_outbox' } }
     $role = switch ($service) { 'catalog-svc' { [string]$envMap.G6_EXPECTED_ROLE } 'inventory-svc' { 'inventory_app' } 'pricing-svc' { 'pricing_app' } 'promotions-svc' { 'po_promotions_dev_runtime' } }
     $password = [string]$envMap.PGPASSWORD
     $hostName = [string]$envMap.PGHOST
@@ -174,87 +212,139 @@ foreach ($service in @('catalog-svc','inventory-svc','pricing-svc','promotions-s
         $password = if ($credentials.Count -gt 1) { [uri]::UnescapeDataString($credentials[1]) } else { '' }
       } catch { Add-Result ($service + '-postgres-readonly-login') 'INVALID' 'DATABASE_URL could not be parsed; contents suppressed.'; continue }
     }
-    $savedPg = @{}
-    foreach ($name in @('PGHOST','PGHOSTADDR','PGPORT','PGDATABASE','PGUSER','PGPASSWORD','PGSSLMODE','PGSSLROOTCERT','PGOPTIONS')) { $savedPg[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
     try {
-      $env:PGHOST = $hostName
-      if ($service -eq 'catalog-svc' -and $envMap.G6_CONNECT_HOST) { $env:PGHOSTADDR = [string]$envMap.G6_CONNECT_HOST }
-      else { Remove-Item Env:PGHOSTADDR -ErrorAction SilentlyContinue }
-      $env:PGPORT = $port; $env:PGDATABASE = $database; $env:PGUSER = $user
-      $env:PGPASSWORD = $password; $env:PGSSLMODE = 'verify-full'; $env:PGSSLROOTCERT = $caPath
-      $env:PGOPTIONS = '-c default_transaction_read_only=on'
-      $probeOutput = & $psql.Source --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 --set "schema=$schema" --set "expected_role=$role" --set "h5_table=$table" --file (Join-Path $PSScriptRoot 'integration-readonly.sql') 2>$null
-      if ($LASTEXITCODE -ne 0) { Add-Result ($service + '-postgres-readonly-login') 'FAIL' 'Connection/TLS/read-only SQL failed; stderr and endpoint details suppressed.'; continue }
-      $diagnostic = ($probeOutput -join '').Trim() | ConvertFrom-Json
-      $grantOk = $diagnostic.h5_table_select -and $diagnostic.h5_table_insert
-      if ($service -ne 'catalog-svc') { $grantOk = $grantOk -and $diagnostic.h5_table_update }
+      $psqlPath = if ($psql.Source) { $psql.Source } else { $psql.Path }
+      $sqlEnvironment = @{ PGHOST=$hostName; PGHOSTADDR=[string]$envMap.G6_CONNECT_HOST; PGPORT=$port; PGDATABASE=$database; PGUSER=$user; PGPASSWORD=$password }
+      $baseArgs = @('--no-psqlrc','--tuples-only','--no-align','--set','ON_ERROR_STOP=1','--set',"schema=$schema",'--set',"expected_role=$role",'--file',(Join-Path $PSScriptRoot 'integration-readonly.sql'))
+      $baseProbe = Invoke-H5ReadOnlySql $caPem $psqlPath $baseArgs $sqlEnvironment
+      if ($baseProbe.ExitCode -ne 0) { Add-Result ($service + '-postgres-readonly-login') 'FAIL' 'Connection/TLS/read-only SQL failed; stderr and endpoint details suppressed.'; continue }
+      $diagnostic = ($baseProbe.Output -join '').Trim() | ConvertFrom-Json
       $roleOk = $diagnostic.expected_role_exists -and ($diagnostic.expected_role_inherited -or $diagnostic.login_role -eq $role)
-      $dbOk = $diagnostic.ssl_in_use -and $diagnostic.schema_exists -and $diagnostic.schema_usage -and $diagnostic.h5_table_exists -and $roleOk -and $grantOk
-      Add-Result ($service + '-postgres-readonly-login') $(if ($dbOk) { 'PASS' } else { 'FAIL' }) 'Read-only TLS, role, schema, H5 table and minimum table grants checked; identifiers suppressed.'
+      $dbOk = $diagnostic.ssl_in_use -and $diagnostic.schema_exists -and $diagnostic.schema_usage -and $roleOk
+      Add-Result ($service + '-postgres-readonly-login') $(if ($dbOk) { 'PASS' } else { 'FAIL' }) 'Read-only TLS, effective runtime role and schema checked; H5-specific tables are not included in HTTP bootstrap.'
+      if ($dbOk -and $service -in @('catalog-svc','inventory-svc','pricing-svc')) {
+        $readinessFile = switch ($service) { 'catalog-svc' { 'catalog-http-readiness.sql' } 'inventory-svc' { 'inventory-http-readiness.sql' } 'pricing-svc' { 'pricing-http-readiness.sql' } }
+        $readinessProbe = Invoke-H5ReadOnlySql $caPem $psqlPath @('--no-psqlrc','--tuples-only','--no-align','--set','ON_ERROR_STOP=1','--file',(Join-Path $PSScriptRoot $readinessFile)) $sqlEnvironment
+        if ($readinessProbe.ExitCode -eq 0) {
+          $readiness = ($readinessProbe.Output -join '').Trim() | ConvertFrom-Json
+          Add-Result ($service + '-http-readiness-schema') $(if ($readiness.ready) { 'PASS' } else { 'MISSING' }) 'Checks only the service HTTP runtime readiness relations/columns/constraints.'
+        } else { Add-Result ($service + '-http-readiness-schema') 'FAIL' 'Read-only HTTP schema check failed; details suppressed.' }
+      } elseif ($dbOk) { Add-Result ($service + '-http-readiness-schema') 'NOT_RUN' 'No additional always-on relation contract is enforced by the Promotions HTTP bootstrap.' }
     } catch { Add-Result ($service + '-postgres-readonly-login') 'FAIL' 'Read-only SQL diagnostics failed; error details suppressed.' }
-    finally {
-      foreach ($name in $savedPg.Keys) {
-        if ($null -eq $savedPg[$name]) { Remove-Item ('Env:' + $name) -ErrorAction SilentlyContinue }
-        else { [Environment]::SetEnvironmentVariable($name, $savedPg[$name], 'Process') }
+    finally { $password = $null; $sqlEnvironment.PGPASSWORD = $null }
+  }
+  $h5Table = switch ($service) { 'catalog-svc' { 'catalog.outbox_delivery + taxonomy reply trigger' } 'inventory-svc' { 'inventory.outbox_delivery' } 'pricing-svc' { 'pricing.outbox_delivery' } 'promotions-svc' { 'promotions.h5_coupon_operations + h5_coupon_outbox' } }
+  $h5Active = switch ($service) {
+    'catalog-svc' { [string]$envMap.MESSAGING_PROVIDER -ceq 'AZURE_SERVICE_BUS' }
+    'inventory-svc' { [string]$envMap.MESSAGING_PROVIDER -ceq 'AZURE_SERVICE_BUS' }
+    'pricing-svc' { [string]$guardedValues['pricing-svc'].PRICING_PRICE_CHANGED_PUBLISH_ENABLED -ceq 'true' }
+    'promotions-svc' { [string]$guardedValues['promotions-svc'].PROMOTIONS_H5_COUPON_COMMANDS_ENABLED -ceq 'true' -or [string]$guardedValues['promotions-svc'].PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED -ceq 'true' }
+  }
+  Add-Result ($service + '-h5-storage') (Test-H5OptionalMessagingTable $service ([bool]$h5Active) $false) $(if ($h5Active) { "Requires separate exact runtime/migration check: $h5Table." } else { "Not required for HTTP-only bootstrap: $h5Table." })
+}
+
+$flagsOk = $null -ne $guardedValues -and
+  [string]$guardedValues['api-gateway'].G6_SECURITY_MODE -ceq 'G7_AUTHENTICATED' -and
+  [string]$guardedValues['api-gateway'].GATEWAY_DEMO_NO_AUTH_ENABLED -ceq 'false' -and
+  [string]$gateway.GATEWAY_PUBLIC_OPERATION_IDS -ceq '' -and
+  [string]$guardedValues['pricing-svc'].PRICING_PRICE_CHANGED_PUBLISH_ENABLED -ceq 'false' -and
+  [string]$guardedValues['promotions-svc'].PROMOTIONS_COUPON_RUNTIME_ENABLED -ceq 'false' -and
+  [string]$guardedValues['promotions-svc'].PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED -ceq 'false' -and
+  [string]$guardedValues['promotions-svc'].PROMOTIONS_H5_COUPON_COMMANDS_ENABLED -ceq 'false' -and
+  [string]$runtime['inventory-svc'].INVENTORY_PUBLIC_OPERATION_IDS -ceq '' -and
+  [string]$runtime['pricing-svc'].PRICING_PUBLIC_OPERATION_IDS -ceq '' -and
+  [string]$promotion.PROMOTIONS_DEPENDENCY_PROBES_ENABLED -ceq 'false'
+Add-Result 'first-bootstrap-closed-flags' $(if (-not $flagsOk) { 'FAIL' } elseif (-not $manifestValid) { 'PENDING' } else { 'PASS' }) 'Commercial H5, fan-out and demo/public bypasses remain closed; PASS requires a complete #263-compatible manifest.'
+
+$registryUsername = [string](Get-ParameterValue $manifest 'registryUsername')
+$ghcrComplete = $true
+foreach ($service in $services) { if (-not (Get-AppSecret $manifest $service 'ghcr-pull')) { $ghcrComplete = $false } }
+Add-Result 'ghcr-pull-least-privilege-credential' $(if ($ghcrComplete -and $registryUsername) { 'AVAILABLE' } else { 'NOT_RUN' }) 'Only a dedicated read-only read:packages credential may be used; gh CLI credentials are never reused.'
+$sourceSha = [string](Get-ParameterValue $manifest 'sourceSha')
+$digests = Get-ParameterValue $manifest 'imageDigests'
+foreach ($service in $services) {
+  $state = 'NOT_RUN'; $detail = 'Supply a final release SHA/digest and dedicated ghcr-pull credential to verify this package.'
+  if (-not $SkipExternalProbes -and $ProbeGhcr -and $ghcrComplete -and $registryUsername) {
+    $digest = [string]$digests.$service
+    $registryToken = $null; $credential = $null
+    try {
+      $repository = "taller-sw-web/g6-productos-ofertas-backend/$service"
+      $credential = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($registryUsername + ':' + (Get-AppSecret $manifest $service 'ghcr-pull')))
+      $tokenResponse = Invoke-WebRequest -Uri "https://ghcr.io/token?scope=repository:${repository}:pull" -Headers @{ Authorization="Basic $credential" } -Method Get -TimeoutSec 20 -SkipHttpErrorCheck
+      if ($tokenResponse.StatusCode -in @(401,403,404)) { $state='NO_VISIBILITY' }
+      elseif ($tokenResponse.StatusCode -ne 200) { $state='UNAVAILABLE' }
+      else {
+        $registryToken = ($tokenResponse.Content | ConvertFrom-Json).token
+        if ($sourceSha -notmatch '^[a-f0-9]{40}$' -or $digest -notmatch '^sha256:[a-f0-9]{64}$') {
+          $state = Get-H5GhcrReleaseStatus 'VISIBLE' $sourceSha '' $false
+          $detail = 'Registry grants pull visibility; exact official release SHA/digest are not available.'
+        } else {
+          $manifestResponse = Invoke-WebRequest -Uri "https://ghcr.io/v2/${repository}/manifests/${digest}" -Headers @{ Authorization="Bearer $registryToken"; Accept='application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' } -Method Get -TimeoutSec 20 -SkipHttpErrorCheck
+          if ($manifestResponse.StatusCode -eq 404) { $state='MISSING_FOR_RELEASE_SHA' }
+          elseif ($manifestResponse.StatusCode -in @(401,403)) { $state='NO_VISIBILITY' }
+          elseif ($manifestResponse.StatusCode -ne 200) { $state='UNAVAILABLE' }
+          else {
+            $actualDigest = [string]$manifestResponse.Headers['docker-content-digest']
+            $imageManifest = $manifestResponse.Content | ConvertFrom-Json
+            $configResponse = Invoke-WebRequest -Uri "https://ghcr.io/v2/${repository}/blobs/$($imageManifest.config.digest)" -Headers @{ Authorization="Bearer $registryToken" } -Method Get -TimeoutSec 20 -SkipHttpErrorCheck
+            $packageSha = ''
+            $digestVerified = $actualDigest -ceq $digest -and $configResponse.StatusCode -eq 200
+            if ($digestVerified) {
+              $labels = ($configResponse.Content | ConvertFrom-Json).config.Labels
+              $packageSha = [string]$labels.'org.opencontainers.image.revision'
+              $digestVerified = $packageSha -ceq $sourceSha -and $labels.'org.opencontainers.image.source' -ceq 'https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend' -and $labels.'org.opencontainers.image.title' -ceq $service
+            }
+            $state = Get-H5GhcrReleaseStatus 'VISIBLE' $sourceSha $packageSha $digestVerified
+          }
+        }
       }
+    } catch { $state='UNAVAILABLE' }
+    finally { $registryToken = $null; $credential = $null }
+  }
+  Add-Result ("ghcr-$service") $state $detail
+}
+
+if ($SkipExternalProbes) {
+  Add-Result 'azure-isolated-container-apps' 'NOT_RUN' 'Network probes disabled for tests.'
+  Add-Result 'promotions-managed-identity-and-servicebus-parameters' 'NOT_RUN' 'Network probes disabled for tests.'
+  Add-Result 'promotions-servicebus-queue-rbac' 'NOT_RUN' 'Queue scope was not queried.'
+} else {
+  try {
+    $appsOutput = az containerapp list --resource-group rg-g6-sb-h5-int-fork -o json 2>$null | Out-String
+    if ($LASTEXITCODE -eq 0) { $apps = @($appsOutput | ConvertFrom-Json); Add-Result 'azure-isolated-container-apps' 'READ_ONLY_CHECKED' ("Count=$($apps.Count); no writes performed.") }
+    else { Add-Result 'azure-isolated-container-apps' 'UNAVAILABLE' 'Read-only resource query failed.' }
+  } catch { Add-Result 'azure-isolated-container-apps' 'UNAVAILABLE' 'Azure CLI query failed; no writes performed.' }
+  try {
+    $queueOutput = az servicebus queue show --resource-group rg-g6-sb-h5-int-fork --namespace-name g6-sb-h5-int-32cdqgbnlk7ow --name g6.promotions.commands -o json 2>$null | Out-String
+    $queueExit = $LASTEXITCODE
+    if ($queueExit -eq 0) {
+      $queue = $queueOutput | ConvertFrom-Json
+      $namespaceOutput = az servicebus namespace show --resource-group rg-g6-sb-h5-int-fork --name g6-sb-h5-int-32cdqgbnlk7ow -o json 2>$null | Out-String
+      $namespaceExit = $LASTEXITCODE
+      $identityOutput = az identity show --resource-group rg-g6-sb-h5-int-fork --name g6-h5-int-promotions -o json 2>$null | Out-String
+      $identityExit = $LASTEXITCODE
+      if ($namespaceExit -ne 0 -or $identityExit -ne 0) { throw 'Azure metadata unavailable' }
+      $namespace = $namespaceOutput | ConvertFrom-Json; $identity = $identityOutput | ConvertFrom-Json
+      $namespaceHost = ([uri]$namespace.serviceBusEndpoint).Host
+      $expectedHost = [string]$guardedValues['promotions-svc'].SERVICE_BUS_NAMESPACE_FQDN
+      $paramsOk = $namespace.sku.name -ceq 'Basic' -and $namespaceHost -ceq $expectedHost -and $identity.id -ceq [string]$manifest.parameters.promotionsIdentityResourceId.value -and $identity.clientId -ceq [string]$manifest.parameters.promotionsIdentityClientId.value -and $queue.id -match '/queues/g6\.promotions\.commands$'
+      Add-Result 'promotions-managed-identity-and-servicebus-parameters' $(if ($paramsOk -and $queue.status -ceq 'Active') { 'PASS' } else { 'FAIL' }) 'Existing identity and exact active queue metadata checked read-only.'
+      $roleOutput = az role assignment list --scope $queue.id --include-inherited -o json 2>$null | Out-String
+      if ($LASTEXITCODE -eq 0) {
+        $roles = @(($roleOutput | ConvertFrom-Json | Where-Object { $_.principalId -ceq $identity.principalId }).roleDefinitionName)
+        $rbacState = Get-H5QueueRbacStatus 'PASS' $roles
+        Add-Result 'promotions-servicebus-queue-rbac' $rbacState 'Data Sender and Data Receiver checked on the exact queue scope, including inherited assignments.'
+      } else { Add-Result 'promotions-servicebus-queue-rbac' (Get-H5QueueRbacStatus 'UNAVAILABLE' @()) 'Queue-scope assignment query failed; no absence is inferred.' }
+    } else {
+      Add-Result 'promotions-managed-identity-and-servicebus-parameters' 'UNAVAILABLE' 'Read-only identity or queue lookup failed.'
+      Add-Result 'promotions-servicebus-queue-rbac' (Get-H5QueueRbacStatus 'UNAVAILABLE' @()) 'Queue ID could not be obtained; no absence is inferred.'
     }
+  } catch {
+    Add-Result 'promotions-managed-identity-and-servicebus-parameters' 'UNAVAILABLE' 'Azure identity/queue metadata failed; no writes performed.'
+    Add-Result 'promotions-servicebus-queue-rbac' (Get-H5QueueRbacStatus 'UNAVAILABLE' @()) 'Queue RBAC query unavailable; no absence is inferred.'
   }
 }
 
-$flagsOk =
-  [string]$gateway.G6_SECURITY_MODE -ceq 'G7_AUTHENTICATED' -and
-  [string]$gateway.GATEWAY_DEMO_NO_AUTH_ENABLED -ceq 'false' -and
-  [string]$gateway.GATEWAY_PUBLIC_OPERATION_IDS -ceq '' -and
-  [string]$runtime['pricing-svc'].PRICING_PRICE_CHANGED_PUBLISH_ENABLED -ceq 'false' -and
-  [string]$promotion.PROMOTIONS_COUPON_RUNTIME_ENABLED -ceq 'false' -and
-  [string]$promotion.PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED -ceq 'false' -and
-  [string]$promotion.PROMOTIONS_H5_COUPON_COMMANDS_ENABLED -ceq 'false'
-Add-Result 'first-bootstrap-closed-flags' $(if ($flagsOk) { 'PASS' } else { 'FAIL' }) 'Commercial H5, fan-out and demo/public bypasses remain closed.'
-
-$packageCount = -1
-if (Get-Command gh -ErrorAction SilentlyContinue) {
-  try {
-    $names = gh api '/orgs/Taller-SW-Web/packages?package_type=container&per_page=100' --jq '.[].name' 2>$null
-    if ($LASTEXITCODE -eq 0) { $packageCount = @($names | Where-Object { $_ }).Count }
-  } catch { }
-}
-Add-Result 'ghcr-five-release-packages' $(if ($packageCount -lt 0) { 'UNAVAILABLE' } elseif ($packageCount -eq 0) { 'NOT_PUBLISHED' } else { 'VERIFY_REQUIRED' }) $(if ($packageCount -ge 0) { "Organization container package count=$packageCount; token value suppressed." } else { 'Read-only GitHub Packages query failed.' })
-$registryUsername = [string](Get-ParameterValue $manifest 'registryUsername')
-$ghcrCredential = -not [string]::IsNullOrWhiteSpace($registryUsername)
-foreach ($service in $services) { if (-not (Get-AppSecret $manifest $service 'ghcr-pull')) { $ghcrCredential = $false } }
-Add-Result 'ghcr-pull-least-privilege-credential' $(if ($ghcrCredential) { 'AVAILABLE' } else { 'EXTERNAL_DEPENDENCY' }) 'Only a dedicated read:packages credential is acceptable for the runtime parameter.'
-
-try {
-  $appsOutput = az containerapp list --resource-group rg-g6-sb-h5-int-fork -o json 2>$null | Out-String
-  if ($LASTEXITCODE -eq 0) { $apps = @($appsOutput | ConvertFrom-Json); Add-Result 'azure-isolated-container-apps' 'READ_ONLY_CHECKED' ("Count=$($apps.Count); no writes performed.") }
-  else { Add-Result 'azure-isolated-container-apps' 'UNAVAILABLE' 'Read-only resource query failed.' }
-} catch { Add-Result 'azure-isolated-container-apps' 'UNAVAILABLE' 'Azure CLI query failed; no writes performed.' }
-
-try {
-  $namespaceOutput = az servicebus namespace list --resource-group rg-g6-sb-h5-int-fork -o json 2>$null | Out-String
-  $identityOutput = az identity show --resource-group rg-g6-sb-h5-int-fork --name g6-h5-int-promotions -o json 2>$null | Out-String
-  if ($LASTEXITCODE -eq 0) {
-    $targetHost = [string]$promotion.SERVICE_BUS_NAMESPACE_FQDN
-    $namespaces = @($namespaceOutput | ConvertFrom-Json)
-    $matching = $null
-    foreach ($item in $namespaces) {
-      try {
-        $details = az servicebus namespace show --resource-group rg-g6-sb-h5-int-fork --name $item.name -o json 2>$null | ConvertFrom-Json
-        if (([uri]$details.serviceBusEndpoint).Host -ceq $targetHost) { $matching = $details; break }
-      } catch { }
-    }
-    $identity = $identityOutput | ConvertFrom-Json
-    $paramsOk = $matching -and $matching.sku.name -ceq 'Basic' -and $identity.id -ceq [string]$manifest.parameters.promotionsIdentityResourceId.value -and $identity.clientId -ceq [string]$manifest.parameters.promotionsIdentityClientId.value
-    if ($paramsOk) {
-      $roleOutput = az role assignment list --scope $matching.id --include-inherited -o json 2>$null | Out-String
-      $roles = @($roleOutput | ConvertFrom-Json | Where-Object { $_.principalId -eq $identity.principalId } | ForEach-Object { $_.roleDefinitionName })
-      $hasSender = $roles -contains 'Azure Service Bus Data Sender'
-      $hasReceiver = $roles -contains 'Azure Service Bus Data Receiver'
-      Add-Result 'promotions-managed-identity-and-servicebus-parameters' 'PASS' 'Resource IDs, FQDN and Basic tier checked read-only.'
-      Add-Result 'promotions-servicebus-data-plane-rbac' $(if ($hasSender -and $hasReceiver) { 'PASS' } elseif ($promotion.PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED -ceq 'false' -and $promotion.PROMOTIONS_H5_COUPON_COMMANDS_ENABLED -ceq 'false') { 'NOT_GRANTED_H5_DISABLED' } else { 'PENDING' }) 'Data Sender/Receiver grants were checked; no role assignments were changed.'
-    } else { Add-Result 'promotions-managed-identity-and-servicebus-parameters' 'PENDING' 'Configured IDs/FQDN do not match the authorized Azure resources.' }
-  } else { Add-Result 'promotions-managed-identity-and-servicebus-parameters' 'UNAVAILABLE' 'Read-only resource query failed.' }
-} catch { Add-Result 'promotions-managed-identity-and-servicebus-parameters' 'UNAVAILABLE' 'Azure CLI metadata query failed; no writes performed.' }
-
-$results | Format-Table -Wrap -AutoSize | Out-String | Write-Output
-if (@($results | Where-Object { $_.Status -in @('FAIL','PENDING','EXTERNAL_DEPENDENCY','NOT_PUBLISHED','UNAVAILABLE') }).Count -gt 0) { exit 1 }
+if ($JsonOutput) { $results | ConvertTo-Json -Depth 4 | Write-Output }
+else { $results | Format-Table -Wrap -AutoSize | Out-String | Write-Output }
+if (@($results | Where-Object { $_.Status -in @('FAIL','PENDING','EXTERNAL_DEPENDENCY','MISSING','NO_VISIBILITY','MISSING_FOR_RELEASE_SHA','UNAVAILABLE') }).Count -gt 0) { exit 1 }
