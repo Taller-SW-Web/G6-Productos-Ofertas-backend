@@ -37,6 +37,18 @@ const producerByQueue = {
 } as const;
 
 type IncomingQueue = keyof typeof producerByQueue;
+export const taxonomyRequestQueue = 'g6.catalog.from.taxonomy';
+export const taxonomyReplyQueue =
+  catalogDestinations['catalog.master.deactivation.checked'][0];
+const maximumMessageBytes = 256 * 1024;
+
+function decodeJson(body: Uint8Array): unknown {
+  try {
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body));
+  } catch {
+    throw new InvalidCatalogMessage();
+  }
+}
 
 export function destinationsFor(message: CatalogEnvelope): readonly string[] {
   assertCatalogPublication(message);
@@ -65,11 +77,7 @@ export class CatalogServiceBus {
   ): Promise<void> {
     if (!destinationsFor(envelope).includes(destination))
       throw new InvalidCatalogMessage();
-    let sender = this.senders.get(destination);
-    if (!sender) {
-      sender = this.client.createSender(destination);
-      this.senders.set(destination, sender);
-    }
+    const sender = this.getSender(destination);
     const message = {
       body: Buffer.from(JSON.stringify(envelope)),
       contentType: 'application/json',
@@ -78,7 +86,7 @@ export class CatalogServiceBus {
       subject: envelope.name,
     };
     const batch = await sender.createMessageBatch({
-      maxSizeInBytes: 256 * 1024,
+      maxSizeInBytes: maximumMessageBytes,
       abortSignal,
     });
     if (!batch.tryAddMessage(message))
@@ -91,10 +99,19 @@ export class CatalogServiceBus {
     service: Pick<CatalogMessageService, 'consume'>,
     reportError: () => void,
   ) {
+    return this.subscribeWithProbe(queue, service, reportError).close;
+  }
+
+  subscribeWithProbe(
+    queue: IncomingQueue,
+    service: Pick<CatalogMessageService, 'consume'>,
+    reportError: () => void,
+  ) {
     if (!Object.hasOwn(producerByQueue, queue))
       throw new InvalidCatalogMessage();
     const receiver = this.client.createReceiver(queue, {
       receiveMode: 'peekLock',
+      skipParsingBodyAsJson: true,
     });
     const subscription = receiver.subscribe(
       {
@@ -102,12 +119,11 @@ export class CatalogServiceBus {
           try {
             if (
               received.contentType !== 'application/json' ||
-              !Buffer.isBuffer(received.body)
+              !(received.body instanceof Uint8Array) ||
+              received.body.byteLength > maximumMessageBytes
             )
               throw new InvalidCatalogMessage();
-            const envelope = parseCatalogMessage(
-              JSON.parse(received.body.toString('utf8')),
-            );
+            const envelope = parseCatalogMessage(decodeJson(received.body));
             if (
               envelope.producer !== producerByQueue[queue] ||
               received.messageId !== envelope.message_id ||
@@ -141,13 +157,36 @@ export class CatalogServiceBus {
       },
       { autoCompleteMessages: false },
     );
-    return async () => {
-      try {
-        await subscription.close();
-      } finally {
-        await receiver.close();
-      }
+    return {
+      probe: (abortSignal: AbortSignal) =>
+        receiver.peekMessages(1, { abortSignal }),
+      close: async () => {
+        try {
+          await subscription.close();
+        } finally {
+          await receiver.close();
+        }
+      },
     };
+  }
+
+  private getSender(destination: string) {
+    let sender = this.senders.get(destination);
+    if (!sender) {
+      sender = this.client.createSender(destination);
+      this.senders.set(destination, sender);
+    }
+    return sender;
+  }
+
+  async verifySender(
+    destination: string,
+    abortSignal: AbortSignal,
+  ): Promise<void> {
+    await this.getSender(destination).createMessageBatch({
+      maxSizeInBytes: maximumMessageBytes,
+      abortSignal,
+    });
   }
 
   close() {
@@ -161,9 +200,28 @@ export function createCatalogServiceBus(
 ): CatalogServiceBus | undefined {
   const provider = env.MESSAGING_PROVIDER;
   if (!provider || provider === 'RABBITMQ') return undefined;
-  if (provider !== 'AZURE_SERVICE_BUS' || env.CATALOG_AMQP_ENABLED === 'true')
+  if (
+    provider !== 'AZURE_SERVICE_BUS' ||
+    env.CATALOG_AMQP_ENABLED === 'true' ||
+    env.RABBITMQ_URL !== undefined
+  )
     throw new Error(
       'Proveedor H5 inválido o RabbitMQ habilitado en el mismo proceso.',
+    );
+  const clientId = env.AZURE_CLIENT_ID;
+  const validIdentity =
+    clientId &&
+    /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(clientId) &&
+    clientId !== '00000000-0000-0000-0000-000000000000';
+  if (
+    (clientId !== undefined && !validIdentity) ||
+    (env.NODE_ENV === 'production' &&
+      (!validIdentity ||
+        env.G6_SECURITY_MODE !== 'G7_AUTHENTICATED' ||
+        env.G6_SERVICE_BUS_PRODUCTION_ENABLED !== 'true'))
+  )
+    throw new Error(
+      'H5 en producción requiere habilitación, G7 e identidad administrada asignada.',
     );
   const namespace = env.SERVICE_BUS_NAMESPACE_FQDN;
   if (
@@ -172,6 +230,12 @@ export function createCatalogServiceBus(
   )
     throw new Error('SERVICE_BUS_NAMESPACE_FQDN inválido.');
   return new CatalogServiceBus(
-    new ServiceBusClient(namespace, new ManagedIdentityCredential()),
+    new ServiceBusClient(
+      namespace,
+      clientId
+        ? new ManagedIdentityCredential({ clientId })
+        : new ManagedIdentityCredential(),
+      { retryOptions: { maxRetries: 0, timeoutInMs: 5000 } },
+    ),
   );
 }

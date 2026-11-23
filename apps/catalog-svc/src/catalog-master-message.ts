@@ -15,6 +15,7 @@ import {
   persistedAssociation,
 } from './catalog-master-barriers.js';
 import type { CatalogTelemetry } from './catalog-telemetry.js';
+import { enqueueCatalogDeliveries } from './catalog-service-bus-relay.js';
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
@@ -33,6 +34,7 @@ export async function consumeMasterMessage(
   database: Database,
   message: CatalogEnvelope,
   telemetry: CatalogTelemetry,
+  replyViaServiceBus = false,
 ) {
   message = parseCatalogMessage(message);
   assertMasterData(message.data, message.operation_id);
@@ -153,6 +155,10 @@ export async function consumeMasterMessage(
             source_version: BigInt(data.version),
             payload: { request: message, result: response.data.result },
           });
+          if (replyViaServiceBus)
+            await tx.execute(
+              sql`SELECT set_config('g6.catalog_taxonomy_reply', 'AZURE_SERVICE_BUS', true)`,
+            );
           await tx.insert(outbox).values({
             message_id: response.message_id,
             event_name: response.name,
@@ -164,6 +170,7 @@ export async function consumeMasterMessage(
             occurred_at: new Date(response.occurred_at),
             payload: response.data,
           });
+          if (replyViaServiceBus) await enqueueCatalogDeliveries(tx, response);
         }
         result = 'APPLIED';
       }
