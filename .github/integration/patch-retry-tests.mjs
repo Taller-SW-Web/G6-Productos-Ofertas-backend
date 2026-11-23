@@ -91,3 +91,16 @@ source = replaceOnce(
   'outage route actor identity',
 );
 writeFileSync(path, source, 'utf8');
+
+const catalogPersistencePath = resolve(
+  root,
+  'apps/catalog-svc/test/postgres.persistence.e2e-spec.ts',
+);
+let catalogPersistenceSource = readFileSync(catalogPersistencePath, 'utf8');
+catalogPersistenceSource = replaceOnce(
+  catalogPersistenceSource,
+  "${readFileSync(resolve('apps/catalog-svc/test/fixtures/0001_create_bulk_persistence.sql'), 'utf8')}\nGRANT USAGE ON SCHEMA bulk TO bulk_fixture_app;",
+  "${readFileSync(resolve('apps/catalog-svc/test/fixtures/0001_create_bulk_persistence.sql'), 'utf8')}\nALTER TABLE bulk.batch_jobs ADD COLUMN owner_sub uuid;\nALTER TABLE bulk.export_jobs ADD COLUMN owner_sub uuid;\nGRANT USAGE ON SCHEMA bulk TO bulk_fixture_app;",
+  'legacy Catalog peer fixture ownership compatibility',
+);
+writeFileSync(catalogPersistencePath, catalogPersistenceSource, 'utf8');

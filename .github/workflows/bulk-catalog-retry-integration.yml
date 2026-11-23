@@ -83,7 +83,7 @@ jobs:
           node .github/integration/patch-retry-tests.mjs "$tree"
           cp "$tree/.github/integration/bulk-catalog-retry.e2e-spec.fixture.ts" \
              "$tree/apps/bulk-svc/test/bulk-catalog-retry.e2e-spec.ts"
-          git -C "$tree" add apps/bulk-svc/test/bulk-catalog-retry.e2e-spec.ts apps/bulk-svc/src/persistence/bulk.repository.integration.spec.ts apps/bulk-svc/test/bulk-postgres-outage.e2e-spec.ts
+          git -C "$tree" add apps/bulk-svc/test/bulk-catalog-retry.e2e-spec.ts apps/bulk-svc/src/persistence/bulk.repository.integration.spec.ts apps/bulk-svc/test/bulk-postgres-outage.e2e-spec.ts apps/catalog-svc/test/postgres.persistence.e2e-spec.ts
           git -C "$tree" diff --cached --binary "$merge_tree" > "$RUNNER_TEMP/test-adaptations.patch"
           git -C "$tree" -c user.name='G6 Retry Integration Runner' \
             -c user.email='g6-retry-integration@users.noreply.github.com' \
