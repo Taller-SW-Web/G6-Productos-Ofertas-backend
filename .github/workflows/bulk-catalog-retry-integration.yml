@@ -67,7 +67,9 @@ jobs:
           tree="$RUNNER_TEMP/bulk-catalog-retry-tree"
           git worktree add --detach "$tree" "$pr254_head"
           set +e
-          git -C "$tree" merge --no-commit --no-ff origin/pr252
+          git -C "$tree" -c user.name='G6 Retry Integration Runner' \
+            -c user.email='g6-retry-integration@users.noreply.github.com' \
+            merge --no-commit --no-ff origin/pr252
           merge_status=$?
           set -e
           if [ "$merge_status" -ne 0 ]; then
