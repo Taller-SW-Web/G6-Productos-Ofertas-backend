@@ -1,0 +1,151 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": { "value": "env-g6-h5-int" },
+    "environmentLocation": { "value": "Brazil South" },
+    "promotionsIdentityResourceId": { "value": "" },
+    "promotionsIdentityClientId": { "value": "" },
+    "registryUsername": { "value": "" },
+    "sourceSha": { "value": "PENDING_OFFICIAL_RELEASE_SHA" },
+    "imageDigests": {
+      "value": {
+        "api-gateway": "PENDING_VERIFIED_DIGEST",
+        "catalog-svc": "PENDING_VERIFIED_DIGEST",
+        "inventory-svc": "PENDING_VERIFIED_DIGEST",
+        "pricing-svc": "PENDING_VERIFIED_DIGEST",
+        "promotions-svc": "PENDING_VERIFIED_DIGEST"
+      }
+    },
+    "appConfiguration": {
+      "value": {
+        "api-gateway": {
+          "env": [
+            { "name": "NODE_ENV", "value": "production" },
+            { "name": "G6_SECURITY_MODE", "value": "G7_AUTHENTICATED" },
+            { "name": "AUTH_ISSUER", "value": "https://g7-auth-service.onrender.com/api/v1/auth" },
+            { "name": "AUTH_JWKS_URL", "value": "https://g7-auth-service.onrender.com/api/v1/auth/.well-known/jwks.json" },
+            { "name": "GATEWAY_DEMO_NO_AUTH_ENABLED", "value": "false" },
+            { "name": "GATEWAY_PUBLIC_OPERATION_IDS", "value": "" },
+            { "name": "GATEWAY_INVENTORY_LOCAL_GRANTS_ENABLED", "value": "false" },
+            { "name": "GATEWAY_CATALOG_SVC_URL", "value": "" },
+            { "name": "GATEWAY_INVENTORY_SVC_URL", "value": "" },
+            { "name": "GATEWAY_PRICING_SVC_URL", "value": "" },
+            { "name": "GATEWAY_PROMOTIONS_SVC_URL", "value": "" }
+          ],
+          "secrets": [
+            { "name": "ghcr-pull", "value": "" },
+            { "name": "gateway-service-client-secret", "value": "" }
+          ]
+        },
+        "catalog-svc": {
+          "env": [
+            { "name": "NODE_ENV", "value": "production" },
+            { "name": "G6_SECURITY_MODE", "value": "G7_AUTHENTICATED" },
+            { "name": "SECURITY_ISSUER", "value": "https://g7-auth-service.onrender.com/api/v1/auth" },
+            { "name": "SECURITY_DISCOVERY_URL", "value": "https://g7-auth-service.onrender.com/api/v1/auth/.well-known/openid-configuration" },
+            { "name": "SECURITY_JWKS_URL", "value": "https://g7-auth-service.onrender.com/api/v1/auth/.well-known/jwks.json" },
+            { "name": "PGHOST", "value": "" },
+            { "name": "PGPORT", "value": "5432" },
+            { "name": "PGDATABASE", "value": "" },
+            { "name": "PGUSER", "value": "" },
+            { "name": "PGPASSWORD", "secretRef": "catalog-pgpassword" },
+            { "name": "PGSSLMODE", "value": "verify-full" },
+            { "name": "PGSSLROOTCERT", "value": "" },
+            { "name": "G6_DATABASE_SCHEMA", "value": "catalog" },
+            { "name": "G6_EXPECTED_ROLE", "value": "catalog_app" },
+            { "name": "G6_CONNECTION_MODE", "value": "session" },
+            { "name": "CATALOG_SERVICE_TOKEN_URL", "value": "https://g7-auth-service.onrender.com/api/v1/auth/token" },
+            { "name": "CATALOG_SERVICE_CLIENT_SECRET", "secretRef": "catalog-service-client-secret" }
+          ],
+          "secrets": [
+            { "name": "ghcr-pull", "value": "" },
+            { "name": "catalog-pgpassword", "value": "" },
+            { "name": "catalog-service-client-secret", "value": "" }
+          ]
+        },
+        "inventory-svc": {
+          "env": [
+            { "name": "NODE_ENV", "value": "production" },
+            { "name": "G6_SECURITY_MODE", "value": "G7_AUTHENTICATED" },
+            { "name": "G7_JWT_ISSUER", "value": "https://g7-auth-service.onrender.com/api/v1/auth" },
+            { "name": "G7_JWT_JWKS_URL", "value": "https://g7-auth-service.onrender.com/api/v1/auth/.well-known/jwks.json" },
+            { "name": "PGHOST", "value": "" },
+            { "name": "PGPORT", "value": "5432" },
+            { "name": "PGDATABASE", "value": "" },
+            { "name": "PGUSER", "value": "" },
+            { "name": "PGPASSWORD", "secretRef": "inventory-pgpassword" },
+            { "name": "PGSSLMODE", "value": "verify-full" },
+            { "name": "PGSSLROOTCERT", "value": "" },
+            { "name": "G6_DATABASE_SCHEMA", "value": "inventory" },
+            { "name": "INVENTORY_CATALOG_SKU_DEACTIVATION_ENABLED", "value": "false" },
+            { "name": "INVENTORY_PUBLIC_OPERATION_IDS", "value": "" }
+          ],
+          "secrets": [
+            { "name": "ghcr-pull", "value": "" },
+            { "name": "inventory-pgpassword", "value": "" }
+          ]
+        },
+        "pricing-svc": {
+          "env": [
+            { "name": "NODE_ENV", "value": "production" },
+            { "name": "G6_SECURITY_MODE", "value": "G7_AUTHENTICATED" },
+            { "name": "AUTH_ISSUER", "value": "https://g7-auth-service.onrender.com/api/v1/auth" },
+            { "name": "AUTH_JWKS_URL", "value": "https://g7-auth-service.onrender.com/api/v1/auth/.well-known/jwks.json" },
+            { "name": "DATABASE_URL", "secretRef": "pricing-database-url" },
+            { "name": "PGSSLMODE", "value": "verify-full" },
+            { "name": "PGSSLROOTCERT", "value": "" },
+            { "name": "PRICING_CATALOG_URL", "value": "" },
+            { "name": "PRICING_SERVICE_TOKEN_URL", "value": "https://g7-auth-service.onrender.com/api/v1/auth/token" },
+            { "name": "PRICING_SERVICE_CLIENT_SECRET", "secretRef": "pricing-service-client-secret" },
+            { "name": "PRICING_PUBLIC_OPERATION_IDS", "value": "" },
+            { "name": "PRICING_PRICE_CHANGED_PUBLISH_ENABLED", "value": "false" }
+          ],
+          "secrets": [
+            { "name": "ghcr-pull", "value": "" },
+            { "name": "pricing-database-url", "value": "" },
+            { "name": "pricing-service-client-secret", "value": "" }
+          ]
+        },
+        "promotions-svc": {
+          "env": [
+            { "name": "NODE_ENV", "value": "production" },
+            { "name": "G6_SECURITY_MODE", "value": "G7_AUTHENTICATED" },
+            { "name": "AUTH_ISSUER", "value": "https://g7-auth-service.onrender.com/api/v1/auth" },
+            { "name": "AUTH_JWKS_URL", "value": "https://g7-auth-service.onrender.com/api/v1/auth/.well-known/jwks.json" },
+            { "name": "PGHOST", "value": "" },
+            { "name": "PGPORT", "value": "5432" },
+            { "name": "PGDATABASE", "value": "" },
+            { "name": "PGUSER", "value": "" },
+            { "name": "PGPASSWORD", "secretRef": "promotions-pgpassword" },
+            { "name": "PGSSLMODE", "value": "verify-full" },
+            { "name": "PGSSLROOTCERT", "value": "" },
+            { "name": "G6_DATABASE_SCHEMA", "value": "promotions" },
+            { "name": "G6_CONNECTION_MODE", "value": "session" },
+            { "name": "MESSAGING_PROVIDER", "value": "AZURE_SERVICE_BUS" },
+            { "name": "G6_SERVICE_BUS_PRODUCTION_ENABLED", "value": "true" },
+            { "name": "SERVICE_BUS_NAMESPACE_FQDN", "value": "" },
+            { "name": "AZURE_CLIENT_ID", "value": "" },
+            { "name": "PROMOTIONS_DEPENDENCY_PROBES_ENABLED", "value": "false" },
+            { "name": "PROMOTIONS_COUPON_RUNTIME_ENABLED", "value": "false" },
+            { "name": "PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED", "value": "false" },
+            { "name": "PROMOTIONS_H5_COUPON_COMMANDS_ENABLED", "value": "false" },
+            { "name": "PROMOTIONS_H5_COUPON_ADMISSION_PAUSED", "value": "false" },
+            { "name": "PROMOTIONS_SERVICE_TOKEN_URL", "value": "https://g7-auth-service.onrender.com/api/v1/auth/token" },
+            { "name": "PROMOTIONS_SERVICE_CLIENT_SECRET", "secretRef": "promotions-service-client-secret" },
+            { "name": "PROMOTIONS_H5_SERVICE_CLIENT_SECRET", "secretRef": "promotions-svc-client-secret" },
+            { "name": "GATEWAY_CATALOG_SVC_URL", "value": "" },
+            { "name": "GATEWAY_PRICING_SVC_URL", "value": "" },
+            { "name": "GATEWAY_INVENTORY_SVC_URL", "value": "" }
+          ],
+          "secrets": [
+            { "name": "ghcr-pull", "value": "" },
+            { "name": "promotions-pgpassword", "value": "" },
+            { "name": "promotions-service-client-secret", "value": "" },
+            { "name": "promotions-svc-client-secret", "value": "" }
+          ]
+        }
+      }
+    }
+  }
+}
