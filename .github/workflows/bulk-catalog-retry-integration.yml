@@ -92,6 +92,7 @@ jobs:
           printf 'integration_tree=%s\n' "$tree" >> "$GITHUB_OUTPUT"
           printf 'integration_sha=%s\n' "$integration_sha" >> "$GITHUB_OUTPUT"
           printf 'merge_tree=%s\n' "$merge_tree" >> "$GITHUB_OUTPUT"
+          printf 'MERGED_TREE_SHA=%s\nINTEGRATION_TREE_SHA=%s\n' "$merge_tree" "$integration_sha" >> "$RUNNER_TEMP/source-heads.txt"
           printf 'SHA árbol temporal: `%s`\n\n' "$integration_sha" >> "$GITHUB_STEP_SUMMARY"
           cat "$RUNNER_TEMP/source-heads.txt" >> "$GITHUB_STEP_SUMMARY"
           printf '\nÁrbol combinado antes de adaptaciones: `%s`\n\n' "$merge_tree" >> "$GITHUB_STEP_SUMMARY"
