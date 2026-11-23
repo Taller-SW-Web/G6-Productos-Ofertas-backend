@@ -1,22 +1,22 @@
 param(
+  [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9]{40}$')][string]$SourceSha,
   [string]$EvidenceDirectory = (Join-Path $env:LOCALAPPDATA 'G6-H5\evidence\2026-11-23\n01')
 )
 
 $ErrorActionPreference = 'Stop'
 $supportModule = Join-Path $PSScriptRoot 'n01-runner-support.psm1'
 Import-Module $supportModule -Force
+$whatIfModule = Join-Path $PSScriptRoot '..\azure-whatif-validation.psm1'
+Import-Module $whatIfModule -Force
 $resourceGroup = 'rg-g6-sb-h5-int-fork'
 $templatePath = Join-Path $PSScriptRoot 'n01-restoration-smoke.bicep'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
-$sourceSha = (gh api repos/Taller-SW-Web/G6-Productos-Ofertas-backend/commits/master --jq .sha).Trim()
-if ($LASTEXITCODE -ne 0 -or $sourceSha -notmatch '^[a-f0-9]{40}$') {
-  throw 'N01_SOURCE_SHA_LOOKUP_FAILED'
-}
-
-$expectedSha = 'fcf3dd983f5436221670e8c6a113fdd15cb76de9'
-if ($sourceSha -ne $expectedSha) {
-  throw 'N01_MASTER_SHA_CHANGED_REVALIDATE_IMAGES_AND_CI'
-}
+$sourceSha = $SourceSha.ToLowerInvariant()
+$masterSha = (gh api repos/Taller-SW-Web/G6-Productos-Ofertas-backend/commits/master --jq .sha).Trim()
+if ($LASTEXITCODE -ne 0 -or $masterSha -cne $sourceSha) { throw 'N01_SOURCE_SHA_NOT_CURRENT_MASTER' }
+$ciQuery = "repos/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs?head_sha=$sourceSha&event=push&status=completed"
+$ciRuns = gh api $ciQuery --jq ".workflow_runs[] | select(.head_sha==\"$sourceSha\" and .event==\"push\" and .status==\"completed\" and .conclusion==\"success\" and .head_branch==\"master\") | .id"
+if ($LASTEXITCODE -ne 0 -or -not $ciRuns) { throw 'N01_SOURCE_CI_PUSH_NOT_SUCCESSFUL' }
 
 $namespace = 'g6-sb-h5-int-32cdqgbnlk7ow'
 $queue = 'g6.promotions.commands'
@@ -36,15 +36,13 @@ if ($LASTEXITCODE -ne 0 -or
   throw 'N01_PROMOTIONS_QUEUE_RBAC_NOT_VERIFIED'
 }
 
-$groups = az container list --resource-group $resourceGroup --query '[].name' -o json | ConvertFrom-Json
-if ($LASTEXITCODE -ne 0 -or $groups.Count -gt 0) {
-  throw 'N01_TEMPORARY_ACI_ALREADY_EXISTS_OR_AZURE_QUERY_FAILED'
-}
-
 $null = New-Item -ItemType Directory -Path $EvidenceDirectory -Force
 $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
 $suffix = [guid]::NewGuid().ToString('N').Substring(0, 8)
 $containerGroupName = "h5-n01-$stamp-$suffix"
+$groups = az container list --resource-group $resourceGroup --query '[].name' -o json | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'N01_TEMPORARY_ACI_STATE_QUERY_FAILED' }
+if (@($groups | Where-Object { $_ -ceq $containerGroupName }).Count -ne 0) { throw 'N01_TEMPORARY_ACI_ALREADY_EXISTS' }
 $deploymentName = "n01-smoke-$stamp-$suffix"
 $databaseName = "g6_h5_azure_smoke_$suffix"
 $postgresPassword = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
@@ -54,6 +52,7 @@ $null = New-Item -ItemType Directory -Path $tempDirectory -Force
 $parametersPath = Join-Path $tempDirectory 'parameters.private.json'
 $armPath = Join-Path $tempDirectory 'template.json'
 $whatIfPath = Join-Path $tempDirectory 'what-if.private.json'
+$whatIfErrorPath = Join-Path $tempDirectory 'what-if.private.stderr'
 $runnerLog = Join-Path $EvidenceDirectory 'runner.log'
 $postgresLog = Join-Path $EvidenceDirectory 'postgres.log'
 $containerDeploymentAttempted = $false
@@ -80,12 +79,12 @@ try {
   az bicep build --file $templatePath --outfile $armPath --no-restore
   if ($LASTEXITCODE -ne 0) { throw 'N01_BICEP_BUILD_FAILED' }
 
-  az deployment group what-if --name $deploymentName --resource-group $resourceGroup --template-file $templatePath --parameters "@$parametersPath" --output jsonc *> $whatIfPath
+  az deployment group what-if --no-pretty-print --name $deploymentName --resource-group $resourceGroup --template-file $templatePath --parameters "@$parametersPath" --output json 1> $whatIfPath 2> $whatIfErrorPath
   if ($LASTEXITCODE -ne 0) { throw 'N01_AZURE_WHAT_IF_FAILED' }
-  $resourceCreates = @(Select-String -LiteralPath $whatIfPath -Pattern '^\s{2}\+ Microsoft\.[^/]+/[^/]+/' | ForEach-Object { $_.Line.Trim() })
-  if ($resourceCreates.Count -ne 1 -or $resourceCreates[0] -notmatch '^\+ Microsoft\.ContainerInstance/containerGroups/h5-n01-') {
-    throw 'N01_WHAT_IF_UNEXPECTED_RESOURCE_CHANGE'
-  }
+  $groupId = az group show --name $resourceGroup --query id --output tsv
+  if ($LASTEXITCODE -ne 0) { throw 'N01_RESOURCE_GROUP_LOOKUP_FAILED' }
+  $expectedAciId = "$groupId/providers/Microsoft.ContainerInstance/containerGroups/$containerGroupName"
+  Assert-N01WhatIfScope -Json (Get-Content -Raw -LiteralPath $whatIfPath) -ExpectedResourceId $expectedAciId -ContainerGroupName $containerGroupName | Out-Null
 
   $containerDeploymentAttempted = $true
   az deployment group create --name $deploymentName --resource-group $resourceGroup --template-file $templatePath --parameters "@$parametersPath" --output none

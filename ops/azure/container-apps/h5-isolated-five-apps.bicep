@@ -3,11 +3,17 @@ targetScope = 'resourceGroup'
 @description('Nombre del Container Apps Environment aislado ya aprobado.')
 param environmentName string = 'env-g6-h5-int'
 
-@description('Nombre DNS de la región ACA usada para construir origins internos.')
-param environmentDefaultDomain string
+@description('Ubicación obtenida del Managed Environment existente y verificada por el preflight.')
+param environmentLocation string
 
 @description('Client ID de la UAMI Promotions con RBAC limitado a la cola autorizada.')
 param promotionsIdentityResourceId string
+
+@description('Client ID de la UAMI Promotions aprobada.')
+param promotionsIdentityClientId string
+
+@description('Usuario autorizado para lectura de paquetes GHCR privados.')
+param registryUsername string
 
 @description('SHA exacto de master del que provienen las cinco imágenes.')
 @minLength(40)
@@ -55,12 +61,18 @@ var guardedEnv = [
     { name: 'PROMOTIONS_SVC_PORT', value: '3004' }
     { name: 'G6_SECURITY_MODE', value: 'G7_AUTHENTICATED' }
     { name: 'PROMOTIONS_COUPON_RUNTIME_ENABLED', value: 'false' }
+    { name: 'PROMOTIONS_H5_COUPON_COMMANDS_ENABLED', value: 'false' }
+    { name: 'MESSAGING_PROVIDER', value: 'AZURE_SERVICE_BUS' }
+    { name: 'SERVICE_BUS_NAMESPACE_FQDN', value: 'g6-sb-h5-int-32cdqgbnlk7ow.servicebus.windows.net' }
+    { name: 'PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED', value: 'false' }
+    { name: 'G6_SERVICE_BUS_PRODUCTION_ENABLED', value: 'true' }
+    { name: 'AZURE_CLIENT_ID', value: promotionsIdentityClientId }
     { name: 'GATEWAY_DEMO_NO_AUTH_ENABLED', value: 'false' }
   ]
 ]
 var images = [for appName in appNames: 'ghcr.io/taller-sw-web/g6-productos-ofertas-backend/${appName}@${imageDigests[appName]}']
 var caddyImage = 'caddy:2.11.6-alpine@sha256:d44355d3c2149dc580ce2cac735955d1c08d3d00882c30489c241aa51a5c10d9'
-var environmentId = resourceId('Microsoft.App/managedEnvironments', environmentName)
+var environmentDefaultDomain = environment.properties.defaultDomain
 var caddyfile = 'admin off\nauto_https off\n:8080 {\n request_body { max_size 10MB }\n header { X-Content-Type-Options nosniff\n X-Frame-Options DENY\n Referrer-Policy no-referrer\n -Server }\n @published path /health /api/v1/*\n handle @published { reverse_proxy 127.0.0.1:3000 { transport http { dial_timeout 3s\n response_header_timeout 45s } } }\n handle { respond 404 }\n}\n'
 
 resource environment 'Microsoft.App/managedEnvironments@2024-03-01' existing = {
@@ -69,7 +81,7 @@ resource environment 'Microsoft.App/managedEnvironments@2024-03-01' existing = {
 
 resource apps 'Microsoft.App/containerApps@2025-01-01' = [for (appName, i) in appNames: {
   name: appName
-  location: resourceGroup().location
+  location: environmentLocation
   identity: i == 4 ? {
     type: 'UserAssigned'
     userAssignedIdentities: {
@@ -86,6 +98,7 @@ resource apps 'Microsoft.App/containerApps@2025-01-01' = [for (appName, i) in ap
     workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
+      registries: [ { server: 'ghcr.io', username: registryUsername, passwordSecretRef: 'ghcr-pull' } ]
       ingress: {
         external: false
         targetPort: i == 0 ? 8080 : ports[i]
@@ -100,16 +113,21 @@ resource apps 'Microsoft.App/containerApps@2025-01-01' = [for (appName, i) in ap
         minReplicas: i == 4 ? 1 : 0
         maxReplicas: 2
       }
-      volumes: i == 0 ? [{
+      volumes: concat(i == 0 ? [{
         name: 'edge-config'
         storageType: 'Secret'
         secrets: [ { secretRef: 'edge-config', path: 'Caddyfile' } ]
-      }] : []
+      }] : [], i == 0 ? [] : [{
+        name: 'postgres-ca'
+        storageType: 'Secret'
+        secrets: [ { secretRef: 'postgres-ca', path: 'ca.crt' } ]
+      }])
       containers: concat([
         {
           name: appName
           image: images[i]
           env: concat(guardedEnv[i], appConfiguration[appName].env)
+          volumeMounts: i == 0 ? [] : [ { volumeName: 'postgres-ca', mountPath: '/etc/ssl/postgres' } ]
           resources: { cpu: json('0.25'), memory: '0.5Gi' }
           probes: [
             { type: 'Startup', httpGet: { path: probePaths[i], port: ports[i], scheme: 'HTTP' }, initialDelaySeconds: 5, periodSeconds: 5, timeoutSeconds: 3, failureThreshold: 60 }
