@@ -3847,6 +3847,7 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
           'ON_ERROR_STOP=1',
         ],
         `CREATE ROLE po_bulk_owner NOLOGIN; CREATE ROLE bulk_fixture_app LOGIN PASSWORD 'isolated-bulk-password'; CREATE SCHEMA bulk AUTHORIZATION po_bulk_owner; SET ROLE po_bulk_owner; ${readFileSync(resolve('apps/catalog-svc/test/fixtures/0001_create_bulk_persistence.sql'), 'utf8')}
+${readFileSync(resolve('apps/bulk-svc/migrations/0005_actor_ownership.sql'), 'utf8')}
 GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA bulk TO bulk_fixture_app; GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
       );
       writeFileSync(
@@ -3877,7 +3878,8 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
       jointRuntime = new CatalogAmqpRuntime(messages, jointBroker.settings);
       jointRuntime.onModuleInit();
       const sku = 'BULK-JOINT-' + randomUUID(),
-        batch = randomUUID();
+        batch = randomUUID(),
+        ownerSub = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
       try {
         const child = spawn(
           process.execPath,
@@ -3900,6 +3902,7 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
             broker: jointBroker.bulkUrl,
             sku,
             batch,
+            ownerSub,
             correlation: randomUUID(),
           }),
         );

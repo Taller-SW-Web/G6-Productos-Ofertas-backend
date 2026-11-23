@@ -1,6 +1,7 @@
 import {
   boolean,
   check,
+  char,
   foreignKey,
   index,
   integer,
@@ -10,6 +11,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
@@ -67,6 +69,8 @@ export const batchJobs = bulk.table(
   {
     id: uuid('id').defaultRandom().notNull(),
     batchId: uuid('batch_id').notNull(),
+    // Nullable only for historical rows; public reads never expose null-owned jobs.
+    ownerSub: uuid('owner_sub'),
     inputFileId: uuid('input_file_id').notNull(),
     reportFileId: uuid('report_file_id'),
     status: jobStatus('status').notNull().default('QUEUED'),
@@ -94,6 +98,10 @@ export const batchJobs = bulk.table(
       foreignColumns: [fileManifests.id],
     }).onDelete('restrict'),
     unique('uq_batch_jobs_batch_id').on(t.batchId),
+    uniqueIndex('uq_batch_jobs_owner_correlation')
+      .on(t.ownerSub, t.correlationId)
+      .where(sql`${t.ownerSub} IS NOT NULL`),
+    index('ix_batch_jobs_owner_created_at').on(t.ownerSub, t.createdAt),
     unique('uq_batch_jobs_report_file_id').on(t.reportFileId),
     check('ck_batch_jobs_template_version', sql`${t.templateVersion} > 0`),
     check('ck_batch_jobs_total_rows', sql`${t.totalRows} >= 0`),
@@ -259,6 +267,8 @@ export const exportJobs = bulk.table(
   {
     id: uuid('id').defaultRandom().notNull(),
     exportId: uuid('export_id').notNull(),
+    // Nullable only for historical rows; public reads never expose null-owned jobs.
+    ownerSub: uuid('owner_sub'),
     status: jobStatus('status').notNull().default('QUEUED'),
     format: text('format').notNull(),
     outputFileId: uuid('output_file_id'),
@@ -276,6 +286,7 @@ export const exportJobs = bulk.table(
       foreignColumns: [fileManifests.id],
     }).onDelete('restrict'),
     unique('uq_export_jobs_export_id').on(t.exportId),
+    index('ix_export_jobs_owner_created_at').on(t.ownerSub, t.createdAt),
     unique('uq_export_jobs_output_file_id').on(t.outputFileId),
     check('ck_export_jobs_format', sql`${t.format} IN ('CSV','XLSX')`),
     check(
@@ -307,13 +318,18 @@ export const outbox = bulk.table(
   (t) => [
     primaryKey({ name: 'pk_outbox', columns: [t.id] }),
     unique('uq_outbox_message_id').on(t.messageId),
-    unique('uq_outbox_operation_event').on(t.operationId, t.eventName),
     check('ck_outbox_kind', sql`${t.kind} IN ('command','event','result')`),
     check('ck_outbox_schema_version', sql`${t.schemaVersion} > 0`),
     check('ck_outbox_attempts', sql`${t.attempts} >= 0`),
     // A Catalog command remains pending until its correlated result proves
     // that the primary consumer handled it; confirms alone are insufficient.
     index('ix_outbox_pending').on(t.publishedAt, t.occurredAt),
+    uniqueIndex('uq_outbox_initial_operation_event')
+      .on(t.operationId, t.eventName)
+      .where(sql`${t.causationId} IS NULL`),
+    uniqueIndex('uq_outbox_retry_causation_event')
+      .on(t.operationId, t.eventName, t.causationId)
+      .where(sql`${t.causationId} IS NOT NULL`),
   ],
 );
 
@@ -336,6 +352,134 @@ export const inbox = bulk.table(
   ],
 );
 
+export const batchResumeRequests = bulk.table(
+  'batch_resume_requests',
+  {
+    id: uuid('id').defaultRandom().notNull(),
+    batchJobId: uuid('batch_job_id').notNull(),
+    ownerSub: uuid('owner_sub').notNull(),
+    correlationId: uuid('correlation_id').notNull(),
+    intentHash: char('intent_hash', { length: 64 }).notNull(),
+    acceptedResponse: jsonb('accepted_response')
+      .notNull()
+      .$type<Record<string, unknown>>(),
+    createdAt: tz('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'pk_batch_resume_requests', columns: [t.id] }),
+    foreignKey({
+      name: 'fk_batch_resume_requests_batch_job_id',
+      columns: [t.batchJobId],
+      foreignColumns: [batchJobs.id],
+    }).onDelete('restrict'),
+    unique('uq_batch_resume_requests_batch_correlation').on(
+      t.batchJobId,
+      t.correlationId,
+    ),
+    check(
+      'ck_batch_resume_requests_intent_hash',
+      sql`${t.intentHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+  ],
+);
+
+export const retryCommands = bulk.table(
+  'retry_commands',
+  {
+    commandAttemptId: uuid('command_attempt_id').notNull(),
+    resumeRequestId: uuid('resume_request_id').notNull(),
+    batchJobId: uuid('batch_job_id').notNull(),
+    domain: text('domain').notNull(),
+    familyKey: text('family_key').notNull(),
+    businessOperationId: uuid('business_operation_id').notNull(),
+    attemptNumber: integer('attempt_number').notNull(),
+    messageId: uuid('message_id').notNull(),
+    previousMessageId: uuid('previous_message_id').notNull(),
+    payloadHash: char('payload_hash', { length: 64 }).notNull(),
+    createdAt: tz('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'pk_retry_commands', columns: [t.commandAttemptId] }),
+    foreignKey({
+      name: 'fk_retry_commands_resume_request_id',
+      columns: [t.resumeRequestId],
+      foreignColumns: [batchResumeRequests.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'fk_retry_commands_batch_job_id',
+      columns: [t.batchJobId],
+      foreignColumns: [batchJobs.id],
+    }).onDelete('restrict'),
+    unique('uq_retry_commands_message_id').on(t.messageId),
+    unique('uq_retry_commands_request_family').on(
+      t.resumeRequestId,
+      t.familyKey,
+    ),
+    check('ck_retry_commands_domain', sql`${t.domain} = 'CATALOGO'`),
+    check('ck_retry_commands_attempt_number', sql`${t.attemptNumber} >= 2`),
+    check(
+      'ck_retry_commands_payload_hash',
+      sql`${t.payloadHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+  ],
+);
+
+export const domainAttempts = bulk.table(
+  'domain_attempts',
+  {
+    attemptId: uuid('attempt_id').notNull(),
+    batchRowId: uuid('batch_row_id').notNull(),
+    domain: text('domain').notNull(),
+    businessOperationId: uuid('business_operation_id').notNull(),
+    attemptNumber: integer('attempt_number').notNull(),
+    previousAttemptId: uuid('previous_attempt_id'),
+    commandAttemptId: uuid('command_attempt_id'),
+    status: text('status').notNull(),
+    effectState: text('effect_state').notNull(),
+    retriable: boolean('retriable').notNull().default(false),
+    receiptMessageId: uuid('receipt_message_id'),
+    errorCode: text('error_code'),
+    createdAt: tz('created_at').notNull().defaultNow(),
+    updatedAt: tz('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'pk_domain_attempts', columns: [t.attemptId] }),
+    foreignKey({
+      name: 'fk_domain_attempts_batch_row_id',
+      columns: [t.batchRowId],
+      foreignColumns: [batchRows.id],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'fk_domain_attempts_previous_attempt_id',
+      columns: [t.previousAttemptId],
+      foreignColumns: [t.attemptId],
+    }).onDelete('restrict'),
+    foreignKey({
+      name: 'fk_domain_attempts_command_attempt_id',
+      columns: [t.commandAttemptId],
+      foreignColumns: [retryCommands.commandAttemptId],
+    }).onDelete('restrict'),
+    unique('uq_domain_attempts_row_domain_number').on(
+      t.batchRowId,
+      t.domain,
+      t.attemptNumber,
+    ),
+    check('ck_domain_attempts_domain', sql`${t.domain} = 'CATALOGO'`),
+    check('ck_domain_attempts_attempt_number', sql`${t.attemptNumber} >= 1`),
+    check(
+      'ck_domain_attempts_status',
+      sql`${t.status} IN ('PENDING','COMPLETED','REJECTED','UNKNOWN')`,
+    ),
+    check(
+      'ck_domain_attempts_effect_state',
+      sql`${t.effectState} IN ('NONE','APPLIED','UNKNOWN')`,
+    ),
+    uniqueIndex('uq_domain_attempts_previous_attempt')
+      .on(t.previousAttemptId)
+      .where(sql`${t.previousAttemptId} IS NOT NULL`),
+  ],
+);
+
 export const bulkSchema = {
   fileManifests,
   batchJobs,
@@ -344,4 +488,7 @@ export const bulkSchema = {
   exportJobs,
   outbox,
   inbox,
+  batchResumeRequests,
+  retryCommands,
+  domainAttempts,
 };

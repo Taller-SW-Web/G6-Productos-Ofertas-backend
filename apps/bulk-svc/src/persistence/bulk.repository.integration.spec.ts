@@ -20,11 +20,13 @@ import {
   bulkSchema,
   batchJobs,
   batchRows,
+  domainAttempts,
   exportJobs,
   fileManifests,
   inbox,
   outbox,
   rowDomainSteps,
+  retryCommands,
 } from './bulk.schema.js';
 import { BulkPersistenceError } from './bulk.persistence.errors.js';
 import {
@@ -33,8 +35,11 @@ import {
 } from './bulk.repository.js';
 
 const testUrl = process.env.BULK_TEST_DATABASE_URL;
+const adminTestUrl = process.env.BULK_TEST_ADMIN_DATABASE_URL;
 const integration = testUrl ? describe : describe.skip;
+const TEST_OWNER_SUB = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 let pool: Pool;
+let adminPool: Pool;
 let repository: BulkPersistenceRepository;
 let database: ReturnType<typeof drizzle<typeof bulkSchema>>;
 
@@ -68,9 +73,32 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
         'Integration tests require loopback PostgreSQL and explicit sslmode=disable',
       );
     }
+    if (adminTestUrl) {
+      const adminUrl = new URL(adminTestUrl);
+      if (
+        !['localhost', '127.0.0.1', '::1'].includes(adminUrl.hostname) ||
+        adminUrl.searchParams.get('sslmode') !== 'disable' ||
+        adminUrl.hostname !== url.hostname ||
+        adminUrl.port !== url.port ||
+        adminUrl.pathname !== url.pathname ||
+        adminUrl.username === url.username
+      ) {
+        throw new Error(
+          'BULK_TEST_ADMIN_DATABASE_URL must use a distinct role on the same loopback test database',
+        );
+      }
+    }
     pool = new Pool({
       connectionString: parsed.databaseUrl,
       ssl: parsed.databaseSsl,
+      max: 2,
+      connectionTimeoutMillis: parsed.databaseConnectionTimeoutMs,
+      query_timeout: parsed.databaseQueryTimeoutMs,
+      statement_timeout: parsed.databaseQueryTimeoutMs,
+      idleTimeoutMillis: parsed.databaseIdleTimeoutMs,
+    });
+    adminPool = new Pool({
+      connectionString: adminTestUrl ?? testUrl,
       max: 2,
       connectionTimeoutMillis: parsed.databaseConnectionTimeoutMs,
       query_timeout: parsed.databaseQueryTimeoutMs,
@@ -89,6 +117,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
 
   afterAll(async () => {
     if (pool) await pool.end();
+    if (adminPool) await adminPool.end();
   });
 
   const importBatch = (
@@ -100,6 +129,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
   ) =>
     repository.createImportBatch({
       batchId: randomUUID(),
+      ownerSub: TEST_OWNER_SUB,
       templateVersion: 2,
       correlationId: randomUUID(),
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -138,6 +168,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const rowB = randomUUID();
     await repository.createImportBatch({
       batchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId,
       templateVersion: 2,
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -181,6 +212,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const rejectedRow = randomUUID();
     await repository.createImportBatch({
       batchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId,
       templateVersion: 2,
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -239,6 +271,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const commandRejectedCorrelationId = randomUUID();
     await repository.createImportBatch({
       batchId: commandRejectedBatchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId: commandRejectedCorrelationId,
       templateVersion: 2,
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -354,6 +387,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     try {
       await repository.createImportBatch({
         batchId,
+        ownerSub: TEST_OWNER_SUB,
         templateVersion: 2,
         correlationId: randomUUID(),
         inputFile: { format: 'CSV', contentRef: ref },
@@ -382,6 +416,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     await expect(
       repository.createImportBatch({
         batchId,
+        ownerSub: TEST_OWNER_SUB,
         templateVersion: 2,
         correlationId: randomUUID(),
         inputFile: { format: 'CSV', contentRef: ref },
@@ -411,16 +446,17 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
   it('rolls back batch creation when writing a domain step fails', async () => {
     const ref = `test://${randomUUID()}`;
     const batchId = randomUUID();
-    await pool.query(
+    await adminPool.query(
       `CREATE OR REPLACE FUNCTION bulk.fn_test_fail_step_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='injected integration failure'; END $$`,
     );
-    await pool.query(
+    await adminPool.query(
       'CREATE TRIGGER trg_test_fail_step_insert BEFORE INSERT ON bulk.row_domain_steps FOR EACH ROW EXECUTE FUNCTION bulk.fn_test_fail_step_insert()',
     );
     try {
       await expect(
         repository.createImportBatch({
           batchId,
+          ownerSub: TEST_OWNER_SUB,
           templateVersion: 2,
           correlationId: randomUUID(),
           inputFile: { format: 'CSV', contentRef: ref },
@@ -435,10 +471,10 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       ).toHaveLength(0);
       expect(await repository.findBatchByBatchId(batchId)).toBeNull();
     } finally {
-      await pool.query(
+      await adminPool.query(
         'DROP TRIGGER IF EXISTS trg_test_fail_step_insert ON bulk.row_domain_steps',
       );
-      await pool.query(
+      await adminPool.query(
         'DROP FUNCTION IF EXISTS bulk.fn_test_fail_step_insert()',
       );
     }
@@ -480,6 +516,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     ).rejects.toBeInstanceOf(Error);
     const job = await repository.createExportJob({
       exportId: randomUUID(),
+      ownerSub: TEST_OWNER_SUB,
       format: 'CSV',
     });
     await expect(
@@ -496,6 +533,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     try {
       const job = await repository.createExportJob({
         exportId: randomUUID(),
+        ownerSub: TEST_OWNER_SUB,
         format: 'CSV',
       });
       const snapshot = {
@@ -632,11 +670,14 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       });
     const service = new BulkExportService(repository, storage as never, source);
     try {
-      const accepted = await service.create('CSV');
+      const accepted = await service.create('CSV', TEST_OWNER_SUB);
       const job = await waitForExport(accepted.export_id, 'COMPLETED');
       expect(completeSpy).toHaveBeenCalledTimes(1);
       expect(job.outputFileId).toBeTruthy();
-      const download = await service.download(accepted.export_id);
+      const download = await service.download(
+        accepted.export_id,
+        TEST_OWNER_SUB,
+      );
       expect(
         await repository.isExportArtifactReferenced(
           download.manifest.contentRef,
@@ -687,13 +728,13 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       pricing: async () => page,
       inventory: async () => page,
     };
-    await pendingPool.query(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
+    await adminPool.query(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
         IF NEW.role = 'RESULTADO_EXPORTACION' THEN PERFORM pg_sleep(2.0); END IF;
         RETURN NEW;
       END
     $$`);
-    await pendingPool.query(
+    await adminPool.query(
       `CREATE TRIGGER ${trigger} BEFORE INSERT ON bulk.file_manifests FOR EACH ROW EXECUTE FUNCTION ${fn}()`,
     );
     const complete =
@@ -738,7 +779,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       source,
     );
     try {
-      const accepted = await service.create('CSV');
+      const accepted = await service.create('CSV', TEST_OWNER_SUB);
       await vi.waitFor(() => expect(referenceReads).toEqual([false]), {
         timeout: 5_000,
       });
@@ -773,7 +814,10 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       }
       expect(job?.status).toBe('COMPLETED');
       expect(job.outputFileId).toBeTruthy();
-      const downloaded = await service.download(accepted.export_id);
+      const downloaded = await service.download(
+        accepted.export_id,
+        TEST_OWNER_SUB,
+      );
       expect(downloaded.manifest.contentRef).toBe(ref);
       expect(await storage.get(ref)).toBeInstanceOf(Buffer);
       expect(removed).toEqual([]);
@@ -782,10 +826,10 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       completeSpy.mockRestore();
       referenceSpy.mockRestore();
       await pendingCommit?.catch(() => undefined);
-      await pendingPool.query(
+      await adminPool.query(
         `DROP TRIGGER IF EXISTS ${trigger} ON bulk.file_manifests`,
       );
-      await pendingPool.query(`DROP FUNCTION IF EXISTS ${fn}()`);
+      await adminPool.query(`DROP FUNCTION IF EXISTS ${fn}()`);
       await pendingPool.end();
       if (previousBucket === undefined) delete process.env.BULK_STORAGE_BUCKET;
       else process.env.BULK_STORAGE_BUCKET = previousBucket;
@@ -818,7 +862,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       pricing: async () => page,
       inventory: async () => page,
     };
-    await pool.query(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
+    await adminPool.query(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
         IF NEW.role = 'RESULTADO_EXPORTACION' THEN
           RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='injected manifest rollback';
@@ -826,12 +870,12 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
         RETURN NEW;
       END
     $$`);
-    await pool.query(
+    await adminPool.query(
       `CREATE TRIGGER ${trigger} BEFORE INSERT ON bulk.file_manifests FOR EACH ROW EXECUTE FUNCTION ${fn}()`,
     );
     const service = new BulkExportService(repository, storage as never, source);
     try {
-      const accepted = await service.create('CSV');
+      const accepted = await service.create('CSV', TEST_OWNER_SUB);
       await vi.waitFor(() => expect(removed.length).toBe(1), {
         timeout: 5_000,
       });
@@ -848,10 +892,10 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       ).toBe('PROCESSING');
     } finally {
       service.onModuleDestroy();
-      await pool.query(
+      await adminPool.query(
         `DROP TRIGGER IF EXISTS ${trigger} ON bulk.file_manifests`,
       );
-      await pool.query(`DROP FUNCTION IF EXISTS ${fn}()`);
+      await adminPool.query(`DROP FUNCTION IF EXISTS ${fn}()`);
       if (previousBucket === undefined) delete process.env.BULK_STORAGE_BUCKET;
       else process.env.BULK_STORAGE_BUCKET = previousBucket;
     }
@@ -860,6 +904,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
   it('persists and conditionally advances an export without exposing partial output', async () => {
     const job = await repository.createExportJob({
       exportId: randomUUID(),
+      ownerSub: TEST_OWNER_SUB,
       format: 'XLSX',
     });
     expect(job.status).toBe('QUEUED');
@@ -898,6 +943,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     try {
       const created = await workerA.createExportJob({
         exportId,
+        ownerSub: TEST_OWNER_SUB,
         format: 'CSV',
       });
       const first = await workerA.claimQueuedExportJob(exportId);
@@ -966,7 +1012,11 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const workerB = new BulkPersistenceRepository(database);
     const exportId = randomUUID();
     let renewing = true;
-    const created = await workerA.createExportJob({ exportId, format: 'CSV' });
+    const created = await workerA.createExportJob({
+      exportId,
+      ownerSub: TEST_OWNER_SUB,
+      format: 'CSV',
+    });
     const first = await workerA.claimQueuedExportJob(exportId);
     expect(first).not.toBeNull();
     const renew = setInterval(() => {
@@ -1039,8 +1089,8 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const seq = `bulk.export_retry_${suffix}`;
     const fn = `bulk.export_retry_fn_${suffix}`;
     const trigger = `export_retry_trigger_${suffix}`;
-    await pool.query(`CREATE SEQUENCE ${seq} START 1`);
-    await pool.query(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
+    await adminPool.query(`CREATE SEQUENCE ${seq} START 1`);
+    await adminPool.query(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, bulk AS $$
       BEGIN
         IF OLD.status = 'QUEUED' AND NEW.status = 'PROCESSING' AND nextval('${seq}') = 1 THEN
           RAISE EXCEPTION 'injected transient failure';
@@ -1048,7 +1098,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
         RETURN NEW;
       END
     $$`);
-    await pool.query(
+    await adminPool.query(
       `CREATE TRIGGER ${trigger} BEFORE UPDATE ON bulk.export_jobs FOR EACH ROW EXECUTE FUNCTION ${fn}()`,
     );
     const service = new BulkExportService(repository);
@@ -1056,7 +1106,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       const before = await pool.query(
         "SELECT count(*)::int AS count FROM bulk.file_manifests WHERE role = 'RESULTADO_EXPORTACION'",
       );
-      const accepted = await service.create('CSV');
+      const accepted = await service.create('CSV', TEST_OWNER_SUB);
       const terminal = await waitForExport(
         accepted.export_id,
         'FAILED_GENERAL',
@@ -1069,20 +1119,23 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       expect(after.rows[0]?.count).toBe(before.rows[0]?.count);
     } finally {
       service.onModuleDestroy();
-      await pool.query(`DROP TRIGGER IF EXISTS ${trigger} ON bulk.export_jobs`);
-      await pool.query(`DROP FUNCTION IF EXISTS ${fn}()`);
-      await pool.query(`DROP SEQUENCE IF EXISTS ${seq}`);
+      await adminPool.query(
+        `DROP TRIGGER IF EXISTS ${trigger} ON bulk.export_jobs`,
+      );
+      await adminPool.query(`DROP FUNCTION IF EXISTS ${fn}()`);
+      await adminPool.query(`DROP SEQUENCE IF EXISTS ${seq}`);
     }
   }, 10_000);
 
   it('recovers a stale PROCESSING export after service restart without publishing an artifact', async () => {
     const job = await repository.createExportJob({
       exportId: randomUUID(),
+      ownerSub: TEST_OWNER_SUB,
       format: 'XLSX',
     });
     await repository.claimQueuedExportJob(job.exportId);
     try {
-      await pool.query(
+      await adminPool.query(
         'ALTER TABLE bulk.export_jobs DISABLE TRIGGER trg_export_jobs_updated_at',
       );
       await pool.query(
@@ -1090,7 +1143,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
         [job.exportId],
       );
     } finally {
-      await pool.query(
+      await adminPool.query(
         'ALTER TABLE bulk.export_jobs ENABLE TRIGGER trg_export_jobs_updated_at',
       );
     }
@@ -1499,7 +1552,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       steps: [{ domain: 'CATALOGO', status: 'COMPLETED' }],
     });
     await expect(
-      repository.requeueBatch(created.batch.batchId),
+      repository.requeueBatch(created.batch.batchId, TEST_OWNER_SUB),
     ).rejects.toMatchObject({ code: 'NOT_CONFIGURED' });
     expect(
       await repository.findBatchByBatchId(created.batch.batchId),
@@ -1527,7 +1580,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       ]),
     );
     await expect(
-      repository.requeueBatch(created.batch.batchId),
+      repository.requeueBatch(created.batch.batchId, TEST_OWNER_SUB),
     ).rejects.toMatchObject({ code: 'NOT_CONFIGURED' });
   });
 
@@ -1542,6 +1595,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     };
     const input = {
       batchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId,
       templateVersion: 2,
       inputFile: {
@@ -1579,6 +1633,94 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     ).toHaveLength(1);
   });
 
+  it('looks up an import by the validated actor and canonical correlation only', async () => {
+    const correlationId = randomUUID();
+    const rowId = randomUUID();
+    const first = await repository.createImportBatch({
+      batchId: randomUUID(),
+      ownerSub: TEST_OWNER_SUB,
+      correlationId,
+      templateVersion: 2,
+      inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
+      rows: [{ rowId, requiredDomains: ['CATALOGO'] }],
+    });
+    expect(
+      await repository.findBatchByOwnerAndCorrelation(
+        TEST_OWNER_SUB,
+        correlationId,
+      ),
+    ).toMatchObject({
+      batchId: first.batch.batchId,
+      correlationId,
+      status: 'QUEUED',
+    });
+    expect(
+      await repository.findBatchByOwnerAndCorrelation(
+        randomUUID(),
+        correlationId,
+      ),
+    ).toBeNull();
+    expect(
+      await repository.findBatchByOwnerAndCorrelation(
+        TEST_OWNER_SUB,
+        randomUUID(),
+      ),
+    ).toBeNull();
+  });
+
+  it('serializes concurrent replay and permits separate intentions over identical bytes', async () => {
+    const ownerSub = TEST_OWNER_SUB;
+    const correlationId = randomUUID();
+    const batchId = randomUUID();
+    const rowId = randomUUID();
+    const sharedInput = {
+      batchId,
+      ownerSub,
+      correlationId,
+      templateVersion: 2,
+      inputFile: { format: 'CSV' as const, contentRef: 'test://same-bytes' },
+      rows: [{ rowId, requiredDomains: ['CATALOGO' as const] }],
+      admissionIntent: { format: 'CSV', templateVersion: 2, sha256: 'same' },
+    };
+    const [first, replay] = await Promise.all([
+      repository.createImportBatch(sharedInput),
+      repository.createImportBatch(sharedInput),
+    ]);
+    expect(first.batch.id).toBe(replay.batch.id);
+    expect(first.manifest.id).toBe(replay.manifest.id);
+    expect(
+      await database
+        .select()
+        .from(batchJobs)
+        .where(eq(batchJobs.batchId, batchId)),
+    ).toHaveLength(1);
+
+    const separate = await repository.createImportBatch({
+      ...sharedInput,
+      batchId: randomUUID(),
+      correlationId: randomUUID(),
+      rows: [{ rowId: randomUUID(), requiredDomains: ['CATALOGO'] }],
+    });
+    expect(separate.batch.batchId).not.toBe(first.batch.batchId);
+    expect(separate.manifest.contentRef).toBe(first.manifest.contentRef);
+
+    const otherOwnerSub = randomUUID();
+    const otherActor = await repository.createImportBatch({
+      ...sharedInput,
+      batchId: randomUUID(),
+      ownerSub: otherOwnerSub,
+      inputFile: { format: 'CSV', contentRef: 'test://same-bytes' },
+      rows: [{ rowId: randomUUID(), requiredDomains: ['CATALOGO'] }],
+    });
+    expect(otherActor.batch.batchId).not.toBe(first.batch.batchId);
+    expect(
+      await repository.findBatchByOwnerAndCorrelation(
+        otherOwnerSub,
+        correlationId,
+      ),
+    ).toMatchObject({ batchId: otherActor.batch.batchId });
+  });
+
   it('waits for each SKU and stock adjustment and deduplicates equivalent operation results durably', async () => {
     const rowId = randomUUID();
     const batchId = randomUUID();
@@ -1598,6 +1740,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     };
     const created = await repository.createImportBatch({
       batchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId,
       templateVersion: 2,
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -1693,6 +1836,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const correlationId = randomUUID();
     await repository.createImportBatch({
       batchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId,
       templateVersion: 2,
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -1754,6 +1898,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const operationId = randomUUID();
     await repository.createImportBatch({
       batchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId,
       templateVersion: 2,
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -1800,7 +1945,9 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       errorDetail: 'retryable',
     };
     await repository.recordDomainResult(rejected);
-    await expect(repository.requeueBatch(batchId)).rejects.toMatchObject({
+    await expect(
+      repository.requeueBatch(batchId, TEST_OWNER_SUB),
+    ).rejects.toMatchObject({
       code: 'NOT_CONFIGURED',
     });
     expect(await repository.recordDomainResult(rejected)).toMatchObject({
@@ -1837,12 +1984,286 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     });
   });
 
+  it('calculates Catalog V3 eligibility from normalized admitted rows and a real attempt receipt', async () => {
+    const previousBucket = process.env.BULK_STORAGE_BUCKET;
+    const previousRetryFlag = process.env.BULK_RETRY_CATALOG_V1_ENABLED;
+    process.env.BULK_STORAGE_BUCKET = 'bulk-retry-test';
+    process.env.BULK_RETRY_CATALOG_V1_ENABLED = 'true';
+    const batchId = randomUUID();
+    const correlationId = randomUUID();
+    const operationId = randomUUID();
+    const messageId = randomUUID();
+    const receiptMessageId = randomUUID();
+    const retryCorrelationId = randomUUID();
+    expect(retryCorrelationId).not.toBe(correlationId);
+    const initialAttemptId = randomUUID();
+    const rowId = randomUUID();
+    const contentRef = `supabase://bulk-retry-test/imports/${batchId}.json`;
+    const command = {
+      message_id: messageId,
+      schema_version: 3,
+      occurred_at: new Date().toISOString(),
+      correlation_id: correlationId,
+      causation_id: null,
+      operation_id: operationId,
+      producer: 'bulk-svc',
+      kind: 'command',
+      name: 'catalog.bulk.upsert.requested',
+      data: {
+        batch_id: batchId,
+        batch_operation_id: operationId,
+        template_version: 2,
+        mode: 'ALTA',
+        content_ref: {
+          content_id: randomUUID(),
+          sha256: 'a'.repeat(64),
+          byte_length: 128,
+          content_type: 'application/json',
+        },
+      },
+    };
+    try {
+      const created = await repository.createImportBatch({
+        batchId,
+        ownerSub: TEST_OWNER_SUB,
+        correlationId,
+        templateVersion: 2,
+        inputFile: { format: 'CSV', contentRef },
+        rows: [{ rowId, requiredDomains: ['CATALOGO'] }],
+        catalogCommands: [
+          {
+            messageId,
+            eventName: command.name,
+            kind: 'command',
+            schemaVersion: 3,
+            correlationId,
+            operationId,
+            occurredAt: new Date(command.occurred_at),
+            payload: command,
+          },
+        ],
+        admissionIntent: {
+          format: 'CSV',
+          templateVersion: 2,
+          contentRef,
+          rows: [
+            {
+              rowNumber: 2,
+              rowId,
+              rowOperationId: rowId,
+              skuBase: 'SKU-RETRY',
+            },
+          ],
+          catalogCommands: [command],
+        },
+      });
+      await database
+        .update(batchJobs)
+        .set({
+          status: 'COMPLETED',
+          failedRows: 1,
+          completedRows: 0,
+          needsReconciliation: true,
+        })
+        .where(eq(batchJobs.id, created.batch.id));
+      await database
+        .update(batchRows)
+        .set({
+          status: 'FAILED',
+          failedDomain: 'CATALOGO',
+          errorCode: 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE',
+        })
+        .where(eq(batchRows.id, created.rows[0]!.row.id));
+      await database
+        .update(rowDomainSteps)
+        .set({
+          status: 'FAILED',
+          errorCode: 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE',
+        })
+        .where(eq(rowDomainSteps.batchRowId, created.rows[0]!.row.id));
+      await database.insert(domainAttempts).values({
+        attemptId: initialAttemptId,
+        batchRowId: created.rows[0]!.row.id,
+        domain: 'CATALOGO',
+        businessOperationId: operationId,
+        attemptNumber: 1,
+        status: 'REJECTED',
+        effectState: 'NONE',
+        retriable: true,
+        receiptMessageId,
+      });
+
+      await expect(
+        repository.getRetryEligibility(batchId, TEST_OWNER_SUB),
+      ).resolves.toEqual({
+        protocolo: 'BULK_RETRY_V1',
+        elegible: true,
+        pasos: [{ row_id: rowId, dominio: 'CATALOGO' }],
+        motivo_bloqueo: null,
+      });
+      const [first, replay] = await Promise.all([
+        repository.requeueBatch(
+          batchId,
+          TEST_OWNER_SUB,
+          retryCorrelationId,
+          'reintento autorizado',
+        ),
+        repository.requeueBatch(
+          batchId,
+          TEST_OWNER_SUB,
+          retryCorrelationId,
+          'reintento autorizado',
+        ),
+      ]);
+      expect(replay).toEqual(first);
+      expect(first).toEqual({
+        batch_id: batchId,
+        status: 'QUEUED',
+        template_version: 2,
+        correlation_id: correlationId,
+      });
+      const [queuedBatch] = await database
+        .select()
+        .from(batchJobs)
+        .where(eq(batchJobs.batchId, batchId));
+      expect(queuedBatch).toMatchObject({
+        status: 'QUEUED',
+        completedRows: 0,
+        failedRows: 0,
+        needsReconciliation: false,
+      });
+      expect(await repository.listBatchRows(batchId)).toMatchObject([
+        { status: 'PENDING', appliedDomains: [] },
+      ]);
+      await expect(
+        repository.requeueBatch(
+          batchId,
+          TEST_OWNER_SUB,
+          retryCorrelationId,
+          'motivo distinto',
+        ),
+      ).rejects.toMatchObject({ code: 'UNIQUE_CONFLICT' });
+      const retryOutbox = await database
+        .select()
+        .from(outbox)
+        .where(eq(outbox.schemaVersion, 4));
+      expect(retryOutbox).toHaveLength(1);
+      expect(retryOutbox[0]?.causationId).toBe(messageId);
+      expect(retryOutbox[0]?.operationId).toBe(operationId);
+      const retryAttempt = await database
+        .select()
+        .from(domainAttempts)
+        .where(eq(domainAttempts.previousAttemptId, initialAttemptId));
+      expect(retryAttempt).toHaveLength(1);
+      expect(retryAttempt[0]).toMatchObject({
+        attemptNumber: 2,
+        status: 'PENDING',
+        previousAttemptId: initialAttemptId,
+      });
+      const [retryCommand] = await database
+        .select()
+        .from(retryCommands)
+        .where(
+          eq(
+            retryCommands.commandAttemptId,
+            retryAttempt[0]!.commandAttemptId!,
+          ),
+        );
+      const resultMessageId = randomUUID();
+      await repository.recordCatalogBulkResult({
+        messageId: resultMessageId,
+        operationId,
+        causationId: retryCommand!.messageId,
+        eventName: 'catalog.bulk.upsert.completed',
+        correlationId,
+        payload: {
+          message_id: resultMessageId,
+          schema_version: 2,
+          occurred_at: new Date().toISOString(),
+          correlation_id: correlationId,
+          causation_id: retryCommand!.messageId,
+          operation_id: operationId,
+          producer: 'catalog-svc',
+          kind: 'result',
+          name: 'catalog.bulk.upsert.completed',
+          data: {
+            batch_id: batchId,
+            batch_operation_id: operationId,
+            command_attempt_id: retryCommand!.commandAttemptId,
+            results: [
+              {
+                row_number: 2,
+                row_operation_id: rowId,
+                product_id: randomUUID(),
+                sku_base: 'SKU-RETRY',
+                status: 'COMPLETED',
+                code: null,
+                attempt_id: retryAttempt[0]!.attemptId,
+                attempt_number: 2,
+                effect_state: 'APPLIED',
+                retriable: false,
+              },
+            ],
+          },
+        },
+      });
+      const [resumed] = await database
+        .select()
+        .from(batchJobs)
+        .where(eq(batchJobs.batchId, batchId));
+      expect(resumed?.status).toBe('COMPLETED');
+      const contradictoryMessageId = randomUUID();
+      await expect(
+        repository.recordCatalogBulkResult({
+          messageId: contradictoryMessageId,
+          operationId,
+          causationId: retryCommand!.messageId,
+          eventName: 'catalog.bulk.upsert.rejected',
+          correlationId,
+          payload: {
+            message_id: contradictoryMessageId,
+            schema_version: 2,
+            occurred_at: new Date().toISOString(),
+            correlation_id: correlationId,
+            causation_id: retryCommand!.messageId,
+            operation_id: operationId,
+            producer: 'catalog-svc',
+            kind: 'result',
+            name: 'catalog.bulk.upsert.rejected',
+            data: {
+              batch_id: batchId,
+              batch_operation_id: operationId,
+              command_attempt_id: retryCommand!.commandAttemptId,
+              code: 'UNEXPECTED_REJECTION',
+              detail: 'Contradice el recibo V2 ya aplicado.',
+            },
+          },
+        }),
+      ).rejects.toMatchObject({ code: 'INVALID_TRANSITION' });
+      const [preservedAttempt] = await database
+        .select()
+        .from(domainAttempts)
+        .where(eq(domainAttempts.attemptId, retryAttempt[0]!.attemptId));
+      expect(preservedAttempt).toMatchObject({
+        status: 'COMPLETED',
+        effectState: 'APPLIED',
+      });
+    } finally {
+      if (previousBucket === undefined) delete process.env.BULK_STORAGE_BUCKET;
+      else process.env.BULK_STORAGE_BUCKET = previousBucket;
+      if (previousRetryFlag === undefined)
+        delete process.env.BULK_RETRY_CATALOG_V1_ENABLED;
+      else process.env.BULK_RETRY_CATALOG_V1_ENABLED = previousRetryFlag;
+    }
+  });
+
   it('keeps a pricing failure open until already-started Inventory work reports its result', async () => {
     const rowId = randomUUID();
     const batchId = randomUUID();
     const correlationId = randomUUID();
     await repository.createImportBatch({
       batchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId,
       templateVersion: 2,
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -1929,6 +2350,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const rejectedRow = randomUUID();
     await repository.createImportBatch({
       batchId,
+      ownerSub: TEST_OWNER_SUB,
       correlationId,
       templateVersion: 2,
       inputFile: { format: 'CSV', contentRef: `test://${randomUUID()}` },
@@ -2076,7 +2498,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       needsReconciliation: true,
     });
     await expect(
-      repository.requeueBatch(created.batch.batchId),
+      repository.requeueBatch(created.batch.batchId, TEST_OWNER_SUB),
     ).rejects.toMatchObject({ code: 'NOT_CONFIGURED' });
     expect(
       (await repository.listBatchRows(created.batch.batchId))[0],

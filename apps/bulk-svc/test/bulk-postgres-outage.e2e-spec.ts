@@ -40,6 +40,7 @@ const encodeJwtPart = (value: object) =>
 const testJwtHeader = encodeJwtPart({ alg: 'RS256', typ: 'JWT' });
 const testJwtClaims = encodeJwtPart({
   iss: testIssuer,
+  aud: 'api-productos',
   sub: '00000000-0000-4000-8000-000000000001',
   tipo: 'acceso',
   iat: Math.floor(Date.now() / 1000),
@@ -295,6 +296,22 @@ describe('Bulk recovery after a real PostgreSQL outage (disposable Docker only)'
       resolve('apps/bulk-svc/migrations/0002_export_source_snapshot.sql'),
       'utf8',
     );
+    const exportLeaseMigration = readFileSync(
+      resolve('apps/bulk-svc/migrations/0003_export_claim_lease.sql'),
+      'utf8',
+    );
+    const actorOwnershipMigration = readFileSync(
+      resolve('apps/bulk-svc/migrations/0005_actor_ownership.sql'),
+      'utf8',
+    );
+    const ownerCorrelationMigration = readFileSync(
+      resolve('apps/bulk-svc/migrations/0006_owner_correlation_identity.sql'),
+      'utf8',
+    );
+    const retryMigration = readFileSync(
+      resolve('apps/bulk-svc/migrations/0007_bulk_retry_v1.sql'),
+      'utf8',
+    );
     docker(
       [
         'exec',
@@ -314,6 +331,10 @@ CREATE SCHEMA bulk AUTHORIZATION po_bulk_owner;
 SET ROLE po_bulk_owner;
 ${migration}
 ${exportSnapshotMigration}
+${exportLeaseMigration}
+${actorOwnershipMigration}
+${ownerCorrelationMigration}
+${retryMigration}
 GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA bulk TO bulk_fixture_app;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
@@ -632,8 +653,8 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
     const refusedResume = await authorizedPost(
       server,
       `/api/v1/carga-masiva/productos/importaciones/${csvBatchId}/reanudar`,
-    ).expect(503);
-    expect(refusedResume.body.code).toBe('SERVICIO_NO_DISPONIBLE');
+    ).expect(409);
+    expect(refusedResume.body.code).toBe('RETRY_PROTOCOL_NOT_APPROVED');
     expect(refusedResume.body.status).not.toBe('QUEUED');
     await authorizedGet(
       server,
@@ -650,8 +671,8 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
     const invalidTransition = await authorizedPost(
       server,
       `/api/v1/carga-masiva/productos/importaciones/${csvBatchId}/reanudar`,
-    ).expect(503);
-    expect(invalidTransition.body.code).toBe('SERVICIO_NO_DISPONIBLE');
+    ).expect(409);
+    expect(invalidTransition.body.code).toBe('RETRY_PROTOCOL_NOT_APPROVED');
     const missingBatch = await authorizedGet(
       server,
       `/api/v1/carga-masiva/productos/importaciones/${randomUUID()}`,

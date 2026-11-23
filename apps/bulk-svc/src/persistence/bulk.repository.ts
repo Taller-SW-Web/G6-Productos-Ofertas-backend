@@ -1,14 +1,17 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import {
   batchJobs,
+  batchResumeRequests,
   batchRows,
+  domainAttempts,
   exportJobs,
   fileManifests,
   inbox,
   outbox,
   rowDomainSteps,
+  retryCommands,
 } from './bulk.schema.js';
 import { BULK_DATABASE, type BulkDatabase } from './bulk.database.js';
 import {
@@ -38,6 +41,7 @@ export interface ImportRowInput {
 }
 export interface CreateImportBatchInput {
   batchId: string;
+  ownerSub: string;
   templateVersion: number;
   correlationId: string;
   inputFile: Omit<FileManifestInput, 'role'>;
@@ -71,6 +75,7 @@ export interface UpdateWorkflowStateInput {
 }
 export interface CreateExportJobInput {
   exportId: string;
+  ownerSub: string;
   format: BulkFileFormat;
 }
 export interface ExportSnapshotMetadata {
@@ -209,6 +214,8 @@ export class BulkPersistenceRepository {
           .for('update')
           .limit(1);
         if (existingBatch) {
+          if (existingBatch.ownerSub !== input.ownerSub)
+            throw new BulkPersistenceError('FOREIGN_KEY_VIOLATION');
           const [intentReceipt] = await tx
             .select()
             .from(inbox)
@@ -295,6 +302,7 @@ export class BulkPersistenceRepository {
           .insert(batchJobs)
           .values({
             batchId: input.batchId,
+            ownerSub: input.ownerSub,
             inputFileId: manifest.id,
             status: 'QUEUED',
             templateVersion: input.templateVersion,
@@ -846,11 +854,13 @@ export class BulkPersistenceRepository {
   async recordCatalogBulkResult(
     input: CatalogBulkResultInput,
   ): Promise<{ processed: boolean; result: string }> {
+    if (input.payload.schema_version === 2)
+      return this.recordCatalogBulkResultV2(input);
     const messageHandler = 'bulk.catalog.bulk-upsert.result';
     try {
       return await this.db.transaction(async (tx) => {
         const envelope = input.payload;
-        const data = envelope.data as Record<string, unknown> | undefined;
+        const data = envelope.data as Record<string, unknown>;
         if (
           !data ||
           envelope.message_id !== input.messageId ||
@@ -1248,6 +1258,712 @@ export class BulkPersistenceRepository {
     }
   }
 
+  private async recordCatalogBulkResultV2(
+    input: CatalogBulkResultInput,
+  ): Promise<{ processed: boolean; result: string }> {
+    const messageHandler = 'bulk.catalog.bulk-upsert.result';
+    try {
+      return await this.db.transaction(async (tx) => {
+        const envelope = input.payload;
+        const data = envelope.data as Record<string, unknown>;
+        if (
+          !data ||
+          envelope.message_id !== input.messageId ||
+          envelope.operation_id !== input.operationId ||
+          envelope.causation_id !== input.causationId ||
+          envelope.correlation_id !== input.correlationId ||
+          envelope.name !== input.eventName ||
+          envelope.producer !== 'catalog-svc' ||
+          envelope.kind !== 'result' ||
+          envelope.schema_version !== 2 ||
+          (input.eventName === 'catalog.bulk.upsert.completed' &&
+            (!Array.isArray(data.results) || data.results.length === 0)) ||
+          (input.eventName === 'catalog.bulk.upsert.rejected' &&
+            (typeof data.code !== 'string' ||
+              typeof data.detail !== 'string' ||
+              Array.isArray(data.results))) ||
+          ![
+            'catalog.bulk.upsert.completed',
+            'catalog.bulk.upsert.rejected',
+          ].includes(input.eventName)
+        )
+          domainFailure(
+            'INVALID_INPUT',
+            'Catalog V2 result envelope is incomplete.',
+          );
+        const commandAttemptId = data.command_attempt_id;
+        if (commandAttemptId !== null && typeof commandAttemptId !== 'string')
+          domainFailure(
+            'INVALID_INPUT',
+            'Catalog V2 command_attempt_id is invalid.',
+          );
+        const [batch] = await tx
+          .select()
+          .from(batchJobs)
+          .where(eq(batchJobs.batchId, String(data.batch_id)))
+          .for('update')
+          .limit(1);
+        if (!batch)
+          domainFailure('INVALID_INPUT', 'Catalog result batch is unknown.');
+        const [admission] = await tx
+          .select()
+          .from(inbox)
+          .where(
+            and(
+              eq(inbox.messageId, batch.batchId),
+              eq(inbox.handler, 'bulk.import.admission'),
+            ),
+          )
+          .limit(1);
+        if (!admission)
+          domainFailure(
+            'PERSISTENCE_FAILURE',
+            'Admitted batch intent is missing.',
+          );
+        const admissionRows = Array.isArray(admission.payload.rows)
+          ? admission.payload.rows
+          : [];
+        const normalized = new Map<string, Record<string, unknown>>();
+        for (const value of admissionRows) {
+          if (typeof value !== 'object' || value === null) continue;
+          const row = value as Record<string, unknown>;
+          const rowOperationId = row.rowOperationId;
+          if (
+            typeof rowOperationId !== 'string' ||
+            row.rowId !== rowOperationId ||
+            normalized.has(rowOperationId)
+          )
+            domainFailure(
+              'INVALID_INPUT',
+              'Normalized admitted row identities are inconsistent.',
+            );
+          normalized.set(String(rowOperationId), row);
+        }
+        let commandData: Record<string, unknown> | undefined;
+        let retryRows: Array<Record<string, unknown>> = [];
+        let retryFamilyKey: string | null = null;
+        if (typeof commandAttemptId === 'string') {
+          const [retry] = await tx
+            .select()
+            .from(retryCommands)
+            .where(eq(retryCommands.commandAttemptId, commandAttemptId))
+            .for('update')
+            .limit(1);
+          const [command] = await tx
+            .select()
+            .from(outbox)
+            .where(
+              and(
+                eq(outbox.messageId, input.causationId),
+                eq(outbox.schemaVersion, 4),
+              ),
+            )
+            .for('update')
+            .limit(1);
+          commandData = command?.payload.data as
+            Record<string, unknown> | undefined;
+          const retryData = commandData?.retry as
+            Record<string, unknown> | undefined;
+          retryFamilyKey = retry?.familyKey ?? null;
+          retryRows = Array.isArray(retryData?.rows)
+            ? retryData.rows.filter(
+                (row): row is Record<string, unknown> =>
+                  typeof row === 'object' && row !== null,
+              )
+            : [];
+          if (
+            !retry ||
+            !command ||
+            retry.messageId !== input.causationId ||
+            retry.businessOperationId !== input.operationId ||
+            retry.batchJobId !== batch.id ||
+            command.operationId !== input.operationId ||
+            command.correlationId !== input.correlationId ||
+            commandData?.batch_id !== batch.batchId ||
+            commandData?.batch_operation_id !== input.operationId ||
+            retryData?.attempt_number !== retry?.attemptNumber ||
+            retryData?.command_attempt_id !== commandAttemptId ||
+            retryData?.previous_command_message_id !== command.causationId ||
+            createHash('sha256')
+              .update(canonicalJson(command.payload))
+              .digest('hex') !== retry.payloadHash ||
+            data.batch_operation_id !== input.operationId
+          )
+            domainFailure(
+              'INVALID_INPUT',
+              'Catalog V2 retry causation does not match its Outbox command.',
+            );
+        } else {
+          const commands = Array.isArray(admission.payload.catalogCommands)
+            ? admission.payload.catalogCommands
+            : [];
+          const originals = commands.filter(
+            (value) =>
+              typeof value === 'object' &&
+              value !== null &&
+              Reflect.get(value, 'schema_version') === 3 &&
+              Reflect.get(value, 'message_id') === input.causationId &&
+              Reflect.get(value, 'operation_id') === input.operationId,
+          );
+          const original = originals[0] as Record<string, unknown> | undefined;
+          commandData = original?.data as Record<string, unknown> | undefined;
+          if (
+            originals.length !== 1 ||
+            !commandData ||
+            commandData.batch_id !== batch.batchId ||
+            commandData.batch_operation_id !== input.operationId ||
+            envelope.correlation_id !== batch.correlationId ||
+            data.batch_operation_id !== input.operationId ||
+            commands.filter(
+              (value) =>
+                typeof value === 'object' &&
+                value !== null &&
+                Reflect.get(value, 'schema_version') === 3,
+            ).length !== 1
+          )
+            domainFailure(
+              'INVALID_INPUT',
+              'Catalog initial V2 result has no unique admitted V3 command.',
+            );
+        }
+        const [previousMessage] = await tx
+          .select()
+          .from(inbox)
+          .where(
+            and(
+              eq(inbox.messageId, input.messageId),
+              eq(inbox.handler, messageHandler),
+            ),
+          )
+          .limit(1);
+        if (previousMessage) {
+          if (
+            canonicalJson(previousMessage.payload) !==
+            canonicalJson(input.payload)
+          )
+            domainFailure(
+              'IDEMPOTENCY_CONFLICT',
+              'Catalog V2 message_id was reused with a different payload.',
+            );
+          return { processed: false, result: previousMessage.result };
+        }
+        if (input.eventName === 'catalog.bulk.upsert.rejected') {
+          const operationIds =
+            typeof commandAttemptId === 'string'
+              ? retryRows.map((row) => String(row.row_operation_id))
+              : [...normalized.keys()];
+          if (typeof commandAttemptId === 'string') {
+            const familyOperations = [...normalized.entries()]
+              .filter(([, row]) => row.skuBase === retryFamilyKey)
+              .map(([operationId]) => operationId)
+              .sort();
+            if (
+              familyOperations.length !== operationIds.length ||
+              familyOperations.join('|') !== [...operationIds].sort().join('|')
+            )
+              domainFailure(
+                'INVALID_INPUT',
+                'Rejected retry command does not cover a complete SKU family.',
+              );
+          }
+          for (const operationId of operationIds) {
+            const source = normalized.get(operationId);
+            if (!source)
+              domainFailure(
+                'INVALID_INPUT',
+                'Rejected Catalog command references an unknown row.',
+              );
+            const [row] = await tx
+              .select()
+              .from(batchRows)
+              .where(
+                and(
+                  eq(batchRows.batchJobId, batch.id),
+                  eq(batchRows.rowId, String(source!.rowId)),
+                ),
+              )
+              .for('update')
+              .limit(1);
+            if (!row)
+              domainFailure(
+                'INVALID_INPUT',
+                'Rejected Catalog command row is not persisted.',
+              );
+            const [currentAttempt] = await tx
+              .select()
+              .from(domainAttempts)
+              .where(
+                and(
+                  eq(domainAttempts.batchRowId, row.id),
+                  eq(domainAttempts.domain, 'CATALOGO'),
+                ),
+              )
+              .orderBy(desc(domainAttempts.attemptNumber))
+              .for('update')
+              .limit(1);
+            if (typeof commandAttemptId === 'string') {
+              const retryRow = retryRows.find(
+                (candidate) => candidate.row_operation_id === operationId,
+              );
+              if (
+                !retryRow ||
+                currentAttempt?.attemptId !== retryRow.attempt_id ||
+                currentAttempt.commandAttemptId !== commandAttemptId
+              )
+                domainFailure(
+                  'INVALID_INPUT',
+                  'Rejected retry result does not match the current attempt.',
+                );
+              await tx
+                .update(domainAttempts)
+                .set({
+                  status: 'UNKNOWN',
+                  effectState: 'UNKNOWN',
+                  retriable: false,
+                  receiptMessageId: input.messageId,
+                  errorCode: String(data.code),
+                  updatedAt: new Date(),
+                })
+                .where(
+                  eq(domainAttempts.attemptId, String(retryRow!.attempt_id)),
+                );
+            } else if (currentAttempt && currentAttempt.attemptNumber > 1) {
+              continue;
+            }
+            const steps = await tx
+              .select()
+              .from(rowDomainSteps)
+              .where(eq(rowDomainSteps.batchRowId, row.id));
+            const catalogStep = steps.find(
+              (step) => step.domain === 'CATALOGO',
+            );
+            if (!catalogStep || catalogStep.status === 'COMPLETED')
+              domainFailure(
+                'INVALID_TRANSITION',
+                'Rejected Catalog command cannot overwrite a completed step.',
+              );
+            const changes: WorkflowStepChange[] = [
+              {
+                domain: 'CATALOGO',
+                status: 'FAILED',
+                errorCode: String(data.code),
+                errorDetail: String(data.detail),
+              },
+            ];
+            for (const dependency of steps)
+              if (
+                dependency.domain !== 'CATALOGO' &&
+                dependency.status === 'PENDING'
+              )
+                changes.push({
+                  domain: dependency.domain as BulkDomain,
+                  status: 'FAILED',
+                  errorCode: 'DEPENDENCY_REJECTED',
+                  errorDetail:
+                    'Catalog rechazó el comando; el paso dependiente no se ejecutó.',
+                });
+            const changedStatuses = new Map(
+              changes.map((change) => [change.domain, change.status]),
+            );
+            const allTerminal = row.requiredDomains.every((domain) =>
+              ['COMPLETED', 'FAILED'].includes(
+                String(
+                  changedStatuses.get(domain as BulkDomain) ??
+                    steps.find((step) => step.domain === domain)?.status,
+                ),
+              ),
+            );
+            const allCompleted = row.requiredDomains.every(
+              (domain) =>
+                (changedStatuses.get(domain as BulkDomain) ??
+                  steps.find((step) => step.domain === domain)?.status) ===
+                'COMPLETED',
+            );
+            const rowStatus: BulkRowStatus = !allTerminal
+              ? 'PROCESSING'
+              : allCompleted
+                ? 'COMPLETED'
+                : 'FAILED';
+            await updateWorkflowStateIn(tx, {
+              batchId: batch.batchId,
+              rowId: row.rowId,
+              steps: changes,
+              status: rowStatus,
+              failedDomain: rowStatus === 'FAILED' ? 'CATALOGO' : null,
+              errorCode: rowStatus === 'FAILED' ? String(data.code) : null,
+              errorDetail: rowStatus === 'FAILED' ? String(data.detail) : null,
+            });
+          }
+          await tx.insert(inbox).values({
+            messageId: input.messageId,
+            handler: messageHandler,
+            eventName: input.eventName,
+            correlationId: input.correlationId,
+            payload: input.payload,
+            result: 'COMMAND_REJECTED_UNKNOWN_EFFECT',
+          });
+          await tx
+            .update(outbox)
+            .set({
+              publishedAt: sql`coalesce(${outbox.publishedAt}, now())`,
+              lastError: null,
+            })
+            .where(
+              and(
+                eq(outbox.messageId, input.causationId),
+                eq(outbox.eventName, 'catalog.bulk.upsert.requested'),
+              ),
+            );
+          return { processed: true, result: 'COMMAND_REJECTED_UNKNOWN_EFFECT' };
+        }
+        const resultRows = data.results as Array<Record<string, unknown>>;
+        if (
+          resultRows.some(
+            (result) =>
+              typeof result.row_operation_id !== 'string' ||
+              !normalized.has(result.row_operation_id),
+          )
+        )
+          domainFailure(
+            'INVALID_INPUT',
+            'Catalog V2 result contains a row outside the admitted intent.',
+          );
+        const expectedOperations =
+          typeof commandAttemptId === 'string'
+            ? retryRows.map((row) => row.row_operation_id)
+            : [...normalized.keys()];
+        if (typeof commandAttemptId === 'string') {
+          const familyOperations = [...normalized.entries()]
+            .filter(([, row]) => row.skuBase === retryFamilyKey)
+            .map(([operationId]) => operationId)
+            .sort();
+          if (
+            familyOperations.length !== expectedOperations.length ||
+            familyOperations.join('|') !==
+              [...expectedOperations].sort().join('|')
+          )
+            domainFailure(
+              'INVALID_INPUT',
+              'Catalog V2 retry command is not a complete SKU family.',
+            );
+        }
+        const actualOperations = resultRows.map((row) => row.row_operation_id);
+        if (
+          new Set(actualOperations).size !== actualOperations.length ||
+          [...expectedOperations].sort().join('|') !==
+            [...actualOperations].sort().join('|')
+        )
+          domainFailure(
+            'INVALID_INPUT',
+            'Catalog V2 result does not cover exactly its command rows.',
+          );
+        const [existingMessage] = await tx
+          .select()
+          .from(inbox)
+          .where(
+            and(
+              eq(inbox.messageId, input.messageId),
+              eq(inbox.handler, messageHandler),
+            ),
+          )
+          .limit(1);
+        if (existingMessage)
+          return { processed: false, result: existingMessage.result };
+        for (const result of resultRows) {
+          const operationId = String(result.row_operation_id);
+          const source = normalized.get(operationId)!;
+          if (
+            Number(source.rowNumber) !== result.row_number ||
+            source.skuBase !== result.sku_base ||
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+              String(result.attempt_id),
+            ) ||
+            !Number.isSafeInteger(result.attempt_number) ||
+            !['COMPLETED', 'REJECTED'].includes(String(result.status)) ||
+            !['NONE', 'APPLIED', 'UNKNOWN'].includes(
+              String(result.effect_state),
+            ) ||
+            typeof result.retriable !== 'boolean' ||
+            (result.status === 'COMPLETED' &&
+              (result.effect_state !== 'APPLIED' ||
+                result.retriable ||
+                result.code !== null)) ||
+            (result.status === 'REJECTED' &&
+              (result.effect_state === 'APPLIED' ||
+                typeof result.code !== 'string' ||
+                (result.retriable &&
+                  (result.effect_state !== 'NONE' ||
+                    result.code !== 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE'))))
+          )
+            domainFailure(
+              'INVALID_INPUT',
+              'Catalog V2 attempt receipt is inconsistent.',
+            );
+          const [row] = await tx
+            .select()
+            .from(batchRows)
+            .where(
+              and(
+                eq(batchRows.batchJobId, batch.id),
+                eq(batchRows.rowId, String(source.rowId)),
+              ),
+            )
+            .for('update')
+            .limit(1);
+          if (!row)
+            domainFailure(
+              'INVALID_INPUT',
+              'Catalog V2 result row is not persisted.',
+            );
+          const [currentAttempt] = await tx
+            .select()
+            .from(domainAttempts)
+            .where(
+              and(
+                eq(domainAttempts.batchRowId, row.id),
+                eq(domainAttempts.domain, 'CATALOGO'),
+              ),
+            )
+            .orderBy(desc(domainAttempts.attemptNumber))
+            .for('update')
+            .limit(1);
+          const attemptNumber = Number(result.attempt_number);
+          let previousAttemptId: string | null = null;
+          if (typeof commandAttemptId === 'string') {
+            const matchingRetryRow = retryRows.find(
+              (candidate) => candidate.row_operation_id === operationId,
+            );
+            if (!matchingRetryRow)
+              domainFailure('INVALID_INPUT', 'Catalog V2 retry row is absent.');
+            if (
+              matchingRetryRow!.attempt_id !== result.attempt_id ||
+              !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+                String(matchingRetryRow!.previous_attempt_id),
+              )
+            )
+              domainFailure(
+                'INVALID_INPUT',
+                'Catalog V2 attempt identity does not match the retry command.',
+              );
+            previousAttemptId = String(matchingRetryRow!.previous_attempt_id);
+            if (
+              currentAttempt &&
+              currentAttempt.attemptNumber > attemptNumber
+            ) {
+              const [oldAttempt] = await tx
+                .select()
+                .from(domainAttempts)
+                .where(eq(domainAttempts.attemptId, String(result.attempt_id)))
+                .limit(1);
+              if (!oldAttempt)
+                domainFailure(
+                  'INVALID_INPUT',
+                  'A tardy Catalog result has no durable attempt.',
+                );
+              await tx.insert(inbox).values({
+                messageId: input.messageId,
+                handler: `bulk.catalog-result-attempt:${result.attempt_id}`,
+                eventName: input.eventName,
+                correlationId: input.correlationId,
+                payload: { stale: true, result },
+                result: 'STALE',
+              });
+              continue;
+            }
+            if (
+              !currentAttempt ||
+              currentAttempt.attemptId !== result.attempt_id ||
+              currentAttempt.commandAttemptId !== commandAttemptId ||
+              currentAttempt.previousAttemptId !== previousAttemptId ||
+              attemptNumber !== currentAttempt.attemptNumber
+            )
+              domainFailure(
+                'INVALID_INPUT',
+                'Catalog V2 result does not extend the current attempt chain.',
+              );
+          } else if (
+            currentAttempt &&
+            currentAttempt.attemptNumber > attemptNumber
+          ) {
+            const [oldAttempt] = await tx
+              .select()
+              .from(domainAttempts)
+              .where(eq(domainAttempts.attemptId, String(result.attempt_id)))
+              .limit(1);
+            if (!oldAttempt)
+              domainFailure(
+                'INVALID_INPUT',
+                'A tardy initial Catalog result has no durable attempt.',
+              );
+            await tx.insert(inbox).values({
+              messageId: input.messageId,
+              handler: `bulk.catalog-result-attempt:${result.attempt_id}`,
+              eventName: input.eventName,
+              correlationId: input.correlationId,
+              payload: { stale: true, result },
+              result: 'STALE',
+            });
+            continue;
+          } else if (attemptNumber !== 1 || currentAttempt) {
+            domainFailure(
+              'INVALID_INPUT',
+              'Catalog initial V2 result conflicts with an existing attempt.',
+            );
+          }
+          if (currentAttempt && currentAttempt.attemptNumber > attemptNumber) {
+            await tx.insert(inbox).values({
+              messageId: input.messageId,
+              handler: `bulk.catalog-result-attempt:${result.attempt_id}`,
+              eventName: input.eventName,
+              correlationId: input.correlationId,
+              payload: { stale: true, result },
+              result: 'STALE',
+            });
+            continue;
+          }
+          const attemptValues = {
+            attemptId: String(result.attempt_id),
+            batchRowId: row.id,
+            domain: 'CATALOGO',
+            businessOperationId: String(data.batch_operation_id),
+            attemptNumber,
+            previousAttemptId,
+            commandAttemptId:
+              typeof commandAttemptId === 'string' ? commandAttemptId : null,
+            status: result.status === 'COMPLETED' ? 'COMPLETED' : 'REJECTED',
+            effectState: String(result.effect_state),
+            retriable: result.retriable === true,
+            receiptMessageId: input.messageId,
+            errorCode: typeof result.code === 'string' ? result.code : null,
+            updatedAt: new Date(),
+          } as const;
+          if (typeof commandAttemptId === 'string') {
+            await tx
+              .update(domainAttempts)
+              .set(attemptValues)
+              .where(eq(domainAttempts.attemptId, String(result.attempt_id)));
+          } else {
+            await tx.insert(domainAttempts).values(attemptValues);
+          }
+          const [step] = await tx
+            .select()
+            .from(rowDomainSteps)
+            .where(
+              and(
+                eq(rowDomainSteps.batchRowId, row.id),
+                eq(rowDomainSteps.domain, 'CATALOGO'),
+              ),
+            )
+            .for('update')
+            .limit(1);
+          if (!step || !row.requiredDomains.includes('CATALOGO'))
+            domainFailure(
+              'INVALID_INPUT',
+              'Catalog V2 result has no matching workflow step.',
+            );
+          if (step.status === 'COMPLETED')
+            domainFailure(
+              'INVALID_TRANSITION',
+              'Catalog V2 result cannot revert a completed step.',
+            );
+          const pendingSteps = await tx
+            .select()
+            .from(rowDomainSteps)
+            .where(eq(rowDomainSteps.batchRowId, row.id));
+          const status: BulkStepStatus =
+            result.status === 'COMPLETED' ? 'COMPLETED' : 'FAILED';
+          const changes: WorkflowStepChange[] = [
+            {
+              domain: 'CATALOGO',
+              status,
+              errorCode: status === 'FAILED' ? String(result.code) : null,
+              errorDetail: null,
+            },
+          ];
+          if (status === 'FAILED')
+            for (const dependency of pendingSteps)
+              if (
+                dependency.domain !== 'CATALOGO' &&
+                dependency.status === 'PENDING'
+              )
+                changes.push({
+                  domain: dependency.domain as BulkDomain,
+                  status: 'FAILED',
+                  errorCode: 'DEPENDENCY_REJECTED',
+                  errorDetail:
+                    'Catalog rechazó la fila; el paso dependiente no se ejecutó.',
+                });
+          const statusByDomain = new Map(
+            changes.map((change) => [change.domain, change.status]),
+          );
+          const allTerminal = row.requiredDomains.every((domain) =>
+            ['COMPLETED', 'FAILED'].includes(
+              String(
+                statusByDomain.get(domain as BulkDomain) ??
+                  pendingSteps.find((candidate) => candidate.domain === domain)
+                    ?.status,
+              ),
+            ),
+          );
+          const allCompleted = row.requiredDomains.every(
+            (domain) =>
+              (statusByDomain.get(domain as BulkDomain) ??
+                pendingSteps.find((candidate) => candidate.domain === domain)
+                  ?.status) === 'COMPLETED',
+          );
+          await updateWorkflowStateIn(tx, {
+            batchId: batch.batchId,
+            rowId: row.rowId,
+            steps: changes,
+            status: !allTerminal
+              ? 'PROCESSING'
+              : allCompleted
+                ? 'COMPLETED'
+                : 'FAILED',
+            failedDomain: status === 'FAILED' ? 'CATALOGO' : null,
+            errorCode: status === 'FAILED' ? String(result.code) : null,
+          });
+          await tx.insert(inbox).values({
+            messageId: input.messageId,
+            handler: `bulk.catalog-result-attempt:${result.attempt_id}`,
+            eventName: input.eventName,
+            correlationId: input.correlationId,
+            payload: {
+              batchId: batch.batchId,
+              batchOperationId: data.batch_operation_id,
+              result,
+            },
+            result: String(result.status),
+          });
+        }
+        await tx.insert(inbox).values({
+          messageId: input.messageId,
+          handler: messageHandler,
+          eventName: input.eventName,
+          correlationId: input.correlationId,
+          payload: input.payload,
+          result: 'RESULTS_APPLIED',
+        });
+        await tx
+          .update(outbox)
+          .set({
+            publishedAt: sql`coalesce(${outbox.publishedAt}, now())`,
+            lastError: null,
+          })
+          .where(
+            and(
+              eq(outbox.messageId, input.causationId),
+              eq(outbox.eventName, 'catalog.bulk.upsert.requested'),
+            ),
+          );
+        return { processed: true, result: 'RESULTS_APPLIED' };
+      });
+    } catch (error) {
+      if (error instanceof BulkDomainError) throw error;
+      throw persistenceError(error);
+    }
+  }
+
   async findBatchByBatchId(
     batchId: string,
   ): Promise<typeof batchJobs.$inferSelect | null> {
@@ -1265,8 +1981,17 @@ export class BulkPersistenceRepository {
 
   async findImportAdmissionIntent(
     batchId: string,
+    ownerSub: string,
   ): Promise<Record<string, unknown> | null> {
     try {
+      const [ownedBatch] = await this.db
+        .select({ id: batchJobs.id })
+        .from(batchJobs)
+        .where(
+          and(eq(batchJobs.batchId, batchId), eq(batchJobs.ownerSub, ownerSub)),
+        )
+        .limit(1);
+      if (!ownedBatch) return null;
       const [receipt] = await this.db
         .select({ payload: inbox.payload })
         .from(inbox)
@@ -1278,6 +2003,27 @@ export class BulkPersistenceRepository {
         )
         .limit(1);
       return (receipt?.payload as Record<string, unknown> | undefined) ?? null;
+    } catch (error) {
+      throw persistenceError(error);
+    }
+  }
+
+  async findBatchByOwnerAndCorrelation(
+    ownerSub: string,
+    correlationId: string,
+  ): Promise<typeof batchJobs.$inferSelect | null> {
+    try {
+      const [batch] = await this.db
+        .select()
+        .from(batchJobs)
+        .where(
+          and(
+            eq(batchJobs.ownerSub, ownerSub),
+            eq(batchJobs.correlationId, correlationId),
+          ),
+        )
+        .limit(1);
+      return batch ?? null;
     } catch (error) {
       throw persistenceError(error);
     }
@@ -1321,7 +2067,11 @@ export class BulkPersistenceRepository {
     }
   }
 
-  async loadBatchSnapshot(batchId: string): Promise<{
+  async loadBatchSnapshot(
+    batchId: string,
+    ownerSub: string,
+    executor: BulkDatabase | BulkTx = this.db,
+  ): Promise<{
     batch: typeof batchJobs.$inferSelect;
     rows: Array<{
       row: typeof batchRows.$inferSelect;
@@ -1329,12 +2079,14 @@ export class BulkPersistenceRepository {
     }>;
   } | null> {
     try {
-      const result = await this.db
+      const result = await executor
         .select({ batch: batchJobs, row: batchRows, step: rowDomainSteps })
         .from(batchJobs)
         .leftJoin(batchRows, eq(batchRows.batchJobId, batchJobs.id))
         .leftJoin(rowDomainSteps, eq(rowDomainSteps.batchRowId, batchRows.id))
-        .where(eq(batchJobs.batchId, batchId))
+        .where(
+          and(eq(batchJobs.batchId, batchId), eq(batchJobs.ownerSub, ownerSub)),
+        )
         .orderBy(
           asc(batchRows.createdAt),
           asc(batchRows.id),
@@ -1364,6 +2116,299 @@ export class BulkPersistenceRepository {
     }
   }
 
+  async getRetryEligibility(
+    batchId: string,
+    ownerSub: string,
+  ): Promise<{
+    protocolo: 'BULK_RETRY_V1';
+    elegible: boolean;
+    pasos: Array<{ row_id: string; dominio: 'CATALOGO' }>;
+    motivo_bloqueo:
+      | 'LOTE_NO_TERMINAL'
+      | 'SIN_PASOS_REINTENTABLES'
+      | 'RESULTADO_INCIERTO'
+      | 'PROTOCOLO_DOMINIO_NO_HABILITADO'
+      | null;
+  }> {
+    return this.calculateRetryEligibility(batchId, ownerSub, this.db);
+  }
+
+  private async calculateRetryEligibility(
+    batchId: string,
+    ownerSub: string,
+    executor: BulkDatabase | BulkTx,
+  ): Promise<{
+    protocolo: 'BULK_RETRY_V1';
+    elegible: boolean;
+    pasos: Array<{ row_id: string; dominio: 'CATALOGO' }>;
+    motivo_bloqueo:
+      | 'LOTE_NO_TERMINAL'
+      | 'SIN_PASOS_REINTENTABLES'
+      | 'RESULTADO_INCIERTO'
+      | 'PROTOCOLO_DOMINIO_NO_HABILITADO'
+      | null;
+  }> {
+    const blocked = (
+      motivo_bloqueo:
+        | 'LOTE_NO_TERMINAL'
+        | 'SIN_PASOS_REINTENTABLES'
+        | 'RESULTADO_INCIERTO'
+        | 'PROTOCOLO_DOMINIO_NO_HABILITADO',
+    ) => ({
+      protocolo: 'BULK_RETRY_V1' as const,
+      elegible: false,
+      pasos: [],
+      motivo_bloqueo,
+    });
+    try {
+      const snapshot = await this.loadBatchSnapshot(
+        batchId,
+        ownerSub,
+        executor,
+      );
+      if (!snapshot) throw new BulkPersistenceError('FOREIGN_KEY_VIOLATION');
+      const { batch, rows } = snapshot;
+      if (batch.status !== 'COMPLETED') return blocked('LOTE_NO_TERMINAL');
+      if (process.env.BULK_RETRY_CATALOG_V1_ENABLED !== 'true')
+        return blocked('PROTOCOLO_DOMINIO_NO_HABILITADO');
+      if (rows.length === 0) return blocked('SIN_PASOS_REINTENTABLES');
+      if (
+        rows.some(({ steps }) =>
+          steps.some((step) => !['COMPLETED', 'FAILED'].includes(step.status)),
+        )
+      )
+        return blocked('RESULTADO_INCIERTO');
+
+      const [admission] = await executor
+        .select({ payload: inbox.payload })
+        .from(inbox)
+        .where(
+          and(
+            eq(inbox.messageId, batch.batchId),
+            eq(inbox.handler, 'bulk.import.admission'),
+          ),
+        )
+        .limit(1);
+      const intentRows = Array.isArray(admission?.payload.rows)
+        ? admission.payload.rows.filter(
+            (value): value is Record<string, unknown> =>
+              typeof value === 'object' && value !== null,
+          )
+        : [];
+      const originalCommands = Array.isArray(admission?.payload.catalogCommands)
+        ? admission.payload.catalogCommands.filter(
+            (value): value is Record<string, unknown> =>
+              typeof value === 'object' && value !== null,
+          )
+        : [];
+      const v3Commands = originalCommands.filter((command) => {
+        const data = command.data as Record<string, unknown> | undefined;
+        return (
+          command.schema_version === 3 &&
+          data?.batch_id === batch.batchId &&
+          data.batch_operation_id === command.operation_id &&
+          typeof data.content_ref === 'object' &&
+          data.content_ref !== null
+        );
+      });
+      if (v3Commands.length !== 1)
+        return blocked('PROTOCOLO_DOMINIO_NO_HABILITADO');
+      const v3Command = v3Commands[0]!;
+      const [manifest] = await executor
+        .select({ contentRef: fileManifests.contentRef })
+        .from(fileManifests)
+        .where(eq(fileManifests.id, batch.inputFileId))
+        .limit(1);
+      if (
+        !manifest ||
+        admission?.payload.contentRef !== manifest.contentRef ||
+        !matchesBulkStorageReference(
+          manifest.contentRef,
+          process.env.BULK_STORAGE_BUCKET,
+        )
+      )
+        return blocked('RESULTADO_INCIERTO');
+
+      const operationRows = new Map<string, Record<string, unknown>>();
+      for (const intentRow of intentRows) {
+        if (
+          typeof intentRow.rowOperationId !== 'string' ||
+          typeof intentRow.rowId !== 'string' ||
+          intentRow.rowOperationId !== intentRow.rowId ||
+          operationRows.has(intentRow.rowOperationId)
+        )
+          return blocked('RESULTADO_INCIERTO');
+        operationRows.set(intentRow.rowOperationId, intentRow);
+      }
+      if (operationRows.size !== rows.length)
+        return blocked('RESULTADO_INCIERTO');
+      const grouped = new Map<string, typeof rows>();
+      for (const persisted of rows) {
+        const intentRow = operationRows.get(persisted.row.rowId);
+        if (!intentRow || typeof intentRow.skuBase !== 'string')
+          return blocked('RESULTADO_INCIERTO');
+        grouped.set(intentRow.skuBase, [
+          ...(grouped.get(intentRow.skuBase) ?? []),
+          persisted,
+        ]);
+      }
+
+      const commandData = v3Command.data as Record<string, unknown>;
+      const contentRef = commandData.content_ref as
+        Record<string, unknown> | undefined;
+      if (
+        !contentRef ||
+        typeof contentRef.content_id !== 'string' ||
+        typeof contentRef.sha256 !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(contentRef.sha256) ||
+        !Number.isSafeInteger(contentRef.byte_length) ||
+        Number(contentRef.byte_length) < 1
+      )
+        return blocked('RESULTADO_INCIERTO');
+      const contentDocumentResult = await executor.execute(sql`
+        SELECT content_id::text AS "contentId",
+               batch_id::text AS "batchId",
+               batch_operation_id::text AS "batchOperationId",
+               content_ref AS "contentRef",
+               sha256,
+               byte_length AS "byteLength",
+               content_type AS "contentType"
+        FROM bulk.content_documents
+        WHERE content_id = ${contentRef.content_id}::uuid
+        FOR UPDATE
+      `);
+      const contentDocument = contentDocumentResult.rows[0] as
+        | {
+            contentId: string;
+            batchId: string;
+            batchOperationId: string;
+            contentRef: string;
+            sha256: string;
+            byteLength: number;
+            contentType: string;
+          }
+        | undefined;
+      if (
+        !contentDocument ||
+        contentDocument.batchId !== batch.batchId ||
+        contentDocument.batchOperationId !== v3Command.operation_id
+      )
+        return blocked('RESULTADO_INCIERTO');
+      if (
+        contentDocument.contentId !== contentRef.content_id ||
+        contentDocument.sha256 !== contentRef.sha256 ||
+        contentDocument.byteLength !== contentRef.byte_length ||
+        contentDocument.contentType !== contentRef.content_type ||
+        !matchesBulkStorageReference(
+          contentDocument.contentRef,
+          process.env.BULK_STORAGE_BUCKET,
+        )
+      )
+        return blocked('RESULTADO_INCIERTO');
+      const candidates: Array<{ row_id: string; dominio: 'CATALOGO' }> = [];
+      let uncertainResult = false;
+      for (const family of grouped.values()) {
+        const familySteps: Array<{ row_id: string; dominio: 'CATALOGO' }> = [];
+        let eligible = true;
+        for (const persisted of family) {
+          const { row, steps } = persisted;
+          const catalogStep = steps.find((step) => step.domain === 'CATALOGO');
+          if (
+            !row.requiredDomains.includes('CATALOGO') ||
+            row.appliedDomains.length > 0 ||
+            row.status === 'COMPLETED' ||
+            catalogStep?.status !== 'FAILED'
+          ) {
+            eligible = false;
+            break;
+          }
+          const attempts = await executor
+            .select()
+            .from(domainAttempts)
+            .where(
+              and(
+                eq(domainAttempts.batchRowId, row.id),
+                eq(domainAttempts.domain, 'CATALOGO'),
+              ),
+            )
+            .orderBy(desc(domainAttempts.attemptNumber))
+            .for('update');
+          const current = attempts[0];
+          if (
+            !current ||
+            attempts.length !== current.attemptNumber ||
+            attempts.some(
+              (attempt, index) =>
+                attempt.attemptNumber !== current.attemptNumber - index,
+            ) ||
+            current.businessOperationId !== v3Command.operation_id ||
+            current.status !== 'REJECTED' ||
+            current.effectState !== 'NONE' ||
+            !current.retriable ||
+            !current.receiptMessageId
+          ) {
+            uncertainResult = true;
+            eligible = false;
+            break;
+          }
+          if (
+            (current.attemptNumber === 1 &&
+              (current.previousAttemptId !== null ||
+                current.commandAttemptId !== null)) ||
+            (current.attemptNumber > 1 &&
+              (!current.previousAttemptId || !current.commandAttemptId))
+          ) {
+            uncertainResult = true;
+            eligible = false;
+            break;
+          }
+          if (current.attemptNumber > 1) {
+            const previous = attempts[1];
+            const [command] = await executor
+              .select()
+              .from(retryCommands)
+              .where(
+                eq(retryCommands.commandAttemptId, current.commandAttemptId!),
+              )
+              .for('update')
+              .limit(1);
+            if (
+              !previous ||
+              previous.attemptId !== current.previousAttemptId ||
+              previous.status !== 'REJECTED' ||
+              previous.effectState !== 'NONE' ||
+              !previous.retriable ||
+              !command ||
+              command.batchJobId !== batch.id ||
+              command.domain !== 'CATALOGO' ||
+              command.familyKey !== operationRows.get(row.rowId)?.skuBase ||
+              command.businessOperationId !== v3Command.operation_id
+            ) {
+              uncertainResult = true;
+              eligible = false;
+              break;
+            }
+          }
+          familySteps.push({ row_id: row.rowId, dominio: 'CATALOGO' });
+        }
+        if (eligible && familySteps.length === family.length)
+          candidates.push(...familySteps);
+      }
+      if (candidates.length === 0)
+        return blocked(
+          uncertainResult ? 'RESULTADO_INCIERTO' : 'SIN_PASOS_REINTENTABLES',
+        );
+      return {
+        protocolo: 'BULK_RETRY_V1',
+        elegible: true,
+        pasos: candidates,
+        motivo_bloqueo: null,
+      };
+    } catch (error) {
+      throw persistenceError(error);
+    }
+  }
+
   async updateWorkflowState(input: UpdateWorkflowStateInput): Promise<void> {
     try {
       await this.db.transaction((tx) => updateWorkflowStateIn(tx, input));
@@ -1372,45 +2417,351 @@ export class BulkPersistenceRepository {
     }
   }
 
-  /** Refuses to reopen failed rows until an approved domain retry can be emitted. */
-  async requeueBatch(batchId: string): Promise<typeof batchJobs.$inferSelect> {
+  /** Admit one durable retry intent; transport publication remains an Outbox concern. */
+  async requeueBatch(
+    batchId: string,
+    ownerSub: string,
+    correlationId?: string,
+    motivo: string | null = null,
+  ): Promise<Record<string, unknown>> {
     try {
       return await this.db.transaction(async (tx) => {
         const [batch] = await tx
           .select()
           .from(batchJobs)
-          .where(eq(batchJobs.batchId, batchId))
+          .where(
+            and(
+              eq(batchJobs.batchId, batchId),
+              eq(batchJobs.ownerSub, ownerSub),
+            ),
+          )
           .for('update')
           .limit(1);
         if (!batch) throw new BulkPersistenceError('FOREIGN_KEY_VIOLATION');
-        if (batch.status !== 'COMPLETED' || !batch.needsReconciliation) {
+        if (!correlationId) {
+          throw new BulkPersistenceError(
+            'NOT_CONFIGURED',
+            new Error('RETRY_PROTOCOL_NOT_APPROVED'),
+          );
+        }
+        const [existingRequest] = await tx
+          .select()
+          .from(batchResumeRequests)
+          .where(
+            and(
+              eq(batchResumeRequests.batchJobId, batch.id),
+              eq(batchResumeRequests.correlationId, correlationId),
+            ),
+          )
+          .for('update')
+          .limit(1);
+        const intentHash = createHash('sha256')
+          .update(
+            canonicalJson({
+              protocol: 'BULK_RETRY_V1',
+              batch_id: batchId,
+              owner_sub: ownerSub,
+              correlation_id: correlationId,
+              motivo,
+            }),
+          )
+          .digest('hex');
+        if (existingRequest) {
+          if (existingRequest.intentHash !== intentHash)
+            throw new BulkPersistenceError(
+              'UNIQUE_CONFLICT',
+              new Error('IDEMPOTENCY_CONFLICT'),
+            );
+          return existingRequest.acceptedResponse;
+        }
+        if (batch.status !== 'COMPLETED') {
           throw new BulkPersistenceError(
             'CHECK_VIOLATION',
             new Error('BATCH_TRANSITION_NOT_ALLOWED'),
           );
         }
-        const eligible = await tx
-          .select({ id: batchRows.id })
+        const lockedRows = await tx
+          .select()
           .from(batchRows)
-          .where(
-            and(
-              eq(batchRows.batchJobId, batch.id),
-              eq(batchRows.needsReconciliation, true),
-            ),
-          )
+          .where(eq(batchRows.batchJobId, batch.id))
+          .orderBy(asc(batchRows.rowId))
           .for('update');
-        if (eligible.length === 0)
+        for (const row of lockedRows)
+          await tx
+            .select({ id: rowDomainSteps.id })
+            .from(rowDomainSteps)
+            .where(eq(rowDomainSteps.batchRowId, row.id))
+            .orderBy(asc(rowDomainSteps.domain))
+            .for('update');
+        const eligibility = await this.calculateRetryEligibility(
+          batchId,
+          ownerSub,
+          tx,
+        );
+        if (!eligibility.elegible || eligibility.pasos.length === 0)
           throw new BulkPersistenceError(
             'CHECK_VIOLATION',
-            new Error('NO_RECONCILABLE_ROWS'),
+            new Error('RETRY_NOT_ELIGIBLE'),
           );
-        // Replaying an already admitted message cannot retry a failed domain:
-        // its original idempotency identity would return the same receipt.
-        // Keep the durable failed state until a reviewed retry protocol exists.
-        throw new BulkPersistenceError(
-          'NOT_CONFIGURED',
-          new Error('RETRY_PROTOCOL_NOT_APPROVED'),
+        const [admission] = await tx
+          .select({ payload: inbox.payload })
+          .from(inbox)
+          .where(
+            and(
+              eq(inbox.messageId, batch.batchId),
+              eq(inbox.handler, 'bulk.import.admission'),
+            ),
+          )
+          .limit(1);
+        const commandList = Array.isArray(admission?.payload.catalogCommands)
+          ? admission.payload.catalogCommands
+          : [];
+        const original = commandList.find(
+          (value) =>
+            typeof value === 'object' &&
+            value !== null &&
+            Reflect.get(value, 'schema_version') === 3 &&
+            Reflect.get(Reflect.get(value, 'data'), 'batch_id') === batchId,
+        ) as Record<string, unknown> | undefined;
+        if (
+          !original ||
+          typeof original.message_id !== 'string' ||
+          typeof original.operation_id !== 'string'
+        )
+          throw new BulkPersistenceError(
+            'NOT_CONFIGURED',
+            new Error('RETRY_PROTOCOL_NOT_APPROVED'),
+          );
+        const data = original.data as Record<string, unknown>;
+        const intentRows = Array.isArray(admission?.payload.rows)
+          ? admission.payload.rows
+          : [];
+        const eligibleIds = new Set(
+          eligibility.pasos.map((step) => step.row_id),
         );
+        const eligibleIntentRows = intentRows.filter(
+          (value): value is Record<string, unknown> =>
+            typeof value === 'object' &&
+            value !== null &&
+            eligibleIds.has(String(Reflect.get(value, 'rowId'))),
+        );
+        const families = new Map<string, Record<string, unknown>[]>();
+        for (const row of eligibleIntentRows) {
+          const sku = row.skuBase;
+          if (typeof sku !== 'string' || row.rowId !== row.rowOperationId)
+            throw new BulkPersistenceError(
+              'CHECK_VIOLATION',
+              new Error('RETRY_NOT_ELIGIBLE'),
+            );
+          families.set(sku, [...(families.get(sku) ?? []), row]);
+        }
+        if (!families.size)
+          throw new BulkPersistenceError(
+            'CHECK_VIOLATION',
+            new Error('RETRY_NOT_ELIGIBLE'),
+          );
+        const acceptedResponse = {
+          batch_id: batch.batchId,
+          status: 'QUEUED',
+          template_version: 2,
+          correlation_id: batch.correlationId,
+        };
+        const [request] = await tx
+          .insert(batchResumeRequests)
+          .values({
+            batchJobId: batch.id,
+            ownerSub,
+            correlationId,
+            intentHash,
+            acceptedResponse,
+          })
+          .returning();
+        if (!request) throw new Error('Resume request insert returned no row');
+        let reopened = 0;
+        const reopenedRowIds = new Set<string>();
+        for (const [familyKey, selectedRows] of [...families.entries()].sort(
+          ([a], [b]) => a.localeCompare(b),
+        )) {
+          const rows = selectedRows.sort((a, b) =>
+            String(a.rowOperationId).localeCompare(String(b.rowOperationId)),
+          );
+          const current = [];
+          for (const row of rows) {
+            const persisted = lockedRows.find(
+              (candidate) => candidate.rowId === row.rowId,
+            );
+            if (!persisted) throw new Error('Retry row missing');
+            const [attempt] = await tx
+              .select()
+              .from(domainAttempts)
+              .where(
+                and(
+                  eq(domainAttempts.batchRowId, persisted.id),
+                  eq(domainAttempts.domain, 'CATALOGO'),
+                ),
+              )
+              .orderBy(desc(domainAttempts.attemptNumber))
+              .for('update')
+              .limit(1);
+            if (
+              !attempt ||
+              !attempt.retriable ||
+              attempt.status !== 'REJECTED' ||
+              attempt.effectState !== 'NONE'
+            )
+              throw new BulkPersistenceError(
+                'CHECK_VIOLATION',
+                new Error('RETRY_NOT_ELIGIBLE'),
+              );
+            current.push({ row, persisted, attempt });
+          }
+          const latest = current[0]!.attempt;
+          if (
+            current.some(
+              ({ attempt }) =>
+                attempt.attemptNumber !== latest.attemptNumber ||
+                attempt.commandAttemptId !== latest.commandAttemptId,
+            )
+          )
+            throw new BulkPersistenceError(
+              'CHECK_VIOLATION',
+              new Error('RETRY_NOT_ELIGIBLE'),
+            );
+          const previousMessageId = latest.commandAttemptId
+            ? (
+                await tx
+                  .select({ messageId: retryCommands.messageId })
+                  .from(retryCommands)
+                  .where(
+                    eq(retryCommands.commandAttemptId, latest.commandAttemptId),
+                  )
+                  .limit(1)
+              )[0]?.messageId
+            : original.message_id;
+          if (!previousMessageId)
+            throw new BulkPersistenceError(
+              'CHECK_VIOLATION',
+              new Error('RESULTADO_INCIERTO'),
+            );
+          const commandAttemptId = randomUUID();
+          const messageId = randomUUID();
+          const retryRows = current.map(({ row, attempt }) => ({
+            row_operation_id: String(row.rowOperationId),
+            attempt_id: randomUUID(),
+            previous_attempt_id: attempt.attemptId,
+          }));
+          const payload = {
+            message_id: messageId,
+            schema_version: 4,
+            occurred_at: new Date().toISOString(),
+            correlation_id: batch.correlationId,
+            causation_id: previousMessageId,
+            operation_id: original.operation_id,
+            producer: 'bulk-svc',
+            kind: 'command',
+            name: 'catalog.bulk.upsert.requested',
+            data: {
+              ...data,
+              retry: {
+                protocol: 'BULK_RETRY_V1',
+                command_attempt_id: commandAttemptId,
+                attempt_number: latest.attemptNumber + 1,
+                previous_command_message_id: previousMessageId,
+                rows: retryRows,
+              },
+            },
+          };
+          const payloadHash = createHash('sha256')
+            .update(canonicalJson(payload))
+            .digest('hex');
+          await tx.insert(retryCommands).values({
+            commandAttemptId,
+            resumeRequestId: request.id,
+            batchJobId: batch.id,
+            domain: 'CATALOGO',
+            familyKey,
+            businessOperationId: String(original.operation_id),
+            attemptNumber: latest.attemptNumber + 1,
+            messageId,
+            previousMessageId,
+            payloadHash,
+          });
+          await tx.insert(outbox).values({
+            messageId,
+            eventName: 'catalog.bulk.upsert.requested',
+            kind: 'command',
+            schemaVersion: 4,
+            correlationId: batch.correlationId,
+            causationId: previousMessageId,
+            operationId: String(original.operation_id),
+            occurredAt: new Date(payload.occurred_at),
+            payload,
+          });
+          for (let index = 0; index < current.length; index++) {
+            const entry = current[index]!;
+            await tx.insert(domainAttempts).values({
+              attemptId: retryRows[index]!.attempt_id,
+              batchRowId: entry.persisted.id,
+              domain: 'CATALOGO',
+              businessOperationId: String(original.operation_id),
+              attemptNumber: latest.attemptNumber + 1,
+              previousAttemptId: entry.attempt.attemptId,
+              commandAttemptId,
+              status: 'PENDING',
+              effectState: 'UNKNOWN',
+              retriable: false,
+            });
+            const steps = await tx
+              .select()
+              .from(rowDomainSteps)
+              .where(eq(rowDomainSteps.batchRowId, entry.persisted.id))
+              .for('update');
+            for (const step of steps)
+              if (
+                step.domain === 'CATALOGO' ||
+                (step.status === 'FAILED' &&
+                  step.errorCode === 'DEPENDENCY_REJECTED')
+              )
+                await tx
+                  .update(rowDomainSteps)
+                  .set({
+                    status: 'PENDING',
+                    errorCode: null,
+                    errorDetail: null,
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(rowDomainSteps.id, step.id));
+            await tx
+              .update(batchRows)
+              .set({
+                status: 'PENDING',
+                failedDomain: null,
+                errorCode: null,
+                errorDetail: null,
+                needsReconciliation: false,
+                updatedAt: new Date(),
+              })
+              .where(eq(batchRows.id, entry.persisted.id));
+            reopened++;
+            reopenedRowIds.add(entry.persisted.rowId);
+          }
+        }
+        await tx
+          .update(batchJobs)
+          .set({
+            status: 'QUEUED',
+            completedRows: lockedRows.filter(
+              (row) => row.status === 'COMPLETED',
+            ).length,
+            failedRows: Math.max(0, batch.failedRows - reopened),
+            needsReconciliation: lockedRows.some(
+              (row) =>
+                row.needsReconciliation && !reopenedRowIds.has(row.rowId),
+            ),
+            updatedAt: new Date(),
+          })
+          .where(eq(batchJobs.id, batch.id));
+        return acceptedResponse;
       });
     } catch (error) {
       throw persistenceError(error);
@@ -1423,7 +2774,11 @@ export class BulkPersistenceRepository {
     try {
       const [job] = await this.db
         .insert(exportJobs)
-        .values({ exportId: input.exportId, format: input.format })
+        .values({
+          exportId: input.exportId,
+          ownerSub: input.ownerSub,
+          format: input.format,
+        })
         .returning();
       if (!job) throw new Error('Export insert returned no row');
       return job;
@@ -1440,6 +2795,27 @@ export class BulkPersistenceRepository {
         .select()
         .from(exportJobs)
         .where(eq(exportJobs.exportId, exportId))
+        .limit(1);
+      return job ?? null;
+    } catch (error) {
+      throw persistenceError(error);
+    }
+  }
+
+  async findOwnedExportJobByExportId(
+    exportId: string,
+    ownerSub: string,
+  ): Promise<typeof exportJobs.$inferSelect | null> {
+    try {
+      const [job] = await this.db
+        .select()
+        .from(exportJobs)
+        .where(
+          and(
+            eq(exportJobs.exportId, exportId),
+            eq(exportJobs.ownerSub, ownerSub),
+          ),
+        )
         .limit(1);
       return job ?? null;
     } catch (error) {

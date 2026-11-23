@@ -12,6 +12,7 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  UnauthorizedException,
   Body,
   Req,
 } from '@nestjs/common';
@@ -23,6 +24,7 @@ import { BulkReadinessService } from './health/bulk-readiness.service.js';
 import { BulkImportService } from './bulk-import.service.js';
 import { BulkStorageService } from './storage/bulk-storage.service.js';
 import { BulkUserBearerGuard } from './auth/bulk-user-bearer.guard.js';
+import type { BulkAuthenticatedRequest } from './auth/bulk-user-bearer.guard.js';
 import { BulkExportService } from './bulk-export.service.js';
 import {
   createBulkTemplateCsv,
@@ -110,6 +112,7 @@ export class BulkSvcController {
     }),
   )
   async crearImportacionGeneralProductos(
+    @Req() request: BulkAuthenticatedRequest,
     @UploadedFile()
     file:
       { buffer: Buffer; originalname: string; mimetype: string } | undefined,
@@ -136,21 +139,22 @@ export class BulkSvcController {
         'template_version debe ser 2 cuando se informa.',
       );
     const contentHash = createHash('sha256').update(file.buffer).digest('hex');
+    const uuidPattern =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (correlation !== undefined && !uuidPattern.test(correlation))
+      throw new BulkDomainError(
+        'INVALID_INPUT',
+        'X-Correlation-Id debe ser un UUID válido.',
+      );
+    const ownerSub = requireActorSub(request).toLowerCase();
     const correlationId =
-      correlation &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        correlation,
-      )
-        ? correlation
-        : uuidFromDigest(
-            createHash('sha256')
-              .update(correlation ?? contentHash)
-              .digest('hex'),
-          );
+      correlation === undefined
+        ? uuidFromDigest(createHash('sha256').update(contentHash).digest('hex'))
+        : correlation.toLowerCase();
     const parsed = parseBulkTemplate(file.buffer, format);
     const batchId = uuidFromDigest(
       createHash('sha256')
-        .update(`${correlationId}:${contentHash}`)
+        .update(`bulk-import:${ownerSub}:${correlationId}`)
         .digest('hex'),
     );
     const contentRef = await this.storage.put(
@@ -162,6 +166,7 @@ export class BulkSvcController {
       bytes: file.buffer,
       format,
       templateVersion: version,
+      ownerSub,
       correlationId,
       contentRef,
       batchId,
@@ -171,15 +176,54 @@ export class BulkSvcController {
       batch_id: result.batch.batchId,
       status: 'QUEUED',
       template_version: result.batch.templateVersion,
-      correlation_id: result.batch.correlationId,
+      correlation_id: correlationId,
+    });
+  }
+
+  @UseGuards(BulkUserBearerGuard)
+  @Get(
+    'api/v1/carga-masiva/productos/importaciones/por-correlacion/:correlationId',
+  )
+  async conciliarImportacionGeneralPorCorrelacion(
+    @Param('correlationId') correlationId: string,
+    @Req() request: BulkAuthenticatedRequest,
+    @Res() response: Response,
+  ) {
+    response.setHeader('Cache-Control', 'no-store');
+    // Provisional API extension: keep disabled until the central contract is approved.
+    if (process.env.BULK_CORRELATION_RECONCILIATION_ENABLED !== 'true')
+      throw new BulkDomainError('BATCH_NOT_FOUND', 'El lote no existe.');
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        correlationId,
+      )
+    )
+      throw new BulkDomainError('INVALID_INPUT', 'correlationId inválido.');
+    const batch = await this.imports.findByOwnerAndCorrelation(
+      requireActorSub(request).toLowerCase(),
+      correlationId.toLowerCase(),
+    );
+    if (!batch)
+      throw new BulkDomainError('BATCH_NOT_FOUND', 'El lote no existe.');
+    return response.status(200).json({
+      batch_id: batch.batchId,
+      correlation_id: batch.correlationId,
+      status: batch.status,
+      template_version: 2,
     });
   }
 
   @UseGuards(BulkUserBearerGuard)
   @Get('api/v1/carga-masiva/productos/importaciones/:batchId')
-  async obtenerImportacionGeneralProductos(@Param('batchId') batchId: string) {
+  async obtenerImportacionGeneralProductos(
+    @Param('batchId') batchId: string,
+    @Req() request: BulkAuthenticatedRequest,
+  ) {
     assertBatchId(batchId);
-    const { batch, rows } = await this.imports.getSnapshot(batchId);
+    const { batch, rows } = await this.imports.getSnapshot(
+      batchId,
+      requireActorSub(request),
+    );
     return {
       batch_id: batch.batchId,
       status: batch.status,
@@ -187,6 +231,14 @@ export class BulkSvcController {
       completed_rows: batch.completedRows,
       failed_rows: batch.failedRows,
       needs_reconciliation: batch.needsReconciliation,
+      ...(process.env.BULK_RETRY_ELIGIBILITY_ENABLED === 'true'
+        ? {
+            reanudacion: await this.imports.getRetryEligibility(
+              batchId,
+              requireActorSub(request),
+            ),
+          }
+        : {}),
       rows: rows.map(({ row, steps }) => ({
         row_id: row.rowId,
         status: row.status,
@@ -209,13 +261,20 @@ export class BulkSvcController {
   @Get('api/v1/carga-masiva/productos/importaciones/:batchId/reporte')
   async descargarReporteImportacionGeneral(
     @Param('batchId') batchId: string,
+    @Req() request: BulkAuthenticatedRequest,
     @Res() response: Response,
   ) {
     assertBatchId(batchId);
-    const { rows } = await this.imports.getSnapshot(batchId);
+    const { rows } = await this.imports.getSnapshot(
+      batchId,
+      requireActorSub(request),
+    );
     const failed = rows.filter(({ row }) => row.status === 'FAILED');
-    const quote = (value: unknown) =>
-      `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const quote = (value: unknown) => {
+      const text = String(value ?? '');
+      const safe = /^[\t\r\n ]*[=+@-]/.test(text) ? `'${text}` : text;
+      return `"${safe.replace(/"/g, '""')}"`;
+    };
     const lines = [
       'row_id,status,failed_domain,code,detail',
       ...failed.map(({ row }) =>
@@ -230,48 +289,103 @@ export class BulkSvcController {
           .join(','),
       ),
     ];
-    return response
-      .status(200)
-      .type('text/csv')
-      .send(`${lines.join('\r\n')}\r\n`);
+    response.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="reporte-importacion-${batchId}.csv"`,
+    );
+    return response.status(200).send(`${lines.join('\r\n')}\r\n`);
   }
 
   @UseGuards(BulkUserBearerGuard)
   @Post('api/v1/carga-masiva/productos/importaciones/:batchId/reanudar')
   @HttpCode(202)
-  async reanudarImportacionGeneral(@Param('batchId') batchId: string) {
+  async reanudarImportacionGeneral(
+    @Param('batchId') batchId: string,
+    @Req() request: BulkAuthenticatedRequest,
+    @Headers('x-correlation-id') correlationId: string | undefined,
+    @Body() body: unknown,
+  ) {
     assertBatchId(batchId);
-    const batch = await this.imports.resumeBatch(batchId);
-    return {
-      batch_id: batch.batchId,
-      status: batch.status,
-      template_version: batch.templateVersion,
-      correlation_id: batch.correlationId,
-    };
+    if (process.env.BULK_RETRY_CATALOG_V1_ENABLED === 'true') {
+      if (
+        !correlationId ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          correlationId,
+        )
+      )
+        throw new BulkDomainError(
+          'INVALID_INPUT',
+          'X-Correlation-Id debe ser un UUID válido.',
+        );
+      if (
+        body !== undefined &&
+        (typeof body !== 'object' ||
+          body === null ||
+          Array.isArray(body) ||
+          Object.keys(body).some((key) => key !== 'motivo'))
+      )
+        throw new BulkDomainError(
+          'INVALID_INPUT',
+          'Body de reanudación inválido.',
+        );
+      const motivo =
+        body && typeof body === 'object' && 'motivo' in body
+          ? Reflect.get(body, 'motivo')
+          : null;
+      if (
+        motivo !== null &&
+        (typeof motivo !== 'string' ||
+          motivo.trim().length < 1 ||
+          motivo.trim().length > 256)
+      )
+        throw new BulkDomainError(
+          'INVALID_INPUT',
+          'motivo debe tener 1–256 caracteres.',
+        );
+      return this.imports.resumeBatch(
+        batchId,
+        requireActorSub(request),
+        correlationId.toLowerCase(),
+        typeof motivo === 'string' ? motivo.trim() : null,
+      );
+    }
+    return this.imports.resumeBatch(batchId, requireActorSub(request));
   }
 
   @UseGuards(BulkUserBearerGuard)
   @Post('api/v1/carga-masiva/productos/exportaciones')
   @HttpCode(202)
-  async crearExportacionGeneralProductos(@Body() body: { formato?: unknown }) {
-    return this.exports.create(body?.formato as 'CSV' | 'XLSX');
+  async crearExportacionGeneralProductos(
+    @Body() body: { formato?: unknown },
+    @Req() request: BulkAuthenticatedRequest,
+  ) {
+    return this.exports.create(
+      body?.formato as 'CSV' | 'XLSX',
+      requireActorSub(request),
+    );
   }
 
   @UseGuards(BulkUserBearerGuard)
   @Get('api/v1/carga-masiva/productos/exportaciones/:exportId')
   async obtenerExportacionGeneralProductos(
     @Param('exportId') exportId: string,
+    @Req() request: BulkAuthenticatedRequest,
   ) {
-    return this.exports.get(exportId);
+    return this.exports.get(exportId, requireActorSub(request));
   }
 
   @UseGuards(BulkUserBearerGuard)
   @Get('api/v1/carga-masiva/productos/exportaciones/:exportId/archivo')
   async descargarExportacionGeneralProductos(
     @Param('exportId') exportId: string,
+    @Req() request: BulkAuthenticatedRequest,
     @Res() response: Response,
   ) {
-    const { job, manifest } = await this.exports.download(exportId);
+    const { job, manifest } = await this.exports.download(
+      exportId,
+      requireActorSub(request),
+    );
     const bytes = await this.storage.get(manifest.contentRef);
     response.setHeader(
       'Content-Type',
@@ -300,4 +414,9 @@ function assertBatchId(batchId: string): void {
 function uuidFromDigest(digest: string): string {
   const value = `${digest.slice(0, 12)}4${digest.slice(13, 16)}8${digest.slice(17, 20)}${digest.slice(20, 32)}`;
   return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+}
+
+function requireActorSub(request: BulkAuthenticatedRequest): string {
+  if (!request.bulkActorSub) throw new UnauthorizedException('TOKEN_INVALIDO');
+  return request.bulkActorSub;
 }

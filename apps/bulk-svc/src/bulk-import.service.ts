@@ -32,6 +32,7 @@ export class BulkImportService {
     bytes: Buffer;
     format: 'CSV' | 'XLSX';
     templateVersion: number;
+    ownerSub: string;
     correlationId: string;
     contentRef: string;
     batchId?: string;
@@ -77,6 +78,7 @@ export class BulkImportService {
       contentRef: input.contentRef,
       format: input.format,
       templateVersion: parsed.templateVersion,
+      ownerSub: input.ownerSub,
       rows,
       intentRows: parsed.rows,
       catalogCommandVersion: commandV2 ? 2 : 1,
@@ -84,15 +86,42 @@ export class BulkImportService {
     return { ...result, parsed };
   }
 
-  async getSnapshot(batchId: string) {
-    const snapshot = await this.repository.loadBatchSnapshot(batchId);
+  async getSnapshot(batchId: string, ownerSub: string) {
+    const snapshot = await this.repository.loadBatchSnapshot(batchId, ownerSub);
     if (!snapshot)
       throw new BulkDomainError('BATCH_NOT_FOUND', 'El lote no existe.');
     return snapshot;
   }
 
+  async getRetryEligibility(batchId: string, ownerSub: string) {
+    try {
+      return await this.repository.getRetryEligibility(batchId, ownerSub);
+    } catch (error) {
+      if (
+        error instanceof BulkPersistenceError &&
+        error.code === 'FOREIGN_KEY_VIOLATION'
+      )
+        throw new BulkDomainError('BATCH_NOT_FOUND', 'El lote no existe.', {
+          cause: error,
+        });
+      throw mapBulkPersistenceError(error);
+    }
+  }
+
+  async findByOwnerAndCorrelation(ownerSub: string, correlationId: string) {
+    try {
+      return await this.repository.findBatchByOwnerAndCorrelation(
+        ownerSub,
+        correlationId,
+      );
+    } catch (error) {
+      throw mapBulkPersistenceError(error);
+    }
+  }
+
   async createImport(input: {
     batchId: string;
+    ownerSub: string;
     correlationId: string;
     contentRef: string;
     format: string;
@@ -144,6 +173,7 @@ export class BulkImportService {
     try {
       priorAdmission = await this.repository.findImportAdmissionIntent(
         input.batchId,
+        input.ownerSub,
       );
     } catch (error) {
       throw mapBulkPersistenceError(error);
@@ -168,6 +198,7 @@ export class BulkImportService {
     try {
       return await this.repository.createImportBatch({
         batchId: input.batchId,
+        ownerSub: input.ownerSub,
         correlationId: input.correlationId,
         templateVersion: input.templateVersion,
         inputFile: {
@@ -242,9 +273,19 @@ export class BulkImportService {
     }
   }
 
-  async resumeBatch(batchId: string) {
+  async resumeBatch(
+    batchId: string,
+    ownerSub: string,
+    correlationId?: string,
+    motivo: string | null = null,
+  ) {
     try {
-      return await this.repository.requeueBatch(batchId);
+      return await this.repository.requeueBatch(
+        batchId,
+        ownerSub,
+        correlationId,
+        motivo,
+      );
     } catch (error) {
       if (
         error instanceof BulkPersistenceError &&
@@ -258,9 +299,19 @@ export class BulkImportService {
         error instanceof BulkPersistenceError &&
         error.code === 'CHECK_VIOLATION'
       ) {
-        throw new BulkDomainError('INVALID_TRANSITION', error.message, {
+        throw new BulkDomainError('RETRY_NOT_ELIGIBLE', error.message, {
           cause: error,
         });
+      }
+      if (
+        error instanceof BulkPersistenceError &&
+        error.code === 'NOT_CONFIGURED'
+      ) {
+        throw new BulkDomainError(
+          'RETRY_PROTOCOL_NOT_APPROVED',
+          'El protocolo de reanudación no está aprobado.',
+          { cause: error },
+        );
       }
       throw mapBulkPersistenceError(error);
     }
