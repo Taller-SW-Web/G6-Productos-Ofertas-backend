@@ -129,7 +129,7 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2022-08-01' = 
 }
 
 resource operationPolicies 'Microsoft.ApiManagement/service/apis/operations/policies@2022-08-01' = [for operation in operationsManifest.operations: {
-  name: '${apiName}/${operation.apimOperationId}/policy'
+  name: '${apimName}/${apiName}/${operation.apimOperationId}/policy'
   dependsOn: [
     api
     openIdNamedValue

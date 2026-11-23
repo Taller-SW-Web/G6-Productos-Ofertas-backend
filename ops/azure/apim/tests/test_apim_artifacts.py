@@ -1,5 +1,9 @@
 import importlib.util
+import copy
 import json
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from xml.etree import ElementTree
@@ -13,6 +17,10 @@ PARAM_SPEC = importlib.util.spec_from_file_location("validate_parameters", ROOT 
 PARAMS = importlib.util.module_from_spec(PARAM_SPEC)
 assert PARAM_SPEC.loader is not None
 PARAM_SPEC.loader.exec_module(PARAMS)
+ARM_SPEC = importlib.util.spec_from_file_location("verify_arm_template", ROOT / "verify-arm-template.py")
+ARM = importlib.util.module_from_spec(ARM_SPEC)
+assert ARM_SPEC.loader is not None
+ARM_SPEC.loader.exec_module(ARM)
 
 
 class FilterOpenApiTests(unittest.TestCase):
@@ -306,6 +314,48 @@ class ApimPolicyTests(unittest.TestCase):
         self.assertNotIn("rewrite-uri", api_policy)
         bicep = (ROOT / "main.bicep").read_text(encoding="utf-8")
         self.assertIn("path: 'api/v1'", bicep)
+
+
+class CompiledArmTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        template_path = os.environ.get("APIM_ARM_TEMPLATE")
+        if not template_path:
+            with tempfile.TemporaryDirectory(prefix="apim-h5-arm-") as temp_dir:
+                template_path = str(Path(temp_dir) / "template.json")
+                subprocess.run(
+                    ["az", "bicep", "build", "--file", str(ROOT / "main.bicep"), "--outfile", template_path],
+                    check=True,
+                )
+                cls.template = json.loads(Path(template_path).read_text(encoding="utf-8"))
+        else:
+            cls.template = json.loads(Path(template_path).read_text(encoding="utf-8"))
+        cls.filtered = json.loads((ROOT / "openapi" / "gateway-filtered.json").read_text(encoding="utf-8"))
+        cls.manifest = json.loads((ROOT / "openapi" / "operation-security.json").read_text(encoding="utf-8"))
+
+    def test_compiled_arm_has_exact_hierarchical_policy_set_and_exclusions(self):
+        self.assertEqual(ARM.validate(self.template, self.filtered, self.manifest), 143)
+
+    def test_compiled_arm_rejects_wrong_policy_hierarchy_or_dependencies(self):
+        for change in ("name", "dependsOn"):
+            mutated = copy.deepcopy(self.template)
+            if change == "name":
+                mutated["resources"]["operationPolicies"]["name"] = "[format('{0}/{1}/policy', 'wrong', 'id')]"
+            else:
+                mutated["resources"]["operationPolicies"]["dependsOn"].remove("issuerNamedValue")
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                ARM.validate(mutated, self.filtered, self.manifest)
+
+    def test_compiled_arm_rejects_stale_manifest_or_private_route_leak(self):
+        stale = copy.deepcopy(self.template)
+        symbol = stale["variables"]["operationsManifest"][len("[variables('") : -3]
+        stale["variables"][symbol]["operations"][0]["operationId"] = "operacion-obsoleta"
+        with self.assertRaisesRegex(ValueError, "manifiesto compilado"):
+            ARM.validate(stale, self.filtered, self.manifest)
+        leaked = copy.deepcopy(self.manifest)
+        leaked["operations"][0]["operationId"] = leaked["privateOperationIds"][0]
+        with self.assertRaises(ValueError):
+            ARM.validate(self.template, self.filtered, leaked)
 
 
 if __name__ == "__main__":
