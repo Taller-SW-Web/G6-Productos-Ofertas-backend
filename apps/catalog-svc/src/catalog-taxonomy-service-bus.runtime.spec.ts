@@ -1,6 +1,7 @@
 import type { CatalogMessageService } from './catalog-message.service.js';
 import type { Database } from './database.js';
 import {
+  bulkRequestQueue,
   catalogIncomingQueues,
   createCatalogServiceBus,
   taxonomyReplyQueue,
@@ -9,6 +10,7 @@ import {
 } from './catalog-service-bus.js';
 import { relayCatalogDelivery } from './catalog-service-bus-relay.js';
 import { CatalogTaxonomyServiceBusRuntime } from './catalog-taxonomy-service-bus.runtime.js';
+import { createCatalogBulkConsumer } from './catalog-service-bus.runtime.js';
 
 vi.mock('./catalog-service-bus.js', async (original) => ({
   ...(await original<typeof import('./catalog-service-bus.js')>()),
@@ -115,6 +117,40 @@ describe('Catalog H5 transport readiness', () => {
     } as Parameters<CatalogMessageService['consume']>[0];
     await expect(taxonomyConsumer!.consume(request)).resolves.toBe('APPLIED');
     expect(f.consume).toHaveBeenCalledWith(request, true);
+  });
+
+  it('rejects Bulk V1/V2/V3 commands before consumption without the result route', async () => {
+    const f = fixture('');
+    await f.runtime.onApplicationBootstrap();
+    await vi.advanceTimersByTimeAsync(0);
+    const bulkConsumer = f.consumers.get(bulkRequestQueue);
+    expect(bulkConsumer).toBeDefined();
+
+    for (const schema_version of [1, 2, 3]) {
+      const request = {
+        name: 'catalog.bulk.upsert.requested',
+        schema_version,
+      } as Parameters<CatalogMessageService['consume']>[0];
+      await expect(bulkConsumer!.consume(request)).rejects.toThrow(
+        'CATALOG_H5_BULK_REPLY_DISABLED',
+      );
+    }
+    expect(f.consume).not.toHaveBeenCalled();
+  });
+
+  it('consumes a Bulk request normally when the result route is enabled', async () => {
+    const f = fixture('g6.bulk.from.catalog');
+    await f.runtime.onApplicationBootstrap();
+    await vi.advanceTimersByTimeAsync(0);
+    const bulkConsumer = f.consumers.get(bulkRequestQueue);
+    expect(bulkConsumer).toBeDefined();
+
+    const request = {
+      name: 'catalog.bulk.upsert.requested',
+      schema_version: 3,
+    } as Parameters<CatalogMessageService['consume']>[0];
+    await expect(bulkConsumer!.consume(request)).resolves.toBe('APPLIED');
+    expect(f.consume).toHaveBeenCalledWith(request);
   });
 
   it('detects storage and idle broker loss, rejects a stale success, and becomes ready without restart', async () => {

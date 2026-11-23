@@ -4,8 +4,12 @@ import type { CatalogEnvelope } from './catalog-messages.js';
 import {
   CatalogServiceBus,
   createCatalogServiceBus,
+  destinationsFor,
 } from './catalog-service-bus.js';
-import { createCatalogTaxonomyConsumer } from './catalog-service-bus.runtime.js';
+import {
+  createCatalogBulkConsumer,
+  createCatalogTaxonomyConsumer,
+} from './catalog-service-bus.runtime.js';
 import { readCatalogH5Destinations } from './catalog-messaging.config.js';
 
 function outgoing(): CatalogEnvelope {
@@ -25,6 +29,92 @@ function outgoing(): CatalogEnvelope {
       product_version: 1,
       changed_at: timestamp,
     },
+  };
+}
+
+function bulkRequest(schema_version: 1 | 2 | 3): CatalogEnvelope {
+  const operationId = randomUUID();
+  const data =
+    schema_version === 3
+      ? {
+          batch_id: randomUUID(),
+          batch_operation_id: operationId,
+          template_version: 2,
+          mode: 'ALTA',
+          content_ref: {
+            content_id: randomUUID(),
+            sha256: 'b'.repeat(64),
+            byte_length: 108,
+            content_type: 'application/json',
+          },
+        }
+      : {
+          batch_id: randomUUID(),
+          batch_operation_id: operationId,
+          template_version: 2,
+          mode: 'ALTA',
+          rows: [
+            {
+              row_number: 2,
+              row_operation_id: randomUUID(),
+              producto_id: null,
+              sku_base: 'SKU-1',
+              product: {},
+              variant_id: null,
+              variant: null,
+            },
+          ],
+        };
+  return {
+    message_id: randomUUID(),
+    schema_version,
+    occurred_at: new Date().toISOString(),
+    correlation_id: randomUUID(),
+    causation_id: null,
+    operation_id: operationId,
+    producer: 'bulk-svc',
+    kind: 'command',
+    name: 'catalog.bulk.upsert.requested',
+    data,
+  };
+}
+
+function bulkResult(
+  name: 'catalog.bulk.upsert.completed' | 'catalog.bulk.upsert.rejected',
+): CatalogEnvelope {
+  const operationId = randomUUID();
+  return {
+    message_id: randomUUID(),
+    schema_version: 1,
+    occurred_at: new Date().toISOString(),
+    correlation_id: randomUUID(),
+    causation_id: randomUUID(),
+    operation_id: operationId,
+    producer: 'catalog-svc',
+    kind: 'result',
+    name,
+    data:
+      name === 'catalog.bulk.upsert.completed'
+        ? {
+            batch_id: randomUUID(),
+            batch_operation_id: operationId,
+            results: [
+              {
+                row_number: 2,
+                row_operation_id: randomUUID(),
+                product_id: randomUUID(),
+                sku_base: 'SKU-1',
+                status: 'COMPLETED',
+                code: null,
+              },
+            ],
+          }
+        : {
+            batch_id: randomUUID(),
+            batch_operation_id: operationId,
+            code: 'VALIDACION',
+            detail: 'Comando inválido.',
+          },
   };
 }
 
@@ -160,6 +250,136 @@ describe('Catalog Service Bus candidate', () => {
       delivery({ ...event, producer: 'pricing-svc' }),
     );
     expect(deadLetterMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([1, 2, 3] as const)(
+    'abandons Bulk V%s commands before consumption when the result route is disabled',
+    async (schemaVersion) => {
+      type Handlers = Parameters<
+        ReturnType<ServiceBusClient['createReceiver']>['subscribe']
+      >[0];
+      type Delivery = Parameters<Handlers['processMessage']>[0];
+      let handlers!: Handlers;
+      const completeMessage = vi.fn();
+      const abandonMessage = vi.fn();
+      const deadLetterMessage = vi.fn();
+      const createReceiver = vi.fn().mockReturnValue({
+        subscribe: (value: Handlers) => {
+          handlers = value;
+          return { close: vi.fn() };
+        },
+        peekMessages: vi.fn().mockResolvedValue([]),
+        completeMessage,
+        abandonMessage,
+        deadLetterMessage,
+      });
+      const bridge = new CatalogServiceBus({
+        createReceiver,
+      } as unknown as ServiceBusClient);
+      const consume = vi.fn().mockResolvedValue('APPLIED');
+      const reportError = vi.fn();
+      bridge.subscribeWithProbe(
+        'g6.catalog.from.bulk',
+        createCatalogBulkConsumer({ consume }, []),
+        reportError,
+      );
+      const event = bulkRequest(schemaVersion);
+      const received = {
+        body: Buffer.from(JSON.stringify(event)),
+        messageId: event.message_id,
+        correlationId: event.correlation_id,
+        subject: event.name,
+        contentType: 'application/json',
+      } as Delivery;
+
+      await handlers.processMessage(received);
+
+      expect(consume).not.toHaveBeenCalled();
+      expect(completeMessage).not.toHaveBeenCalled();
+      expect(abandonMessage).toHaveBeenCalledWith(received);
+      expect(deadLetterMessage).not.toHaveBeenCalled();
+      expect(reportError).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('completes a Bulk request only after consumption when the result route is enabled', async () => {
+    type Handlers = Parameters<
+      ReturnType<ServiceBusClient['createReceiver']>['subscribe']
+    >[0];
+    type Delivery = Parameters<Handlers['processMessage']>[0];
+    let handlers!: Handlers;
+    const completeMessage = vi.fn();
+    const abandonMessage = vi.fn();
+    const deadLetterMessage = vi.fn();
+    const createReceiver = vi.fn().mockReturnValue({
+      subscribe: (value: Handlers) => {
+        handlers = value;
+        return { close: vi.fn() };
+      },
+      peekMessages: vi.fn().mockResolvedValue([]),
+      completeMessage,
+      abandonMessage,
+      deadLetterMessage,
+    });
+    const bridge = new CatalogServiceBus({
+      createReceiver,
+    } as unknown as ServiceBusClient);
+    const consume = vi.fn().mockResolvedValue('APPLIED');
+    const resultRoute = 'g6.bulk.from.catalog';
+    bridge.subscribeWithProbe(
+      'g6.catalog.from.bulk',
+      createCatalogBulkConsumer({ consume }, [resultRoute]),
+      vi.fn(),
+    );
+    const event = bulkRequest(3);
+    const received = {
+      body: Buffer.from(JSON.stringify(event)),
+      messageId: event.message_id,
+      correlationId: event.correlation_id,
+      subject: event.name,
+      contentType: 'application/json',
+    } as Delivery;
+
+    await handlers.processMessage(received);
+
+    expect(consume).toHaveBeenCalledWith(event);
+    expect(consume.mock.invocationCallOrder[0]).toBeLessThan(
+      completeMessage.mock.invocationCallOrder[0]!,
+    );
+    expect(completeMessage).toHaveBeenCalledWith(received);
+    expect(abandonMessage).not.toHaveBeenCalled();
+    expect(deadLetterMessage).not.toHaveBeenCalled();
+  });
+
+  it('routes Bulk completed and rejected results to the enabled Bulk destination', async () => {
+    const resultRoute = 'g6.bulk.from.catalog';
+    expect(
+      readCatalogH5Destinations({ CATALOG_H5_DESTINATIONS: resultRoute }),
+    ).toContain(resultRoute);
+    const tryAddMessage = vi
+      .fn<(message: ServiceBusMessage) => boolean>()
+      .mockReturnValue(true);
+    const sendMessages = vi.fn().mockResolvedValue(undefined);
+    const createSender = vi.fn().mockReturnValue({
+      createMessageBatch: vi.fn().mockResolvedValue({ tryAddMessage }),
+      sendMessages,
+    });
+    const bridge = new CatalogServiceBus({
+      createSender,
+    } as unknown as ServiceBusClient);
+
+    for (const name of [
+      'catalog.bulk.upsert.completed',
+      'catalog.bulk.upsert.rejected',
+    ] as const) {
+      const result = bulkResult(name);
+      expect(destinationsFor(result)).toEqual([resultRoute]);
+      await bridge.publish(resultRoute, result);
+    }
+
+    expect(createSender).toHaveBeenCalledWith(resultRoute);
+    expect(sendMessages).toHaveBeenCalledTimes(2);
+    expect(tryAddMessage).toHaveBeenCalledTimes(2);
   });
 
   it('abandons a valid Taxonomy check when the H5 reply route is disabled', async () => {

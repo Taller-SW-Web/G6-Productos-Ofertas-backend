@@ -8,6 +8,7 @@ import { sql } from 'drizzle-orm';
 import { Database } from './database.js';
 import { CatalogMessageService } from './catalog-message.service.js';
 import {
+  bulkRequestQueue,
   catalogIncomingQueues,
   createCatalogServiceBus,
   taxonomyReplyQueue,
@@ -35,6 +36,20 @@ export function createCatalogTaxonomyConsumer(
       )
         throw new Error('CATALOG_H5_TAXONOMY_REPLY_DISABLED');
       return messages.consume(envelope, replyEnabled);
+    },
+  };
+}
+
+export function createCatalogBulkConsumer(
+  messages: Pick<CatalogMessageService, 'consume'>,
+  destinations: readonly string[],
+): Pick<CatalogMessageService, 'consume'> {
+  const replyEnabled = destinations.includes('g6.bulk.from.catalog');
+  return {
+    consume: async (envelope) => {
+      if (envelope.name === 'catalog.bulk.upsert.requested' && !replyEnabled)
+        throw new Error('CATALOG_H5_BULK_REPLY_DISABLED');
+      return messages.consume(envelope);
     },
   };
 }
@@ -197,7 +212,9 @@ export class CatalogServiceBusRuntime
         const service =
           queue === taxonomyRequestQueue
             ? createCatalogTaxonomyConsumer(this.messages, this.destinations)
-            : this.messages;
+            : queue === bulkRequestQueue
+              ? createCatalogBulkConsumer(this.messages, this.destinations)
+              : this.messages;
         opened.push(
           this.bus.subscribeWithProbe(queue, service, () =>
             this.scheduleReceiverRecovery(),

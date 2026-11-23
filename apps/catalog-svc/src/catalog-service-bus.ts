@@ -45,6 +45,7 @@ export const catalogIncomingQueues = Object.keys(
   producerByQueue,
 ) as IncomingQueue[];
 export const taxonomyRequestQueue = 'g6.catalog.from.taxonomy';
+export const bulkRequestQueue = 'g6.catalog.from.bulk';
 export const taxonomyReplyQueue =
   catalogDestinations['catalog.master.deactivation.checked'][0];
 const maximumMessageBytes = 256 * 1024;
