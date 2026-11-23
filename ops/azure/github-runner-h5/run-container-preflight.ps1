@@ -51,7 +51,9 @@ try {
     if ((@($container.command) -join ' ') -ne '/bin/bash -c') { throw 'Job command differs from the approved bash entrypoint.' }
     if (@($container.env | Where-Object name -eq 'H5_PREFLIGHT_REF').Count -gt 0) { throw 'Job execution already defines H5_PREFLIGHT_REF.' }
 
-    $container | Add-Member -NotePropertyName env -NotePropertyValue (@(@($container.env), @{name='H5_PREFLIGHT_REF';value=$Ref}) | Where-Object { $_ }) -Force
+    $templateJson = $job.properties.template | ConvertTo-Json -Depth 100 -Compress
+    $rendered = $templateJson | & python (Join-Path $PSScriptRoot 'render-execution-template.py') --set-env "H5_PREFLIGHT_REF=$Ref" 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $rendered) { throw 'Could not render the one-execution Container Apps template.' }
     $bootstrap = @'
 set -Eeuo pipefail
 work="$(mktemp -d)"
@@ -63,8 +65,7 @@ bash "$work/preflight.sh"
     $bootstrap = $bootstrap.Replace('__REPOSITORY__',$Repository).Replace('__SHA__',$sha)
     $container.args = @($bootstrap)
     $templatePath = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N') + '.yaml')
-    $json = $job.properties.template | ConvertTo-Json -Depth 100 -Compress
-    [System.IO.File]::WriteAllText($templatePath,$json,[System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText($templatePath,($rendered -join "`n"),[System.Text.UTF8Encoding]::new($false))
 
     $start = & az containerapp job start --name $JobName --resource-group $ResourceGroup --subscription $subscriptionId --yaml $templatePath --only-show-errors --output json 2>&1
     if ($LASTEXITCODE -ne 0) { throw "Container Apps Job start denied/failed: $($start -join ' ')" }

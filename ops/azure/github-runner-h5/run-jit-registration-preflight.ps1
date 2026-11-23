@@ -211,9 +211,10 @@ try {
     }
 
     Set-TemporaryJobSecret -Value $jitConfig
-    $container | Add-Member -NotePropertyName env -NotePropertyValue @(@{name='H5_RUNNER_JIT_CONFIG'; secretRef=$jobSecretName}) -Force
     $templateJson = $job.properties.template | ConvertTo-Json -Depth 100 -Compress
-    $templateFile = New-RestrictedTemplateFile -Content $templateJson
+    $rendered = $templateJson | & python (Join-Path $PSScriptRoot 'render-execution-template.py') --set-secret "H5_RUNNER_JIT_CONFIG=$jobSecretName" 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $rendered) { throw 'Could not render the one-execution JIT template.' }
+    $templateFile = New-RestrictedTemplateFile -Content ($rendered -join "`n")
     $startedAt = [DateTimeOffset]::UtcNow
     $startOutput = & az containerapp job start --name $JobName --resource-group $ResourceGroup --yaml $templateFile --only-show-errors --output json 2>&1
     if ($LASTEXITCODE -ne 0) {
