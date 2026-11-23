@@ -25,6 +25,7 @@ export async function enqueueCatalogDeliveries(
 export async function relayCatalogDelivery(
   database: Pick<Database, 'transaction'>,
   bus: Pick<CatalogServiceBus, 'publish'>,
+  destination?: string,
 ): Promise<'EMPTY' | 'CONFIRMED' | 'RETRY' | 'LEASE_LOST'> {
   const lease = randomUUID();
   const {
@@ -38,6 +39,7 @@ export async function relayCatalogDelivery(
       SELECT message_id, destination
       FROM catalog.outbox_delivery
       WHERE published_at IS NULL AND available_at <= now()
+        AND (${destination ?? null}::text IS NULL OR destination = ${destination ?? null})
       ORDER BY available_at, created_at, message_id, destination
       LIMIT 1 FOR UPDATE SKIP LOCKED
     ), claimed AS (
@@ -85,6 +87,7 @@ export async function relayCatalogDelivery(
     WHERE message_id = ${delivery.envelope.message_id}
       AND destination = ${delivery.destination}
       AND lease_token = ${lease}
+      AND available_at > now() AND published_at IS NULL
   `),
   );
   if (result.rowCount !== 1) return 'LEASE_LOST';
