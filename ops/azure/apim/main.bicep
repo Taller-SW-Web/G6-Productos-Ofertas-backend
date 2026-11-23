@@ -34,8 +34,11 @@ param quotaCalls int
 @description('Ventana de cuota en segundos.')
 @minValue(300)
 param quotaWindowSeconds int
-@description('Resource ID del logger de observabilidad aprobado.')
-param loggerResourceId string
+@description('Resource ID del recurso Application Insights autorizado.')
+param applicationInsightsResourceId string
+@secure()
+@description('Cadena de conexión de Application Insights; no se almacena en el repositorio.')
+param applicationInsightsConnectionString string
 @description('OpenAPI JSON generado por filter-openapi.py; se suministra al deployment autorizado.')
 param filteredOpenApi string
 
@@ -159,12 +162,26 @@ resource operationPolicies 'Microsoft.ApiManagement/service/apis/operations/poli
   }
 }]
 
+resource applicationInsightsLogger 'Microsoft.ApiManagement/service/loggers@2022-08-01' = {
+  parent: apim
+  name: 'applicationinsights'
+  properties: {
+    loggerType: 'applicationInsights'
+    description: 'Logger APIM para Application Insights con identidad administrada del sistema'
+    resourceId: applicationInsightsResourceId
+    credentials: {
+      connectionString: applicationInsightsConnectionString
+      identityClientId: 'systemAssigned'
+    }
+  }
+}
+
 resource apiDiagnostics 'Microsoft.ApiManagement/service/apis/diagnostics@2022-08-01' = {
   parent: api
   name: 'applicationinsights'
   properties: {
     alwaysLog: 'allErrors'
-    loggerId: loggerResourceId
+    loggerId: applicationInsightsLogger.id
     sampling: {
       samplingType: 'fixed'
       percentage: 10

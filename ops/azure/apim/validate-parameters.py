@@ -16,6 +16,10 @@ assert FILTER_SPEC.loader is not None
 FILTER_SPEC.loader.exec_module(FILTER)
 
 RESOURCE_ID = re.compile(r"^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/.+$", re.I)
+APPLICATION_INSIGHTS_RESOURCE_ID = re.compile(
+    r"^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.Insights/components/[^/]+$",
+    re.I,
+)
 HOSTNAME = re.compile(
     r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}",
     re.I,
@@ -66,13 +70,26 @@ def validate(parameters: dict, filtered_openapi: dict, manifest: dict) -> None:
         "burstWindowSeconds",
         "quotaCalls",
         "quotaWindowSeconds",
-        "loggerResourceId",
+        "applicationInsightsResourceId",
+        "applicationInsightsConnectionString",
         "filteredOpenApi",
     ):
         if key not in parameters:
             raise ValueError(f"Falta parámetro obligatorio: {key}")
 
-    for key in ("apimSubnetResourceId", "loggerResourceId"):
+    if not APPLICATION_INSIGHTS_RESOURCE_ID.fullmatch(
+        parameters["applicationInsightsResourceId"]
+    ):
+        raise ValueError(
+            "applicationInsightsResourceId debe identificar un componente Microsoft.Insights"
+        )
+    if (
+        not isinstance(parameters["applicationInsightsConnectionString"], str)
+        or not parameters["applicationInsightsConnectionString"].strip()
+    ):
+        raise ValueError("Falta applicationInsightsConnectionString segura")
+
+    for key in ("apimSubnetResourceId",):
         if not RESOURCE_ID.fullmatch(parameters[key]):
             raise ValueError(f"Resource ID inválido: {key}")
 

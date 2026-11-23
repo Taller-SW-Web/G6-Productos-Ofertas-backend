@@ -12,6 +12,7 @@
         <return-response>
           <set-status code="401" reason="Unauthorized" />
           <set-header name="Content-Type" exists-action="override"><value>application/problem+json</value></set-header>
+          <set-body>{"type":"about:blank","title":"No autorizado","status":401,"code":"TOKEN_INVALIDO"}</set-body>
         </return-response>
       </when>
     </choose>

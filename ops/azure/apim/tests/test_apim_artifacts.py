@@ -162,7 +162,8 @@ class ApimPolicyTests(unittest.TestCase):
             "burstWindowSeconds": 30,
             "quotaCalls": 1000,
             "quotaWindowSeconds": 86400,
-            "loggerResourceId": "/subscriptions/test/resourceGroups/lab/providers/Microsoft.Insights/components/apim",
+            "applicationInsightsResourceId": "/subscriptions/test/resourceGroups/lab/providers/Microsoft.Insights/components/g6-h5-test",
+            "applicationInsightsConnectionString": "test-placeholder-not-a-real-secret",
             "filteredOpenApi": "{}",
         }
         self.filtered = {"paths": {}}
@@ -187,6 +188,7 @@ class ApimPolicyTests(unittest.TestCase):
             {"gatewayBackendUrl": "https://gateway.internal.test/api/v1?x=1"},
             {"burstWindowSeconds": 301},
             {"quotaWindowSeconds": 120},
+            {"applicationInsightsResourceId": "/subscriptions/test/resourceGroups/lab/providers/Microsoft.ApiManagement/service/apim/loggers/logger"},
         ):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 PARAMS.validate(self.parameters | change, self.filtered, self.manifest)
@@ -220,6 +222,34 @@ class ApimPolicyTests(unittest.TestCase):
         self.assertIn("bytes: 0", bicep)
         self.assertIn("gatewayBackendUrl", bicep)
 
+    def test_application_insights_logger_uses_secure_connection_and_system_identity(self):
+        bicep = (ROOT / "main.bicep").read_text(encoding="utf-8")
+        self.assertIn("Microsoft.ApiManagement/service/loggers@2022-08-01", bicep)
+        self.assertIn("parent: apim", bicep)
+        self.assertIn("loggerType: 'applicationInsights'", bicep)
+        self.assertIn("resourceId: applicationInsightsResourceId", bicep)
+        self.assertIn("connectionString: applicationInsightsConnectionString", bicep)
+        self.assertIn("identityClientId: 'systemAssigned'", bicep)
+        self.assertRegex(
+            bicep,
+            r"@secure\(\)\s*@description\([^\n]*\)\s*param applicationInsightsConnectionString string",
+        )
+        self.assertIn("loggerId: applicationInsightsLogger.id", bicep)
+        diagnostics = bicep.split("resource apiDiagnostics", 1)[1]
+        self.assertIn("loggerId: applicationInsightsLogger.id", diagnostics)
+        self.assertNotIn("loggerResourceId", bicep)
+        self.assertNotRegex(bicep, r"InstrumentationKey=[0-9a-fA-F-]{36}")
+        validator = (ROOT / "validate-parameters.py").read_text(encoding="utf-8")
+        self.assertIn("applicationInsightsResourceId", validator)
+        self.assertNotIn("loggerResourceId", validator)
+        for candidate in ROOT.rglob("*"):
+            if candidate.is_file() and candidate.suffix.lower() in {".bicep", ".json", ".md", ".py", ".xml"}:
+                if candidate.resolve() == Path(__file__).resolve():
+                    continue
+                contents = candidate.read_text(encoding="utf-8")
+                self.assertNotIn("InstrumentationKey=", contents, candidate.as_posix())
+                self.assertNotIn("SharedAccessKey=", contents, candidate.as_posix())
+
     def test_jwt_rate_identity_comes_only_from_validated_jwt_subject(self):
         policy = (ROOT / "policies" / "operation-secured.xml").read_text(encoding="utf-8")
         self.assertIn('output-token-variable-name="jwt"', policy)
@@ -231,6 +261,19 @@ class ApimPolicyTests(unittest.TestCase):
         self.assertIn('code="401"', policy)
         self.assertNotIn("context.Principal", policy)
         self.assertNotIn("context.Request.IpAddress", policy)
+        root = ElementTree.fromstring(policy)
+        body = root.find(".//when/return-response/set-body")
+        self.assertIsNotNone(body)
+        problem = json.loads(body.text or "{}")
+        self.assertEqual(
+            problem,
+            {
+                "type": "about:blank",
+                "title": "No autorizado",
+                "status": 401,
+                "code": "TOKEN_INVALIDO",
+            },
+        )
         self.assertNotIn("output-token-variable-name", (ROOT / "policies" / "operation-public.xml").read_text(encoding="utf-8"))
 
     def test_imported_policy_resource_uses_apim_normalized_id_and_named_value_dependencies(self):
