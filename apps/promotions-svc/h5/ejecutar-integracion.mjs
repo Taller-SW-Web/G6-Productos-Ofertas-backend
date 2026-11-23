@@ -1,17 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { constanciaComercial } from './evidencia-integracion.mjs';
+import { authorizeMutation, readMutationAuthorization } from './autorizacion-mutaciones.mjs';
+import { verificarDespliegue } from './verificar-despliegue.mjs';
+import { pathToFileURL } from 'node:url';
 
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 const sha = /^[a-f0-9]{40}$/i;
-const scenario = {
-  sku: 'ADI-ENT22-AZU-M',
-  quantity: 1,
-  channel_id: 'MARKETPLACE',
-  coupon_code: 'ENTRENA5',
-  location_id: '9129b578-631e-1735-8427-b683fb524380',
-};
 const actions = [
   'preflight',
   'reserve',
@@ -28,10 +25,71 @@ const ensure = (condition, code) => {
 const segment = encodeURIComponent;
 const orderQuery = (order) => '?' + new URLSearchParams({ order_id: order });
 
+export function cancellationSteps(plan) {
+  if (plan.cancel_mode === 'release-only') return ['release'];
+  if (plan.cancel_mode === 'restore-consumption' || plan.cancel_mode === 'reject-unbacked-restore')
+    return ['restore', 'release'];
+  throw new Error('CANCEL_MODE_REQUIRED');
+}
+
+export async function executeCancellation(plan, cancellation, submit, operationId, reservationPath) {
+  for (const step of cancellationSteps(plan)) {
+    if (step === 'restore') {
+      const restore = {
+        order_id: plan.order_id,
+        operation_id: operationId('restore'),
+        consumption_operation_id: operationId('coupon'),
+        cancellation_reason: 'ANULACION',
+        cancelled_at: cancellation.occurred_at,
+      };
+      const restored = await submit('cupones', '/cupones/restauraciones', restore);
+      if (plan.cancel_mode === 'reject-unbacked-restore')
+        ensure(restored.status === 'REJECTED' && restored.result?.result_code === 'COUPON_IDENTITY_MISMATCH', 'UNBACKED_RESTORE_WAS_NOT_REJECTED');
+      else ensure(restored.status === 'COMPLETED' && restored.result?.outcome === plan.expected_restore_outcome, 'RESTORE_RESULT_DIFFERED');
+      continue;
+    }
+    const released = await submit('inventario', reservationPath() + '/liberar', {
+      order_id: plan.order_id,
+      operation_id: operationId('release'),
+      reason: 'ANULACION',
+    });
+    ensure(released.status === 'COMPLETED', 'RELEASE_RESULT_DIFFERED');
+  }
+}
+
 async function main() {
-  const [action, planPath] = process.argv.slice(2);
+  const [action, planPath, statePath = `${planPath}.runtime.json`, authorizationPath, executeFlag] =
+    process.argv.slice(2);
   ensure(actions.includes(action) && planPath, 'USE_ACTION_AND_PLAN_FILE');
+  ensure(resolve(statePath) !== resolve(planPath), 'RUNTIME_STATE_PATH_MUST_DIFFER');
   const plan = JSON.parse(await readFile(planPath, 'utf8'));
+  if (['reserve', 'coupon', 'confirm', 'cancel'].includes(action)) {
+    const authorization = await readMutationAuthorization(authorizationPath);
+    await authorizeMutation({
+      stage: action,
+      plan,
+      authorization,
+      execute: executeFlag === 'true',
+    });
+    await verificarDespliegue(plan);
+  }
+  const runtimeState = await readFile(statePath, 'utf8')
+    .then((text) => JSON.parse(text))
+    .catch((error) => {
+      if (error.code === 'ENOENT') return {};
+      throw error;
+    });
+  const runtimeReservation = runtimeState.reservation_id;
+  if (runtimeReservation)
+    ensure(
+      runtimeState.environment === plan.environment &&
+        runtimeState.g6_sha === plan.g6_sha &&
+        runtimeState.order_id === plan.order_id &&
+        runtimeState.operation_id === plan.operations?.reserve &&
+        uuid.test(runtimeReservation) &&
+        (!plan.reservation_id || plan.reservation_id === runtimeReservation),
+      'RUNTIME_STATE_CONFLICT',
+    );
   const gateway = new URL(plan.gateway);
   ensure(
     plan.environment === 'integration' &&
@@ -47,22 +105,36 @@ async function main() {
   const mutates = ['reserve', 'coupon', 'confirm', 'cancel'].includes(action);
   if (mutates) {
     ensure(
-      process.env.G5_H5_MUTATIONS === 'integration-only',
-      'INTEGRATION_MUTATIONS_NOT_APPROVED',
-    );
-    ensure(
       sha.test(plan.g5_sha) &&
         typeof plan.order_id === 'string' &&
         plan.order_id.trim(),
       'G5_SHA_AND_ORDER_REQUIRED',
     );
   }
-  const location = plan.location_id ?? scenario.location_id;
-  ensure(uuid.test(location), 'LOCATION_REQUIRED');
-  const correlationId = randomUUID();
+  const scenario = plan.scenario;
+  if (['preflight', 'reserve', 'coupon'].includes(action))
+    ensure(
+      scenario &&
+        typeof scenario.sku === 'string' && scenario.sku.trim() &&
+        Number.isSafeInteger(scenario.quantity) && scenario.quantity > 0 &&
+        typeof scenario.channel_id === 'string' && scenario.channel_id.trim() &&
+        typeof scenario.coupon_code === 'string' && scenario.coupon_code.trim() &&
+        typeof scenario.currency === 'string' && scenario.currency.trim() &&
+        (scenario.expected_regular_price === undefined ||
+          (typeof scenario.expected_regular_price === 'string' &&
+            /^\d+(?:\.\d{1,6})?$/.test(scenario.expected_regular_price) &&
+            Number(scenario.expected_regular_price) > 0)),
+      'AUTHORIZED_SCENARIO_CONFIGURATION_REQUIRED',
+    );
+  const location = scenario?.location_id;
+  if (['preflight', 'reserve'].includes(action))
+    ensure(uuid.test(location), 'LOCATION_REQUIRED');
+  const correlationId = plan.correlation_id;
+  ensure(uuid.test(correlationId), 'CORRELATION_ID_REQUIRED');
   const order = plan.order_id;
   const base = {
     environment: plan.environment,
+    case_id: plan.case_id,
     g6_sha: plan.g6_sha,
     g5_sha: plan.g5_sha,
     action,
@@ -95,12 +167,39 @@ async function main() {
       typeof data?.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(data.code)
         ? data.code
         : undefined;
+    const route = path.split('?')[0];
+    const check = method === 'GET' && route === '/inventario/disponibilidad'
+      ? 'availability'
+      : method === 'GET' && route === '/precios/skus/' + segment(scenario?.sku ?? '')
+        ? 'price'
+        : method === 'POST' && route === '/cupones/validar'
+          ? 'coupon'
+          : undefined;
+    const query = Object.fromEntries(new URLSearchParams(path.split('?')[1] ?? ''));
+    const requestEvidence = method === 'GET'
+      ? query
+      : body ? {
+        channel_id: body.channel_id,
+        coupon_code: body.coupon_code,
+        lines: body.lines,
+      } : {};
     report({
       event: 'http',
       method,
-      route: path.split('?')[0],
+      route,
       status: response.status,
       code,
+      check,
+      request: requestEvidence,
+      case_id: plan.case_id,
+      scenario: scenario ? {
+        sku: scenario.sku,
+        quantity: scenario.quantity,
+        channel_id: scenario.channel_id,
+        coupon_code: scenario.coupon_code,
+        currency: scenario.currency,
+        location_id: location,
+      } : undefined,
       operation_id: body?.operation_id,
     });
     return { status: response.status, data };
@@ -213,13 +312,16 @@ async function main() {
     const available = await inventoryAvailability();
     const pricing = await expectStatus(
       'GET',
-      '/precios/skus/' + scenario.sku + '?canal=MARKETPLACE',
+      '/precios/skus/' + segment(scenario.sku) +
+        '?canal=' + segment(scenario.channel_id),
       [200],
     );
     ensure(
       pricing?.sku === scenario.sku &&
-        pricing.currency === 'PEN' &&
-        Number(pricing.precio_regular) > 0,
+        pricing.currency === scenario.currency &&
+        Number(pricing.precio_regular) > 0 &&
+        (scenario.expected_regular_price === undefined ||
+          Number(pricing.precio_regular) === Number(scenario.expected_regular_price)),
       'INTEGRATION_PRICE_INVALID',
     );
     ensure(uuid.test(plan.customer_ref), 'TEST_CUSTOMER_REQUIRED');
@@ -233,7 +335,7 @@ async function main() {
     });
     ensure(coupon?.valid === true, 'INTEGRATION_COUPON_NOT_ELIGIBLE');
     ensure(
-      coupon.currency === 'PEN' && Number(coupon.discount_amount) > 0,
+      coupon.currency === scenario.currency && Number(coupon.discount_amount) > 0,
       'INTEGRATION_DISCOUNT_INVALID',
     );
     report({
@@ -241,6 +343,12 @@ async function main() {
       available,
       price: pricing.precio_regular,
       discount: coupon.discount_amount,
+      sku: scenario.sku,
+      currency: scenario.currency,
+      eligible: coupon.valid,
+      price_sku: pricing.sku,
+      price_currency: pricing.currency,
+      discount_currency: coupon.currency,
     });
     return;
   }
@@ -267,6 +375,38 @@ async function main() {
           Date.parse(result.expires_at) > Date.now(),
         'RESERVATION_NOT_CURRENT',
       );
+    if (result.status === 'COMPLETED') {
+      ensure(
+        !plan.reservation_id || plan.reservation_id === result.reservation_id,
+        'RESERVATION_ID_CHANGED_ON_REPLAY',
+      );
+      const checkpoint = {
+        environment: plan.environment,
+        g6_sha: plan.g6_sha,
+        order_id: order,
+        operation_id: operationId('reserve'),
+        reservation_id: result.reservation_id,
+      };
+      const prior = await readFile(statePath, 'utf8')
+        .then((text) => JSON.parse(text))
+        .catch((error) => {
+          if (error.code === 'ENOENT') return undefined;
+          throw error;
+        });
+      if (prior && JSON.stringify(prior) !== JSON.stringify(checkpoint))
+        ensure(
+          prior.environment === checkpoint.environment &&
+            prior.g6_sha === checkpoint.g6_sha &&
+            prior.order_id === checkpoint.order_id &&
+            prior.operation_id === checkpoint.operation_id &&
+            prior.reservation_id === checkpoint.reservation_id,
+          'RUNTIME_STATE_CONFLICT',
+        );
+      else if (!prior)
+        await writeFile(statePath, JSON.stringify(checkpoint, null, 2) + '\n', {
+          flag: 'wx',
+        });
+    }
     return;
   }
 
@@ -295,8 +435,9 @@ async function main() {
     const bearer = process.env.G5_H5_WRONG_SCOPE_JWT;
     ensure(bearer, 'REAL_NEGATIVE_G7_TOKENS_REQUIRED');
     await expectStatus('POST', invalid, [403], { body: {}, bearer });
-    if (plan.operations?.coupon && order) {
-      const operation = operationId('coupon');
+    if (plan.auth?.existing_coupon_operation_id && order) {
+      const operation = plan.auth.existing_coupon_operation_id;
+      ensure(uuid.test(operation), 'AUTH_EXISTING_OPERATION_REQUIRED');
       const original = await expectStatus(
         'GET',
         statusPath('cupones', operation),
@@ -306,9 +447,14 @@ async function main() {
         original?.operation_id === operation && original.order_id === order,
         'OPERATION_IDENTITY_MISMATCH',
       );
+      const foreignOrder = plan.auth.foreign_order_id;
+      ensure(
+        typeof foreignOrder === 'string' && foreignOrder.trim() && foreignOrder !== order,
+        'FOREIGN_ORDER_REQUIRED',
+      );
       const foreign = await expectStatus(
         'GET',
-        statusPath('cupones', operation, order + '-AJENO'),
+        statusPath('cupones', operation, foreignOrder),
         [404],
       );
       const missing = await expectStatus(
@@ -330,14 +476,16 @@ async function main() {
     return;
   }
 
-  const reservation = reservationPath();
+  const reservation = runtimeReservation
+    ? '/inventario/reservas/' + segment(runtimeReservation)
+    : reservationPath();
   const state = async () =>
     expectStatus('GET', reservation + '/estado' + orderQuery(order), [200]);
   if (action === 'expired') {
     const result = await state();
     ensure(
       result?.order_id === order &&
-        result.reservation_id === plan.reservation_id,
+        result.reservation_id === (runtimeReservation ?? plan.reservation_id),
       'RESERVATION_IDENTITY_MISMATCH',
     );
     ensure(
@@ -423,31 +571,14 @@ async function main() {
     kind: cancellation.event,
     evidence_id: cancellation.event_id,
   });
-  const restore = {
-    order_id: order,
-    operation_id: operationId('restore'),
-    consumption_operation_id: operationId('coupon'),
-    cancellation_reason: 'ANULACION',
-    cancelled_at: cancellation.occurred_at,
-  };
-  const restored = await submit('cupones', '/cupones/restauraciones', restore);
-  ensure(
-    restored.status === 'COMPLETED' &&
-      restored.result?.outcome === plan.expected_restore_outcome,
-    'RESTORE_RESULT_DIFFERED',
-  );
-  const released = await submit('inventario', reservation + '/liberar', {
-    order_id: order,
-    operation_id: operationId('release'),
-    reason: 'ANULACION',
-  });
-  ensure(released.status === 'COMPLETED', 'RELEASE_RESULT_DIFFERED');
+  await executeCancellation(plan, cancellation, submit, operationId, reservationPath);
 }
 
-main().catch((error) => {
-  const code = /^[A-Z0-9_]{1,100}$/.test(error?.message ?? '')
-    ? error.message
-    : 'INTEGRATION_RUN_FAILED';
-  console.error(JSON.stringify({ event: 'failed', code }));
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  main().catch((error) => {
+    const code = /^[A-Z0-9_]{1,100}$/.test(error?.message ?? '')
+      ? error.message
+      : 'INTEGRATION_RUN_FAILED';
+    console.error(JSON.stringify({ event: 'failed', code }));
+    process.exitCode = 1;
+  });
