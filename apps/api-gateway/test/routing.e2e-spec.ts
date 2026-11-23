@@ -295,23 +295,35 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
     }
   });
 
-  it('keeps Inventory H01/H02 absent until their real HTTP providers are ready', async () => {
+  it('proxies Inventory H01/H02 only to an authenticated manager', async () => {
+    settings.securityMode = 'G7_AUTHENTICATED';
     const manager = signed.token({
       tipo: 'acceso',
       sub: '11111111-1111-4111-8111-111111111111',
       roles: ['GESTOR_COMERCIAL'],
     });
+    const otherUser = signed.token({
+      tipo: 'acceso',
+      sub: '22222222-2222-4222-8222-222222222222',
+      roles: ['VENDEDOR'],
+    });
     for (const path of [
       '/api/v1/inventario/alertas',
       '/api/v1/inventario/ubicaciones',
     ]) {
-      await request(app.getHttpServer()).get(path).expect(404);
       await request(app.getHttpServer())
         .get(path)
         .set('Authorization', `Bearer ${manager}`)
-        .expect(404);
+        .expect(200);
+      await request(app.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${otherUser}`)
+        .expect(403);
     }
-    expect(calls).toHaveLength(0);
+    expect(calls.map(({ url }) => url)).toEqual([
+      '/api/v1/inventario/alertas',
+      '/api/v1/inventario/ubicaciones',
+    ]);
   });
 
   it('proxies Bulk correlation reconciliation as an authorized no-store read', async () => {
