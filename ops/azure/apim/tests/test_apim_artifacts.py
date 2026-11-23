@@ -10,7 +10,7 @@ from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_DOCS_SHA = "490172c11cb4b83ddd1996f8d5834d0402184cf8"
-EXPECTED_GATEWAY_SHA = "57899dbbfb82758135eb67ad08c94bec03ff19cb"
+EXPECTED_GATEWAY_SHA = "05f6b929f8aebfd745acd2e70959e36967c96d09"
 SPEC = importlib.util.spec_from_file_location("filter_openapi", ROOT / "filter-openapi.py")
 FILTER = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -307,6 +307,20 @@ class ApimPolicyTests(unittest.TestCase):
         bicep = (ROOT / "main.bicep").read_text(encoding="utf-8")
         self.assertIn("[for operation in operationsManifest.operations", bicep)
         self.assertIn("${operation.apimOperationId}/policy", bicep)
+
+    def test_final_manifest_keeps_h5_operation_count_and_exclusions(self):
+        manifest = json.loads((ROOT / "openapi" / "operation-security.json").read_text(encoding="utf-8"))
+        operations = manifest["operations"]
+        self.assertEqual(len(operations), 145)
+        self.assertEqual(sum(operation["secured"] for operation in operations), 143)
+        self.assertEqual(sum(not operation["secured"] for operation in operations), 2)
+        self.assertEqual(len(manifest["privateOperationIds"]), 5)
+        self.assertFalse(manifest["g5EnabledByDefault"])
+        self.assertEqual(sum(operation["g5OptIn"] for operation in operations), 0)
+        self.assertEqual(
+            manifest["excludedUncontractedLegacyOperationIds"],
+            sorted(FILTER.LEGACY_UNCONTRACTED),
+        )
 
     def test_gateway_prefix_maps_public_route_without_rewrite(self):
         backend = "https://gateway.private.test/api/v1"

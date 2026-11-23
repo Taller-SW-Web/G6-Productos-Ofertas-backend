@@ -715,7 +715,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-backend
-        ref: 57899dbbfb82758135eb67ad08c94bec03ff19cb
+        ref: 05f6b929f8aebfd745acd2e70959e36967c96d09
         path: .ci/G6-Productos-Ofertas-gateway
         persist-credentials: 'false'
     - name: Configurar Python 3.12
@@ -740,7 +740,7 @@ jobs:
         --gateway-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/contract-routes.ts
         --g5-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/g5-h5-routes.ts
         --expected-docs-sha 490172c11cb4b83ddd1996f8d5834d0402184cf8
-        --expected-gateway-sha 57899dbbfb82758135eb67ad08c94bec03ff19cb
+        --expected-gateway-sha 05f6b929f8aebfd745acd2e70959e36967c96d09
   integral:
     name: Validación integral de integración continua
     runs-on: ubuntu-latest

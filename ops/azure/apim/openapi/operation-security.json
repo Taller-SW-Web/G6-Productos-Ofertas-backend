@@ -1,6 +1,6 @@
 {
   "docsSha": "490172c11cb4b83ddd1996f8d5834d0402184cf8",
-  "gatewaySha": "57899dbbfb82758135eb67ad08c94bec03ff19cb",
+  "gatewaySha": "05f6b929f8aebfd745acd2e70959e36967c96d09",
   "privateOperationIds": [
     "filtrarSkusVendiblesInterno",
     "obtenerContenidoCargaMasivaInternoH5",
@@ -1176,5 +1176,5 @@
     }
   ],
   "operationSetSha256": "040544e1666747ff00c9eb77c6509b6831c83368dcba7b0ef29f3668ac7365fb",
-  "filteredOpenApiCanonicalSha256": "aa13be424d904393efc2ea1dc83212506388b56a1eb39ce63bfb70895edc41e8"
+  "filteredOpenApiCanonicalSha256": "537e67b96aa521198bb8923661f27590eb0d39e4c3ed65076d999beadb23b742"
 }

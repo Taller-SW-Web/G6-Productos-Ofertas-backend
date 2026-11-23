@@ -18,6 +18,10 @@ python ops/azure/apim/filter-openapi.py `
 
 G5 queda desactivado si no se usa `--enable-g5`. No se incluye valor de ejemplo con datos de producción.
 
+### Procedencia de esta revisión
+
+Los artefactos versionados en este PR se regeneraron desde Docs `490172c11cb4b83ddd1996f8d5834d0402184cf8` y Gateway `05f6b929f8aebfd745acd2e70959e36967c96d09` (merge commit integrado en `master`). El manifiesto contiene 145 operaciones importables: 143 protegidas y dos públicas. Excluye las cinco operaciones internas, mantiene G5 deshabilitado por defecto y deja fuera las dos operaciones legacy de Pricing sin contrato. El CI fija ambas procedencias y valida que OpenAPI filtrado, manifiesto y políticas ARM correspondan exactamente.
+
 ## Infraestructura
 
 `main.bicep` define APIM Developer clásico con inyección VNet externa para HTTPS de clientes y conectividad saliente a Gateway. La URL de origen del Gateway debe ser privada y resolverse desde la subred dedicada. La plantilla parametriza IDs de subred, URL/DNS, issuer/JWKS/audience, orígenes CORS, límites y el Resource ID del componente Application Insights autorizado. Declara el logger hijo de APIM con `loggerType: applicationInsights`; `apiDiagnostics.loggerId` usa el `.id` de ese recurso, no el Resource ID del componente Application Insights. La referencia Bicep declara la dependencia de diagnóstico hacia logger.
