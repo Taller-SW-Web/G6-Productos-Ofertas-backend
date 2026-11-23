@@ -22,7 +22,10 @@ import {
 type Config = NonNullable<ReturnType<typeof readTaxonomyServiceBus>>;
 type Store = Pick<
   TaxonomyMessageStore,
-  'consumir' | 'claimServiceBusDelivery' | 'finishServiceBusDelivery'
+  | 'consumir'
+  | 'claimServiceBusDelivery'
+  | 'finishServiceBusDelivery'
+  | 'verifyServiceBusStorage'
 >;
 
 function envelope(row: Record<string, unknown>) {
@@ -82,6 +85,7 @@ export async function publishTaxonomyDelivery(
     if (message) {
       const batch = await sender.createMessageBatch({
         maxSizeInBytes: 256 * 1024,
+        abortSignal: AbortSignal.timeout(5000),
       });
       if (!batch.tryAddMessage(message)) outcome = 'terminal';
       else {
@@ -106,7 +110,7 @@ export async function receiveTaxonomyDelivery(
     'completeMessage' | 'abandonMessage' | 'deadLetterMessage'
   >,
   message: ServiceBusReceivedMessage,
-): Promise<void> {
+): Promise<boolean> {
   let checked: ReturnType<typeof parseChecked>;
   try {
     if (
@@ -136,15 +140,16 @@ export async function receiveTaxonomyDelivery(
       deadLetterReason: 'INVALID_TAXONOMY_CHECK_RESULT',
       deadLetterErrorDescription: 'Contract or queue validation failed',
     });
-    return;
+    return true;
   }
   try {
     await store.consumir(checked);
   } catch {
     await receiver.abandonMessage(message);
-    return;
+    return false;
   }
   await receiver.completeMessage(message);
+  return true;
 }
 
 export class TaxonomyServiceBusRuntime {
@@ -156,6 +161,7 @@ export class TaxonomyServiceBusRuntime {
   private tick?: Promise<void>;
   private readonly deliveries = new Set<Promise<void>>();
   private stopped = false;
+  private failures = 0;
   available = false;
 
   constructor(
@@ -183,35 +189,37 @@ export class TaxonomyServiceBusRuntime {
     this.subscription = receiver.subscribe(
       {
         processMessage: (message) => {
-          const task = receiveTaxonomyDelivery(
-            this.store,
-            receiver,
-            message,
-          ).catch(() => {
-            this.available = false;
-          });
+          const task = receiveTaxonomyDelivery(this.store, receiver, message)
+            .then((settled) => {
+              if (!settled) this.markUnavailable();
+            })
+            .catch(() => this.markUnavailable());
           this.deliveries.add(task);
           void task.then(() => this.deliveries.delete(task));
           return task;
         },
-        processError: async () => {
-          this.available = false;
-        },
+        processError: async () => this.markUnavailable(),
       },
       { autoCompleteMessages: false, maxConcurrentCalls: 1 },
     );
     const cycle = () => {
-      this.tick = Promise.all([
-        receiver.peekMessages(1, { abortSignal: AbortSignal.timeout(5000) }),
-        sender.createMessageBatch({ maxSizeInBytes: 256 * 1024 }),
-      ])
+      const failures = this.failures;
+      this.tick = this.store
+        .verifyServiceBusStorage()
+        .then(() =>
+          receiver.peekMessages(1, { abortSignal: AbortSignal.timeout(5000) }),
+        )
+        .then(() =>
+          sender.createMessageBatch({
+            maxSizeInBytes: 256 * 1024,
+            abortSignal: AbortSignal.timeout(5000),
+          }),
+        )
         .then(() => publishTaxonomyDelivery(this.store, sender))
         .then((ready) => {
-          this.available = ready && !this.stopped;
+          this.available = ready && this.failures === failures && !this.stopped;
         })
-        .catch(() => {
-          this.available = false;
-        })
+        .catch(() => this.markUnavailable())
         .finally(() => {
           if (!this.stopped) {
             this.timer = setTimeout(cycle, 1000);
@@ -220,6 +228,11 @@ export class TaxonomyServiceBusRuntime {
         });
     };
     cycle();
+  }
+
+  private markUnavailable(): void {
+    this.available = false;
+    this.failures++;
   }
 
   async close(): Promise<void> {

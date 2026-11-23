@@ -1,9 +1,22 @@
--- Taxonomy H5. No backfill and no changes to the H4 migrations.
+-- Taxonomy H5. The executor must wrap this file in one transaction.
+SET LOCAL lock_timeout = '5s';
+SET LOCAL search_path = pg_catalog;
+LOCK TABLE taxonomy.outbox IN ACCESS EXCLUSIVE MODE;
+
 DO $guard$
 BEGIN
   IF current_user <> 'po_taxonomy_owner' OR NOT EXISTS (
     SELECT 1 FROM pg_namespace WHERE nspname = 'taxonomy' AND pg_get_userbyid(nspowner) = current_user
   ) THEN RAISE EXCEPTION 'Run H5 migration as po_taxonomy_owner on taxonomy'; END IF;
+
+  IF to_regclass('taxonomy.outbox_delivery') IS NOT NULL
+    OR to_regprocedure('taxonomy.enqueue_catalog_delivery_h5()') IS NOT NULL
+    OR EXISTS (
+      SELECT 1 FROM pg_trigger WHERE tgrelid = 'taxonomy.outbox'::regclass
+        AND NOT tgisinternal AND tgname IN ('taxonomy_enqueue_catalog_delivery_h5', 'trg_taxonomy_catalog_h5')
+    ) THEN
+    RAISE EXCEPTION 'Taxonomy H5 has an existing or alternate writer; reconcile before applying';
+  END IF;
 END;
 $guard$;
 
@@ -42,6 +55,7 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+REVOKE ALL ON FUNCTION taxonomy.fn_enqueue_catalog_h5() FROM PUBLIC;
 CREATE TRIGGER trg_taxonomy_catalog_h5 AFTER INSERT ON taxonomy.outbox
 FOR EACH ROW WHEN (NEW.delivery_transport = 'AZURE_SERVICE_BUS')
 EXECUTE FUNCTION taxonomy.fn_enqueue_catalog_h5();

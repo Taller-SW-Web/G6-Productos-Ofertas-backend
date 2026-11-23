@@ -24,6 +24,8 @@ import {
 describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
   'Taxonomy H5 storage and relay with PostgreSQL',
   () => {
+    const catalogLegacyId = randomUUID();
+    const taxonomyLegacyId = randomUUID();
     let admin: Pool;
     let runtime: Pool;
     let store: TaxonomyMessageStore;
@@ -78,16 +80,54 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
           "'; CREATE SCHEMA catalog AUTHORIZATION po_catalog_owner",
       );
       const catalogOwner = await admin.connect();
+      const catalogMigration = await readFile(
+        'apps/catalog-svc/migrations-candidate/h5/0002_taxonomy_reply_transport.sql',
+        'utf8',
+      );
       try {
         await catalogOwner.query('SET ROLE po_catalog_owner');
         for (const path of [
           'apps/catalog-svc/test/fixtures/0001_create_catalog.sql',
           'apps/catalog-svc/migrations-candidate/h5/0001_outbox_delivery.sql',
-          'apps/catalog-svc/migrations-candidate/h5/0002_taxonomy_reply_transport.sql',
         ]) {
           await catalogOwner.query(await readFile(path, 'utf8'));
         }
+        await catalogOwner.query(
+          "INSERT INTO catalog.outbox (message_id,event_name,kind,correlation_id,occurred_at,payload) VALUES ($1,'catalog.product.deactivated','event',$2,now(),'{}')",
+          [catalogLegacyId, randomUUID()],
+        );
+        await catalogOwner.query(
+          "INSERT INTO catalog.outbox_delivery (message_id,destination) VALUES ($1,'g6.promotions.from.catalog')",
+          [catalogLegacyId],
+        );
+        const before = await catalogOwner.query(
+          'SELECT * FROM catalog.outbox_delivery',
+        );
+        await expect(catalogOwner.query(catalogMigration)).rejects.toThrow(
+          'Catalog H5 has unclassified deliveries',
+        );
+        await catalogOwner.query('ROLLBACK');
+        expect(
+          (await catalogOwner.query('SELECT * FROM catalog.outbox_delivery'))
+            .rows,
+        ).toEqual(before.rows);
+        await catalogOwner.query(
+          'DELETE FROM catalog.outbox_delivery WHERE message_id=$1',
+          [catalogLegacyId],
+        );
+        await catalogOwner.query(
+          'CREATE FUNCTION catalog.enqueue_h5_outbox_deliveries() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$',
+        );
+        await expect(catalogOwner.query(catalogMigration)).rejects.toThrow(
+          'Catalog H5 has an existing or alternate writer',
+        );
+        await catalogOwner.query('ROLLBACK');
+        await catalogOwner.query(
+          'DROP FUNCTION catalog.enqueue_h5_outbox_deliveries()',
+        );
+        await catalogOwner.query(catalogMigration);
       } finally {
+        await catalogOwner.query('ROLLBACK');
         await catalogOwner.query('RESET ROLE');
         catalogOwner.release();
       }
@@ -112,8 +152,36 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
         'utf8',
       );
       await admin.query(
-        'BEGIN; SET LOCAL ROLE po_taxonomy_owner; ' + candidate + ' COMMIT;',
+        "INSERT INTO taxonomy.outbox (message_id,event_name,kind,correlation_id,occurred_at,payload) VALUES ($1,'taxonomy.category.updated','event',$2,now(),'{}')",
+        [taxonomyLegacyId, randomUUID()],
       );
+      const taxonomyOwner = await admin.connect();
+      try {
+        await taxonomyOwner.query(
+          'SET ROLE po_taxonomy_owner; CREATE TABLE taxonomy.outbox_delivery (message_id uuid PRIMARY KEY, published_at timestamptz)',
+        );
+        await taxonomyOwner.query(
+          'INSERT INTO taxonomy.outbox_delivery (message_id) VALUES ($1)',
+          [taxonomyLegacyId],
+        );
+        await expect(
+          taxonomyOwner.query('BEGIN; ' + candidate + ' COMMIT;'),
+        ).rejects.toThrow('Taxonomy H5 has an existing or alternate writer');
+        await taxonomyOwner.query('ROLLBACK');
+        expect(
+          (
+            await taxonomyOwner.query(
+              'SELECT message_id,published_at FROM taxonomy.outbox_delivery',
+            )
+          ).rows,
+        ).toEqual([{ message_id: taxonomyLegacyId, published_at: null }]);
+        await taxonomyOwner.query('DROP TABLE taxonomy.outbox_delivery');
+        await taxonomyOwner.query('BEGIN; ' + candidate + ' COMMIT;');
+      } finally {
+        await taxonomyOwner.query('ROLLBACK');
+        await taxonomyOwner.query('RESET ROLE');
+        taxonomyOwner.release();
+      }
       url.username = 'taxonomy_app';
       url.password = password;
       runtime = new Pool({
@@ -135,6 +203,43 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
         admin?.end(),
         catalogDb?.onModuleDestroy(),
       ]);
+    });
+
+    it('keeps the installed legacy records and drains only RabbitMQ without creating H5 deliveries', async () => {
+      expect(
+        (
+          await admin.query(
+            'SELECT delivery_transport,published_at FROM catalog.outbox WHERE message_id=$1',
+            [catalogLegacyId],
+          )
+        ).rows,
+      ).toEqual([{ delivery_transport: 'RABBITMQ', published_at: null }]);
+      expect(
+        (
+          await admin.query(
+            'SELECT delivery_transport,published_at FROM taxonomy.outbox WHERE message_id=$1',
+            [taxonomyLegacyId],
+          )
+        ).rows,
+      ).toEqual([{ delivery_transport: 'RABBITMQ', published_at: null }]);
+      expect(
+        (await admin.query('SELECT message_id FROM catalog.outbox_delivery'))
+          .rows,
+      ).toHaveLength(0);
+      expect(
+        (await admin.query('SELECT message_id FROM taxonomy.outbox_delivery'))
+          .rows,
+      ).toHaveLength(0);
+      const catalogPublisher = { publish: vi.fn(async () => undefined) };
+      expect(await catalog.relayOne(catalogPublisher)).toBe('PUBLISHED');
+      expect(catalogPublisher.publish).toHaveBeenCalledWith(
+        expect.objectContaining({ message_id: catalogLegacyId }),
+      );
+      const taxonomyPublisher = vi.fn(async () => undefined);
+      expect(await store.publicarUno(taxonomyPublisher)).toBe('PUBLICADO');
+      expect(taxonomyPublisher).toHaveBeenCalledWith(
+        expect.objectContaining({ message_id: taxonomyLegacyId }),
+      );
     });
 
     const insert = (
@@ -191,11 +296,21 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
           .mockRejectedValueOnce(new Error('AMBIGUOUS')),
       };
       expect(await publishTaxonomyDelivery(store, sender)).toBe(false);
+      const restartedStore = new TaxonomyMessageStore(
+        {
+          read: <T>(work: (db: NodePgDatabase) => Promise<T>) =>
+            work(drizzle(runtime)),
+        } as Database,
+        intents,
+      );
+      expect(await restartedStore.publicarUno(publishH4)).toBe('VACIO');
       await admin.query(
         'UPDATE taxonomy.outbox_delivery SET next_attempt_at=clock_timestamp() WHERE message_id=$1',
         [h5.message_id],
       );
-      expect(await publishTaxonomyDelivery(store, sender)).toBe(true);
+      expect(await publishTaxonomyDelivery(restartedStore, sender)).toBe(true);
+      expect(await restartedStore.publicarUno(publishH4)).toBe('VACIO');
+      expect(publishH4).toHaveBeenCalledTimes(1);
       expect(captured.map((m) => m.messageId)).toEqual([
         h5.message_id,
         h5.message_id,
@@ -245,12 +360,16 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
       expect(
         await relayCatalogDelivery(catalogDb, { publish }, taxonomyReplyQueue),
       ).toBe('RETRY');
+      const restartedCatalog = new CatalogMessageService(catalogDb);
+      expect(await restartedCatalog.relayOne(h4Publisher)).toBe('EMPTY');
       await admin.query(
         'UPDATE catalog.outbox_delivery SET available_at=now() WHERE published_at IS NULL',
       );
       expect(
         await relayCatalogDelivery(catalogDb, { publish }, taxonomyReplyQueue),
       ).toBe('CONFIRMED');
+      expect(await restartedCatalog.relayOne(h4Publisher)).toBe('EMPTY');
+      expect(h4Publisher.publish).not.toHaveBeenCalled();
       expect(
         publish.mock.calls.map(([queue, message]) => [
           queue,
@@ -313,6 +432,58 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
           )
         ).rows,
       ).toEqual([{ is_blocking: false }]);
+    });
+
+    it('rolls back Inbox, barrier, Outbox and delivery when the Catalog marker or Inbox insert fails', async () => {
+      const request: CatalogEnvelope = {
+        message_id: randomUUID(),
+        correlation_id: randomUUID(),
+        operation_id: randomUUID(),
+        schema_version: 1,
+        occurred_at: new Date().toISOString(),
+        producer: 'taxonomy-svc',
+        kind: 'command',
+        name: 'taxonomy.master.deactivation.check.requested',
+        data: { entity_type: 'CATEGORY', entity_id: randomUUID(), version: 0 },
+      };
+      const snapshot = async () =>
+        (
+          await admin.query(
+            'SELECT (SELECT count(*)::int FROM catalog.inbox WHERE operation_id=$1) AS inbox, (SELECT count(*)::int FROM catalog.master_barriers WHERE operation_id=$1) AS barriers, (SELECT count(*)::int FROM catalog.outbox WHERE operation_id=$1) AS outbox, (SELECT count(*)::int FROM catalog.outbox_delivery d JOIN catalog.outbox o USING (message_id) WHERE o.operation_id=$1) AS deliveries',
+            [request.operation_id],
+          )
+        ).rows[0];
+      const empty = { inbox: 0, barriers: 0, outbox: 0, deliveries: 0 };
+      await admin.query(
+        'ALTER TABLE catalog.outbox DISABLE TRIGGER trg_catalog_taxonomy_reply_transport',
+      );
+      try {
+        await expect(catalog.consume(request, true)).rejects.toThrow(
+          'CATALOG_H5_REPLY_TRANSPORT_NOT_PERSISTED',
+        );
+        expect(await snapshot()).toEqual(empty);
+      } finally {
+        await admin.query(
+          'ALTER TABLE catalog.outbox ENABLE TRIGGER trg_catalog_taxonomy_reply_transport',
+        );
+      }
+      await admin.query('REVOKE INSERT ON catalog.inbox FROM catalog_app');
+      try {
+        await expect(catalog.consume(request, true)).rejects.toThrow();
+        expect(await snapshot()).toEqual(empty);
+      } finally {
+        await admin.query('GRANT INSERT ON catalog.inbox TO catalog_app');
+      }
+      expect(await catalog.consume(request, true)).toBe('APPLIED');
+      expect(
+        await new CatalogMessageService(catalogDb).consume(request, true),
+      ).toBe('DUPLICATE');
+      expect(await snapshot()).toEqual({
+        inbox: 1,
+        barriers: 1,
+        outbox: 1,
+        deliveries: 1,
+      });
     });
 
     it('uses the existing checked-result handler before settling a matching Azure delivery', async () => {

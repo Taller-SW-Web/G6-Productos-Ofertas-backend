@@ -25,6 +25,7 @@ export class CatalogTaxonomyServiceBusRuntime
   private timer?: ReturnType<typeof setTimeout>;
   private running?: Promise<void>;
   private connected = false;
+  private failures = 0;
   private stopping = false;
 
   constructor(
@@ -44,12 +45,31 @@ export class CatalogTaxonomyServiceBusRuntime
     this.bus = createCatalogServiceBus(env);
     if (!this.bus) throw new Error('CATALOG_H5_SERVICE_BUS_REQUIRED');
 
+    await this.verifyStorage();
+
+    this.subscription = this.bus.subscribeWithProbe(
+      taxonomyRequestQueue,
+      { consume: (envelope) => this.messages.consume(envelope, true) },
+      () => this.markUnavailable(),
+    );
+    this.schedule(this.bus, this.subscription);
+  }
+
+  private markUnavailable(): void {
+    this.connected = false;
+    this.failures++;
+  }
+
+  private async verifyStorage(): Promise<void> {
     const result = await this.database.read((db) =>
       db.execute(sql`
         SELECT to_regclass('catalog.outbox_delivery') IS NOT NULL
           AND has_table_privilege(current_user, to_regclass('catalog.outbox_delivery'), 'SELECT')
           AND has_table_privilege(current_user, to_regclass('catalog.outbox_delivery'), 'INSERT')
-          AND has_column_privilege(current_user, to_regclass('catalog.outbox_delivery'), 'lease_token', 'UPDATE')
+          AND NOT EXISTS (
+            SELECT 1 FROM unnest(ARRAY['attempts','available_at','lease_token','published_at','last_error']) AS cols(name)
+            WHERE NOT has_column_privilege(current_user, to_regclass('catalog.outbox_delivery'), cols.name, 'UPDATE')
+          )
           AND EXISTS (
             SELECT FROM pg_trigger
             WHERE tgname = 'trg_catalog_taxonomy_reply_transport'
@@ -60,15 +80,6 @@ export class CatalogTaxonomyServiceBusRuntime
     );
     if (result.rows[0]?.ready !== true)
       throw new Error('CATALOG_H5_TAXONOMY_STORAGE_NOT_READY');
-
-    this.subscription = this.bus.subscribeWithProbe(
-      taxonomyRequestQueue,
-      { consume: (envelope) => this.messages.consume(envelope, true) },
-      () => {
-        this.connected = false;
-      },
-    );
-    this.schedule(this.bus, this.subscription);
   }
 
   private schedule(
@@ -86,21 +97,22 @@ export class CatalogTaxonomyServiceBusRuntime
     bus: CatalogServiceBus,
     subscription: ReturnType<CatalogServiceBus['subscribeWithProbe']>,
   ): Promise<void> {
+    const failures = this.failures;
     try {
-      if (!this.connected) {
-        await Promise.all([
-          subscription.probe(AbortSignal.timeout(5000)),
-          bus.verifySender(taxonomyReplyQueue, AbortSignal.timeout(5000)),
-        ]);
-      }
+      await this.verifyStorage();
+      await subscription.probe(AbortSignal.timeout(5000));
+      await bus.verifySender(taxonomyReplyQueue, AbortSignal.timeout(5000));
       const result = await relayCatalogDelivery(
         this.database,
         bus,
         taxonomyReplyQueue,
       );
-      this.connected = result !== 'RETRY' && !this.stopping;
+      this.connected =
+        this.failures === failures &&
+        (result === 'CONFIRMED' || result === 'EMPTY') &&
+        !this.stopping;
     } catch {
-      this.connected = false;
+      this.markUnavailable();
       this.logger.warn('CATALOG_H5_TAXONOMY_TRANSPORT_UNAVAILABLE');
     }
   }

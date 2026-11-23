@@ -95,7 +95,10 @@ export class TaxonomyMessageStore {
         AND current_setting('g6.taxonomy_messaging', true) = 'AZURE_SERVICE_BUS'
         AND has_table_privilege(current_user, to_regclass('taxonomy.outbox_delivery'), 'SELECT')
         AND has_table_privilege(current_user, to_regclass('taxonomy.outbox_delivery'), 'INSERT')
-        AND has_column_privilege(current_user, to_regclass('taxonomy.outbox_delivery'), 'lease_token', 'UPDATE')
+        AND NOT EXISTS (
+          SELECT 1 FROM unnest(ARRAY['next_attempt_at','attempts','lease_token','lease_until','sent_at','last_error']) AS cols(name)
+          WHERE NOT has_column_privilege(current_user, to_regclass('taxonomy.outbox_delivery'), cols.name, 'UPDATE')
+        )
         AND EXISTS (SELECT FROM pg_trigger WHERE tgname = 'trg_taxonomy_catalog_h5'
           AND tgrelid = 'taxonomy.outbox'::regclass AND tgenabled IN ('O','A')) AS ready
     `),

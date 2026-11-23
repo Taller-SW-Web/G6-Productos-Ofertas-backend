@@ -9,3 +9,5 @@ TAXONOMY_SERVICE_BUS_ENABLED=false pausa envío y consumo del runtime H5. La sel
 Esta candidata es la variante seleccionada para la reconciliación R18/R09. La migración `0006_service_bus_outbox_delivery.sql` del PR #247 define una tabla incompatible y un trigger que encola también escrituras H4. Si aparece aplicada en un ambiente, revisar su ledger, estructura y pendientes con el owner antes de ejecutar esta candidata. El trabajo Bulk/claim-check del PR #243 conserva su revisión separada.
 
 El flujo conserva orden causal por operación. Una entrega terminal sin envío queda pendiente de revisión y bloquea las siguientes de la misma operación. El resto continúa. Monitorizar edad del Outbox, DLQ y disponibilidad de enlaces.
+
+[Orden de aplicación, esquema instalado y corte R18/R09](../../../../docs/hito-5/RECONCILIACION_R18_R09_PR258.md).
