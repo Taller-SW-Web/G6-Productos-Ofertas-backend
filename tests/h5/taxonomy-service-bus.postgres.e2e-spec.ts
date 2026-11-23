@@ -123,7 +123,7 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
           'CREATE TRIGGER trg_catalog_alternate_h5_writer AFTER INSERT ON catalog.outbox FOR EACH ROW EXECUTE FUNCTION catalog.alternate_h5_outbox_deliveries()',
         );
         await expect(catalogOwner.query(catalogMigration)).rejects.toThrow(
-          'Catalog H5 has an existing or alternate writer',
+          'Catalog H5 requires the canonical 0001 delivery trigger and no alternate transport writer',
         );
         await catalogOwner.query('ROLLBACK');
         await catalogOwner.query(
