@@ -14,6 +14,7 @@ try {
   $bicep = git show "${sha}:ops/azure/container-apps/h5-isolated-five-apps.bicep"
   if ($LASTEXITCODE -ne 0) { throw 'Could not load the pinned #263 Bicep template.' }
   Assert ((@(Test-H5GuardedEnvironment ($bicep -join "`n"))).Count -eq 0) 'official guardedEnv values match the reviewed safe values'
+  $guarded = Get-H5GuardedEnvironment ($bicep -join "`n")
 
   $manifest = Get-Content (Join-Path $root 'parameters.private.example.json') -Raw | ConvertFrom-Json
   Assert ((@(Test-H5ManifestEnvironment $manifest)).Count -eq 0) 'example manifest has required nonreserved vars and no collisions'
@@ -116,6 +117,14 @@ exit /b 0
     Assert ((Test-H5JwtRequiredScopes $validToken.Status $validToken.Scopes @('promociones:leer','cupones:validar') @('promociones:leer','cupones:validar')) -eq 'REQUIRED_SCOPES_MISSING') 'correctly signed JWT missing one required scope does not authorize the integration'
     $jwtParts = $jwt.Split('.'); $tamperedSignature = if ($jwtParts[2][0] -eq 'A') { 'B' + $jwtParts[2].Substring(1) } else { 'A' + $jwtParts[2].Substring(1) }
     Assert ((Test-H5JwtAuthenticity ("$($jwtParts[0]).$($jwtParts[1]).$tamperedSignature") $jwks 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' 'api-productos').Status -eq 'TOKEN_INVALID') 'G7 verifier rejects a tampered token signature'
+    foreach ($invalidJwtCase in @(
+      @{ name='malformed JWT'; token='not-a-jwt'; keys=$jwks },
+      @{ name='unknown kid'; token=$jwt; keys=@{keys=@()} },
+      @{ name='unsupported algorithm'; token=("$(B64Url ([Text.Encoding]::UTF8.GetBytes('{"alg":"none","kid":"test-key"}'))).$($jwtParts[1]).$($jwtParts[2])"); keys=$jwks }
+    )) {
+      $invalidTokenResult = Test-H5JwtAuthenticity $invalidJwtCase.token $invalidJwtCase.keys 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' 'api-productos'
+      Assert ($invalidTokenResult -is [pscustomobject] -and $invalidTokenResult.Status -eq 'TOKEN_INVALID' -and $invalidTokenResult.Scopes -is [array]) "JWT $($invalidJwtCase.name) returns structured TOKEN_INVALID"
+    }
     $salesPayload = B64Url ([Text.Encoding]::UTF8.GetBytes((@{iss='https://g7-auth-service.onrender.com/api/v1/auth';aud=@('api-ventas');client_id='modulo-ventas';exp=$now+300;scope='ventas:pedidos:evidencia-cupon:leer'} | ConvertTo-Json -Compress)))
     $salesInput = [Text.Encoding]::ASCII.GetBytes("$head.$salesPayload")
     $salesJwt = "$head.$salesPayload.$(B64Url ($rsa.SignData($salesInput,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)))"
@@ -136,8 +145,18 @@ exit /b 0
   )
   Assert ($staticGate.ExitCode -eq 0 -and -not $staticGate.DeploymentAuthorized) 'STATIC outcome is structurally separate from deployment authorization'
   $httpRequired = (Get-H5PreflightOutcome 'HTTP_BOOTSTRAP' @()).RequiredChecks
-  $httpPassResults = @($httpRequired | ForEach-Object { [pscustomobject]@{Check=$_;Status='PASS'} })
-  Assert ((Get-H5PreflightOutcome 'HTTP_BOOTSTRAP' $httpPassResults).ExitCode -eq 0) 'HTTP_BOOTSTRAP exits zero only when every required operational check passes'
+  $httpPassResults = @($httpRequired | ForEach-Object {
+    $status = if ($_.StartsWith('ghcr-')) { Get-H5GhcrReleaseStatus 'VISIBLE' ('a'*40) ('a'*40) $true } else { Get-H5CheckSuccessStatus $_ }
+    [pscustomobject]@{Check=$_;Status=$status}
+  })
+  Assert (@($httpPassResults | Where-Object { $_.Check -like 'ghcr-*' -and $_.Status -ne 'VERIFIED' }).Count -eq 0 -and (Get-H5PreflightOutcome 'HTTP_BOOTSTRAP' $httpPassResults).ExitCode -eq 0) 'five producer-verified GHCR images plus all required check-specific producer states yield HTTP_BOOTSTRAP PASS'
+  $ghcrNotRun = @($httpPassResults | ForEach-Object { if ($_.Check -eq 'ghcr-pricing-svc') { [pscustomobject]@{Check=$_.Check;Status='NOT_RUN'} } else { $_ } })
+  Assert ((Get-H5PreflightOutcome 'HTTP_BOOTSTRAP' $ghcrNotRun).ExitCode -eq 2) 'one GHCR image NOT_RUN keeps HTTP_BOOTSTRAP pending'
+  $badGhcrDigestState = Get-H5GhcrReleaseStatus 'VISIBLE' ('a'*40) ('c'*40) $false
+  $badGhcrDigest = @($httpPassResults | ForEach-Object { if ($_.Check -eq 'ghcr-pricing-svc') { [pscustomobject]@{Check=$_.Check;Status=$badGhcrDigestState} } else { $_ } })
+  Assert ((Get-H5PreflightOutcome 'HTTP_BOOTSTRAP' $badGhcrDigest).ExitCode -eq 1) 'GHCR image digest mismatch fails HTTP_BOOTSTRAP'
+  $ghcrWrongPositive = @($httpPassResults | ForEach-Object { if ($_.Check -eq 'ghcr-pricing-svc') { [pscustomobject]@{Check=$_.Check;Status='PASS'} } else { $_ } })
+  Assert ((Get-H5PreflightOutcome 'HTTP_BOOTSTRAP' $ghcrWrongPositive).ExitCode -eq 1) 'GHCR PASS without producer VERIFIED cannot satisfy the gate'
   foreach ($case in @(
     @{name='psql absent';check='catalog-svc-postgres-readonly-login';status='NOT_RUN'},
     @{name='PostgreSQL not executed';check='inventory-svc-postgres-readonly-login';status='NOT_RUN'},
@@ -152,9 +171,43 @@ exit /b 0
   $noNetworkResults = @($httpPassResults | ForEach-Object { if ($_.Check -eq 'catalog-svc-postgres-readonly-login' -or $_.Check -eq 'ghcr-api-gateway') { [pscustomobject]@{Check=$_.Check;Status='NOT_RUN'} } else { $_ } })
   Assert ((Get-H5PreflightOutcome 'HTTP_BOOTSTRAP' $noNetworkResults).ExitCode -eq 2) 'complete manifest without network evidence cannot pass HTTP_BOOTSTRAP'
   $h5Required = (Get-H5PreflightOutcome 'H5_INTEGRATION' @()).RequiredChecks
-  $h5PassResults = @($h5Required | ForEach-Object { [pscustomobject]@{Check=$_;Status='PASS'} })
+  $h5PassResults = @($h5Required | ForEach-Object { [pscustomobject]@{Check=$_;Status=(Get-H5CheckSuccessStatus $_)} })
+  $h5PreparationPass = Get-H5PreflightOutcome 'H5_INTEGRATION' $h5PassResults
+  Assert ($h5PreparationPass.ExitCode -eq 0 -and -not $h5PreparationPass.DeploymentAuthorized) 'H5_INTEGRATION PASS represents dependency preparation only and never authorizes deployment'
+  $h5TargetPending = @($h5PassResults | ForEach-Object { if ($_.Check -eq 'h5-integration-target-configuration') { [pscustomobject]@{Check=$_.Check;Status='PENDING'} } else { $_ } })
+  Assert ((Get-H5PreflightOutcome 'H5_INTEGRATION' $h5TargetPending).ExitCode -eq 2) 'H5_INTEGRATION requires an approved target and returns pending without it'
   $h5JwtMissing = @($h5PassResults | ForEach-Object { if ($_.Check -eq 'promotions-token-api-productos') { [pscustomobject]@{Check=$_.Check;Status='AUTHORIZATION_NOT_RUN'} } else { $_ } })
   Assert ((Get-H5PreflightOutcome 'H5_INTEGRATION' $h5JwtMissing).ExitCode -eq 2) 'H5 integration is blocked when a required JWT authorization was not verified'
+
+  $guardedParameters = [pscustomobject]@{parameters=[pscustomobject]@{promotionsIdentityClientId=[pscustomobject]@{value='00000000-0000-0000-0000-000000000002'}}}
+  $resolvedGuarded = Resolve-H5GuardedEnvironmentReferences $guarded $guardedParameters
+  Assert ($guarded['promotions-svc'].AZURE_CLIENT_ID -ceq 'promotionsIdentityClientId' -and $resolvedGuarded['promotions-svc'].AZURE_CLIENT_ID -ceq '00000000-0000-0000-0000-000000000002') 'Bicep promotionsIdentityClientId reference resolves to the supplied UUID'
+  $syntheticTarget = Get-Content (Join-Path $root 'h5-integration-target.private.example.json') -Raw | ConvertFrom-Json -AsHashtable
+  $syntheticTarget.approvalStatus = 'APPROVED'
+  $syntheticTarget.approvalReference = 'test-approval-reference'
+  foreach ($service in @('catalog-svc','inventory-svc','pricing-svc','promotions-svc')) {
+    $serviceTarget = $syntheticTarget.services[$service]
+    $clientId = switch ($service) {
+      'catalog-svc' {'00000000-0000-0000-0000-000000000003'}
+      'inventory-svc' {'00000000-0000-0000-0000-000000000004'}
+      'pricing-svc' {'00000000-0000-0000-0000-000000000005'}
+      'promotions-svc' {$guardedParameters.parameters.promotionsIdentityClientId.value}
+    }
+    $serviceTarget.identityResourceId = "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/h5-test/providers/Microsoft.ManagedIdentity/userAssignedIdentities/$service"
+    $serviceTarget.identityClientId = $clientId
+    $serviceTarget.env.AZURE_CLIENT_ID = $clientId
+    $serviceTarget.queueGrants = @(@{queue="g6.test.$service";roles=@('Azure Service Bus Data Sender')})
+  }
+  $targetResult = Test-H5IntegrationTarget $syntheticTarget $resolvedGuarded $guardedParameters
+  Assert ($targetResult.Status -eq 'PASS') 'approved synthetic H5 target passes with four distinct identities and per-service queue grants'
+  Assert ((@(Test-H5GuardedEnvironment ($bicep -join "`n"))).Count -eq 0 -and $resolvedGuarded['promotions-svc'].PROMOTIONS_H5_COUPON_COMMANDS_ENABLED -ceq 'false' -and $resolvedGuarded['pricing-svc'].PRICING_PRICE_CHANGED_PUBLISH_ENABLED -ceq 'false') 'H5 preparation passes while official #263 guarded commercial flags remain closed'
+  $missingApproval = $syntheticTarget | ConvertTo-Json -Depth 30 | ConvertFrom-Json -AsHashtable; $missingApproval.approvalStatus = 'PENDING_APPROVAL'; $missingApproval.approvalReference = ''
+  Assert ((Test-H5IntegrationTarget $missingApproval $resolvedGuarded $guardedParameters).Status -eq 'PENDING') 'unapproved H5 commercial target stays pending'
+  $reusedIdentity = $syntheticTarget | ConvertTo-Json -Depth 30 | ConvertFrom-Json -AsHashtable; $reusedIdentity.services['catalog-svc'].identityClientId = $reusedIdentity.services['inventory-svc'].identityClientId; $reusedIdentity.services['catalog-svc'].env.AZURE_CLIENT_ID = $reusedIdentity.services['inventory-svc'].identityClientId
+  $reusedIdentityResult = Test-H5IntegrationTarget $reusedIdentity $resolvedGuarded $guardedParameters
+  Assert (($reusedIdentityResult.Errors -join ',') -match 'IDENTITY_REUSED_inventory-svc') 'H5 target rejects reusing one managed identity across services'
+  $unapprovedGrant = $syntheticTarget | ConvertTo-Json -Depth 30 | ConvertFrom-Json -AsHashtable; $unapprovedGrant.services['catalog-svc'].queueGrants[0].roles = @('Azure Service Bus Data Owner')
+  Assert ((@((Test-H5IntegrationTarget $unapprovedGrant $resolvedGuarded $guardedParameters).Errors) -join ',') -match 'QUEUE_GRANT_INVALID_catalog-svc') 'H5 target rejects broad or unrecognized Service Bus roles'
   $docsRepo = [IO.Path]::GetFullPath((Join-Path $root '..\..\..\..\docs'))
   $openApiText = git -C $docsRepo show 'origin/master:contratos/http/openapi.yaml' | Out-String
   $contractOperationScopes = Get-H5ContractOperationScopes $openApiText

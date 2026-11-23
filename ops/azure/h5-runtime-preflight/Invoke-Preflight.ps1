@@ -3,6 +3,7 @@ param(
   [ValidateSet('STATIC','HTTP_BOOTSTRAP','H5_INTEGRATION')]
   [string]$Mode = 'STATIC',
   [string]$ManifestPath = (Join-Path $env:LOCALAPPDATA 'G6\h5-runtime-preflight\parameters.private.json'),
+  [string]$H5TargetPath = (Join-Path $env:LOCALAPPDATA 'G6\h5-runtime-preflight\h5-integration-target.private.json'),
   [string]$BicepTemplatePath = (Join-Path $PSScriptRoot '..\container-apps\h5-isolated-five-apps.bicep'),
   [switch]$ProbePostgres,
   [switch]$ProbeG7Token,
@@ -98,9 +99,21 @@ Add-Result 'h5-aca-effective-configuration' $manifestStatus $manifestDetail
 $guardedValues = $null
 if (Test-Path -LiteralPath $BicepTemplatePath -PathType Leaf) {
   $guardErrors = @(Test-H5GuardedEnvironment (Get-Content -LiteralPath $BicepTemplatePath -Raw))
-  if ($guardErrors.Count -eq 0) { $guardedValues = Get-H5GuardedEnvironment (Get-Content -LiteralPath $BicepTemplatePath -Raw) }
+  if ($guardErrors.Count -eq 0) { $guardedValues = Resolve-H5GuardedEnvironmentReferences (Get-H5GuardedEnvironment (Get-Content -LiteralPath $BicepTemplatePath -Raw)) $manifest }
   Add-Result 'official-bicep-guarded-env' $(if ($guardErrors.Count -eq 0) { 'PASS' } else { 'FAIL' }) $(if ($guardErrors.Count) { $guardErrors -join ', ' } else { 'Reserved values match the approved five-app template.' })
 } else { Add-Result 'official-bicep-guarded-env' 'UNAVAILABLE' 'Official Bicep template is not present at the supplied local path; effective bootstrap cannot PASS.' }
+
+$h5Target = $null
+$h5TargetCheck = [pscustomobject]@{ Status='NOT_REQUIRED'; Errors=@() }
+if ($Mode -eq 'H5_INTEGRATION') {
+  if (Test-Path -LiteralPath $H5TargetPath -PathType Leaf) {
+    try {
+      $h5Target = Get-Content -LiteralPath $H5TargetPath -Raw | ConvertFrom-Json
+      $h5TargetCheck = Test-H5IntegrationTarget $h5Target $guardedValues $manifest
+    } catch { $h5TargetCheck = [pscustomobject]@{ Status='INVALID'; Errors=@('H5_TARGET_JSON_INVALID') } }
+  } else { $h5TargetCheck = Test-H5IntegrationTarget $null $guardedValues $manifest }
+  Add-Result 'h5-integration-target-configuration' $h5TargetCheck.Status ($h5TargetCheck.Errors -join ', ')
+}
 
 $runtime = @{}
 foreach ($service in $services) { $runtime[$service] = Get-AppEnvironment $manifest $service }
@@ -350,42 +363,6 @@ $flagsOk = $null -ne $guardedValues -and
   [string]$promotion.PROMOTIONS_DEPENDENCY_PROBES_ENABLED -ceq 'false'
 Add-Result 'first-bootstrap-closed-flags' $(if (-not $flagsOk) { 'FAIL' } elseif (-not $manifestValid) { 'PENDING' } else { 'PASS' }) 'Commercial H5, fan-out and demo/public bypasses remain closed; PASS requires a complete #263-compatible manifest.'
 
-$messageVariables = @{
-  'catalog-svc' = @('MESSAGING_PROVIDER','SERVICE_BUS_NAMESPACE_FQDN','AZURE_CLIENT_ID','G6_SECURITY_MODE','G6_SERVICE_BUS_PRODUCTION_ENABLED')
-  'inventory-svc' = @('MESSAGING_PROVIDER','SERVICE_BUS_NAMESPACE_FQDN','AZURE_CLIENT_ID','G6_SECURITY_MODE','G6_SERVICE_BUS_PILOT_ENABLED','G6_SERVICE_BUS_PRODUCTION_ENABLED','INVENTORY_SERVICE_BUS_PUBLISH_ENABLED','INVENTORY_SERVICE_BUS_CONSUME_ENABLED')
-  'pricing-svc' = @('MESSAGING_PROVIDER','SERVICE_BUS_NAMESPACE_FQDN','AZURE_CLIENT_ID','G6_SECURITY_MODE','G6_SERVICE_BUS_PILOT_ENABLED','G6_SERVICE_BUS_PRODUCTION_ENABLED','PRICING_PRICE_CHANGED_PUBLISH_ENABLED')
-  'promotions-svc' = @('MESSAGING_PROVIDER','SERVICE_BUS_NAMESPACE_FQDN','AZURE_CLIENT_ID','G6_SECURITY_MODE','G6_SERVICE_BUS_PRODUCTION_ENABLED','PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED','PROMOTIONS_H5_COUPON_COMMANDS_ENABLED')
-}
-$messagingMissing = [System.Collections.Generic.List[string]]::new()
-$messagingInvalid = [System.Collections.Generic.List[string]]::new()
-foreach ($service in $messageVariables.Keys) {
-  $effective = @{}
-  foreach ($name in $runtime[$service].Keys) { $effective[$name] = [string]$runtime[$service][$name] }
-  $guardedService = if ($null -ne $guardedValues -and $guardedValues.ContainsKey($service)) { $guardedValues[$service] } else { @{} }
-  foreach ($name in $guardedService.Keys) { $effective[$name] = [string]$guardedService[$name] }
-  foreach ($name in $messageVariables[$service]) {
-    $expectedValue = switch ($name) {
-      'MESSAGING_PROVIDER' { 'AZURE_SERVICE_BUS' }
-      'SERVICE_BUS_NAMESPACE_FQDN' { if ($null -ne $guardedValues) { [string]$guardedValues['promotions-svc'].SERVICE_BUS_NAMESPACE_FQDN } else { '' } }
-      'AZURE_CLIENT_ID' { [string]$manifest.parameters.promotionsIdentityClientId.value }
-      'G6_SECURITY_MODE' { 'G7_AUTHENTICATED' }
-      'G6_SERVICE_BUS_PILOT_ENABLED' { 'true' }
-      'G6_SERVICE_BUS_PRODUCTION_ENABLED' { 'true' }
-      'INVENTORY_SERVICE_BUS_PUBLISH_ENABLED' { 'true' }
-      'INVENTORY_SERVICE_BUS_CONSUME_ENABLED' { 'true' }
-      'PRICING_PRICE_CHANGED_PUBLISH_ENABLED' { 'true' }
-      'PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED' { 'true' }
-      'PROMOTIONS_H5_COUPON_COMMANDS_ENABLED' { 'true' }
-    }
-    if (-not $effective.ContainsKey($name) -or [string]::IsNullOrWhiteSpace([string]$effective[$name])) { $messagingMissing.Add("$service.$name") }
-    elseif ([string]$effective[$name] -cne $expectedValue) { $messagingInvalid.Add("$service.$name") }
-  }
-  if ($runtime[$service].ContainsKey('RABBITMQ_URL') -or $runtime[$service].ContainsKey('CATALOG_AMQP_ENABLED')) { $messagingInvalid.Add("$service.incompatible-broker") }
-}
-$messagingStatus = if ($messagingInvalid.Count) { 'INVALID' } elseif ($messagingMissing.Count) { 'PENDING' } else { 'PASS' }
-$messagingDetail = if ($messagingInvalid.Count) { 'Unexpected runtime messaging configuration: ' + ($messagingInvalid -join ', ') } elseif ($messagingMissing.Count) { 'Required H5 parser variables are absent or not enabled: ' + ($messagingMissing -join ', ') } else { 'All four service messaging parsers are configured for the approved Azure Service Bus namespace and runtime identity.' }
-Add-Result 'h5-messaging-runtime-configuration' $messagingStatus $messagingDetail
-
 $registryUsername = [string](Get-ParameterValue $manifest 'registryUsername')
 $ghcrComplete = $true
 foreach ($service in $services) { if (-not (Get-AppSecret $manifest $service 'ghcr-pull')) { $ghcrComplete = $false } }
@@ -438,6 +415,10 @@ if (-not $allowExternal) {
   Add-Result 'azure-isolated-container-apps' 'NOT_RUN' 'Network probes disabled for tests.'
   Add-Result 'promotions-managed-identity-and-servicebus-parameters' 'NOT_RUN' 'Network probes disabled for tests.'
   Add-Result 'promotions-servicebus-queue-rbac' 'NOT_RUN' 'Queue scope was not queried.'
+  if ($Mode -eq 'H5_INTEGRATION') {
+    Add-Result 'h5-target-managed-identities' 'NOT_RUN' 'Target identities were not queried.'
+    Add-Result 'h5-target-servicebus-rbac' 'NOT_RUN' 'Target queue scopes were not queried.'
+  }
 } else {
   try {
     $appsOutput = az containerapp list --resource-group rg-g6-sb-h5-int-fork -o json 2>$null | Out-String
@@ -472,6 +453,55 @@ if (-not $allowExternal) {
   } catch {
     Add-Result 'promotions-managed-identity-and-servicebus-parameters' 'UNAVAILABLE' 'Azure identity/queue metadata failed; no writes performed.'
     Add-Result 'promotions-servicebus-queue-rbac' (Get-H5QueueRbacStatus 'UNAVAILABLE' @()) 'Queue RBAC query unavailable; no absence is inferred.'
+  }
+  if ($Mode -eq 'H5_INTEGRATION') {
+    if ($h5TargetCheck.Status -ne 'PASS') {
+      Add-Result 'h5-target-managed-identities' 'PENDING' 'Approved four-service identity target is required before read-only identity lookups.'
+      Add-Result 'h5-target-servicebus-rbac' 'PENDING' 'Approved per-service queue topology and expected roles are required before scope checks.'
+    } else {
+      $targetIdentityMap = @{}
+      $identityStates = [System.Collections.Generic.List[string]]::new()
+      foreach ($service in @('catalog-svc','inventory-svc','pricing-svc','promotions-svc')) {
+        $targetIdentity = $h5Target.services.$service
+        try {
+          $identityJson = az identity show --ids ([string]$targetIdentity.identityResourceId) -o json 2>$null | Out-String
+          if ($LASTEXITCODE -ne 0) { $identityStates.Add('UNAVAILABLE'); continue }
+          $identity = $identityJson | ConvertFrom-Json
+          if ($identity.id -ine [string]$targetIdentity.identityResourceId -or $identity.clientId -ine [string]$targetIdentity.identityClientId) { $identityStates.Add('INVALID') }
+          else {
+            $appJson = az containerapp show --resource-group rg-g6-sb-h5-int-fork --name $service -o json 2>$null | Out-String
+            if ($LASTEXITCODE -ne 0) { $identityStates.Add('UNAVAILABLE'); continue }
+            $appIdentity = $appJson | ConvertFrom-Json
+            $assignedIdentityIds = @($appIdentity.identity.userAssignedIdentities.PSObject.Properties.Name)
+            if ($identity.id -notin $assignedIdentityIds) { $identityStates.Add('MISSING') }
+            else { $targetIdentityMap[$service] = $identity; $identityStates.Add('PASS') }
+          }
+        } catch { $identityStates.Add('UNAVAILABLE') }
+      }
+      $identityStatus = if ($identityStates -contains 'INVALID') { 'INVALID' } elseif ($identityStates -contains 'MISSING') { 'MISSING' } elseif ($identityStates -contains 'UNAVAILABLE') { 'UNAVAILABLE' } elseif ($identityStates.Count -eq 4 -and @($identityStates | Where-Object { $_ -ne 'PASS' }).Count -eq 0) { 'PASS' } else { 'PENDING' }
+      Add-Result 'h5-target-managed-identities' $identityStatus 'Each service identity resource, client ID and attachment to its matching existing Container App checked independently; no identity is inferred from Promotions.'
+
+      $rbacStates = [System.Collections.Generic.List[string]]::new()
+      if ($identityStatus -eq 'PASS') {
+        $namespaceName = ([string]$h5Target.namespaceFqdn).Split('.')[0]
+        foreach ($service in @('catalog-svc','inventory-svc','pricing-svc','promotions-svc')) {
+          $identity = $targetIdentityMap[$service]
+          foreach ($grant in @($h5Target.services.$service.queueGrants)) {
+            try {
+              $targetQueue = az servicebus queue show --resource-group rg-g6-sb-h5-int-fork --namespace-name $namespaceName --name ([string]$grant.queue) -o json 2>$null | Out-String
+              if ($LASTEXITCODE -ne 0) { $rbacStates.Add('UNAVAILABLE'); continue }
+              $queue = $targetQueue | ConvertFrom-Json
+              $assignments = az role assignment list --scope $queue.id --include-inherited -o json 2>$null | Out-String
+              if ($LASTEXITCODE -ne 0) { $rbacStates.Add('UNAVAILABLE'); continue }
+              $effectiveRoles = @(($assignments | ConvertFrom-Json | Where-Object { $_.principalId -ceq $identity.principalId }).roleDefinitionName)
+              if (@($grant.roles | Where-Object { $_ -notin $effectiveRoles }).Count -gt 0) { $rbacStates.Add('MISSING') } else { $rbacStates.Add('PASS') }
+            } catch { $rbacStates.Add('UNAVAILABLE') }
+          }
+        }
+        $targetRbacStatus = if ($rbacStates -contains 'MISSING') { 'MISSING' } elseif ($rbacStates -contains 'UNAVAILABLE') { 'UNAVAILABLE' } elseif ($rbacStates.Count -gt 0 -and @($rbacStates | Where-Object { $_ -ne 'PASS' }).Count -eq 0) { 'PASS' } else { 'PENDING' }
+      } else { $targetRbacStatus = 'NOT_RUN' }
+      Add-Result 'h5-target-servicebus-rbac' $targetRbacStatus 'Each approved identity/queue/role tuple checked at the exact queue scope including inherited assignments.'
+    }
   }
 }
 

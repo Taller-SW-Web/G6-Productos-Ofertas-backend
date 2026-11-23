@@ -6,12 +6,11 @@ PostgreSQL. No crea ACA, ejecuta CD, modifica grants, aplica SQL ni cambia datos
 
 ## Contratos revisados
 
-- Backend `master` actualizado antes de estos cambios: `494a8595` (incluye el merge de #267; rama sincronizada sin modificar sus archivos).
+- Backend `master` actualizado antes de estos cambios: `c1eb244b73c5c151569ed6735761ff8c8d19b55d` (incluye #263; rama sincronizada sin modificar su implementación).
 - Interfaz y `guardedEnv` verificados contra #263 HEAD
   `51f8441a2adb2e0484b2a2d3072617908f9672dc`. El validador no fue modificado.
-- #263 aún no está integrado en `master`; el test Node también intentará cargar
-  `origin/master:ops/azure/container-apps/validate-h5-five-apps.mjs` cuando el
-  archivo aparezca allí.
+- #263 está integrado en `master`; el test Node valida contra el SHA fijado y
+  contra el validador presente en `origin/master`.
 - Docs `master`: `490172c11cb4b83ddd1996f8d5834d0402184cf8`; los seis contratos
   H5 revisados no cambiaron respecto a la lectura anterior.
 - H5 Service Bus Basic es mensajería entre bounded contexts G6; G5 consume por
@@ -47,6 +46,14 @@ Inicializar/restringir la copia:
 ```powershell
 pwsh -NoProfile -File ops/azure/h5-runtime-preflight/Initialize-PrivateManifest.ps1
 ```
+
+La preparación de activación H5 vive en un archivo separado del manifiesto de
+bootstrap, en `%LOCALAPPDATA%\G6\h5-runtime-preflight\h5-integration-target.private.json`.
+Inicialízalo con `Initialize-H5IntegrationTarget.ps1`. Su estado inicial es
+`PENDING_APPROVAL`; requiere referencia de aprobación, flags comerciales
+objetivo, namespace, colas/roles por servicio y una identidad administrada
+distinta para Catalog, Inventory, Pricing y Promotions. Sus valores no se
+inyectan en `appConfiguration` ni abren los flags protegidos de la plantilla.
 
 El ejemplo es intencionalmente incompleto; reemplazar todos los placeholders
 con credenciales autorizadas, SHA/digests finales y valores del entorno. Las
@@ -93,15 +100,41 @@ del SHA/digests, configuración y discovery G7, y los orígenes privados. La
 salida JSON incluye `mode`, `overall_status`, `exit_code`, `release_sha` y cada
 resultado individual. `STATIC` no realiza conexiones; aunque devuelva PASS,
 `deployment_authorized` siempre es `false`. `H5_INTEGRATION` añade scopes G7
-por operación/audiencia, migraciones y grants H5, configuración messaging y
-RBAC de la cola.
+por operación/audiencia, migraciones y grants H5, más una configuración
+objetivo privada y aprobada independiente del manifiesto de bootstrap. Verifica
+las identidades de los cuatro servicios, su asignación a su ACA correspondiente
+y RBAC de cada cola declarada al scope exacto. La referencia Bicep de
+`promotionsIdentityClientId` se resuelve al UUID del parámetro antes de comparar.
+Sus flags comerciales objetivo permanecen como preparación: `guardedEnv` sigue
+con las protecciones cerradas. Un `H5_INTEGRATION PASS` acredita preparación de
+dependencias; no autoriza despliegue, activa funciones comerciales ni demuestra
+homologación bilateral. Sin configuración objetivo aprobada, el resultado es
+`PENDING`/código 2.
 
-El test Node carga `validateH5AcaParameters()` desde el SHA de #263 y completa
-el ejemplo con identidades, secretos, CA y digests sintéticos. Acepta el caso
+El agregador valida el estado esperado para cada check: GHCR solo acepta
+`VERIFIED`, autenticidad JWT solo `TOKEN_VALID`, autorización solo
+`REQUIRED_SCOPES_VERIFIED` y los checks convencionales solo `PASS`. Una imagen
+GHCR omitida queda pendiente; digest incorrecto o estado positivo de tipo
+equivocado falla el gate.
+
+Semántica exacta: `STATIC` comprueba archivos/configuración local y no acredita
+conexiones; `HTTP_BOOTSTRAP` es el gate operativo previo al what-if inicial;
+`H5_INTEGRATION` se ejecuta después del bootstrap para validar preparación
+comercial con el target privado aprobado. Los tres modos devuelven código `0`
+solo si cada check obligatorio tiene su estado de éxito esperado; `1` ante
+fallo verificable o estado positivo de tipo equivocado; `2` si una comprobación
+obligatoria está pendiente, bloqueada o no ejecutada. `deployment_authorized`
+es siempre `false`.
+
+El test Node carga `validateH5AcaParameters()` desde el SHA de #263 y desde el
+validador en `origin/master`; completa el ejemplo con identidades, secretos,
+CA y digests sintéticos. Acepta el caso
 positivo y prueba rechazos de variable reservada y CA ausente/vacía/inválida.
 Las pruebas PowerShell cubren outcomes fail-closed, psql ausente, modos,
 `INVALID`/`UNAVAILABLE`, scopes requeridos, valores `guardedEnv`, colisiones,
-X.509, cleanup TLS, estados RBAC/GHCR y firma JWT simulada. El test de
+X.509, cleanup TLS, estados RBAC/GHCR, cinco imágenes `VERIFIED`, estados JWT
+malformados estructurados y la separación del objetivo H5 respecto a
+`guardedEnv` cerrado. El test PowerShell ejecuta 53 assertions. El test de
 PostgreSQL crea y elimina un contenedor PostgreSQL 17 desechable. Sus tablas y
 roles son sintéticos; las consultas de roles/grants corren como logins runtime
 no-superuser. Ese contenedor no configura PostgreSQL TLS: demuestra SQL y
@@ -109,10 +142,10 @@ privilegios efectivos, no evidencia de TLS real. El probe local de `psql` usa
 `verify-full` con un CA temporal protegido cuando se conecta a un endpoint que
 entreguen las operaciones autorizadas.
 
-Si #263 aún no está integrado en el checkout, pasar a `Invoke-Preflight.ps1`
-un archivo temporal de `h5-isolated-five-apps.bicep` extraído del SHA aprobado
-de #263 mediante `-BicepTemplatePath`. Sin plantilla local, el check queda
-`UNAVAILABLE`, nunca `PASS`.
+Con #263 integrado, el Bicep y validador oficiales se cargan desde el checkout.
+En un checkout anterior se puede pasar a `Invoke-Preflight.ps1` la plantilla
+extraída del SHA aprobado mediante `-BicepTemplatePath`; sin plantilla local,
+el check queda `UNAVAILABLE`, nunca `PASS`.
 
 ### SQL y alcance de arranque
 

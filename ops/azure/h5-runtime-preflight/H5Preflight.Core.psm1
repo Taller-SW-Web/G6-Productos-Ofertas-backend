@@ -172,6 +172,86 @@ function Get-H5GhcrReleaseStatus([string]$Visibility, [string]$ExpectedSha, [str
   return 'VERIFIED'
 }
 
+function Resolve-H5GuardedEnvironmentReferences($GuardedEnvironment, $ParameterDocument) {
+  $resolved = @{}
+  foreach ($service in $GuardedEnvironment.Keys) {
+    $resolved[$service] = [ordered]@{}
+    foreach ($name in $GuardedEnvironment[$service].Keys) {
+      $value = [string]$GuardedEnvironment[$service][$name]
+      if ($value -match '^[A-Za-z_][A-Za-z0-9_]*$' -and $null -ne $ParameterDocument.parameters.$value) {
+        $value = [string]$ParameterDocument.parameters.$value.value
+      }
+      $resolved[$service][$name] = $value
+    }
+  }
+  return $resolved
+}
+
+function Test-H5IntegrationTarget($Target, $GuardedEnvironment, $ParameterDocument) {
+  $pending = [System.Collections.Generic.List[string]]::new()
+  $invalid = [System.Collections.Generic.List[string]]::new()
+  if ($null -eq $Target) { return [pscustomobject]@{ Status='PENDING'; Errors=@('H5_TARGET_FILE_MISSING') } }
+  if ($Target.approvalStatus -ceq 'PENDING_APPROVAL' -or [string]::IsNullOrWhiteSpace([string]$Target.approvalStatus)) { $pending.Add('APPROVAL_PENDING') }
+  elseif ($Target.approvalStatus -cne 'APPROVED') { $invalid.Add('APPROVAL_STATUS_INVALID') }
+  if ([string]::IsNullOrWhiteSpace([string]$Target.approvalReference)) { $pending.Add('APPROVAL_REFERENCE_PENDING') }
+  $namespace = [string]$Target.namespaceFqdn
+  if (-not $namespace) { $pending.Add('NAMESPACE_PENDING') }
+  elseif ($null -eq $GuardedEnvironment) { $pending.Add('BICEP_NAMESPACE_UNAVAILABLE') }
+  elseif ($namespace -cne [string]$GuardedEnvironment['promotions-svc'].SERVICE_BUS_NAMESPACE_FQDN) { $invalid.Add('NAMESPACE_MISMATCH') }
+
+  $serviceNames = @('catalog-svc','inventory-svc','pricing-svc','promotions-svc')
+  $clientIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  $requiredEnv = @{
+    'catalog-svc' = @('MESSAGING_PROVIDER','SERVICE_BUS_NAMESPACE_FQDN','G6_SECURITY_MODE','G6_SERVICE_BUS_PRODUCTION_ENABLED','AZURE_CLIENT_ID','CATALOG_H5_DESTINATIONS')
+    'inventory-svc' = @('MESSAGING_PROVIDER','SERVICE_BUS_NAMESPACE_FQDN','G6_SECURITY_MODE','G6_SERVICE_BUS_PILOT_ENABLED','G6_SERVICE_BUS_PRODUCTION_ENABLED','INVENTORY_SERVICE_BUS_PUBLISH_ENABLED','INVENTORY_SERVICE_BUS_CONSUME_ENABLED','AZURE_CLIENT_ID')
+    'pricing-svc' = @('MESSAGING_PROVIDER','SERVICE_BUS_NAMESPACE_FQDN','G6_SECURITY_MODE','G6_SERVICE_BUS_PILOT_ENABLED','G6_SERVICE_BUS_PRODUCTION_ENABLED','PRICING_PRICE_CHANGED_PUBLISH_ENABLED','AZURE_CLIENT_ID')
+    'promotions-svc' = @('MESSAGING_PROVIDER','SERVICE_BUS_NAMESPACE_FQDN','G6_SECURITY_MODE','G6_SERVICE_BUS_PRODUCTION_ENABLED','PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED','PROMOTIONS_H5_COUPON_COMMANDS_ENABLED','AZURE_CLIENT_ID')
+  }
+  foreach ($service in $serviceNames) {
+    $entry = $Target.services.$service
+    if ($null -eq $entry) { $pending.Add("SERVICE_TARGET_MISSING_$service"); continue }
+    $clientId = [string]$entry.identityClientId
+    $resourceId = [string]$entry.identityResourceId
+    if (-not $clientId -or -not $resourceId) { $pending.Add("IDENTITY_PENDING_$service") }
+    elseif ($clientId -notmatch '^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$' -or $resourceId -notmatch '^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.ManagedIdentity/userAssignedIdentities/[^/]+$') { $invalid.Add("IDENTITY_INVALID_$service") }
+    elseif (-not $clientIds.Add($clientId)) { $invalid.Add("IDENTITY_REUSED_$service") }
+    $environment = $entry.env
+    foreach ($name in $requiredEnv[$service]) {
+      if ($null -eq $environment -or [string]::IsNullOrWhiteSpace([string]$environment.$name)) { $pending.Add("TARGET_ENV_PENDING_$service.$name") }
+    }
+    if ($environment) {
+      if ([string]$environment.AZURE_CLIENT_ID -and [string]$environment.AZURE_CLIENT_ID -cne $clientId) { $invalid.Add("IDENTITY_ENV_MISMATCH_$service") }
+      if ([string]$environment.SERVICE_BUS_NAMESPACE_FQDN -and [string]$environment.SERVICE_BUS_NAMESPACE_FQDN -cne $namespace) { $invalid.Add("SERVICE_NAMESPACE_MISMATCH_$service") }
+      if ([string]$environment.MESSAGING_PROVIDER -and [string]$environment.MESSAGING_PROVIDER -cne 'AZURE_SERVICE_BUS') { $invalid.Add("MESSAGING_PROVIDER_INVALID_$service") }
+      if ([string]$environment.G6_SECURITY_MODE -and [string]$environment.G6_SECURITY_MODE -cne 'G7_AUTHENTICATED') { $invalid.Add("SECURITY_MODE_INVALID_$service") }
+      foreach ($flag in @('G6_SERVICE_BUS_PRODUCTION_ENABLED','G6_SERVICE_BUS_PILOT_ENABLED','INVENTORY_SERVICE_BUS_PUBLISH_ENABLED','INVENTORY_SERVICE_BUS_CONSUME_ENABLED','PRICING_PRICE_CHANGED_PUBLISH_ENABLED','PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED','PROMOTIONS_H5_COUPON_COMMANDS_ENABLED')) {
+        if ($requiredEnv[$service] -contains $flag -and [string]$environment.$flag -and [string]$environment.$flag -cne 'true') { $invalid.Add("TARGET_FLAG_NOT_ENABLED_$service.$flag") }
+      }
+      if ($service -eq 'catalog-svc' -and [string]$environment.CATALOG_H5_DESTINATIONS -notmatch '^g6\.[a-z0-9.-]+$') { $invalid.Add('CATALOG_DESTINATION_INVALID') }
+      if ($service -eq 'promotions-svc' -and [string]$ParameterDocument.parameters.promotionsIdentityClientId.value -and $clientId -cne [string]$ParameterDocument.parameters.promotionsIdentityClientId.value) { $invalid.Add('PROMOTIONS_IDENTITY_BICEP_PARAMETER_MISMATCH') }
+    }
+    $queueGrants = @($entry.queueGrants)
+    if ($queueGrants.Count -eq 0) { $pending.Add("QUEUE_GRANTS_PENDING_$service") }
+    foreach ($grant in $queueGrants) {
+      if ([string]$grant.queue -notmatch '^g6\.[a-z0-9.-]+$' -or @($grant.roles).Count -eq 0 -or @($grant.roles | Where-Object { $_ -notin @('Azure Service Bus Data Sender','Azure Service Bus Data Receiver') }).Count -gt 0) { $invalid.Add("QUEUE_GRANT_INVALID_$service") }
+    }
+    if ($entry.env.RABBITMQ_URL -or $entry.env.PRICING_AMQP_URL -or $entry.env.CATALOG_AMQP_ENABLED) { $invalid.Add("INCOMPATIBLE_BROKER_$service") }
+  }
+  $flags = $Target.commercialFlags
+  foreach ($pair in @(@('api-gateway','GATEWAY_G5_H5_ENABLED'),@('pricing-svc','PRICING_PRICE_CHANGED_PUBLISH_ENABLED'),@('promotions-svc','PROMOTIONS_H5_COUPON_COMMANDS_ENABLED'))) {
+    if ([string]$flags.($pair[0]).($pair[1]) -cne 'true') { $pending.Add("COMMERCIAL_FLAG_PENDING_$($pair[0]).$($pair[1])") }
+  }
+  $status = if ($invalid.Count) { 'INVALID' } elseif ($pending.Count) { 'PENDING' } else { 'PASS' }
+  return [pscustomobject]@{ Status=$status; Errors=@($invalid + $pending) }
+}
+
+function Get-H5CheckSuccessStatus([string]$Check) {
+  if ($Check -like 'ghcr-*') { return 'VERIFIED' }
+  if ($Check -like 'promotions-token-*') { return 'TOKEN_VALID' }
+  if ($Check -like 'promotions-required-scopes-*') { return 'REQUIRED_SCOPES_VERIFIED' }
+  return 'PASS'
+}
+
 function Get-H5ContractScopes([string]$OpenApiText) {
   return @([regex]::Matches($OpenApiText,'(?m)^\s*x-required-scope:\s*["'']?([A-Za-z0-9:_-]+)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
 }
@@ -271,12 +351,12 @@ function Invoke-H5ReadOnlySql([string]$Pem, [string]$PsqlPath, [string[]]$Argume
 function Test-H5JwtAuthenticity([string]$Jwt, $Jwks, [string]$Issuer, [string]$ExpectedClient, [string]$ExpectedAudience) {
   try {
     $parts = $Jwt.Split('.')
-    if ($parts.Count -ne 3) { return $false }
+    if ($parts.Count -ne 3) { return [pscustomobject]@{ Status='TOKEN_INVALID'; Scopes=@(); Audience=$ExpectedAudience; Client='' } }
     $decode = { param($value) $v=$value.Replace('-','+').Replace('_','/'); while ($v.Length % 4) { $v+='=' }; [Convert]::FromBase64String($v) }
     $header = [Text.Encoding]::UTF8.GetString((& $decode $parts[0])) | ConvertFrom-Json
     $claims = [Text.Encoding]::UTF8.GetString((& $decode $parts[1])) | ConvertFrom-Json
     $key = @($Jwks.keys | Where-Object { $_.kid -ceq $header.kid -and $_.use -ne 'enc' -and $_.alg -in @($null,$header.alg) }) | Select-Object -First 1
-    if (-not $key) { return $false }
+    if (-not $key) { return [pscustomobject]@{ Status='TOKEN_INVALID'; Scopes=@(); Audience=$ExpectedAudience; Client='' } }
     $input = [Text.Encoding]::ASCII.GetBytes($parts[0] + '.' + $parts[1])
     $signature = & $decode $parts[2]
     $validSignature = $false
@@ -300,7 +380,7 @@ function Test-H5JwtAuthenticity([string]$Jwt, $Jwks, [string]$Issuer, [string]$E
         $ec.ImportParameters($ecParameters)
         $validSignature = $ec.VerifyData($input,$signature,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.DSASignatureFormat]::IeeeP1363FixedFieldConcatenation)
       } finally { $ec.Dispose() }
-    } else { return $false }
+    } else { return [pscustomobject]@{ Status='TOKEN_INVALID'; Scopes=@(); Audience=$ExpectedAudience; Client='' } }
     $aud = @($claims.aud)
     $client = if ($claims.client_id) { [string]$claims.client_id } else { [string]$claims.sub }
     $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
@@ -314,7 +394,7 @@ function Get-H5PreflightOutcome([string]$Mode, [object[]]$Results) {
   $required = @{
     STATIC = @('private-manifest','h5-aca-effective-configuration','official-bicep-guarded-env','g7-five-service-parser-configuration','first-bootstrap-closed-flags')
     HTTP_BOOTSTRAP = @('private-manifest','h5-aca-effective-configuration','official-bicep-guarded-env','g7-five-service-parser-configuration','g7-discovery-issuer-and-jwks','azure-environment-private-domain','gateway-four-private-https-upstreams','pricing-private-catalog-dependency','first-bootstrap-closed-flags','release-source-provenance','catalog-svc-postgres-readonly-login','catalog-svc-http-readiness-schema','inventory-svc-postgres-readonly-login','inventory-svc-http-readiness-schema','pricing-svc-postgres-readonly-login','pricing-svc-http-readiness-schema','promotions-svc-postgres-readonly-login') + @('ghcr-api-gateway','ghcr-catalog-svc','ghcr-inventory-svc','ghcr-pricing-svc','ghcr-promotions-svc')
-    H5_INTEGRATION = @('private-manifest','h5-aca-effective-configuration','official-bicep-guarded-env','g7-five-service-parser-configuration','g7-discovery-issuer-and-jwks','release-source-provenance','azure-environment-private-domain','gateway-four-private-https-upstreams','pricing-private-catalog-dependency','catalog-svc-postgres-readonly-login','catalog-svc-http-readiness-schema','inventory-svc-postgres-readonly-login','inventory-svc-http-readiness-schema','pricing-svc-postgres-readonly-login','pricing-svc-http-readiness-schema','promotions-svc-postgres-readonly-login','promotions-required-scopes-contract','promotions-token-api-productos','promotions-required-scopes-api-productos','promotions-token-api-ventas','promotions-required-scopes-api-ventas','h5-messaging-runtime-configuration','promotions-managed-identity-and-servicebus-parameters','promotions-servicebus-queue-rbac','catalog-svc-h5-storage','inventory-svc-h5-storage','pricing-svc-h5-storage','promotions-svc-h5-storage') + @('ghcr-api-gateway','ghcr-catalog-svc','ghcr-inventory-svc','ghcr-pricing-svc','ghcr-promotions-svc')
+    H5_INTEGRATION = @('private-manifest','h5-aca-effective-configuration','official-bicep-guarded-env','g7-five-service-parser-configuration','g7-discovery-issuer-and-jwks','release-source-provenance','azure-environment-private-domain','gateway-four-private-https-upstreams','pricing-private-catalog-dependency','catalog-svc-postgres-readonly-login','catalog-svc-http-readiness-schema','inventory-svc-postgres-readonly-login','inventory-svc-http-readiness-schema','pricing-svc-postgres-readonly-login','pricing-svc-http-readiness-schema','promotions-svc-postgres-readonly-login','promotions-required-scopes-contract','promotions-token-api-productos','promotions-required-scopes-api-productos','promotions-token-api-ventas','promotions-required-scopes-api-ventas','h5-integration-target-configuration','h5-target-managed-identities','h5-target-servicebus-rbac','promotions-managed-identity-and-servicebus-parameters','promotions-servicebus-queue-rbac','catalog-svc-h5-storage','inventory-svc-h5-storage','pricing-svc-h5-storage','promotions-svc-h5-storage') + @('ghcr-api-gateway','ghcr-catalog-svc','ghcr-inventory-svc','ghcr-pricing-svc','ghcr-promotions-svc')
   }
   if (-not $required.ContainsKey($Mode)) { throw 'PREFLIGHT_MODE_INVALID' }
   $byName = @{}; foreach ($item in $Results) { $byName[$item.Check] = $item }
@@ -322,13 +402,18 @@ function Get-H5PreflightOutcome([string]$Mode, [object[]]$Results) {
     if ($byName.ContainsKey($name)) { $byName[$name] }
     else { [pscustomobject]@{ Check=$name; Status='NOT_RUN'; Detail='Mandatory check was not produced.' } }
   }
-  $passedStates = @('PASS','TOKEN_VALID','REQUIRED_SCOPES_VERIFIED')
   $failedStates = @('FAIL','INVALID','MISSING','NO_VISIBILITY','MISSING_FOR_RELEASE_SHA','REQUIRED_SCOPES_MISSING','TOKEN_INVALID')
-  $bad = @($mandatory | Where-Object { $_.Status -in $failedStates })
-  $pending = @($mandatory | Where-Object { $_.Status -notin $passedStates -and $_.Status -notin $failedStates })
+  $bad = [System.Collections.Generic.List[object]]::new()
+  $pending = [System.Collections.Generic.List[object]]::new()
+  foreach ($check in $mandatory) {
+    $expected = Get-H5CheckSuccessStatus $check.Check
+    if ($check.Status -ceq $expected) { continue }
+    if ($check.Status -in $failedStates -or $check.Status -in @('PASS','VERIFIED','TOKEN_VALID','REQUIRED_SCOPES_VERIFIED')) { $bad.Add($check) }
+    else { $pending.Add($check) }
+  }
   $exitCode = if ($bad.Count) { 1 } elseif ($pending.Count) { 2 } else { 0 }
   $overall = if ($exitCode -eq 0) { 'PASS' } elseif ($exitCode -eq 1) { 'FAIL' } else { 'PENDING' }
   return [pscustomobject]@{ Mode=$Mode; OverallStatus=$overall; ExitCode=$exitCode; DeploymentAuthorized=$false; RequiredChecks=@($required[$Mode]); MandatoryResults=@($mandatory) }
 }
 
-Export-ModuleMember -Function Get-H5ReservedEnvironment,Test-H5ManifestEnvironment,Test-H5ManifestCompleteness,Get-H5GuardedEnvironment,Test-H5GuardedEnvironment,Get-H5QueueRbacStatus,Test-H5PsqlAvailable,Get-H5GhcrReleaseStatus,Get-H5ContractScopes,Get-H5ContractOperationScopes,Get-H5PromotionsRequiredOperations,Test-H5JwtRequiredScopes,Get-H5ScopeAuthorizationStatus,Test-H5OptionalMessagingTable,Test-H5PemCertificate,New-H5ProtectedCaFile,Invoke-H5ReadOnlySql,Test-H5JwtAuthenticity,Get-H5PreflightOutcome
+Export-ModuleMember -Function Get-H5ReservedEnvironment,Test-H5ManifestEnvironment,Test-H5ManifestCompleteness,Get-H5GuardedEnvironment,Test-H5GuardedEnvironment,Resolve-H5GuardedEnvironmentReferences,Test-H5IntegrationTarget,Get-H5CheckSuccessStatus,Get-H5QueueRbacStatus,Test-H5PsqlAvailable,Get-H5GhcrReleaseStatus,Get-H5ContractScopes,Get-H5ContractOperationScopes,Get-H5PromotionsRequiredOperations,Test-H5JwtRequiredScopes,Get-H5ScopeAuthorizationStatus,Test-H5OptionalMessagingTable,Test-H5PemCertificate,New-H5ProtectedCaFile,Invoke-H5ReadOnlySql,Test-H5JwtAuthenticity,Get-H5PreflightOutcome
