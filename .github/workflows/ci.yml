@@ -423,6 +423,10 @@ jobs:
       run: |
         set -o pipefail
         node apps/taxonomy-svc/test/e2e-catalog/run.mjs 2>&1 | tee apps/taxonomy-svc/test/e2e-catalog/run.log
+    - name: Verificar migraciones e idempotencia H5 Taxonomy-Catalog en PostgreSQL descartable
+      run: |
+        set -o pipefail
+        node tests/h5/run-taxonomy-catalog-postgres.mjs ../G6-Productos-Ofertas-docs 2>&1 | tee apps/taxonomy-svc/test/e2e-catalog/h5-postgres.log
     - name: Conservar evidencia de la ejecución
       if: always()
       uses: actions/upload-artifact@v4
@@ -431,6 +435,7 @@ jobs:
         path: |
           backend/apps/taxonomy-svc/test/e2e-catalog/evidence-latest.json
           backend/apps/taxonomy-svc/test/e2e-catalog/run.log
+          backend/apps/taxonomy-svc/test/e2e-catalog/h5-postgres.log
         if-no-files-found: warn
   inventario:
     if: >-
