@@ -4026,6 +4026,89 @@ GRANT inventory_app TO inventory_test;`,
       );
     });
 
+    it('expone H01/H02 por HTTP contra PostgreSQL 17 con autorización y paginación reales', async () => {
+      const previousIssuer = process.env.G7_JWT_ISSUER;
+      let app: INestApplication | undefined;
+      process.env.G7_JWT_ISSUER = TEST_ISSUER;
+      InventoryAuthGuard.setTrustedPublicKey(TEST_PUBLIC_KEY);
+      try {
+        const module = await Test.createTestingModule({
+          imports: [InventorySvcModule],
+        })
+          .overrideProvider(InventoryWorkersService)
+          .useValue({})
+          .compile();
+        app = module.createNestApplication();
+        app.useGlobalFilters(new ProblemDetailsFilter());
+        await app.listen(0, '127.0.0.1');
+        const origin = await app.getUrl();
+        const token = createCryptographicJwt({
+          tipo: 'acceso',
+          sub: randomUUID(),
+          roles: ['GESTOR_COMERCIAL'],
+          scope: '',
+          includeAudience: false,
+        });
+        const alertsPath = '/api/v1/inventario/alertas';
+        const locationsPath = '/api/v1/inventario/ubicaciones';
+
+        await request(origin).get(alertsPath).expect(401);
+        await request(origin)
+          .get(alertsPath)
+          .auth(
+            createCryptographicJwt({
+              tipo: 'acceso',
+              sub: randomUUID(),
+              roles: [],
+              scope: '',
+              includeAudience: false,
+            }),
+            { type: 'bearer' },
+          )
+          .expect(403);
+        await request(origin)
+          .get(`${alertsPath}?estado=DISPONIBLE`)
+          .auth(token, { type: 'bearer' })
+          .expect(400);
+        await request(origin)
+          .get(
+            `${alertsPath}?sku=${encodeURIComponent(skuLow)}&locationId=${activeLocId}&pagina=1&tamanio=1`,
+          )
+          .auth(token, { type: 'bearer' })
+          .expect(200)
+          .expect(({ body }) => {
+            expect(body.items).toHaveLength(1);
+            expect(body.items[0]).toMatchObject({
+              sku: skuLow,
+              estado: 'STOCK_BAJO',
+            });
+            expect(body.meta).toMatchObject({
+              pagina: 1,
+              tamanio: 1,
+              total: 1,
+            });
+          });
+        await request(origin)
+          .get(`${locationsPath}?pagina=1&tamanio=1&soloActivas=true`)
+          .auth(token, { type: 'bearer' })
+          .expect(200)
+          .expect(({ body }) => {
+            expect(body.items).toHaveLength(1);
+            expect(body.items[0].active).toBe(true);
+            expect(body.meta).toMatchObject({ pagina: 1, tamanio: 1 });
+          });
+        await request(origin)
+          .get(`${locationsPath}?tamanio=101`)
+          .auth(token, { type: 'bearer' })
+          .expect(400);
+      } finally {
+        await app?.close();
+        InventoryAuthGuard.setTrustedPublicKey(null);
+        if (previousIssuer === undefined) delete process.env.G7_JWT_ISSUER;
+        else process.env.G7_JWT_ISSUER = previousIssuer;
+      }
+    }, 30_000);
+
     it('clasifica alertas correctamente en PostgreSQL real: normal/disponible (sin alerta), stock bajo, agotado y umbral exacto', async () => {
       const res = await dashService.obtenerAlertasInternas({
         locationId: activeLocId,

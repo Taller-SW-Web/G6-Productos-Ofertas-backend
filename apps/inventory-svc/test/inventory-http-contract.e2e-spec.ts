@@ -13,6 +13,7 @@ import {
 } from 'vitest';
 import request from 'supertest';
 import { InventorySvcModule } from '../src/inventory-svc.module.js';
+import { DashboardService } from '../src/dashboard/dashboard.service.js';
 import { DatabaseService } from '../src/database/database.service.js';
 import { ProblemDetailsFilter } from '../src/errors/problem-details.filter.js';
 import { InventoryAuthGuard } from '../src/auth/inventory-auth.guard.js';
@@ -142,6 +143,76 @@ describe('Inventory — contrato HTTP de consultas y escrituras (#99/#100/#101)'
       .set('Authorization', manager)
       .expect(503);
     expect(outage.body.code).toBe('SERVICIO_NO_DISPONIBLE');
+  });
+
+  it('expone H01/H02 solo a GESTOR_COMERCIAL y conserva filtros y paginación', async () => {
+    const http = request(app.getHttpServer());
+    const alertsPath = '/api/v1/inventario/alertas';
+    const locationsPath = '/api/v1/inventario/ubicaciones';
+
+    await http.get(alertsPath).expect(401);
+    await http
+      .get(alertsPath)
+      .set('Authorization', `Bearer ${human({ roles: [] })}`)
+      .expect(403);
+    await http
+      .get(alertsPath + '?estado=DISPONIBLE')
+      .set('Authorization', `Bearer ${human()}`)
+      .expect(400);
+    await http
+      .get(locationsPath + '?tamanio=101')
+      .set('Authorization', `Bearer ${human()}`)
+      .expect(400);
+    const dashboard = app.get(DashboardService);
+    const alertas = vi
+      .spyOn(dashboard, 'obtenerAlertasInternas')
+      .mockResolvedValue({
+        items: [],
+        meta: { pagina: 2, tamanio: 5, total: 0, totalPaginas: 0 },
+      });
+    const ubicaciones = vi
+      .spyOn(dashboard, 'obtenerUbicacionesInternas')
+      .mockResolvedValue({
+        items: [],
+        meta: { pagina: 3, tamanio: 7, total: 0, totalPaginas: 0 },
+      });
+    expect(alertas).not.toHaveBeenCalled();
+    expect(ubicaciones).not.toHaveBeenCalled();
+
+    await http
+      .get(
+        alertsPath +
+          '?sku=NIK-1&locationId=' +
+          locationId +
+          '&estado=AGOTADO&pagina=2&tamanio=5',
+      )
+      .set('Authorization', `Bearer ${human()}`)
+      .expect(200)
+      .expect(({ body }) =>
+        expect(body.meta).toMatchObject({ pagina: 2, tamanio: 5 }),
+      );
+    expect(alertas).toHaveBeenCalledWith(
+      {
+        sku: 'NIK-1',
+        locationId,
+        estado: 'AGOTADO',
+        pagina: '2',
+        tamanio: '5',
+      },
+      undefined,
+    );
+
+    await http
+      .get(locationsPath + '?pagina=3&tamanio=7&soloActivas=true')
+      .set('Authorization', `Bearer ${human()}`)
+      .expect(200)
+      .expect(({ body }) =>
+        expect(body.meta).toMatchObject({ pagina: 3, tamanio: 7 }),
+      );
+    expect(ubicaciones).toHaveBeenCalledWith(
+      { pagina: '3', tamanio: '7', soloActivas: 'true' },
+      undefined,
+    );
   });
 
   it.each([
