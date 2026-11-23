@@ -9,6 +9,8 @@ export const SERVICES = Object.freeze([
   'pricing-svc',
   'promotions-svc',
 ]);
+export const OFFICIAL_REPOSITORY = 'Taller-SW-Web/G6-Productos-Ofertas-backend';
+export const OFFICIAL_CI_WORKFLOW = '.github/workflows/ci.yml';
 
 const RESERVED_ENV = new Set([
   'NODE_ENV',
@@ -168,9 +170,10 @@ export function validateH5AcaParameters(document, { authorizedSha, environmentDe
   return Object.freeze({ sourceSha, services: SERVICES });
 }
 
-export function verifyGitHubSourceEvidence({ selectedSha, masterSha, workflowRun }) {
+export function verifyGitHubSourceEvidence({ repositoryFullName, selectedSha, masterSha, workflowRun }) {
+  if (repositoryFullName !== OFFICIAL_REPOSITORY) fail('SOURCE_REPOSITORY_NOT_OFFICIAL');
   if (!/^[a-f0-9]{40}$/i.test(selectedSha ?? '') || selectedSha.toLowerCase() !== masterSha?.toLowerCase()) fail('SOURCE_SHA_NOT_CURRENT_MASTER');
-  if (workflowRun?.head_sha?.toLowerCase() !== selectedSha.toLowerCase() || workflowRun?.event !== 'push' || workflowRun?.status !== 'completed' || workflowRun?.conclusion !== 'success') fail('SOURCE_CI_PUSH_NOT_SUCCESSFUL');
+  if (workflowRun?.path !== OFFICIAL_CI_WORKFLOW || workflowRun?.head_sha?.toLowerCase() !== selectedSha.toLowerCase() || workflowRun?.event !== 'push' || workflowRun?.head_branch !== 'master' || workflowRun?.status !== 'completed' || workflowRun?.conclusion !== 'success') fail('SOURCE_CI_PUSH_NOT_SUCCESSFUL');
   return true;
 }
 
@@ -183,7 +186,7 @@ export function verifyOciImageEvidence({ service, digest, sourceSha, manifest })
 }
 
 export async function verifyRemoteEvidence(document, sourceSha, fetchImpl = fetch, env = process.env) {
-  const github = 'https://api.github.com/repos/Taller-SW-Web/G6-Productos-Ofertas-backend';
+  const github = `https://api.github.com/repos/${OFFICIAL_REPOSITORY}`;
   const headers = { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
   const masterResponse = await fetchImpl(`${github}/commits/master`, { headers });
   if (!masterResponse.ok) fail('GITHUB_MASTER_LOOKUP_FAILED');
@@ -191,8 +194,8 @@ export async function verifyRemoteEvidence(document, sourceSha, fetchImpl = fetc
   const runsResponse = await fetchImpl(`${github}/actions/runs?head_sha=${sourceSha}&event=push&status=completed`, { headers });
   if (!runsResponse.ok) fail('GITHUB_CI_LOOKUP_FAILED');
   const runs = await runsResponse.json();
-  const workflowRun = runs.workflow_runs?.find((run) => run.head_sha === sourceSha && run.event === 'push' && run.status === 'completed' && run.conclusion === 'success' && run.head_branch === 'master');
-  verifyGitHubSourceEvidence({ selectedSha: sourceSha, masterSha: master.sha, workflowRun });
+  const workflowRun = runs.workflow_runs?.find((run) => run.path === OFFICIAL_CI_WORKFLOW && run.head_sha === sourceSha && run.event === 'push' && run.status === 'completed' && run.conclusion === 'success' && run.head_branch === 'master');
+  verifyGitHubSourceEvidence({ repositoryFullName:OFFICIAL_REPOSITORY, selectedSha: sourceSha, masterSha: master.sha, workflowRun });
 
   const username = env.GHCR_READ_USERNAME;
   const password = env.GHCR_READ_TOKEN;

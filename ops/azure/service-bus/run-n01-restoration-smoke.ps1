@@ -13,10 +13,12 @@ $templatePath = Join-Path $PSScriptRoot 'n01-restoration-smoke.bicep'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 $sourceSha = $SourceSha.ToLowerInvariant()
 $masterSha = (gh api repos/Taller-SW-Web/G6-Productos-Ofertas-backend/commits/master --jq .sha).Trim()
-if ($LASTEXITCODE -ne 0 -or $masterSha -cne $sourceSha) { throw 'N01_SOURCE_SHA_NOT_CURRENT_MASTER' }
-$ciQuery = "repos/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs?head_sha=$sourceSha&event=push&status=completed"
-$ciRuns = gh api $ciQuery --jq ".workflow_runs[] | select(.head_sha==\"$sourceSha\" and .event==\"push\" and .status==\"completed\" and .conclusion==\"success\" and .head_branch==\"master\") | .id"
-if ($LASTEXITCODE -ne 0 -or -not $ciRuns) { throw 'N01_SOURCE_CI_PUSH_NOT_SUCCESSFUL' }
+if ($LASTEXITCODE -ne 0) { throw 'N01_SOURCE_MASTER_LOOKUP_FAILED' }
+$ciQuery = "repos/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs?head_sha=$sourceSha"
+$ciRunsJson = gh api $ciQuery --jq '{workflow_runs: [.workflow_runs[] | {path,event,head_branch,head_sha,status,conclusion}]}'
+if ($LASTEXITCODE -ne 0) { throw 'N01_SOURCE_CI_LOOKUP_FAILED' }
+try { Assert-H5SourceEvidence -RepositoryFullName 'Taller-SW-Web/G6-Productos-Ofertas-backend' -SelectedSha $sourceSha -MasterSha $masterSha -WorkflowRunsJson ($ciRunsJson | Out-String) | Out-Null }
+catch { throw "N01_$($_.Exception.Message)" }
 
 $namespace = 'g6-sb-h5-int-32cdqgbnlk7ow'
 $queue = 'g6.promotions.commands'

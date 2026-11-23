@@ -1,3 +1,19 @@
+function Assert-H5SourceEvidence {
+  [CmdletBinding()]
+  param([Parameter(Mandatory)][string]$RepositoryFullName, [Parameter(Mandatory)][string]$SelectedSha,
+    [Parameter(Mandatory)][string]$MasterSha, [Parameter(Mandatory)][string]$WorkflowRunsJson)
+  if ($RepositoryFullName -cne 'Taller-SW-Web/G6-Productos-Ofertas-backend') { throw 'H5_SOURCE_REPOSITORY_NOT_OFFICIAL' }
+  if ($SelectedSha -cnotmatch '^[a-f0-9]{40}$' -or $SelectedSha -cne $MasterSha) { throw 'H5_SOURCE_SHA_NOT_CURRENT_MASTER' }
+  try { $runs = ($WorkflowRunsJson | ConvertFrom-Json -ErrorAction Stop).workflow_runs } catch { throw 'H5_SOURCE_CI_RESPONSE_INVALID' }
+  $eligible = @($runs | Where-Object {
+    $_.path -ceq '.github/workflows/ci.yml' -and $_.event -ceq 'push' -and
+    $_.head_branch -ceq 'master' -and $_.head_sha -ceq $SelectedSha -and
+    $_.status -ceq 'completed' -and $_.conclusion -ceq 'success'
+  })
+  if ($eligible.Count -eq 0) { throw 'H5_SOURCE_CI_PUSH_NOT_SUCCESSFUL' }
+  return $true
+}
+
 function Get-AzureWhatIfChanges {
   [CmdletBinding()]
   param([Parameter(Mandatory)][string]$Json)
@@ -39,6 +55,14 @@ function Assert-AcaWhatIfScope {
   return $true
 }
 
+function Assert-AcaEnvironmentLocation {
+  [CmdletBinding()]
+  param([Parameter(Mandatory)][string]$EnvironmentLocation)
+  $normalized = ($EnvironmentLocation -replace '[^a-zA-Z]', '').ToLowerInvariant()
+  if ($normalized -ne 'brazilsouth') { throw 'H5_ACA_ENVIRONMENT_LOCATION_MISMATCH' }
+  return $normalized
+}
+
 function Assert-N01WhatIfScope {
   [CmdletBinding()]
   param([Parameter(Mandatory)][string]$Json, [Parameter(Mandatory)][string]$ExpectedResourceId, [Parameter(Mandatory)][string]$ContainerGroupName)
@@ -56,4 +80,4 @@ function Assert-N01WhatIfScope {
   return $true
 }
 
-Export-ModuleMember -Function Get-AzureWhatIfChanges, Assert-AcaWhatIfScope, Assert-N01WhatIfScope
+Export-ModuleMember -Function Assert-H5SourceEvidence, Get-AzureWhatIfChanges, Assert-AcaWhatIfScope, Assert-AcaEnvironmentLocation, Assert-N01WhatIfScope

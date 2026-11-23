@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { rootCertificates } from 'node:tls';
-import { SERVICES, validateH5AcaParameters, verifyGitHubSourceEvidence, verifyOciImageEvidence, verifyRemoteEvidence } from './validate-h5-five-apps.mjs';
+import { SERVICES, OFFICIAL_REPOSITORY, OFFICIAL_CI_WORKFLOW, validateH5AcaParameters, verifyGitHubSourceEvidence, verifyOciImageEvidence, verifyRemoteEvidence } from './validate-h5-five-apps.mjs';
 
 const sha = 'fcf3dd983f5436221670e8c6a113fdd15cb76de9';
 const digest = `sha256:${'a'.repeat(64)}`;
@@ -62,9 +62,13 @@ test('rechaza configuración que no permite arrancar, TLS inválido u origen pú
   const origin = validParameters(); origin.parameters.appConfiguration.value['api-gateway'].env[2].value = 'https://public.example';
   expectCode(() => validate(origin), 'PRIVATE_ORIGIN_INVALID_GATEWAY_CATALOG_SVC_URL');
 });
-test('verifica evidencia GitHub inyectada y metadatos OCI por servicio y SHA', () => {
-  assert.equal(verifyGitHubSourceEvidence({ selectedSha: sha, masterSha: sha, workflowRun:{head_sha:sha,event:'push',status:'completed',conclusion:'success'} }), true);
-  assert.throws(() => verifyGitHubSourceEvidence({ selectedSha:sha, masterSha:sha, workflowRun:{head_sha:sha,event:'pull_request',status:'completed',conclusion:'success'} }), /SOURCE_CI_PUSH_NOT_SUCCESSFUL/);
+test('verifica repositorio, workflow ci.yml, push/master exitoso y metadatos OCI por servicio/SHA', () => {
+  const run = {head_sha:sha,event:'push',head_branch:'master',path:OFFICIAL_CI_WORKFLOW,status:'completed',conclusion:'success'};
+  assert.equal(verifyGitHubSourceEvidence({ repositoryFullName:OFFICIAL_REPOSITORY, selectedSha: sha, masterSha: sha, workflowRun:run }), true);
+  for (const change of [{path:'other.yml'}, {event:'pull_request'}, {head_branch:'feature'}, {conclusion:'failure'}]) {
+    assert.throws(() => verifyGitHubSourceEvidence({ repositoryFullName:OFFICIAL_REPOSITORY, selectedSha:sha, masterSha:sha, workflowRun:{...run,...change} }), /SOURCE_CI_PUSH_NOT_SUCCESSFUL/);
+  }
+  assert.throws(() => verifyGitHubSourceEvidence({ repositoryFullName:'AXL031/G6-Productos-Ofertas-backend', selectedSha:sha, masterSha:sha, workflowRun:run }), /SOURCE_REPOSITORY_NOT_OFFICIAL/);
   assert.equal(verifyOciImageEvidence({ service:'catalog-svc', digest, sourceSha:sha, manifest:{digest,labels:{'org.opencontainers.image.revision':sha,'org.opencontainers.image.source':'https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend','org.opencontainers.image.title':'catalog-svc'}} }), true);
   assert.throws(() => verifyOciImageEvidence({ service:'catalog-svc', digest, sourceSha:sha, manifest:{digest,labels:{}} }), /OCI_SOURCE_MISMATCH/);
 });
@@ -72,7 +76,7 @@ test('verifica master, CI push exacta y GHCR privado con respuestas simuladas in
   const doc = validParameters();
   const fakeFetch = async (url) => {
     if (url.endsWith('/commits/master')) return Response.json({ sha });
-    if (url.includes('/actions/runs?')) return Response.json({ workflow_runs:[{head_sha:sha,event:'push',status:'completed',conclusion:'success',head_branch:'master'}] });
+    if (url.includes('/actions/runs?')) return Response.json({ workflow_runs:[{head_sha:sha,event:'push',status:'completed',conclusion:'success',head_branch:'master',path:OFFICIAL_CI_WORKFLOW}] });
     if (url.startsWith('https://ghcr.io/token?')) return Response.json({ token:'simulated-private-token' });
     if (url.includes('/manifests/')) return new Response(JSON.stringify({config:{digest:'sha256:config'}}), {headers:{'docker-content-digest':digest}});
     if (url.includes('/blobs/')) {

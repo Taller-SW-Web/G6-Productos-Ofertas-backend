@@ -14,9 +14,10 @@ $resolvedParameters = (Resolve-Path -LiteralPath $ParametersFile).Path
 
 $masterSha = gh api repos/Taller-SW-Web/G6-Productos-Ofertas-backend/commits/master --jq .sha 2>$null
 if ($LASTEXITCODE -ne 0 -or $masterSha.Trim() -cne $AuthorizedSha.ToLowerInvariant()) { throw 'H5_ACA_SOURCE_SHA_NOT_CURRENT_MASTER' }
-$ciQuery = "repos/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs?head_sha=$AuthorizedSha&event=push&status=completed"
-$ciRunIds = gh api $ciQuery --jq ".workflow_runs[] | select(.head_sha==\"$AuthorizedSha\" and .event==\"push\" and .status==\"completed\" and .conclusion==\"success\" and .head_branch==\"master\") | .id" 2>$null
-if ($LASTEXITCODE -ne 0 -or -not $ciRunIds) { throw 'H5_ACA_SOURCE_CI_PUSH_NOT_SUCCESSFUL' }
+$ciQuery = "repos/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs?head_sha=$($AuthorizedSha.ToLowerInvariant())"
+$ciRunsJson = gh api $ciQuery --jq '{workflow_runs: [.workflow_runs[] | {path,event,head_branch,head_sha,status,conclusion}]}' 2>$null
+if ($LASTEXITCODE -ne 0) { throw 'H5_ACA_SOURCE_CI_LOOKUP_FAILED' }
+Assert-H5SourceEvidence -RepositoryFullName 'Taller-SW-Web/G6-Productos-Ofertas-backend' -SelectedSha $AuthorizedSha.ToLowerInvariant() -MasterSha $masterSha.Trim() -WorkflowRunsJson ($ciRunsJson | Out-String) | Out-Null
 
 $deploymentResourceGroup = 'rg-g6-sb-h5-int-fork'
 $preflightErrorPath = Join-Path $env:TEMP ('h5-aca-preflight-' + [guid]::NewGuid().ToString('N') + '.stderr')
@@ -24,19 +25,26 @@ try {
   $group = az group show --name $deploymentResourceGroup --output json 2>$preflightErrorPath | ConvertFrom-Json
   if ($LASTEXITCODE -ne 0) { throw 'H5_ACA_RESOURCE_GROUP_PREFLIGHT_FAILED' }
   $environment = az containerapp env show --name 'env-g6-h5-int' --resource-group $deploymentResourceGroup --output json 2>$preflightErrorPath | ConvertFrom-Json
-  if ($LASTEXITCODE -ne 0 -or $environment.location -ne 'brazilsouth' -or $group.location -ne $environment.location) { throw 'H5_ACA_ENVIRONMENT_LOCATION_MISMATCH' }
+  if ($LASTEXITCODE -ne 0) { throw 'H5_ACA_ENVIRONMENT_PREFLIGHT_FAILED' }
+  $environmentLocation = Assert-AcaEnvironmentLocation -EnvironmentLocation $environment.location
   if ([string]::IsNullOrWhiteSpace($environment.properties.defaultDomain)) { throw 'H5_ACA_ENVIRONMENT_DEFAULT_DOMAIN_MISSING' }
 } finally { Remove-Item -LiteralPath $preflightErrorPath -Force -ErrorAction SilentlyContinue }
 
-node --test $validatorTests *> $null
-if ($LASTEXITCODE -ne 0) { throw 'H5_ACA_VALIDATOR_TESTS_FAILED' }
-
-$env:H5_AUTHORIZED_SOURCE_SHA = $AuthorizedSha
-$env:H5_ENVIRONMENT_DEFAULT_DOMAIN = $environment.properties.defaultDomain
-node $validatorPath $resolvedParameters
-Remove-Item Env:H5_AUTHORIZED_SOURCE_SHA -ErrorAction SilentlyContinue
-Remove-Item Env:H5_ENVIRONMENT_DEFAULT_DOMAIN -ErrorAction SilentlyContinue
-if ($LASTEXITCODE -ne 0) { throw 'H5_ACA_PARAMETER_VALIDATION_FAILED_BEFORE_WHAT_IF' }
+$previousAuthorizedSha = $env:H5_AUTHORIZED_SOURCE_SHA
+$previousEnvironmentDomain = $env:H5_ENVIRONMENT_DEFAULT_DOMAIN
+try {
+  $env:H5_AUTHORIZED_SOURCE_SHA = $AuthorizedSha.ToLowerInvariant()
+  $env:H5_ENVIRONMENT_DEFAULT_DOMAIN = $environment.properties.defaultDomain
+  node --test $validatorTests *> $null
+  if ($LASTEXITCODE -ne 0) { throw 'H5_ACA_VALIDATOR_TESTS_FAILED' }
+  node $validatorPath $resolvedParameters
+  if ($LASTEXITCODE -ne 0) { throw 'H5_ACA_PARAMETER_VALIDATION_FAILED_BEFORE_WHAT_IF' }
+} finally {
+  if ($null -eq $previousAuthorizedSha) { Remove-Item Env:H5_AUTHORIZED_SOURCE_SHA -ErrorAction SilentlyContinue }
+  else { $env:H5_AUTHORIZED_SOURCE_SHA = $previousAuthorizedSha }
+  if ($null -eq $previousEnvironmentDomain) { Remove-Item Env:H5_ENVIRONMENT_DEFAULT_DOMAIN -ErrorAction SilentlyContinue }
+  else { $env:H5_ENVIRONMENT_DEFAULT_DOMAIN = $previousEnvironmentDomain }
+}
 
 az bicep build --file $templatePath --stdout *> $null
 if ($LASTEXITCODE -ne 0) { throw 'H5_ACA_BICEP_BUILD_FAILED' }
@@ -56,7 +64,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'H5_ACA_EXISTING_APPS_QUERY_FAILED' }
   foreach ($app in @($currentApps | Where-Object { $_.name -in $serviceNames })) {
     $expectedFqdn = "$($app.name).internal.$($environment.properties.defaultDomain)"
-    if ($app.location -ne $environment.location -or $app.properties.configuration.ingress.external -ne $false -or
+    $appLocation = ([string]$app.location -replace '[^a-zA-Z]', '').ToLowerInvariant()
+    if ($appLocation -ne $environmentLocation -or $app.properties.configuration.ingress.external -ne $false -or
         $app.properties.configuration.ingress.allowInsecure -ne $false -or $app.properties.configuration.ingress.fqdn -cne $expectedFqdn) {
       throw 'H5_ACA_EXISTING_APP_PRIVATE_FQDN_OR_LOCATION_INVALID'
     }
