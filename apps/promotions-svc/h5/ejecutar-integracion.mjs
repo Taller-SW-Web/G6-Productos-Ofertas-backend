@@ -134,6 +134,7 @@ async function main() {
   const order = plan.order_id;
   const base = {
     environment: plan.environment,
+    case_id: plan.case_id,
     g6_sha: plan.g6_sha,
     g5_sha: plan.g5_sha,
     action,

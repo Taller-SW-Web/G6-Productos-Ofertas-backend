@@ -32,7 +32,8 @@ export function validatePreflightEvidence(events, plan) {
       plan.environment !== 'integration' || !sha.test(plan.g5_sha ?? '') ||
       !sha.test(plan.g6_sha ?? '') || !uuid.test(plan.correlation_id ?? '') ||
       typeof plan.order_id !== 'string' || !plan.order_id.trim() ||
-      typeof plan.case_id !== 'string') return false;
+      typeof plan.case_id !== 'string' ||
+      !scenarios.some((scenario) => scenario.id === plan.case_id)) return false;
   const scenario = plan.scenario;
   const expectedScenario = {
     sku: scenario.sku,

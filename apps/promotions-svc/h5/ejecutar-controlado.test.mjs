@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -90,4 +92,89 @@ test('preflight exige las tres comprobaciones reales, correlacionadas y no mutan
   }, ['G5-H5-01'], join(dir, 'matrix.json'), async () => {
     throw new Error('deployment must not be queried before mutation authorization');
   }), /MUTATION_AUTHORIZATION_FILE_REQUIRED_G5-H5-01/);
+});
+
+test('runner productor emite case_id en las cuatro evidencias aceptadas por el consumidor', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'g6-h5-preflight-producer-consumer-'));
+  const gateway = 'https://gateway.integration.example.invalid';
+  const restore = vars.map((name) => assignEnv(name, name.endsWith('ORIGIN') ? gateway : 'synthetic-test-jwt'));
+  t.after(async () => { restore.forEach((fn) => fn()); await rm(dir, { recursive: true, force: true }); });
+
+  const plan = {
+    environment: 'integration', gateway, case_id: 'G5-H5-01', order_id: 'SYNTHETIC-ORDER-01',
+    g5_sha: '1'.repeat(40), g6_sha: '2'.repeat(40), correlation_id: randomUUID(),
+    customer_ref: randomUUID(),
+    scenario: {
+      sku: 'SKU-VALIDADO', quantity: 2, channel_id: 'WEB', coupon_code: 'CUPON-VALIDADO',
+      currency: 'PEN', location_id: randomUUID(),
+    },
+  };
+  const planPath = join(dir, 'plan.json');
+  const preloadPath = join(dir, 'http-double.mjs');
+  await writeFile(planPath, JSON.stringify(plan));
+  await writeFile(preloadPath, `
+    globalThis.fetch = async (input) => {
+      const url = new URL(input);
+      let body;
+      if (url.pathname === '/api/v1/inventario/disponibilidad') body = { items: [{
+        sku: 'SKU-VALIDADO', location_id: url.searchParams.get('location_id'), available: 12,
+      }] };
+      else if (url.pathname === '/api/v1/precios/skus/SKU-VALIDADO') body = {
+        sku: 'SKU-VALIDADO', currency: 'PEN', precio_regular: '20.00',
+      };
+      else if (url.pathname === '/api/v1/cupones/validar') body = {
+        valid: true, currency: 'PEN', discount_amount: '5.00',
+      };
+      else return new Response('{}', { status: 404 });
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+  `);
+
+  const producer = spawnSync(process.execPath, [
+    '--import', pathToFileURL(preloadPath).href,
+    fileURLToPath(new URL('./ejecutar-integracion.mjs', import.meta.url)),
+    'preflight', planPath, join(dir, 'runtime.json'),
+  ], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      G5_H5_AUTHORIZED_GATEWAY_ORIGIN: gateway,
+      G5_H5_VENTAS_JWT: 'synthetic-test-jwt',
+    },
+  });
+  assert.equal(producer.status, 0, producer.stderr);
+  const emitted = producer.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+  assert.deepEqual(emitted.map((event) => event.event), [
+    'http', 'http', 'http', 'read_only_preflight',
+  ]);
+  assert.ok(emitted.every((event) => event.case_id === plan.case_id));
+
+  const manifest = { 'G5-H5-01': { plan: planPath } };
+  const successful = await ejecutarPreflight(
+    manifest,
+    ['G5-H5-01'],
+    join(dir, 'accepted.json'),
+    () => ({ status: producer.status, stdout: producer.stdout }),
+  );
+  assert.equal(successful.results[0].technical_status, 'PASS');
+  assert.equal(successful.results[0].status, 'BLOCKED');
+
+  const invalidEvidence = [
+    emitted.map((event, index) => index === 3 ? Object.fromEntries(
+      Object.entries(event).filter(([key]) => key !== 'case_id'),
+    ) : event),
+    emitted.map((event, index) => index === 3 ? { ...event, case_id: 'G5-H5-02' } : event),
+  ];
+  for (const [index, evidence] of invalidEvidence.entries()) {
+    const rejected = await ejecutarPreflight(
+      manifest,
+      ['G5-H5-01'],
+      join(dir, `rejected-${index}.json`),
+      () => ({ status: 0, stdout: evidence.map((event) => JSON.stringify(event)).join('\n') }),
+    );
+    assert.equal(rejected.results[0].technical_status, 'FAIL');
+    assert.equal(rejected.results[0].status, 'BLOCKED');
+  }
+
+  assert.equal(validatePreflightEvidence(emitted, { ...plan, case_id: 'UNKNOWN-CASE' }), false);
 });
