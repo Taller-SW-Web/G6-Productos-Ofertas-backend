@@ -76,7 +76,8 @@ ALTER TABLE catalog.outbox
 CREATE FUNCTION catalog.mark_taxonomy_reply_transport()
 RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
 BEGIN
-    IF current_setting('g6.catalog_taxonomy_reply', true) = 'AZURE_SERVICE_BUS'
+    IF current_setting('catalog.messaging_provider', true) = 'AZURE_SERVICE_BUS'
+       OR current_setting('g6.catalog_taxonomy_reply', true) = 'AZURE_SERVICE_BUS'
     THEN
         NEW.delivery_transport := 'AZURE_SERVICE_BUS';
     END IF;
@@ -87,7 +88,7 @@ REVOKE ALL ON FUNCTION catalog.mark_taxonomy_reply_transport() FROM PUBLIC;
 
 CREATE TRIGGER trg_catalog_taxonomy_reply_transport
 BEFORE INSERT ON catalog.outbox
-FOR EACH ROW WHEN (NEW.event_name = 'catalog.master.deactivation.checked')
+FOR EACH ROW
 EXECUTE FUNCTION catalog.mark_taxonomy_reply_transport();
 
 COMMIT;

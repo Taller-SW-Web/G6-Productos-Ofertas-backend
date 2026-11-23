@@ -35,15 +35,22 @@ describe('Catalog H5 transport readiness', () => {
     vi.resetAllMocks();
   });
 
-  function fixture() {
+  function fixture(destinations = taxonomyReplyQueue) {
+    vi.stubEnv('CATALOG_H5_DESTINATIONS', destinations);
     const storage = vi.fn().mockResolvedValue({ rows: [{ ready: true }] });
     const probe = vi.fn().mockResolvedValue([]);
     const close = vi.fn().mockResolvedValue(undefined);
     const verifySender = vi.fn().mockResolvedValue(undefined);
     const closeBus = vi.fn().mockResolvedValue(undefined);
     let reportError: (() => void) | undefined;
+    const consumers = new Map<string, Pick<CatalogMessageService, 'consume'>>();
     const subscribeWithProbe = vi.fn(
-      (_queue: string, _consumer: unknown, onError: () => void) => {
+      (
+        queue: string,
+        consumer: Pick<CatalogMessageService, 'consume'>,
+        onError: () => void,
+      ) => {
+        consumers.set(queue, consumer);
         reportError = onError;
         return { probe, close };
       },
@@ -58,8 +65,9 @@ describe('Catalog H5 transport readiness', () => {
       read: (work: (db: { execute: typeof storage }) => unknown) =>
         work({ execute: storage }),
     } as unknown as Database;
+    const consume = vi.fn().mockResolvedValue('APPLIED');
     runtime = new CatalogTaxonomyServiceBusRuntime(database, {
-      consume: vi.fn(),
+      consume,
     } as unknown as CatalogMessageService);
     return {
       runtime,
@@ -67,9 +75,47 @@ describe('Catalog H5 transport readiness', () => {
       probe,
       verifySender,
       subscribeWithProbe,
+      consumers,
+      consume,
       failReceiver: () => reportError?.(),
     };
   }
+
+  it('rejects a reply-dependent Taxonomy check but processes other events without the route', async () => {
+    const f = fixture('');
+    await f.runtime.onApplicationBootstrap();
+    await vi.advanceTimersByTimeAsync(0);
+    const taxonomyConsumer = f.consumers.get(taxonomyRequestQueue);
+    expect(taxonomyConsumer).toBeDefined();
+
+    const request = {
+      name: 'taxonomy.master.deactivation.check.requested',
+    } as Parameters<CatalogMessageService['consume']>[0];
+    await expect(taxonomyConsumer!.consume(request)).rejects.toThrow(
+      'CATALOG_H5_TAXONOMY_REPLY_DISABLED',
+    );
+    expect(f.consume).not.toHaveBeenCalled();
+
+    const update = {
+      name: 'taxonomy.category.updated',
+    } as Parameters<CatalogMessageService['consume']>[0];
+    await expect(taxonomyConsumer!.consume(update)).resolves.toBe('APPLIED');
+    expect(f.consume).toHaveBeenCalledWith(update, false);
+  });
+
+  it('consumes a Taxonomy deactivation check with the reply route enabled', async () => {
+    const f = fixture(taxonomyReplyQueue);
+    await f.runtime.onApplicationBootstrap();
+    await vi.advanceTimersByTimeAsync(0);
+    const taxonomyConsumer = f.consumers.get(taxonomyRequestQueue);
+    expect(taxonomyConsumer).toBeDefined();
+
+    const request = {
+      name: 'taxonomy.master.deactivation.check.requested',
+    } as Parameters<CatalogMessageService['consume']>[0];
+    await expect(taxonomyConsumer!.consume(request)).resolves.toBe('APPLIED');
+    expect(f.consume).toHaveBeenCalledWith(request, true);
+  });
 
   it('detects storage and idle broker loss, rejects a stale success, and becomes ready without restart', async () => {
     const f = fixture();

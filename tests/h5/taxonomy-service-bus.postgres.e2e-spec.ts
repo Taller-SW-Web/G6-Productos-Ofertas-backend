@@ -13,6 +13,7 @@ import { DeactivationIntentService } from '../../apps/taxonomy-svc/src/domain/de
 import { Database as CatalogDatabase } from '../../apps/catalog-svc/src/database.js';
 import { CatalogMessageService } from '../../apps/catalog-svc/src/catalog-message.service.js';
 import type { CatalogEnvelope } from '../../apps/catalog-svc/src/catalog-messages.js';
+import { createCatalogTaxonomyConsumer } from '../../apps/catalog-svc/src/catalog-service-bus.runtime.js';
 import { relayCatalogDelivery } from '../../apps/catalog-svc/src/catalog-service-bus-relay.js';
 import { taxonomyReplyQueue } from '../../apps/catalog-svc/src/catalog-service-bus.js';
 import { TaxonomyMessageStore } from '../../apps/taxonomy-svc/src/persistence/taxonomy-message.store.js';
@@ -355,10 +356,45 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
       const request = initial.row.payload as CatalogEnvelope;
       expect(await store.finishServiceBusDelivery(initial, 'sent')).toBe(true);
 
-      expect(await catalog.consume(request, true)).toBe('APPLIED');
-      expect(await catalog.consume(request, true)).toBe('DUPLICATE');
+      const snapshot = async () =>
+        (
+          await admin.query(
+            'SELECT (SELECT count(*)::int FROM catalog.inbox WHERE operation_id=$1) AS inbox, (SELECT count(*)::int FROM catalog.master_barriers WHERE operation_id=$1) AS barriers, (SELECT count(*)::int FROM catalog.outbox WHERE operation_id=$1) AS outbox, (SELECT count(*)::int FROM catalog.outbox_delivery d JOIN catalog.outbox o USING (message_id) WHERE o.operation_id=$1) AS deliveries',
+            [operationId],
+          )
+        ).rows[0];
+      const empty = { inbox: 0, barriers: 0, outbox: 0, deliveries: 0 };
+      const disabledConsumer = createCatalogTaxonomyConsumer(catalog, []);
+      await expect(disabledConsumer.consume(request)).rejects.toThrow(
+        'CATALOG_H5_TAXONOMY_REPLY_DISABLED',
+      );
+      expect(await snapshot()).toEqual(empty);
+
+      const enabledConsumer = createCatalogTaxonomyConsumer(catalog, [
+        taxonomyReplyQueue,
+      ]);
+      expect(await enabledConsumer.consume(request)).toBe('APPLIED');
+      expect(await enabledConsumer.consume(request)).toBe('DUPLICATE');
+      const replyTransport = await admin.query(
+        'SELECT o.delivery_transport,d.destination,d.published_at FROM catalog.outbox o JOIN catalog.outbox_delivery d USING (message_id) WHERE o.operation_id=$1',
+        [operationId],
+      );
+      expect(replyTransport.rows).toEqual([
+        {
+          delivery_transport: 'AZURE_SERVICE_BUS',
+          destination: taxonomyReplyQueue,
+          published_at: null,
+        },
+      ]);
       const h4Publisher = { publish: vi.fn() };
-      expect(await catalog.relayOne(h4Publisher)).toBe('EMPTY');
+      const priorProvider = process.env.MESSAGING_PROVIDER;
+      process.env.MESSAGING_PROVIDER = 'RABBITMQ';
+      try {
+        expect(await catalog.relayOne(h4Publisher)).toBe('EMPTY');
+      } finally {
+        if (priorProvider === undefined) delete process.env.MESSAGING_PROVIDER;
+        else process.env.MESSAGING_PROVIDER = priorProvider;
+      }
       expect(h4Publisher.publish).not.toHaveBeenCalled();
       const publish = vi
         .fn()
@@ -374,8 +410,22 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
       expect(
         await relayCatalogDelivery(catalogDb, { publish }, taxonomyReplyQueue),
       ).toBe('CONFIRMED');
-      expect(await restartedCatalog.relayOne(h4Publisher)).toBe('EMPTY');
+      const providerBeforeH4Check = process.env.MESSAGING_PROVIDER;
+      process.env.MESSAGING_PROVIDER = 'RABBITMQ';
+      try {
+        expect(await restartedCatalog.relayOne(h4Publisher)).toBe('EMPTY');
+      } finally {
+        if (providerBeforeH4Check === undefined)
+          delete process.env.MESSAGING_PROVIDER;
+        else process.env.MESSAGING_PROVIDER = providerBeforeH4Check;
+      }
       expect(h4Publisher.publish).not.toHaveBeenCalled();
+      expect(await snapshot()).toEqual({
+        inbox: 1,
+        barriers: 1,
+        outbox: 1,
+        deliveries: 1,
+      });
       expect(
         publish.mock.calls.map(([queue, message]) => [
           queue,
@@ -420,10 +470,10 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
       if (!final) throw new Error('FINAL_NOT_ENQUEUED');
       expect(final.row.event_name).toBe('taxonomy.master.deactivated');
       expect(
-        await catalog.consume(final.row.payload as CatalogEnvelope, true),
+        await enabledConsumer.consume(final.row.payload as CatalogEnvelope),
       ).toBe('APPLIED');
       expect(
-        await catalog.consume(final.row.payload as CatalogEnvelope, true),
+        await enabledConsumer.consume(final.row.payload as CatalogEnvelope),
       ).toBe('DUPLICATE');
       expect(await store.finishServiceBusDelivery(final, 'sent')).toBe(true);
       expect(await store.claimServiceBusDelivery()).toBeUndefined();

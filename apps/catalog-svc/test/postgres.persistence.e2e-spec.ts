@@ -404,10 +404,21 @@ describe.skipIf(!dockerAvailable)(
           event_name: 'catalog.product.deactivated',
           kind: 'event',
           correlation_id: correlationId,
-          occurred_at: new Date(),
-          payload: { product_id: randomUUID(), product_version: 1 },
+          occurred_at: new Date('2000-01-01T00:00:00Z'),
+          payload: {
+            product_id: randomUUID(),
+            product_version: 1,
+            changed_at: '2000-01-01T00:00:00.000Z',
+          },
         }),
       );
+      const h4Transport = await database.read((db) =>
+        db.execute(sql`
+          SELECT delivery_transport
+          FROM catalog.outbox WHERE message_id = ${h4MessageId}
+        `),
+      );
+      expect(h4Transport.rows[0]?.delivery_transport).toBe('RABBITMQ');
       const h4Deliveries = await database.read((db) =>
         db.execute(sql`
           SELECT count(*)::integer AS count
@@ -415,6 +426,76 @@ describe.skipIf(!dockerAvailable)(
         `),
       );
       expect(h4Deliveries.rows[0]?.count).toBe(0);
+
+      vi.stubEnv('MESSAGING_PROVIDER', 'AZURE_SERVICE_BUS');
+      vi.stubEnv('CATALOG_H5_DESTINATIONS', '');
+      const noDestinationMessageId = randomUUID();
+      await database.transaction((tx) =>
+        tx.insert(outbox).values({
+          message_id: noDestinationMessageId,
+          event_name: 'catalog.product.deactivated',
+          kind: 'event',
+          correlation_id: randomUUID(),
+          occurred_at: new Date('2010-01-01T00:00:00Z'),
+          payload: {
+            product_id: randomUUID(),
+            product_version: 2,
+            changed_at: '2010-01-01T00:00:00.000Z',
+          },
+        }),
+      );
+      const noDestination = await database.read((db) =>
+        db.execute(sql`
+          SELECT
+            o.delivery_transport,
+            count(d.message_id)::integer AS deliveries
+          FROM catalog.outbox o
+          LEFT JOIN catalog.outbox_delivery d USING (message_id)
+          WHERE o.message_id = ${noDestinationMessageId}
+          GROUP BY o.delivery_transport
+        `),
+      );
+      expect(noDestination.rows[0]).toEqual({
+        delivery_transport: 'AZURE_SERVICE_BUS',
+        deliveries: 0,
+      });
+
+      vi.stubEnv('MESSAGING_PROVIDER', 'RABBITMQ');
+      const markerReplyMessageId = randomUUID();
+      await database.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT set_config('g6.catalog_taxonomy_reply', 'AZURE_SERVICE_BUS', true)`,
+        );
+        await tx.insert(outbox).values({
+          message_id: markerReplyMessageId,
+          event_name: 'catalog.master.deactivation.checked',
+          kind: 'result',
+          correlation_id: randomUUID(),
+          operation_id: randomUUID(),
+          occurred_at: new Date('2011-01-01T00:00:00Z'),
+          payload: {
+            entity_type: 'CATEGORY',
+            entity_id: randomUUID(),
+            version: 1,
+            result: 'CLEAR',
+          },
+        });
+      });
+      const explicitMarker = await database.read((db) =>
+        db.execute(sql`
+          SELECT
+            o.delivery_transport,
+            count(d.message_id)::integer AS deliveries
+          FROM catalog.outbox o
+          LEFT JOIN catalog.outbox_delivery d USING (message_id)
+          WHERE o.message_id = ${markerReplyMessageId}
+          GROUP BY o.delivery_transport
+        `),
+      );
+      expect(explicitMarker.rows[0]).toEqual({
+        delivery_transport: 'AZURE_SERVICE_BUS',
+        deliveries: 0,
+      });
 
       vi.stubEnv('MESSAGING_PROVIDER', 'AZURE_SERVICE_BUS');
       vi.stubEnv(
@@ -429,8 +510,12 @@ describe.skipIf(!dockerAvailable)(
             event_name: 'catalog.product.deactivated',
             kind: 'event',
             correlation_id: randomUUID(),
-            occurred_at: new Date(),
-            payload: { product_id: randomUUID(), product_version: 2 },
+            occurred_at: new Date('2020-01-01T00:00:00Z'),
+            payload: {
+              product_id: randomUUID(),
+              product_version: 3,
+              changed_at: '2020-01-01T00:00:00.000Z',
+            },
           });
           throw new Error('rollback H5 outbox');
         }),
@@ -454,9 +539,22 @@ describe.skipIf(!dockerAvailable)(
           event_name: 'catalog.product.deactivated',
           kind: 'event',
           correlation_id: randomUUID(),
-          occurred_at: new Date(),
-          payload: { product_id: randomUUID(), product_version: 3 },
+          occurred_at: new Date('2021-01-01T00:00:00Z'),
+          payload: {
+            product_id: randomUUID(),
+            product_version: 4,
+            changed_at: '2021-01-01T00:00:00.000Z',
+          },
         }),
+      );
+      const fanoutTransport = await database.read((db) =>
+        db.execute(sql`
+          SELECT delivery_transport
+          FROM catalog.outbox WHERE message_id = ${fanoutMessageId}
+        `),
+      );
+      expect(fanoutTransport.rows[0]?.delivery_transport).toBe(
+        'AZURE_SERVICE_BUS',
       );
       const fanout = await database.read((db) =>
         db.execute(sql`
@@ -479,8 +577,12 @@ describe.skipIf(!dockerAvailable)(
           event_name: 'catalog.product.deactivated',
           kind: 'event',
           correlation_id: randomUUID(),
-          occurred_at: new Date(),
-          payload: { product_id: randomUUID(), product_version: 4 },
+          occurred_at: new Date('2022-01-01T00:00:00Z'),
+          payload: {
+            product_id: randomUUID(),
+            product_version: 5,
+            changed_at: '2022-01-01T00:00:00.000Z',
+          },
         }),
       );
       const restricted = await database.read((db) =>
@@ -503,20 +605,65 @@ describe.skipIf(!dockerAvailable)(
         .mockRejectedValueOnce(new Error('ambiguous send'))
         .mockResolvedValue(undefined);
       const bus = { publish };
-      expect(await relayCatalogDelivery(database, bus)).toBe('RETRY');
+      expect(
+        await relayCatalogDelivery(database, bus, 'g6.combos.from.catalog'),
+      ).toBe('RETRY');
       await database.transaction((tx) =>
         tx.execute(sql`
           UPDATE catalog.outbox_delivery
           SET available_at = now()
           WHERE message_id = ${fanoutMessageId}
+            AND destination = 'g6.combos.from.catalog'
             AND published_at IS NULL
         `),
       );
-      expect(await relayCatalogDelivery(database, bus)).toBe('CONFIRMED');
+      expect(
+        await relayCatalogDelivery(database, bus, 'g6.combos.from.catalog'),
+      ).toBe('CONFIRMED');
       expect(publish.mock.calls[1]?.[1].message_id).toBe(
         publish.mock.calls[0]?.[1].message_id,
       );
       expect(publish.mock.calls[1]?.[0]).toBe(publish.mock.calls[0]?.[0]);
+      expect(
+        await relayCatalogDelivery(database, bus, 'g6.promotions.from.catalog'),
+      ).toBe('CONFIRMED');
+      expect(
+        await relayCatalogDelivery(database, bus, 'g6.promotions.from.catalog'),
+      ).toBe('CONFIRMED');
+      expect(publish).toHaveBeenCalledTimes(4);
+      const publishedFanout = await database.read((db) =>
+        db.execute(sql`
+          SELECT destination, published_at IS NOT NULL AS published
+          FROM catalog.outbox_delivery
+          WHERE message_id = ${fanoutMessageId}
+          ORDER BY destination
+        `),
+      );
+      expect(publishedFanout.rows).toEqual([
+        { destination: 'g6.combos.from.catalog', published: true },
+        { destination: 'g6.promotions.from.catalog', published: true },
+      ]);
+
+      vi.stubEnv('MESSAGING_PROVIDER', 'RABBITMQ');
+      vi.stubEnv('CATALOG_H5_DESTINATIONS', '');
+      const h4Publisher = { publish: vi.fn().mockResolvedValue(undefined) };
+      const messages = new CatalogMessageService(database);
+      expect(await messages.relayOne(h4Publisher)).toBe('PUBLISHED');
+      expect(await messages.relayOne(h4Publisher)).toBe('EMPTY');
+      expect(h4Publisher.publish).toHaveBeenCalledTimes(1);
+      expect(h4Publisher.publish.mock.calls[0]?.[0].message_id).toBe(
+        h4MessageId,
+      );
+      const skippedH5 = await database.read((db) =>
+        db.execute(sql`
+          SELECT message_id
+          FROM catalog.outbox
+          WHERE message_id IN (
+            ${noDestinationMessageId}, ${markerReplyMessageId}, ${fanoutMessageId}, ${restrictedMessageId}
+          ) AND published_at IS NOT NULL
+        `),
+      );
+      expect(skippedH5.rows).toEqual([]);
     });
 
     function productInput(sku: string) {

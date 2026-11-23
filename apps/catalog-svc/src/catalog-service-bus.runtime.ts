@@ -22,6 +22,23 @@ const recoveryDelayMs = 2000;
 
 type CatalogSubscription = ReturnType<CatalogServiceBus['subscribeWithProbe']>;
 
+export function createCatalogTaxonomyConsumer(
+  messages: Pick<CatalogMessageService, 'consume'>,
+  destinations: readonly string[],
+): Pick<CatalogMessageService, 'consume'> {
+  const replyEnabled = destinations.includes(taxonomyReplyQueue);
+  return {
+    consume: async (envelope) => {
+      if (
+        envelope.name === 'taxonomy.master.deactivation.check.requested' &&
+        !replyEnabled
+      )
+        throw new Error('CATALOG_H5_TAXONOMY_REPLY_DISABLED');
+      return messages.consume(envelope, replyEnabled);
+    },
+  };
+}
+
 @Injectable()
 export class CatalogServiceBusRuntime
   implements OnApplicationBootstrap, OnModuleDestroy
@@ -179,15 +196,7 @@ export class CatalogServiceBusRuntime
       for (const queue of catalogIncomingQueues) {
         const service =
           queue === taxonomyRequestQueue
-            ? {
-                consume: (
-                  envelope: Parameters<CatalogMessageService['consume']>[0],
-                ) =>
-                  this.messages.consume(
-                    envelope,
-                    this.destinations.includes(taxonomyReplyQueue),
-                  ),
-              }
+            ? createCatalogTaxonomyConsumer(this.messages, this.destinations)
             : this.messages;
         opened.push(
           this.bus.subscribeWithProbe(queue, service, () =>

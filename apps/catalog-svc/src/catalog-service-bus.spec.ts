@@ -5,6 +5,7 @@ import {
   CatalogServiceBus,
   createCatalogServiceBus,
 } from './catalog-service-bus.js';
+import { createCatalogTaxonomyConsumer } from './catalog-service-bus.runtime.js';
 import { readCatalogH5Destinations } from './catalog-messaging.config.js';
 
 function outgoing(): CatalogEnvelope {
@@ -159,5 +160,67 @@ describe('Catalog Service Bus candidate', () => {
       delivery({ ...event, producer: 'pricing-svc' }),
     );
     expect(deadLetterMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('abandons a valid Taxonomy check when the H5 reply route is disabled', async () => {
+    type Handlers = Parameters<
+      ReturnType<ServiceBusClient['createReceiver']>['subscribe']
+    >[0];
+    type Delivery = Parameters<Handlers['processMessage']>[0];
+    let handlers!: Handlers;
+    const completeMessage = vi.fn();
+    const abandonMessage = vi.fn();
+    const deadLetterMessage = vi.fn();
+    const createReceiver = vi.fn().mockReturnValue({
+      subscribe: (value: Handlers) => {
+        handlers = value;
+        return { close: vi.fn() };
+      },
+      peekMessages: vi.fn().mockResolvedValue([]),
+      completeMessage,
+      abandonMessage,
+      deadLetterMessage,
+    });
+    const bridge = new CatalogServiceBus({
+      createReceiver,
+    } as unknown as ServiceBusClient);
+    const consume = vi.fn().mockResolvedValue('APPLIED');
+    const reportError = vi.fn();
+    bridge.subscribeWithProbe(
+      'g6.catalog.from.taxonomy',
+      createCatalogTaxonomyConsumer({ consume }, []),
+      reportError,
+    );
+    const event: CatalogEnvelope = {
+      message_id: randomUUID(),
+      schema_version: 1,
+      occurred_at: new Date().toISOString(),
+      correlation_id: randomUUID(),
+      causation_id: randomUUID(),
+      operation_id: randomUUID(),
+      producer: 'taxonomy-svc',
+      kind: 'command',
+      name: 'taxonomy.master.deactivation.check.requested',
+      data: {
+        entity_type: 'CATEGORY',
+        entity_id: randomUUID(),
+        version: 1,
+      },
+    };
+    const received = {
+      body: Buffer.from(JSON.stringify(event)),
+      messageId: event.message_id,
+      correlationId: event.correlation_id,
+      subject: event.name,
+      contentType: 'application/json',
+    } as Delivery;
+
+    await handlers.processMessage(received);
+
+    expect(consume).not.toHaveBeenCalled();
+    expect(completeMessage).not.toHaveBeenCalled();
+    expect(abandonMessage).toHaveBeenCalledWith(received);
+    expect(deadLetterMessage).not.toHaveBeenCalled();
+    expect(reportError).toHaveBeenCalledOnce();
   });
 });
