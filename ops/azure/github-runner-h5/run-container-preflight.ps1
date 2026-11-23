@@ -51,9 +51,6 @@ try {
     if ((@($container.command) -join ' ') -ne '/bin/bash -c') { throw 'Job command differs from the approved bash entrypoint.' }
     if (@($container.env | Where-Object name -eq 'H5_PREFLIGHT_REF').Count -gt 0) { throw 'Job execution already defines H5_PREFLIGHT_REF.' }
 
-    $templateJson = $job.properties.template | ConvertTo-Json -Depth 100 -Compress
-    $rendered = $templateJson | & python (Join-Path $PSScriptRoot 'render-execution-template.py') --set-env "H5_PREFLIGHT_REF=$Ref" 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $rendered) { throw 'Could not render the one-execution Container Apps template.' }
     $bootstrap = @'
 set -Eeuo pipefail
 work="$(mktemp -d)"
@@ -63,7 +60,9 @@ cd "$work"
 bash "$work/preflight.sh"
 '@
     $bootstrap = $bootstrap.Replace('__REPOSITORY__',$Repository).Replace('__SHA__',$sha)
-    $container.args = @($bootstrap)
+    $templateJson = $job.properties.template | ConvertTo-Json -Depth 100 -Compress
+    $rendered = $templateJson | & python (Join-Path $PSScriptRoot 'render-execution-template.py') --set-env "H5_PREFLIGHT_REF=$Ref" --replace-args --set-arg $bootstrap 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $rendered) { throw 'Could not render the one-execution Container Apps template.' }
     $templatePath = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N') + '.yaml')
     [System.IO.File]::WriteAllText($templatePath,($rendered -join "`n"),[System.Text.UTF8Encoding]::new($false))
 

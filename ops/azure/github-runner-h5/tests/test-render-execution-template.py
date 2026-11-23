@@ -36,13 +36,21 @@ def invoke(*args: str, template: dict | None = None) -> subprocess.CompletedProc
     )
 
 
-normal = invoke("--set-env", "H5_PREFLIGHT_REF=refs/heads/work")
+bootstrap = "set -euo pipefail\necho safe"
+normal = invoke(
+    "--set-env",
+    "H5_PREFLIGHT_REF=refs/heads/work",
+    "--replace-args",
+    "--set-arg",
+    bootstrap,
+)
 assert normal.returncode == 0, normal.stderr
 normal_template = yaml.safe_load(normal.stdout)
 assert normal_template["containers"][0]["env"] == [
     {"name": "H5_PREFLIGHT_REF", "value": "refs/heads/work"}
 ]
 assert normal_template["containers"][0]["image"] == BASE["containers"][0]["image"]
+assert normal_template["containers"][0]["args"] == [bootstrap]
 
 secret = invoke("--set-secret", "H5_RUNNER_JIT_CONFIG=h5jit")
 assert secret.returncode == 0, secret.stderr

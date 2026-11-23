@@ -12,6 +12,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--set-env", action="append", default=[])
     parser.add_argument("--set-secret", action="append", default=[])
+    parser.add_argument("--replace-args", action="store_true")
+    parser.add_argument("--set-arg", action="append", default=[])
     args = parser.parse_args()
 
     try:
@@ -38,6 +40,10 @@ def main() -> int:
                 raise ValueError("invalid or duplicate secret reference")
             env.append({"name": name, "secretRef": secret_name})
             names.add(name)
+        if args.replace_args:
+            if not args.set_arg:
+                raise ValueError("replacement arguments are required")
+            container["args"] = args.set_arg
         if env:
             container["env"] = env
         sys.stdout.write(yaml.safe_dump(template, sort_keys=False))
