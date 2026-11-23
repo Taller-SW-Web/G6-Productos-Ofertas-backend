@@ -1594,16 +1594,14 @@ export class BulkPersistenceRepository {
               errorDetail: rowStatus === 'FAILED' ? String(data.detail) : null,
             });
           }
-          await tx
-            .insert(inbox)
-            .values({
-              messageId: input.messageId,
-              handler: messageHandler,
-              eventName: input.eventName,
-              correlationId: input.correlationId,
-              payload: input.payload,
-              result: 'COMMAND_REJECTED_UNKNOWN_EFFECT',
-            });
+          await tx.insert(inbox).values({
+            messageId: input.messageId,
+            handler: messageHandler,
+            eventName: input.eventName,
+            correlationId: input.correlationId,
+            payload: input.payload,
+            result: 'COMMAND_REJECTED_UNKNOWN_EFFECT',
+          });
           await tx
             .update(outbox)
             .set({
@@ -2072,6 +2070,7 @@ export class BulkPersistenceRepository {
   async loadBatchSnapshot(
     batchId: string,
     ownerSub: string,
+    executor: BulkDatabase | BulkTx = this.db,
   ): Promise<{
     batch: typeof batchJobs.$inferSelect;
     rows: Array<{
@@ -2080,7 +2079,7 @@ export class BulkPersistenceRepository {
     }>;
   } | null> {
     try {
-      const result = await this.db
+      const result = await executor
         .select({ batch: batchJobs, row: batchRows, step: rowDomainSteps })
         .from(batchJobs)
         .leftJoin(batchRows, eq(batchRows.batchJobId, batchJobs.id))
@@ -2131,6 +2130,24 @@ export class BulkPersistenceRepository {
       | 'PROTOCOLO_DOMINIO_NO_HABILITADO'
       | null;
   }> {
+    return this.calculateRetryEligibility(batchId, ownerSub, this.db);
+  }
+
+  private async calculateRetryEligibility(
+    batchId: string,
+    ownerSub: string,
+    executor: BulkDatabase | BulkTx,
+  ): Promise<{
+    protocolo: 'BULK_RETRY_V1';
+    elegible: boolean;
+    pasos: Array<{ row_id: string; dominio: 'CATALOGO' }>;
+    motivo_bloqueo:
+      | 'LOTE_NO_TERMINAL'
+      | 'SIN_PASOS_REINTENTABLES'
+      | 'RESULTADO_INCIERTO'
+      | 'PROTOCOLO_DOMINIO_NO_HABILITADO'
+      | null;
+  }> {
     const blocked = (
       motivo_bloqueo:
         | 'LOTE_NO_TERMINAL'
@@ -2144,7 +2161,11 @@ export class BulkPersistenceRepository {
       motivo_bloqueo,
     });
     try {
-      const snapshot = await this.loadBatchSnapshot(batchId, ownerSub);
+      const snapshot = await this.loadBatchSnapshot(
+        batchId,
+        ownerSub,
+        executor,
+      );
       if (!snapshot) throw new BulkPersistenceError('FOREIGN_KEY_VIOLATION');
       const { batch, rows } = snapshot;
       if (batch.status !== 'COMPLETED') return blocked('LOTE_NO_TERMINAL');
@@ -2158,7 +2179,7 @@ export class BulkPersistenceRepository {
       )
         return blocked('RESULTADO_INCIERTO');
 
-      const [admission] = await this.db
+      const [admission] = await executor
         .select({ payload: inbox.payload })
         .from(inbox)
         .where(
@@ -2193,7 +2214,7 @@ export class BulkPersistenceRepository {
       if (v3Commands.length !== 1)
         return blocked('PROTOCOLO_DOMINIO_NO_HABILITADO');
       const v3Command = v3Commands[0]!;
-      const [manifest] = await this.db
+      const [manifest] = await executor
         .select({ contentRef: fileManifests.contentRef })
         .from(fileManifests)
         .where(eq(fileManifests.id, batch.inputFileId))
@@ -2244,6 +2265,46 @@ export class BulkPersistenceRepository {
         Number(contentRef.byte_length) < 1
       )
         return blocked('RESULTADO_INCIERTO');
+      const contentDocumentResult = await executor.execute(sql`
+        SELECT content_id::text AS "contentId",
+               batch_id::text AS "batchId",
+               batch_operation_id::text AS "batchOperationId",
+               content_ref AS "contentRef",
+               sha256,
+               byte_length AS "byteLength",
+               content_type AS "contentType"
+        FROM bulk.content_documents
+        WHERE content_id = ${contentRef.content_id}::uuid
+        FOR UPDATE
+      `);
+      const contentDocument = contentDocumentResult.rows[0] as
+        | {
+            contentId: string;
+            batchId: string;
+            batchOperationId: string;
+            contentRef: string;
+            sha256: string;
+            byteLength: number;
+            contentType: string;
+          }
+        | undefined;
+      if (
+        !contentDocument ||
+        contentDocument.batchId !== batch.batchId ||
+        contentDocument.batchOperationId !== v3Command.operation_id
+      )
+        return blocked('RESULTADO_INCIERTO');
+      if (
+        contentDocument.contentId !== contentRef.content_id ||
+        contentDocument.sha256 !== contentRef.sha256 ||
+        contentDocument.byteLength !== contentRef.byte_length ||
+        contentDocument.contentType !== contentRef.content_type ||
+        !matchesBulkStorageReference(
+          contentDocument.contentRef,
+          process.env.BULK_STORAGE_BUCKET,
+        )
+      )
+        return blocked('RESULTADO_INCIERTO');
       const candidates: Array<{ row_id: string; dominio: 'CATALOGO' }> = [];
       let uncertainResult = false;
       for (const family of grouped.values()) {
@@ -2261,7 +2322,7 @@ export class BulkPersistenceRepository {
             eligible = false;
             break;
           }
-          const attempts = await this.db
+          const attempts = await executor
             .select()
             .from(domainAttempts)
             .where(
@@ -2270,7 +2331,8 @@ export class BulkPersistenceRepository {
                 eq(domainAttempts.domain, 'CATALOGO'),
               ),
             )
-            .orderBy(desc(domainAttempts.attemptNumber));
+            .orderBy(desc(domainAttempts.attemptNumber))
+            .for('update');
           const current = attempts[0];
           if (
             !current ||
@@ -2302,12 +2364,13 @@ export class BulkPersistenceRepository {
           }
           if (current.attemptNumber > 1) {
             const previous = attempts[1];
-            const [command] = await this.db
+            const [command] = await executor
               .select()
               .from(retryCommands)
               .where(
                 eq(retryCommands.commandAttemptId, current.commandAttemptId!),
               )
+              .for('update')
               .limit(1);
             if (
               !previous ||
@@ -2354,17 +2417,7 @@ export class BulkPersistenceRepository {
     }
   }
 
-  /**
-   * Refuses to reopen failed rows until an approved domain retry can be emitted.
-   * Unlock requires a versioned contract update for the affected domain that
-   * defines stable business operation identity versus attempt/message identity,
-   * preserves correlation and causation, and specifies how a consumer returns
-   * its durable prior receipt on replay. Only after that domain owner accepts
-   * the protocol may Bulk atomically lock the batch/rows, create the approved
-   * next-attempt outbox intent, and preserve all already-applied steps. Tests
-   * must prove identical replay, ambiguous timeout reconciliation, rejected
-   * prior receipt, no second commercial effect, and concurrent requeue safety.
-   */
+  /** Admit one durable retry intent; transport publication remains an Outbox concern. */
   async requeueBatch(
     batchId: string,
     ownerSub: string,
@@ -2440,7 +2493,11 @@ export class BulkPersistenceRepository {
             .where(eq(rowDomainSteps.batchRowId, row.id))
             .orderBy(asc(rowDomainSteps.domain))
             .for('update');
-        const eligibility = await this.getRetryEligibility(batchId, ownerSub);
+        const eligibility = await this.calculateRetryEligibility(
+          batchId,
+          ownerSub,
+          tx,
+        );
         if (!eligibility.elegible || eligibility.pasos.length === 0)
           throw new BulkPersistenceError(
             'CHECK_VIOLATION',
@@ -2505,9 +2562,9 @@ export class BulkPersistenceRepository {
           );
         const acceptedResponse = {
           batch_id: batch.batchId,
-          status: 'PROCESSING',
-          template_version: batch.templateVersion,
-          correlation_id: correlationId,
+          status: 'QUEUED',
+          template_version: 2,
+          correlation_id: batch.correlationId,
         };
         const [request] = await tx
           .insert(batchResumeRequests)
@@ -2597,7 +2654,7 @@ export class BulkPersistenceRepository {
             message_id: messageId,
             schema_version: 4,
             occurred_at: new Date().toISOString(),
-            correlation_id: correlationId,
+            correlation_id: batch.correlationId,
             causation_id: previousMessageId,
             operation_id: original.operation_id,
             producer: 'bulk-svc',
@@ -2634,7 +2691,7 @@ export class BulkPersistenceRepository {
             eventName: 'catalog.bulk.upsert.requested',
             kind: 'command',
             schemaVersion: 4,
-            correlationId,
+            correlationId: batch.correlationId,
             causationId: previousMessageId,
             operationId: String(original.operation_id),
             occurredAt: new Date(payload.occurred_at),
@@ -2677,7 +2734,7 @@ export class BulkPersistenceRepository {
             await tx
               .update(batchRows)
               .set({
-                status: 'PROCESSING',
+                status: 'PENDING',
                 failedDomain: null,
                 errorCode: null,
                 errorDetail: null,
@@ -2692,7 +2749,10 @@ export class BulkPersistenceRepository {
         await tx
           .update(batchJobs)
           .set({
-            status: 'PROCESSING',
+            status: 'QUEUED',
+            completedRows: lockedRows.filter(
+              (row) => row.status === 'COMPLETED',
+            ).length,
             failedRows: Math.max(0, batch.failedRows - reopened),
             needsReconciliation: lockedRows.some(
               (row) =>

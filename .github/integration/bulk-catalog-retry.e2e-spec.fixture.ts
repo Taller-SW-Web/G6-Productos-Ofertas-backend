@@ -1,0 +1,557 @@
+import { randomUUID, createSign, generateKeyPairSync } from 'node:crypto';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { eq } from 'drizzle-orm';
+import { Test } from '@nestjs/testing';
+import request from 'supertest';
+import { BulkSvcController } from '../src/bulk-svc.controller.js';
+import { BulkSvcService } from '../src/bulk-svc.service.js';
+import { BulkImportService } from '../src/bulk-import.service.js';
+import { BulkStorageService } from '../src/storage/bulk-storage.service.js';
+import { BulkContentService } from '../src/bulk-content.service.js';
+import { BulkUserBearerGuard } from '../src/auth/bulk-user-bearer.guard.js';
+import { BulkServiceBearerGuard } from '../src/auth/bulk-service-bearer.guard.js';
+import { BulkProblemFilter } from '../src/http/bulk-problem.filter.js';
+import { BulkReadinessService } from '../src/health/bulk-readiness.service.js';
+import { BulkExportService } from '../src/bulk-export.service.js';
+import {
+  bulkSchema,
+  batchJobs,
+  domainAttempts,
+  outbox as bulkOutbox,
+} from '../src/persistence/bulk.schema.js';
+import { BulkPersistenceRepository } from '../src/persistence/bulk.repository.js';
+import {
+  Database,
+  type PostgresSettings,
+} from '../../catalog-svc/src/database.js';
+import { CatalogTransactionManager } from '../../catalog-svc/src/catalog-transaction.js';
+import { CatalogMutationService } from '../../catalog-svc/src/catalog-mutation.service.js';
+import { PostgresCatalogWriteRepository } from '../../catalog-svc/src/postgres-catalog-write.repository.js';
+import {
+  CatalogBulkService,
+  CatalogBulkIdentity,
+} from '../../catalog-svc/src/catalog-bulk.service.js';
+import { CatalogTokenVerifier } from '../../catalog-svc/src/catalog-auth.js';
+import { CatalogIdentityAcquisitionError } from '../../catalog-svc/src/catalog-pricing-identity.js';
+import {
+  outbox as catalogOutbox,
+  products,
+  bulkRetryAttemptReceipts,
+} from '../../catalog-svc/src/catalog.schema.js';
+import type { CatalogEnvelope } from '../../catalog-svc/src/catalog-messages.js';
+import { BULK_TEMPLATE_HEADERS } from '../src/domain/bulk-template-v2.js';
+
+const databaseUrl = process.env.BULK_RETRY_INTEGRATION_DATABASE_URL;
+const integration = databaseUrl ? describe : describe.skip;
+const ownerSub = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+let pool: Pool;
+let bulkDatabase: ReturnType<typeof drizzle<typeof bulkSchema>>;
+let bulkRepository: BulkPersistenceRepository;
+let catalogDatabase: Database;
+let restoreFlags: Array<[string, string | undefined]> = [];
+
+function setFlag(name: string, value: string) {
+  restoreFlags.push([name, process.env[name]]);
+  process.env[name] = value;
+}
+
+function signedUserToken(sub: string, roles = ['GESTOR_COMERCIAL']) {
+  const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const encode = (value: object) =>
+    Buffer.from(JSON.stringify(value)).toString('base64url');
+  const header = encode({ alg: 'RS256', typ: 'JWT' });
+  const claims = encode({
+    iss: 'bulk-retry-integration',
+    sub,
+    tipo: 'acceso',
+    aud: 'api-productos',
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 900,
+    jti: randomUUID(),
+    roles,
+  });
+  const signer = createSign('RSA-SHA256');
+  signer.update(`${header}.${claims}`);
+  setFlag(
+    'G7_JWT_PUBLIC_KEY',
+    keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+  );
+  return `${header}.${claims}.${signer.sign(keys.privateKey, 'base64url')}`;
+}
+
+integration(
+  'Bulk ↔ Catalog BULK_RETRY_V1 against one disposable PostgreSQL 17',
+  () => {
+    beforeAll(async () => {
+      if (!databaseUrl)
+        throw new Error('BULK_RETRY_INTEGRATION_DATABASE_URL required');
+      const url = new URL(databaseUrl);
+      if (
+        !['localhost', '127.0.0.1', '::1'].includes(url.hostname) ||
+        url.searchParams.get('sslmode') !== 'disable'
+      )
+        throw new Error('Integration requires disposable loopback PostgreSQL');
+      setFlag('NODE_ENV', 'test');
+      setFlag('G6_SECURITY_MODE', 'G7_AUTHENTICATED');
+      setFlag('G7_JWT_ISSUER', 'bulk-retry-integration');
+      setFlag('BULK_STORAGE_BUCKET', 'bulk-retry-integration');
+      setFlag('BULK_CATALOG_V3_ENABLED', 'true');
+      setFlag('BULK_CATALOG_V3_AUTHORIZATION_VERIFIED', 'true');
+      setFlag('BULK_RETRY_CATALOG_V1_ENABLED', 'true');
+      setFlag('BULK_RETRY_ELIGIBILITY_ENABLED', 'true');
+      setFlag('CATALOG_BULK_RETRY_V1_ENABLED', 'true');
+      setFlag('CATALOG_BULK_RESULT_V2_ENABLED', 'true');
+      pool = new Pool({ connectionString: databaseUrl, max: 6 });
+      bulkDatabase = drizzle(pool, { schema: bulkSchema, logger: false });
+      bulkRepository = new BulkPersistenceRepository(bulkDatabase);
+      const version = await pool.query<{ server_version_num: string }>(
+        'SHOW server_version_num',
+      );
+      expect(
+        Number(version.rows[0]?.server_version_num),
+      ).toBeGreaterThanOrEqual(170000);
+      expect(Number(version.rows[0]?.server_version_num)).toBeLessThan(180000);
+
+      const catalogSettings: PostgresSettings = {
+        pool: {
+          host: url.hostname,
+          port: Number(url.port || 5432),
+          database: url.pathname.slice(1),
+          user: decodeURIComponent(url.username),
+          password: decodeURIComponent(url.password),
+          ssl: false,
+          max: 6,
+        },
+        expectedRole: decodeURIComponent(url.username),
+        database: url.pathname.slice(1),
+        user: decodeURIComponent(url.username),
+        password: decodeURIComponent(url.password),
+        mode: 'direct',
+      };
+      catalogDatabase = new Database(catalogSettings);
+      await catalogDatabase.verifyIdentity();
+    }, 30_000);
+
+    afterAll(async () => {
+      await catalogDatabase?.onModuleDestroy();
+      await pool?.end();
+      for (const [name, oldValue] of restoreFlags) {
+        if (oldValue === undefined) delete process.env[name];
+        else process.env[name] = oldValue;
+      }
+    });
+
+    it('admits, rejects without commercial effects, retries through V4, and closes without duplicate effects', async () => {
+      const originalCorrelation = randomUUID();
+      const retryHttpCorrelation = randomUUID();
+      expect(retryHttpCorrelation).not.toBe(originalCorrelation);
+      const token = signedUserToken(ownerSub);
+      const transactions = new CatalogTransactionManager(catalogDatabase);
+      const seedMutations = new CatalogMutationService(
+        transactions,
+        new PostgresCatalogWriteRepository(),
+        {
+          masters: async () => ({ schemaVersion: 1 }),
+          attributes: async (_type: string, values: unknown[]) => values,
+        } as never,
+        {
+          resolve: async (_input, id) => ({
+            slug: `retry-${id}`,
+            moneda: 'PEN',
+          }),
+        },
+      );
+      const skuBase = `BULK-RETRY-${randomUUID()}`;
+      const seed = await seedMutations.createProduct(
+        {
+          nombre: 'Retry integration seed',
+          descripcion: 'Before retry',
+          categoriaId: 'category-fixture',
+          tipoProductoId: 'type-fixture',
+          marcaId: 'brand-fixture',
+          skuBase,
+          tieneVariantes: false,
+          precioBaseInicial: 20,
+          imagenes: [{ url: 'https://example.test/product' }],
+          perfilFisico: {
+            pesoKg: 1.5,
+            dimensionesCm: { largo: 10, ancho: 20, alto: 30 },
+          },
+        },
+        {
+          authorization: 'Bearer isolated-master-fixture',
+          correlationId: randomUUID(),
+        },
+      );
+      const storageObjects = new Map<string, Buffer>();
+      const storageFixture = {
+        put: vi.fn(async (bytes: Buffer, _mime: string, key: string) => {
+          storageObjects.set(key, Buffer.from(bytes));
+          return `supabase://bulk-retry-integration/${key}`;
+        }),
+      };
+      const imports = new BulkImportService(
+        bulkRepository,
+        storageFixture as unknown as BulkStorageService,
+      );
+      const moduleRef = await Test.createTestingModule({
+        controllers: [BulkSvcController],
+        providers: [
+          BulkSvcService,
+          BulkUserBearerGuard,
+          BulkServiceBearerGuard,
+          {
+            provide: BulkReadinessService,
+            useValue: { probe: async () => ({ ready: true }) },
+          },
+          { provide: BulkImportService, useValue: imports },
+          { provide: BulkStorageService, useValue: storageFixture },
+          { provide: BulkExportService, useValue: {} },
+          {
+            provide: BulkContentService,
+            useValue: {
+              download: async () => {
+                throw new Error('unused');
+              },
+            },
+          },
+        ],
+      }).compile();
+      const http = moduleRef.createNestApplication();
+      http.useGlobalFilters(new BulkProblemFilter());
+      await http.init();
+      const server = http.getHttpServer();
+      try {
+        const csvValues = [
+          'ACTUALIZACION',
+          seed.product_id,
+          String(seed.catalog_version),
+          skuBase,
+          '',
+          'Retry integration seed',
+          'After retry',
+          'category-fixture',
+          'brand-fixture',
+          'type-fixture',
+          'false',
+          '',
+          '[]',
+          '',
+          '',
+          '0',
+        ];
+        const csv = Buffer.from(
+          `${BULK_TEMPLATE_HEADERS.join(',')}\r\n${csvValues.map((value) => `"${value.replace(/"/g, '""')}"`).join(',')}\r\n`,
+          'utf8',
+        );
+        const admission = await request(server)
+          .post('/api/v1/carga-masiva/productos/importaciones')
+          .set('Authorization', `Bearer ${token}`)
+          .set('X-Correlation-Id', originalCorrelation)
+          .field('template_version', '2')
+          .attach('archivo', csv, {
+            filename: 'retry.csv',
+            contentType: 'text/csv',
+          })
+          .expect(202);
+        expect(admission.body).toMatchObject({
+          status: 'QUEUED',
+          correlation_id: originalCorrelation,
+          template_version: 2,
+        });
+        const batchId = String(admission.body.batch_id);
+        const [originalOutbox] = await bulkDatabase
+          .select()
+          .from(bulkOutbox)
+          .where(eq(bulkOutbox.correlationId, originalCorrelation));
+        expect(originalOutbox?.schemaVersion).toBe(3);
+        const original = originalOutbox?.payload as unknown as CatalogEnvelope;
+        const contentRef = original.data.content_ref as { content_id: string };
+        const contentKey = [...storageObjects.keys()].find((key) =>
+          key.includes('/catalog-'),
+        );
+        if (!contentKey)
+          throw new Error('V3 private content document was not stored');
+        const contentBytes = storageObjects.get(contentKey)!;
+        const decodedDocument = JSON.parse(
+          contentBytes.toString('utf8'),
+        ) as unknown;
+
+        const productsBefore = await catalogDatabase.read((db) =>
+          db.select().from(products),
+        );
+        const initialIdentity = new CatalogBulkIdentity(
+          undefined,
+          new CatalogTokenVerifier(undefined),
+        );
+        vi.spyOn(
+          initialIdentity,
+          'authorizationForBulkRetry',
+        ).mockRejectedValue(new CatalogIdentityAcquisitionError('TRANSIENT'));
+        const contentClient = {
+          getDocument: vi.fn(async (reference: { content_id: string }) => {
+            if (reference.content_id !== contentRef.content_id)
+              throw new Error('Unexpected claim-check reference');
+            return decodedDocument;
+          }),
+        };
+        const mutations = new CatalogMutationService(
+          transactions,
+          new PostgresCatalogWriteRepository(),
+          {
+            masters: async () => ({ schemaVersion: 1 }),
+            attributes: async (_type: string, values: unknown[]) => values,
+          } as never,
+          {
+            resolve: async (_input, id) => ({
+              slug: `retry-${id}`,
+              moneda: 'PEN',
+            }),
+          },
+        );
+        const initialCatalog = new CatalogBulkService(
+          catalogDatabase,
+          mutations,
+          initialIdentity,
+          contentClient as never,
+        );
+        await expect(initialCatalog.consume(original)).resolves.toBe('APPLIED');
+        const [initialResultRow] = await catalogDatabase.read((db) =>
+          db
+            .select()
+            .from(catalogOutbox)
+            .where(eq(catalogOutbox.causation_id, original.message_id))
+            .limit(1),
+        );
+        const initialResult = initialResultRow?.payload as Record<
+          string,
+          unknown
+        >;
+        expect(initialResult).toMatchObject({
+          schema_version: 2,
+          correlation_id: originalCorrelation,
+          causation_id: original.message_id,
+          data: {
+            results: [
+              {
+                status: 'REJECTED',
+                effect_state: 'NONE',
+                retriable: true,
+                code: 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE',
+              },
+            ],
+          },
+        });
+        expect(
+          await catalogDatabase.read((db) => db.select().from(products)),
+        ).toEqual(productsBefore);
+        await bulkRepository.recordCatalogBulkResult({
+          messageId: String(initialResult.message_id),
+          operationId: String(initialResult.operation_id),
+          causationId: String(initialResult.causation_id),
+          eventName: String(
+            initialResult.name,
+          ) as 'catalog.bulk.upsert.completed',
+          correlationId: String(initialResult.correlation_id),
+          payload: initialResult,
+        });
+
+        const statePath = `/api/v1/carga-masiva/productos/importaciones/${batchId}`;
+        const eligible = await request(server)
+          .get(statePath)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(200);
+        expect(eligible.body.reanudacion).toMatchObject({
+          elegible: true,
+          motivo_bloqueo: null,
+        });
+        expect(eligible.body.reanudacion.pasos).toHaveLength(1);
+        const resumePath = `${statePath}/reanudar`;
+        const resumed = await request(server)
+          .post(resumePath)
+          .set('Authorization', `Bearer ${token}`)
+          .set('X-Correlation-Id', retryHttpCorrelation)
+          .send({ motivo: 'Recuperar familia Catalog' })
+          .expect(202);
+        expect(resumed.body).toEqual({
+          batch_id: batchId,
+          status: 'QUEUED',
+          template_version: 2,
+          correlation_id: originalCorrelation,
+        });
+        const replay = await request(server)
+          .post(resumePath)
+          .set('Authorization', `Bearer ${token}`)
+          .set('X-Correlation-Id', retryHttpCorrelation)
+          .send({ motivo: 'Recuperar familia Catalog' })
+          .expect(202);
+        expect(replay.body).toEqual(resumed.body);
+        const conflict = await request(server)
+          .post(resumePath)
+          .set('Authorization', `Bearer ${token}`)
+          .set('X-Correlation-Id', retryHttpCorrelation)
+          .send({ motivo: 'Motivo distinto' });
+        expect(conflict.status).toBe(409);
+        const [retryOutbox] = await bulkDatabase
+          .select()
+          .from(bulkOutbox)
+          .where(eq(bulkOutbox.schemaVersion, 4));
+        expect(retryOutbox).toMatchObject({
+          correlationId: originalCorrelation,
+          operationId: original.operation_id,
+          causationId: original.message_id,
+        });
+        expect(retryOutbox?.messageId).not.toBe(original.message_id);
+        const retryCommand = retryOutbox?.payload as unknown as CatalogEnvelope;
+        expect(retryCommand.correlation_id).toBe(originalCorrelation);
+
+        const retryIdentity = new CatalogBulkIdentity(
+          undefined,
+          new CatalogTokenVerifier(undefined),
+        );
+        vi.spyOn(retryIdentity, 'authorizationForBulkRetry').mockResolvedValue(
+          'Bearer isolated-catalog-service-identity',
+        );
+        const retryCatalog = new CatalogBulkService(
+          catalogDatabase,
+          mutations,
+          retryIdentity,
+          contentClient as never,
+        );
+        await expect(retryCatalog.consume(retryCommand)).resolves.toBe(
+          'APPLIED',
+        );
+        const [retryResultRow] = await catalogDatabase.read((db) =>
+          db
+            .select()
+            .from(catalogOutbox)
+            .where(eq(catalogOutbox.causation_id, retryCommand.message_id))
+            .limit(1),
+        );
+        const retryResult = retryResultRow?.payload as Record<string, unknown>;
+        expect(retryResult).toMatchObject({
+          schema_version: 2,
+          correlation_id: originalCorrelation,
+          causation_id: retryCommand.message_id,
+          data: {
+            command_attempt_id: Reflect.get(retryCommand.data, 'retry')
+              ?.command_attempt_id,
+            results: [
+              {
+                status: 'COMPLETED',
+                effect_state: 'APPLIED',
+                retriable: false,
+                attempt_number: 2,
+              },
+            ],
+          },
+        });
+        await bulkRepository.recordCatalogBulkResult({
+          messageId: String(retryResult.message_id),
+          operationId: String(retryResult.operation_id),
+          causationId: String(retryResult.causation_id),
+          eventName: String(
+            retryResult.name,
+          ) as 'catalog.bulk.upsert.completed',
+          correlationId: String(retryResult.correlation_id),
+          payload: retryResult,
+        });
+        const firstProductCount = await catalogDatabase.read((db) =>
+          db
+            .select()
+            .from(products)
+            .where(
+              eq(
+                products.sku_base,
+                String(
+                  (decodedDocument as { rows: Array<{ sku_base: string }> })
+                    .rows[0]!.sku_base,
+                ),
+              ),
+            ),
+        );
+        expect(firstProductCount).toHaveLength(1);
+        expect(firstProductCount[0]?.product_id).toBe(seed.product_id);
+        expect(firstProductCount[0]?.descripcion).toBe('After retry');
+        const persistedAttempts = await catalogDatabase.read((db) =>
+          db
+            .select()
+            .from(bulkRetryAttemptReceipts)
+            .where(
+              eq(
+                bulkRetryAttemptReceipts.batchOperationId,
+                String(original.operation_id),
+              ),
+            )
+            .orderBy(bulkRetryAttemptReceipts.attemptNumber),
+        );
+        expect(persistedAttempts).toMatchObject([
+          {
+            attemptNumber: 1,
+            status: 'REJECTED',
+            effectState: 'NONE',
+            retriable: true,
+          },
+          {
+            attemptNumber: 2,
+            status: 'COMPLETED',
+            effectState: 'APPLIED',
+            retriable: false,
+          },
+        ]);
+        await expect(
+          new CatalogBulkService(
+            catalogDatabase,
+            mutations,
+            retryIdentity,
+            contentClient as never,
+          ).consume(retryCommand),
+        ).resolves.toBe('DUPLICATE');
+        await bulkRepository.recordCatalogBulkResult({
+          messageId: String(retryResult.message_id),
+          operationId: String(retryResult.operation_id),
+          causationId: String(retryResult.causation_id),
+          eventName: String(
+            retryResult.name,
+          ) as 'catalog.bulk.upsert.completed',
+          correlationId: String(retryResult.correlation_id),
+          payload: retryResult,
+        });
+        const completed = await request(server)
+          .get(statePath)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(200);
+        expect(completed.body).toMatchObject({
+          status: 'COMPLETED',
+          completed_rows: 1,
+          failed_rows: 0,
+        });
+        expect(completed.body.rows[0].steps).toMatchObject([
+          { dominio: 'CATALOGO', status: 'COMPLETED' },
+        ]);
+        const [batch] = await bulkDatabase
+          .select()
+          .from(batchJobs)
+          .where(eq(batchJobs.batchId, batchId));
+        expect(batch).toMatchObject({
+          status: 'COMPLETED',
+          completedRows: 1,
+          failedRows: 0,
+        });
+        expect(await bulkDatabase.select().from(domainAttempts)).toHaveLength(
+          2,
+        );
+        expect(
+          await bulkDatabase
+            .select()
+            .from(bulkOutbox)
+            .where(eq(bulkOutbox.schemaVersion, 4)),
+        ).toHaveLength(1);
+      } finally {
+        await http.close();
+      }
+    }, 90_000);
+  },
+);

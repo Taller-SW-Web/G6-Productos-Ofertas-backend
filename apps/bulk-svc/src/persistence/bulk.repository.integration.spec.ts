@@ -1967,6 +1967,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const messageId = randomUUID();
     const receiptMessageId = randomUUID();
     const retryCorrelationId = randomUUID();
+    expect(retryCorrelationId).not.toBe(correlationId);
     const initialAttemptId = randomUUID();
     const rowId = randomUUID();
     const contentRef = `supabase://bulk-retry-test/imports/${batchId}.json`;
@@ -2089,10 +2090,23 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       expect(replay).toEqual(first);
       expect(first).toEqual({
         batch_id: batchId,
-        status: 'PROCESSING',
+        status: 'QUEUED',
         template_version: 2,
-        correlation_id: retryCorrelationId,
+        correlation_id: correlationId,
       });
+      const [queuedBatch] = await database
+        .select()
+        .from(batchJobs)
+        .where(eq(batchJobs.batchId, batchId));
+      expect(queuedBatch).toMatchObject({
+        status: 'QUEUED',
+        completedRows: 0,
+        failedRows: 0,
+        needsReconciliation: false,
+      });
+      expect(await repository.listBatchRows(batchId)).toMatchObject([
+        { status: 'PENDING', appliedDomains: [] },
+      ]);
       await expect(
         repository.requeueBatch(
           batchId,
@@ -2133,12 +2147,12 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
         operationId,
         causationId: retryCommand!.messageId,
         eventName: 'catalog.bulk.upsert.completed',
-        correlationId: retryCorrelationId,
+        correlationId,
         payload: {
           message_id: resultMessageId,
           schema_version: 2,
           occurred_at: new Date().toISOString(),
-          correlation_id: retryCorrelationId,
+          correlation_id: correlationId,
           causation_id: retryCommand!.messageId,
           operation_id: operationId,
           producer: 'catalog-svc',
@@ -2177,12 +2191,12 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
           operationId,
           causationId: retryCommand!.messageId,
           eventName: 'catalog.bulk.upsert.rejected',
-          correlationId: retryCorrelationId,
+          correlationId,
           payload: {
             message_id: contradictoryMessageId,
             schema_version: 2,
             occurred_at: new Date().toISOString(),
-            correlation_id: retryCorrelationId,
+            correlation_id: correlationId,
             causation_id: retryCommand!.messageId,
             operation_id: operationId,
             producer: 'catalog-svc',

@@ -1,0 +1,180 @@
+name: Integración Bulk-Catalog Retry (PostgreSQL 17 desechable)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: bulk-catalog-retry-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: retry-fixture-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 24
+    steps:
+      - name: Obtener Backend Bulk (#252)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Resolver y construir el árbol temporal de los tres HEAD
+        id: integration-tree
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          pr243=$(gh pr view 243 --repo Taller-SW-Web/G6-Productos-Ofertas-backend --json headRefOid -q .headRefOid)
+          pr254=$(gh pr view 254 --repo Taller-SW-Web/G6-Productos-Ofertas-backend --json headRefOid,baseRefOid -q '[.headRefOid,.baseRefOid] | @tsv')
+          pr252=$(gh pr view 252 --repo Taller-SW-Web/G6-Productos-Ofertas-backend --json headRefOid -q .headRefOid)
+          pr254_head=${pr254%%$'\t'*}
+          pr254_base=${pr254#*$'\t'}
+          checked_out=$(git rev-parse HEAD)
+          test "$checked_out" = "$pr252"
+          test "$pr254_base" = "$pr243"
+          printf 'PR243=%s\nPR254=%s\nPR252=%s\n' "$pr243" "$pr254_head" "$pr252" | tee "$RUNNER_TEMP/source-heads.txt"
+          git fetch origin "refs/pull/243/head:refs/remotes/origin/pr243"
+          git fetch origin "refs/pull/254/head:refs/remotes/origin/pr254"
+          git fetch origin "refs/pull/252/head:refs/remotes/origin/pr252"
+          test "$(git rev-parse origin/pr243)" = "$pr243"
+          test "$(git rev-parse origin/pr254)" = "$pr254_head"
+          test "$(git rev-parse origin/pr252)" = "$pr252"
+          tree="$RUNNER_TEMP/bulk-catalog-retry-tree"
+          git worktree add --detach "$tree" "$pr254_head"
+          set +e
+          git -C "$tree" merge --no-commit --no-ff "$pr252"
+          merge_status=$?
+          set -e
+          if [ "$merge_status" -ne 0 ]; then
+            node .github/integration/resolve-retry-merge.mjs "$tree"
+          fi
+          if git -C "$tree" diff --name-only --diff-filter=U | grep -q .; then
+            echo "Quedan conflictos no resueltos en el árbol de integración" >&2
+            exit 1
+          fi
+          cp "$tree/.github/integration/bulk-catalog-retry.e2e-spec.fixture.ts" \
+             "$tree/apps/bulk-svc/test/bulk-catalog-retry.e2e-spec.ts"
+          git -C "$tree" add apps/bulk-svc/test/bulk-catalog-retry.e2e-spec.ts
+          git -C "$tree" -c user.name='G6 Retry Integration Runner' \
+            -c user.email='g6-retry-integration@users.noreply.github.com' \
+            commit --no-gpg-sign -m 'test(integracion): verifica Bulk Catalog retry en PostgreSQL'
+          integration_sha=$(git -C "$tree" rev-parse HEAD)
+          printf 'integration_tree=%s\n' "$tree" >> "$GITHUB_OUTPUT"
+          printf 'integration_sha=%s\n' "$integration_sha" >> "$GITHUB_OUTPUT"
+          printf 'SHA árbol temporal: `%s`\n\n' "$integration_sha" >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/source-heads.txt" >> "$GITHUB_STEP_SUMMARY"
+          printf '\nBases comprobadas: #254 sobre el HEAD #243 exacto; #252 sobre la base de su PR.\n' >> "$GITHUB_STEP_SUMMARY"
+      - name: Instalar dependencias
+        working-directory: ${{ steps.integration-tree.outputs.integration_tree }}
+        run: npm ci
+      - name: Aplicar DDL Catalog y Bulk en la misma PostgreSQL 17
+        working-directory: ${{ steps.integration-tree.outputs.integration_tree }}
+        env:
+          ADMIN_URL: postgresql://postgres:retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          set -euo pipefail
+          apply_as() {
+            role="$1"; shift
+            { printf 'SET ROLE %s;\n' "$role"; for file in "$@"; do cat "$file"; printf '\n'; done; } \
+              | psql "$ADMIN_URL" -v ON_ERROR_STOP=1
+          }
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE po_catalog_owner NOLOGIN;
+          CREATE ROLE catalog_app LOGIN PASSWORD 'catalog-retry-fixture-only';
+          CREATE ROLE po_bulk_owner NOLOGIN;
+          CREATE ROLE bulk_app LOGIN PASSWORD 'bulk-retry-fixture-only';
+          CREATE SCHEMA catalog AUTHORIZATION po_catalog_owner;
+          CREATE SCHEMA bulk AUTHORIZATION po_bulk_owner;
+          SQL
+          apply_as po_catalog_owner \
+            apps/catalog-svc/test/fixtures/0001_create_catalog.sql \
+            apps/catalog-svc/migrations/0002_create_sku_barcodes.sql \
+            apps/catalog-svc/migrations-candidate/h5/0001_outbox_delivery.sql \
+            apps/catalog-svc/migrations-candidate/h5/0002_bulk_retry_receipts.sql \
+            apps/catalog-svc/migrations/0003_product_publication_history.sql \
+            apps/catalog-svc/migrations/0004_historical_preparation_requests.sql
+          apply_as po_bulk_owner \
+            apps/bulk-svc/test/fixtures/0001_create_bulk_persistence.sql \
+            apps/bulk-svc/migrations/0002_export_source_snapshot.sql \
+            apps/bulk-svc/migrations/0003_export_claim_lease.sql \
+            apps/bulk-svc/migrations/0004_catalog_claim_check_content.sql \
+            apps/bulk-svc/migrations/0005_actor_ownership.sql \
+            apps/bulk-svc/migrations/0006_owner_correlation_identity.sql \
+            apps/bulk-svc/migrations/0007_bulk_retry_v1.sql
+          apply_as po_bulk_owner \
+            apps/bulk-svc/migrations/0005_actor_ownership.sql \
+            apps/bulk-svc/migrations/0006_owner_correlation_identity.sql \
+            apps/bulk-svc/migrations/0007_bulk_retry_v1.sql
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          GRANT USAGE ON SCHEMA bulk TO catalog_app;
+          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA bulk TO catalog_app;
+          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA bulk TO catalog_app;
+          GRANT USAGE ON SCHEMA catalog TO catalog_app;
+          SQL
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c 'SHOW server_version_num' \
+            | tee "$RUNNER_TEMP/postgres-version.txt"
+      - name: Ejecutar flujo E2E HTTP Bulk ↔ consumidor Catalog V3/V4
+        working-directory: ${{ steps.integration-tree.outputs.integration_tree }}
+        env:
+          NODE_ENV: test
+          BULK_RETRY_INTEGRATION_DATABASE_URL: postgresql://catalog_app:catalog-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
+        run: npm run test:e2e -- apps/bulk-svc/test/bulk-catalog-retry.e2e-spec.ts
+      - name: Ejecutar repositorio Bulk con migraciones conjuntas
+        working-directory: ${{ steps.integration-tree.outputs.integration_tree }}
+        env:
+          NODE_ENV: test
+          BULK_TEST_DATABASE_URL: postgresql://catalog_app:catalog-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
+        run: npx vitest run apps/bulk-svc/src/persistence/bulk.repository.integration.spec.ts
+      - name: Ejecutar pruebas de outage Bulk
+        working-directory: ${{ steps.integration-tree.outputs.integration_tree }}
+        env:
+          NODE_ENV: test
+        run: npm run test:e2e -- apps/bulk-svc/test/bulk-postgres-outage.e2e-spec.ts
+      - name: Ejecutar persistencia Catalog en PostgreSQL desechable
+        working-directory: ${{ steps.integration-tree.outputs.integration_tree }}
+        env:
+          NODE_ENV: test
+          CI: 'true'
+        run: npm run test:e2e -- apps/catalog-svc/test/postgres.persistence.e2e-spec.ts
+      - name: Validar tipos, construcción y whitespace del árbol integrado
+        working-directory: ${{ steps.integration-tree.outputs.integration_tree }}
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          npm run build:bulk-svc
+          npm run build:catalog-svc
+          git diff --check HEAD^ HEAD
+      - name: Publicar manifiesto y resumen de evidencia
+        if: always()
+        env:
+          TREE_SHA: ${{ steps.integration-tree.outputs.integration_sha }}
+        run: |
+          {
+            echo '## Integración Bulk–Catalog Retry';
+            echo "Árbol integrado ejecutado: `$TREE_SHA`";
+            echo 'PostgreSQL: service container `postgres:17-alpine`; DDL Catalog y Bulk aplicado en la misma instancia.';
+            echo 'Migraciones: Catalog fixtures 0001, barcode 0002, outbox candidate 0001, retry candidate 0002, publication 0003 e historical 0004; Bulk 0001 a 0007; Bulk 0005 a 0007 reaplicadas.';
+            echo 'E2E HTTP y consumidores: ver pasos de prueba anteriores; un paso fallido invalida el run.';
+          } >> "$GITHUB_STEP_SUMMARY"
