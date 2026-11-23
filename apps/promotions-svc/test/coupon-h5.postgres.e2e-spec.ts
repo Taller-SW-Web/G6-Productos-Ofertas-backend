@@ -145,6 +145,25 @@ describe.skipIf(process.env.PROMOTIONS_H5_POSTGRES_TESTS !== '1')(
       );
     };
     const admit = () => operations.admit(admission());
+    const restorationAdmission = (
+      order_id = `PED-RESTORE-${randomUUID()}`,
+      consumption_operation_id = randomUUID(),
+    ) => {
+      const operation_id = randomUUID();
+      return prepareCouponH5Admission(
+        'RESTAURAR_CUPON',
+        {
+          operation_id,
+          order_id,
+          consumption_operation_id,
+          cancellation_reason: 'ANULACION',
+          cancelled_at: '2026-11-21T16:00:00Z',
+        },
+        operation_id,
+        'modulo-ventas',
+        randomUUID(),
+      );
+    };
     const wire = () => {
       const sent: ServiceBusMessage[] = [];
       const send = vi.fn(async () => {});
@@ -192,6 +211,84 @@ describe.skipIf(process.env.PROMOTIONS_H5_POSTGRES_TESTS !== '1')(
       expect(persisted.rows).toEqual([
         { message_id: first.command.message_id },
       ]);
+    });
+    it('rejects restoration without a prior consumption and preserves zero coupon effects', async () => {
+      const restore = restorationAdmission();
+      const admitted = await operations.admit(restore);
+      const worker = new CouponH5Worker(
+        operations,
+        new CouponCommandProcessor(runtime, {
+          verify: async () => {
+            throw new Error('restoration must not read consumption evidence');
+          },
+        }),
+      );
+      await worker.process(restore.command);
+      const operation = await operations.get(
+        restore.command.operation_id,
+        restore.command.data.order_id,
+        restore.actor,
+      );
+      expect(operation).toMatchObject({
+        status: 'REJECTED',
+        result: { result_code: 'COUPON_IDENTITY_MISMATCH' },
+      });
+      expect(
+        (
+          await pool.query(
+            `SELECT
+              (SELECT count(*)::int FROM promotions.coupon_uses WHERE order_id=$1) AS uses,
+              (SELECT count(*)::int FROM promotions.coupon_command_receipts WHERE order_id=$1 AND intention='RESTAURAR' AND status='REJECTED') AS restorations,
+              (SELECT count(*)::int FROM promotions.inbox WHERE message_id=$2) AS inbox,
+              (SELECT count(*)::int FROM promotions.outbox WHERE operation_id=$3) AS results`,
+            [restore.command.data.order_id, restore.command.message_id, restore.command.operation_id],
+          )
+        ).rows[0],
+      ).toEqual({ uses: 0, restorations: 1, inbox: 1, results: 1 });
+      expect(admitted.snapshot.status).toBe('ACCEPTED');
+    });
+    it('restores only the consumption operation linked to the same order', async () => {
+      const consume = admission();
+      await operations.admit(consume);
+      const processor = new CouponCommandProcessor(runtime, {
+        verify: async (command) => ({
+          reservationConfirmed: true,
+          snapshotDurable: true,
+          eligible: true,
+          orderId: command.data.order_id,
+          reservationId: command.data.reservation_id!,
+          commercialSnapshotRef: command.data.commercial_snapshot_ref!,
+        }),
+      });
+      const worker = new CouponH5Worker(operations, processor);
+      await worker.process(consume.command);
+      const restore = restorationAdmission(
+        consume.command.data.order_id,
+        consume.command.operation_id,
+      );
+      await operations.admit(restore);
+      await worker.process(restore.command);
+      const result = await operations.get(
+        restore.command.operation_id,
+        restore.command.data.order_id,
+        restore.actor,
+      );
+      expect(result).toMatchObject({
+        status: 'COMPLETED',
+        result: {
+          outcome: 'RESTORED',
+          restored: true,
+          consumption_operation_id: consume.command.operation_id,
+        },
+      });
+      expect(
+        (
+          await pool.query(
+            'SELECT count(*)::int n FROM promotions.coupon_uses WHERE order_id=$1 AND restored_at IS NOT NULL',
+            [consume.command.data.order_id],
+          )
+        ).rows[0].n,
+      ).toBe(1);
     });
 
     it('rejects an oversized envelope before inserting an operation or intent', async () => {

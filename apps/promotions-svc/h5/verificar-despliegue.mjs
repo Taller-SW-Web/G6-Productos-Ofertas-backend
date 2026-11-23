@@ -25,6 +25,7 @@ export async function verificarDespliegue(plan, execute = exec) {
   if (
     plan.environment !== 'integration' ||
     !/^[a-f0-9]{40}$/.test(plan.g6_sha) ||
+    new Set(services.map((service) => String(plan.g6_cd_runs?.[service]))).size !== services.length ||
     services.some(
       (service) =>
         !/^[1-9][0-9]{0,15}$/.test(String(plan.g6_cd_runs?.[service])),

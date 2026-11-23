@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { constanciaFirmada } from './evidencia-integracion.mjs';
 import { verificarDespliegue } from './verificar-despliegue.mjs';
@@ -285,17 +286,24 @@ function runtimeEvidenceMatches(id, proof, terminal, afterDeployment) {
 function stageIdentifier(id, stage, plan) {
   if (stage === 'expired') return plan.reservation_id;
   if (stage === 'follow') return plan.follow_operation_id;
-  if (stage === 'auth') return plan.operations?.coupon;
+  if (stage === 'auth')
+    return id === 'G5-H5-14'
+      ? plan.correlation_id
+      : plan.auth?.existing_coupon_operation_id;
   if (stage === 'cancel')
     return plan.operations?.[id === 'G5-H5-04' ? 'release' : 'restore'];
   return plan.operations?.[stage];
 }
 
-const executeStage = (stage, plan) =>
-  spawnSync(process.execPath, [runner, stage, plan], {
-    encoding: 'utf8',
-    timeout: 420_000,
-  });
+const executeStage = (stage, plan, statePath) =>
+  spawnSync(
+    process.execPath,
+    [runner, stage, plan, ...(statePath ? [statePath] : [])],
+    {
+      encoding: 'utf8',
+      timeout: 420_000,
+    },
+  );
 
 function httpsEvidence(value) {
   try {
@@ -310,6 +318,23 @@ function httpsEvidence(value) {
   } catch {
     return false;
   }
+}
+
+function g5DeploymentVerified(plan) {
+  const evidence = plan.g5_deployment;
+  if (
+    evidence?.verification_status !== 'VERIFIED' ||
+    evidence.commit_sha !== plan.g5_sha ||
+    !/^sha256:[a-f0-9]{64}$/i.test(evidence.image_digest ?? '') ||
+    typeof evidence.revision !== 'string' ||
+    !evidence.revision.trim() ||
+    !httpsEvidence(evidence.evidence_url) ||
+    typeof evidence.verified_by !== 'string' ||
+    !evidence.verified_by.trim() ||
+    !Number.isFinite(Date.parse(evidence.verified_at))
+  )
+    return false;
+  return true;
 }
 
 export async function ejecutarMatriz(
@@ -351,17 +376,22 @@ export async function ejecutarMatriz(
       plan?.environment !== 'integration' ||
       !sha.test(plan.g6_sha) ||
       (actor.includes('G5') && !sha.test(plan.g5_sha)) ||
-      typeof plan.order_id !== 'string' ||
-      !plan.order_id.trim()
+      (idOf(index) !== 'G5-H5-20' &&
+        (typeof plan.order_id !== 'string' || !plan.order_id.trim())) ||
+      !g5DeploymentVerified(plan)
     ) {
-      row.reason = 'AMBIENTE_SHA_O_PEDIDO_INVALIDO';
+      row.reason = !g5DeploymentVerified(plan)
+        ? 'SHA_G5_SIN_EVIDENCIA_VERIFICADA'
+        : 'AMBIENTE_SHA_O_PEDIDO_INVALIDO';
       continue;
     }
-    const ids = [
+    const ids = [...new Set([
       plan.reservation_id,
       plan.follow_operation_id,
+      ...(id === 'G5-H5-14' ? [plan.correlation_id] : []),
+      ...(id === 'G5-H5-20' ? (plan.message_ids ?? []) : []),
       ...Object.values(plan.operations ?? {}),
-    ].filter((id) => uuid.test(id));
+    ].filter((id) => uuid.test(id)))];
     Object.assign(row, {
       environment: plan.environment,
       g6_sha: plan.g6_sha,
@@ -388,7 +418,7 @@ export async function ejecutarMatriz(
     const observe = observations.get(id);
     const needsRuntime = supervisedRuntimeCases.has(id);
     if (stage !== null) {
-      const run = execute(stage, fixture.plan);
+      const run = execute(stage, fixture.plan, fixture.state);
       row.technical_status = 'FAIL';
       const detail = /"code":"([A-Z0-9_]+)"/.exec(
         String(run.stderr ?? ''),
@@ -424,7 +454,11 @@ export async function ejecutarMatriz(
           event.order_id === plan.order_id,
       );
       const identifier =
-        stage === 'expired' ? 'reservation_id' : 'operation_id';
+        stage === 'expired'
+          ? 'reservation_id'
+          : stage === 'auth' && id === 'G5-H5-14'
+            ? 'correlation_id'
+            : 'operation_id';
       const linked = row.evidence.filter(
         (event) => event[identifier] === primaryId,
       );
@@ -552,7 +586,22 @@ async function main() {
       'Uso: ejecutar-matriz.mjs <manifest.json> <resultado.json> [G5-H5-NN ...]',
     );
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-  const report = await ejecutarMatriz(manifest, selected);
+  const manifestDirectory = dirname(resolve(manifestPath));
+  const resolvedManifest = Object.fromEntries(
+    Object.entries(manifest).map(([id, fixture]) => [
+      id,
+      fixture?.plan
+        ? {
+            ...fixture,
+            plan: resolve(manifestDirectory, fixture.plan),
+            ...(fixture.state
+              ? { state: resolve(manifestDirectory, fixture.state) }
+              : {}),
+          }
+        : fixture,
+    ]),
+  );
+  const report = await ejecutarMatriz(resolvedManifest, selected);
   await writeFile(resultPath, JSON.stringify(report, null, 2) + '\n', {
     flag: 'wx',
   });

@@ -20,7 +20,7 @@ const plan = {
   environment: 'integration',
   g6_sha: '1'.repeat(40),
   gateway: 'https://g6-private.example.invalid',
-  g6_cd_runs: Object.fromEntries(services.map((service) => [service, 123])),
+  g6_cd_runs: Object.fromEntries(services.map((service, index) => [service, 123 + index])),
 };
 const image = (service) =>
   'ghcr.io/' + repo.toLowerCase() + '/' + service + '@sha256:' + 'f'.repeat(64);
@@ -39,12 +39,12 @@ function fixture(change = (type, result) => result) {
     }
     if (cmd === 'gh' && args[1] === 'view')
       return output('run', {
-        databaseId: 123,
+        databaseId: Number(args[2]),
         headSha: plan.g6_sha,
         headBranch: 'master',
         event: 'workflow_dispatch',
         conclusion: 'success',
-        url: 'https://github.com/' + repo + '/actions/runs/123',
+        url: 'https://github.com/' + repo + '/actions/runs/' + args[2],
         jobs: services.map((service) => ({
           name: 'Desplegar ' + service + ' en Azure',
           conclusion: 'success',
@@ -129,6 +129,10 @@ test('bloquea evidencia ausente, ajena o con revisiones cruzadas', async () => {
     );
   await assert.rejects(
     verificarDespliegue({ ...plan, g6_cd_runs: {} }, fixture()),
+    /DESPLIEGUE_OFICIAL_NO_VERIFICADO/,
+  );
+  await assert.rejects(
+    verificarDespliegue({ ...plan, g6_cd_runs: Object.fromEntries(services.map((service) => [service, 123])) }, fixture()),
     /DESPLIEGUE_OFICIAL_NO_VERIFICADO/,
   );
   await assert.rejects(

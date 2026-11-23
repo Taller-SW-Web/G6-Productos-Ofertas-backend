@@ -13,11 +13,22 @@ test('clasifica homologación técnica y bilateral', async (t) => {
     gateway: 'https://integration.example.invalid',
     g5_sha: '1'.repeat(40),
     g6_sha: '2'.repeat(40),
+    g5_deployment: {
+      verification_status: 'VERIFIED',
+      commit_sha: '1'.repeat(40),
+      image_digest: 'sha256:' + '3'.repeat(64),
+      revision: 'g5-test-revision',
+      evidence_url: 'https://g5-evidence.example.invalid/deployment',
+      verified_at: '2026-01-01T00:00:00Z',
+      verified_by: 'G5 test fixture',
+    },
     order_id: 'PED-AUDITADO',
+    correlation_id: randomUUID(),
     reservation_id: randomUUID(),
     follow_type: 'cupones',
     follow_operation_id: randomUUID(),
     operations: { reserve: randomUUID(), coupon: randomUUID() },
+    auth: { existing_coupon_operation_id: randomUUID(), foreign_order_id: 'PEDIDO-AJENO' },
   };
   const planPath = join(dir, 'plan.json');
   const keyPath = join(dir, 'public.pem');
@@ -387,6 +398,25 @@ test('clasifica homologación técnica y bilateral', async (t) => {
       );
     },
   );
+  await t.test('no inicia etapas sin evidencia revisada del SHA desplegado de G5', async () => {
+    const badPlan = join(dir, 'unverified-g5-plan.json');
+    await writeFile(
+      badPlan,
+      JSON.stringify({ ...plan, g5_deployment: { ...plan.g5_deployment, commit_sha: '9'.repeat(40) } }),
+    );
+    let executed = false;
+    const report = await ejecutarMatriz(
+      { [coupon]: { ...fixture, plan: badPlan } },
+      [coupon],
+      () => { executed = true; return validRun; },
+      deployment,
+    );
+    const row = report.results.find((item) => item.id === coupon);
+    assert.equal(executed, false);
+    assert.equal(row.status, 'BLOCKED');
+    assert.equal(row.technical_status, 'NOT_RUN');
+    assert.equal(row.reason, 'SHA_G5_SIN_EVIDENCIA_VERIFICADA');
+  });
   await t.test(
     'exige constancia en un caso G7 y permite PASS automático para G6',
     async () => {
@@ -397,7 +427,7 @@ test('clasifica homologación técnica y bilateral', async (t) => {
             fixture,
             output({
               event: 'uniform_coupon_not_found',
-              operation_id: plan.operations.coupon,
+              correlation_id: plan.correlation_id,
             }),
           )
         ).status,
@@ -444,7 +474,7 @@ test('clasifica homologación técnica y bilateral', async (t) => {
         [
           'G5-H5-13',
           'operation_id',
-          plan.operations.coupon,
+          plan.auth.existing_coupon_operation_id,
           { event: 'uniform_coupon_not_found' },
         ],
       ];

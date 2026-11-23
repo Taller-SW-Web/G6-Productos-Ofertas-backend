@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Fixture autorizado G5-G6 H5 para preparar planes",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["environment", "gateway", "g6_sha", "g6_cd_runs", "g5_sha", "g5_deployment", "cases"],
+  "properties": {
+    "environment": { "const": "integration" },
+    "gateway": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "g6_sha": { "$ref": "#/$defs/sha" },
+    "g5_sha": { "$ref": "#/$defs/sha" },
+    "g6_cd_runs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api-gateway", "catalog-svc", "inventory-svc", "promotions-svc"],
+      "properties": {
+        "api-gateway": { "type": ["string", "integer"], "pattern": "^[1-9][0-9]{0,15}$" },
+        "catalog-svc": { "type": ["string", "integer"], "pattern": "^[1-9][0-9]{0,15}$" },
+        "inventory-svc": { "type": ["string", "integer"], "pattern": "^[1-9][0-9]{0,15}$" },
+        "promotions-svc": { "type": ["string", "integer"], "pattern": "^[1-9][0-9]{0,15}$" }
+      }
+    },
+    "g5_deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verification_status", "commit_sha", "image_digest", "revision", "evidence_url", "verified_at", "verified_by"],
+      "properties": {
+        "verification_status": { "const": "VERIFIED" },
+        "commit_sha": { "$ref": "#/$defs/sha" },
+        "image_digest": { "type": "string", "pattern": "^sha256:[a-fA-F0-9]{64}$" },
+        "revision": { "type": "string", "minLength": 1 },
+        "evidence_url": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "verified_at": { "type": "string", "format": "date-time" },
+        "verified_by": { "type": "string", "minLength": 1 }
+      }
+    },
+    "cases": {
+      "type": "object",
+      "propertyNames": { "pattern": "^G5-H5-(0[1-9]|1[0-9]|20)$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "order_id": { "type": "string", "minLength": 1 },
+          "foreign_order_id": { "type": "string", "minLength": 1 },
+          "scenario": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["sku", "quantity", "channel_id", "coupon_code", "currency", "location_id"],
+            "properties": {
+              "sku": { "type": "string", "minLength": 1 },
+              "quantity": { "type": "integer", "minimum": 1 },
+              "channel_id": { "type": "string", "minLength": 1 },
+              "coupon_code": { "type": "string", "minLength": 1 },
+              "currency": { "type": "string", "minLength": 1 },
+              "expected_regular_price": { "type": "string", "pattern": "^\\d+(?:\\.\\d{1,6})?$" },
+              "location_id": { "type": "string", "format": "uuid" }
+            }
+          },
+          "customer_ref": { "type": "string", "format": "uuid" },
+          "effective_at": { "type": "string", "format": "date-time" },
+          "reservation_id": { "type": "string", "format": "uuid" },
+          "g5_snapshot_confirmed": { "type": "boolean" },
+          "follow_type": { "enum": ["cupones", "inventario"] },
+          "follow_operation_id": { "type": "string", "format": "uuid" },
+          "expected_restore_outcome": { "enum": ["RESTORED", "POLICY_KEEPS_CONSUMPTION", "NO_CONSUMPTION"] },
+          "correlation_id": { "type": "string", "format": "uuid" },
+          "expected_reserve_status": { "enum": ["COMPLETED", "REJECTED"] },
+          "fixture_origin": { "type": "string", "minLength": 1 },
+          "operations": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "reserve": { "type": "string", "format": "uuid" },
+              "coupon": { "type": "string", "format": "uuid" },
+              "confirm": { "type": "string", "format": "uuid" },
+              "restore": { "type": "string", "format": "uuid" },
+              "release": { "type": "string", "format": "uuid" }
+            }
+          },
+          "g5_evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["payload", "signature"],
+            "properties": {
+              "payload": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+              "signature": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": { "sha": { "type": "string", "pattern": "^[a-fA-F0-9]{40}$" } }
+}

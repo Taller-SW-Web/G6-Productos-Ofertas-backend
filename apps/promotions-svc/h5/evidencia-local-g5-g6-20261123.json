@@ -1,0 +1,365 @@
+{
+  "report_type": "G6_LOCAL_G5_H5",
+  "recorded_at": "2026-11-23T21:56:24.920Z",
+  "evidence_id": "7cbcb992-be71-4a28-b5f0-61caae51fbd8",
+  "tested_git_head": "fcf3dd983f5436221670e8c6a113fdd15cb76de9",
+  "tested_tree_sha256": "baa4cf65111e84fdcd448d84a8371a0f7e49af2b658b9e6c67875c27bde7492c",
+  "tested_files": [
+    {
+      "path": "apps/promotions-svc/h5/escenarios.json",
+      "sha256": "21a0f886f67a5a26983ff88ce0c7985c9cbf341924beb7fa9d09798e08500b55"
+    },
+    {
+      "path": "apps/promotions-svc/h5/ESCENARIOS_G5_H5.md",
+      "sha256": "48aa3140acd4f51b38a28d5b48cccfce375f477ef522a720f78e038975faf8f3"
+    },
+    {
+      "path": "apps/promotions-svc/h5/PRUEBA_CONJUNTA_G5.md",
+      "sha256": "536d474659822207738b47b0b735448edb254916ea70aeea9cc4312626ddb125"
+    },
+    {
+      "path": "apps/promotions-svc/h5/perfil-autorizado.schema.json",
+      "sha256": "4cf876412e838a823458c7da4983c76a6ea505c4b02234bf23bc1d38c3241ebf"
+    },
+    {
+      "path": "apps/promotions-svc/h5/preparar-planes.mjs",
+      "sha256": "d509fc30711ed153169373ec28c98401dc4b21264568571c1a2304b393ad9011"
+    },
+    {
+      "path": "apps/promotions-svc/h5/preparar-planes.test.mjs",
+      "sha256": "a0798887ff113513ead8e5b8ddee5b0d6f07113675d98723bc8c0a47d31da322"
+    },
+    {
+      "path": "apps/promotions-svc/h5/ejecutar-controlado.mjs",
+      "sha256": "b8ea08d0dd57ee554f8df4ee03d290f17c52d5cc6bbf1c4816a4807da6ccf623"
+    },
+    {
+      "path": "apps/promotions-svc/h5/ejecutar-controlado.test.mjs",
+      "sha256": "9e9e217f45c13c34eda6235a0a13eac66e508acf8973f04f7c48c02131935335"
+    },
+    {
+      "path": "apps/promotions-svc/h5/ejecutar-local.mjs",
+      "sha256": "7b9ea1e127ead7de387d0d1f5598bcc435ce98d09e85b75b0074e42bfb992c90"
+    },
+    {
+      "path": "apps/promotions-svc/h5/ejecutar-integracion.mjs",
+      "sha256": "487b0ba949083acdd415779ec3f3b736fef7dff6277846a88015362d2ac8ab6e"
+    },
+    {
+      "path": "apps/promotions-svc/h5/ejecutar-matriz.mjs",
+      "sha256": "65a6ebe42e711b3f9840ee3aee1096c8a74548ef87c719b6dfc847a883006e4e"
+    },
+    {
+      "path": "apps/promotions-svc/h5/ejecutar-matriz.test.mjs",
+      "sha256": "11033624a86c91c53fc4534cb811a137135eaa42d670c250c17f58f96e0956f6"
+    },
+    {
+      "path": "apps/promotions-svc/h5/verificar-despliegue.mjs",
+      "sha256": "f677705f5db728093fb36e7ecce19df228ff37585038a24d2abd75d4408c9a34"
+    },
+    {
+      "path": "apps/promotions-svc/h5/verificar-despliegue.test.mjs",
+      "sha256": "3e6d93c4cb18ba88beb1fe145cc63ed397c48f195820d22272e1a247bcd55c93"
+    },
+    {
+      "path": "apps/promotions-svc/h5/evidencia-integracion.mjs",
+      "sha256": "e77299f5e2a2beeade8cc8256eded691b2504205439223a3932862e5a91d14a2"
+    },
+    {
+      "path": "apps/promotions-svc/h5/evidencia-integracion.test.mjs",
+      "sha256": "d0b3459827f0f703edfe4388e3c34b5da7fb9abfc5357f9637f5689bb37e72d0"
+    },
+    {
+      "path": "apps/promotions-svc/test/coupon-h5-boundary.e2e-spec.ts",
+      "sha256": "ab960caca82cc035a551e7db698d6a963193b70ae3a16118e9d943aa7927c499"
+    },
+    {
+      "path": "apps/promotions-svc/test/coupon-h5.postgres.e2e-spec.ts",
+      "sha256": "046707a782d4f4288886d268240d92d656949c41fbee9a19342777bbbabad371"
+    },
+    {
+      "path": "apps/promotions-svc/test/run-h5-postgres.mjs",
+      "sha256": "28e797bb1d2f20b9254b504de291ecdc01160442e912d1b132f25cec14f32c3c"
+    },
+    {
+      "path": "apps/inventory-svc/test/app.e2e-spec.ts",
+      "sha256": "76b65a61b2af680442817ccd1bcb3a46c20db368c0838ab0adb5012d964716af"
+    }
+  ],
+  "commands": [
+    {
+      "id": "h5-runners",
+      "command": [
+        "node",
+        "--test",
+        "apps/promotions-svc/h5/preparar-planes.test.mjs",
+        "apps/promotions-svc/h5/ejecutar-controlado.test.mjs",
+        "apps/promotions-svc/h5/ejecutar-matriz.test.mjs",
+        "apps/promotions-svc/h5/verificar-despliegue.test.mjs",
+        "apps/promotions-svc/h5/evidencia-integracion.test.mjs"
+      ],
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_ms": 795,
+      "stdout_tail": "✔ preflight queda BLOCKED para homologación y acepta solo GET y validación de cupón (215.0689ms)\n▶ clasifica homologación técnica y bilateral\n  ✔ ningún caso con etapa aprueba si execute no está habilitado, incluso 07 con firma válida (49.6684ms)\n  ✔ 07, 15 y 16 requieren hechos específicos con firma, ejecución y CD (86.7597ms)\n  ✔ un PASS automático G6 tampoco puede sustituir al CD oficial (3.4887ms)\n  ✔ G5-H5-05 sin constancia queda BLOCKED (3.2649ms)\n  ✔ G5-H5-05 con ambas evidencias pasa (6.5332ms)\n  ✔ sin CD verificable o con cambio de revisión no hay homologación (9.0871ms)\n  ✔ G5-H5-05 conserva el FAIL técnico aunque exista constancia (14.1564ms)\n  ✔ para G5-H5-05 la firma o los vínculos incorrectos y la ejecución ausente bloquean (40.4781ms)\n  ✔ no inicia etapas sin evidencia revisada del SHA desplegado de G5 (9.1317ms)\n  ✔ exige constancia en un caso G7 y permite PASS automático para G6 (2.7243ms)\n  ✔ los cuatro casos G6 rechazan un SHA o UUID cruzado aunque haya otro evento relacionado (15.0251ms)\n✔ clasifica homologación técnica y bilateral (484.5907ms)\n✔ exige una firma G5 vinculada a la operación y usa su instante original (234.5863ms)\n✔ prepara veinte planes aislados con UUID estables y sin credenciales (356.481ms)\n✔ exige pedidos únicos, revisión G5 verificada y firma real en casos que la requieren (9.9184ms)\n✔ verifica los cuatro digests del CD oficial contra las revisiones activas aisladas (221.6816ms)\n✔ bloquea evidencia ausente, ajena o con revisiones cruzadas (131.8965ms)\nℹ tests 18\nℹ suites 0\nℹ pass 18\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 690.5807\n",
+      "stderr_tail": ""
+    },
+    {
+      "id": "coupon-unit",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+        "test",
+        "--",
+        "apps/promotions-svc/src/coupons/coupon-h5-operations.spec.ts",
+        "apps/promotions-svc/src/coupons/service-bus-events.spec.ts",
+        "--maxWorkers=1"
+      ],
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_ms": 5131,
+      "stdout_tail": "\n> g6-productos-ofertas-backend@0.0.1 test\n> vitest run apps/promotions-svc/src/coupons/coupon-h5-operations.spec.ts apps/promotions-svc/src/coupons/service-bus-events.spec.ts --maxWorkers=1\n\n\n RUN  v4.1.12 C:/Users/marec/Desktop/G6-Productos-Ofertas/backend\n\n\n Test Files  2 passed (2)\n      Tests  34 passed (34)\n   Start at  16:55:43\n   Duration  3.00s (transform 369ms, setup 0ms, import 2.36s, tests 73ms, environment 0ms)\n\n",
+      "stderr_tail": "The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n"
+    },
+    {
+      "id": "promotions-http",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+        "run",
+        "test:e2e",
+        "--",
+        "apps/promotions-svc/test/coupon-h5-boundary.e2e-spec.ts",
+        "--maxWorkers=1"
+      ],
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_ms": 9885,
+      "stdout_tail": "\n> g6-productos-ofertas-backend@0.0.1 test:e2e\n> vitest run --config ./vitest.config.e2e.ts apps/promotions-svc/test/coupon-h5-boundary.e2e-spec.ts --maxWorkers=1\n\n\n RUN  v4.1.12 C:/Users/marec/Desktop/G6-Productos-Ofertas/backend\n\n\n Test Files  1 passed (1)\n      Tests  8 passed (8)\n   Start at  16:55:47\n   Duration  8.59s (transform 2.79s, setup 0ms, import 7.86s, tests 466ms, environment 0ms)\n\n",
+      "stderr_tail": "The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n"
+    },
+    {
+      "id": "inventory-reservations",
+      "command": [
+        "C:\\Program Files\\nodejs\\node.exe",
+        "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+        "run",
+        "test:e2e",
+        "--",
+        "apps/inventory-svc/test/app.e2e-spec.ts",
+        "--maxWorkers=1"
+      ],
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_ms": 13737,
+      "stdout_tail": "\n> g6-productos-ofertas-backend@0.0.1 test:e2e\n> vitest run --config ./vitest.config.e2e.ts apps/inventory-svc/test/app.e2e-spec.ts --maxWorkers=1\n\n\n RUN  v4.1.12 C:/Users/marec/Desktop/G6-Productos-Ofertas/backend\n\n\n Test Files  1 passed (1)\n      Tests  66 passed (66)\n   Start at  16:55:58\n   Duration  11.91s (transform 2.80s, setup 0ms, import 9.07s, tests 2.57s, environment 0ms)\n\n",
+      "stderr_tail": "The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n"
+    },
+    {
+      "id": "postgres-h5",
+      "command": [
+        "node",
+        "apps/promotions-svc/test/run-h5-postgres.mjs"
+      ],
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_ms": 14841,
+      "stdout_tail": "\n RUN  v4.1.12 C:/Users/marec/Desktop/G6-Productos-Ofertas/backend\n\n\n Test Files  1 passed (1)\n      Tests  12 passed (12)\n   Start at  16:56:14\n   Duration  8.88s (transform 323ms, setup 0ms, import 1.28s, tests 7.37s, environment 0ms)\n\nDISPOSABLE_POSTGRES_CLEANUP_CONFIRMED\n",
+      "stderr_tail": "The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n"
+    }
+  ],
+  "results": [
+    {
+      "id": "G5-H5-01",
+      "local_test_status": "PASS",
+      "local_scope": [
+        "inventory-reservations"
+      ],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-02",
+      "local_test_status": "PASS",
+      "local_scope": [
+        "inventory-reservations"
+      ],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-03",
+      "local_test_status": "PASS",
+      "local_scope": [
+        "postgres-h5"
+      ],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-04",
+      "local_test_status": "PASS",
+      "local_scope": [
+        "postgres-h5",
+        "inventory-reservations"
+      ],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-05",
+      "local_test_status": "PASS",
+      "local_scope": [
+        "postgres-h5"
+      ],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-06",
+      "local_test_status": "PASS",
+      "local_scope": [
+        "postgres-h5"
+      ],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-07",
+      "local_test_status": "PASS",
+      "local_scope": [
+        "postgres-h5"
+      ],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-08",
+      "local_test_status": "PASS",
+      "local_scope": [
+        "postgres-h5"
+      ],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-09",
+      "local_test_status": "NOT_RUN",
+      "local_scope": [],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_COVERAGE_NOT_EXECUTED_OR_NOT_AVAILABLE"
+    },
+    {
+      "id": "G5-H5-10",
+      "local_test_status": "NOT_RUN",
+      "local_scope": [],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_COVERAGE_NOT_EXECUTED_OR_NOT_AVAILABLE"
+    },
+    {
+      "id": "G5-H5-11",
+      "local_test_status": "NOT_RUN",
+      "local_scope": [],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_COVERAGE_NOT_EXECUTED_OR_NOT_AVAILABLE"
+    },
+    {
+      "id": "G5-H5-12",
+      "local_test_status": "NOT_RUN",
+      "local_scope": [],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_COVERAGE_NOT_EXECUTED_OR_NOT_AVAILABLE"
+    },
+    {
+      "id": "G5-H5-13",
+      "local_test_status": "PASS",
+      "local_scope": [
+        "promotions-http"
+      ],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-14",
+      "local_test_status": "PASS",
+      "local_scope": [
+        "promotions-http"
+      ],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-15",
+      "local_test_status": "PASS",
+      "local_scope": [
+        "postgres-h5"
+      ],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-16",
+      "local_test_status": "PASS",
+      "local_scope": [
+        "postgres-h5"
+      ],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-17",
+      "local_test_status": "NOT_RUN",
+      "local_scope": [],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_COVERAGE_NOT_EXECUTED_OR_NOT_AVAILABLE"
+    },
+    {
+      "id": "G5-H5-18",
+      "local_test_status": "NOT_RUN",
+      "local_scope": [],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_COVERAGE_NOT_EXECUTED_OR_NOT_AVAILABLE"
+    },
+    {
+      "id": "G5-H5-19",
+      "local_test_status": "NOT_RUN",
+      "local_scope": [],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_COVERAGE_NOT_EXECUTED_OR_NOT_AVAILABLE"
+    },
+    {
+      "id": "G5-H5-20",
+      "local_test_status": "NOT_RUN",
+      "local_scope": [],
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "G6_LOCAL_COVERAGE_NOT_EXECUTED_OR_NOT_AVAILABLE"
+    }
+  ],
+  "conclusions": {
+    "homologation": "NONE",
+    "real_g5_requests": 0,
+    "real_g7_tokens": 0,
+    "shared_azure_changes": 0,
+    "note": "Local PostgreSQL and explicit G5/Service Bus test doubles are G6 regression evidence only."
+  }
+}
