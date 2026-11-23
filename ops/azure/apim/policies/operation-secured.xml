@@ -1,12 +1,20 @@
 <policies>
   <inbound>
     <base />
-    <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized" require-scheme="Bearer">
+    <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized" require-scheme="Bearer" output-token-variable-name="jwt">
       <openid-config url="{{g7-openid-config-url}}" />
       <issuers><issuer>{{g7-issuer}}</issuer></issuers>
       <audiences><audience>{{g7-audience}}</audience></audiences>
     </validate-jwt>
-    <set-variable name="rateIdentity" value="@(context.Principal.Claims.FirstOrDefault(c =&gt; c.Type == &quot;sub&quot;)?.Value ?? context.Request.IpAddress)" />
+    <set-variable name="rateIdentity" value="@(((Jwt)context.Variables[&quot;jwt&quot;]).Subject ?? string.Empty)" />
+    <choose>
+      <when condition="@((string)context.Variables[&quot;rateIdentity&quot;] == string.Empty)">
+        <return-response>
+          <set-status code="401" reason="Unauthorized" />
+          <set-header name="Content-Type" exists-action="override"><value>application/problem+json</value></set-header>
+        </return-response>
+      </when>
+    </choose>
     <rate-limit-by-key calls="{{burst-calls}}" renewal-period="{{burst-window-seconds}}" counter-key="@((string)context.Variables[&quot;rateIdentity&quot;] + &quot;:{{operation-id}}&quot;)" />
     <quota-by-key calls="{{quota-calls}}" renewal-period="{{quota-window-seconds}}" counter-key="@((string)context.Variables[&quot;rateIdentity&quot;] + &quot;:{{operation-id}}&quot;)" />
   </inbound>

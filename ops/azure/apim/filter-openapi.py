@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -11,27 +12,100 @@ from pathlib import Path
 import yaml
 
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head"}
-OPERATION_ID = re.compile(r"operationId\s*:\s*['\"]([A-Za-z0-9_.-]+)['\"]")
+ROUTE_ENTRY = re.compile(
+    r"\{\s*method:\s*['\"]([A-Z]+)['\"]\s*,\s*"
+    r"path:\s*['\"]([^'\"]+)['\"]\s*,\s*"
+    r"operationId:\s*['\"]([A-Za-z0-9_.-]+)['\"]",
+    re.S,
+)
 LEGACY_UNCONTRACTED = {
     "obtenerDefinicionPrecioProductoAdministracion",
     "obtenerDefinicionPrecioSkuAdministracion",
 }
 
 
-def read_registry(path: Path) -> list[str]:
+def read_registry(path: Path) -> list[dict[str, str]]:
     contents = path.read_text(encoding="utf-8")
-    operation_ids = OPERATION_ID.findall(contents)
-    if not operation_ids:
+    entries = [
+        {"method": method, "path": route_path, "operationId": operation_id}
+        for method, route_path, operation_id in ROUTE_ENTRY.findall(contents)
+    ]
+    operation_ids = [entry["operationId"] for entry in entries]
+    if not entries:
         raise ValueError(f"No se encontraron operationId en {path}")
     if len(operation_ids) != len(set(operation_ids)):
         raise ValueError(f"operationId duplicado en {path}")
-    return operation_ids
+    return entries
+
+
+def normalize_apim_operation_id(operation_id: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "-", operation_id.lower()).strip("-")[:76]
+    if not normalized or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", normalized):
+        raise ValueError(f"operationId incompatible con APIM: {operation_id!r}")
+    return normalized
+
+
+def canonical_sha256(value: object) -> str:
+    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def operation_records(spec: dict) -> list[dict]:
+    records = []
+    for path, path_item in spec.get("paths", {}).items():
+        if not isinstance(path_item, dict):
+            continue
+        for method, operation in path_item.items():
+            if method.lower() not in HTTP_METHODS or not isinstance(operation, dict):
+                continue
+            records.append(
+                {
+                    "operationId": operation.get("operationId"),
+                    "method": method.upper(),
+                    "path": path,
+                    "secured": bool(
+                        operation["security"]
+                        if "security" in operation
+                        else spec.get("security", [])
+                    ),
+                }
+            )
+    return sorted(records, key=lambda item: (item["operationId"] or "", item["method"], item["path"]))
+
+
+def validate_artifact_pair(filtered: dict, manifest: dict) -> None:
+    expected = [
+        {
+            "operationId": operation["operationId"],
+            "method": operation["method"],
+            "path": operation["path"],
+            "secured": operation["secured"],
+        }
+        for operation in manifest.get("operations", [])
+    ]
+    if operation_records(filtered) != sorted(
+        expected, key=lambda item: (item["operationId"], item["method"], item["path"])
+    ):
+        raise ValueError("El manifiesto no corresponde al conjunto método/ruta/operationId del OpenAPI filtrado")
+    if canonical_sha256(filtered) != manifest.get("filteredOpenApiCanonicalSha256"):
+        raise ValueError("OpenAPI filtrado distinto del SHA declarado por el manifiesto")
+    operation_set_hash = canonical_sha256(operation_records(filtered))
+    if operation_set_hash != manifest.get("operationSetSha256"):
+        raise ValueError("operationSetSha256 no corresponde al conjunto importado")
+    if filtered.get("x-apim-filter", {}).get("operationSetSha256") != operation_set_hash:
+        raise ValueError("El OpenAPI filtrado declara otro conjunto de operaciones")
+    ids = [operation["apimOperationId"] for operation in manifest["operations"]]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Colisión de apimOperationId en el manifiesto")
+    for operation in manifest["operations"]:
+        if operation["apimOperationId"] != normalize_apim_operation_id(operation["operationId"]):
+            raise ValueError(f"apimOperationId no corresponde a {operation['operationId']}")
 
 
 def filter_spec(
     source: dict,
-    gateway_ids: list[str],
-    g5_ids: list[str],
+    gateway_routes: list[dict[str, str]],
+    g5_routes: list[dict[str, str]],
     enable_g5: bool,
     docs_sha: str,
     gateway_sha: str,
@@ -57,18 +131,37 @@ def filter_spec(
 
     if len(private_ids) != 5:
         raise ValueError(f"Se esperaban cinco operaciones internas y hay {len(private_ids)}")
-    if set(gateway_ids) & set(private_ids) or set(g5_ids) & set(private_ids):
+    gateway_ids = {route["operationId"] for route in gateway_routes}
+    g5_ids = {route["operationId"] for route in g5_routes}
+    if gateway_ids & set(private_ids) or g5_ids & set(private_ids):
         raise ValueError("Una ruta interna aparece en el registro público del Gateway")
 
-    uncontracted = set(gateway_ids) & LEGACY_UNCONTRACTED
-    enabled_ids = (set(gateway_ids) - LEGACY_UNCONTRACTED) | (
-        set(g5_ids) if enable_g5 else set()
-    )
+    uncontracted = gateway_ids & LEGACY_UNCONTRACTED
+    selected_ids = (gateway_ids - LEGACY_UNCONTRACTED) | (g5_ids if enable_g5 else set())
+    route_index = {route["operationId"]: route for route in gateway_routes + g5_routes}
+    enabled_ids = selected_ids
     missing = enabled_ids - operation_index.keys()
     if missing:
         raise ValueError(f"Rutas registradas sin operación OpenAPI: {sorted(missing)}")
-    if set(gateway_ids) & set(g5_ids):
+    if gateway_ids & g5_ids:
         raise ValueError("Las rutas G5 deben ser exclusivas del registro opt-in")
+
+    server_url = source.get("servers", [{}])[0].get("url", "")
+    server_path = re.sub(r"https?://[^/]+", "", server_url).rstrip("/")
+    for operation_id in gateway_ids | g5_ids:
+        route = route_index[operation_id]
+        operation = operation_index.get(operation_id)
+        if operation is None:
+            if operation_id in LEGACY_UNCONTRACTED:
+                continue
+            raise ValueError(f"operationId no documentado: {operation_id}")
+        path, method, _ = operation
+        expected_route = f"{server_path}{path}" if server_path else path
+        if route["method"] != method.upper() or route["path"] != expected_route:
+            raise ValueError(
+                f"Método/ruta de Gateway no corresponde al OpenAPI para {operation_id}: "
+                f"{route['method']} {route['path']} != {method.upper()} {expected_route}"
+            )
 
     selected_paths: dict[str, dict] = {}
     operations: list[dict] = []
@@ -83,6 +176,7 @@ def filter_spec(
         operations.append(
             {
                 "operationId": operation_id,
+                "apimOperationId": normalize_apim_operation_id(operation_id),
                 "method": method.upper(),
                 "path": path,
                 "secured": bool(
@@ -103,6 +197,8 @@ def filter_spec(
         "g5EnabledByDefault": False,
         "privateOperationCount": len(private_ids),
     }
+    operation_set_hash = canonical_sha256(operation_records(filtered))
+    filtered["x-apim-filter"]["operationSetSha256"] = operation_set_hash
     manifest = {
         "docsSha": docs_sha,
         "gatewaySha": gateway_sha,
@@ -110,7 +206,10 @@ def filter_spec(
         "excludedUncontractedLegacyOperationIds": sorted(uncontracted),
         "g5EnabledByDefault": False,
         "operations": operations,
+        "operationSetSha256": operation_set_hash,
+        "filteredOpenApiCanonicalSha256": canonical_sha256(filtered),
     }
+    validate_artifact_pair(filtered, manifest)
     return filtered, manifest
 
 
@@ -137,7 +236,8 @@ def main() -> None:
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(filtered, indent=2) + "\n", encoding="utf-8")
+    output_text = json.dumps(filtered, indent=2) + "\n"
+    args.output.write_text(output_text, encoding="utf-8")
     args.manifest.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 

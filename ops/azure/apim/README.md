@@ -4,7 +4,7 @@ Este paquete prepara la importación y las políticas de APIM Developer clásico
 
 ## Contrato filtrado
 
-El filtro importa exclusivamente operaciones del registro `CONTRACT_ROUTES`. No acepta las cinco operaciones `x-internal`; valida esa condición y mantiene las cuatro operaciones G5 fuera del documento salvo que se proporcione `--enable-g5` de forma explícita. El manifiesto guarda el SHA de Docs y Gateway que originaron cada artefacto.
+El filtro importa exclusivamente operaciones del registro `CONTRACT_ROUTES`. Comprueba método+ruta contra el OpenAPI y no acepta las cinco operaciones `x-internal`; mantiene las cuatro G5 fuera del documento salvo `--enable-g5`. Cada operación conserva `operationId` y registra `apimOperationId` calculado con la normalización oficial APIM (minúsculas, secuencias no alfanuméricas a guion, recorte, truncado a 76). Colisiones o nombres incompatibles fallan sin sufijos automáticos. El manifiesto conserva los SHA Docs/Gateway y liga el conjunto método/ruta/IDs al contenido filtrado mediante hashes canónicos.
 
 ```powershell
 python ops/azure/apim/filter-openapi.py `
@@ -22,7 +22,7 @@ G5 queda desactivado si no se usa `--enable-g5`. No se incluye valor de ejemplo 
 
 `main.bicep` define APIM Developer clásico con inyección VNet externa para HTTPS de clientes y conectividad saliente a Gateway. La URL de origen del Gateway debe ser privada y resolverse desde la subred dedicada. La plantilla parametriza IDs de subred, URL/DNS, issuer/JWKS/audience, orígenes CORS, límites y logger; no contiene secretos, identificadores de red ni parámetros de laboratorio inventados.
 
-Las policies validan JWT antes de limitar operaciones protegidas; el contador usa `sub` validado y operationId. Las lecturas públicas expresamente declaradas usan IP y operación. La policy de burst admite una ventana de hasta 300 segundos; APIM devuelve 429 con `Retry-After`. La cuota por clave admite ventanas desde 300 segundos y, al agotarse, responde 403 con `Retry-After`. El preflight local valida URLs HTTPS, orígenes CORS, IDs de recursos y ventanas sin consultar Azure. La observabilidad captura solo cabeceras de correlación, nunca cuerpos. No se registran tokens.
+Las policies validan JWT antes de limitar operaciones protegidas; el sujeto se toma de `Jwt.Subject` del token que valida `validate-jwt`, rechazando subject vacío, y la clave combina sujeto+`operationId` contractual. La policy pública mantiene su comportamiento IP+operación. El Gateway conserva autoridad de roles, scopes, clientes e introspección. La policy de burst admite una ventana de hasta 300 segundos; APIM devuelve 429 con `Retry-After`. La cuota por clave admite ventanas desde 300 segundos y, al agotarse, responde 403 con `Retry-After`. La observabilidad captura solo cabeceras de correlación, nunca cuerpos. No se registran tokens.
 
 La prevención de bypass requiere que el owner de infraestructura de Gateway permita tráfico de entrada únicamente desde la subred/egress aprobada de APIM y que la ruta del backend APIM resuelva a un destino privado. Esta plantilla no cambia el ingress actual del Gateway ni el tráfico.
 
@@ -30,13 +30,13 @@ La prevención de bypass requiere que el owner de infraestructura de Gateway per
 
 ```powershell
 python -m unittest discover ops/azure/apim/tests -v
-python ops/azure/apim/validate-parameters.py <parametros-revisados.json>
+python ops/azure/apim/validate-parameters.py <parametros-revisados.json> --openapi ops/azure/apim/openapi/gateway-filtered.json --manifest ops/azure/apim/openapi/operation-security.json
 az bicep build --file ops/azure/apim/main.bicep --outfile $env:TEMP/apim-h5.json
 ```
 
 No ejecutar `az deployment`, `what-if`, importaciones APIM ni comandos que creen o modifiquen recursos.
 
-`filteredOpenApi` se pasa como parámetro al despliegue futuro a partir de `openapi/gateway-filtered.json`; nunca se carga una definición contractual sin filtrar.
+El preflight verifica que el parámetro `filteredOpenApi`, el archivo filtrado y el manifiesto coincidan exactamente en SHA canónico y en operationId/método/ruta; un manifiesto viejo o una sustitución del parámetro falla antes de cualquier ejecución de Azure. La importación mantiene `servers=/api/v1`, el sufijo público APIM `api/v1` y `gatewayBackendUrl=https://<hostname-privado-aprobado>/api/v1`; una operación pública `/api/v1/productos` llega al Gateway como `/api/v1/productos`. No se añade `rewrite-uri`.
 
 ## Plan de aceptación APIM-T01–T08 / RL-01–RL-06
 

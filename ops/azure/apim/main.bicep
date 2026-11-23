@@ -10,7 +10,7 @@ param publisherName string
 param publisherEmail string
 @description('Subred dedicada de APIM en la VNet existente. No se crea red.')
 param apimSubnetResourceId string
-@description('URL HTTPS privada del Gateway existente alcanzable desde APIM.')
+@description('Base URL privada aprobada del Gateway: https://<hostname>/api/v1, sin ruta adicional.')
 param gatewayBackendUrl string
 @description('Issuer exacto publicado por G7.')
 param g7Issuer string
@@ -126,9 +126,12 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2022-08-01' = 
 }
 
 resource operationPolicies 'Microsoft.ApiManagement/service/apis/operations/policies@2022-08-01' = [for operation in operationsManifest.operations: {
-  name: '${apiName}/${operation.operationId}/policy'
+  name: '${apiName}/${operation.apimOperationId}/policy'
   dependsOn: [
     api
+    openIdNamedValue
+    issuerNamedValue
+    audienceNamedValue
   ]
   properties: {
     format: 'rawxml'

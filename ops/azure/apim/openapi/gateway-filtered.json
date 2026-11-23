@@ -46670,9 +46670,10 @@
     "forbidden_source": "service-token sub/client_id"
   },
   "x-apim-filter": {
-    "docsSha": "354f5a93e4ec03ca5f9262a3767911c8c9211638",
+    "docsSha": "9dc8b2193c76d7a1fd53d0634316445f1f0bad20",
     "gatewaySha": "85a7894a817aaeede26e5e45fa700de104454474",
     "g5EnabledByDefault": false,
-    "privateOperationCount": 5
+    "privateOperationCount": 5,
+    "operationSetSha256": "565eae67d9ae7384d387c4b980ff1a6c43ea539fb6ae5f37b9937eac94ed05ec"
   }
 }
