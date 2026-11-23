@@ -115,7 +115,7 @@ jobs:
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 <<'SQL'
           CREATE ROLE po_catalog_owner NOLOGIN;
           CREATE ROLE catalog_app LOGIN PASSWORD 'catalog-retry-fixture-only';
-          CREATE ROLE po_bulk_owner NOLOGIN;
+          CREATE ROLE po_bulk_owner LOGIN PASSWORD 'bulk-owner-fixture-only';
           CREATE ROLE bulk_app LOGIN PASSWORD 'bulk-retry-fixture-only';
           CREATE SCHEMA catalog AUTHORIZATION po_catalog_owner;
           CREATE SCHEMA bulk AUTHORIZATION po_bulk_owner;
@@ -182,6 +182,7 @@ jobs:
         env:
           NODE_ENV: test
           BULK_TEST_DATABASE_URL: postgresql://bulk_app:bulk-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
+          BULK_TEST_ADMIN_DATABASE_URL: postgresql://po_bulk_owner:bulk-owner-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
         run: npx vitest run apps/bulk-svc/src/persistence/bulk.repository.integration.spec.ts
       - name: Ejecutar pruebas de outage Bulk
         working-directory: ${{ steps.integration-tree.outputs.integration_tree }}

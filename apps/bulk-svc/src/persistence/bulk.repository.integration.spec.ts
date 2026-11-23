@@ -35,9 +35,11 @@ import {
 } from './bulk.repository.js';
 
 const testUrl = process.env.BULK_TEST_DATABASE_URL;
+const adminTestUrl = process.env.BULK_TEST_ADMIN_DATABASE_URL;
 const integration = testUrl ? describe : describe.skip;
 const TEST_OWNER_SUB = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 let pool: Pool;
+let adminPool: Pool;
 let repository: BulkPersistenceRepository;
 let database: ReturnType<typeof drizzle<typeof bulkSchema>>;
 
@@ -71,9 +73,32 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
         'Integration tests require loopback PostgreSQL and explicit sslmode=disable',
       );
     }
+    if (adminTestUrl) {
+      const adminUrl = new URL(adminTestUrl);
+      if (
+        !['localhost', '127.0.0.1', '::1'].includes(adminUrl.hostname) ||
+        adminUrl.searchParams.get('sslmode') !== 'disable' ||
+        adminUrl.hostname !== url.hostname ||
+        adminUrl.port !== url.port ||
+        adminUrl.pathname !== url.pathname ||
+        adminUrl.username === url.username
+      ) {
+        throw new Error(
+          'BULK_TEST_ADMIN_DATABASE_URL must use a distinct role on the same loopback test database',
+        );
+      }
+    }
     pool = new Pool({
       connectionString: parsed.databaseUrl,
       ssl: parsed.databaseSsl,
+      max: 2,
+      connectionTimeoutMillis: parsed.databaseConnectionTimeoutMs,
+      query_timeout: parsed.databaseQueryTimeoutMs,
+      statement_timeout: parsed.databaseQueryTimeoutMs,
+      idleTimeoutMillis: parsed.databaseIdleTimeoutMs,
+    });
+    adminPool = new Pool({
+      connectionString: adminTestUrl ?? testUrl,
       max: 2,
       connectionTimeoutMillis: parsed.databaseConnectionTimeoutMs,
       query_timeout: parsed.databaseQueryTimeoutMs,
@@ -92,6 +117,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
 
   afterAll(async () => {
     if (pool) await pool.end();
+    if (adminPool) await adminPool.end();
   });
 
   const importBatch = (
@@ -420,10 +446,10 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
   it('rolls back batch creation when writing a domain step fails', async () => {
     const ref = `test://${randomUUID()}`;
     const batchId = randomUUID();
-    await pool.query(
+    await adminPool.query(
       `CREATE OR REPLACE FUNCTION bulk.fn_test_fail_step_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='injected integration failure'; END $$`,
     );
-    await pool.query(
+    await adminPool.query(
       'CREATE TRIGGER trg_test_fail_step_insert BEFORE INSERT ON bulk.row_domain_steps FOR EACH ROW EXECUTE FUNCTION bulk.fn_test_fail_step_insert()',
     );
     try {
@@ -445,10 +471,10 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       ).toHaveLength(0);
       expect(await repository.findBatchByBatchId(batchId)).toBeNull();
     } finally {
-      await pool.query(
+      await adminPool.query(
         'DROP TRIGGER IF EXISTS trg_test_fail_step_insert ON bulk.row_domain_steps',
       );
-      await pool.query(
+      await adminPool.query(
         'DROP FUNCTION IF EXISTS bulk.fn_test_fail_step_insert()',
       );
     }
@@ -702,13 +728,13 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       pricing: async () => page,
       inventory: async () => page,
     };
-    await pendingPool.query(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
+    await adminPool.query(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
         IF NEW.role = 'RESULTADO_EXPORTACION' THEN PERFORM pg_sleep(2.0); END IF;
         RETURN NEW;
       END
     $$`);
-    await pendingPool.query(
+    await adminPool.query(
       `CREATE TRIGGER ${trigger} BEFORE INSERT ON bulk.file_manifests FOR EACH ROW EXECUTE FUNCTION ${fn}()`,
     );
     const complete =
@@ -800,10 +826,10 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       completeSpy.mockRestore();
       referenceSpy.mockRestore();
       await pendingCommit?.catch(() => undefined);
-      await pendingPool.query(
+      await adminPool.query(
         `DROP TRIGGER IF EXISTS ${trigger} ON bulk.file_manifests`,
       );
-      await pendingPool.query(`DROP FUNCTION IF EXISTS ${fn}()`);
+      await adminPool.query(`DROP FUNCTION IF EXISTS ${fn}()`);
       await pendingPool.end();
       if (previousBucket === undefined) delete process.env.BULK_STORAGE_BUCKET;
       else process.env.BULK_STORAGE_BUCKET = previousBucket;
@@ -836,7 +862,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       pricing: async () => page,
       inventory: async () => page,
     };
-    await pool.query(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
+    await adminPool.query(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
         IF NEW.role = 'RESULTADO_EXPORTACION' THEN
           RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='injected manifest rollback';
@@ -844,7 +870,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
         RETURN NEW;
       END
     $$`);
-    await pool.query(
+    await adminPool.query(
       `CREATE TRIGGER ${trigger} BEFORE INSERT ON bulk.file_manifests FOR EACH ROW EXECUTE FUNCTION ${fn}()`,
     );
     const service = new BulkExportService(repository, storage as never, source);
@@ -866,10 +892,10 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       ).toBe('PROCESSING');
     } finally {
       service.onModuleDestroy();
-      await pool.query(
+      await adminPool.query(
         `DROP TRIGGER IF EXISTS ${trigger} ON bulk.file_manifests`,
       );
-      await pool.query(`DROP FUNCTION IF EXISTS ${fn}()`);
+      await adminPool.query(`DROP FUNCTION IF EXISTS ${fn}()`);
       if (previousBucket === undefined) delete process.env.BULK_STORAGE_BUCKET;
       else process.env.BULK_STORAGE_BUCKET = previousBucket;
     }
@@ -1063,8 +1089,8 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const seq = `bulk.export_retry_${suffix}`;
     const fn = `bulk.export_retry_fn_${suffix}`;
     const trigger = `export_retry_trigger_${suffix}`;
-    await pool.query(`CREATE SEQUENCE ${seq} START 1`);
-    await pool.query(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
+    await adminPool.query(`CREATE SEQUENCE ${seq} START 1`);
+    await adminPool.query(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
         IF OLD.status = 'QUEUED' AND NEW.status = 'PROCESSING' AND nextval('${seq}') = 1 THEN
           RAISE EXCEPTION 'injected transient failure';
@@ -1072,7 +1098,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
         RETURN NEW;
       END
     $$`);
-    await pool.query(
+    await adminPool.query(
       `CREATE TRIGGER ${trigger} BEFORE UPDATE ON bulk.export_jobs FOR EACH ROW EXECUTE FUNCTION ${fn}()`,
     );
     const service = new BulkExportService(repository);
@@ -1093,9 +1119,11 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       expect(after.rows[0]?.count).toBe(before.rows[0]?.count);
     } finally {
       service.onModuleDestroy();
-      await pool.query(`DROP TRIGGER IF EXISTS ${trigger} ON bulk.export_jobs`);
-      await pool.query(`DROP FUNCTION IF EXISTS ${fn}()`);
-      await pool.query(`DROP SEQUENCE IF EXISTS ${seq}`);
+      await adminPool.query(
+        `DROP TRIGGER IF EXISTS ${trigger} ON bulk.export_jobs`,
+      );
+      await adminPool.query(`DROP FUNCTION IF EXISTS ${fn}()`);
+      await adminPool.query(`DROP SEQUENCE IF EXISTS ${seq}`);
     }
   }, 10_000);
 
@@ -1107,7 +1135,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     });
     await repository.claimQueuedExportJob(job.exportId);
     try {
-      await pool.query(
+      await adminPool.query(
         'ALTER TABLE bulk.export_jobs DISABLE TRIGGER trg_export_jobs_updated_at',
       );
       await pool.query(
@@ -1115,7 +1143,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
         [job.exportId],
       );
     } finally {
-      await pool.query(
+      await adminPool.query(
         'ALTER TABLE bulk.export_jobs ENABLE TRIGGER trg_export_jobs_updated_at',
       );
     }
