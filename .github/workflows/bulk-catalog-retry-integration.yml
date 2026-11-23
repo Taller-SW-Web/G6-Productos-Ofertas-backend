@@ -74,6 +74,7 @@ jobs:
             echo "Quedan conflictos no resueltos en el árbol de integración" >&2
             exit 1
           fi
+          node .github/integration/patch-retry-tests.mjs "$tree"
           cp "$tree/.github/integration/bulk-catalog-retry.e2e-spec.fixture.ts" \
              "$tree/apps/bulk-svc/test/bulk-catalog-retry.e2e-spec.ts"
           git -C "$tree" add apps/bulk-svc/test/bulk-catalog-retry.e2e-spec.ts

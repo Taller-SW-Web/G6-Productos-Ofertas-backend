@@ -2,7 +2,7 @@ import { randomUUID, createSign, generateKeyPairSync } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { BulkSvcController } from '../src/bulk-svc.controller.js';
@@ -18,6 +18,7 @@ import { BulkExportService } from '../src/bulk-export.service.js';
 import {
   bulkSchema,
   batchJobs,
+  batchRows,
   domainAttempts,
   outbox as bulkOutbox,
 } from '../src/persistence/bulk.schema.js';
@@ -227,7 +228,10 @@ integration(
         const csvValues = [
           'ACTUALIZACION',
           seed.product_id,
-          String(seed.catalog_version),
+          JSON.stringify({
+            producto: Number(seed.catalog_version),
+            variante: null,
+          }),
           skuBase,
           '',
           'Retry integration seed',
@@ -255,7 +259,12 @@ integration(
             filename: 'retry.csv',
             contentType: 'text/csv',
           })
-          .expect(202);
+          .expect((response) => {
+            if (response.status !== 202)
+              throw new Error(
+                `Admission response: ${JSON.stringify(response.body)}`,
+              );
+          });
         expect(admission.body).toMatchObject({
           status: 'QUEUED',
           correlation_id: originalCorrelation,
@@ -325,10 +334,20 @@ integration(
             .where(eq(catalogOutbox.causation_id, original.message_id))
             .limit(1),
         );
-        const initialResult = initialResultRow?.payload as Record<
-          string,
-          unknown
-        >;
+        if (!initialResultRow)
+          throw new Error('Catalog V2 result was not persisted');
+        const initialResult: CatalogEnvelope = {
+          message_id: initialResultRow.message_id,
+          schema_version: initialResultRow.schema_version,
+          occurred_at: initialResultRow.occurred_at.toISOString(),
+          correlation_id: initialResultRow.correlation_id,
+          causation_id: initialResultRow.causation_id,
+          operation_id: initialResultRow.operation_id,
+          producer: 'catalog-svc',
+          kind: initialResultRow.kind as CatalogEnvelope['kind'],
+          name: initialResultRow.event_name,
+          data: initialResultRow.payload,
+        };
         expect(initialResult).toMatchObject({
           schema_version: 2,
           correlation_id: originalCorrelation,
@@ -348,13 +367,13 @@ integration(
           await catalogDatabase.read((db) => db.select().from(products)),
         ).toEqual(productsBefore);
         await bulkRepository.recordCatalogBulkResult({
-          messageId: String(initialResult.message_id),
+          messageId: initialResult.message_id,
           operationId: String(initialResult.operation_id),
           causationId: String(initialResult.causation_id),
           eventName: String(
             initialResult.name,
           ) as 'catalog.bulk.upsert.completed',
-          correlationId: String(initialResult.correlation_id),
+          correlationId: initialResult.correlation_id,
           payload: initialResult,
         });
 
@@ -397,7 +416,12 @@ integration(
         const [retryOutbox] = await bulkDatabase
           .select()
           .from(bulkOutbox)
-          .where(eq(bulkOutbox.schemaVersion, 4));
+          .where(
+            and(
+              eq(bulkOutbox.schemaVersion, 4),
+              eq(bulkOutbox.operationId, original.operation_id),
+            ),
+          );
         expect(retryOutbox).toMatchObject({
           correlationId: originalCorrelation,
           operationId: original.operation_id,
@@ -430,7 +454,20 @@ integration(
             .where(eq(catalogOutbox.causation_id, retryCommand.message_id))
             .limit(1),
         );
-        const retryResult = retryResultRow?.payload as Record<string, unknown>;
+        if (!retryResultRow)
+          throw new Error('Catalog retry result was not persisted');
+        const retryResult: CatalogEnvelope = {
+          message_id: retryResultRow.message_id,
+          schema_version: retryResultRow.schema_version,
+          occurred_at: retryResultRow.occurred_at.toISOString(),
+          correlation_id: retryResultRow.correlation_id,
+          causation_id: retryResultRow.causation_id,
+          operation_id: retryResultRow.operation_id,
+          producer: 'catalog-svc',
+          kind: retryResultRow.kind as CatalogEnvelope['kind'],
+          name: retryResultRow.event_name,
+          data: retryResultRow.payload,
+        };
         expect(retryResult).toMatchObject({
           schema_version: 2,
           correlation_id: originalCorrelation,
@@ -449,13 +486,13 @@ integration(
           },
         });
         await bulkRepository.recordCatalogBulkResult({
-          messageId: String(retryResult.message_id),
+          messageId: retryResult.message_id,
           operationId: String(retryResult.operation_id),
           causationId: String(retryResult.causation_id),
           eventName: String(
             retryResult.name,
           ) as 'catalog.bulk.upsert.completed',
-          correlationId: String(retryResult.correlation_id),
+          correlationId: retryResult.correlation_id,
           payload: retryResult,
         });
         const firstProductCount = await catalogDatabase.read((db) =>
@@ -473,7 +510,7 @@ integration(
             ),
         );
         expect(firstProductCount).toHaveLength(1);
-        expect(firstProductCount[0]?.product_id).toBe(seed.product_id);
+        expect(firstProductCount[0]?.id).toBe(seed.product_id);
         expect(firstProductCount[0]?.descripcion).toBe('After retry');
         const persistedAttempts = await catalogDatabase.read((db) =>
           db
@@ -510,13 +547,13 @@ integration(
           ).consume(retryCommand),
         ).resolves.toBe('DUPLICATE');
         await bulkRepository.recordCatalogBulkResult({
-          messageId: String(retryResult.message_id),
+          messageId: retryResult.message_id,
           operationId: String(retryResult.operation_id),
           causationId: String(retryResult.causation_id),
           eventName: String(
             retryResult.name,
           ) as 'catalog.bulk.upsert.completed',
-          correlationId: String(retryResult.correlation_id),
+          correlationId: retryResult.correlation_id,
           payload: retryResult,
         });
         const completed = await request(server)
@@ -540,14 +577,31 @@ integration(
           completedRows: 1,
           failedRows: 0,
         });
-        expect(await bulkDatabase.select().from(domainAttempts)).toHaveLength(
-          2,
-        );
+        const currentBatchRows = await bulkDatabase
+          .select({ id: batchRows.id })
+          .from(batchRows)
+          .where(eq(batchRows.batchJobId, batch.id));
+        expect(
+          await bulkDatabase
+            .select()
+            .from(domainAttempts)
+            .where(
+              inArray(
+                domainAttempts.batchRowId,
+                currentBatchRows.map((row) => row.id),
+              ),
+            ),
+        ).toHaveLength(2);
         expect(
           await bulkDatabase
             .select()
             .from(bulkOutbox)
-            .where(eq(bulkOutbox.schemaVersion, 4)),
+            .where(
+              and(
+                eq(bulkOutbox.schemaVersion, 4),
+                eq(bulkOutbox.operationId, original.operation_id),
+              ),
+            ),
         ).toHaveLength(1);
       } finally {
         await http.close();
