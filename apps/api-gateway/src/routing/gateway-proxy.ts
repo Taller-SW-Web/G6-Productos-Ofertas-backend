@@ -145,6 +145,8 @@ export class GatewayProxy {
       res.status(404).end();
       return;
     }
+    if (route.operationId === 'conciliarImportacionGeneralPorCorrelacion')
+      res.setHeader('Cache-Control', 'no-store');
     const incomingCorrelation = req.header('x-correlation-id');
     const correlationId =
       incomingCorrelation && uuid.test(incomingCorrelation)
@@ -248,6 +250,11 @@ export class GatewayProxy {
         throw new GatewayFailure(503, 'SERVICIO_NO_DISPONIBLE');
       }
       for (const header of contractResponse.headers) {
+        if (
+          route.operationId === 'conciliarImportacionGeneralPorCorrelacion' &&
+          header.toLowerCase() === 'cache-control'
+        )
+          continue;
         const value = response.headers.get(header);
         if (value) res.setHeader(header, value);
       }
