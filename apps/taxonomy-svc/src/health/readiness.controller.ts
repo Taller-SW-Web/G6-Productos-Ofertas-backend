@@ -46,10 +46,10 @@ export class ReadinessController {
         }
       | null
       | undefined;
-    let dependencia: 'postgres' | 'amqp' = 'postgres';
+    let dependencia: 'postgres' | 'amqp' | 'service_bus' = 'postgres';
     try {
       if (!this.amqp.disponible()) {
-        dependencia = 'amqp';
+        dependencia = this.amqp.dependenciaNoDisponible();
         throw ProblemDetailsException.noDisponible(
           'Mensajería de taxonomía no disponible.',
         );
@@ -79,7 +79,9 @@ export class ReadinessController {
         reason:
           dependencia === 'amqp'
             ? 'AMQP_UNAVAILABLE'
-            : 'POSTGRES_READINESS_FAILED',
+            : dependencia === 'service_bus'
+              ? 'SERVICE_BUS_UNAVAILABLE'
+              : 'POSTGRES_READINESS_FAILED',
       });
       if (
         error instanceof ProblemDetailsException &&

@@ -5,6 +5,8 @@ import {
 } from '@azure/service-bus';
 import {
   TaxonomyServiceBusRuntime,
+  TAXONOMY_SERVICE_BUS_MAX_BATCH_BYTES,
+  publishTaxonomyDelivery,
   receiveTaxonomyDelivery,
 } from './taxonomy-service-bus.runtime.js';
 import { TaxonomyMessageIdentityConflict } from '../persistence/taxonomy-message.store.js';
@@ -56,6 +58,13 @@ describe('Taxonomy H5 feature flags', () => {
         ...base,
         TAXONOMY_SERVICE_BUS_ENABLED: 'false',
         TAXONOMY_SERVICE_BUS_SEND_ENABLED: 'true',
+      }),
+    ).toThrow('TAXONOMY_SERVICE_BUS_CONFIGURATION_INVALID');
+    expect(() =>
+      readTaxonomyServiceBus({
+        ...base,
+        TAXONOMY_SERVICE_BUS_SEND_ENABLED: 'true',
+        RABBITMQ_URL: 'amqp://localhost',
       }),
     ).toThrow('TAXONOMY_SERVICE_BUS_CONFIGURATION_INVALID');
   });
@@ -131,6 +140,8 @@ describe('Taxonomy R09 settlement', () => {
     'subject',
     'contentType',
     'oversize',
+    'producer',
+    'operationId',
   ] as const)(
     'rejects invalid %s before invoking the handler',
     async (invalid) => {
@@ -140,7 +151,16 @@ describe('Taxonomy R09 settlement', () => {
       if (invalid === 'correlationId') altered.correlationId = randomUUID();
       if (invalid === 'subject') altered.subject = 'wrong.event';
       if (invalid === 'contentType') altered.contentType = 'text/plain';
-      if (invalid === 'oversize') altered.body = Buffer.alloc(256 * 1024 + 1);
+      if (invalid === 'oversize')
+        altered.body = Buffer.alloc(TAXONOMY_SERVICE_BUS_MAX_BATCH_BYTES + 1);
+      if (invalid === 'producer' || invalid === 'operationId') {
+        const body = JSON.parse(
+          Buffer.from(message.body).toString('utf8'),
+        ) as Record<string, unknown>;
+        if (invalid === 'producer') body.producer = 'otro-servicio';
+        else body.operation_id = 'no-es-uuid';
+        altered.body = Buffer.from(JSON.stringify(body));
+      }
       const consumir = vi.fn();
       expect(
         await receiveTaxonomyDelivery({ consumir }, receiver, altered),
@@ -151,6 +171,50 @@ describe('Taxonomy R09 settlement', () => {
       expect(receiver.abandonMessage).not.toHaveBeenCalled();
     },
   );
+});
+
+it('limits the encoded batch below 256 KiB and never sends a rejected message', async () => {
+  const id = randomUUID();
+  const correlation = randomUUID();
+  const claim = {
+    messageId: id,
+    token: randomUUID(),
+    row: {
+      message_id: id,
+      correlation_id: correlation,
+      event_name: 'taxonomy.category.updated',
+      payload: {
+        message_id: id,
+        correlation_id: correlation,
+        name: 'taxonomy.category.updated',
+        kind: 'event',
+        producer: 'taxonomy-svc',
+        schema_version: 1,
+        data: {},
+      },
+    },
+  };
+  const store = {
+    claimServiceBusDelivery: vi.fn().mockResolvedValue(claim),
+    finishServiceBusDelivery: vi.fn().mockResolvedValue(true),
+  };
+  const sender = {
+    createMessageBatch: vi
+      .fn()
+      .mockResolvedValue({ tryAddMessage: () => false }),
+    sendMessages: vi.fn(),
+  };
+  expect(await publishTaxonomyDelivery(store, sender)).toBe(false);
+  expect(sender.createMessageBatch).toHaveBeenCalledWith(
+    expect.objectContaining({
+      maxSizeInBytes: TAXONOMY_SERVICE_BUS_MAX_BATCH_BYTES,
+    }),
+  );
+  expect(store.finishServiceBusDelivery).toHaveBeenCalledWith(
+    claim,
+    'terminal',
+  );
+  expect(sender.sendMessages).not.toHaveBeenCalled();
 });
 
 describe('Taxonomy H5 transport readiness', () => {
@@ -204,6 +268,9 @@ describe('Taxonomy H5 transport readiness', () => {
     expect(createSender).toHaveBeenCalledTimes(flags.sendEnabled ? 1 : 0);
     expect(createReceiver).toHaveBeenCalledTimes(flags.receiveEnabled ? 1 : 0);
     expect(runtime.available).toBe(true);
+    expect(runtime.storageAvailable).toBe(true);
+    expect(runtime.brokerAvailable).toBe(true);
+    expect(TAXONOMY_SERVICE_BUS_MAX_BATCH_BYTES).toBeLessThan(256 * 1024);
   });
 
   it('checks storage and both links while idle and recovers in the same process', async () => {
@@ -250,16 +317,42 @@ describe('Taxonomy H5 transport readiness', () => {
       expect.anything(),
     );
     expect(createSender).toHaveBeenCalledWith(taxonomyCatalogQueue);
+    expect(createMessageBatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxSizeInBytes: TAXONOMY_SERVICE_BUS_MAX_BATCH_BYTES,
+      }),
+    );
 
     verifyServiceBusStorage.mockRejectedValueOnce(new Error('storage offline'));
     await vi.advanceTimersByTimeAsync(1000);
     expect(runtime.available).toBe(false);
+    expect(runtime.storageAvailable).toBe(false);
+    expect(runtime.brokerAvailable).toBe(false);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(runtime.available).toBe(true);
+
+    claimServiceBusDelivery.mockRejectedValueOnce(
+      new Error('database unavailable during claim'),
+    );
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(runtime.available).toBe(false);
+    expect(runtime.storageAvailable).toBe(false);
     await vi.advanceTimersByTimeAsync(1000);
     expect(runtime.available).toBe(true);
 
     createMessageBatch.mockRejectedValueOnce(new Error('sender offline'));
     await vi.advanceTimersByTimeAsync(1000);
     expect(runtime.available).toBe(false);
+    expect(runtime.storageAvailable).toBe(true);
+    expect(runtime.brokerAvailable).toBe(false);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(runtime.available).toBe(true);
+
+    peekMessages.mockRejectedValueOnce(new Error('receiver forbidden'));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(runtime.available).toBe(false);
+    expect(runtime.storageAvailable).toBe(true);
+    expect(runtime.brokerAvailable).toBe(false);
     await vi.advanceTimersByTimeAsync(1000);
     expect(runtime.available).toBe(true);
 

@@ -47,7 +47,7 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
         throw new Error('EMPTY_DATABASE_REQUIRED');
       const password = randomUUID();
       await admin.query(
-        "CREATE ROLE po_taxonomy_owner NOLOGIN; CREATE ROLE taxonomy_app LOGIN PASSWORD '" +
+        "CREATE ROLE po_taxonomy_owner NOLOGIN; CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE taxonomy_app LOGIN PASSWORD '" +
           password +
           "'; CREATE SCHEMA taxonomy AUTHORIZATION po_taxonomy_owner",
       );
@@ -322,6 +322,71 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
       await expect(insert(runtime, 'unknown.event')).rejects.toThrow(
         'Unsupported Taxonomy H5 route',
       );
+    });
+
+    it('keeps the trigger invoker and grants restricted in the disposable schema', async () => {
+      const metadata = await admin.query(`
+        SELECT p.prosecdef, pg_get_userbyid(n.nspowner) AS schema_owner,
+          has_schema_privilege('taxonomy_app', n.oid, 'USAGE') AS runtime_usage,
+          has_table_privilege('anon', c.oid, 'SELECT,INSERT,UPDATE,DELETE') AS anon_all,
+          has_table_privilege('authenticated', c.oid, 'SELECT,INSERT,UPDATE,DELETE') AS authenticated_all,
+          EXISTS (SELECT FROM aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) a WHERE a.grantee=0) AS public_table_grant,
+          EXISTS (SELECT FROM pg_attribute col, LATERAL aclexplode(col.attacl) a WHERE col.attrelid=c.oid AND a.grantee=0) AS public_column_grant,
+          has_function_privilege('anon', p.oid, 'EXECUTE') AS anon_execute,
+          has_function_privilege('authenticated', p.oid, 'EXECUTE') AS authenticated_execute
+        FROM pg_namespace n JOIN pg_class c ON c.relnamespace=n.oid AND c.relname='outbox_delivery'
+        JOIN pg_proc p ON p.pronamespace=n.oid AND p.proname='fn_enqueue_catalog_h5'
+        WHERE n.nspname='taxonomy'
+      `);
+      expect(metadata.rows).toEqual([
+        {
+          prosecdef: false,
+          schema_owner: 'po_taxonomy_owner',
+          runtime_usage: true,
+          anon_all: false,
+          authenticated_all: false,
+          public_table_grant: false,
+          public_column_grant: false,
+          anon_execute: false,
+          authenticated_execute: false,
+        },
+      ]);
+      expect(
+        (
+          await admin.query(
+            "SELECT pg_has_role('taxonomy_app','po_taxonomy_owner','MEMBER') AS owns_role",
+          )
+        ).rows[0].owns_role,
+      ).toBe(false);
+      for (const role of ['anon', 'authenticated']) {
+        for (const privilege of ['SELECT', 'INSERT', 'UPDATE', 'DELETE']) {
+          expect(
+            (
+              await admin.query(
+                'SELECT has_table_privilege($1, $2, $3) AS allowed',
+                [role, 'taxonomy.outbox_delivery', privilege],
+              )
+            ).rows[0].allowed,
+          ).toBe(false);
+        }
+        for (const column of [
+          'next_attempt_at',
+          'attempts',
+          'lease_token',
+          'lease_until',
+          'sent_at',
+          'last_error',
+        ]) {
+          expect(
+            (
+              await admin.query(
+                'SELECT has_column_privilege($1, $2, $3, $4) AS allowed',
+                [role, 'taxonomy.outbox_delivery', column, 'UPDATE'],
+              )
+            ).rows[0].allowed,
+          ).toBe(false);
+        }
+      }
     });
 
     it('executes the read-only preflight using the non-owner runtime role', async () => {

@@ -78,6 +78,11 @@ export class TaxonomyAmqpRuntime implements OnModuleDestroy {
       (!!this.connection && !!this.consumer && !!this.publisher && !this.paused)
     );
   }
+  dependenciaNoDisponible(): 'postgres' | 'service_bus' | 'amqp' {
+    if (this.azure)
+      return this.azure.storageAvailable ? 'service_bus' : 'postgres';
+    return 'amqp';
+  }
   iniciar(): void {
     if (this.azure) {
       this.azure.start();
