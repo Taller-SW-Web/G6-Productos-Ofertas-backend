@@ -10,6 +10,6 @@
   "DataActions": [],
   "NotDataActions": [],
   "AssignableScopes": [
-    "/subscriptions/fef42188-accd-4470-ae88-78f583eb4906/resourceGroups/rg-g6-sb-h5-int-fork"
+    "__AZURE_INTEGRATION_RESOURCE_GROUP_ID__"
   ]
 }

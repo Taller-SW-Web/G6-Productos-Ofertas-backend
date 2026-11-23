@@ -1,7 +1,7 @@
 {
   "Name": "G6 H5 Existing Container Apps Operator",
   "IsCustom": true,
-  "Description": "Read and update existing G6 H5 Container Apps at app resource scope; no create, delete, identity, or network permissions.",
+  "Description": "Read and update the complete configuration of existing G6 H5 Container Apps at app resource scope; no delete permission. Container Apps write can change app configuration, including identity, ingress, and networking.",
   "Actions": [
     "Microsoft.App/containerApps/read",
     "Microsoft.App/containerApps/write"
@@ -12,6 +12,6 @@
   "DataActions": [],
   "NotDataActions": [],
   "AssignableScopes": [
-    "/subscriptions/fef42188-accd-4470-ae88-78f583eb4906/resourceGroups/rg-g6-sb-h5-int-fork"
+    "__AZURE_INTEGRATION_RESOURCE_GROUP_ID__"
   ]
 }
