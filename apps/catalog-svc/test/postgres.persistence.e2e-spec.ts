@@ -3646,12 +3646,13 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         expect(await commercialRows()).toEqual(beforeRejectedAttempt);
         const commandAttemptId = randomUUID();
         const newAttemptId = randomUUID();
-        const retryCorrelation = randomUUID();
+        const retryRequestCorrelation = randomUUID();
+        expect(retryRequestCorrelation).not.toBe(correlation);
         const retry: CatalogEnvelope = {
           message_id: randomUUID(),
           schema_version: 4,
           occurred_at: new Date().toISOString(),
-          correlation_id: retryCorrelation,
+          correlation_id: correlation,
           causation_id: original.message_id,
           operation_id: operation,
           producer: 'bulk-svc',

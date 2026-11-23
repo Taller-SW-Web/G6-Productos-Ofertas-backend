@@ -548,6 +548,7 @@ export class CatalogBulkService {
         !priorResult ||
         !priorDelivery ||
         priorDelivery.correlation_id !== priorResult.correlation_id ||
+        priorDelivery.correlation_id !== message.correlation_id ||
         priorCommand?.data.batch_id !== request.batch_id ||
         priorCommand?.data.batch_operation_id !== request.batch_operation_id ||
         priorResult.schema_version !== 2 ||
