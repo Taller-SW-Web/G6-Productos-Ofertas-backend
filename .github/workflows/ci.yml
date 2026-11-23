@@ -693,6 +693,54 @@ jobs:
         path: ${{ runner.temp }}/dependency-audit-evidence/
         if-no-files-found: error
         retention-days: 30
+  apim_h5_estatico:
+    name: APIM H5 — artefactos y ARM estáticos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
+    steps:
+    - name: Obtener código fuente
+      uses: actions/checkout@v4
+    - name: Obtener OpenAPI de Docs integrado
+      uses: actions/checkout@v4
+      with:
+        repository: Taller-SW-Web/G6-Productos-Ofertas-docs
+        ref: 490172c11cb4b83ddd1996f8d5834d0402184cf8
+        path: .ci/G6-Productos-Ofertas-docs
+        persist-credentials: 'false'
+    - name: Obtener registro Gateway integrado
+      uses: actions/checkout@v4
+      with:
+        repository: Taller-SW-Web/G6-Productos-Ofertas-backend
+        ref: 05f6b929f8aebfd745acd2e70959e36967c96d09
+        path: .ci/G6-Productos-Ofertas-gateway
+        persist-credentials: 'false'
+    - name: Configurar Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Instalar dependencias APIM
+      run: python -m pip install -r ops/azure/apim/requirements.txt
+    - name: Compilar Bicep a ARM sin despliegue
+      run: |
+        az bicep install
+        az bicep build --file ops/azure/apim/main.bicep --outfile "${RUNNER_TEMP}/apim-h5-arm.json"
+    - name: Probar herramientas contractuales y jerarquía ARM
+      env:
+        APIM_ARM_TEMPLATE: ${{ runner.temp }}/apim-h5-arm.json
+      run: python -m unittest discover -s ops/azure/apim/tests -p 'test_*.py' -v
+    - name: Validar jerarquía ARM y correspondencia exacta de operaciones
+      run: >-
+        python ops/azure/apim/verify-arm-template.py
+        --template "${RUNNER_TEMP}/apim-h5-arm.json"
+        --source-openapi .ci/G6-Productos-Ofertas-docs/contratos/http/openapi.yaml
+        --gateway-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/contract-routes.ts
+        --g5-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/g5-h5-routes.ts
+        --expected-docs-sha 490172c11cb4b83ddd1996f8d5834d0402184cf8
+        --expected-gateway-sha 05f6b929f8aebfd745acd2e70959e36967c96d09
   integral:
     name: Validación integral de integración continua
     runs-on: ubuntu-latest
@@ -715,6 +763,7 @@ jobs:
       - gateway_inventory_postgres
       - azure_cd_h5
       - seguridad_dependencias
+      - apim_h5_estatico
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
       (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark') &&
@@ -731,7 +780,7 @@ jobs:
         RESULTADOS: ${{ toJSON(needs) }}
       run: |
         printf '%s\n' "$RESULTADOS"
-        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias
+        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias apim_h5_estatico
   compatibilidad:
     name: Lint, Typecheck, Test, Build & Smoke Test
     runs-on: ubuntu-latest
@@ -754,6 +803,7 @@ jobs:
     - gateway_inventory_postgres
     - azure_cd_h5
     - seguridad_dependencias
+    - apim_h5_estatico
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
       (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark') &&
@@ -770,7 +820,7 @@ jobs:
         RESULTADOS: ${{ toJSON(needs) }}
       run: |
         printf '%s\n' "$RESULTADOS"
-        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias
+        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias apim_h5_estatico
   benchmark_focalizado:
     name: Benchmark focalizado solicitado
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'benchmark'
