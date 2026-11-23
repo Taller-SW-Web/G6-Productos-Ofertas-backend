@@ -1,0 +1,475 @@
+{
+  "report_type": "G6_LOCAL_G5_H5",
+  "recorded_at": "2026-11-23T22:44:37.273Z",
+  "evidence_id": "1c1aede1-f219-4164-9148-abc1e709666b",
+  "tested_git_head": "2f69293a42ff654b79fc988c5a11aeb5caa4bbdf",
+  "tested_git_commit": "2f69293a42ff654b79fc988c5a11aeb5caa4bbdf",
+  "tested_tree_sha256": "ed69cbd1252703b4ae03583f724f8c6f91b86ed2b4e9325e414af696a104780b",
+  "node_version": "v24.15.0",
+  "node_executable": "C:\\Users\\marec\\AppData\\Local\\npm-cache\\_npx\\1c56de6e9acc34f8\\node_modules\\node\\bin\\node.exe",
+  "tested_files": [
+    {
+      "path": "apps/promotions-svc/h5/escenarios.json",
+      "sha256": "a506b1c2b743c61adc2aa4b759aa2cffd96d3cd12579211223da3b6860ffaf7d"
+    },
+    {
+      "path": "apps/promotions-svc/h5/ESCENARIOS_G5_H5.md",
+      "sha256": "9b99614c66b41d2700d3ef31dce91509b8f66ff0bc74be3d191fc99cb930c777"
+    },
+    {
+      "path": "apps/promotions-svc/h5/PRUEBA_CONJUNTA_G5.md",
+      "sha256": "c8b45a69ff4baf3216685bff62cd781f7f346c3c09134fbebbdc681c074cd099"
+    },
+    {
+      "path": "apps/promotions-svc/h5/perfil-autorizado.schema.json",
+      "sha256": "950353eb38da9286eb1f0a7f1c6792c9424d8fcbb1b4a51fcea140661bd3bcc9"
+    },
+    {
+      "path": "apps/promotions-svc/h5/preparar-planes.mjs",
+      "sha256": "a78ea428f901797b7fdbf4578f697ac8f1e6914dd3be033e2661af110313b308"
+    },
+    {
+      "path": "apps/promotions-svc/h5/preparar-planes.test.mjs",
+      "sha256": "ebc4be4e19ca5b32b55ff0d7c2c0fdaa682c831833bd05633c04827c92a48763"
+    },
+    {
+      "path": "apps/promotions-svc/h5/ejecutar-controlado.mjs",
+      "sha256": "9697fae30b54c58a225db4412f45cf0f77eb084bcfec00cc4024bc5d0167078a"
+    },
+    {
+      "path": "apps/promotions-svc/h5/ejecutar-controlado.test.mjs",
+      "sha256": "11920d01d008f4b81a39b4440a1ff42bdece3e36c2de89b7580d3871924c3e56"
+    },
+    {
+      "path": "apps/promotions-svc/h5/ejecutar-local.mjs",
+      "sha256": "e03e3e8983be753e3279a00d44bff283efa4158657d754c5af8ab3a8a0b68631"
+    },
+    {
+      "path": "apps/promotions-svc/h5/ejecutar-integracion.mjs",
+      "sha256": "c08e10a94cd938415ce95af51f3bb4ae3a40948536cfc1376c34704401bc005e"
+    },
+    {
+      "path": "apps/promotions-svc/h5/ejecutar-integracion.test.mjs",
+      "sha256": "2b1d1046e49359da02fd192ab5fbce840db28fa7fdb9f823ce6deacb177dfc31"
+    },
+    {
+      "path": "apps/promotions-svc/h5/autorizacion-mutaciones.mjs",
+      "sha256": "771890a77022043a682626978d7f62654e36031fb346ad00965bfb2ffb925d84"
+    },
+    {
+      "path": "apps/promotions-svc/h5/autorizacion-mutaciones.test.mjs",
+      "sha256": "aaef350e9716483d50f329c44f4468c3537047854237b1309e8b18b64cda9feb"
+    },
+    {
+      "path": "apps/promotions-svc/h5/ejecutar-matriz.mjs",
+      "sha256": "c12c0bcdb0c7361b548c92267f3d6c60984b6bab3f514df7059cf4b4493875a7"
+    },
+    {
+      "path": "apps/promotions-svc/h5/ejecutar-matriz.test.mjs",
+      "sha256": "d81073e9122279dbef2e99e5131ec1a9df0d40e2299254985e4bbfeb87643771"
+    },
+    {
+      "path": "apps/promotions-svc/h5/verificar-despliegue.mjs",
+      "sha256": "f677705f5db728093fb36e7ecce19df228ff37585038a24d2abd75d4408c9a34"
+    },
+    {
+      "path": "apps/promotions-svc/h5/verificar-despliegue.test.mjs",
+      "sha256": "3e6d93c4cb18ba88beb1fe145cc63ed397c48f195820d22272e1a247bcd55c93"
+    },
+    {
+      "path": "apps/promotions-svc/h5/evidencia-integracion.mjs",
+      "sha256": "9d13f7060d45059671730143e7c024871a4dacd9689f654132b2346d11d6d48d"
+    },
+    {
+      "path": "apps/promotions-svc/h5/evidencia-integracion.test.mjs",
+      "sha256": "d0b3459827f0f703edfe4388e3c34b5da7fb9abfc5357f9637f5689bb37e72d0"
+    },
+    {
+      "path": "apps/promotions-svc/test/coupon-h5-boundary.e2e-spec.ts",
+      "sha256": "ab960caca82cc035a551e7db698d6a963193b70ae3a16118e9d943aa7927c499"
+    },
+    {
+      "path": "apps/promotions-svc/test/coupon-h5.postgres.e2e-spec.ts",
+      "sha256": "046707a782d4f4288886d268240d92d656949c41fbee9a19342777bbbabad371"
+    },
+    {
+      "path": "apps/promotions-svc/test/run-h5-postgres.mjs",
+      "sha256": "28e797bb1d2f20b9254b504de291ecdc01160442e912d1b132f25cec14f32c3c"
+    },
+    {
+      "path": "apps/inventory-svc/test/app.e2e-spec.ts",
+      "sha256": "76b65a61b2af680442817ccd1bcb3a46c20db368c0838ab0adb5012d964716af"
+    }
+  ],
+  "commands": [
+    {
+      "id": "h5-runners",
+      "command": [
+        "C:\\Users\\marec\\AppData\\Local\\npm-cache\\_npx\\1c56de6e9acc34f8\\node_modules\\node\\bin\\node.exe",
+        "--test",
+        "apps/promotions-svc/h5/autorizacion-mutaciones.test.mjs",
+        "apps/promotions-svc/h5/ejecutar-integracion.test.mjs",
+        "apps/promotions-svc/h5/preparar-planes.test.mjs",
+        "apps/promotions-svc/h5/ejecutar-controlado.test.mjs",
+        "apps/promotions-svc/h5/ejecutar-matriz.test.mjs",
+        "apps/promotions-svc/h5/verificar-despliegue.test.mjs",
+        "apps/promotions-svc/h5/evidencia-integracion.test.mjs"
+      ],
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_ms": 1653,
+      "stdout_tail": "✔ solo admite autorización Ed25519 vigente y ligada al caso, operación y entorno (116.9722ms)\n✔ ejecutar-integracion directo no inicia reserve sin pasar por el wrapper ni aportar autorización (257.3219ms)\n✔ preflight exige las tres comprobaciones reales, correlacionadas y no mutantes (354.0352ms)\n✔ G5-H5-04 configura solo liberación y G5-H5-06 conserva restauración comercial (18.3533ms)\n▶ clasifica homologación técnica y bilateral\n  ✔ ningún caso con etapa aprueba si execute no está habilitado, incluso 07 con firma válida (127.5956ms)\n  ✔ 07, 15 y 16 requieren hechos específicos con firma, ejecución y CD (126.4189ms)\n  ✔ un PASS automático G6 tampoco puede sustituir al CD oficial (4.3468ms)\n  ✔ G5-H5-05 sin constancia queda BLOCKED (3.1302ms)\n  ✔ G5-H5-09 requiere follow técnico y constancia bilateral (28.2713ms)\n  ✔ G5-H5-05 con ambas evidencias pasa (15.168ms)\n  ✔ sin CD verificable o con cambio de revisión no hay homologación (25.2549ms)\n  ✔ G5-H5-05 conserva el FAIL técnico aunque exista constancia (22.4449ms)\n  ✔ para G5-H5-05 la firma o los vínculos incorrectos y la ejecución ausente bloquean (27.9167ms)\n  ✔ no inicia etapas sin evidencia revisada del SHA desplegado de G5 (26.9794ms)\n  ✔ exige constancia en un caso G7 y permite PASS automático para G6 (16.4848ms)\n  ✔ los cuatro casos G6 rechazan un SHA o UUID cruzado aunque haya otro evento relacionado (87.2173ms)\n✔ clasifica homologación técnica y bilateral (575.5813ms)\n✔ runner usa escenarios.json como fuente única de ID, actor, etapa y expectativa (11.8002ms)\n✔ ejecutar-matriz directo bloquea reserve si falta autorización firmada (150.4936ms)\n✔ exige una firma G5 vinculada a la operación y usa su instante original (83.3219ms)\n✔ PREPARED crea planes UUID estables aunque falten evidencias externas (267.1106ms)\n✔ update es idempotente, no rota UUID y authorize nunca activa execute (764.6417ms)\n✔ authorize rechaza falta de firma auténtica y pedidos reutilizados (201.8064ms)\n✔ verifica los cuatro digests del CD oficial contra las revisiones activas aisladas (117.3398ms)\n✔ bloquea evidencia ausente, ajena o con revisiones cruzadas (88.6655ms)\nℹ tests 25\nℹ suites 0\nℹ pass 25\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 1558.4225\n",
+      "stderr_tail": ""
+    },
+    {
+      "id": "coupon-unit",
+      "command": [
+        "C:\\Users\\marec\\AppData\\Local\\npm-cache\\_npx\\1c56de6e9acc34f8\\node_modules\\node\\bin\\node.exe",
+        "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+        "test",
+        "--",
+        "apps/promotions-svc/src/coupons/coupon-h5-operations.spec.ts",
+        "apps/promotions-svc/src/coupons/service-bus-events.spec.ts",
+        "--reporter=verbose",
+        "--maxWorkers=1"
+      ],
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_ms": 7825,
+      "stdout_tail": "e Bus event lifecycle > does not abandon or deadletter a committed event when complete fails 17ms\n ✓ apps/promotions-svc/src/coupons/service-bus-events.spec.ts > Promotions Service Bus event lifecycle > settles replay and durably rejected payloads distinctly 4ms\n ✓ apps/promotions-svc/src/coupons/service-bus-events.spec.ts > Promotions Service Bus event lifecycle > closes partially opened resources if a queue is inaccessible at startup 6ms\n ✓ apps/promotions-svc/src/coupons/service-bus-events.spec.ts > Promotions Service Bus event lifecycle > rejects altered producer metadata before SQL 4ms\n ✓ apps/promotions-svc/src/coupons/service-bus-events.spec.ts > Promotions Service Bus event lifecycle > rejects altered schema_version metadata before SQL 1ms\n ✓ apps/promotions-svc/src/coupons/service-bus-events.spec.ts > Promotions Service Bus event lifecycle > rejects altered route_version metadata before SQL 19ms\n ✓ apps/promotions-svc/src/coupons/service-bus-events.spec.ts > Promotions H5 configuration > selects independent event consumers without enabling coupon mutations 101ms\n ✓ apps/promotions-svc/src/coupons/service-bus-events.spec.ts > Promotions H5 configuration > requires explicit G7 mode for the H5 command queue 1ms\n ✓ apps/promotions-svc/src/coupons/service-bus-events.spec.ts > Promotions H5 configuration > rejects unsafe/conflicting selection {\"RABBITMQ_URL\":\"amqp://localhost\"} 1ms\n ✓ apps/promotions-svc/src/coupons/service-bus-events.spec.ts > Promotions H5 configuration > rejects unsafe/conflicting selection {\"PROMOTIONS_COUPON_RUNTIME_ENABLED\":\"true\"} 0ms\n ✓ apps/promotions-svc/src/coupons/service-bus-events.spec.ts > Promotions H5 configuration > rejects unsafe/conflicting selection {\"MESSAGING_PROVIDER\":\"other\"} 0ms\n ✓ apps/promotions-svc/src/coupons/service-bus-events.spec.ts > Promotions H5 configuration > rejects unsafe/conflicting selection {\"SERVICE_BUS_NAMESPACE_FQDN\":\"https://bad-host\"} 0ms\n ✓ apps/promotions-svc/src/coupons/service-bus-events.spec.ts > Promotions H5 configuration > rejects unsafe/conflicting selection {\"PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED\":\"yes\"} 0ms\n ✓ apps/promotions-svc/src/coupons/service-bus-events.spec.ts > Promotions H5 configuration > rejects unsafe/conflicting selection {\"NODE_ENV\":\"production\"} 0ms\n ✓ apps/promotions-svc/src/coupons/service-bus-events.spec.ts > Promotions H5 configuration > rejects unsafe/conflicting selection {\"G6_SERVICE_BUS_PRODUCTION_ENABLED\":\"true\"} 0ms\n ✓ apps/promotions-svc/src/coupons/service-bus-events.spec.ts > Promotions H5 configuration > rejects unsafe/conflicting selection {\"AZURE_CLIENT_ID\":\"00000000-0000-0000-0000-000000000000\"} 0ms\n ✓ apps/promotions-svc/src/coupons/service-bus-events.spec.ts > Promotions H5 configuration > requires real security mode and assigned identity for production selection 1ms\n\n Test Files  2 passed (2)\n      Tests  34 passed (34)\n   Start at  17:43:39\n   Duration  5.31s (transform 560ms, setup 0ms, import 4.09s, tests 321ms, environment 0ms)\n\n",
+      "stderr_tail": "The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n"
+    },
+    {
+      "id": "promotions-http",
+      "command": [
+        "C:\\Users\\marec\\AppData\\Local\\npm-cache\\_npx\\1c56de6e9acc34f8\\node_modules\\node\\bin\\node.exe",
+        "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+        "run",
+        "test:e2e",
+        "--",
+        "apps/promotions-svc/test/coupon-h5-boundary.e2e-spec.ts",
+        "--reporter=verbose",
+        "--maxWorkers=1"
+      ],
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_ms": 22572,
+      "stdout_tail": "\n> g6-productos-ofertas-backend@0.0.1 test:e2e\n> vitest run --config ./vitest.config.e2e.ts apps/promotions-svc/test/coupon-h5-boundary.e2e-spec.ts --reporter=verbose --maxWorkers=1\n\n\n RUN  v4.1.12 C:/Users/marec/Desktop/G6-Productos-Ofertas/backend\n\n ✓ apps/promotions-svc/test/coupon-h5-boundary.e2e-spec.ts > H5 candidate HTTP boundary remains isolated > does not expose admission or operation reads before contract/G7 review 307ms\n ✓ apps/promotions-svc/test/coupon-h5-boundary.e2e-spec.ts > Promotions H5 HTTP contract in isolation > returns the durable resource on first admission and reuses it on replay 90ms\n ✓ apps/promotions-svc/test/coupon-h5-boundary.e2e-spec.ts > Promotions H5 HTTP contract in isolation > separates malformed keys, conflicting UUIDs and authorization failures 127ms\n ✓ apps/promotions-svc/test/coupon-h5-boundary.e2e-spec.ts > Promotions H5 HTTP contract in isolation > sends the original consumption reference and cancellation timestamp to the durable admission 85ms\n ✓ apps/promotions-svc/test/coupon-h5-boundary.e2e-spec.ts > Promotions H5 HTTP contract in isolation > serves snapshots by order and returns one indistinguishable 404 for missing or other orders 119ms\n ✓ apps/promotions-svc/test/coupon-h5-boundary.e2e-spec.ts > Promotions H5 HTTP contract in isolation > does not report admission when storage returns a technical failure 21ms\n ✓ apps/promotions-svc/test/coupon-h5-boundary.e2e-spec.ts > Promotions H5 HTTP contract in isolation > does not admit when the trusted worker has never started 21ms\n ✓ apps/promotions-svc/test/coupon-h5-boundary.e2e-spec.ts > Promotions H5 HTTP contract in isolation > enforces the complete UTF-8 envelope limit before consulting the runtime or storage 121ms\n\n Test Files  1 passed (1)\n      Tests  8 passed (8)\n   Start at  17:43:49\n   Duration  17.46s (transform 3.87s, setup 0ms, import 14.30s, tests 1.66s, environment 0ms)\n\n",
+      "stderr_tail": "The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n"
+    },
+    {
+      "id": "inventory-reservations",
+      "command": [
+        "C:\\Users\\marec\\AppData\\Local\\npm-cache\\_npx\\1c56de6e9acc34f8\\node_modules\\node\\bin\\node.exe",
+        "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
+        "run",
+        "test:e2e",
+        "--",
+        "apps/inventory-svc/test/app.e2e-spec.ts",
+        "--reporter=verbose",
+        "--maxWorkers=1"
+      ],
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_ms": 12422,
+      "stdout_tail": "torySvc E2E — Corte funcional G5 y Seguridad > Disponibilidad comercial — identidad interna modulo-productos (H4) > POST: un cliente no autorizado con scope válido responde 403 26ms\n ✓ apps/inventory-svc/test/app.e2e-spec.ts > InventorySvc E2E — Corte funcional G5 y Seguridad > Disponibilidad comercial — identidad interna modulo-productos (H4) > POST: un channel_id inexistente responde 400 25ms\n ✓ apps/inventory-svc/test/app.e2e-spec.ts > InventorySvc E2E — Corte funcional G5 y Seguridad > Disponibilidad comercial — identidad interna modulo-productos (H4) > POST: sin JWT responde 401 23ms\n ✓ apps/inventory-svc/test/app.e2e-spec.ts > InventorySvc E2E — Corte funcional G5 y Seguridad > Disponibilidad comercial — identidad interna modulo-productos (H4) > POST: con JWT de firma inválida responde 401 28ms\n ✓ apps/inventory-svc/test/app.e2e-spec.ts > InventorySvc E2E — Corte funcional G5 y Seguridad > Disponibilidad comercial — identidad interna modulo-productos (H4) > modulo-productos no obtiene acceso general a la disponibilidad detallada 30ms\n ✓ apps/inventory-svc/test/app.e2e-spec.ts > InventorySvc E2E — Corte funcional G5 y Seguridad > Disponibilidad comercial — identidad interna modulo-productos (H4) > modulo-productos no obtiene acceso a reservas 28ms\n ✓ apps/inventory-svc/test/app.e2e-spec.ts > InventorySvc E2E — Corte funcional G5 y Seguridad > Reintegro F3/Postventa (POST /api/v1/inventario/reintegros) > aplica el incremento y responde 200 COMPLETED 26ms\n ✓ apps/inventory-svc/test/app.e2e-spec.ts > InventorySvc E2E — Corte funcional G5 y Seguridad > Reintegro F3/Postventa (POST /api/v1/inventario/reintegros) > un retry idéntico no duplica stock ni Kardex 37ms\n ✓ apps/inventory-svc/test/app.e2e-spec.ts > InventorySvc E2E — Corte funcional G5 y Seguridad > Reintegro F3/Postventa (POST /api/v1/inventario/reintegros) > responde 409 IDEMPOTENCY_CONFLICT con identidad reutilizada y payload distinto 42ms\n ✓ apps/inventory-svc/test/app.e2e-spec.ts > InventorySvc E2E — Corte funcional G5 y Seguridad > Reintegro F3/Postventa (POST /api/v1/inventario/reintegros) > responde 422 REINTEGRO_NO_APLICABLE si Ventas usa DEVOLUCION_ACEPTADA 30ms\n ✓ apps/inventory-svc/test/app.e2e-spec.ts > InventorySvc E2E — Corte funcional G5 y Seguridad > Reintegro F3/Postventa (POST /api/v1/inventario/reintegros) > responde 403 SCOPE_INSUFICIENTE para un cliente no autorizado 36ms\n ✓ apps/inventory-svc/test/app.e2e-spec.ts > InventorySvc E2E — Corte funcional G5 y Seguridad > Reintegro F3/Postventa (POST /api/v1/inventario/reintegros) > responde 400 VALIDACION sin Idempotency-Key 32ms\n ✓ apps/inventory-svc/test/app.e2e-spec.ts > InventorySvc E2E — Corte funcional G5 y Seguridad > Reintegro F3/Postventa (POST /api/v1/inventario/reintegros) > habilita a Postventa la consulta informativa de disponibilidad 37ms\n\n Test Files  1 passed (1)\n      Tests  66 passed (66)\n   Start at  17:44:10\n   Duration  9.51s (transform 1.44s, setup 0ms, import 5.82s, tests 3.30s, environment 0ms)\n\n",
+      "stderr_tail": "The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n"
+    },
+    {
+      "id": "postgres-h5",
+      "command": [
+        "C:\\Users\\marec\\AppData\\Local\\npm-cache\\_npx\\1c56de6e9acc34f8\\node_modules\\node\\bin\\node.exe",
+        "apps/promotions-svc/test/run-h5-postgres.mjs"
+      ],
+      "status": "PASS",
+      "exit_code": 0,
+      "duration_ms": 17166,
+      "stdout_tail": "\n RUN  v4.1.12 C:/Users/marec/Desktop/G6-Productos-Ofertas/backend\n\n\n Test Files  1 passed (1)\n      Tests  12 passed (12)\n   Start at  17:44:25\n   Duration  10.24s (transform 460ms, setup 0ms, import 2.35s, tests 7.59s, environment 0ms)\n\nDISPOSABLE_POSTGRES_CLEANUP_CONFIRMED\n",
+      "stderr_tail": "The plugin \"vite-tsconfig-paths\" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.\n"
+    }
+  ],
+  "results": [
+    {
+      "id": "G5-H5-01",
+      "local_test_status": "PARTIAL",
+      "local_assertions": [
+        {
+          "command": "inventory-reservations",
+          "title": "Ciclo completo: solicitar reserva -> consultar operacion -> confirmar consumo",
+          "scope": "reserva y consulta durable local",
+          "result": "PASS"
+        }
+      ],
+      "local_missing": "Gateway privado, token G7 autorizado y pedido/snapshot G5 asociado.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "PARTIAL_G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-02",
+      "local_test_status": "NOT_RUN",
+      "local_assertions": [],
+      "local_missing": "Caso local de saldo insuficiente y verificación G5/M1 de que no cobra ni consume.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "NO_MATCHING_LOCAL_ASSERTION_EXECUTED"
+    },
+    {
+      "id": "G5-H5-03",
+      "local_test_status": "PARTIAL",
+      "local_assertions": [
+        {
+          "command": "inventory-reservations",
+          "title": "Ciclo completo: solicitar reserva -> consultar operacion -> confirmar consumo",
+          "scope": "confirmación de reserva local; pago y firma G5 no cubiertos",
+          "result": "PASS"
+        }
+      ],
+      "local_missing": "Pago G5 firmado y confirmación cruzada usando despliegues G5/G6 reales.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "PARTIAL_G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-04",
+      "local_test_status": "PARTIAL",
+      "local_assertions": [
+        {
+          "command": "inventory-reservations",
+          "title": "Ciclo de liberación: solicitar reserva -> liberar por pago no completado",
+          "scope": "liberación Inventory; cancelación/constancia G5 no cubiertas",
+          "result": "PASS"
+        }
+      ],
+      "local_missing": "Anulación G5 firmada y recorrido Gateway autenticado; el test local negativo de restauración no forma parte de este caso.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "PARTIAL_G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-05",
+      "local_test_status": "NOT_RUN",
+      "local_assertions": [
+        {
+          "command": "postgres-h5",
+          "title": "processes the G5 snapshot adapter through durable G6 coupon eligibility and Inventory evidence",
+          "scope": "snapshot doble y efecto local PostgreSQL; sin Gateway/G5 real",
+          "result": "NOT_RUN"
+        }
+      ],
+      "local_missing": "Gateway, snapshot G5 real, consulta durable del caso y evidencia de Azure Service Bus.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "NO_MATCHING_LOCAL_ASSERTION_EXECUTED"
+    },
+    {
+      "id": "G5-H5-06",
+      "local_test_status": "NOT_RUN",
+      "local_assertions": [
+        {
+          "command": "postgres-h5",
+          "title": "restores only the consumption operation linked to the same order",
+          "scope": "vínculo de restauración local; anulación firmada G5 no cubierta",
+          "result": "NOT_RUN"
+        }
+      ],
+      "local_missing": "Constancia real de anulación G5 y liberación Inventory en la misma ejecución aislada.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "NO_MATCHING_LOCAL_ASSERTION_EXECUTED"
+    },
+    {
+      "id": "G5-H5-07",
+      "local_test_status": "NOT_RUN",
+      "local_assertions": [],
+      "local_missing": "Pérdida de respuesta HTTP real, reinvocación/follow del mismo UUID y lectura durable.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "NO_MATCHING_LOCAL_ASSERTION_EXECUTED"
+    },
+    {
+      "id": "G5-H5-08",
+      "local_test_status": "NOT_RUN",
+      "local_assertions": [
+        {
+          "command": "postgres-h5",
+          "title": "replays identical admissions and rejects changed content with one durable intent",
+          "scope": "idempotencia durable local; POST Gateway/replay no cubierto",
+          "result": "NOT_RUN"
+        }
+      ],
+      "local_missing": "Replays y conflicto 409 mediante el Gateway privado del pedido autorizado.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "NO_MATCHING_LOCAL_ASSERTION_EXECUTED"
+    },
+    {
+      "id": "G5-H5-09",
+      "local_test_status": "NOT_RUN",
+      "local_assertions": [],
+      "local_missing": "Reinicio coordinado de M1 en G5 y posterior GET durable correlacionado.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "NO_MATCHING_LOCAL_ASSERTION_EXECUTED"
+    },
+    {
+      "id": "G5-H5-10",
+      "local_test_status": "NOT_RUN",
+      "local_assertions": [],
+      "local_missing": "Fixture de reserva vencida y consulta antes del barrido real de expiración.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "NO_MATCHING_LOCAL_ASSERTION_EXECUTED"
+    },
+    {
+      "id": "G5-H5-11",
+      "local_test_status": "NOT_RUN",
+      "local_assertions": [],
+      "local_missing": "Barrido M1 real entre consultas y conciliación bilateral de EXPIRADA.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "NO_MATCHING_LOCAL_ASSERTION_EXECUTED"
+    },
+    {
+      "id": "G5-H5-12",
+      "local_test_status": "NOT_RUN",
+      "local_assertions": [],
+      "local_missing": "Carrera sincronizada pago/anulación/vencimiento con G5 y reserva G6.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "NO_MATCHING_LOCAL_ASSERTION_EXECUTED"
+    },
+    {
+      "id": "G5-H5-13",
+      "local_test_status": "PARTIAL",
+      "local_assertions": [
+        {
+          "command": "promotions-http",
+          "title": "serves snapshots by order and returns one indistinguishable 404 for missing or other orders",
+          "scope": "404 uniforme local Promotions; autorización externa/Gateway no cubiertos",
+          "result": "PASS"
+        }
+      ],
+      "local_missing": "Operación real del pedido original y comparación autenticada de 404 en Gateway.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "PARTIAL_G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-14",
+      "local_test_status": "PARTIAL",
+      "local_assertions": [
+        {
+          "command": "inventory-reservations",
+          "title": "Ciclo completo: solicitar reserva -> consultar operacion -> confirmar consumo",
+          "scope": "JWT de prueba válido en servicio Inventory local",
+          "result": "PASS"
+        },
+        {
+          "command": "inventory-reservations",
+          "title": "debe rechazar con 401 TOKEN_INVALIDO si falta el encabezado Authorization",
+          "scope": "401 local",
+          "result": "PASS"
+        },
+        {
+          "command": "inventory-reservations",
+          "title": "debe rechazar con 401 TOKEN_INVALIDO si el token está expirado",
+          "scope": "JWT expirado local",
+          "result": "PASS"
+        },
+        {
+          "command": "inventory-reservations",
+          "title": "debe rechazar con 403 SCOPE_INSUFICIENTE si el token carece del scope necesario",
+          "scope": "403 local",
+          "result": "PASS"
+        }
+      ],
+      "local_missing": "JWTs reales G7 y validación en Gateway privado; local usa claves de test de Inventory.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "PARTIAL_G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-15",
+      "local_test_status": "NOT_RUN",
+      "local_assertions": [
+        {
+          "command": "postgres-h5",
+          "title": "recovers ambiguous delivery after restart and commits a single effect before settlement",
+          "scope": "worker/Outbox local; Gateway aislado no cubierto",
+          "result": "NOT_RUN"
+        }
+      ],
+      "local_missing": "Worker de la revisión aislada desplegada, lectura autorizada de Outbox y constancia supervisada.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "NO_MATCHING_LOCAL_ASSERTION_EXECUTED"
+    },
+    {
+      "id": "G5-H5-16",
+      "local_test_status": "NOT_RUN",
+      "local_assertions": [
+        {
+          "command": "postgres-h5",
+          "title": "recovers ambiguous delivery after restart and commits a single effect before settlement",
+          "scope": "efecto único local; redelivery Service Bus real no cubierta",
+          "result": "NOT_RUN"
+        }
+      ],
+      "local_missing": "Redelivery/settlement de Azure Service Bus real y verificación Inbox/efecto por MessageId.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "NO_MATCHING_LOCAL_ASSERTION_EXECUTED"
+    },
+    {
+      "id": "G5-H5-17",
+      "local_test_status": "PARTIAL",
+      "local_assertions": [
+        {
+          "command": "inventory-reservations",
+          "title": "un retry idéntico no duplica stock ni Kardex",
+          "scope": "reintegro idempotente local; recepción parcial M2 no cubierta",
+          "result": "PASS"
+        }
+      ],
+      "local_missing": "Recepción parcial autorizada de M2 y reintegro ligado al pedido G5.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "PARTIAL_G6_LOCAL_ONLY_NOT_HOMOLOGATION"
+    },
+    {
+      "id": "G5-H5-18",
+      "local_test_status": "NOT_RUN",
+      "local_assertions": [],
+      "local_missing": "Aprobación G5 del cambio, fixture G2 y evidencia de reserva/consumo antes del despacho.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "NO_MATCHING_LOCAL_ASSERTION_EXECUTED"
+    },
+    {
+      "id": "G5-H5-19",
+      "local_test_status": "NOT_RUN",
+      "local_assertions": [],
+      "local_missing": "Ventana de corte, pausado/conciliación/reversión en entorno G5/G6 aislado.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "NO_MATCHING_LOCAL_ASSERTION_EXECUTED"
+    },
+    {
+      "id": "G5-H5-20",
+      "local_test_status": "NOT_RUN",
+      "local_assertions": [],
+      "local_missing": "Topología desplegada, handlers por destinatario y lecturas autorizadas de Inbox/Outbox por MessageId.",
+      "technical_status": "NOT_RUN",
+      "status": "BLOCKED",
+      "reason": "NO_MATCHING_LOCAL_ASSERTION_EXECUTED"
+    }
+  ],
+  "conclusions": {
+    "homologation": "NONE",
+    "real_g5_requests": 0,
+    "real_g7_tokens": 0,
+    "shared_azure_changes": 0,
+    "note": "Assertions match exact test titles in verbose output. Local checks are partial G6 regression evidence only and never G5 homologation."
+  }
+}
