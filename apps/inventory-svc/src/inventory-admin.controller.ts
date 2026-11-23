@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { UmbralesService } from './umbrales/umbrales.service.js';
 import { DashboardService } from './dashboard/dashboard.service.js';
+import type { UbicacionesInternasQuery } from './dashboard/dashboard.service.js';
 import { TrasladosService } from './traslados/traslados.service.js';
 import {
   DashboardInventario,
@@ -106,6 +107,25 @@ export class InventoryAdminController {
     @Headers('x-correlation-id') correlationId?: string,
   ) {
     return this.dashboardService.listarSaldosFisicos(query, correlationId);
+  }
+
+  @Get('alertas')
+  listarAlertasInternas(
+    @Query() query: Record<string, unknown>,
+    @Headers('x-correlation-id') correlationId?: string,
+  ) {
+    return this.dashboardService.obtenerAlertasInternas(query, correlationId);
+  }
+
+  @Get('ubicaciones')
+  listarUbicacionesInternas(
+    @Query() query: UbicacionesInternasQuery,
+    @Headers('x-correlation-id') correlationId?: string,
+  ) {
+    return this.dashboardService.obtenerUbicacionesInternas(
+      query,
+      correlationId,
+    );
   }
 
   @Get('traslados')
