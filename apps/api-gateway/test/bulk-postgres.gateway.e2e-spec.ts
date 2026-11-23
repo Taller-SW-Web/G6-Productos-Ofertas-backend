@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { once } from 'node:events';
@@ -60,6 +61,14 @@ describe('Gateway → Bulk real → PostgreSQL 17 descartable (conciliación por
     try {
       postgres = new Phase1Postgres();
       await postgres.start();
+      const postgresVersion = postgres.sql('SHOW server_version_num;');
+      if (!postgresVersion.startsWith('17'))
+        throw new Error(
+          `El harness Bulk requiere PostgreSQL 17; obtuvo ${postgresVersion}`,
+        );
+      console.info(
+        `[bulk-gateway-e2e] SHA=${execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()} PostgreSQL=${postgresVersion} BULK_CORRELATION_RECONCILIATION_ENABLED=test-only`,
+      );
       const fixture = (path: string) => readFileSync(path, 'utf8');
       postgres.sql(`
         CREATE ROLE po_bulk_owner NOLOGIN;
