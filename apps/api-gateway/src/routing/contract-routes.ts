@@ -6522,4 +6522,92 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
       },
     },
   },
+  {
+    method: 'GET',
+    path: '/api/v1/inventario/alertas',
+    operationId: 'listarAlertasOperativasInventario',
+    service: 'inventory-svc',
+    security: ['userBearer'],
+    role: 'GESTOR_COMERCIAL',
+    introspection: false,
+    headers: [{ name: 'x-correlation-id', required: false }],
+    requestTypes: [],
+    responses: {
+      '200': { types: ['application/json'], codes: [], headers: [] },
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
+      '401': {
+        types: ['application/problem+json'],
+        codes: ['TOKEN_INVALIDO'],
+        headers: [],
+      },
+      '403': {
+        types: ['application/problem+json'],
+        codes: ['SCOPE_INSUFICIENTE'],
+        headers: [],
+      },
+      '429': {
+        types: ['application/problem+json'],
+        codes: ['RATE_LIMIT_EXCEDIDO'],
+        headers: ['retry-after'],
+      },
+      '500': {
+        types: ['application/problem+json'],
+        codes: ['ERROR_INTERNO'],
+        headers: [],
+      },
+      '503': {
+        types: ['application/problem+json'],
+        codes: ['SERVICIO_NO_DISPONIBLE'],
+        headers: [],
+      },
+    },
+  },
+  {
+    method: 'GET',
+    path: '/api/v1/inventario/ubicaciones',
+    operationId: 'listarUbicacionesInventario',
+    service: 'inventory-svc',
+    security: ['userBearer'],
+    role: 'GESTOR_COMERCIAL',
+    introspection: false,
+    headers: [{ name: 'x-correlation-id', required: false }],
+    requestTypes: [],
+    responses: {
+      '200': { types: ['application/json'], codes: [], headers: [] },
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
+      '401': {
+        types: ['application/problem+json'],
+        codes: ['TOKEN_INVALIDO'],
+        headers: [],
+      },
+      '403': {
+        types: ['application/problem+json'],
+        codes: ['SCOPE_INSUFICIENTE'],
+        headers: [],
+      },
+      '429': {
+        types: ['application/problem+json'],
+        codes: ['RATE_LIMIT_EXCEDIDO'],
+        headers: ['retry-after'],
+      },
+      '500': {
+        types: ['application/problem+json'],
+        codes: ['ERROR_INTERNO'],
+        headers: [],
+      },
+      '503': {
+        types: ['application/problem+json'],
+        codes: ['SERVICIO_NO_DISPONIBLE'],
+        headers: [],
+      },
+    },
+  },
 ];

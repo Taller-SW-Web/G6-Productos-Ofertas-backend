@@ -1,6 +1,6 @@
 {
-  "docsSha": "354f5a93e4ec03ca5f9262a3767911c8c9211638",
-  "contractState": "PR_CANDIDATE_UNMERGED",
+  "docsSha": "490172c11cb4b83ddd1996f8d5834d0402184cf8",
+  "contractState": "MASTER_MERGED",
   "openApiVersion": "0.7.0-rc.3",
   "approvalStatus": "APPROVED_G6",
   "operationCount": 154,

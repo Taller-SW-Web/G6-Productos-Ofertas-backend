@@ -54,15 +54,11 @@ const internalOperationIds = [
   'obtenerEvidenciaReservaCuponInterno',
   'obtenerContenidoCargaMasivaInternoH5',
 ];
-const pendingProviderOperationIds = [
-  'listarAlertasOperativasInventario',
-  'listarUbicacionesInventario',
-];
 const legacyPricingOperationIds = [
   'obtenerDefinicionPrecioProductoAdministracion',
   'obtenerDefinicionPrecioSkuAdministracion',
 ];
-const missingPublicOperationIds = [...pendingProviderOperationIds];
+const missingPublicOperationIds: string[] = [];
 const missingErrorCodeMetadataOperationIds = [
   'filtrarSkusVendiblesInterno',
   'obtenerEvidenciaReservaCuponInterno',
@@ -130,14 +126,14 @@ function routeMetadata(route: (typeof CONTRACT_ROUTES)[number]) {
 describe('Gateway parity with the pinned H5 OpenAPI snapshot', () => {
   it('uses the latest internally approved Docs snapshot and its full inventory', () => {
     expect(snapshot).toMatchObject({
-      docsSha: '354f5a93e4ec03ca5f9262a3767911c8c9211638',
-      contractState: 'PR_CANDIDATE_UNMERGED',
+      docsSha: '490172c11cb4b83ddd1996f8d5834d0402184cf8',
+      contractState: 'MASTER_MERGED',
       openApiVersion: '0.7.0-rc.3',
       approvalStatus: 'APPROVED_G6',
       operationCount: 154,
     });
     expect(snapshot.operations).toHaveLength(snapshot.operationCount);
-    expect(CONTRACT_ROUTES).toHaveLength(145);
+    expect(CONTRACT_ROUTES).toHaveLength(147);
     expect(G5_H5_ROUTES).toHaveLength(4);
     expect(
       new Set(snapshot.operations.map((operation) => operation.operationId))
@@ -282,16 +278,7 @@ describe('Gateway parity with the pinned H5 OpenAPI snapshot', () => {
           !registeredIds.includes(id) && !internalOperationIds.includes(id),
       );
     expect(sorted(missingIds)).toEqual(sorted(missingPublicOperationIds));
-    expect(missingIds).toHaveLength(2);
-    expect(
-      snapshot.operations
-        .filter((operation) =>
-          pendingProviderOperationIds.includes(operation.operationId),
-        )
-        .every(
-          (operation) => operation.runtimeStatus === 'PENDIENTE_ENDPOINT_HTTP',
-        ),
-    ).toBe(true);
+    expect(missingIds).toHaveLength(0);
   });
 
   it('does not register duplicate method and parameter-pattern pairs', () => {
