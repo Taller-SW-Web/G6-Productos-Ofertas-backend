@@ -25,6 +25,30 @@ describe('SafeLogger', () => {
       'fixture-sensitive-token',
     );
   });
+  it('registra etapas de dependencias con solo valores enumerados', () => {
+    const sink = { log: vi.fn(), error: vi.fn(), warn: vi.fn() };
+    const logger = new SafeLogger('test', sink);
+    logger.dependency(
+      '74ed2f19-7e70-4915-a6f6-bbc691b82587',
+      'catalog',
+      'context_resolution',
+      17.3,
+      'success',
+      { itemCount: 55, mode: 'per_sku' },
+    );
+    expect(sink.log).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        event: 'DEPENDENCY_STAGE_COMPLETED',
+        correlation_id: '74ed2f19-7e70-4915-a6f6-bbc691b82587',
+        dependency: 'catalog',
+        stage: 'context_resolution',
+        outcome: 'success',
+        duration_ms: 17,
+        item_count: 55,
+        mode: 'per_sku',
+      }),
+    );
+  });
   it.each(['log', 'error', 'warn', 'debug', 'verbose', 'fatal'] as const)(
     'omite secretos y objetos también en los argumentos de %s',
     (level) => {

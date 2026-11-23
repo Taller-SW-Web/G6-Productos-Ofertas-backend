@@ -56,6 +56,67 @@ export class SafeLogger implements LoggerService {
     });
   }
 
+  dependency(
+    correlationId: string | undefined,
+    dependency: 'g7' | 'catalog' | 'pricing',
+    stage:
+      | 'token_http'
+      | 'token_body'
+      | 'token_verification'
+      | 'token_lookup'
+      | 'context_headers'
+      | 'context_body'
+      | 'context_resolution'
+      | 'postgres_candidates',
+    durationMs: number,
+    outcome: 'success' | 'error' | 'deadline' | 'http_error',
+    options: {
+      status?: number;
+      itemCount?: number;
+      mode?: 'batch' | 'per_sku';
+    } = {},
+  ): void {
+    const safeCorrelation =
+      typeof correlationId === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        correlationId,
+      )
+        ? correlationId
+        : '[REDACTED]';
+    const status =
+      Number.isInteger(options.status) &&
+      options.status! >= 100 &&
+      options.status! <= 599
+        ? options.status
+        : undefined;
+    const itemCount =
+      Number.isInteger(options.itemCount) &&
+      options.itemCount! >= 0 &&
+      options.itemCount! <= 100
+        ? options.itemCount
+        : undefined;
+    this.destination.log({
+      service: 'pricing-svc',
+      environment: controlled(
+        this.environment,
+        new Set(['development', 'test', 'production', 'unknown']),
+      ),
+      message: 'Dependencia de Pricing finalizada.',
+      event: 'DEPENDENCY_STAGE_COMPLETED',
+      correlation_id: safeCorrelation,
+      dependency,
+      stage,
+      outcome,
+      duration_ms:
+        Number.isFinite(durationMs) && durationMs >= 0
+          ? Math.round(durationMs)
+          : 0,
+      ...(status === undefined ? {} : { status }),
+      ...(itemCount === undefined ? {} : { item_count: itemCount }),
+      ...(options.mode === undefined ? {} : { mode: options.mode }),
+    });
+  }
+
   private write(
     level: 'log' | 'error' | 'warn' | 'debug' | 'verbose' | 'fatal',
     message: unknown,

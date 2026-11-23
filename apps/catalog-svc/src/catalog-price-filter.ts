@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { CatalogConfig } from './config.js';
+import { CatalogTelemetry } from './catalog-telemetry.js';
 import type { Canal, ProductQuery } from './commercial.types.js';
 import { compareDecimal, parseDecimalJson } from './decimal.js';
 
@@ -48,7 +49,31 @@ export class CatalogPriceFilter {
     @Optional()
     @Inject(CATALOG_PRICING_IDENTITY)
     private readonly identity?: CatalogPricingIdentity,
+    @Optional()
+    @Inject(CatalogTelemetry)
+    private readonly telemetry?: CatalogTelemetry,
   ) {}
+
+  private recordStage(
+    correlationId: string,
+    dependency: 'g7' | 'pricing',
+    stage:
+      'g7_authorization' | 'pricing_response_headers' | 'pricing_response_body',
+    started: number,
+    outcome: 'success' | 'error' | 'deadline' | 'http_error' | 'skipped',
+    status?: number,
+    skuCount?: number,
+  ): void {
+    this.telemetry?.dependencyStage({
+      correlationId,
+      dependency,
+      stage,
+      outcome,
+      durationMs: performance.now() - started,
+      ...(status === undefined ? {} : { status }),
+      ...(skuCount === undefined ? {} : { skuCount }),
+    });
+  }
 
   private async batch(
     skus: string[],
@@ -66,9 +91,43 @@ export class CatalogPriceFilter {
     const individual = skus.length === 1 && skus[0].includes(',');
     if (skus.some((sku) => !sku || (!individual && sku.includes(','))))
       throw new Error();
-    const authorization = publicRead
-      ? undefined
-      : await this.identity!.authorization(signal);
+    let authorization: string | undefined;
+    const authorizationStarted = performance.now();
+    if (publicRead) {
+      this.recordStage(
+        correlation,
+        'g7',
+        'g7_authorization',
+        authorizationStarted,
+        'skipped',
+        undefined,
+        skus.length,
+      );
+    } else {
+      try {
+        authorization = await this.identity!.authorization(signal);
+        this.recordStage(
+          correlation,
+          'g7',
+          'g7_authorization',
+          authorizationStarted,
+          'success',
+          undefined,
+          skus.length,
+        );
+      } catch {
+        this.recordStage(
+          correlation,
+          'g7',
+          'g7_authorization',
+          authorizationStarted,
+          signal.aborted ? 'deadline' : 'error',
+          undefined,
+          skus.length,
+        );
+        throw new Error();
+      }
+    }
     signal.throwIfAborted();
     if (
       !publicRead &&
@@ -87,19 +146,44 @@ export class CatalogPriceFilter {
     }).toString();
     if (!individual) url.searchParams.set('skus', skus.join(','));
     if (canal !== undefined) url.searchParams.set('canal', canal);
-    const response = await fetch(url, {
-      headers: {
-        ...(authorization ? { authorization } : {}),
-        'X-Correlation-Id': correlation,
-      },
-      redirect: 'error',
-      signal,
-    });
+    const requestStarted = performance.now();
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: {
+          ...(authorization ? { authorization } : {}),
+          'X-Correlation-Id': correlation,
+        },
+        redirect: 'error',
+        signal,
+      });
+      this.recordStage(
+        correlation,
+        'pricing',
+        'pricing_response_headers',
+        requestStarted,
+        response.status === 200 ? 'success' : 'http_error',
+        response.status,
+        skus.length,
+      );
+    } catch {
+      this.recordStage(
+        correlation,
+        'pricing',
+        'pricing_response_headers',
+        requestStarted,
+        signal.aborted ? 'deadline' : 'error',
+        undefined,
+        skus.length,
+      );
+      throw new Error();
+    }
     if (
       response.status !== 200 ||
       response.headers.get('content-type')?.split(';')[0] !== 'application/json'
     )
       throw new Error();
+    const bodyStarted = performance.now();
     const reader = response.body?.getReader();
     if (!reader) throw new Error();
     const chunks: Uint8Array[] = [];
@@ -112,6 +196,26 @@ export class CatalogPriceFilter {
         if (size > 1024 * 1024) throw new Error();
         chunks.push(value);
       }
+      this.recordStage(
+        correlation,
+        'pricing',
+        'pricing_response_body',
+        bodyStarted,
+        'success',
+        response.status,
+        skus.length,
+      );
+    } catch (error) {
+      this.recordStage(
+        correlation,
+        'pricing',
+        'pricing_response_body',
+        bodyStarted,
+        signal.aborted ? 'deadline' : 'error',
+        response.status,
+        skus.length,
+      );
+      throw error;
     } finally {
       await reader.cancel();
     }

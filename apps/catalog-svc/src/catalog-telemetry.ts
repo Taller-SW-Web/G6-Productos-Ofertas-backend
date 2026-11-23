@@ -24,6 +24,11 @@ export type CatalogSignal =
   | 'MASTER_BARRIER_OPERATION_CONFLICT'
   | 'MASTER_BARRIER_FINAL_PENDING';
 
+export type CatalogDependencyStage =
+  'g7_authorization' | 'pricing_response_headers' | 'pricing_response_body';
+export type CatalogDependencyOutcome =
+  'success' | 'error' | 'deadline' | 'http_error' | 'skipped';
+
 /** Internal process indicators, not a new public metrics contract or health claim. */
 @Injectable()
 export class CatalogTelemetry {
@@ -41,6 +46,44 @@ export class CatalogTelemetry {
       Object.entries(ids).filter(([, value]) => isCorrelationId(value)),
     );
     new SanitizedLogger('runtime').log({ code, ...safeIds });
+  }
+
+  dependencyStage(input: {
+    correlationId?: string;
+    dependency: 'g7' | 'pricing';
+    stage: CatalogDependencyStage;
+    outcome: CatalogDependencyOutcome;
+    durationMs: number;
+    status?: number;
+    skuCount?: number;
+  }): void {
+    const durationMs = Number.isFinite(input.durationMs)
+      ? Math.max(0, Math.round(input.durationMs))
+      : 0;
+    const status =
+      Number.isInteger(input.status) &&
+      input.status! >= 100 &&
+      input.status! <= 599
+        ? input.status
+        : undefined;
+    const skuCount =
+      Number.isInteger(input.skuCount) &&
+      input.skuCount! >= 0 &&
+      input.skuCount! <= 100
+        ? input.skuCount
+        : undefined;
+    new SanitizedLogger('runtime').log({
+      code: 'DEPENDENCY_STAGE_COMPLETED',
+      ...(isCorrelationId(input.correlationId)
+        ? { correlationId: input.correlationId }
+        : {}),
+      dependency: input.dependency,
+      stage: input.stage,
+      outcome: input.outcome,
+      durationMs,
+      ...(status === undefined ? {} : { status }),
+      ...(skuCount === undefined ? {} : { skuCount }),
+    });
   }
   snapshot(): Readonly<Record<string, number>> {
     return Object.freeze(Object.fromEntries(this.counts));

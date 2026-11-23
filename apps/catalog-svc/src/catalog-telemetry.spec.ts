@@ -49,4 +49,33 @@ describe('Catalog operational signals', () => {
     });
     expect(lines[0]).not.toMatch(/private|secret|authorization|originalUrl/);
   });
+
+  it('logs a dependency stage with bounded fields and a valid correlation id', () => {
+    const output = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const id = randomUUID();
+    new CatalogTelemetry().dependencyStage({
+      correlationId: id,
+      dependency: 'pricing',
+      stage: 'pricing_response_headers',
+      outcome: 'success',
+      durationMs: 12.6,
+      status: 200,
+      skuCount: 3,
+    });
+    const written = String(output.mock.calls.at(-1)?.[0]);
+    expect(JSON.parse(written)).toMatchObject({
+      service: 'catalog-svc',
+      message: {
+        code: 'DEPENDENCY_STAGE_COMPLETED',
+        correlationId: id,
+        dependency: 'pricing',
+        stage: 'pricing_response_headers',
+        outcome: 'success',
+        durationMs: 13,
+        status: 200,
+        skuCount: 3,
+      },
+    });
+    expect(written).not.toMatch(/authorization|token|sku-value/);
+  });
 });

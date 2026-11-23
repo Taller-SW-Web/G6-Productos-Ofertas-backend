@@ -2,6 +2,8 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import { resolvePrice } from '../domain/resolve-price.js';
 import { PriceRuleError } from '../domain/price.js';
 import { PricingRepository } from '../persistence/pricing.repository.js';
+import { PRICING_CONFIG, type PricingConfig } from '../config/environment.js';
+import { SafeLogger } from '../logging/safe-logger.js';
 import { PricingHttpError } from './pricing-http.error.js';
 import { wireMoney, wireVersion } from './pricing-reads.js';
 
@@ -38,6 +40,9 @@ export const channels = ['MARKETPLACE', 'CHATBOT', 'RETAIL', 'VENTAS'] as const;
 const MAX_CATALOG_CONTEXT_CONCURRENCY = 8;
 type CommercialCandidates = Awaited<
   ReturnType<PricingRepository['readCandidates']>
+>;
+type BatchCommercialCandidates = Awaited<
+  ReturnType<PricingRepository['readCandidatesBatch']>
 >;
 export function parseCommercialQuery(
   query: Record<string, unknown>,
@@ -86,12 +91,19 @@ export function parseCommercialQuery(
 }
 @Injectable()
 export class CommercialPrices {
+  private readonly logger: SafeLogger;
+
   constructor(
     @Inject(PricingRepository) private readonly repository: PricingRepository,
     @Optional()
     @Inject(PRICING_CATALOG_CONTEXT)
     private readonly catalog?: PricingCatalogContext,
-  ) {}
+    @Optional()
+    @Inject(PRICING_CONFIG)
+    config?: PricingConfig,
+  ) {
+    this.logger = new SafeLogger(config?.nodeEnv);
+  }
 
   private async resolveContext(
     sku: string,
@@ -207,68 +219,93 @@ export class CommercialPrices {
       string,
       Awaited<ReturnType<PricingCatalogContext['resolve']>>
     >();
-    // Select the private batch capability before making a request. In legacy
-    // read modes, use the explicitly supported individual GET path. Once the
-    // private G7 batch is selected, any HTTP/auth/technical failure is terminal;
-    // it must never silently downgrade to individual or public reads.
-    if (
-      this.catalog.resolveBatch &&
-      this.catalog.batchMode === 'G7_AUTHENTICATED'
-    ) {
-      let resolved: NonNullable<
-        Awaited<ReturnType<NonNullable<PricingCatalogContext['resolveBatch']>>>
-      >;
-      try {
-        resolved = await this.catalog.resolveBatch(uniqueSkus, correlationId);
-      } catch {
-        throw new PricingHttpError(503, 'SERVICIO_NO_DISPONIBLE');
-      }
-      if (
-        !Array.isArray(resolved) ||
-        resolved.length !== uniqueSkus.length ||
-        resolved.some(
-          (context, index) =>
-            context !== null &&
-            (!context ||
-              context.sku !== uniqueSkus[index] ||
-              typeof context.productId !== 'string' ||
-              !context.productId.trim() ||
-              typeof context.isVariant !== 'boolean' ||
-              typeof context.active !== 'boolean' ||
-              typeof context.eligible !== 'boolean'),
-        )
-      )
-        throw new PricingHttpError(503, 'SERVICIO_NO_DISPONIBLE');
-      uniqueSkus.forEach((sku, index) => contexts.set(sku, resolved[index]!));
-    } else {
-      let cursor = 0;
-      let failed = false;
-      let failure: unknown;
-      const worker = async () => {
-        while (!failed) {
-          const index = cursor++;
-          if (index >= uniqueSkus.length) return;
-          const sku = uniqueSkus[index]!;
-          try {
-            contexts.set(
-              sku,
-              await this.resolveContext(sku, correlationId, 'consultarPrecios'),
-            );
-          } catch (error) {
-            failed = true;
-            failure = error;
-          }
+    const resolveBatch = this.catalog.resolveBatch;
+    const batchResolution =
+      Boolean(resolveBatch) && this.catalog.batchMode === 'G7_AUTHENTICATED';
+    const contextResolutionStarted = performance.now();
+    let contextResolutionOutcome: 'success' | 'error' = 'success';
+    try {
+      // Select the private batch capability before making a request. In legacy
+      // read modes, use the explicitly supported individual GET path. Once the
+      // private G7 batch is selected, any HTTP/auth/technical failure is terminal;
+      // it must never silently downgrade to individual or public reads.
+      if (batchResolution) {
+        let resolved: NonNullable<
+          Awaited<
+            ReturnType<NonNullable<PricingCatalogContext['resolveBatch']>>
+          >
+        >;
+        try {
+          resolved = await resolveBatch!(uniqueSkus, correlationId);
+        } catch {
+          throw new PricingHttpError(503, 'SERVICIO_NO_DISPONIBLE');
         }
-      };
-      await Promise.all(
-        Array.from(
-          {
-            length: Math.min(concurrency, uniqueSkus.length),
-          },
-          worker,
-        ),
+        if (
+          !Array.isArray(resolved) ||
+          resolved.length !== uniqueSkus.length ||
+          resolved.some(
+            (context, index) =>
+              context !== null &&
+              (!context ||
+                context.sku !== uniqueSkus[index] ||
+                typeof context.productId !== 'string' ||
+                !context.productId.trim() ||
+                typeof context.isVariant !== 'boolean' ||
+                typeof context.active !== 'boolean' ||
+                typeof context.eligible !== 'boolean'),
+          )
+        )
+          throw new PricingHttpError(503, 'SERVICIO_NO_DISPONIBLE');
+        uniqueSkus.forEach((sku, index) => contexts.set(sku, resolved[index]!));
+      } else {
+        let cursor = 0;
+        let failed = false;
+        let failure: unknown;
+        const worker = async () => {
+          while (!failed) {
+            const index = cursor++;
+            if (index >= uniqueSkus.length) return;
+            const sku = uniqueSkus[index]!;
+            try {
+              contexts.set(
+                sku,
+                await this.resolveContext(
+                  sku,
+                  correlationId,
+                  'consultarPrecios',
+                ),
+              );
+            } catch (error) {
+              failed = true;
+              failure = error;
+            }
+          }
+        };
+        await Promise.all(
+          Array.from(
+            {
+              length: Math.min(concurrency, uniqueSkus.length),
+            },
+            worker,
+          ),
+        );
+        if (failed) throw failure;
+      }
+    } catch (error) {
+      contextResolutionOutcome = 'error';
+      throw error;
+    } finally {
+      this.logger.dependency(
+        correlationId,
+        'catalog',
+        'context_resolution',
+        performance.now() - contextResolutionStarted,
+        contextResolutionOutcome,
+        {
+          itemCount: uniqueSkus.length,
+          mode: batchResolution ? 'batch' : 'per_sku',
+        },
       );
-      if (failed) throw failure;
     }
 
     const eligibleContexts = uniqueSkus.flatMap((sku) => {
@@ -277,11 +314,39 @@ export class CommercialPrices {
         ? [{ sku, productId: context.productId, context }]
         : [];
     });
-    const candidates = await this.repository.readCandidatesBatch(
-      eligibleContexts,
-      channel ?? null,
-      at,
-    );
+    const candidatesStarted = performance.now();
+    let candidates: BatchCommercialCandidates;
+    try {
+      candidates = await this.repository.readCandidatesBatch(
+        eligibleContexts,
+        channel ?? null,
+        at,
+      );
+      this.logger.dependency(
+        correlationId,
+        'pricing',
+        'postgres_candidates',
+        performance.now() - candidatesStarted,
+        'success',
+        {
+          itemCount: eligibleContexts.length,
+          mode: batchResolution ? 'batch' : 'per_sku',
+        },
+      );
+    } catch (error) {
+      this.logger.dependency(
+        correlationId,
+        'pricing',
+        'postgres_candidates',
+        performance.now() - candidatesStarted,
+        'error',
+        {
+          itemCount: eligibleContexts.length,
+          mode: batchResolution ? 'batch' : 'per_sku',
+        },
+      );
+      throw error;
+    }
     const definitionsBySku = new Map(
       candidates.map(({ sku, definitions }) => [sku, definitions]),
     );
