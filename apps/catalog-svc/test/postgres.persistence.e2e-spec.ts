@@ -44,6 +44,7 @@ import { runData002Psql, type Data002Step } from './support/data002-psql.js';
 import { CatalogGatewayHarness } from './support/catalog-gateway-harness.js';
 import type { ProductSummary } from '../src/commercial.types.js';
 import { CatalogAmqpRuntime } from '../src/catalog-amqp.js';
+import { relayCatalogDelivery } from '../src/catalog-service-bus-relay.js';
 import { CatalogTelemetry } from '../src/catalog-telemetry.js';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import {
@@ -318,6 +319,33 @@ describe.skipIf(!dockerAvailable)(
             'utf8',
           ),
       );
+      command(
+        'docker',
+        [
+          'exec',
+          '-i',
+          container,
+          'psql',
+          '-U',
+          'postgres',
+          '-v',
+          'ON_ERROR_STOP=1',
+        ],
+        'SET ROLE po_catalog_owner;\n' +
+          readFileSync(
+            resolve(
+              'apps/catalog-svc/migrations-candidate/h5/0001_outbox_delivery.sql',
+            ),
+            'utf8',
+          ) +
+          '\n' +
+          readFileSync(
+            resolve(
+              'apps/catalog-svc/migrations-candidate/h5/0002_taxonomy_reply_transport.sql',
+            ),
+            'utf8',
+          ),
+      );
       port = command('docker', ['port', container, '5432/tcp'])
         .split(':')
         .at(-1)!;
@@ -362,6 +390,134 @@ describe.skipIf(!dockerAvailable)(
         rmSync(directory, { recursive: true, force: true });
       }
     }, 30000);
+
+    afterEach(() => vi.unstubAllEnvs());
+
+    it('keeps H4 deliveries disabled and commits the H5 trigger fan-out atomically', async () => {
+      vi.stubEnv('MESSAGING_PROVIDER', 'RABBITMQ');
+      vi.stubEnv('CATALOG_H5_DESTINATIONS', '');
+      const h4MessageId = randomUUID();
+      const correlationId = randomUUID();
+      await database.transaction((tx) =>
+        tx.insert(outbox).values({
+          message_id: h4MessageId,
+          event_name: 'catalog.product.deactivated',
+          kind: 'event',
+          correlation_id: correlationId,
+          occurred_at: new Date(),
+          payload: { product_id: randomUUID(), product_version: 1 },
+        }),
+      );
+      const h4Deliveries = await database.read((db) =>
+        db.execute(sql`
+          SELECT count(*)::integer AS count
+          FROM catalog.outbox_delivery WHERE message_id = ${h4MessageId}
+        `),
+      );
+      expect(h4Deliveries.rows[0]?.count).toBe(0);
+
+      vi.stubEnv('MESSAGING_PROVIDER', 'AZURE_SERVICE_BUS');
+      vi.stubEnv(
+        'CATALOG_H5_DESTINATIONS',
+        'g6.promotions.from.catalog,g6.combos.from.catalog',
+      );
+      const rolledBackMessageId = randomUUID();
+      await expect(
+        database.transaction(async (tx) => {
+          await tx.insert(outbox).values({
+            message_id: rolledBackMessageId,
+            event_name: 'catalog.product.deactivated',
+            kind: 'event',
+            correlation_id: randomUUID(),
+            occurred_at: new Date(),
+            payload: { product_id: randomUUID(), product_version: 2 },
+          });
+          throw new Error('rollback H5 outbox');
+        }),
+      ).rejects.toThrow('rollback H5 outbox');
+      const rolledBack = await database.read((db) =>
+        db.execute(sql`
+          SELECT
+            EXISTS (SELECT FROM catalog.outbox WHERE message_id = ${rolledBackMessageId}) AS outbox_exists,
+            EXISTS (SELECT FROM catalog.outbox_delivery WHERE message_id = ${rolledBackMessageId}) AS delivery_exists
+        `),
+      );
+      expect(rolledBack.rows[0]).toEqual({
+        outbox_exists: false,
+        delivery_exists: false,
+      });
+
+      const fanoutMessageId = randomUUID();
+      await database.transaction((tx) =>
+        tx.insert(outbox).values({
+          message_id: fanoutMessageId,
+          event_name: 'catalog.product.deactivated',
+          kind: 'event',
+          correlation_id: randomUUID(),
+          occurred_at: new Date(),
+          payload: { product_id: randomUUID(), product_version: 3 },
+        }),
+      );
+      const fanout = await database.read((db) =>
+        db.execute(sql`
+          SELECT destination
+          FROM catalog.outbox_delivery
+          WHERE message_id = ${fanoutMessageId}
+          ORDER BY destination
+        `),
+      );
+      expect(fanout.rows.map((row) => row.destination)).toEqual([
+        'g6.combos.from.catalog',
+        'g6.promotions.from.catalog',
+      ]);
+
+      vi.stubEnv('CATALOG_H5_DESTINATIONS', 'g6.promotions.from.catalog');
+      const restrictedMessageId = randomUUID();
+      await database.transaction((tx) =>
+        tx.insert(outbox).values({
+          message_id: restrictedMessageId,
+          event_name: 'catalog.product.deactivated',
+          kind: 'event',
+          correlation_id: randomUUID(),
+          occurred_at: new Date(),
+          payload: { product_id: randomUUID(), product_version: 4 },
+        }),
+      );
+      const restricted = await database.read((db) =>
+        db.execute(sql`
+          SELECT destination
+          FROM catalog.outbox_delivery
+          WHERE message_id = ${restrictedMessageId}
+        `),
+      );
+      expect(restricted.rows.map((row) => row.destination)).toEqual([
+        'g6.promotions.from.catalog',
+      ]);
+
+      vi.stubEnv(
+        'CATALOG_H5_DESTINATIONS',
+        'g6.promotions.from.catalog,g6.combos.from.catalog',
+      );
+      const publish = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('ambiguous send'))
+        .mockResolvedValue(undefined);
+      const bus = { publish };
+      expect(await relayCatalogDelivery(database, bus)).toBe('RETRY');
+      await database.transaction((tx) =>
+        tx.execute(sql`
+          UPDATE catalog.outbox_delivery
+          SET available_at = now()
+          WHERE message_id = ${fanoutMessageId}
+            AND published_at IS NULL
+        `),
+      );
+      expect(await relayCatalogDelivery(database, bus)).toBe('CONFIRMED');
+      expect(publish.mock.calls[1]?.[1].message_id).toBe(
+        publish.mock.calls[0]?.[1].message_id,
+      );
+      expect(publish.mock.calls[1]?.[0]).toBe(publish.mock.calls[0]?.[0]);
+    });
 
     function productInput(sku: string) {
       return {

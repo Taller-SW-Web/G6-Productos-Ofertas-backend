@@ -3,15 +3,20 @@ import { sql } from 'drizzle-orm';
 import { Database } from '../src/database.js';
 import { outbox } from '../src/catalog.schema.js';
 import type { CatalogEnvelope } from '../src/catalog-messages.js';
-import {
-  enqueueCatalogDeliveries,
-  relayCatalogDelivery,
-} from '../src/catalog-service-bus-relay.js';
+import { relayCatalogDelivery } from '../src/catalog-service-bus-relay.js';
 
 describe.runIf(process.env.CATALOG_H4_NATIVE_POSTGRES === '1')(
   'H5 independent deliveries on disposable PostgreSQL',
   () => {
     const database = new Database();
+    beforeEach(() => {
+      vi.stubEnv('MESSAGING_PROVIDER', 'AZURE_SERVICE_BUS');
+      vi.stubEnv(
+        'CATALOG_H5_DESTINATIONS',
+        'g6.promotions.from.catalog,g6.combos.from.catalog',
+      );
+    });
+    afterEach(() => vi.unstubAllEnvs());
     beforeAll(() => {
       if (
         process.env.PGDATABASE !== 'h4_catalog_isolated' ||
@@ -50,8 +55,6 @@ describe.runIf(process.env.CATALOG_H4_NATIVE_POSTGRES === '1')(
           occurred_at: new Date(timestamp),
           payload: event.data,
         });
-        await enqueueCatalogDeliveries(tx, event);
-        await enqueueCatalogDeliveries(tx, event);
       });
       const publish = vi.fn().mockRejectedValueOnce(new Error('ambiguous'));
       const bus = { publish };
@@ -70,6 +73,9 @@ describe.runIf(process.env.CATALOG_H4_NATIVE_POSTGRES === '1')(
         publish.mock.calls[0]?.[0],
         event,
       ]);
+      expect(
+        publish.mock.calls.map(([, envelope]) => envelope.message_id),
+      ).toEqual([event.message_id, event.message_id, event.message_id]);
       expect(await relayCatalogDelivery(database, bus)).toBe('EMPTY');
     });
   },

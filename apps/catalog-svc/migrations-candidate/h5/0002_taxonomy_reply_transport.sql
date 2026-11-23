@@ -48,12 +48,18 @@ BEGIN
         RAISE EXCEPTION 'Catalog H5 outbox_delivery shape differs from 0001';
     END IF;
 
-    IF EXISTS (
+    IF NOT EXISTS (
         SELECT 1 FROM pg_trigger
         WHERE tgrelid = 'catalog.outbox'::regclass AND NOT tgisinternal
-          AND tgname IN ('tr_catalog_outbox_h5_delivery', 'trg_catalog_taxonomy_reply_transport')
-    ) OR to_regprocedure('catalog.enqueue_h5_outbox_deliveries()') IS NOT NULL THEN
-        RAISE EXCEPTION 'Catalog H5 has an existing or alternate writer; reconcile before applying';
+          AND tgname = 'tr_catalog_outbox_h5_delivery'
+          AND tgenabled IN ('O', 'A')
+    ) OR to_regprocedure('catalog.enqueue_h5_outbox_deliveries()') IS NULL
+      OR EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'catalog.outbox'::regclass AND NOT tgisinternal
+          AND tgname <> 'tr_catalog_outbox_h5_delivery'
+    ) THEN
+        RAISE EXCEPTION 'Catalog H5 requires the canonical 0001 delivery trigger and no alternate transport writer';
     END IF;
 
     IF EXISTS (SELECT 1 FROM catalog.outbox_delivery) THEN

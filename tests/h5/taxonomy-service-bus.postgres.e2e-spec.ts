@@ -116,14 +116,20 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
           [catalogLegacyId],
         );
         await catalogOwner.query(
-          'CREATE FUNCTION catalog.enqueue_h5_outbox_deliveries() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$',
+          'CREATE FUNCTION catalog.alternate_h5_outbox_deliveries() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$',
+        );
+        await catalogOwner.query(
+          'CREATE TRIGGER trg_catalog_alternate_h5_writer AFTER INSERT ON catalog.outbox FOR EACH ROW EXECUTE FUNCTION catalog.alternate_h5_outbox_deliveries()',
         );
         await expect(catalogOwner.query(catalogMigration)).rejects.toThrow(
           'Catalog H5 has an existing or alternate writer',
         );
         await catalogOwner.query('ROLLBACK');
         await catalogOwner.query(
-          'DROP FUNCTION catalog.enqueue_h5_outbox_deliveries()',
+          'DROP TRIGGER trg_catalog_alternate_h5_writer ON catalog.outbox',
+        );
+        await catalogOwner.query(
+          'DROP FUNCTION catalog.alternate_h5_outbox_deliveries()',
         );
         await catalogOwner.query(catalogMigration);
       } finally {

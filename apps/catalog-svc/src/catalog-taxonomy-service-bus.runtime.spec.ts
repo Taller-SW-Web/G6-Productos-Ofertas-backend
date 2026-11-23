@@ -1,6 +1,7 @@
 import type { CatalogMessageService } from './catalog-message.service.js';
 import type { Database } from './database.js';
 import {
+  catalogIncomingQueues,
   createCatalogServiceBus,
   taxonomyReplyQueue,
   taxonomyRequestQueue,
@@ -80,8 +81,13 @@ describe('Catalog H5 transport readiness', () => {
       expect.anything(),
       expect.any(Function),
     );
+    expect(f.subscribeWithProbe.mock.calls.map(([queue]) => queue)).toEqual(
+      catalogIncomingQueues,
+    );
 
     f.probe.mockRejectedValueOnce(new Error('receiver offline'));
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(f.runtime.ready).toBe(false);
     await vi.advanceTimersByTimeAsync(2000);
     expect(f.runtime.ready).toBe(false);
     await vi.advanceTimersByTimeAsync(2000);
@@ -99,21 +105,38 @@ describe('Catalog H5 transport readiness', () => {
     await vi.advanceTimersByTimeAsync(2000);
     expect(f.runtime.ready).toBe(true);
 
-    f.probe.mockImplementationOnce(async () => f.failReceiver());
+    f.probe.mockImplementationOnce(async () => {
+      f.failReceiver();
+      return [];
+    });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(f.runtime.ready).toBe(false);
     await vi.advanceTimersByTimeAsync(2000);
     expect(f.runtime.ready).toBe(false);
     await vi.advanceTimersByTimeAsync(2000);
     expect(f.runtime.ready).toBe(true);
-    expect(f.subscribeWithProbe).toHaveBeenCalledTimes(1);
+    expect(f.subscribeWithProbe).toHaveBeenCalledTimes(12);
   });
 
-  it('refuses to start the consumer without the migration and runtime privileges', async () => {
+  it('reports unavailable until migration and runtime privileges are present', async () => {
     const f = fixture();
     f.storage.mockResolvedValue({ rows: [{ ready: false }] });
-    await expect(f.runtime.onApplicationBootstrap()).rejects.toThrow(
-      'CATALOG_H5_TAXONOMY_STORAGE_NOT_READY',
-    );
+    await expect(f.runtime.onApplicationBootstrap()).resolves.toBeUndefined();
     expect(f.runtime.ready).toBe(false);
+    expect(f.subscribeWithProbe).not.toHaveBeenCalled();
+    f.storage.mockResolvedValue({ rows: [{ ready: true }] });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(f.subscribeWithProbe).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(f.runtime.ready).toBe(true);
+  });
+
+  it('keeps the runtime disabled for the existing H4 provider', async () => {
+    vi.stubEnv('MESSAGING_PROVIDER', 'RABBITMQ');
+    const f = fixture();
+    await f.runtime.onApplicationBootstrap();
+    expect(f.runtime.required).toBe(false);
+    expect(f.runtime.ready).toBe(true);
     expect(f.subscribeWithProbe).not.toHaveBeenCalled();
   });
 });

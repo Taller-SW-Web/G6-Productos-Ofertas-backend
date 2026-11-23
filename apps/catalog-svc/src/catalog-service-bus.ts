@@ -10,6 +10,10 @@ import {
   type CatalogEnvelope,
 } from './catalog-messages.js';
 import type { CatalogMessageService } from './catalog-message.service.js';
+import {
+  readCatalogH5Destinations,
+  readCatalogMessagingProvider,
+} from './catalog-messaging.config.js';
 
 export const catalogDestinations = {
   'pricing.product.initialization.requested': ['g6.pricing.from.catalog'],
@@ -37,6 +41,9 @@ const producerByQueue = {
 } as const;
 
 type IncomingQueue = keyof typeof producerByQueue;
+export const catalogIncomingQueues = Object.keys(
+  producerByQueue,
+) as IncomingQueue[];
 export const taxonomyRequestQueue = 'g6.catalog.from.taxonomy';
 export const taxonomyReplyQueue =
   catalogDestinations['catalog.master.deactivation.checked'][0];
@@ -113,50 +120,56 @@ export class CatalogServiceBus {
       receiveMode: 'peekLock',
       skipParsingBodyAsJson: true,
     });
-    const subscription = receiver.subscribe(
-      {
-        processMessage: async (received: ServiceBusReceivedMessage) => {
-          try {
-            if (
-              received.contentType !== 'application/json' ||
-              !(received.body instanceof Uint8Array) ||
-              received.body.byteLength > maximumMessageBytes
-            )
-              throw new InvalidCatalogMessage();
-            const envelope = parseCatalogMessage(decodeJson(received.body));
-            if (
-              envelope.producer !== producerByQueue[queue] ||
-              received.messageId !== envelope.message_id ||
-              received.correlationId !== envelope.correlation_id ||
-              received.subject !== envelope.name
-            )
-              throw new InvalidCatalogMessage();
-            await service.consume(envelope);
-          } catch (error) {
-            if (
-              error instanceof InvalidCatalogMessage ||
-              error instanceof SyntaxError
-            ) {
-              await receiver.deadLetterMessage(received, {
-                deadLetterReason: 'INVALID_CATALOG_MESSAGE',
-                deadLetterErrorDescription:
-                  'Envelope or routing metadata failed validation.',
-              });
-            } else {
-              reportError();
-              await receiver.abandonMessage(received);
+    let subscription: ReturnType<typeof receiver.subscribe>;
+    try {
+      subscription = receiver.subscribe(
+        {
+          processMessage: async (received: ServiceBusReceivedMessage) => {
+            try {
+              if (
+                received.contentType !== 'application/json' ||
+                !(received.body instanceof Uint8Array) ||
+                received.body.byteLength > maximumMessageBytes
+              )
+                throw new InvalidCatalogMessage();
+              const envelope = parseCatalogMessage(decodeJson(received.body));
+              if (
+                envelope.producer !== producerByQueue[queue] ||
+                received.messageId !== envelope.message_id ||
+                received.correlationId !== envelope.correlation_id ||
+                received.subject !== envelope.name
+              )
+                throw new InvalidCatalogMessage();
+              await service.consume(envelope);
+            } catch (error) {
+              if (
+                error instanceof InvalidCatalogMessage ||
+                error instanceof SyntaxError
+              ) {
+                await receiver.deadLetterMessage(received, {
+                  deadLetterReason: 'INVALID_CATALOG_MESSAGE',
+                  deadLetterErrorDescription:
+                    'Envelope or routing metadata failed validation.',
+                });
+              } else {
+                reportError();
+                await receiver.abandonMessage(received);
+              }
+              return;
             }
-            return;
-          }
-          // A failed settlement after commit is allowed to redeliver to the same Inbox.
-          await receiver.completeMessage(received);
+            // A failed settlement after commit is allowed to redeliver to the same Inbox.
+            await receiver.completeMessage(received);
+          },
+          processError: async () => {
+            reportError();
+          },
         },
-        processError: async () => {
-          reportError();
-        },
-      },
-      { autoCompleteMessages: false },
-    );
+        { autoCompleteMessages: false },
+      );
+    } catch (error) {
+      void receiver.close().catch(() => undefined);
+      throw error;
+    }
     return {
       probe: (abortSignal: AbortSignal) =>
         receiver.peekMessages(1, { abortSignal }),
@@ -198,12 +211,13 @@ export class CatalogServiceBus {
 export function createCatalogServiceBus(
   env: NodeJS.ProcessEnv,
 ): CatalogServiceBus | undefined {
-  const provider = env.MESSAGING_PROVIDER;
-  if (!provider || provider === 'RABBITMQ') return undefined;
+  const provider = readCatalogMessagingProvider(env);
+  if (provider !== 'AZURE_SERVICE_BUS') return undefined;
+  readCatalogH5Destinations(env);
   if (
-    provider !== 'AZURE_SERVICE_BUS' ||
     env.CATALOG_AMQP_ENABLED === 'true' ||
-    env.RABBITMQ_URL !== undefined
+    (env.CATALOG_AMQP_ENABLED !== undefined &&
+      env.CATALOG_AMQP_ENABLED !== 'false')
   )
     throw new Error(
       'Proveedor H5 inválido o RabbitMQ habilitado en el mismo proceso.',

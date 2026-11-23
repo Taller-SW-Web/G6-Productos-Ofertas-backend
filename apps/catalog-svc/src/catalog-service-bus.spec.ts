@@ -5,6 +5,7 @@ import {
   CatalogServiceBus,
   createCatalogServiceBus,
 } from './catalog-service-bus.js';
+import { readCatalogH5Destinations } from './catalog-messaging.config.js';
 
 function outgoing(): CatalogEnvelope {
   const timestamp = new Date().toISOString();
@@ -29,6 +30,30 @@ function outgoing(): CatalogEnvelope {
 describe('Catalog Service Bus candidate', () => {
   it('defaults to the existing provider and refuses simultaneous activation', () => {
     expect(createCatalogServiceBus({})).toBeUndefined();
+    expect(
+      createCatalogServiceBus({
+        MESSAGING_PROVIDER: 'RABBITMQ',
+        CATALOG_H5_DESTINATIONS: 'g6.taxonomy.from.catalog',
+      }),
+    ).toBeUndefined();
+    expect(readCatalogH5Destinations({})).toEqual([]);
+    expect(
+      readCatalogH5Destinations({
+        CATALOG_H5_DESTINATIONS:
+          ' g6.promotions.from.catalog, g6.combos.from.catalog ',
+      }),
+    ).toEqual(['g6.promotions.from.catalog', 'g6.combos.from.catalog']);
+    expect(() =>
+      readCatalogH5Destinations({
+        CATALOG_H5_DESTINATIONS: 'g6.promotions.from.catalog,other.queue',
+      }),
+    ).toThrow('destinos no autorizados');
+    expect(() =>
+      readCatalogH5Destinations({
+        CATALOG_H5_DESTINATIONS:
+          'g6.promotions.from.catalog,g6.promotions.from.catalog',
+      }),
+    ).toThrow('destinos no autorizados');
     expect(() =>
       createCatalogServiceBus({
         MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
