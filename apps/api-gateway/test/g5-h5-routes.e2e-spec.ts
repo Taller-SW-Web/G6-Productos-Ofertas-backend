@@ -93,6 +93,49 @@ describe('G5 H5 routes behind authenticated Gateway opt-in', () => {
     );
   });
 
+  it('forwards all four operations only for their exact G7 client and scope', async () => {
+    settings.g5H5Enabled = true;
+    for (const route of G5_H5_ROUTES) {
+      const successStatus = Number(
+        Object.keys(route.responses).find(
+          (status) => Number(status) >= 200 && Number(status) < 300,
+        ),
+      );
+      upstream.mockResolvedValue(Response.json({}, { status: successStatus }));
+      const path = route.path.replace(
+        /\{[^}]+\}/g,
+        '11111111-1111-4111-8111-111111111111',
+      );
+      const client = request(app.getHttpServer());
+      const send =
+        route.method === 'POST' ? client.post(path) : client.get(path);
+      const operationToken = token(route.scope!);
+      if (route.method === 'POST')
+        await send
+          .set('Authorization', `Bearer ${operationToken}`)
+          .set('Idempotency-Key', '11111111-1111-4111-8111-111111111111')
+          .send({})
+          .expect(successStatus);
+      else
+        await send
+          .set('Authorization', `Bearer ${operationToken}`)
+          .expect(successStatus);
+
+      const unauthorizedClient = request(app.getHttpServer());
+      const wrongClientRequest =
+        route.method === 'POST'
+          ? unauthorizedClient.post(path)
+          : unauthorizedClient.get(path);
+      await wrongClientRequest
+        .set(
+          'Authorization',
+          `Bearer ${signed.token({ sub: 'modulo-marketplace', scope: route.scope })}`,
+        )
+        .expect(403);
+    }
+    expect(upstream).toHaveBeenCalledTimes(4);
+  });
+
   it('insists on each operation scope and never proxies the private Inventory reader', async () => {
     settings.g5H5Enabled = true;
     for (const route of G5_H5_ROUTES) {

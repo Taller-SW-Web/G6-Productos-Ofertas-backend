@@ -30,9 +30,14 @@ const issuer = 'https://isolated.test/issuer';
 const commercial = '/api/v1/inventario/disponibilidad/comercial';
 const verify = `${commercial}/verificar`;
 const locationId = 'a1ed4218-6d13-4df0-ae43-3379c1e7f932';
+const secondLocationId = 'b2ed4218-6d13-4df0-ae43-3379c1e7f932';
+const inactiveLocationId = 'c3ed4218-6d13-4df0-ae43-3379c1e7f932';
 const enoughSku = 'GATEWAY-E2E-ENOUGH';
 const shortSku = 'GATEWAY-E2E-SHORT';
 const missingSku = 'GATEWAY-E2E-MISSING';
+const exhaustedSku = 'GATEWAY-E2E-EXHAUSTED';
+const inactiveSku = 'GATEWAY-E2E-INACTIVE';
+const humanSub = 'd4ed4218-6d13-4df0-ae43-3379c1e7f932';
 const performanceEnabled = process.env.G6_PERFORMANCE_HTTP === '1';
 const performanceOutput = resolve(
   process.env.G6_PERFORMANCE_OUTPUT ?? '.ci/performance',
@@ -121,6 +126,8 @@ run('Gateway → Inventory HTTP real → PostgreSQL 17 (JWT RS256 fixture)', () 
       aud: ['api-productos'],
       scope,
     });
+  const humanToken = (roles: string[] = ['GESTOR_COMERCIAL']) =>
+    signed.token({ sub: humanSub, tipo: 'acceso', roles });
 
   const input = (sku: string, quantity = 2) => ({
     channel_id: 'MARKETPLACE',
@@ -251,13 +258,17 @@ run('Gateway → Inventory HTTP real → PostgreSQL 17 (JWT RS256 fixture)', () 
       GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA inventory TO inventory_gateway_e2e;
       GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA inventory TO inventory_gateway_e2e;
       INSERT INTO inventory.locations (id, code, name, type, active)
-      VALUES ('${locationId}', 'GATEWAY-E2E-LIMA', 'Gateway E2E Lima', 'ALMACEN', true);
+      VALUES ('${locationId}', 'GATEWAY-E2E-LIMA', 'Gateway E2E Lima', 'ALMACEN', true),
+             ('${secondLocationId}', 'GATEWAY-E2E-ALFA', 'Gateway E2E Alfa', 'ALMACEN', true),
+             ('${inactiveLocationId}', 'GATEWAY-E2E-ZETA', 'Gateway E2E Zeta', 'ALMACEN', false);
       INSERT INTO inventory.commercial_fulfillment_routes
         (channel_id, mode, fulfillment_ref, location_id, active)
       VALUES ('MARKETPLACE', 'ENVIO_DOMICILIO', 'E2E-LIMA', '${locationId}', true);
       INSERT INTO inventory.stock_balance (sku_id, location_id, on_hand, reserved, blocked)
       VALUES ('${enoughSku}', '${locationId}', 14, 1, 1),
-             ('${shortSku}', '${locationId}', 1, 0, 0);
+             ('${shortSku}', '${locationId}', 1, 0, 0),
+             ('${exhaustedSku}', '${secondLocationId}', 0, 0, 0),
+             ('${inactiveSku}', '${inactiveLocationId}', 0, 0, 0);
     `);
 
       const inventoryPort = await unusedPort();
@@ -314,6 +325,89 @@ run('Gateway → Inventory HTTP real → PostgreSQL 17 (JWT RS256 fixture)', () 
       items: [{ sku: enoughSku, status: 'DISPONIBLE' }],
     });
     expect(response.headers['x-correlation-id']).toBe(correlationId);
+  });
+
+  it('integra H01/H02 con PostgreSQL, paginación y rechazos de autorización', async () => {
+    const alerts = '/api/v1/inventario/alertas';
+    const locations = '/api/v1/inventario/ubicaciones';
+    const before = await snapshot();
+
+    await request(gateway).get(alerts).expect(401);
+    await request(gateway)
+      .get(alerts)
+      .set('Authorization', `Bearer ${token('modulo-productos')}`)
+      .expect(403);
+    await request(gateway)
+      .get(locations)
+      .set('Authorization', `Bearer ${humanToken([])}`)
+      .expect(403);
+
+    const alert = await request(gateway)
+      .get(`${alerts}?sku=${shortSku}`)
+      .set('Authorization', `Bearer ${humanToken()}`)
+      .expect(200);
+    expect(alert.body).toMatchObject({
+      items: [
+        {
+          sku: shortSku,
+          estado: 'STOCK_BAJO',
+          available: 1,
+          ubicacion: { locationId },
+        },
+      ],
+      meta: { pagina: 1, tamanio: 20, total: 1, totalPaginas: 1 },
+    });
+
+    const exhausted = await request(gateway)
+      .get(`${alerts}?estado=AGOTADO`)
+      .set('Authorization', `Bearer ${humanToken()}`)
+      .expect(200);
+    expect(
+      exhausted.body.items.map((item: { sku: string }) => item.sku),
+    ).toEqual([exhaustedSku]);
+    const invalid = await request(gateway)
+      .get(`${alerts}?estado=DISPONIBLE`)
+      .set('Authorization', `Bearer ${humanToken()}`)
+      .expect(400);
+    expect(invalid.body.code).toBe('VALIDACION');
+    expect(invalid.text).not.toMatch(
+      /postgres|inventory_gateway_e2e|PGPASSWORD/i,
+    );
+
+    const firstPage = await request(gateway)
+      .get(`${locations}?soloActivas=true&tamanio=1&pagina=1`)
+      .set('Authorization', `Bearer ${humanToken()}`)
+      .expect(200);
+    const secondPage = await request(gateway)
+      .get(`${locations}?soloActivas=true&tamanio=1&pagina=2`)
+      .set('Authorization', `Bearer ${humanToken()}`)
+      .expect(200);
+    expect(firstPage.body.items[0]).toMatchObject({
+      id: secondLocationId,
+      code: 'GATEWAY-E2E-ALFA',
+      active: true,
+    });
+    expect(secondPage.body.items[0]).toMatchObject({
+      id: locationId,
+      code: 'GATEWAY-E2E-LIMA',
+      active: true,
+    });
+    expect(firstPage.body.meta).toMatchObject({
+      pagina: 1,
+      tamanio: 1,
+      total: 2,
+      totalPaginas: 2,
+    });
+    const allLocations = await request(gateway)
+      .get(`${locations}?soloActivas=false`)
+      .set('Authorization', `Bearer ${humanToken()}`)
+      .expect(200);
+    expect(allLocations.body.items).toHaveLength(3);
+    expect(
+      allLocations.body.items.map((item: { code: string }) => item.code),
+    ).toEqual(['GATEWAY-E2E-ALFA', 'GATEWAY-E2E-LIMA', 'GATEWAY-E2E-ZETA']);
+
+    expect(await snapshot()).toBe(before);
   });
 
   it.skipIf(!performanceEnabled)(
