@@ -1,0 +1,1019 @@
+{
+  "docsSha": "354f5a93e4ec03ca5f9262a3767911c8c9211638",
+  "gatewaySha": "85a7894a817aaeede26e5e45fa700de104454474",
+  "privateOperationIds": [
+    "filtrarSkusVendiblesInterno",
+    "obtenerContenidoCargaMasivaInternoH5",
+    "obtenerContextoSku",
+    "obtenerContextosSkuLote",
+    "obtenerEvidenciaReservaCuponInterno"
+  ],
+  "excludedUncontractedLegacyOperationIds": [
+    "obtenerDefinicionPrecioProductoAdministracion",
+    "obtenerDefinicionPrecioSkuAdministracion"
+  ],
+  "g5EnabledByDefault": false,
+  "operations": [
+    {
+      "operationId": "activarCupon",
+      "method": "POST",
+      "path": "/cupones/{cuponId}/activar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "activarProducto",
+      "method": "POST",
+      "path": "/productos/{productoId}/activar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "activarPromocion",
+      "method": "POST",
+      "path": "/promociones/{promocionId}/activar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "activarReglaRecomendacion",
+      "method": "POST",
+      "path": "/recomendaciones/reglas/{reglaId}/activar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "activarVariante",
+      "method": "POST",
+      "path": "/productos/{productoId}/variantes/{variantId}/activar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "actualizarAsociacionTipoCaracteristica",
+      "method": "PATCH",
+      "path": "/tipos-producto/{tipoProductoId}/caracteristicas/{caracteristicaId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "actualizarCaracteristica",
+      "method": "PATCH",
+      "path": "/caracteristicas/{caracteristicaId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "actualizarCategoria",
+      "method": "PATCH",
+      "path": "/categorias/{categoriaId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "actualizarCombo",
+      "method": "PATCH",
+      "path": "/combos/{comboId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "actualizarCupon",
+      "method": "PATCH",
+      "path": "/cupones/{cuponId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "actualizarMarca",
+      "method": "PATCH",
+      "path": "/marcas/{marcaId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "actualizarPrecioBaseProducto",
+      "method": "PATCH",
+      "path": "/precios/productos/{productoId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "actualizarPrecioSku",
+      "method": "PATCH",
+      "path": "/precios/skus/{sku}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "actualizarProducto",
+      "method": "PATCH",
+      "path": "/productos/{productoId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "actualizarPromocion",
+      "method": "PATCH",
+      "path": "/promociones/{promocionId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "actualizarReglaRecomendacion",
+      "method": "PATCH",
+      "path": "/recomendaciones/reglas/{reglaId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "actualizarSeoCategoria",
+      "method": "PATCH",
+      "path": "/categorias/{categoriaId}/seo",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "actualizarUmbralGlobal",
+      "method": "PUT",
+      "path": "/inventario/umbrales/global",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "actualizarValorCaracteristica",
+      "method": "PATCH",
+      "path": "/caracteristicas/{caracteristicaId}/valores/{valorId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "actualizarVariante",
+      "method": "PATCH",
+      "path": "/productos/{productoId}/variantes/{variantId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "asociarCaracteristicaTipoProducto",
+      "method": "POST",
+      "path": "/tipos-producto/{tipoProductoId}/caracteristicas",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "conciliarImportacionGeneralPorCorrelacion",
+      "method": "GET",
+      "path": "/carga-masiva/productos/importaciones/por-correlacion/{correlationId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "conciliarVentaOffline",
+      "method": "POST",
+      "path": "/inventario/conciliaciones-offline",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "confirmarReserva",
+      "method": "POST",
+      "path": "/inventario/reservas/{reservaId}/confirmar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "consultarDatosFisicos",
+      "method": "POST",
+      "path": "/productos/datos-fisicos/consulta",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "consultarDisponibilidad",
+      "method": "GET",
+      "path": "/inventario/disponibilidad",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "consultarDisponibilidadCombo",
+      "method": "GET",
+      "path": "/combos/{comboId}/disponibilidad",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "consultarDisponibilidadComercial",
+      "method": "GET",
+      "path": "/inventario/disponibilidad/comercial",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "consultarOperacionInventario",
+      "method": "GET",
+      "path": "/inventario/operaciones/{operationId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "consultarPrecios",
+      "method": "GET",
+      "path": "/precios",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "crearCaracteristica",
+      "method": "POST",
+      "path": "/caracteristicas",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "crearCategoria",
+      "method": "POST",
+      "path": "/categorias",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "crearCombo",
+      "method": "POST",
+      "path": "/combos",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "crearComboAdministracion",
+      "method": "POST",
+      "path": "/combos/administracion",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "crearCupon",
+      "method": "POST",
+      "path": "/cupones",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "crearExportacionAuditoriaPrecios",
+      "method": "POST",
+      "path": "/auditoria-precios/exportaciones",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "crearExportacionGeneralProductos",
+      "method": "POST",
+      "path": "/carga-masiva/productos/exportaciones",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "crearImportacionGeneralProductos",
+      "method": "POST",
+      "path": "/carga-masiva/productos/importaciones",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "crearImportacionPrecios",
+      "method": "POST",
+      "path": "/precios/importaciones",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "crearMarca",
+      "method": "POST",
+      "path": "/marcas",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "crearProducto",
+      "method": "POST",
+      "path": "/productos",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "crearPromocion",
+      "method": "POST",
+      "path": "/promociones",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "crearReglaRecomendacion",
+      "method": "POST",
+      "path": "/recomendaciones/reglas",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "crearTipoProducto",
+      "method": "POST",
+      "path": "/tipos-producto",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "crearValorCaracteristica",
+      "method": "POST",
+      "path": "/caracteristicas/{caracteristicaId}/valores",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "crearVariante",
+      "method": "POST",
+      "path": "/productos/{productoId}/variantes",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "desactivarCaracteristica",
+      "method": "POST",
+      "path": "/caracteristicas/{caracteristicaId}/desactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "desactivarCombo",
+      "method": "POST",
+      "path": "/combos/{comboId}/desactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "desactivarCupon",
+      "method": "POST",
+      "path": "/cupones/{cuponId}/desactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "desactivarProducto",
+      "method": "POST",
+      "path": "/productos/{productoId}/desactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "desactivarPromocion",
+      "method": "POST",
+      "path": "/promociones/{promocionId}/desactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "desactivarReglaRecomendacion",
+      "method": "POST",
+      "path": "/recomendaciones/reglas/{reglaId}/desactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "desactivarVariante",
+      "method": "POST",
+      "path": "/productos/{productoId}/variantes/{variantId}/desactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "descargarExportacionAuditoriaPrecios",
+      "method": "GET",
+      "path": "/auditoria-precios/exportaciones/{exportId}/archivo",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "descargarExportacionGeneralProductos",
+      "method": "GET",
+      "path": "/carga-masiva/productos/exportaciones/{exportId}/archivo",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "descargarPlantillaProductos",
+      "method": "GET",
+      "path": "/carga-masiva/productos/plantilla",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "descargarReporteImportacionGeneral",
+      "method": "GET",
+      "path": "/carga-masiva/productos/importaciones/{batchId}/reporte",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "descargarReporteImportacionPrecios",
+      "method": "GET",
+      "path": "/precios/importaciones/{batchId}/reporte",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "eliminarUmbralSku",
+      "method": "DELETE",
+      "path": "/inventario/umbrales/skus/{sku}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "establecerUmbralSku",
+      "method": "PUT",
+      "path": "/inventario/umbrales/skus/{sku}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "evaluarPromociones",
+      "method": "POST",
+      "path": "/promociones/evaluar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "liberarReserva",
+      "method": "POST",
+      "path": "/inventario/reservas/{reservaId}/liberar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarAuditoriaPrecios",
+      "method": "GET",
+      "path": "/auditoria-precios",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarAuditoriaPreciosAdministracion",
+      "method": "GET",
+      "path": "/auditoria-precios/administracion",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarCaracteristicas",
+      "method": "GET",
+      "path": "/caracteristicas",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarCategorias",
+      "method": "GET",
+      "path": "/categorias",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarCategoriasAdmin",
+      "method": "GET",
+      "path": "/categorias/administracion",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarCombosAdmin",
+      "method": "GET",
+      "path": "/combos",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarCupones",
+      "method": "GET",
+      "path": "/cupones",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarHistorialSlugCategoria",
+      "method": "GET",
+      "path": "/categorias/{categoriaId}/seo/historial",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarMarcas",
+      "method": "GET",
+      "path": "/marcas",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarMarcasAdmin",
+      "method": "GET",
+      "path": "/marcas/administracion",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarProductos",
+      "method": "GET",
+      "path": "/productos",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarProductosAdministracion",
+      "method": "GET",
+      "path": "/productos/administracion",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarProgramacionesPrecioProducto",
+      "method": "GET",
+      "path": "/precios/productos/{productoId}/programaciones",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarProgramacionesPrecioSku",
+      "method": "GET",
+      "path": "/precios/skus/{sku}/programaciones",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarPromociones",
+      "method": "GET",
+      "path": "/promociones",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarPromocionesAdmin",
+      "method": "GET",
+      "path": "/promociones/administracion",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarReglasRecomendacion",
+      "method": "GET",
+      "path": "/recomendaciones/reglas",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarSaldosFisicosAdministracion",
+      "method": "GET",
+      "path": "/inventario/administracion/saldos",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarTiposProducto",
+      "method": "GET",
+      "path": "/tipos-producto",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarTrasladosInventario",
+      "method": "GET",
+      "path": "/inventario/traslados",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarValoresCaracteristica",
+      "method": "GET",
+      "path": "/caracteristicas/{caracteristicaId}/valores",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarVariantesProducto",
+      "method": "GET",
+      "path": "/productos/{productoId}/variantes",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerArbolCategoriasAdmin",
+      "method": "GET",
+      "path": "/categorias/arbol",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerAuditoriaPrecio",
+      "method": "GET",
+      "path": "/auditoria-precios/{auditId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerAuditoriaPrecioAdministracion",
+      "method": "GET",
+      "path": "/auditoria-precios/administracion/{auditId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerCaracteristica",
+      "method": "GET",
+      "path": "/caracteristicas/{caracteristicaId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerCategoriaAdmin",
+      "method": "GET",
+      "path": "/categorias/{categoriaId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerCombo",
+      "method": "GET",
+      "path": "/combos/{comboId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerCuponAdmin",
+      "method": "GET",
+      "path": "/cupones/{cuponId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerDashboardInventario",
+      "method": "GET",
+      "path": "/inventario/dashboard",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerEsquemaTipoProducto",
+      "method": "GET",
+      "path": "/tipos-producto/{tipoProductoId}/caracteristicas",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerExportacionAuditoriaPrecios",
+      "method": "GET",
+      "path": "/auditoria-precios/exportaciones/{exportId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerExportacionGeneralProductos",
+      "method": "GET",
+      "path": "/carga-masiva/productos/exportaciones/{exportId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerImportacionGeneralProductos",
+      "method": "GET",
+      "path": "/carga-masiva/productos/importaciones/{batchId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerImportacionPrecios",
+      "method": "GET",
+      "path": "/precios/importaciones/{batchId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerMarcaAdmin",
+      "method": "GET",
+      "path": "/marcas/{marcaId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerOperacionMaestra",
+      "method": "GET",
+      "path": "/taxonomia/operaciones/{operationId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerPrecioBaseProducto",
+      "method": "GET",
+      "path": "/precios/productos/{productoId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerPrecioSku",
+      "method": "GET",
+      "path": "/precios/skus/{sku}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerPreparacionProducto",
+      "method": "GET",
+      "path": "/productos/{productoId}/preparacion",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerProducto",
+      "method": "GET",
+      "path": "/productos/{productoId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerProductoAdministracion",
+      "method": "GET",
+      "path": "/productos/administracion/{productoId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerProductoPorSlug",
+      "method": "GET",
+      "path": "/productos/por-slug/{slug}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerPromocionAdmin",
+      "method": "GET",
+      "path": "/promociones/{promocionId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerRecomendaciones",
+      "method": "GET",
+      "path": "/recomendaciones",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerReglaRecomendacion",
+      "method": "GET",
+      "path": "/recomendaciones/reglas/{reglaId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerSeoCategoriaAdmin",
+      "method": "GET",
+      "path": "/categorias/{categoriaId}/seo",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerSeoPorSlug",
+      "method": "GET",
+      "path": "/seo/{slug}",
+      "secured": false,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerTipoProducto",
+      "method": "GET",
+      "path": "/tipos-producto/{tipoProductoId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerTrasladoInventario",
+      "method": "GET",
+      "path": "/inventario/traslados/{trasladoId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerUmbralesInventario",
+      "method": "GET",
+      "path": "/inventario/umbrales",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerVariante",
+      "method": "GET",
+      "path": "/productos/{productoId}/variantes/{variantId}",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "prevalidarImportacionPrecios",
+      "method": "POST",
+      "path": "/precios/importaciones/prevalidar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "programarPrecioBaseProducto",
+      "method": "POST",
+      "path": "/precios/productos/{productoId}/programaciones",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "programarPrecioSku",
+      "method": "POST",
+      "path": "/precios/skus/{sku}/programaciones",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "reactivarCaracteristica",
+      "method": "POST",
+      "path": "/caracteristicas/{caracteristicaId}/reactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "reactivarCategoria",
+      "method": "POST",
+      "path": "/categorias/{categoriaId}/reactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "reactivarMarca",
+      "method": "POST",
+      "path": "/marcas/{marcaId}/reactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "reactivarProducto",
+      "method": "POST",
+      "path": "/productos/{productoId}/reactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "reactivarTipoProducto",
+      "method": "POST",
+      "path": "/tipos-producto/{tipoProductoId}/reactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "reactivarValorCaracteristica",
+      "method": "POST",
+      "path": "/caracteristicas/{caracteristicaId}/valores/{valorId}/reactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "reactivarVariante",
+      "method": "POST",
+      "path": "/productos/{productoId}/variantes/{variantId}/reactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "reanudarImportacionGeneral",
+      "method": "POST",
+      "path": "/carga-masiva/productos/importaciones/{batchId}/reanudar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "registrarRecepcionTrasladoInventario",
+      "method": "POST",
+      "path": "/inventario/traslados/{trasladoId}/recepciones",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "reintegrarInventario",
+      "method": "POST",
+      "path": "/inventario/reintegros",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "reintentarPreparacionProducto",
+      "method": "POST",
+      "path": "/productos/{productoId}/preparacion/reintentar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "reintentarPreparacionVariante",
+      "method": "POST",
+      "path": "/productos/{productoId}/variantes/{variantId}/preparacion/reintentar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "reportarIncidenciaInventario",
+      "method": "POST",
+      "path": "/inventario/incidencias",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "resolverCodigoBarras",
+      "method": "POST",
+      "path": "/productos/codigos-barras/resolver",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "resolverIncidenciaInventario",
+      "method": "POST",
+      "path": "/inventario/incidencias/{incidenciaId}/resolver",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "resolverSkusAdministracion",
+      "method": "POST",
+      "path": "/productos/administracion/skus/resolver",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "resolverSlugAnterior",
+      "method": "GET",
+      "path": "/seo/resoluciones/{slugAnterior}",
+      "secured": false,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "resolverSlugCategoriaCreacion",
+      "method": "POST",
+      "path": "/seo/categorias/slug/resolver",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "solicitarDesactivacionCategoria",
+      "method": "POST",
+      "path": "/categorias/{categoriaId}/desactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "solicitarDesactivacionMarca",
+      "method": "POST",
+      "path": "/marcas/{marcaId}/desactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "solicitarDesactivacionTipoProducto",
+      "method": "POST",
+      "path": "/tipos-producto/{tipoProductoId}/desactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "solicitarDesactivacionValorCaracteristica",
+      "method": "POST",
+      "path": "/caracteristicas/{caracteristicaId}/valores/{valorId}/desactivar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "solicitarDesasociacionTipoCaracteristica",
+      "method": "POST",
+      "path": "/tipos-producto/{tipoProductoId}/caracteristicas/{caracteristicaId}/desasociar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "solicitarReserva",
+      "method": "POST",
+      "path": "/inventario/reservas",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "validarCupon",
+      "method": "POST",
+      "path": "/cupones/validar",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "verificarCantidadComercial",
+      "method": "POST",
+      "path": "/inventario/disponibilidad/comercial/verificar",
+      "secured": true,
+      "g5OptIn": false
+    }
+  ]
+}
