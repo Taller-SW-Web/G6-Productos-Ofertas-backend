@@ -1,11 +1,157 @@
-import { ServiceBusClient } from '@azure/service-bus';
-import { TaxonomyServiceBusRuntime } from './taxonomy-service-bus.runtime.js';
+import { randomUUID } from 'node:crypto';
+import {
+  ServiceBusClient,
+  type ServiceBusReceivedMessage,
+} from '@azure/service-bus';
+import {
+  TaxonomyServiceBusRuntime,
+  receiveTaxonomyDelivery,
+} from './taxonomy-service-bus.runtime.js';
+import { TaxonomyMessageIdentityConflict } from '../persistence/taxonomy-message.store.js';
 import {
   catalogTaxonomyQueue,
+  readTaxonomyServiceBus,
   taxonomyCatalogQueue,
 } from '../config/service-bus.js';
 
 vi.mock('@azure/service-bus', () => ({ ServiceBusClient: vi.fn() }));
+
+describe('Taxonomy H5 feature flags', () => {
+  const base = {
+    MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
+    TAXONOMY_SERVICE_BUS_ENABLED: 'true',
+    SERVICE_BUS_NAMESPACE_FQDN: 'g6-taxonomy-local.servicebus.windows.net',
+  };
+  it('keeps both directions off by default and allows each direction to be disabled independently', () => {
+    expect(readTaxonomyServiceBus({})).toBeUndefined();
+    expect(readTaxonomyServiceBus(base)).toMatchObject({
+      enabled: false,
+      sendEnabled: false,
+      receiveEnabled: false,
+    });
+    expect(
+      readTaxonomyServiceBus({
+        ...base,
+        TAXONOMY_SERVICE_BUS_RECEIVE_ENABLED: 'true',
+      }),
+    ).toMatchObject({ sendEnabled: false, receiveEnabled: true });
+    expect(
+      readTaxonomyServiceBus({
+        ...base,
+        TAXONOMY_SERVICE_BUS_SEND_ENABLED: 'true',
+      }),
+    ).toMatchObject({ sendEnabled: true, receiveEnabled: false });
+    expect(
+      readTaxonomyServiceBus({
+        ...base,
+        TAXONOMY_SERVICE_BUS_ENABLED: 'false',
+      }),
+    ).toMatchObject({
+      enabled: false,
+      sendEnabled: false,
+      receiveEnabled: false,
+    });
+    expect(() =>
+      readTaxonomyServiceBus({
+        ...base,
+        TAXONOMY_SERVICE_BUS_ENABLED: 'false',
+        TAXONOMY_SERVICE_BUS_SEND_ENABLED: 'true',
+      }),
+    ).toThrow('TAXONOMY_SERVICE_BUS_CONFIGURATION_INVALID');
+  });
+});
+
+describe('Taxonomy R09 settlement', () => {
+  function fixture() {
+    const body = {
+      message_id: randomUUID(),
+      correlation_id: randomUUID(),
+      operation_id: randomUUID(),
+      occurred_at: new Date().toISOString(),
+      schema_version: 1,
+      producer: 'catalog-svc',
+      kind: 'result',
+      name: 'catalog.master.deactivation.checked',
+      data: {
+        entity_type: 'BRAND',
+        entity_id: randomUUID(),
+        version: 1,
+        result: 'IN_USE',
+      },
+    };
+    const message = {
+      body: Buffer.from(JSON.stringify(body)),
+      contentType: 'application/json',
+      messageId: body.message_id,
+      correlationId: body.correlation_id,
+      subject: body.name,
+    } as ServiceBusReceivedMessage;
+    const receiver = {
+      completeMessage: vi.fn(),
+      abandonMessage: vi.fn(),
+      deadLetterMessage: vi.fn(),
+    };
+    return { message, receiver };
+  }
+
+  it('sends a conflicting message identity to DLQ without completing or retrying it', async () => {
+    const { message, receiver } = fixture();
+    const consumir = vi
+      .fn()
+      .mockRejectedValue(new TaxonomyMessageIdentityConflict());
+    expect(await receiveTaxonomyDelivery({ consumir }, receiver, message)).toBe(
+      true,
+    );
+    expect(receiver.deadLetterMessage).toHaveBeenCalledWith(
+      message,
+      expect.objectContaining({
+        deadLetterReason: 'TAXONOMY_MESSAGE_ID_CONFLICT',
+      }),
+    );
+    expect(receiver.completeMessage).not.toHaveBeenCalled();
+    expect(receiver.abandonMessage).not.toHaveBeenCalled();
+  });
+
+  it('abandons transient database failures without moving the message to DLQ', async () => {
+    const { message, receiver } = fixture();
+    const consumir = vi
+      .fn()
+      .mockRejectedValue(new Error('database unavailable'));
+    expect(await receiveTaxonomyDelivery({ consumir }, receiver, message)).toBe(
+      false,
+    );
+    expect(receiver.abandonMessage).toHaveBeenCalledWith(message);
+    expect(receiver.deadLetterMessage).not.toHaveBeenCalled();
+    expect(receiver.completeMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'messageId',
+    'correlationId',
+    'subject',
+    'contentType',
+    'oversize',
+  ] as const)(
+    'rejects invalid %s before invoking the handler',
+    async (invalid) => {
+      const { message, receiver } = fixture();
+      const altered = { ...message };
+      if (invalid === 'messageId') altered.messageId = randomUUID();
+      if (invalid === 'correlationId') altered.correlationId = randomUUID();
+      if (invalid === 'subject') altered.subject = 'wrong.event';
+      if (invalid === 'contentType') altered.contentType = 'text/plain';
+      if (invalid === 'oversize') altered.body = Buffer.alloc(256 * 1024 + 1);
+      const consumir = vi.fn();
+      expect(
+        await receiveTaxonomyDelivery({ consumir }, receiver, altered),
+      ).toBe(true);
+      expect(consumir).not.toHaveBeenCalled();
+      expect(receiver.deadLetterMessage).toHaveBeenCalledOnce();
+      expect(receiver.completeMessage).not.toHaveBeenCalled();
+      expect(receiver.abandonMessage).not.toHaveBeenCalled();
+    },
+  );
+});
 
 describe('Taxonomy H5 transport readiness', () => {
   let runtime: TaxonomyServiceBusRuntime | undefined;
@@ -16,6 +162,48 @@ describe('Taxonomy H5 transport readiness', () => {
     runtime = undefined;
     vi.useRealTimers();
     vi.resetAllMocks();
+  });
+
+  it.each([
+    { sendEnabled: true, receiveEnabled: false },
+    { sendEnabled: false, receiveEnabled: true },
+  ])('starts only the enabled direction: %j', async (flags) => {
+    const close = vi.fn().mockResolvedValue(undefined);
+    const createReceiver = vi.fn().mockReturnValue({
+      peekMessages: vi.fn().mockResolvedValue([]),
+      subscribe: vi.fn().mockReturnValue({ close }),
+      close,
+    });
+    const createSender = vi.fn().mockReturnValue({
+      createMessageBatch: vi.fn().mockResolvedValue({}),
+      close,
+    });
+    vi.mocked(ServiceBusClient).mockImplementation(function () {
+      return {
+        createReceiver,
+        createSender,
+        close,
+      } as unknown as ServiceBusClient;
+    });
+    runtime = new TaxonomyServiceBusRuntime(
+      {
+        namespace: 'g6-taxonomy-local.servicebus.windows.net',
+        clientId: undefined,
+        enabled: true,
+        ...flags,
+      },
+      {
+        verifyServiceBusStorage: vi.fn().mockResolvedValue(undefined),
+        claimServiceBusDelivery: vi.fn().mockResolvedValue(undefined),
+        finishServiceBusDelivery: vi.fn(),
+        consumir: vi.fn(),
+      },
+    );
+    runtime.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(createSender).toHaveBeenCalledTimes(flags.sendEnabled ? 1 : 0);
+    expect(createReceiver).toHaveBeenCalledTimes(flags.receiveEnabled ? 1 : 0);
+    expect(runtime.available).toBe(true);
   });
 
   it('checks storage and both links while idle and recovers in the same process', async () => {
@@ -43,6 +231,8 @@ describe('Taxonomy H5 transport readiness', () => {
       {
         namespace,
         enabled: true,
+        sendEnabled: true,
+        receiveEnabled: true,
         clientId: '12345678-abcd-4321-9876-abcdef123456',
       },
       {

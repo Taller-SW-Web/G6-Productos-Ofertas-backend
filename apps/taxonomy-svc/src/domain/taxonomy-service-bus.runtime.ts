@@ -16,6 +16,7 @@ import {
 } from '../config/service-bus.js';
 import {
   parseChecked,
+  TaxonomyMessageIdentityConflict,
   type TaxonomyMessageStore,
 } from '../persistence/taxonomy-message.store.js';
 
@@ -144,7 +145,15 @@ export async function receiveTaxonomyDelivery(
   }
   try {
     await store.consumir(checked);
-  } catch {
+  } catch (error) {
+    if (error instanceof TaxonomyMessageIdentityConflict) {
+      await receiver.deadLetterMessage(message, {
+        deadLetterReason: 'TAXONOMY_MESSAGE_ID_CONFLICT',
+        deadLetterErrorDescription:
+          'Message identity conflicts with persisted inbox',
+      });
+      return true;
+    }
     await receiver.abandonMessage(message);
     return false;
   }
@@ -178,18 +187,22 @@ export class TaxonomyServiceBusRuntime {
         : new DefaultAzureCredential(),
       { retryOptions: { maxRetries: 0, timeoutInMs: 5000 } },
     );
-    const receiver = this.client.createReceiver(catalogTaxonomyQueue, {
-      receiveMode: 'peekLock',
-      skipParsingBodyAsJson: true,
-      maxAutoLockRenewalDurationInMs: 60_000,
-    });
+    const receiver = this.config.receiveEnabled
+      ? this.client.createReceiver(catalogTaxonomyQueue, {
+          receiveMode: 'peekLock',
+          skipParsingBodyAsJson: true,
+          maxAutoLockRenewalDurationInMs: 60_000,
+        })
+      : undefined;
     this.receiver = receiver;
-    const sender = this.client.createSender(taxonomyCatalogQueue);
+    const sender = this.config.sendEnabled
+      ? this.client.createSender(taxonomyCatalogQueue)
+      : undefined;
     this.sender = sender;
-    this.subscription = receiver.subscribe(
+    this.subscription = receiver?.subscribe(
       {
         processMessage: (message) => {
-          const task = receiveTaxonomyDelivery(this.store, receiver, message)
+          const task = receiveTaxonomyDelivery(this.store, receiver!, message)
             .then((settled) => {
               if (!settled) this.markUnavailable();
             })
@@ -207,15 +220,17 @@ export class TaxonomyServiceBusRuntime {
       this.tick = this.store
         .verifyServiceBusStorage()
         .then(() =>
-          receiver.peekMessages(1, { abortSignal: AbortSignal.timeout(5000) }),
+          receiver?.peekMessages(1, { abortSignal: AbortSignal.timeout(5000) }),
         )
         .then(() =>
-          sender.createMessageBatch({
+          sender?.createMessageBatch({
             maxSizeInBytes: 256 * 1024,
             abortSignal: AbortSignal.timeout(5000),
           }),
         )
-        .then(() => publishTaxonomyDelivery(this.store, sender))
+        .then(() =>
+          sender ? publishTaxonomyDelivery(this.store, sender) : true,
+        )
         .then((ready) => {
           this.available = ready && this.failures === failures && !this.stopped;
         })

@@ -324,6 +324,114 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
       );
     });
 
+    it('executes the read-only preflight using the non-owner runtime role', async () => {
+      const client = await runtime.connect();
+      try {
+        const preflight = await readFile(
+          'apps/taxonomy-svc/migrations-candidate/h5/preflight-readonly.sql',
+          'utf8',
+        );
+        await expect(client.query(preflight)).resolves.toBeDefined();
+        expect(
+          (await client.query('SELECT current_user AS role')).rows[0].role,
+        ).toBe('taxonomy_app');
+      } finally {
+        client.release();
+      }
+    });
+
+    it('creates one delivery for each of the six R18 routes under the runtime role', async () => {
+      const client = await runtime.connect();
+      try {
+        await client.query('BEGIN');
+        const ids: string[] = [];
+        for (const name of [
+          'taxonomy.category.updated',
+          'taxonomy.product-type-schema.changed',
+          'taxonomy.characteristic-value.updated',
+          'taxonomy.master.deactivation.check.requested',
+          'taxonomy.master.deactivated',
+          'taxonomy.master.deactivation.rejected',
+        ]) {
+          const result = await insert(client, name);
+          ids.push(result.rows[0].message_id as string);
+        }
+        const deliveries = await client.query(
+          'SELECT message_id, destination FROM taxonomy.outbox_delivery WHERE message_id = ANY($1::uuid[])',
+          [ids],
+        );
+        expect(deliveries.rows).toHaveLength(6);
+        expect(new Set(deliveries.rows.map((row) => row.message_id)).size).toBe(
+          6,
+        );
+        expect(
+          deliveries.rows.every(
+            (row) => row.destination === 'g6.catalog.from.taxonomy',
+          ),
+        ).toBe(true);
+      } finally {
+        await client.query('ROLLBACK');
+        client.release();
+      }
+    });
+
+    it('claims independent deliveries concurrently without assigning the same row twice', async () => {
+      const first = (await insert(runtime)).rows[0];
+      const second = (await insert(runtime)).rows[0];
+      const claims = await Promise.all([
+        store.claimServiceBusDelivery(),
+        store.claimServiceBusDelivery(),
+      ]);
+      expect(claims.every(Boolean)).toBe(true);
+      expect(new Set(claims.map((claim) => claim?.messageId))).toEqual(
+        new Set([first.message_id, second.message_id]),
+      );
+      for (const claim of claims) {
+        if (!claim) throw new Error('CONCURRENT_CLAIM_MISSING');
+        expect(await store.finishServiceBusDelivery(claim, 'sent')).toBe(true);
+      }
+    });
+
+    it('rejects a stale lease token after another relay reclaims the delivery', async () => {
+      const inserted = (await insert(runtime)).rows[0];
+      const first = await store.claimServiceBusDelivery();
+      expect(first?.messageId).toBe(inserted.message_id);
+      if (!first) throw new Error('FIRST_CLAIM_MISSING');
+      await admin.query(
+        "UPDATE taxonomy.outbox_delivery SET lease_until=clock_timestamp() - interval '1 second' WHERE message_id=$1",
+        [inserted.message_id],
+      );
+      const second = await store.claimServiceBusDelivery();
+      if (!second) throw new Error('SECOND_CLAIM_MISSING');
+      expect(second.token).not.toBe(first.token);
+      expect(await store.finishServiceBusDelivery(first, 'sent')).toBe(false);
+      expect(await store.finishServiceBusDelivery(second, 'sent')).toBe(true);
+    });
+
+    it('rolls back an outbox fact when the runtime role cannot insert its delivery', async () => {
+      const before = (
+        await admin.query('SELECT count(*)::int AS total FROM taxonomy.outbox')
+      ).rows[0].total;
+      await admin.query(
+        'REVOKE INSERT ON taxonomy.outbox_delivery FROM taxonomy_app',
+      );
+      try {
+        await expect(insert(runtime)).rejects.toThrow(/permission denied/i);
+        expect(
+          (
+            await admin.query(
+              'SELECT count(*)::int AS total FROM taxonomy.outbox',
+            )
+          ).rows[0].total,
+        ).toBe(before);
+      } finally {
+        await admin.query(
+          'GRANT INSERT ON taxonomy.outbox_delivery TO taxonomy_app',
+        );
+      }
+      await store.verifyServiceBusStorage();
+    });
+
     it('round-trips a category deactivation through both outboxes and inboxes without publishing the reply in H4', async () => {
       const entityId = randomUUID();
       const operationId = randomUUID();
@@ -410,6 +518,39 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
       ).rejects.toThrow('settlement lost');
       await receiveTaxonomyDelivery(store, checkedReceiver, checkedDelivery);
       expect(checkedReceiver.completeMessage).toHaveBeenCalledTimes(2);
+      const changed = JSON.parse(JSON.stringify(response)) as {
+        data: { result: string };
+      };
+      changed.data.result = 'IN_USE';
+      const conflictDelivery = {
+        ...checkedDelivery,
+        body: Buffer.from(JSON.stringify(changed)),
+      };
+      const conflictReceiver = {
+        completeMessage: vi.fn(),
+        abandonMessage: vi.fn(),
+        deadLetterMessage: vi.fn(),
+      };
+      await receiveTaxonomyDelivery(store, conflictReceiver, conflictDelivery);
+      expect(conflictReceiver.deadLetterMessage).toHaveBeenCalledWith(
+        conflictDelivery,
+        expect.objectContaining({
+          deadLetterReason: 'TAXONOMY_MESSAGE_ID_CONFLICT',
+        }),
+      );
+      expect(conflictReceiver.completeMessage).not.toHaveBeenCalled();
+      expect(conflictReceiver.abandonMessage).not.toHaveBeenCalled();
+      expect(
+        (
+          await admin.query(
+            'SELECT count(*)::int AS total FROM taxonomy.inbox WHERE message_id=$1',
+            [response.message_id],
+          )
+        ).rows,
+      ).toEqual([{ total: 1 }]);
+      expect((await intents.obtenerOperacion(operationId))?.status).toBe(
+        'COMPLETED',
+      );
       const final = await store.claimServiceBusDelivery();
       if (!final) throw new Error('FINAL_NOT_ENQUEUED');
       expect(final.row.event_name).toBe('taxonomy.master.deactivated');
@@ -432,6 +573,167 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
           )
         ).rows,
       ).toEqual([{ is_blocking: false }]);
+    });
+
+    it('rejects a brand with an active Catalog SKU and completes after its reference is released', async () => {
+      const brand = randomUUID();
+      const product = randomUUID();
+      const sku = `sku-${product}`;
+      await admin.query(
+        'INSERT INTO taxonomy.brands (id,nombre) VALUES ($1,$2)',
+        [brand, `Brand ${brand}`],
+      );
+      const client = await admin.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          "INSERT INTO catalog.products (id,nombre,descripcion,categoria_id,tipo_producto_id,marca_id,sku_base,slug,tiene_variantes) VALUES ($1,'Producto','Fixture','category','type',$2,$3,$3,false)",
+          [product, brand, sku],
+        );
+        await client.query(
+          "INSERT INTO catalog.product_images (product_id,url) VALUES ($1,'https://example.test/image')",
+          [product],
+        );
+        await client.query(
+          'INSERT INTO catalog.sku_physical_profiles (sku_identity_id,peso_kg,largo_cm,ancho_cm,alto_cm) SELECT id,1,1,1,1 FROM catalog.sku_identity WHERE product_id=$1',
+          [product],
+        );
+        for (const dependency of ['PRICING', 'INVENTORY']) {
+          await client.query(
+            "INSERT INTO catalog.activation_checks (product_id,sku,dependency,operation_id,correlation_id,request_payload,state,result_payload,result_message_id) VALUES ($1,$2,$3,$4,$5,'{}','COMPLETED','{}',$6)",
+            [
+              product,
+              sku,
+              dependency,
+              randomUUID(),
+              randomUUID(),
+              randomUUID(),
+            ],
+          );
+        }
+        await client.query(
+          "UPDATE catalog.products SET estado='ACTIVO' WHERE id=$1",
+          [product],
+        );
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+
+      const runCheck = async (expected: 'IN_USE' | 'CLEAR') => {
+        const operationId = randomUUID();
+        const correlationId = randomUUID();
+        const version = Number(
+          (
+            await admin.query(
+              'SELECT taxonomy_version FROM taxonomy.brands WHERE id=$1',
+              [brand],
+            )
+          ).rows[0].taxonomy_version,
+        );
+        expect(
+          await intents.registrar({
+            entityType: 'BRAND',
+            entityId: brand,
+            operationId,
+            correlationId,
+            version,
+          }),
+        ).toBe('REGISTRADA');
+        const request = await store.claimServiceBusDelivery();
+        if (!request) throw new Error('BRAND_REQUEST_NOT_ENQUEUED');
+        expect(await store.finishServiceBusDelivery(request, 'sent')).toBe(
+          true,
+        );
+        expect(
+          await catalog.consume(request.row.payload as CatalogEnvelope, true),
+        ).toBe('APPLIED');
+        const publish = vi.fn(async () => undefined);
+        expect(
+          await relayCatalogDelivery(
+            catalogDb,
+            { publish },
+            taxonomyReplyQueue,
+          ),
+        ).toBe('CONFIRMED');
+        const response = publish.mock.calls[0]?.[1];
+        expect(response).toMatchObject({
+          operation_id: operationId,
+          data: { result: expected },
+        });
+        if (!response) throw new Error('BRAND_RESPONSE_NOT_ENQUEUED');
+        const delivery = {
+          body: Buffer.from(JSON.stringify(response)),
+          subject: response.name,
+          contentType: 'application/json',
+          messageId: response.message_id,
+          correlationId: response.correlation_id,
+        } as ServiceBusReceivedMessage;
+        const receiver = {
+          completeMessage: vi.fn(),
+          abandonMessage: vi.fn(),
+          deadLetterMessage: vi.fn(),
+        };
+        if (expected === 'CLEAR') {
+          const stale = JSON.parse(JSON.stringify(response)) as {
+            message_id: string;
+            data: { version: number };
+          };
+          stale.message_id = randomUUID();
+          stale.data.version = version + 1;
+          await receiveTaxonomyDelivery(store, receiver, {
+            ...delivery,
+            messageId: stale.message_id,
+            body: Buffer.from(JSON.stringify(stale)),
+          });
+          expect((await intents.obtenerOperacion(operationId))?.status).toBe(
+            'PENDING_DEACTIVATION',
+          );
+          expect(
+            (
+              await admin.query(
+                'SELECT result FROM taxonomy.inbox WHERE message_id=$1',
+                [stale.message_id],
+              )
+            ).rows,
+          ).toEqual([{ result: 'IGNORED' }]);
+          receiver.completeMessage.mockClear();
+        }
+        await receiveTaxonomyDelivery(store, receiver, delivery);
+        expect(receiver.completeMessage).toHaveBeenCalledOnce();
+        expect((await intents.obtenerOperacion(operationId))?.status).toBe(
+          expected === 'IN_USE' ? 'REJECTED' : 'COMPLETED',
+        );
+        const final = await store.claimServiceBusDelivery();
+        if (!final) throw new Error('BRAND_FINAL_NOT_ENQUEUED');
+        expect(
+          await catalog.consume(final.row.payload as CatalogEnvelope, true),
+        ).toBe('APPLIED');
+        expect(await store.finishServiceBusDelivery(final, 'sent')).toBe(true);
+      };
+      await runCheck('IN_USE');
+      expect(
+        (
+          await admin.query('SELECT estado FROM taxonomy.brands WHERE id=$1', [
+            brand,
+          ])
+        ).rows[0].estado,
+      ).toBe('ACTIVO');
+      await admin.query(
+        "UPDATE catalog.products SET estado='INACTIVO' WHERE id=$1",
+        [product],
+      );
+      await runCheck('CLEAR');
+      expect(
+        (
+          await admin.query('SELECT estado FROM taxonomy.brands WHERE id=$1', [
+            brand,
+          ])
+        ).rows[0].estado,
+      ).toBe('INACTIVO');
     });
 
     it('rolls back Inbox, barrier, Outbox and delivery when the Catalog marker or Inbox insert fails', async () => {
