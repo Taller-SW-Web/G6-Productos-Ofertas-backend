@@ -32,6 +32,7 @@ interface ContractSnapshot {
     >;
     internal: boolean;
     runtimeStatus: string | null;
+    errorCodesDeclared: boolean;
   }[];
 }
 
@@ -59,9 +60,15 @@ const legacyPricingOperationIds = [
   'obtenerDefinicionPrecioProductoAdministracion',
   'obtenerDefinicionPrecioSkuAdministracion',
 ];
-const missingPublicOperationIds = [
-  'conciliarImportacionGeneralPorCorrelacion',
-  ...pendingProviderOperationIds,
+const missingPublicOperationIds = [...pendingProviderOperationIds];
+const missingErrorCodeMetadataOperationIds = [
+  'listarSaldosFisicosAdministracion',
+  'listarAlertasOperativasInventario',
+  'listarUbicacionesInventario',
+  'listarTrasladosInventario',
+  'obtenerTrasladoInventario',
+  'filtrarSkusVendiblesInterno',
+  'obtenerEvidenciaReservaCuponInterno',
 ];
 const h5OperationIds = [
   'admitirConsumoCuponH5',
@@ -69,68 +76,6 @@ const h5OperationIds = [
   'obtenerOperacionCuponH5',
   'obtenerEstadoReservaH5',
 ];
-// Frozen classification for the current Gateway registry against this Docs
-// SHA. The #255 owner controls contract-routes.ts; do not silently absorb
-// these differences while that shared-file delta is under review.
-const classifiedMetadataMismatches = [
-  { operationId: 'obtenerProducto', fields: ['clients'] },
-  { operationId: 'consultarPrecios', fields: ['clients'] },
-  { operationId: 'obtenerPrecioSku', fields: ['clients'] },
-  { operationId: 'solicitarReserva', fields: ['headers'] },
-  { operationId: 'confirmarReserva', fields: ['headers'] },
-  { operationId: 'liberarReserva', fields: ['headers'] },
-  { operationId: 'consultarDatosFisicos', fields: ['responses'] },
-  {
-    operationId: 'obtenerArbolCategoriasAdmin',
-    fields: ['security', 'scope', 'audience', 'clients'],
-  },
-  {
-    operationId: 'listarTiposProducto',
-    fields: ['security', 'scope', 'audience', 'clients'],
-  },
-  {
-    operationId: 'obtenerTipoProducto',
-    fields: ['security', 'scope', 'audience', 'clients'],
-  },
-  {
-    operationId: 'obtenerEsquemaTipoProducto',
-    fields: ['security', 'scope', 'audience', 'clients'],
-  },
-  {
-    operationId: 'obtenerMarcaAdmin',
-    fields: ['security', 'scope', 'audience', 'clients'],
-  },
-  { operationId: 'crearImportacionPrecios', fields: ['headers', 'responses'] },
-  {
-    operationId: 'reanudarImportacionGeneral',
-    fields: ['headers', 'responses'],
-  },
-  {
-    operationId: 'listarCategoriasAdmin',
-    fields: ['security', 'scope', 'audience', 'clients'],
-  },
-  {
-    operationId: 'listarMarcasAdmin',
-    fields: ['security', 'scope', 'audience', 'clients'],
-  },
-  { operationId: 'reportarIncidenciaInventario', fields: ['headers'] },
-  { operationId: 'resolverIncidenciaInventario', fields: ['headers'] },
-  { operationId: 'reintegrarInventario', fields: ['headers'] },
-  { operationId: 'conciliarVentaOffline', fields: ['headers'] },
-  { operationId: 'listarTrasladosInventario', fields: ['responses'] },
-  { operationId: 'obtenerTrasladoInventario', fields: ['responses'] },
-  { operationId: 'registrarRecepcionTrasladoInventario', fields: ['headers'] },
-  { operationId: 'consultarOperacionInventario', fields: ['responses'] },
-  { operationId: 'listarProductosAdministracion', fields: ['responses'] },
-  { operationId: 'obtenerProductoAdministracion', fields: ['responses'] },
-  { operationId: 'listarSaldosFisicosAdministracion', fields: ['responses'] },
-  { operationId: 'crearComboAdministracion', fields: ['responses'] },
-  { operationId: 'admitirConsumoCuponH5', fields: ['headers'] },
-  { operationId: 'admitirRestauracionCuponH5', fields: ['headers'] },
-  { operationId: 'obtenerOperacionCuponH5', fields: ['headers', 'responses'] },
-  { operationId: 'obtenerEstadoReservaH5', fields: ['headers', 'responses'] },
-];
-
 function sorted(values: readonly string[]): string[] {
   return [...values].sort();
 }
@@ -180,7 +125,7 @@ describe('Gateway parity with the pinned H5 OpenAPI snapshot', () => {
       operationCount: 154,
     });
     expect(snapshot.operations).toHaveLength(snapshot.operationCount);
-    expect(CONTRACT_ROUTES).toHaveLength(144);
+    expect(CONTRACT_ROUTES).toHaveLength(145);
     expect(G5_H5_ROUTES).toHaveLength(4);
     expect(
       new Set(snapshot.operations.map((operation) => operation.operationId))
@@ -260,8 +205,7 @@ describe('Gateway parity with the pinned H5 OpenAPI snapshot', () => {
       if (fields.length)
         metadataMismatches.push({ operationId: route.operationId, fields });
     }
-    expect(metadataMismatches).toHaveLength(32);
-    expect(metadataMismatches).toEqual(classifiedMetadataMismatches);
+    expect(metadataMismatches).toEqual([]);
 
     expect(sorted(h5Ids)).toEqual(sorted(h5OperationIds));
     expect(
@@ -274,6 +218,26 @@ describe('Gateway parity with the pinned H5 OpenAPI snapshot', () => {
           .map((operation) => operation.operationId),
       ),
     ).toEqual(sorted(internalOperationIds));
+    expect(
+      sorted(
+        snapshot.operations
+          .filter((operation) => !operation.errorCodesDeclared)
+          .map((operation) => operation.operationId),
+      ),
+    ).toEqual(sorted(missingErrorCodeMetadataOperationIds));
+    for (const route of [...CONTRACT_ROUTES, ...G5_H5_ROUTES]) {
+      const operation = contractById.get(route.operationId);
+      if (!operation) {
+        expect(legacyPricingOperationIds).toContain(route.operationId);
+        continue;
+      }
+      if (!operation.errorCodesDeclared)
+        expect(
+          Object.values(route.responses).every(
+            (response) => response.codes.length === 0,
+          ),
+        ).toBe(true);
+    }
 
     const legacyRoutes = CONTRACT_ROUTES.filter((route) =>
       legacyPricingOperationIds.includes(route.operationId),
@@ -293,7 +257,7 @@ describe('Gateway parity with the pinned H5 OpenAPI snapshot', () => {
           !registeredIds.includes(id) && !internalOperationIds.includes(id),
       );
     expect(sorted(missingIds)).toEqual(sorted(missingPublicOperationIds));
-    expect(missingIds).toHaveLength(3);
+    expect(missingIds).toHaveLength(2);
     expect(
       snapshot.operations
         .filter((operation) =>

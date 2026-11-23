@@ -1,6 +1,6 @@
 // Offline generation from the official OpenAPI converted to JSON by a YAML parser.
-// For one route, pass its operationId as the third argument; its contract-derived
-// security metadata and error codes are refreshed without touching other routes.
+// For one route, pass its operationId as the third argument; its complete
+// contract-derived metadata is refreshed without touching other routes.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -39,14 +39,25 @@ const adminCandidates = {
     service: 'pricing-svc',
     path: /^\/api\/v1\/precios\/administracion\/(?:productos\/\{productoId\}|skus\/\{sku\})$/,
   },
+  '0.7.0-rc.3': {
+    method: 'GET',
+    service: 'bulk-svc',
+    path: /^\/api\/v1\/carga-masiva\/productos\/importaciones\/por-correlacion\/\{correlationId\}$/,
+    operationId: 'conciliarImportacionGeneralPorCorrelacion',
+    security: ['userBearer'],
+  },
 };
 const candidate = adminCandidates[spec.info.version];
 if (
   (add
     ? !candidate
-    : !['0.6.0-rc.2', '0.6.0-rc.3', '0.6.0-rc.4', '0.6.0-rc.5'].includes(
-        spec.info.version,
-      )) ||
+    : ![
+        '0.6.0-rc.2',
+        '0.6.0-rc.3',
+        '0.6.0-rc.4',
+        '0.6.0-rc.5',
+        '0.7.0-rc.3',
+      ].includes(spec.info.version)) ||
   spec.servers[0].url !== '/api/v1'
 ) {
   throw new Error('Unexpected contract version or base path');
@@ -108,9 +119,8 @@ for (const [path, item] of Object.entries(spec.paths)) {
       ...(item.parameters || []),
       ...(operation.parameters || []),
     ].map(dereference);
-    const declaredErrorCodes = operation['x-error-codes'];
+    const declaredErrorCodes = operation['x-error-codes'] ?? {};
     if (
-      !declaredErrorCodes ||
       typeof declaredErrorCodes !== 'object' ||
       Array.isArray(declaredErrorCodes)
     ) {
@@ -162,16 +172,6 @@ for (const [path, item] of Object.entries(spec.paths)) {
         Object.entries(operation.responses).map(([status, raw]) => {
           const response = dereference(raw);
           const codes = declaredErrorCodes[status] ?? [];
-          if (status.startsWith('4') || status.startsWith('5')) {
-            if (
-              response.content?.['application/problem+json'] &&
-              (!Array.isArray(codes) || codes.length === 0)
-            ) {
-              throw new Error(
-                `Missing x-error-codes entry ${status} for ${operationId}`,
-              );
-            }
-          }
           return [
             status,
             {
@@ -191,20 +191,62 @@ if (routes.length !== 1)
   throw new Error(
     `Expected one operation ${operationId}; found ${routes.length}`,
   );
-const output = fileURLToPath(
+let output = fileURLToPath(
   new URL('../src/routing/contract-routes.ts', import.meta.url),
 );
-const existing = readFileSync(output, 'utf8');
+let existing = readFileSync(output, 'utf8');
 const replacement = routes[0];
+function tsQuote(value) {
+  return `'${String(value).replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
+}
+function serializeRoute(route) {
+  const properties = [
+    `method: ${tsQuote(route.method)}`,
+    `path: ${tsQuote(route.path)}`,
+    `operationId: ${tsQuote(route.operationId)}`,
+    `service: ${tsQuote(route.service)}`,
+    `security: [${route.security.map(tsQuote).join(', ')}]`,
+  ];
+  for (const name of ['scope', 'audience', 'clients', 'role']) {
+    const value = route[name];
+    if (value !== undefined)
+      properties.push(
+        `${name}: ${Array.isArray(value) ? `[${value.map(tsQuote).join(', ')}]` : tsQuote(value)}`,
+      );
+  }
+  properties.push(`introspection: ${route.introspection}`);
+  const headers = route.headers.map((header) => {
+    const fields = [
+      `name: ${tsQuote(header.name)}`,
+      `required: ${header.required}`,
+    ];
+    for (const name of ['minLength', 'maxLength'])
+      if (header[name] !== undefined) fields.push(`${name}: ${header[name]}`);
+    return `      { ${fields.join(', ')} }`;
+  });
+  properties.push(
+    `headers: [${headers.length ? `\n${headers.join(',\n')}\n    ` : ''}]`,
+  );
+  properties.push(
+    `requestTypes: [${route.requestTypes.map(tsQuote).join(', ')}]`,
+  );
+  const responses = Object.entries(route.responses).map(
+    ([status, response]) =>
+      `      ${tsQuote(status)}: { types: [${response.types.map(tsQuote).join(', ')}], codes: [${response.codes.map(tsQuote).join(', ')}], headers: [${response.headers.map(tsQuote).join(', ')}] }`,
+  );
+  properties.push(`responses: {\n${responses.join(',\n')}\n    }`);
+  return `{\n${properties.map((property) => `  ${property}`).join(',\n')}\n}`;
+}
 if (add) {
   const { CONTRACT_ROUTES } = await import(pathToFileURL(output).href);
   const shape = (path) => path.replace(/\{[^}]+\}/g, '{}');
   if (
+    candidate.operationId !== operationId ||
     replacement.method !== (candidate.method ?? 'GET') ||
     replacement.service !== candidate.service ||
-    replacement.security.length !== 1 ||
-    replacement.security[0] !== 'userBearer' ||
-    replacement.role !== 'GESTOR_COMERCIAL' ||
+    JSON.stringify(replacement.security) !==
+      JSON.stringify(candidate.security ?? ['userBearer']) ||
+    replacement.role !== (candidate.role ?? undefined) ||
     !candidate.path.test(replacement.path) ||
     CONTRACT_ROUTES.some(
       (route) =>
@@ -219,11 +261,8 @@ if (add) {
   writeFileSync(
     output,
     existing.slice(0, end) +
-      '\n' +
-      JSON.stringify(replacement, null, 2)
-        .split('\n')
-        .map((line) => '  ' + line)
-        .join('\n') +
+      '\n  ' +
+      serializeRoute(replacement) +
       ',' +
       existing.slice(end),
   );
@@ -231,7 +270,19 @@ if (add) {
   process.exit(0);
 }
 const marker = `operationId: '${operationId}'`;
-const operationPosition = existing.indexOf(marker);
+let operationPosition = existing.indexOf(marker);
+if (operationPosition < 0) {
+  const overlayOutput = fileURLToPath(
+    new URL('../src/routing/g5-h5-routes.ts', import.meta.url),
+  );
+  const overlay = readFileSync(overlayOutput, 'utf8');
+  const overlayPosition = overlay.indexOf(marker);
+  if (overlayPosition >= 0) {
+    output = overlayOutput;
+    existing = overlay;
+    operationPosition = overlayPosition;
+  }
+}
 if (operationPosition < 0) throw new Error(`Unknown operation ${operationId}`);
 const objectStart = existing.lastIndexOf('\n  {', operationPosition) + 3;
 let depth = 0;
@@ -254,51 +305,22 @@ for (let i = objectStart; i < existing.length; i++) {
   }
 }
 if (objectEnd < 0) throw new Error('Could not locate existing route object');
-let existingRoute = existing.slice(objectStart, objectEnd);
-const generatedSecurity = `security: [${replacement.security.map((scheme) => `'${scheme}'`).join(', ')}]`;
-existingRoute = existingRoute.replace(
-  /security: \[[^\]]*\]/,
-  generatedSecurity,
-);
-for (const [name, value] of [
-  ['scope', replacement.scope],
-  ['audience', replacement.audience],
-  ['clients', replacement.clients],
+const existingRoute = existing.slice(objectStart, objectEnd);
+for (const [name, expected] of [
+  ['method', replacement.method],
+  ['path', replacement.path],
+  ['service', replacement.service],
 ]) {
-  const serialized =
-    value === undefined
-      ? undefined
-      : Array.isArray(value)
-        ? `[${value.map((item) => `'${item}'`).join(', ')}]`
-        : `'${value}'`;
-  const property = new RegExp(`\\b${name}:\\s*(?:'[^']*'|\\[[^\\]]*\\]),?`);
-  if (serialized === undefined) {
-    existingRoute = existingRoute
-      .replace(property, '')
-      .replace(/\n\s*\n/g, '\n');
-  } else if (property.test(existingRoute)) {
-    existingRoute = existingRoute.replace(property, `${name}: ${serialized},`);
-  } else {
-    existingRoute = existingRoute.replace(
-      /service: '[^']+',/,
-      (service) => `${service}\n    ${name}: ${serialized},`,
+  if (!existingRoute.includes(`${name}: ${tsQuote(expected)}`))
+    throw new Error(
+      `Refusing to change ${name} for ${operationId}: ${existingRoute.slice(0, 120)}`,
     );
-  }
-}
-for (const [status, response] of Object.entries(replacement.responses)) {
-  const pattern = new RegExp(
-    `('${status}'\\s*:\\s*\\{[^{}]*?\\bcodes:\\s*)\\[[^\\]]*\\]`,
-  );
-  const declaredCodes = `[${response.codes.map((code) => `'${code}'`).join(', ')}]`;
-  if (!pattern.test(existingRoute))
-    throw new Error(`Could not find ${status} codes for ${operationId}`);
-  existingRoute = existingRoute.replace(pattern, `$1${declaredCodes}`);
 }
 writeFileSync(
   output,
   `// Generated from Docs OpenAPI ${spec.info.version}; focused update: ${operationId}.\n` +
     existing.slice(existing.indexOf('\n') + 1, objectStart) +
-    existingRoute +
+    serializeRoute(replacement) +
     existing.slice(objectEnd),
 );
 console.log(`Updated ${operationId} only.`);

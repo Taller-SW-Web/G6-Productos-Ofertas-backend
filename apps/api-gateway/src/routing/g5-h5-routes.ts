@@ -1,4 +1,4 @@
-// Four external G5 routes from Docs OpenAPI 0.7.0-rc.2 at 937b7deb.
+// Generated from Docs OpenAPI 0.7.0-rc.3; focused update: obtenerEstadoReservaH5.
 import type { ContractRoute } from './contract-route.js';
 
 export const G5_H5_ROUTES: readonly ContractRoute[] = [
@@ -12,23 +12,10 @@ export const G5_H5_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: ['modulo-ventas'],
     introspection: false,
-    headers: [
-      {
-        name: 'idempotency-key',
-        required: true,
-      },
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'idempotency-key', required: true }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '202': {
         types: ['application/json'],
         codes: [],
@@ -81,23 +68,10 @@ export const G5_H5_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: ['modulo-ventas'],
     introspection: false,
-    headers: [
-      {
-        name: 'idempotency-key',
-        required: true,
-      },
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'idempotency-key', required: true }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '202': {
         types: ['application/json'],
         codes: [],
@@ -150,24 +124,11 @@ export const G5_H5_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: ['modulo-ventas'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
-      '400': {
-        types: ['application/problem+json'],
-        codes: ['VALIDACION'],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
+      '400': { types: ['application/problem+json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -210,24 +171,11 @@ export const G5_H5_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: ['modulo-ventas'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
-      '400': {
-        types: ['application/problem+json'],
-        codes: ['VALIDACION'],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
+      '400': { types: ['application/problem+json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],

@@ -31,6 +31,7 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
     body: '{"items":[]}',
     delay: 0,
     location: '',
+    cacheControl: '',
     early: false,
   };
 
@@ -69,6 +70,7 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
         'content-type': reply.type,
         'set-cookie': 'private=secret',
         ...(reply.location ? { location: reply.location } : {}),
+        ...(reply.cacheControl ? { 'cache-control': reply.cacheControl } : {}),
       });
       res.end(reply.body);
     });
@@ -116,6 +118,7 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
       body: '{"items":[]}',
       delay: 0,
       location: '',
+      cacheControl: '',
       early: false,
     };
   });
@@ -155,6 +158,68 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
       .expect('Access-Control-Allow-Origin', 'https://admin.example.test')
       .expect('Access-Control-Expose-Headers', /Content-Disposition/);
     expect(calls).toHaveLength(0);
+  });
+
+  it('preserves Pricing CSV idempotency and 409 through the multipart proxy', async () => {
+    const path = '/api/v1/precios/importaciones';
+    const token = signed.token({
+      tipo: 'acceso',
+      sub: '11111111-1111-1111-1111-111111111111',
+      roles: ['GESTOR_COMERCIAL'],
+    });
+    const upload = (key?: string) => {
+      const test = request(app.getHttpServer())
+        .post(path)
+        .auth(token, { type: 'bearer' });
+      if (key !== undefined) test.set('Idempotency-Key', key);
+      return test
+        .field('allow_partial', 'false')
+        .attach('archivo', Buffer.from('sku\nSKU-TEST\n'), 'precios.csv');
+    };
+    await request(app.getHttpServer()).post(path).expect(401);
+    await request(app.getHttpServer())
+      .post(path)
+      .auth(
+        signed.token({
+          tipo: 'acceso',
+          sub: '11111111-1111-1111-1111-111111111111',
+          roles: [],
+        }),
+        { type: 'bearer' },
+      )
+      .expect(403);
+    expect(calls).toHaveLength(0);
+    const authorize = vi
+      .spyOn(signed.identity, 'authorize')
+      .mockResolvedValue(undefined);
+    try {
+      await upload().expect(400);
+      await upload('A'.repeat(129)).expect(400);
+      expect(calls).toHaveLength(0);
+      const key = 'Intent-'.padEnd(128, 'x');
+      reply.status = 202;
+      await upload(key).expect(202);
+      expect(calls[0].headers['idempotency-key']).toBe(key);
+      expect(calls[0].body).toContain('SKU-TEST');
+      expect(calls[0].body).toContain('name="allow_partial"');
+      expect(authorize).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          role: 'GESTOR_COMERCIAL',
+          introspection: true,
+        }),
+        `Bearer ${token}`,
+      );
+      reply.status = 409;
+      reply.type = 'application/problem+json';
+      reply.body = '{"code":"IDEMPOTENCY_CONFLICT"}';
+      const conflict = await upload(key)
+        .expect(409)
+        .expect('content-type', /application\/problem\+json/);
+      expect(conflict.body.code).toBe('IDEMPOTENCY_CONFLICT');
+      expect(calls[1].headers['idempotency-key']).toBe(key);
+    } finally {
+      authorize.mockRestore();
+    }
   });
 
   it.each([
@@ -226,6 +291,88 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
     } finally {
       Object.assign(settings, previous);
     }
+  });
+
+  it('keeps Inventory H01/H02 absent until their real HTTP providers are ready', async () => {
+    const manager = signed.token({
+      tipo: 'acceso',
+      sub: '11111111-1111-4111-8111-111111111111',
+      roles: ['GESTOR_COMERCIAL'],
+    });
+    for (const path of [
+      '/api/v1/inventario/alertas',
+      '/api/v1/inventario/ubicaciones',
+    ]) {
+      await request(app.getHttpServer()).get(path).expect(404);
+      await request(app.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${manager}`)
+        .expect(404);
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it('proxies Bulk correlation reconciliation as an authorized no-store read', async () => {
+    const path =
+      '/api/v1/carga-masiva/productos/importaciones/por-correlacion/22222222-2222-4222-8222-222222222222';
+    const manager = signed.token({
+      tipo: 'acceso',
+      sub: '11111111-1111-4111-8111-111111111111',
+      roles: ['GESTOR_COMERCIAL'],
+    });
+    reply.body = JSON.stringify({
+      batch_id: '33333333-3333-4333-8333-333333333333',
+      correlation_id: '22222222-2222-4222-8222-222222222222',
+      status: 'QUEUED',
+      template_version: 2,
+    });
+    reply.cacheControl = 'no-store';
+
+    const result = await request(app.getHttpServer())
+      .get(path)
+      .set('Authorization', `Bearer ${manager}`)
+      .expect(200)
+      .expect('Cache-Control', 'no-store');
+    expect(result.body).toMatchObject({
+      correlation_id: '22222222-2222-4222-8222-222222222222',
+      status: 'QUEUED',
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      method: 'GET',
+      url: path,
+      headers: { authorization: `Bearer ${manager}` },
+      body: '',
+    });
+
+    calls = [];
+    await request(app.getHttpServer()).get(path).expect(401);
+    await request(app.getHttpServer())
+      .get(path)
+      .set('Authorization', `Bearer ${signed.token()}`)
+      .expect(403);
+    expect(calls).toHaveLength(0);
+
+    for (const [status, code] of [
+      [400, 'VALIDACION'],
+      [404, 'LOTE_NO_ENCONTRADO'],
+      [503, 'SERVICIO_NO_DISPONIBLE'],
+    ] as const) {
+      calls = [];
+      reply.status = status;
+      reply.type = 'application/problem+json';
+      reply.body = JSON.stringify({ code, detail: 'provider-secret-detail' });
+      const failure = await request(app.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${manager}`)
+        .expect(status);
+      expect(failure.body.code).toBe(code);
+      expect(JSON.stringify(failure.body)).not.toContain(
+        'provider-secret-detail',
+      );
+      expect(calls).toHaveLength(1);
+    }
+    expect(calls.every((call) => call.method === 'GET')).toBe(true);
   });
 
   it('forwards the administrative SKU resolver only for a human commercial manager', async () => {
@@ -355,7 +502,11 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
         if (header.required)
           send.set(
             header.name,
-            header.name === 'idempotency-key' ? 'isolated-intent-key' : '1',
+            header.name === 'idempotency-key'
+              ? '11111111-1111-4111-8111-111111111111'
+              : header.name === 'x-correlation-id'
+                ? '22222222-2222-4222-8222-222222222222'
+                : '1',
           );
       if (route.requestTypes.includes('application/json'))
         send.set('Content-Type', 'application/json').send({ fixture: true });

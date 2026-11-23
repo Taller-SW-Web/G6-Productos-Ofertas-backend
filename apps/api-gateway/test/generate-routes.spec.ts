@@ -25,6 +25,7 @@ describe('focused Gateway contract route generation', () => {
   let scriptPath: string;
   let specPath: string;
   let routesPath: string;
+  let overlayRoutesPath: string;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'gateway-route-generator-'));
@@ -35,6 +36,7 @@ describe('focused Gateway contract route generation', () => {
     scriptPath = join(testDirectory, 'generate-routes.mjs');
     specPath = join(root, 'openapi-0.6.0-rc.2.json');
     routesPath = join(sourceDirectory, 'contract-routes.ts');
+    overlayRoutesPath = join(sourceDirectory, 'g5-h5-routes.ts');
     writeFileSync(
       scriptPath,
       readFileSync(
@@ -71,7 +73,21 @@ describe('focused Gateway contract route generation', () => {
               'x-required-scope': 'catalogo:leer',
               'x-service-audience': 'api-productos',
               'x-allowed-client-ids': ['modulo-productos'],
-              parameters: [],
+              'x-required-role': 'GESTOR_COMERCIAL',
+              'x-auth-validation': 'introspection',
+              parameters: [
+                {
+                  in: 'header',
+                  name: 'Idempotency-Key',
+                  required: true,
+                  schema: { type: 'string', minLength: 1, maxLength: 128 },
+                },
+              ],
+              requestBody: {
+                content: {
+                  'multipart/form-data': { schema: { type: 'object' } },
+                },
+              },
               responses,
               'x-error-codes': errorCodes,
             },
@@ -89,6 +105,11 @@ describe('focused Gateway contract route generation', () => {
           .map((status) => `      '${status}': { codes: [] },\n`)
           .join('') +
         `    },\n  },\n];\n`,
+    );
+    writeFileSync(
+      overlayRoutesPath,
+      `// overlay fixture\nimport type { ContractRoute } from './contract-route.js';\nexport const G5_H5_ROUTES: readonly ContractRoute[] = [\n` +
+        `  { method: 'POST', path: '/api/v1/cupones/consumos', operationId: 'admitirConsumoCuponH5', service: 'promotions-svc', security: ['userBearer'], introspection: false, headers: [], requestTypes: [], responses: { '202': { types: ['application/json'], codes: [], headers: [] } } },\n];\n`,
     );
   });
 
@@ -142,16 +163,146 @@ describe('focused Gateway contract route generation', () => {
     expect(afterFirstRun).toContain(
       '// Generated from Docs OpenAPI 0.6.0-rc.3; focused update: verificarCantidadComercial.',
     );
-    expect(afterFirstRun).toContain("'400': { codes: ['VALIDACION'] }");
+    expect(afterFirstRun).toContain(
+      "'400': { types: ['application/problem+json'], codes: ['VALIDACION'], headers: [] }",
+    );
     expect(afterFirstRun).toContain("security: ['serviceBearer']");
     expect(afterFirstRun).toContain("scope: 'catalogo:leer'");
     expect(afterFirstRun).toContain("clients: ['modulo-productos']");
+    expect(afterFirstRun).toContain("role: 'GESTOR_COMERCIAL'");
+    expect(afterFirstRun).toContain('introspection: true');
     expect(afterFirstRun).toContain(
-      "'422': { codes: ['CONTEXTO_ABASTECIMIENTO_INVALIDO'] }",
+      "name: 'idempotency-key', required: true, minLength: 1, maxLength: 128",
+    );
+    expect(afterFirstRun).toContain("requestTypes: ['multipart/form-data']");
+    expect(afterFirstRun).toContain(
+      "'422': { types: ['application/problem+json'], codes: ['CONTEXTO_ABASTECIMIENTO_INVALIDO'], headers: [] }",
     );
 
     const secondRun = runGenerator(operationId);
-    expect(secondRun.status).toBe(0);
+    expect(secondRun.status, secondRun.stderr).toBe(0);
     expect(readFileSync(routesPath, 'utf8')).toBe(afterFirstRun);
+  });
+
+  it('adds only the approved Bulk correlation route from OpenAPI rc.3', () => {
+    const spec = JSON.parse(readFileSync(specPath, 'utf8'));
+    spec.info.version = '0.7.0-rc.3';
+    spec.paths = {
+      '/carga-masiva/productos/importaciones/por-correlacion/{correlationId}': {
+        get: {
+          operationId: 'conciliarImportacionGeneralPorCorrelacion',
+          security: [{ userBearer: [] }],
+          parameters: [
+            {
+              in: 'header',
+              name: 'X-Correlation-Id',
+              required: false,
+              schema: { type: 'string' },
+            },
+          ],
+          responses: {
+            '200': {
+              content: { 'application/json': { schema: { type: 'object' } } },
+              headers: { 'Cache-Control': { schema: { type: 'string' } } },
+            },
+            ...Object.fromEntries(
+              ['400', '401', '403', '404', '503'].map((status) => [
+                status,
+                {
+                  content: {
+                    'application/problem+json': { schema: { type: 'object' } },
+                  },
+                },
+              ]),
+            ),
+          },
+          'x-error-codes': {
+            '400': ['VALIDACION'],
+            '401': ['TOKEN_INVALIDO'],
+            '403': ['SCOPE_INSUFICIENTE'],
+            '404': ['LOTE_NO_ENCONTRADO'],
+            '503': ['SERVICIO_NO_DISPONIBLE'],
+          },
+        },
+      },
+    };
+    writeFileSync(specPath, JSON.stringify(spec));
+    const operation = 'conciliarImportacionGeneralPorCorrelacion';
+    const result = spawnSync(
+      process.execPath,
+      [scriptPath, specPath, operation, '--add'],
+      { encoding: 'utf8' },
+    );
+
+    expect(result.status).toBe(0);
+    const updated = readFileSync(routesPath, 'utf8');
+    expect(updated).toContain(`operationId: '${operation}'`);
+    expect(updated).toContain("service: 'bulk-svc'");
+    expect(updated).toContain(
+      "'200': { types: ['application/json'], codes: [], headers: ['cache-control'] }",
+    );
+    expect(updated).toContain(
+      "'404': { types: ['application/problem+json'], codes: ['LOTE_NO_ENCONTRADO'], headers: [] }",
+    );
+  });
+
+  it('updates the G5 overlay in place without moving it into the public registry', () => {
+    const spec = JSON.parse(readFileSync(specPath, 'utf8'));
+    spec.info.version = '0.7.0-rc.3';
+    spec.paths = {
+      '/cupones/consumos': {
+        post: {
+          operationId: 'admitirConsumoCuponH5',
+          security: [{ serviceBearer: [] }],
+          'x-required-scope': 'cupones:consumir',
+          'x-service-audience': 'api-productos',
+          'x-allowed-client-ids': ['modulo-ventas'],
+          parameters: [
+            {
+              in: 'header',
+              name: 'Idempotency-Key',
+              required: true,
+              schema: { type: 'string', minLength: 1, maxLength: 128 },
+            },
+          ],
+          requestBody: {
+            content: { 'application/json': { schema: { type: 'object' } } },
+          },
+          responses: {
+            '202': {
+              content: { 'application/json': { schema: { type: 'object' } } },
+            },
+            ...Object.fromEntries(
+              Object.keys(errorCodes).map((status) => [
+                status,
+                {
+                  content: {
+                    'application/problem+json': { schema: { type: 'object' } },
+                  },
+                },
+              ]),
+            ),
+          },
+          'x-error-codes': errorCodes,
+        },
+      },
+    };
+    writeFileSync(specPath, JSON.stringify(spec));
+    const contractBefore = readFileSync(routesPath, 'utf8');
+    const result = spawnSync(
+      process.execPath,
+      [scriptPath, specPath, 'admitirConsumoCuponH5'],
+      { encoding: 'utf8' },
+    );
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(routesPath, 'utf8')).toBe(contractBefore);
+    const overlay = readFileSync(overlayRoutesPath, 'utf8');
+    expect(overlay).toContain("security: ['serviceBearer']");
+    expect(overlay).toContain("scope: 'cupones:consumir'");
+    expect(overlay).toContain("clients: ['modulo-ventas']");
+    expect(overlay).toContain(
+      "name: 'idempotency-key', required: true, minLength: 1, maxLength: 128",
+    );
   });
 });

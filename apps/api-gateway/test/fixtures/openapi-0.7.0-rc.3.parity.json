@@ -25,7 +25,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -34,6 +38,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["CUPON_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -45,15 +54,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["CUPON_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -76,7 +81,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -85,21 +99,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
           "headers": []
         },
         "404": {
@@ -114,17 +113,23 @@
         },
         "422": {
           "types": ["application/problem+json"],
-          "codes": [
-            "DATOS_INCOMPLETOS",
-            "CATEGORIA_INVALIDA",
-            "TIPO_PRODUCTO_INVALIDO",
-            "MARCA_INVALIDA"
-          ],
+          "codes": ["DATOS_INCOMPLETOS", "CATEGORIA_INVALIDA", "TIPO_PRODUCTO_INVALIDO", "MARCA_INVALIDA"],
+          "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -147,7 +152,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -156,6 +165,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["PROMOCION_NO_ENCONTRADA"],
           "headers": []
         },
         "500": {
@@ -167,15 +181,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["PROMOCION_NO_ENCONTRADA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -198,7 +208,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -207,6 +221,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["REGLA_RECOMENDACION_NO_ENCONTRADA"],
           "headers": []
         },
         "500": {
@@ -218,15 +237,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["REGLA_RECOMENDACION_NO_ENCONTRADA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -249,7 +264,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -258,16 +277,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         },
         "404": {
@@ -282,17 +291,23 @@
         },
         "422": {
           "types": ["application/problem+json"],
-          "codes": [
-            "DATOS_INCOMPLETOS",
-            "SKU_INVALIDO",
-            "ATRIBUTO_IDENTIFICADOR_INVALIDO",
-            "IMAGEN_INVALIDA"
-          ],
+          "codes": ["DATOS_INCOMPLETOS", "SKU_INVALIDO", "ATRIBUTO_IDENTIFICADOR_INVALIDO", "IMAGEN_INVALIDA"],
+          "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "PATCH",
@@ -315,7 +330,11 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -324,16 +343,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         },
         "404": {
@@ -345,10 +354,21 @@
           "types": ["application/problem+json"],
           "codes": ["VERSION_CONFLICT"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "PATCH",
@@ -371,7 +391,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -380,21 +409,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
           "headers": []
         },
         "404": {
@@ -411,10 +425,21 @@
           "types": ["application/problem+json"],
           "codes": ["VALOR_NUMERICO_INVALIDO"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "PATCH",
@@ -437,7 +462,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -446,6 +480,21 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["CATEGORIA_NO_ENCONTRADA"],
+          "headers": []
+        },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["CICLO_CATEGORIA", "CATEGORIA_PADRE_INACTIVA", "VERSION_CONFLICT"],
+          "headers": []
+        },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["PROFUNDIDAD_CATEGORIA_EXCEDIDA"],
           "headers": []
         },
         "500": {
@@ -457,34 +506,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["CATEGORIA_NO_ENCONTRADA"],
-          "headers": []
-        },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": [
-            "CICLO_CATEGORIA",
-            "CATEGORIA_PADRE_INACTIVA",
-            "VERSION_CONFLICT"
-          ],
-          "headers": []
-        },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": ["PROFUNDIDAD_CATEGORIA_EXCEDIDA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "PATCH",
@@ -507,7 +533,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -516,21 +551,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
           "headers": []
         },
         "404": {
@@ -545,17 +565,23 @@
         },
         "422": {
           "types": ["application/problem+json"],
-          "codes": [
-            "COMBO_ANIDADO_NO_PERMITIDO",
-            "COMBO_COMPONENTES_INSUFICIENTES",
-            "COMBO_COMPONENTE_DUPLICADO",
-            "COMBO_PRECIO_INVALIDO"
-          ],
+          "codes": ["COMBO_ANIDADO_NO_PERMITIDO", "COMBO_COMPONENTES_INSUFICIENTES", "COMBO_COMPONENTE_DUPLICADO", "COMBO_PRECIO_INVALIDO"],
+          "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "PATCH",
@@ -578,7 +604,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -587,6 +622,21 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["CUPON_NO_ENCONTRADO"],
+          "headers": []
+        },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["CUPON_DUPLICADO"],
+          "headers": []
+        },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["LIMITE_CUPON_INVALIDO"],
           "headers": []
         },
         "500": {
@@ -598,30 +648,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["CUPON_NO_ENCONTRADO"],
-          "headers": []
-        },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": ["LIMITE_CUPON_INVALIDO"],
-          "headers": []
-        },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": ["CUPON_DUPLICADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "PATCH",
@@ -644,7 +675,16 @@
       ],
       "requestTypes": ["multipart/form-data"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -653,21 +693,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
           "headers": []
         },
         "404": {
@@ -689,10 +714,21 @@
           "types": ["application/problem+json"],
           "codes": ["LOGO_INVALIDO"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "PATCH",
@@ -715,7 +751,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION", "MOTIVO_CAMBIO_REQUERIDO"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -724,21 +769,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION", "MOTIVO_CAMBIO_REQUERIDO"],
           "headers": []
         },
         "404": {
@@ -753,17 +783,23 @@
         },
         "422": {
           "types": ["application/problem+json"],
-          "codes": [
-            "PRECIO_INVALIDO",
-            "OFERTA_INVALIDA",
-            "ACCION_OFERTA_INVALIDA",
-            "SCOPE_PRECIO_INVALIDO"
-          ],
+          "codes": ["PRECIO_INVALIDO", "OFERTA_INVALIDA", "ACCION_OFERTA_INVALIDA", "SCOPE_PRECIO_INVALIDO"],
+          "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "PATCH",
@@ -786,7 +822,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION", "MOTIVO_CAMBIO_REQUERIDO"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -795,21 +840,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION", "MOTIVO_CAMBIO_REQUERIDO"],
           "headers": []
         },
         "404": {
@@ -824,17 +854,23 @@
         },
         "422": {
           "types": ["application/problem+json"],
-          "codes": [
-            "PRECIO_INVALIDO",
-            "OFERTA_INVALIDA",
-            "ACCION_OFERTA_INVALIDA",
-            "SCOPE_PRECIO_INVALIDO"
-          ],
+          "codes": ["PRECIO_INVALIDO", "OFERTA_INVALIDA", "ACCION_OFERTA_INVALIDA", "SCOPE_PRECIO_INVALIDO"],
+          "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "PATCH",
@@ -857,7 +893,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -866,21 +911,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
           "headers": []
         },
         "404": {
@@ -895,16 +925,23 @@
         },
         "422": {
           "types": ["application/problem+json"],
-          "codes": [
-            "CATEGORIA_INVALIDA",
-            "MARCA_INVALIDA",
-            "PERFIL_FISICO_INVALIDO"
-          ],
+          "codes": ["CATEGORIA_INVALIDA", "MARCA_INVALIDA", "PERFIL_FISICO_INVALIDO"],
+          "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "PATCH",
@@ -927,7 +964,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -936,21 +982,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
           "headers": []
         },
         "404": {
@@ -962,10 +993,21 @@
           "types": ["application/problem+json"],
           "codes": ["PROMOCION_INVALIDA", "ALCANCE_PROMOCION_INVALIDO"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "PATCH",
@@ -988,7 +1030,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -997,6 +1048,16 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["REGLA_RECOMENDACION_NO_ENCONTRADA"],
+          "headers": []
+        },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["REGLA_RECOMENDACION_INVALIDA", "PRODUCTO_RECOMENDADO_INVALIDO"],
           "headers": []
         },
         "500": {
@@ -1008,28 +1069,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["REGLA_RECOMENDACION_NO_ENCONTRADA"],
-          "headers": []
-        },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": [
-            "REGLA_RECOMENDACION_INVALIDA",
-            "PRODUCTO_RECOMENDADO_INVALIDO"
-          ],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "PATCH",
@@ -1052,7 +1096,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -1061,21 +1114,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
           "headers": []
         },
         "404": {
@@ -1092,10 +1130,21 @@
           "types": ["application/problem+json"],
           "codes": ["METADATOS_SEO_INVALIDOS"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "PUT",
@@ -1118,7 +1167,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -1138,15 +1196,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "PATCH",
@@ -1169,7 +1223,11 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -1178,16 +1236,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         },
         "404": {
@@ -1199,10 +1247,21 @@
           "types": ["application/problem+json"],
           "codes": ["VERSION_CONFLICT"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "PATCH",
@@ -1225,7 +1284,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -1234,21 +1302,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
           "headers": []
         },
         "404": {
@@ -1265,10 +1318,21 @@
           "types": ["application/problem+json"],
           "codes": ["IMAGEN_INVALIDA", "PERFIL_FISICO_INVALIDO"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -1291,16 +1355,15 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "202": {
           "types": ["application/json"],
           "codes": [],
           "headers": ["location", "retry-after"]
-        },
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": ["IDEMPOTENCY_CONFLICT"],
-          "headers": []
         },
         "400": {
           "types": ["application/problem+json"],
@@ -1315,6 +1378,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["IDEMPOTENCY_CONFLICT"],
           "headers": []
         },
         "429": {
@@ -1334,7 +1402,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -1357,16 +1426,15 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "202": {
           "types": ["application/json"],
           "codes": [],
           "headers": ["location", "retry-after"]
-        },
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": ["IDEMPOTENCY_CONFLICT"],
-          "headers": []
         },
         "400": {
           "types": ["application/problem+json"],
@@ -1381,6 +1449,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["IDEMPOTENCY_CONFLICT"],
           "headers": []
         },
         "429": {
@@ -1400,7 +1473,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -1423,7 +1497,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "201": { "types": ["application/json"], "codes": [], "headers": [] },
+        "201": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -1434,27 +1517,9 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
-        },
         "404": {
           "types": ["application/problem+json"],
-          "codes": [
-            "TIPO_PRODUCTO_NO_ENCONTRADO",
-            "CARACTERISTICA_NO_ENCONTRADA"
-          ],
+          "codes": ["TIPO_PRODUCTO_NO_ENCONTRADO", "CARACTERISTICA_NO_ENCONTRADA"],
           "headers": []
         },
         "409": {
@@ -1466,10 +1531,21 @@
           "types": ["application/problem+json"],
           "codes": ["LIMITE_CARACTERISTICAS_EXCEDIDO"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -1524,7 +1600,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -1553,20 +1630,9 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": ["IDEMPOTENCY_CONFLICT"],
-          "headers": []
-        },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": [
-            "CANTIDAD_INVALIDA",
-            "SKU_NO_ENCONTRADO",
-            "SKU_INACTIVO",
-            "UBICACION_NO_ENCONTRADA"
-          ],
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
           "headers": []
         },
         "400": {
@@ -1584,6 +1650,16 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["IDEMPOTENCY_CONFLICT"],
+          "headers": []
+        },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["CANTIDAD_INVALIDA", "SKU_NO_ENCONTRADO", "SKU_INACTIVO", "UBICACION_NO_ENCONTRADA"],
+          "headers": []
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -1596,7 +1672,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -1625,19 +1702,9 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "202": { "types": ["application/json"], "codes": [], "headers": [] },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["RESERVA_NO_ENCONTRADA"],
-          "headers": []
-        },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": [
-            "IDEMPOTENCY_CONFLICT",
-            "RESERVA_NO_ACTIVA",
-            "RESERVA_EXPIRADA"
-          ],
+        "202": {
+          "types": ["application/json"],
+          "codes": [],
           "headers": []
         },
         "400": {
@@ -1655,6 +1722,16 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["RESERVA_NO_ENCONTRADA"],
+          "headers": []
+        },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["IDEMPOTENCY_CONFLICT", "RESERVA_NO_ACTIVA", "RESERVA_EXPIRADA"],
+          "headers": []
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -1667,7 +1744,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -1690,10 +1768,9 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": ["SKU_INVALIDO", "DATOS_FISICOS_INCOMPLETOS"],
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
           "headers": []
         },
         "400": {
@@ -1711,6 +1788,11 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["SKU_INVALIDO", "DATOS_FISICOS_INCOMPLETOS"],
+          "headers": []
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -1723,7 +1805,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -1746,7 +1829,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -1774,7 +1861,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -1797,7 +1885,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -1806,6 +1898,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["COMBO_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -1817,15 +1914,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["COMBO_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -1835,12 +1928,7 @@
       "security": ["serviceBearer"],
       "scope": "inventario:disponibilidad:leer",
       "audience": "api-productos",
-      "clients": [
-        "modulo-marketplace",
-        "modulo-chatbot",
-        "modulo-retail",
-        "modulo-productos"
-      ],
+      "clients": ["modulo-marketplace", "modulo-chatbot", "modulo-retail", "modulo-productos"],
       "role": null,
       "introspection": false,
       "headers": [
@@ -1853,7 +1941,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -1869,6 +1961,11 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "429": {
+          "types": ["application/problem+json"],
+          "codes": ["RATE_LIMIT_EXCEDIDO"],
+          "headers": ["retry-after"]
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -1878,15 +1975,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "429": {
-          "types": ["application/problem+json"],
-          "codes": ["RATE_LIMIT_EXCEDIDO"],
-          "headers": ["retry-after"]
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -1909,7 +2002,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -1947,7 +2044,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -1957,12 +2055,7 @@
       "security": ["userBearer", "serviceBearer"],
       "scope": "precios:leer",
       "audience": "api-productos",
-      "clients": [
-        "modulo-marketplace",
-        "modulo-chatbot",
-        "modulo-retail",
-        "modulo-productos"
-      ],
+      "clients": ["modulo-marketplace", "modulo-chatbot", "modulo-retail", "modulo-productos"],
       "role": null,
       "introspection": false,
       "headers": [
@@ -1975,7 +2068,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -2003,7 +2100,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -2026,7 +2124,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "201": { "types": ["application/json"], "codes": [], "headers": [] },
+        "201": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -2035,6 +2142,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["VALOR_NUMERICO_INVALIDO"],
           "headers": []
         },
         "500": {
@@ -2046,20 +2158,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
-        },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": ["VALOR_NUMERICO_INVALIDO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -2082,7 +2185,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "201": { "types": ["application/json"], "codes": [], "headers": [] },
+        "201": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -2091,21 +2203,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
           "headers": []
         },
         "409": {
@@ -2117,10 +2214,21 @@
           "types": ["application/problem+json"],
           "codes": ["PROFUNDIDAD_CATEGORIA_EXCEDIDA"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -2143,7 +2251,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "201": { "types": ["application/json"], "codes": [], "headers": [] },
+        "201": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -2152,6 +2269,16 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["SKU_NO_ENCONTRADO"],
+          "headers": []
+        },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["COMBO_ANIDADO_NO_PERMITIDO", "COMBO_COMPONENTES_INSUFICIENTES", "COMBO_COMPONENTE_DUPLICADO", "COMBO_PRECIO_INVALIDO"],
           "headers": []
         },
         "500": {
@@ -2163,30 +2290,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["SKU_NO_ENCONTRADO"],
-          "headers": []
-        },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": [
-            "COMBO_ANIDADO_NO_PERMITIDO",
-            "COMBO_COMPONENTES_INSUFICIENTES",
-            "COMBO_COMPONENTE_DUPLICADO",
-            "COMBO_PRECIO_INVALIDO"
-          ],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -2215,7 +2323,11 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "201": { "types": ["application/json"], "codes": [], "headers": [] },
+        "201": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -2231,14 +2343,14 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": ["IDEMPOTENCY_CONFLICT"],
-          "headers": []
-        },
         "404": {
           "types": ["application/problem+json"],
           "codes": ["SKU_NO_ENCONTRADO"],
+          "headers": []
+        },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["IDEMPOTENCY_CONFLICT"],
           "headers": []
         },
         "500": {
@@ -2253,7 +2365,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -2276,7 +2389,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "201": { "types": ["application/json"], "codes": [], "headers": [] },
+        "201": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -2285,6 +2407,16 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["CUPON_DUPLICADO"],
+          "headers": []
+        },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["LIMITE_CUPON_INVALIDO"],
           "headers": []
         },
         "500": {
@@ -2296,25 +2428,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
-        },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": ["LIMITE_CUPON_INVALIDO"],
-          "headers": []
-        },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": ["CUPON_DUPLICADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -2337,7 +2455,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "202": { "types": ["application/json"], "codes": [], "headers": [] },
+        "202": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -2346,6 +2473,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["LIMITE_EXPORTACION_AUDITORIA_EXCEDIDO"],
           "headers": []
         },
         "500": {
@@ -2357,20 +2489,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
-        },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": ["LIMITE_EXPORTACION_AUDITORIA_EXCEDIDO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -2393,7 +2516,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "202": { "types": ["application/json"], "codes": [], "headers": [] },
+        "202": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -2413,15 +2545,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -2444,7 +2572,16 @@
       ],
       "requestTypes": ["multipart/form-data"],
       "responses": {
-        "202": { "types": ["application/json"], "codes": [], "headers": [] },
+        "202": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["ARCHIVO_INVALIDO"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -2453,21 +2590,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["ARCHIVO_INVALIDO"],
           "headers": []
         },
         "413": {
@@ -2479,10 +2601,21 @@
           "types": ["application/problem+json"],
           "codes": ["PLANTILLA_INCOMPATIBLE", "CONTENIDO_ACTIVO_NO_PERMITIDO"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -2511,7 +2644,16 @@
       ],
       "requestTypes": ["multipart/form-data"],
       "responses": {
-        "202": { "types": ["application/json"], "codes": [], "headers": [] },
+        "202": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["ARCHIVO_INVALIDO", "VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -2520,21 +2662,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["ARCHIVO_INVALIDO", "VALIDACION"],
           "headers": []
         },
         "409": {
@@ -2551,10 +2678,21 @@
           "types": ["application/problem+json"],
           "codes": ["PLANTILLA_INCOMPATIBLE"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -2577,7 +2715,16 @@
       ],
       "requestTypes": ["multipart/form-data"],
       "responses": {
-        "201": { "types": ["application/json"], "codes": [], "headers": [] },
+        "201": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -2586,21 +2733,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
           "headers": []
         },
         "409": {
@@ -2617,10 +2749,21 @@
           "types": ["application/problem+json"],
           "codes": ["LOGO_INVALIDO"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -2643,7 +2786,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "201": { "types": ["application/json"], "codes": [], "headers": [] },
+        "201": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -2652,6 +2804,16 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["SKU_DUPLICADO"],
+          "headers": []
+        },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["CATEGORIA_INVALIDA", "TIPO_PRODUCTO_INVALIDO", "MARCA_INVALIDA", "PERFIL_FISICO_INVALIDO"],
           "headers": []
         },
         "500": {
@@ -2663,30 +2825,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
-        },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": ["SKU_DUPLICADO"],
-          "headers": []
-        },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": [
-            "CATEGORIA_INVALIDA",
-            "TIPO_PRODUCTO_INVALIDO",
-            "MARCA_INVALIDA",
-            "PERFIL_FISICO_INVALIDO"
-          ],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -2709,7 +2852,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "201": { "types": ["application/json"], "codes": [], "headers": [] },
+        "201": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -2718,6 +2870,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["PROMOCION_INVALIDA", "ALCANCE_PROMOCION_INVALIDO"],
           "headers": []
         },
         "500": {
@@ -2729,20 +2886,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
-        },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": ["PROMOCION_INVALIDA", "ALCANCE_PROMOCION_INVALIDO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -2765,7 +2913,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "201": { "types": ["application/json"], "codes": [], "headers": [] },
+        "201": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -2774,6 +2931,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["REGLA_RECOMENDACION_INVALIDA", "PRODUCTO_RECOMENDADO_INVALIDO"],
           "headers": []
         },
         "500": {
@@ -2785,23 +2947,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
-        },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": [
-            "REGLA_RECOMENDACION_INVALIDA",
-            "PRODUCTO_RECOMENDADO_INVALIDO"
-          ],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -2824,7 +2974,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "201": { "types": ["application/json"], "codes": [], "headers": [] },
+        "201": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -2844,15 +3003,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -2875,7 +3030,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "201": { "types": ["application/json"], "codes": [], "headers": [] },
+        "201": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -2884,21 +3048,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
           "headers": []
         },
         "404": {
@@ -2910,10 +3059,21 @@
           "types": ["application/problem+json"],
           "codes": ["VALOR_LISTA_LIMITE_EXCEDIDO"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -2936,7 +3096,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "201": { "types": ["application/json"], "codes": [], "headers": [] },
+        "201": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -2945,6 +3114,21 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["PRODUCTO_NO_ENCONTRADO"],
+          "headers": []
+        },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["COMBINACION_DUPLICADA", "SKU_DUPLICADO", "PRODUCTO_NO_ADMITE_VARIANTES"],
+          "headers": []
+        },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["SKU_INVALIDO", "ATRIBUTO_IDENTIFICADOR_INVALIDO", "IMAGEN_INVALIDA", "PERFIL_FISICO_INVALIDO"],
           "headers": []
         },
         "500": {
@@ -2956,39 +3140,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["PRODUCTO_NO_ENCONTRADO"],
-          "headers": []
-        },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": [
-            "COMBINACION_DUPLICADA",
-            "SKU_DUPLICADO",
-            "PRODUCTO_NO_ADMITE_VARIANTES"
-          ],
-          "headers": []
-        },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": [
-            "SKU_INVALIDO",
-            "ATRIBUTO_IDENTIFICADOR_INVALIDO",
-            "IMAGEN_INVALIDA",
-            "PERFIL_FISICO_INVALIDO"
-          ],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -3011,7 +3167,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -3020,16 +3180,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         },
         "404": {
@@ -3041,10 +3191,21 @@
           "types": ["application/problem+json"],
           "codes": ["BAJA_MAESTRA_EN_PROCESO"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -3067,7 +3228,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -3076,6 +3241,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["COMBO_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -3087,15 +3257,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["COMBO_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -3118,7 +3284,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -3127,6 +3297,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["CUPON_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -3138,15 +3313,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["CUPON_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -3169,7 +3340,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -3178,21 +3358,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
           "headers": []
         },
         "404": {
@@ -3204,10 +3369,21 @@
           "types": ["application/problem+json"],
           "codes": ["VERSION_CONFLICT"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -3230,7 +3406,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -3239,6 +3419,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["PROMOCION_NO_ENCONTRADA"],
           "headers": []
         },
         "500": {
@@ -3250,15 +3435,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["PROMOCION_NO_ENCONTRADA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -3281,7 +3462,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -3290,6 +3475,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["REGLA_RECOMENDACION_NO_ENCONTRADA"],
           "headers": []
         },
         "500": {
@@ -3301,15 +3491,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["REGLA_RECOMENDACION_NO_ENCONTRADA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -3332,7 +3518,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -3341,16 +3531,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         },
         "404": {
@@ -3362,10 +3542,21 @@
           "types": ["application/problem+json"],
           "codes": ["VERSION_CONFLICT"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -3403,6 +3594,11 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["LOTE_NO_ENCONTRADO"],
+          "headers": []
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -3412,15 +3608,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["LOTE_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -3444,10 +3636,7 @@
       "requestTypes": [],
       "responses": {
         "200": {
-          "types": [
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "text/csv"
-          ],
+          "types": ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "text/csv"],
           "codes": [],
           "headers": []
         },
@@ -3461,6 +3650,11 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["LOTE_NO_ENCONTRADO"],
+          "headers": []
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -3470,15 +3664,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["LOTE_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -3502,11 +3692,13 @@
       "requestTypes": [],
       "responses": {
         "200": {
-          "types": [
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "text/csv"
-          ],
+          "types": ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "text/csv"],
           "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
           "headers": []
         },
         "401": {
@@ -3528,15 +3720,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -3559,7 +3747,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["text/csv"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["text/csv"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -3568,6 +3760,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["LOTE_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -3579,15 +3776,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["LOTE_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -3610,7 +3803,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["text/csv"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["text/csv"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -3619,6 +3816,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["LOTE_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -3630,15 +3832,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["LOTE_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "DELETE",
@@ -3661,7 +3859,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "204": { "types": [], "codes": [], "headers": [] },
+        "204": {
+          "types": [],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -3670,6 +3872,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["SKU_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -3681,15 +3888,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["SKU_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "PUT",
@@ -3712,7 +3915,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -3721,6 +3933,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["SKU_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -3732,20 +3949,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["SKU_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -3768,10 +3976,9 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": ["PROMOCION_INVALIDA", "ALCANCE_PROMOCION_INVALIDO"],
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
           "headers": []
         },
         "400": {
@@ -3789,6 +3996,16 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["PROMOCION_INVALIDA", "ALCANCE_PROMOCION_INVALIDO"],
+          "headers": []
+        },
+        "429": {
+          "types": ["application/problem+json"],
+          "codes": ["RATE_LIMIT_EXCEDIDO"],
+          "headers": ["retry-after"]
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -3798,15 +4015,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "429": {
-          "types": ["application/problem+json"],
-          "codes": ["RATE_LIMIT_EXCEDIDO"],
-          "headers": ["retry-after"]
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -3822,7 +4035,11 @@
       "headers": [],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": [],
@@ -3855,7 +4072,8 @@
         }
       },
       "internal": true,
-      "runtimeStatus": "PENDIENTE_IMPLEMENTACION"
+      "runtimeStatus": "PENDIENTE_IMPLEMENTACION",
+      "errorCodesDeclared": false
     },
     {
       "method": "POST",
@@ -3884,15 +4102,9 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "202": { "types": ["application/json"], "codes": [], "headers": [] },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["RESERVA_NO_ENCONTRADA"],
-          "headers": []
-        },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": ["IDEMPOTENCY_CONFLICT", "RESERVA_NO_ACTIVA"],
+        "202": {
+          "types": ["application/json"],
+          "codes": [],
           "headers": []
         },
         "400": {
@@ -3910,6 +4122,16 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["RESERVA_NO_ENCONTRADA"],
+          "headers": []
+        },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["IDEMPOTENCY_CONFLICT", "RESERVA_NO_ACTIVA"],
+          "headers": []
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -3922,7 +4144,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -3945,7 +4168,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": [],
@@ -3978,7 +4205,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": "PENDIENTE_ENDPOINT_HTTP"
+      "runtimeStatus": "PENDIENTE_ENDPOINT_HTTP",
+      "errorCodesDeclared": false
     },
     {
       "method": "GET",
@@ -4001,7 +4229,16 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -4021,15 +4258,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4052,7 +4285,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -4080,7 +4317,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4103,7 +4341,16 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -4123,15 +4370,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4154,7 +4397,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -4170,6 +4417,11 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "429": {
+          "types": ["application/problem+json"],
+          "codes": ["RATE_LIMIT_EXCEDIDO"],
+          "headers": ["retry-after"]
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -4179,15 +4431,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "429": {
-          "types": ["application/problem+json"],
-          "codes": ["RATE_LIMIT_EXCEDIDO"],
-          "headers": ["retry-after"]
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4210,7 +4458,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -4233,7 +4485,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4256,7 +4509,16 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -4276,15 +4538,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4307,7 +4565,16 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -4327,15 +4594,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4358,7 +4621,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -4367,6 +4634,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["CATEGORIA_NO_ENCONTRADA"],
           "headers": []
         },
         "500": {
@@ -4378,15 +4650,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["CATEGORIA_NO_ENCONTRADA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4409,7 +4677,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -4425,6 +4697,11 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "429": {
+          "types": ["application/problem+json"],
+          "codes": ["RATE_LIMIT_EXCEDIDO"],
+          "headers": ["retry-after"]
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -4434,15 +4711,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "429": {
-          "types": ["application/problem+json"],
-          "codes": ["RATE_LIMIT_EXCEDIDO"],
-          "headers": ["retry-after"]
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4465,7 +4738,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -4488,7 +4765,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4511,7 +4789,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -4527,16 +4809,6 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
         "422": {
           "types": ["application/problem+json"],
           "codes": ["CATEGORIA_INVALIDA", "MARCA_INVALIDA"],
@@ -4546,10 +4818,21 @@
           "types": ["application/problem+json"],
           "codes": ["RATE_LIMIT_EXCEDIDO"],
           "headers": ["retry-after"]
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4572,7 +4855,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -4600,7 +4887,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4623,7 +4911,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -4632,6 +4924,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["PRECIO_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -4643,15 +4940,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["PRECIO_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4674,7 +4967,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -4683,6 +4980,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["PRECIO_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -4694,15 +4996,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["PRECIO_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4725,7 +5023,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -4741,6 +5043,11 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "429": {
+          "types": ["application/problem+json"],
+          "codes": ["RATE_LIMIT_EXCEDIDO"],
+          "headers": ["retry-after"]
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -4750,15 +5057,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "429": {
-          "types": ["application/problem+json"],
-          "codes": ["RATE_LIMIT_EXCEDIDO"],
-          "headers": ["retry-after"]
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4781,7 +5084,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -4804,7 +5111,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4827,7 +5135,16 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -4847,15 +5164,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4878,7 +5191,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": [],
@@ -4911,7 +5228,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": "IMPLEMENTADO_BACKEND_PENDIENTE_VERIFICACION"
+      "runtimeStatus": "IMPLEMENTADO_BACKEND_PENDIENTE_VERIFICACION",
+      "errorCodesDeclared": false
     },
     {
       "method": "GET",
@@ -4934,7 +5252,16 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -4954,15 +5281,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -4978,7 +5301,11 @@
       "headers": [],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": [],
@@ -5001,7 +5328,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": false
     },
     {
       "method": "GET",
@@ -5024,7 +5352,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": [],
@@ -5057,7 +5389,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": "PENDIENTE_ENDPOINT_HTTP"
+      "runtimeStatus": "PENDIENTE_ENDPOINT_HTTP",
+      "errorCodesDeclared": false
     },
     {
       "method": "GET",
@@ -5080,7 +5413,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -5089,6 +5426,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["CARACTERISTICA_NO_ENCONTRADA"],
           "headers": []
         },
         "500": {
@@ -5100,15 +5442,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["CARACTERISTICA_NO_ENCONTRADA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -5131,7 +5469,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -5147,6 +5489,11 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["PRODUCTO_NO_ENCONTRADO"],
+          "headers": []
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -5156,15 +5503,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["PRODUCTO_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -5187,7 +5530,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -5210,7 +5557,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -5233,7 +5581,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -5242,6 +5594,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["AUDITORIA_PRECIO_NO_ENCONTRADA"],
           "headers": []
         },
         "500": {
@@ -5253,15 +5610,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["AUDITORIA_PRECIO_NO_ENCONTRADA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -5284,7 +5637,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -5317,7 +5674,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -5340,7 +5698,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -5349,6 +5711,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["CARACTERISTICA_NO_ENCONTRADA"],
           "headers": []
         },
         "500": {
@@ -5360,15 +5727,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["CARACTERISTICA_NO_ENCONTRADA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -5391,7 +5754,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -5400,6 +5767,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["CATEGORIA_NO_ENCONTRADA"],
           "headers": []
         },
         "500": {
@@ -5411,15 +5783,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["CATEGORIA_NO_ENCONTRADA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -5442,10 +5810,9 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["COMBO_NO_ENCONTRADO"],
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
           "headers": []
         },
         "400": {
@@ -5463,6 +5830,11 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["COMBO_NO_ENCONTRADO"],
+          "headers": []
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -5475,7 +5847,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -5496,16 +5869,6 @@
           "codes": [],
           "headers": ["content-length", "x-content-sha256"]
         },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["ARCHIVO_NO_ENCONTRADO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
         "400": {
           "types": ["application/problem+json"],
           "codes": [],
@@ -5521,6 +5884,11 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["ARCHIVO_NO_ENCONTRADO"],
+          "headers": []
+        },
         "429": {
           "types": ["application/problem+json"],
           "codes": ["RATE_LIMIT_EXCEDIDO"],
@@ -5530,10 +5898,16 @@
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
           "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": true,
-      "runtimeStatus": "PENDIENTE_IMPLEMENTACION"
+      "runtimeStatus": "PENDIENTE_IMPLEMENTACION",
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -5556,7 +5930,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -5579,7 +5957,8 @@
         }
       },
       "internal": true,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -5602,7 +5981,11 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -5625,7 +6008,8 @@
         }
       },
       "internal": true,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -5648,7 +6032,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -5657,6 +6045,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["CUPON_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -5668,15 +6061,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["CUPON_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -5699,7 +6088,16 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -5719,15 +6117,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -5750,7 +6144,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -5759,6 +6157,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["TIPO_PRODUCTO_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -5770,15 +6173,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["TIPO_PRODUCTO_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -5794,10 +6193,9 @@
       "headers": [],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["RESERVA_NO_ENCONTRADA"],
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
           "headers": []
         },
         "400": {
@@ -5813,6 +6211,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["RESERVA_NO_ENCONTRADA"],
           "headers": []
         },
         "429": {
@@ -5832,7 +6235,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -5848,9 +6252,8 @@
       "headers": [],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
-        "404": {
-          "types": ["application/problem+json"],
+        "200": {
+          "types": ["application/json"],
           "codes": [],
           "headers": []
         },
@@ -5865,6 +6268,11 @@
           "headers": []
         },
         "403": {
+          "types": ["application/problem+json"],
+          "codes": [],
+          "headers": []
+        },
+        "404": {
           "types": ["application/problem+json"],
           "codes": [],
           "headers": []
@@ -5886,7 +6294,8 @@
         }
       },
       "internal": true,
-      "runtimeStatus": "PENDIENTE_IMPLEMENTACION_BACKEND"
+      "runtimeStatus": "PENDIENTE_IMPLEMENTACION_BACKEND",
+      "errorCodesDeclared": false
     },
     {
       "method": "GET",
@@ -5909,7 +6318,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -5918,6 +6331,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["LOTE_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -5929,15 +6347,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["LOTE_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -5960,7 +6374,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -5969,6 +6387,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["LOTE_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -5980,15 +6403,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["LOTE_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6011,7 +6430,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -6020,6 +6443,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["LOTE_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -6031,15 +6459,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["LOTE_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6062,7 +6486,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -6071,6 +6499,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["LOTE_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -6082,15 +6515,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["LOTE_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6113,7 +6542,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -6122,6 +6555,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["MARCA_NO_ENCONTRADA"],
           "headers": []
         },
         "500": {
@@ -6133,15 +6571,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["MARCA_NO_ENCONTRADA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6157,10 +6591,9 @@
       "headers": [],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["OPERACION_CUPON_NO_ENCONTRADA"],
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
           "headers": []
         },
         "400": {
@@ -6176,6 +6609,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["OPERACION_CUPON_NO_ENCONTRADA"],
           "headers": []
         },
         "429": {
@@ -6195,7 +6633,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6218,7 +6657,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -6227,6 +6670,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["OPERACION_MAESTRA_NO_ENCONTRADA"],
           "headers": []
         },
         "500": {
@@ -6238,15 +6686,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["OPERACION_MAESTRA_NO_ENCONTRADA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6269,7 +6713,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -6278,6 +6726,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["PRECIO_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -6289,15 +6742,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["PRECIO_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6307,12 +6756,7 @@
       "security": ["userBearer", "serviceBearer"],
       "scope": "precios:leer",
       "audience": "api-productos",
-      "clients": [
-        "modulo-marketplace",
-        "modulo-chatbot",
-        "modulo-retail",
-        "modulo-productos"
-      ],
+      "clients": ["modulo-marketplace", "modulo-chatbot", "modulo-retail", "modulo-productos"],
       "role": null,
       "introspection": false,
       "headers": [
@@ -6325,10 +6769,9 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["PRECIO_NO_ENCONTRADO"],
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
           "headers": []
         },
         "400": {
@@ -6346,6 +6789,16 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["PRECIO_NO_ENCONTRADO"],
+          "headers": []
+        },
+        "429": {
+          "types": ["application/problem+json"],
+          "codes": ["RATE_LIMIT_EXCEDIDO"],
+          "headers": ["retry-after"]
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -6355,15 +6808,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "429": {
-          "types": ["application/problem+json"],
-          "codes": ["RATE_LIMIT_EXCEDIDO"],
-          "headers": ["retry-after"]
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6386,7 +6835,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -6419,7 +6872,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6429,12 +6883,7 @@
       "security": ["userBearer", "serviceBearer"],
       "scope": "catalogo:leer",
       "audience": "api-productos",
-      "clients": [
-        "modulo-marketplace",
-        "modulo-chatbot",
-        "modulo-retail",
-        "modulo-productos"
-      ],
+      "clients": ["modulo-marketplace", "modulo-chatbot", "modulo-retail", "modulo-productos"],
       "role": null,
       "introspection": false,
       "headers": [
@@ -6447,10 +6896,9 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["PRODUCTO_NO_ENCONTRADO"],
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
           "headers": []
         },
         "400": {
@@ -6468,6 +6916,16 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["PRODUCTO_NO_ENCONTRADO"],
+          "headers": []
+        },
+        "429": {
+          "types": ["application/problem+json"],
+          "codes": ["RATE_LIMIT_EXCEDIDO"],
+          "headers": ["retry-after"]
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -6477,15 +6935,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "429": {
-          "types": ["application/problem+json"],
-          "codes": ["RATE_LIMIT_EXCEDIDO"],
-          "headers": ["retry-after"]
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6508,7 +6962,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -6541,7 +6999,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6564,7 +7023,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -6573,16 +7036,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         },
         "404": {
@@ -6594,10 +7047,21 @@
           "types": ["application/problem+json"],
           "codes": ["RATE_LIMIT_EXCEDIDO"],
           "headers": ["retry-after"]
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6620,7 +7084,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -6629,6 +7097,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["PROMOCION_NO_ENCONTRADA"],
           "headers": []
         },
         "500": {
@@ -6640,15 +7113,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["PROMOCION_NO_ENCONTRADA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6671,7 +7140,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -6687,6 +7160,11 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "429": {
+          "types": ["application/problem+json"],
+          "codes": ["RATE_LIMIT_EXCEDIDO"],
+          "headers": ["retry-after"]
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -6696,15 +7174,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "429": {
-          "types": ["application/problem+json"],
-          "codes": ["RATE_LIMIT_EXCEDIDO"],
-          "headers": ["retry-after"]
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6727,7 +7201,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -6736,6 +7214,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["REGLA_RECOMENDACION_NO_ENCONTRADA"],
           "headers": []
         },
         "500": {
@@ -6747,15 +7230,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["REGLA_RECOMENDACION_NO_ENCONTRADA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6778,7 +7257,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -6787,6 +7270,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["CATEGORIA_NO_ENCONTRADA"],
           "headers": []
         },
         "500": {
@@ -6798,15 +7286,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["CATEGORIA_NO_ENCONTRADA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6822,7 +7306,11 @@
       "headers": [],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "404": {
           "types": ["application/problem+json"],
           "codes": ["SLUG_NO_ENCONTRADO"],
@@ -6835,7 +7323,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6858,7 +7347,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -6867,6 +7360,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["TIPO_PRODUCTO_NO_ENCONTRADO"],
           "headers": []
         },
         "500": {
@@ -6878,15 +7376,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["TIPO_PRODUCTO_NO_ENCONTRADO"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6902,9 +7396,8 @@
       "headers": [],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
-        "404": {
-          "types": ["application/problem+json"],
+        "200": {
+          "types": ["application/json"],
           "codes": [],
           "headers": []
         },
@@ -6914,6 +7407,11 @@
           "headers": []
         },
         "403": {
+          "types": ["application/problem+json"],
+          "codes": [],
+          "headers": []
+        },
+        "404": {
           "types": ["application/problem+json"],
           "codes": [],
           "headers": []
@@ -6930,7 +7428,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": false
     },
     {
       "method": "GET",
@@ -6953,7 +7452,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -6976,7 +7479,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -6999,7 +7503,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -7015,6 +7523,11 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["VARIANTE_NO_ENCONTRADA"],
+          "headers": []
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -7024,15 +7537,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["VARIANTE_NO_ENCONTRADA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -7055,7 +7564,16 @@
       ],
       "requestTypes": ["multipart/form-data"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["ARCHIVO_INVALIDO"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -7064,21 +7582,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["ARCHIVO_INVALIDO"],
           "headers": []
         },
         "413": {
@@ -7090,10 +7593,21 @@
           "types": ["application/problem+json"],
           "codes": ["PLANTILLA_INCOMPATIBLE"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -7116,7 +7630,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "201": { "types": ["application/json"], "codes": [], "headers": [] },
+        "201": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION", "MOTIVO_CAMBIO_REQUERIDO"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -7125,21 +7648,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION", "MOTIVO_CAMBIO_REQUERIDO"],
           "headers": []
         },
         "404": {
@@ -7154,16 +7662,23 @@
         },
         "422": {
           "types": ["application/problem+json"],
-          "codes": [
-            "PRECIO_INVALIDO",
-            "OFERTA_INVALIDA",
-            "SCOPE_PRECIO_INVALIDO"
-          ],
+          "codes": ["PRECIO_INVALIDO", "OFERTA_INVALIDA", "SCOPE_PRECIO_INVALIDO"],
+          "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -7186,7 +7701,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "201": { "types": ["application/json"], "codes": [], "headers": [] },
+        "201": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION", "MOTIVO_CAMBIO_REQUERIDO"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -7195,21 +7719,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION", "MOTIVO_CAMBIO_REQUERIDO"],
           "headers": []
         },
         "404": {
@@ -7224,16 +7733,23 @@
         },
         "422": {
           "types": ["application/problem+json"],
-          "codes": [
-            "PRECIO_INVALIDO",
-            "OFERTA_INVALIDA",
-            "SCOPE_PRECIO_INVALIDO"
-          ],
+          "codes": ["PRECIO_INVALIDO", "OFERTA_INVALIDA", "SCOPE_PRECIO_INVALIDO"],
+          "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -7256,7 +7772,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -7265,16 +7785,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         },
         "404": {
@@ -7286,10 +7796,21 @@
           "types": ["application/problem+json"],
           "codes": ["VERSION_CONFLICT"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -7312,7 +7833,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -7321,16 +7846,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         },
         "404": {
@@ -7342,10 +7857,21 @@
           "types": ["application/problem+json"],
           "codes": ["CATEGORIA_PADRE_INACTIVA"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -7368,7 +7894,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -7377,6 +7907,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["MARCA_NO_ENCONTRADA"],
           "headers": []
         },
         "500": {
@@ -7388,15 +7923,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["MARCA_NO_ENCONTRADA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -7419,7 +7950,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -7428,21 +7968,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
           "headers": []
         },
         "404": {
@@ -7457,17 +7982,23 @@
         },
         "422": {
           "types": ["application/problem+json"],
-          "codes": [
-            "DATOS_INCOMPLETOS",
-            "CATEGORIA_INVALIDA",
-            "TIPO_PRODUCTO_INVALIDO",
-            "MARCA_INVALIDA"
-          ],
+          "codes": ["DATOS_INCOMPLETOS", "CATEGORIA_INVALIDA", "TIPO_PRODUCTO_INVALIDO", "MARCA_INVALIDA"],
+          "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -7490,7 +8021,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -7499,16 +8034,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         },
         "404": {
@@ -7520,10 +8045,21 @@
           "types": ["application/problem+json"],
           "codes": ["VERSION_CONFLICT"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -7546,7 +8082,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -7555,6 +8095,11 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["CARACTERISTICA_NO_ENCONTRADA"],
           "headers": []
         },
         "500": {
@@ -7566,15 +8111,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["CARACTERISTICA_NO_ENCONTRADA"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -7597,7 +8138,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -7606,16 +8151,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         },
         "404": {
@@ -7630,17 +8165,23 @@
         },
         "422": {
           "types": ["application/problem+json"],
-          "codes": [
-            "DATOS_INCOMPLETOS",
-            "SKU_INVALIDO",
-            "ATRIBUTO_IDENTIFICADOR_INVALIDO",
-            "IMAGEN_INVALIDA"
-          ],
+          "codes": ["DATOS_INCOMPLETOS", "SKU_INVALIDO", "ATRIBUTO_IDENTIFICADOR_INVALIDO", "IMAGEN_INVALIDA"],
+          "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -7663,7 +8204,16 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "202": { "types": ["application/json"], "codes": [], "headers": [] },
+        "202": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "400": {
+          "types": ["application/problem+json"],
+          "codes": ["VALIDACION"],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -7672,6 +8222,16 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["LOTE_NO_ENCONTRADO"],
+          "headers": []
+        },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["IDEMPOTENCY_CONFLICT", "RETRY_PROTOCOL_NOT_APPROVED", "RETRY_NOT_ELIGIBLE"],
           "headers": []
         },
         "500": {
@@ -7683,29 +8243,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["LOTE_NO_ENCONTRADO"],
-          "headers": []
-        },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": [
-            "IDEMPOTENCY_CONFLICT",
-            "RETRY_PROTOCOL_NOT_APPROVED",
-            "RETRY_NOT_ELIGIBLE"
-          ],
-          "headers": []
-        },
-        "400": {
-          "types": ["application/problem+json"],
-          "codes": ["VALIDACION"],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -7734,7 +8276,21 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
+        "401": {
+          "types": ["application/problem+json"],
+          "codes": ["TOKEN_INVALIDO"],
+          "headers": []
+        },
+        "403": {
+          "types": ["application/problem+json"],
+          "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
         "404": {
           "types": ["application/problem+json"],
           "codes": ["TRASLADO_NO_ENCONTRADO"],
@@ -7747,20 +8303,7 @@
         },
         "422": {
           "types": ["application/problem+json"],
-          "codes": [
-            "CANTIDAD_RECIBIDA_EXCEDE_TRASLADO",
-            "DISPOSICION_RECEPCION_INVALIDA"
-          ],
-          "headers": []
-        },
-        "401": {
-          "types": ["application/problem+json"],
-          "codes": ["TOKEN_INVALIDO"],
-          "headers": []
-        },
-        "403": {
-          "types": ["application/problem+json"],
-          "codes": ["SCOPE_INSUFICIENTE"],
+          "codes": ["CANTIDAD_RECIBIDA_EXCEDE_TRASLADO", "DISPOSICION_RECEPCION_INVALIDA"],
           "headers": []
         },
         "500": {
@@ -7775,7 +8318,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -7804,20 +8348,9 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": ["IDEMPOTENCY_CONFLICT"],
-          "headers": []
-        },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": [
-            "REINTEGRO_NO_APLICABLE",
-            "CANTIDAD_INVALIDA",
-            "SKU_NO_ENCONTRADO",
-            "UBICACION_NO_ENCONTRADA"
-          ],
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
           "headers": []
         },
         "400": {
@@ -7835,6 +8368,16 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["IDEMPOTENCY_CONFLICT"],
+          "headers": []
+        },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["REINTEGRO_NO_APLICABLE", "CANTIDAD_INVALIDA", "SKU_NO_ENCONTRADO", "UBICACION_NO_ENCONTRADA"],
+          "headers": []
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -7847,7 +8390,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -7870,7 +8414,11 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "202": { "types": ["application/json"], "codes": [], "headers": [] },
+        "202": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -7908,7 +8456,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -7931,7 +8480,11 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "202": { "types": ["application/json"], "codes": [], "headers": [] },
+        "202": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -7969,7 +8522,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -7998,20 +8552,9 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "201": { "types": ["application/json"], "codes": [], "headers": [] },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": ["IDEMPOTENCY_CONFLICT", "STOCK_INSUFICIENTE"],
-          "headers": []
-        },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": [
-            "CANTIDAD_INVALIDA",
-            "SKU_NO_ENCONTRADO",
-            "SKU_INACTIVO",
-            "UBICACION_NO_ENCONTRADA"
-          ],
+        "201": {
+          "types": ["application/json"],
+          "codes": [],
           "headers": []
         },
         "400": {
@@ -8029,6 +8572,16 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["IDEMPOTENCY_CONFLICT", "STOCK_INSUFICIENTE"],
+          "headers": []
+        },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["CANTIDAD_INVALIDA", "SKU_NO_ENCONTRADO", "SKU_INACTIVO", "UBICACION_NO_ENCONTRADA"],
+          "headers": []
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -8041,7 +8594,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -8064,7 +8618,11 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -8085,6 +8643,11 @@
           "codes": ["CODIGO_BARRAS_NO_ENCONTRADO"],
           "headers": []
         },
+        "429": {
+          "types": ["application/problem+json"],
+          "codes": ["RATE_LIMIT_EXCEDIDO"],
+          "headers": ["retry-after"]
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -8094,15 +8657,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "429": {
-          "types": ["application/problem+json"],
-          "codes": ["RATE_LIMIT_EXCEDIDO"],
-          "headers": ["retry-after"]
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -8131,20 +8690,9 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["INCIDENCIA_NO_ENCONTRADA"],
-          "headers": []
-        },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": ["IDEMPOTENCY_CONFLICT", "INCIDENCIA_NO_ACTIVA"],
-          "headers": []
-        },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": ["RESOLUCION_INCIDENCIA_INVALIDA", "CANTIDAD_INVALIDA"],
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
           "headers": []
         },
         "400": {
@@ -8162,6 +8710,21 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["INCIDENCIA_NO_ENCONTRADA"],
+          "headers": []
+        },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["IDEMPOTENCY_CONFLICT", "INCIDENCIA_NO_ACTIVA"],
+          "headers": []
+        },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["RESOLUCION_INCIDENCIA_INVALIDA", "CANTIDAD_INVALIDA"],
+          "headers": []
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -8174,7 +8737,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -8197,7 +8761,11 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -8220,7 +8788,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "GET",
@@ -8236,7 +8805,11 @@
       "headers": [],
       "requestTypes": [],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "404": {
           "types": ["application/problem+json"],
           "codes": ["SLUG_NO_ENCONTRADO"],
@@ -8249,7 +8822,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -8272,7 +8846,11 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -8300,7 +8878,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -8323,7 +8902,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "202": { "types": ["application/json"], "codes": [], "headers": [] },
+        "202": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -8332,6 +8915,16 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["CATEGORIA_NO_ENCONTRADA"],
+          "headers": []
+        },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["CATEGORIA_CON_SUBCATEGORIAS_ACTIVAS", "BAJA_MAESTRA_EN_PROCESO"],
           "headers": []
         },
         "500": {
@@ -8343,23 +8936,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["CATEGORIA_NO_ENCONTRADA"],
-          "headers": []
-        },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": [
-            "CATEGORIA_CON_SUBCATEGORIAS_ACTIVAS",
-            "BAJA_MAESTRA_EN_PROCESO"
-          ],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -8382,7 +8963,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "202": { "types": ["application/json"], "codes": [], "headers": [] },
+        "202": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -8391,6 +8976,16 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["MARCA_NO_ENCONTRADA"],
+          "headers": []
+        },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["ENTIDAD_MAESTRA_CON_PRODUCTOS_ACTIVOS", "BAJA_MAESTRA_EN_PROCESO"],
           "headers": []
         },
         "500": {
@@ -8402,23 +8997,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["MARCA_NO_ENCONTRADA"],
-          "headers": []
-        },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": [
-            "ENTIDAD_MAESTRA_CON_PRODUCTOS_ACTIVOS",
-            "BAJA_MAESTRA_EN_PROCESO"
-          ],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -8441,7 +9024,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "202": { "types": ["application/json"], "codes": [], "headers": [] },
+        "202": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -8450,16 +9037,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         },
         "404": {
@@ -8471,10 +9048,21 @@
           "types": ["application/problem+json"],
           "codes": ["BAJA_MAESTRA_EN_PROCESO"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -8497,7 +9085,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "202": { "types": ["application/json"], "codes": [], "headers": [] },
+        "202": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -8506,16 +9098,6 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
-          "headers": []
-        },
-        "500": {
-          "types": ["application/problem+json"],
-          "codes": ["ERROR_INTERNO"],
-          "headers": []
-        },
-        "503": {
-          "types": ["application/problem+json"],
-          "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
         },
         "404": {
@@ -8527,10 +9109,21 @@
           "types": ["application/problem+json"],
           "codes": ["VALOR_LISTA_EN_USO", "BAJA_MAESTRA_EN_PROCESO"],
           "headers": []
+        },
+        "500": {
+          "types": ["application/problem+json"],
+          "codes": ["ERROR_INTERNO"],
+          "headers": []
+        },
+        "503": {
+          "types": ["application/problem+json"],
+          "codes": ["SERVICIO_NO_DISPONIBLE"],
+          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -8553,7 +9146,11 @@
       ],
       "requestTypes": [],
       "responses": {
-        "202": { "types": ["application/json"], "codes": [], "headers": [] },
+        "202": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "401": {
           "types": ["application/problem+json"],
           "codes": ["TOKEN_INVALIDO"],
@@ -8562,6 +9159,16 @@
         "403": {
           "types": ["application/problem+json"],
           "codes": ["SCOPE_INSUFICIENTE"],
+          "headers": []
+        },
+        "404": {
+          "types": ["application/problem+json"],
+          "codes": ["ASOCIACION_NO_ENCONTRADA"],
+          "headers": []
+        },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["ASOCIACION_EN_USO", "BAJA_MAESTRA_EN_PROCESO", "VERSION_CONFLICT"],
           "headers": []
         },
         "500": {
@@ -8573,24 +9180,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "404": {
-          "types": ["application/problem+json"],
-          "codes": ["ASOCIACION_NO_ENCONTRADA"],
-          "headers": []
-        },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": [
-            "ASOCIACION_EN_USO",
-            "BAJA_MAESTRA_EN_PROCESO",
-            "VERSION_CONFLICT"
-          ],
-          "headers": []
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -8619,15 +9213,9 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "202": { "types": ["application/json"], "codes": [], "headers": [] },
-        "409": {
-          "types": ["application/problem+json"],
-          "codes": ["IDEMPOTENCY_CONFLICT"],
-          "headers": []
-        },
-        "422": {
-          "types": ["application/problem+json"],
-          "codes": ["CANTIDAD_INVALIDA"],
+        "202": {
+          "types": ["application/json"],
+          "codes": [],
           "headers": []
         },
         "400": {
@@ -8645,6 +9233,16 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "409": {
+          "types": ["application/problem+json"],
+          "codes": ["IDEMPOTENCY_CONFLICT"],
+          "headers": []
+        },
+        "422": {
+          "types": ["application/problem+json"],
+          "codes": ["CANTIDAD_INVALIDA"],
+          "headers": []
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -8657,7 +9255,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -8680,7 +9279,11 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -8696,6 +9299,11 @@
           "codes": ["SCOPE_INSUFICIENTE"],
           "headers": []
         },
+        "429": {
+          "types": ["application/problem+json"],
+          "codes": ["RATE_LIMIT_EXCEDIDO"],
+          "headers": ["retry-after"]
+        },
         "500": {
           "types": ["application/problem+json"],
           "codes": ["ERROR_INTERNO"],
@@ -8705,15 +9313,11 @@
           "types": ["application/problem+json"],
           "codes": ["SERVICIO_NO_DISPONIBLE"],
           "headers": []
-        },
-        "429": {
-          "types": ["application/problem+json"],
-          "codes": ["RATE_LIMIT_EXCEDIDO"],
-          "headers": ["retry-after"]
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     },
     {
       "method": "POST",
@@ -8736,7 +9340,11 @@
       ],
       "requestTypes": ["application/json"],
       "responses": {
-        "200": { "types": ["application/json"], "codes": [], "headers": [] },
+        "200": {
+          "types": ["application/json"],
+          "codes": [],
+          "headers": []
+        },
         "400": {
           "types": ["application/problem+json"],
           "codes": ["VALIDACION"],
@@ -8774,7 +9382,8 @@
         }
       },
       "internal": false,
-      "runtimeStatus": null
+      "runtimeStatus": null,
+      "errorCodesDeclared": true
     }
   ]
 }
