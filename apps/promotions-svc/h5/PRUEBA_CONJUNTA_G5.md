@@ -1,5 +1,9 @@
 # Prueba conjunta G5–G6 H5
 
+## Historial de evidencia local
+
+`evidencia-local-g5-g6-20261123.json` conserva el resultado histórico del commit `70f7e4bce2790985340a0db04c30579221f0af8f`; no describe las correcciones de esta revisión. El informe `evidencia-local-g5-g6-20261123-revision-correcciones.json` se genera desde el SHA final de código e identifica cada archivo comprobado y su hash. Es evidencia de regresión G6 local parcial, nunca homologación G5.
+
 Usar la revisión aislada aprobada por Infra, los SHA desplegados de G5/G6 y un pedido de prueba por intención. El contrato externo es OpenAPI `0.7.0-rc.2`. La batería sigue los identificadores de la sección 5 de la respuesta de G5 al contrato, que remite a los casos de aceptación de la sección 14.
 
 ## Ejecución coordinada
@@ -10,30 +14,53 @@ Usar la revisión aislada aprobada por Infra, los SHA desplegados de G5/G6 y un 
 4. Para anulación usar otro pedido ya consumido pero sin confirmar stock. G5 verifica y firma el evento original. `cancel` toma la fecha de la constancia, verifica la restauración según la política del cupón y libera stock. `expired` observa reserva ACTIVA vencida o EXPIRADA sin mutar. `auth` prueba 400/401/403 y 404 uniforme con los tokens negativos reales. Para pérdida de respuesta o reinicio, reutilizar el plan y los mismos UUID; `follow` concilia la operación en curso. Detener el componente o afectar la red solo en la ventana aprobada por Infra; comprobar las filas y DLQ antes de reanudar.
 5. Para M2 ejecutar devolución/reemplazo mediante los flujos existentes de G5 y medir saldo antes y después. Para corte o reversión, pausar nuevas admisiones y mantener consulta/worker hasta conciliar por `operation_id`. Marcar un caso como aprobado solo con resultados observados y SHA de ambos participantes cuando corresponda.
 
-El runner usa `node apps/promotions-svc/h5/ejecutar-integracion.mjs <etapa> <plan-local.json>`. Inyectar `G5_H5_VENTAS_JWT` desde el almacén autorizado. Para `auth` también se requieren `G5_H5_EXPIRED_JWT`, `G5_H5_WRONG_AUDIENCE_JWT` y `G5_H5_WRONG_SCOPE_JWT`. Fijar `G5_H5_AUTHORIZED_GATEWAY_ORIGIN` al origen aprobado y `G5_H5_MUTATIONS=integration-only` exclusivamente en la ventana de prueba autorizada. El runner registra UUID de correlación, operación, revisión, estado y códigos; los JWT se mantienen fuera del archivo y de la salida.
+El perfil de entrada sigue [perfil-autorizado.schema.json](perfil-autorizado.schema.json). La fase inicial es `node apps/promotions-svc/h5/preparar-planes.mjs prepare perfil-parcial.json directorio-nuevo`: crea los 20 planes `PREPARED`, UUID propios estables, `execute:false` y sin inventar pedido, reserva, snapshot, firmas o deployment. Completar campos pendientes con `node apps/promotions-svc/h5/preparar-planes.mjs update perfil-conocido.json directorio`; la operación es idempotente y rechaza valores contradictorios sin cambiar UUID ni reportes. Después de verificar SHAs, cuatro IDs CD G6 distintos, evidencia oficial G5 marcada `VERIFIED`, pedidos distintos, datos comerciales y firmas reales, ejecutar `node apps/promotions-svc/h5/preparar-planes.mjs authorize perfil-completo.json directorio G5-H5-NN ...`. Esto marca los casos solicitados `AUTHORIZED` pero conserva `execute:false`; nunca se habilitan mutaciones automáticamente. No incluir JWT ni claves privadas.
 
-Plantilla de plan. Sustituir referencias y SHA por evidencia del ambiente. Guardar el plan y los UUID por caso para recuperar reintentos. Reutilizar el payload original para el mismo UUID.
+Cada caso mutante del manifiesto debe indicar `execute:true` y `mutation_authorization` apuntando a un archivo firmado por el owner que aprueba la ventana/fixture. El contenedor del archivo lleva `execute:true` y `document.payload`/`document.signature` Ed25519 base64url. El payload firmado liga `issuer:"G6_H5_MUTATION_AUTHORIZATION"`, `authorized_by`, `case_id`, `stage`, `environment`, origen Gateway, SHA G5/G6, pedido, `correlation_id`, `operation_id`, `reservation_id`, `restore_operation_id` si aplica, `plan_sha256` del plan completo, referencias HTTPS de ventana y fixture, `issued_at` y `expires_at` (máximo 24 h). Configurar `G5_H5_MUTATION_AUTHORIZATION_PUBLIC_KEY` con el PEM público del aprobador por canal autenticado. El wrapper, la matriz y `ejecutar-integracion.mjs` verifican la firma y el alcance; proporcionar URLs HTTPS sin firma no autoriza la ejecución. Las mutaciones exigen además `G5_H5_MUTATIONS=integration-only` y el Gateway privado autorizado.
+
+Para lecturas permitidas ejecutar `node apps/promotions-svc/h5/ejecutar-controlado.mjs preflight directorio/manifiesto.azure.json resultado-nuevo.json [G5-H5-NN ...]`. El preflight exige `G5_H5_AUTHORIZED_GATEWAY_ORIGIN` y `G5_H5_VENTAS_JWT` reales, corre GET de disponibilidad/precio y la validación no mutante del cupón, y deja `status=BLOCKED` aunque el preflight técnico pase. Para `auth` se requieren además `G5_H5_EXPIRED_JWT`, `G5_H5_WRONG_AUDIENCE_JWT` y `G5_H5_WRONG_SCOPE_JWT` emitidos para pruebas por G7.
+
+La batería usa `node apps/promotions-svc/h5/ejecutar-controlado.mjs matrix ...`. La misma autorización firmada se verifica también al invocar `ejecutar-matriz.mjs` o `ejecutar-integracion.mjs` directamente: una llamada directa sin archivo de autorización, `execute:true` y el flag de ventana falla antes de HTTP. `G5_H5_AUTHORIZED_GATEWAY_ORIGIN` debe coincidir exactamente con el origen privado del plan. El runner registra UUID de correlación, operación, revisión, estado y códigos; JWTs se mantienen fuera del archivo y salida. La reserva generada guarda el `reservation_id` en un sidecar `.runtime.json`; conservar plan, sidecar y todos los operation UUID para retries.
+
+Referencia de estructura del plan. Los valores entre `<...>` son campos pendientes, no fixtures ejecutables. Usar el generador para producir los veinte planes a partir de pedidos y datos autorizados; los IDs se guardan para recuperar reintentos. Reutilizar el payload original para el mismo UUID.
 
 ```json
 {
   "environment": "integration",
-  "gateway": "https://gateway-integracion.example.invalid",
+  "gateway": "<origen HTTPS privado autorizado>",
   "g6_sha": "<SHA desplegado G6>",
   "g6_cd_runs": {
-    "api-gateway": "<ID de la ejecución oficial>",
-    "promotions-svc": "<ID de la ejecución oficial>",
-    "inventory-svc": "<ID de la ejecución oficial>",
-    "catalog-svc": "<ID de la ejecución oficial>"
+    "api-gateway": "<ID CD único Gateway>",
+    "catalog-svc": "<ID CD único Catalog>",
+    "inventory-svc": "<ID CD único Inventory>",
+    "promotions-svc": "<ID CD único Promotions>"
   },
   "g5_sha": "<SHA desplegado G5>",
+  "g5_deployment": {
+    "verification_status": "<VERIFIED solo tras cotejar fuente oficial G5>",
+    "commit_sha": "<SHA desplegado G5>",
+    "image_digest": "<digest sha256 confirmado>",
+    "revision": "<revisión G5 activa>",
+    "evidence_url": "<HTTPS evidencia oficial CD G5>",
+    "verified_at": "<fecha ISO-8601>",
+    "verified_by": "<responsable que contrastó CD G5>"
+  },
   "order_id": "<pedido sintético G5>",
   "customer_ref": "<UUID de cliente sintético>",
   "effective_at": "<fecha efectiva original G5>",
   "reservation_id": "<UUID persistido por Inventory>",
-  "location_id": "9129b578-631e-1735-8427-b683fb524380",
+  "scenario": {
+    "sku": "<SKU validado por fixture y preflight>",
+    "quantity": 1,
+    "channel_id": "<canal aprobado>",
+    "coupon_code": "<cupón aprobado>",
+    "currency": "<moneda de pricing y snapshot>",
+    "expected_regular_price": "<precio decimal validado, si aplica>",
+    "location_id": "<UUID de ubicación validada>"
+  },
+  "correlation_id": "<UUID generado una vez>",
   "g5_snapshot_confirmed": false,
-  "g5_evidence": { "payload": "<JSON UTF-8 base64url>", "signature": "<firma Ed25519 base64url>" },
-  "expected_restore_outcome": "RESTORED",
+  "g5_evidence": null,
   "operations": {
     "reserve": "<UUID único>",
     "coupon": "<UUID único>",
@@ -44,7 +71,7 @@ Plantilla de plan. Sustituir referencias y SHA por evidencia del ambiente. Guard
 }
 ```
 
-Para `follow`, añadir `follow_type` (`inventario` o `cupones`) y `follow_operation_id`. Para el caso 02, establecer `expected_reserve_status=REJECTED` y usar un pedido independiente; el runner solicita más unidades que el saldo de la consulta inmediatamente anterior. El paso preflight verifica disponibilidad real, precio y descuento. Las referencias históricas de S/ 79,90 y S/ 3,99 sirven para comparar con lo observado, sin sobrescribir la evidencia actual.
+Para `follow`, añadir `follow_type` (`inventario` o `cupones`) y `follow_operation_id` persistidos por el owner. Para el caso 02, establecer `expected_reserve_status=REJECTED` y usar un pedido independiente; el runner solicita más unidades que el saldo de la consulta inmediatamente anterior. El paso preflight verifica disponibilidad real, precio, moneda y descuento; si el fixture aporta precio esperado, debe coincidir con el GET vigente. No reutilizar valores comerciales históricos como verdad del ambiente.
 
 ### Constancias verificables
 
@@ -98,12 +125,12 @@ Estado real al 21/11/2026. Los 20 casos completos quedan `BLOCKED` hasta que se 
 | G5-H5-01 | Reserva y resultado durable | `reserve` / `follow` | Pendiente Gateway aislado y token G7 |
 | G5-H5-02 | Reserva rechazada y M1 evita cupón/pago | `reserve` negativo + verificación M1 | Pendiente G5 y ambiente |
 | G5-H5-03 | Confirmación de consumo de stock | `confirm` tras pago G5 | Pendiente bilateral |
-| G5-H5-04 | Liberación por anulación | `cancel` y seguimiento M1 | Pendiente bilateral |
+| G5-H5-04 | Liberación por anulación | `cancel` en modo `release-only` y seguimiento M1 | Pendiente bilateral; no llama a restauración de cupón |
 | G5-H5-05 | Cupón y GET terminal | `coupon` y constancia bilateral firmada | BLOCKED. Pendiente snapshot de G5 y constancia vinculada a la ejecución real |
 | G5-H5-06 | Restauración del consumo original | `cancel` con fecha original y política | Pendiente bilateral |
 | G5-H5-07 | Pérdida de respuesta del POST | `follow` y mismo UUID, con pérdida de respuesta y conteos firmados | BLOCKED. Reintento cubierto localmente. Pendiente evidencia del ambiente aislado |
 | G5-H5-08 | Identidad reutilizada con otro contenido | Conflicto del paso `coupon` | 409 cubierto localmente; pendiente ambiente |
-| G5-H5-09 | Reinicio de G5 | Reinicio M1 y `follow` | Pendiente bilateral |
+| G5-H5-09 | Reinicio de G5 | Reinicio coordinado de M1 y `follow` durable | Etapa técnica obligatoria y constancia bilateral; pendiente G5 |
 | G5-H5-10 | ACTIVA y vencida | `expired` antes del barrido | Pendiente fixture y ambiente |
 | G5-H5-11 | EXPIRADA entre barridos | `expired` tras barrido | Pendiente bilateral |
 | G5-H5-12 | Carrera pago/anulación/vencimiento | Carrera controlada M1 con consultas de reserva | Pendiente bilateral |
@@ -115,3 +142,5 @@ Estado real al 21/11/2026. Los 20 casos completos quedan `BLOCKED` hasta que se 
 | G5-H5-18 | Orden de reemplazo por CAMBIO | M2/M1, reserva y consumo antes de despacho | Pendiente G5/G2 y ambiente |
 | G5-H5-19 | Corte y reversión conciliados | Pausa de admisión, consulta y conciliación por ID | Pendiente bilateral e Infra |
 | G5-H5-20 | Destinos internos obligatorios | Matriz Service Bus H5 por emisor/receptor | Colas candidatas verificadas; pendiente validar workloads y efectos |
+
+Detalle ejecutable por escenario: [ESCENARIOS_G5_H5.md](ESCENARIOS_G5_H5.md); definición estructurada: [escenarios.json](escenarios.json). La configuración comercial de `ejecutar-integracion.mjs` ahora debe venir del plan autorizado. preparar-planes.mjs genera planes aislados y UUID una sola vez; no genera pedidos ni firmas. Ejecutar lecturas con `ejecutar-controlado.mjs` preflight ...; la matriz mutante exige referencias de ventana y fixture autorizadas.
