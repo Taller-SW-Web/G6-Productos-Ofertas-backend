@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
 const root = resolve(process.argv[2] ?? '');
-if (!root || root === process.cwd()) {
+if (!process.argv[2] || root === process.cwd()) {
   throw new Error('An isolated integration worktree path is required.');
 }
 
@@ -33,12 +33,6 @@ resolveConflict(
 
 execFileSync(
   'git',
-  ['-C', root, 'diff', '--name-only', '--diff-filter=U'],
-  { encoding: 'utf8' },
-).trim();
-if (unresolved) throw new Error(`Unresolved conflicts remain:\n${unresolved}`);
-execFileSync(
-  'git',
   [
     '-C',
     root,
@@ -49,5 +43,9 @@ execFileSync(
   ],
   { stdio: 'inherit' },
 );
-
-const unresolved = 
+const unresolved = execFileSync(
+  'git',
+  ['-C', root, 'diff', '--name-only', '--diff-filter=U'],
+  { encoding: 'utf8' },
+).trim();
+if (unresolved) throw new Error(`Unresolved conflicts remain:\n${unresolved}`);
