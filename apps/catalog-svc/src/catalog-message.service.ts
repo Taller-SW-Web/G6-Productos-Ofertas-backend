@@ -4,7 +4,7 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { CatalogBulkService } from './catalog-bulk.service.js';
 import { CatalogTelemetry } from './catalog-telemetry.js';
 import { consumeMasterMessage } from './catalog-master-message.js';
-import { and, asc, eq, isNull, lt } from 'drizzle-orm';
+import { and, asc, eq, isNull, lt, sql } from 'drizzle-orm';
 import { Database } from './database.js';
 import {
   activationChecks,
@@ -53,6 +53,7 @@ export class CatalogMessageService {
 
   async consume(
     message: CatalogEnvelope,
+    replyViaServiceBus = false,
   ): Promise<'APPLIED' | 'STALE' | 'TERMINAL' | 'DUPLICATE' | 'BLOCKED'> {
     if (message.name === 'catalog.bulk.upsert.requested') {
       if (!this.bulk) throw new BlockedCatalogHandler();
@@ -61,7 +62,12 @@ export class CatalogMessageService {
     if ((taxonomyUpdates as readonly string[]).includes(message.name))
       return consumeTaxonomyUpdate(this.database, message);
     if (message.name.startsWith('taxonomy.master.'))
-      return consumeMasterMessage(this.database, message, this.telemetry);
+      return consumeMasterMessage(
+        this.database,
+        message,
+        this.telemetry,
+        replyViaServiceBus,
+      );
     if (!(preparationResults as readonly string[]).includes(message.name))
       throw new BlockedCatalogHandler();
     const result = await this.database.transaction(async (tx) => {
@@ -198,7 +204,12 @@ export class CatalogMessageService {
       const [row] = await tx
         .select()
         .from(outbox)
-        .where(isNull(outbox.published_at))
+        .where(
+          and(
+            isNull(outbox.published_at),
+            sql`COALESCE(to_jsonb(catalog.outbox.*)->>'delivery_transport', 'RABBITMQ') = 'RABBITMQ'`,
+          ),
+        )
         .orderBy(asc(outbox.occurred_at), asc(outbox.id))
         .limit(1)
         .for('update', { skipLocked: true });

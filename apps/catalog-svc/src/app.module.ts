@@ -76,6 +76,7 @@ import {
   readHistoricalRecoveryCapabilities,
 } from './historical-recovery.service.js';
 import { readHistoricalPricingContract } from './historical-pricing.contract.js';
+import { CatalogTaxonomyServiceBusRuntime } from './catalog-taxonomy-service-bus.runtime.js';
 
 @Module({
   imports: [],
@@ -130,6 +131,7 @@ import { readHistoricalPricingContract } from './historical-pricing.contract.js'
     { provide: CATALOG_TAXONOMY_IDENTITY, useExisting: CatalogBulkIdentity },
     CatalogTelemetry,
     CatalogAmqpRuntime,
+    CatalogTaxonomyServiceBusRuntime,
     {
       provide: CATALOG_AMQP_SETTINGS,
       useFactory: () => ({ connection: readCatalogAmqpConfig() }),
