@@ -162,6 +162,10 @@ function Get-H5QueueRbacStatus([string]$QueryState, [string[]]$Roles) {
   return 'MISSING'
 }
 
+function Test-H5PsqlAvailable([string]$CommandName) {
+  return $null -ne (Get-Command $CommandName -ErrorAction SilentlyContinue)
+}
+
 function Get-H5GhcrReleaseStatus([string]$Visibility, [string]$ExpectedSha, [string]$PackageSha, [bool]$DigestVerified) {
   if ($Visibility -ne 'VISIBLE') { return 'NO_VISIBILITY' }
   if ($ExpectedSha -notmatch '^[a-f0-9]{40}$' -or $PackageSha -cne $ExpectedSha -or -not $DigestVerified) { return 'MISSING_FOR_RELEASE_SHA' }
@@ -170,6 +174,47 @@ function Get-H5GhcrReleaseStatus([string]$Visibility, [string]$ExpectedSha, [str
 
 function Get-H5ContractScopes([string]$OpenApiText) {
   return @([regex]::Matches($OpenApiText,'(?m)^\s*x-required-scope:\s*["'']?([A-Za-z0-9:_-]+)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+}
+
+function Get-H5ContractOperationScopes([string]$OpenApiText) {
+  $result = @{}
+  $paths = [regex]::Matches($OpenApiText, '(?ms)^  (?<path>/[^\r\n]+):\r?\n(?<body>.*?)(?=^  /|\z)')
+  foreach ($path in $paths) {
+    $operations = [regex]::Matches($path.Groups['body'].Value, '(?ms)^    (?<method>get|post|put|patch|delete|options|head):\r?\n(?<body>.*?)(?=^    (?:get|post|put|patch|delete|options|head):|\z)')
+    foreach ($operation in $operations) {
+      $id = [regex]::Match($operation.Groups['body'].Value, '(?m)^      operationId:\s*["'']?([A-Za-z0-9_-]+)')
+      $scope = [regex]::Match($operation.Groups['body'].Value, '(?m)^      x-required-scope:\s*["'']?([A-Za-z0-9:_-]+)')
+      if ($id.Success -and $scope.Success) { $result[$id.Groups[1].Value] = $scope.Groups[1].Value }
+    }
+  }
+  return $result
+}
+
+function Get-H5PromotionsRequiredOperations {
+  return @(
+    [pscustomobject]@{ operation='obtenerProducto'; contractOperationId='obtenerProducto'; audience='api-productos'; scope='catalogo:leer'; credential='promotions-service-client-secret' },
+    [pscustomobject]@{ operation='obtenerContextoSku'; contractOperationId='obtenerContextoSku'; audience='api-productos'; scope='catalogo:leer'; credential='promotions-service-client-secret' },
+    [pscustomobject]@{ operation='obtenerPrecioSku'; contractOperationId='obtenerPrecioSku'; audience='api-productos'; scope='precios:leer'; credential='promotions-service-client-secret' },
+    [pscustomobject]@{ operation='consultarDisponibilidadComercial'; contractOperationId='consultarDisponibilidadComercial'; audience='api-productos'; scope='inventario:disponibilidad:leer'; credential='promotions-service-client-secret' },
+    [pscustomobject]@{ operation='obtenerEvidenciaReservaCuponInterno'; contractOperationId='obtenerEvidenciaReservaCuponInterno'; audience='api-productos'; scope='inventario:reservas:estado:leer'; credential='promotions-svc-client-secret' },
+    [pscustomobject]@{ operation='obtenerSnapshotCuponG5'; contractOperationId=''; audience='api-ventas'; scope='ventas:pedidos:evidencia-cupon:leer'; credential='promotions-svc-client-secret' },
+    [pscustomobject]@{ operation='obtenerCategoriaAdmin'; contractOperationId='obtenerCategoriaAdmin'; audience='api-productos'; scope='catalogo:leer'; credential='promotions-service-client-secret' }
+  )
+}
+
+function Test-H5JwtRequiredScopes([string]$TokenStatus, [string[]]$TokenScopes, [string[]]$RequiredScopes, [string[]]$ContractScopes) {
+  if ($TokenStatus -ne 'TOKEN_VALID') { return 'AUTHORIZATION_NOT_RUN' }
+  if (-not $RequiredScopes -or @($RequiredScopes | Where-Object { $_ -notin $ContractScopes }).Count -gt 0) { return 'AUTHORIZATION_NOT_RUN' }
+  if (@($RequiredScopes | Where-Object { $_ -notin $TokenScopes }).Count -gt 0) { return 'REQUIRED_SCOPES_MISSING' }
+  return 'REQUIRED_SCOPES_VERIFIED'
+}
+
+function Get-H5ScopeAuthorizationStatus([object[]]$TokenResults, [string[]]$RequiredScopes, [string[]]$ContractScopes) {
+  if (@($RequiredScopes | Where-Object { $_ -notin $ContractScopes }).Count -gt 0) { return 'AUTHORIZATION_NOT_RUN' }
+  if (-not $TokenResults -or @($TokenResults | Where-Object { $_.TokenStatus -ne 'TOKEN_VALID' }).Count -gt 0) { return 'AUTHORIZATION_NOT_RUN' }
+  $verified = @($TokenResults | Where-Object { $_.ScopeStatus -eq 'REQUIRED_SCOPES_VERIFIED' } | ForEach-Object { $_.Scopes })
+  if (@($RequiredScopes | Where-Object { $_ -notin $verified }).Count -gt 0) { return 'REQUIRED_SCOPES_MISSING' }
+  return 'REQUIRED_SCOPES_VERIFIED'
 }
 
 function Test-H5OptionalMessagingTable([string]$Service, [bool]$MessagingEnabled, [bool]$TableExists) {
@@ -205,9 +250,15 @@ function Invoke-H5ReadOnlySql([string]$Pem, [string]$PsqlPath, [string[]]$Argume
     $caPath = New-H5ProtectedCaFile $Pem
     foreach ($name in $Environment.Keys) { [Environment]::SetEnvironmentVariable([string]$name,[string]$Environment[$name],'Process') }
     $env:PGSSLROOTCERT = $caPath; $env:PGSSLMODE = 'verify-full'; $env:PGOPTIONS = '-c default_transaction_read_only=on'
-    $output = & $PsqlPath @Arguments 2>$null
+    $output = & $PsqlPath @Arguments 2>&1
     $exitCode = $LASTEXITCODE
-    return [pscustomobject]@{ ExitCode=$exitCode; Output=@($output) }
+    $status = 'PASS'
+    if ($exitCode -ne 0) {
+      $message = ($output | ForEach-Object { [string]$_ }) -join "`n"
+      $status = if ($message -match '(?i)could not translate host|connection timed out|timeout expired|network is unreachable|no route to host|could not connect to server') { 'UNAVAILABLE' } else { 'FAIL' }
+      $output = @()
+    }
+    return [pscustomobject]@{ ExitCode=$exitCode; Status=$status; Output=@($output) }
   } finally {
     foreach ($name in $saved.Keys) {
       if ($null -eq $saved[$name]) { Remove-Item ('Env:' + $name) -ErrorAction SilentlyContinue }
@@ -217,7 +268,7 @@ function Invoke-H5ReadOnlySql([string]$Pem, [string]$PsqlPath, [string[]]$Argume
   }
 }
 
-function Test-H5JwtSignatureAndClaims([string]$Jwt, $Jwks, [string]$Issuer, [string]$ExpectedClient, [string[]]$ContractScopes) {
+function Test-H5JwtAuthenticity([string]$Jwt, $Jwks, [string]$Issuer, [string]$ExpectedClient, [string]$ExpectedAudience) {
   try {
     $parts = $Jwt.Split('.')
     if ($parts.Count -ne 3) { return $false }
@@ -251,13 +302,33 @@ function Test-H5JwtSignatureAndClaims([string]$Jwt, $Jwks, [string]$Issuer, [str
       } finally { $ec.Dispose() }
     } else { return $false }
     $aud = @($claims.aud)
-    $scopeText = if ($claims.scope) { [string]$claims.scope } else { (@($claims.scp) -join ' ') }
-    $scopes = @(($scopeText -split '\s+') | Where-Object { $_ })
-    $scopesValid = $scopes.Count -gt 0 -and @($scopes | Where-Object { $_ -notin $ContractScopes }).Count -eq 0
     $client = if ($claims.client_id) { [string]$claims.client_id } else { [string]$claims.sub }
     $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-    return $validSignature -and [string]$claims.iss -ceq $Issuer -and $aud -contains 'api-productos' -and $client -ceq $ExpectedClient -and [long]$claims.exp -gt $now -and (-not $claims.nbf -or [long]$claims.nbf -le $now) -and $scopesValid -and -not ($scopes -contains 'ventas:pedidos:evidencia-cupon:leer')
-  } catch { return $false }
+    $valid = $validSignature -and [string]$claims.iss -ceq $Issuer -and $aud -contains $ExpectedAudience -and $client -ceq $ExpectedClient -and [long]$claims.exp -gt $now -and (-not $claims.nbf -or [long]$claims.nbf -le $now)
+    $scopeText = if ($claims.scope) { [string]$claims.scope } else { (@($claims.scp) -join ' ') }
+    return [pscustomobject]@{ Status=$(if ($valid) { 'TOKEN_VALID' } else { 'TOKEN_INVALID' }); Scopes=@(($scopeText -split '\s+') | Where-Object { $_ }); Audience=$ExpectedAudience; Client=$client }
+  } catch { return [pscustomobject]@{ Status='TOKEN_INVALID'; Scopes=@(); Audience=$ExpectedAudience; Client='' } }
 }
 
-Export-ModuleMember -Function Get-H5ReservedEnvironment,Test-H5ManifestEnvironment,Test-H5ManifestCompleteness,Get-H5GuardedEnvironment,Test-H5GuardedEnvironment,Get-H5QueueRbacStatus,Get-H5GhcrReleaseStatus,Get-H5ContractScopes,Test-H5OptionalMessagingTable,Test-H5PemCertificate,New-H5ProtectedCaFile,Invoke-H5ReadOnlySql,Test-H5JwtSignatureAndClaims
+function Get-H5PreflightOutcome([string]$Mode, [object[]]$Results) {
+  $required = @{
+    STATIC = @('private-manifest','h5-aca-effective-configuration','official-bicep-guarded-env','g7-five-service-parser-configuration','first-bootstrap-closed-flags')
+    HTTP_BOOTSTRAP = @('private-manifest','h5-aca-effective-configuration','official-bicep-guarded-env','g7-five-service-parser-configuration','g7-discovery-issuer-and-jwks','azure-environment-private-domain','gateway-four-private-https-upstreams','pricing-private-catalog-dependency','first-bootstrap-closed-flags','release-source-provenance','catalog-svc-postgres-readonly-login','catalog-svc-http-readiness-schema','inventory-svc-postgres-readonly-login','inventory-svc-http-readiness-schema','pricing-svc-postgres-readonly-login','pricing-svc-http-readiness-schema','promotions-svc-postgres-readonly-login') + @('ghcr-api-gateway','ghcr-catalog-svc','ghcr-inventory-svc','ghcr-pricing-svc','ghcr-promotions-svc')
+    H5_INTEGRATION = @('private-manifest','h5-aca-effective-configuration','official-bicep-guarded-env','g7-five-service-parser-configuration','g7-discovery-issuer-and-jwks','release-source-provenance','azure-environment-private-domain','gateway-four-private-https-upstreams','pricing-private-catalog-dependency','catalog-svc-postgres-readonly-login','catalog-svc-http-readiness-schema','inventory-svc-postgres-readonly-login','inventory-svc-http-readiness-schema','pricing-svc-postgres-readonly-login','pricing-svc-http-readiness-schema','promotions-svc-postgres-readonly-login','promotions-required-scopes-contract','promotions-token-api-productos','promotions-required-scopes-api-productos','promotions-token-api-ventas','promotions-required-scopes-api-ventas','h5-messaging-runtime-configuration','promotions-managed-identity-and-servicebus-parameters','promotions-servicebus-queue-rbac','catalog-svc-h5-storage','inventory-svc-h5-storage','pricing-svc-h5-storage','promotions-svc-h5-storage') + @('ghcr-api-gateway','ghcr-catalog-svc','ghcr-inventory-svc','ghcr-pricing-svc','ghcr-promotions-svc')
+  }
+  if (-not $required.ContainsKey($Mode)) { throw 'PREFLIGHT_MODE_INVALID' }
+  $byName = @{}; foreach ($item in $Results) { $byName[$item.Check] = $item }
+  $mandatory = foreach ($name in $required[$Mode]) {
+    if ($byName.ContainsKey($name)) { $byName[$name] }
+    else { [pscustomobject]@{ Check=$name; Status='NOT_RUN'; Detail='Mandatory check was not produced.' } }
+  }
+  $passedStates = @('PASS','TOKEN_VALID','REQUIRED_SCOPES_VERIFIED')
+  $failedStates = @('FAIL','INVALID','MISSING','NO_VISIBILITY','MISSING_FOR_RELEASE_SHA','REQUIRED_SCOPES_MISSING','TOKEN_INVALID')
+  $bad = @($mandatory | Where-Object { $_.Status -in $failedStates })
+  $pending = @($mandatory | Where-Object { $_.Status -notin $passedStates -and $_.Status -notin $failedStates })
+  $exitCode = if ($bad.Count) { 1 } elseif ($pending.Count) { 2 } else { 0 }
+  $overall = if ($exitCode -eq 0) { 'PASS' } elseif ($exitCode -eq 1) { 'FAIL' } else { 'PENDING' }
+  return [pscustomobject]@{ Mode=$Mode; OverallStatus=$overall; ExitCode=$exitCode; DeploymentAuthorized=$false; RequiredChecks=@($required[$Mode]); MandatoryResults=@($mandatory) }
+}
+
+Export-ModuleMember -Function Get-H5ReservedEnvironment,Test-H5ManifestEnvironment,Test-H5ManifestCompleteness,Get-H5GuardedEnvironment,Test-H5GuardedEnvironment,Get-H5QueueRbacStatus,Test-H5PsqlAvailable,Get-H5GhcrReleaseStatus,Get-H5ContractScopes,Get-H5ContractOperationScopes,Get-H5PromotionsRequiredOperations,Test-H5JwtRequiredScopes,Get-H5ScopeAuthorizationStatus,Test-H5OptionalMessagingTable,Test-H5PemCertificate,New-H5ProtectedCaFile,Invoke-H5ReadOnlySql,Test-H5JwtAuthenticity,Get-H5PreflightOutcome

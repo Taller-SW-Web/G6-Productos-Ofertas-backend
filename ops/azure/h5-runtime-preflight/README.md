@@ -6,9 +6,12 @@ PostgreSQL. No crea ACA, ejecuta CD, modifica grants, aplica SQL ni cambia datos
 
 ## Contratos revisados
 
-- Backend `master` actualizado: `7fb3fcb380f106bfa58f6c39976c7681ca5fe32b`.
+- Backend `master` actualizado antes de estos cambios: `494a8595` (incluye el merge de #267; rama sincronizada sin modificar sus archivos).
 - Interfaz y `guardedEnv` verificados contra #263 HEAD
   `51f8441a2adb2e0484b2a2d3072617908f9672dc`. El validador no fue modificado.
+- #263 aún no está integrado en `master`; el test Node también intentará cargar
+  `origin/master:ops/azure/container-apps/validate-h5-five-apps.mjs` cuando el
+  archivo aparezca allí.
 - Docs `master`: `490172c11cb4b83ddd1996f8d5834d0402184cf8`; los seis contratos
   H5 revisados no cambiaron respecto a la lectura anterior.
 - H5 Service Bus Basic es mensajería entre bounded contexts G6; G5 consume por
@@ -73,17 +76,38 @@ Promotions.
 pwsh -NoProfile -File ops/azure/h5-runtime-preflight/Test-H5RuntimePreflight.ps1
 node --test ops/azure/h5-runtime-preflight/h5-aca-compatibility.test.mjs
 pwsh -NoProfile -File ops/azure/h5-runtime-preflight/Test-Postgres17.ps1
-pwsh -NoProfile -File ops/azure/h5-runtime-preflight/Invoke-Preflight.ps1 -ProbePostgres -ProbeG7Token -ProbeGhcr
 ```
+
+Gate único previo al what-if del Chat 6:
+
+```powershell
+pwsh -NoProfile -File ops/azure/h5-runtime-preflight/Invoke-Preflight.ps1 -Mode HTTP_BOOTSTRAP -JsonOutput
+```
+
+El comando ejecuta automáticamente los probes públicos/privados que puede
+realizar desde este equipo. Devuelve código `0` solo si pasan todos los checks
+obligatorios, `1` ante un fallo verificable y `2` si una dependencia o probe
+está pendiente, bloqueado o no ejecutado. En HTTP_BOOTSTRAP son obligatorios
+PostgreSQL TLS/rol/permisos/readiness, GHCR de los cinco paquetes, procedencia
+del SHA/digests, configuración y discovery G7, y los orígenes privados. La
+salida JSON incluye `mode`, `overall_status`, `exit_code`, `release_sha` y cada
+resultado individual. `STATIC` no realiza conexiones; aunque devuelva PASS,
+`deployment_authorized` siempre es `false`. `H5_INTEGRATION` añade scopes G7
+por operación/audiencia, migraciones y grants H5, configuración messaging y
+RBAC de la cola.
 
 El test Node carga `validateH5AcaParameters()` desde el SHA de #263 y completa
 el ejemplo con identidades, secretos, CA y digests sintéticos. Acepta el caso
 positivo y prueba rechazos de variable reservada y CA ausente/vacía/inválida.
-Las pruebas PowerShell cubren valores `guardedEnv`, colisiones, X.509, cleanup
-TLS, estados RBAC/GHCR, tablas H5 opcionales y firma JWT simulada. El test de
-PostgreSQL crea y elimina un contenedor PostgreSQL 17 desechable; valida que los
-SQL de conexión, readiness y fixtures sean ejecutables. No usa datos ni
-credenciales compartidos.
+Las pruebas PowerShell cubren outcomes fail-closed, psql ausente, modos,
+`INVALID`/`UNAVAILABLE`, scopes requeridos, valores `guardedEnv`, colisiones,
+X.509, cleanup TLS, estados RBAC/GHCR y firma JWT simulada. El test de
+PostgreSQL crea y elimina un contenedor PostgreSQL 17 desechable. Sus tablas y
+roles son sintéticos; las consultas de roles/grants corren como logins runtime
+no-superuser. Ese contenedor no configura PostgreSQL TLS: demuestra SQL y
+privilegios efectivos, no evidencia de TLS real. El probe local de `psql` usa
+`verify-full` con un CA temporal protegido cuando se conecta a un endpoint que
+entreguen las operaciones autorizadas.
 
 Si #263 aún no está integrado en el checkout, pasar a `Invoke-Preflight.ps1`
 un archivo temporal de `h5-isolated-five-apps.bicep` extraído del SHA aprobado
@@ -92,13 +116,20 @@ de #263 mediante `-BicepTemplatePath`. Sin plantilla local, el check queda
 
 ### SQL y alcance de arranque
 
-`integration-readonly.sql` verifica conexión/TLS, login, membresía del rol y
-uso del esquema; no exige tablas H5 ni grants DML a todos los servicios.
-Catalog, Inventory y Pricing tienen consultas separadas para las relaciones
-que sus chequeos HTTP de arranque/readiness realmente requieren. Las tablas y
-permisos de Outbox/Inbox pertenecen a la preparación adicional del flujo H5.
-En particular, la ausencia de `pricing.outbox_delivery` no bloquea HTTP si la
-publicación de cambios está deshabilitada. Ningún script aplica DDL.
+`integration-readonly.sql` verifica conexión/TLS, `CONNECT`, login, membresía,
+`USAGE` y los privilegios efectivos de lectura/escritura que necesita el
+runtime comprobado. Las consultas de readiness usan las relaciones reales de
+arranque: Catalog y Pricing necesitan SELECT; Inventory además usa
+`sku_lifecycle` y `offline_sale_reconciliations` en sus operaciones runtime,
+por lo que se verifican SELECT/INSERT/UPDATE. La migración candidata
+`20261104_0001_lifecycle_offline_reconciliation.sql` no otorga esos grants; si
+faltan en el login real, la propuesta aislada para revisión está en
+`inventory-runtime-grants.proposal.sql`. No se aplica ni se ejecuta DDL remoto.
+
+`h5-storage-readonly.sql` exige las tablas candidatas de Outbox H5 y los grants
+runtime correspondientes solo en `H5_INTEGRATION`; no son requisitos de
+arranque HTTP. La ausencia de `pricing.outbox_delivery` no bloquea HTTP cuando
+la publicación está deshabilitada. Ningún script aplica DDL.
 
 Los cuatro `fixtures-*-readonly.sql` son consultas de presencia y devuelven
 booleanos. Solo deben ejecutarse con SKU, ubicación, importe, producto y
@@ -108,13 +139,15 @@ de PostgreSQL 17 valida ejecutabilidad, no la presencia de fixtures reales.
 
 ## G7, GHCR y Service Bus
 
-- G7 discovery/JWKS se consulta públicamente. Si existe el secreto autorizado
-  `promotions-svc`, el probe valida firma criptográfica RS256/ES256 con JWKS,
-  issuer, expiración, audiencia `api-productos`, cliente y scopes contra los
-  `x-required-scope` del OpenAPI de Docs `master`. Un token de `api-ventas` no
-  se acepta como concesión `api-productos`; el scope
-  `ventas:pedidos:evidencia-cupon:leer` sigue pendiente para `api-ventas`.
-  Sin credencial, el token queda `NOT_RUN`.
+- G7 discovery/JWKS se consulta públicamente. En H5_INTEGRATION el probe deriva
+  operaciones/scopes de `promotions-svc` desde `internalOperations` y los
+  contrasta con `operationId`/`x-required-scope` del OpenAPI actual. Reporta por
+  separado `TOKEN_VALID`, `REQUIRED_SCOPES_VERIFIED` y
+  `AUTHORIZATION_NOT_RUN`; solo la firma JWKS más issuer, expiración, audiencia
+  y cliente válidos permiten evaluar scopes. Comprueba la cobertura completa
+  de api-productos como grupo y api-ventas aparte. La concesión
+  `ventas:pedidos:evidencia-cupon:leer` no aparece en el contrato Docs actual;
+  api-ventas no se infiere desde api-productos.
 - GHCR usa únicamente el `ghcr-pull` dedicado del manifiesto privado. Nunca usa
   la sesión amplia de `gh`. Reporta `NO_VISIBILITY` si el registro deniega
   lectura, `MISSING_FOR_RELEASE_SHA` si hay visibilidad pero no se verifica la
@@ -128,6 +161,17 @@ de PostgreSQL 17 valida ejecutabilidad, no la presencia de fixtures reales.
   No crea ni amplía asignaciones.
 
 ## Ejecución real observada (2026-11-23)
+
+- Gate `HTTP_BOOTSTRAP` ejecutado con el Bicep extraído temporalmente del HEAD
+  histórico de #263. Resultado global `FAIL`, código 1, por el parámetro local
+  inválido `PRICING_DATABASE_URL_INVALID` y colisiones de variables runtime
+  reservadas en Promotions/Pricing. No declara éxito ante configuración
+  incompatible. Release SHA/digests, credencial GHCR dedicada y credenciales/CA
+  PostgreSQL siguen pendientes; no se hicieron probes PostgreSQL reales. El
+  JSON completo se mantuvo fuera de los logs compartidos.
+- La prueba de compatibilidad con #263 pasa contra su SHA fijado. El test contra
+  el validador de `origin/master` está omitido porque el archivo aún no existe
+  en master; se activará automáticamente tras integrarse #263.
 
 - `h5-aca-effective-configuration`: `PENDING`, por SHA/digests, pull
   credential, upstream/configuración runtime y CA/credenciales vacías del
@@ -152,6 +196,10 @@ de PostgreSQL 17 valida ejecutabilidad, no la presencia de fixtures reales.
   comprobó el release solicitado para los cinco servicios.
 - No se consultaron ni alteraron fixtures comerciales reales. El estado de
   SKU, stock, precio MARKETPLACE y cupón apto sigue sin verificar.
+- Los roles runtime de prueba verificaron SELECT de readiness, DML de
+  `inventory.sku_lifecycle`/`offline_sale_reconciliations`, y privilegios H5 en
+  las cuatro bases sintéticas. Un test negativo revocó `USAGE` y otro verificó
+  que ser miembro del rol sin SELECT efectivo no pasa.
 - Manifiesto privado actualizado fuera del repositorio; ACL restringida a la
   cuenta local y SYSTEM. Ningún secreto/CA/JWT quedó versionado.
 

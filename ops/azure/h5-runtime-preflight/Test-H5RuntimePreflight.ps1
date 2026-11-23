@@ -40,6 +40,7 @@ try {
   Assert ((Get-H5QueueRbacStatus 'PASS' @('Azure Service Bus Data Sender')) -eq 'MISSING') 'queue RBAC reports a missing role'
   Assert ((Get-H5QueueRbacStatus 'UNAVAILABLE' @()) -eq 'UNAVAILABLE') 'denied/unavailable queue query is not reported as missing'
   Assert ((Get-H5QueueRbacStatus 'NOT_RUN' @()) -eq 'NOT_RUN') 'unrun queue query remains NOT_RUN'
+  Assert (-not (Test-H5PsqlAvailable 'g6-h5-preflight-no-such-psql-executable')) 'psql absent is detected without attempting a database connection'
 
   Assert ((Get-H5GhcrReleaseStatus 'UNKNOWN' '' '' $false) -eq 'NO_VISIBILITY') 'GHCR access without visibility is not treated as unpublished'
   Assert ((Get-H5GhcrReleaseStatus 'VISIBLE' ('a'*40) '' $false) -eq 'MISSING_FOR_RELEASE_SHA') 'visible package without release digest is distinguished'
@@ -78,8 +79,9 @@ try {
   $syntheticBicep = Join-Path $testRoot 'h5-isolated-five-apps.bicep'
   $synthetic | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $syntheticManifest -Encoding utf8
   Set-Content -LiteralPath $syntheticBicep -Value ($bicep -join "`n") -Encoding utf8
-  $invokeOutput = & pwsh -NoProfile -File (Join-Path $root 'Invoke-Preflight.ps1') -ManifestPath $syntheticManifest -BicepTemplatePath $syntheticBicep -EnvironmentDefaultDomain 'test' -SkipExternalProbes 2>&1 | Out-String
-  Assert ($LASTEXITCODE -eq 0 -and $invokeOutput -match 'h5-aca-effective-configuration\s+PASS' -and $invokeOutput -match 'official-bicep-guarded-env\s+PASS' -and $invokeOutput -match 'first-bootstrap-closed-flags\s+PASS') 'completed fixture passes live configuration preflight against #263 guardedEnv without network probes'
+  $invokeOutput = & pwsh -NoProfile -File (Join-Path $root 'Invoke-Preflight.ps1') -Mode STATIC -JsonOutput -ManifestPath $syntheticManifest -BicepTemplatePath $syntheticBicep -SkipExternalProbes 2>&1 | Out-String
+  $staticResult = $invokeOutput | ConvertFrom-Json
+  Assert ($LASTEXITCODE -eq 0 -and $staticResult.overall_status -eq 'PASS' -and -not $staticResult.deployment_authorized -and $staticResult.mode -eq 'STATIC') 'STATIC pass validates configuration only and never authorizes deployment'
 
   $env:PGSSLROOTCERT = 'restore-me'; $env:PGSSLMODE = 'prefer'; $env:PGOPTIONS = 'caller-options'; $env:PGHOST = 'before.test'; $env:TEST_PSQL_CA_LOG = Join-Path $testRoot 'ca-path.log'
   $fakePsql = Join-Path $testRoot 'psql.cmd'
@@ -108,18 +110,60 @@ exit /b 0
     $jwt = "$head.$payload.$(B64Url $signature)"
     $jwks = @{ keys=@(@{kid='test-key';kty='RSA';alg='RS256';use='sig';n=(B64Url $parameters.Modulus);e=(B64Url $parameters.Exponent)}) }
     $apiProductsScopes = @('promociones:leer')
-    Assert (Test-H5JwtSignatureAndClaims $jwt $jwks 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' $apiProductsScopes) 'G7 verifier accepts a signed api-productos promotions-svc token with documented scope'
+    $validToken = Test-H5JwtAuthenticity $jwt $jwks 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' 'api-productos'
+    Assert ($validToken.Status -eq 'TOKEN_VALID') 'G7 authenticity verifier accepts a signed api-productos promotions-svc token'
+    Assert ((Test-H5JwtRequiredScopes $validToken.Status $validToken.Scopes $apiProductsScopes @('promociones:leer')) -eq 'REQUIRED_SCOPES_VERIFIED') 'G7 authorization verifies inclusion of the required scope set'
+    Assert ((Test-H5JwtRequiredScopes $validToken.Status $validToken.Scopes @('promociones:leer','cupones:validar') @('promociones:leer','cupones:validar')) -eq 'REQUIRED_SCOPES_MISSING') 'correctly signed JWT missing one required scope does not authorize the integration'
     $jwtParts = $jwt.Split('.'); $tamperedSignature = if ($jwtParts[2][0] -eq 'A') { 'B' + $jwtParts[2].Substring(1) } else { 'A' + $jwtParts[2].Substring(1) }
-    Assert (-not (Test-H5JwtSignatureAndClaims ("$($jwtParts[0]).$($jwtParts[1]).$tamperedSignature") $jwks 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' $apiProductsScopes)) 'G7 verifier rejects a tampered token signature'
+    Assert ((Test-H5JwtAuthenticity ("$($jwtParts[0]).$($jwtParts[1]).$tamperedSignature") $jwks 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' 'api-productos').Status -eq 'TOKEN_INVALID') 'G7 verifier rejects a tampered token signature'
     $salesPayload = B64Url ([Text.Encoding]::UTF8.GetBytes((@{iss='https://g7-auth-service.onrender.com/api/v1/auth';aud=@('api-ventas');client_id='modulo-ventas';exp=$now+300;scope='ventas:pedidos:evidencia-cupon:leer'} | ConvertTo-Json -Compress)))
     $salesInput = [Text.Encoding]::ASCII.GetBytes("$head.$salesPayload")
     $salesJwt = "$head.$salesPayload.$(B64Url ($rsa.SignData($salesInput,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)))"
-    Assert (-not (Test-H5JwtSignatureAndClaims $salesJwt $jwks 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' $apiProductsScopes)) 'api-ventas audience/scope cannot pass as an api-productos grant'
+    Assert ((Test-H5JwtAuthenticity $salesJwt $jwks 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' 'api-productos').Status -eq 'TOKEN_INVALID') 'api-ventas audience/scope cannot pass as an api-productos token'
     $unknownPayload = B64Url ([Text.Encoding]::UTF8.GetBytes((@{iss='https://g7-auth-service.onrender.com/api/v1/auth';aud=@('api-productos');client_id='promotions-svc';exp=$now+300;scope='scope:no-registrado'} | ConvertTo-Json -Compress)))
     $unknownInput = [Text.Encoding]::ASCII.GetBytes("$head.$unknownPayload")
     $unknownJwt = "$head.$unknownPayload.$(B64Url ($rsa.SignData($unknownInput,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)))"
-    Assert (-not (Test-H5JwtSignatureAndClaims $unknownJwt $jwks 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' $apiProductsScopes)) 'G7 verifier rejects scopes absent from the current OpenAPI contract'
+    $unknownResult = Test-H5JwtAuthenticity $unknownJwt $jwks 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' 'api-productos'
+    Assert ($unknownResult.Status -eq 'TOKEN_VALID' -and (Test-H5JwtRequiredScopes $unknownResult.Status $unknownResult.Scopes @('scope:no-registrado') $apiProductsScopes) -eq 'AUTHORIZATION_NOT_RUN') 'G7 token authenticity is not converted to authorization by uncontracted scopes'
   } finally { $rsa.Dispose() }
+
+  $staticGate = Get-H5PreflightOutcome 'STATIC' @(
+    [pscustomobject]@{Check='private-manifest';Status='PASS'}
+    [pscustomobject]@{Check='h5-aca-effective-configuration';Status='PASS'}
+    [pscustomobject]@{Check='official-bicep-guarded-env';Status='PASS'}
+    [pscustomobject]@{Check='g7-five-service-parser-configuration';Status='PASS'}
+    [pscustomobject]@{Check='first-bootstrap-closed-flags';Status='PASS'}
+  )
+  Assert ($staticGate.ExitCode -eq 0 -and -not $staticGate.DeploymentAuthorized) 'STATIC outcome is structurally separate from deployment authorization'
+  $httpRequired = (Get-H5PreflightOutcome 'HTTP_BOOTSTRAP' @()).RequiredChecks
+  $httpPassResults = @($httpRequired | ForEach-Object { [pscustomobject]@{Check=$_;Status='PASS'} })
+  Assert ((Get-H5PreflightOutcome 'HTTP_BOOTSTRAP' $httpPassResults).ExitCode -eq 0) 'HTTP_BOOTSTRAP exits zero only when every required operational check passes'
+  foreach ($case in @(
+    @{name='psql absent';check='catalog-svc-postgres-readonly-login';status='NOT_RUN'},
+    @{name='PostgreSQL not executed';check='inventory-svc-postgres-readonly-login';status='NOT_RUN'},
+    @{name='GHCR not executed';check='ghcr-pricing-svc';status='NOT_RUN'},
+    @{name='unavailable network';check='catalog-svc-postgres-readonly-login';status='UNAVAILABLE'}
+  )) {
+    $blocked = @($httpPassResults | ForEach-Object { if ($_.Check -eq $case.check) { [pscustomobject]@{Check=$_.Check;Status=$case.status} } else { $_ } })
+    Assert ((Get-H5PreflightOutcome 'HTTP_BOOTSTRAP' $blocked).ExitCode -eq 2) "HTTP gate blocks when $($case.name)"
+  }
+  $invalidResults = @($httpPassResults | ForEach-Object { if ($_.Check -eq 'official-bicep-guarded-env') { [pscustomobject]@{Check=$_.Check;Status='INVALID'} } else { $_ } })
+  Assert ((Get-H5PreflightOutcome 'HTTP_BOOTSTRAP' $invalidResults).ExitCode -eq 1) 'HTTP gate returns failure code 1 for INVALID'
+  $noNetworkResults = @($httpPassResults | ForEach-Object { if ($_.Check -eq 'catalog-svc-postgres-readonly-login' -or $_.Check -eq 'ghcr-api-gateway') { [pscustomobject]@{Check=$_.Check;Status='NOT_RUN'} } else { $_ } })
+  Assert ((Get-H5PreflightOutcome 'HTTP_BOOTSTRAP' $noNetworkResults).ExitCode -eq 2) 'complete manifest without network evidence cannot pass HTTP_BOOTSTRAP'
+  $h5Required = (Get-H5PreflightOutcome 'H5_INTEGRATION' @()).RequiredChecks
+  $h5PassResults = @($h5Required | ForEach-Object { [pscustomobject]@{Check=$_;Status='PASS'} })
+  $h5JwtMissing = @($h5PassResults | ForEach-Object { if ($_.Check -eq 'promotions-token-api-productos') { [pscustomobject]@{Check=$_.Check;Status='AUTHORIZATION_NOT_RUN'} } else { $_ } })
+  Assert ((Get-H5PreflightOutcome 'H5_INTEGRATION' $h5JwtMissing).ExitCode -eq 2) 'H5 integration is blocked when a required JWT authorization was not verified'
+  $docsRepo = [IO.Path]::GetFullPath((Join-Path $root '..\..\..\..\docs'))
+  $openApiText = git -C $docsRepo show 'origin/master:contratos/http/openapi.yaml' | Out-String
+  $contractOperationScopes = Get-H5ContractOperationScopes $openApiText
+  $scopeOperationsValid = $true
+  foreach ($operation in Get-H5PromotionsRequiredOperations | Where-Object contractOperationId) {
+    if ($contractOperationScopes[$operation.contractOperationId] -cne $operation.scope) { $scopeOperationsValid = $false }
+  }
+  Assert $scopeOperationsValid 'Promotions required api-productos scopes map to concrete current OpenAPI operation IDs'
+  Assert ('ventas:pedidos:evidencia-cupon:leer' -notin @(Get-H5ContractScopes $openApiText)) 'pending api-ventas scope is reported separately from api-productos contract grants'
   Write-Output "Completed $passed PowerShell assertions."
 } finally {
   foreach ($name in @('PGSSLROOTCERT','PGSSLMODE','PGOPTIONS','PGHOST','PGPASSWORD','TEST_PSQL_CA_LOG')) { Remove-Item ('Env:'+$name) -ErrorAction SilentlyContinue }

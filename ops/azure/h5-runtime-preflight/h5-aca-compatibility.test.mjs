@@ -85,3 +85,26 @@ test('rejects missing, empty, and invalid postgres-ca secrets', () => {
     assert.throws(() => validateH5AcaParameters(document, { authorizedSha: sha, environmentDefaultDomain: 'preflight.test' }), /POSTGRES_CA_INVALID_CATALOG_SVC|SECRET_INVALID_CATALOG_SVC/);
   }
 });
+
+test('also accepts the current master validator after #263 is integrated', async (context) => {
+  let currentSource;
+  try {
+    currentSource = execFileSync('git', ['show', `origin/master:${validatorPathInRepo}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    context.skip('#263 validator is not present in origin/master yet');
+    return;
+  }
+  const currentPath = join(root, 'validate-h5-five-apps-master.mjs');
+  writeFileSync(currentPath, currentSource, 'utf8');
+  const currentValidator = await import(pathToFileURL(currentPath));
+  const document = validParameters();
+  assert.deepEqual(
+    currentValidator.validateH5AcaParameters(document, { authorizedSha: sha, environmentDefaultDomain: 'preflight.test' }),
+    { sourceSha: sha, services },
+  );
+  document.parameters.appConfiguration.value['api-gateway'].env.push({ name: 'NODE_ENV', value: 'production' });
+  assert.throws(
+    () => currentValidator.validateH5AcaParameters(document, { authorizedSha: sha, environmentDefaultDomain: 'preflight.test' }),
+    /ENVIRONMENT_RESERVED_API_GATEWAY/,
+  );
+});
