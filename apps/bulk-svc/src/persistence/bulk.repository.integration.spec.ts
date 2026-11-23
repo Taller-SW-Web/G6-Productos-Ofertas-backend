@@ -1090,7 +1090,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const fn = `bulk.export_retry_fn_${suffix}`;
     const trigger = `export_retry_trigger_${suffix}`;
     await adminPool.query(`CREATE SEQUENCE ${seq} START 1`);
-    await adminPool.query(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
+    await adminPool.query(`CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, bulk AS $$
       BEGIN
         IF OLD.status = 'QUEUED' AND NEW.status = 'PROCESSING' AND nextval('${seq}') = 1 THEN
           RAISE EXCEPTION 'injected transient failure';
