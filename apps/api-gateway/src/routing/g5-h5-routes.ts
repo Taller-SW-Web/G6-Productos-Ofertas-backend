@@ -128,7 +128,11 @@ export const G5_H5_ROUTES: readonly ContractRoute[] = [
     requestTypes: [],
     responses: {
       '200': { types: ['application/json'], codes: [], headers: [] },
-      '400': { types: ['application/problem+json'], codes: [], headers: [] },
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -175,7 +179,11 @@ export const G5_H5_ROUTES: readonly ContractRoute[] = [
     requestTypes: [],
     responses: {
       '200': { types: ['application/json'], codes: [], headers: [] },
-      '400': { types: ['application/problem+json'], codes: [], headers: [] },
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],

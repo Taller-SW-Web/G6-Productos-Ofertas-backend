@@ -87,6 +87,77 @@ function dereference(value) {
     .split('/')
     .reduce((node, key) => node[key], spec);
 }
+const allowedUnclassifiedInternalErrors = {
+  filtrarSkusVendiblesInterno: ['400', '401', '403', '429', '500', '503'],
+  obtenerEvidenciaReservaCuponInterno: [
+    '400',
+    '401',
+    '403',
+    '404',
+    '429',
+    '500',
+    '503',
+  ],
+  obtenerContenidoCargaMasivaInternoH5: ['400'],
+};
+function validateErrorMetadata() {
+  for (const [path, item] of Object.entries(spec.paths)) {
+    for (const [method, operation] of Object.entries(item)) {
+      if (
+        !['get', 'post', 'put', 'patch', 'delete', 'head', 'options'].includes(
+          method,
+        )
+      )
+        continue;
+      const operationId = operation.operationId;
+      if (!operationId)
+        throw new Error(
+          `Missing operationId for ${method.toUpperCase()} ${path}`,
+        );
+      const internalPending =
+        operation['x-internal'] === true &&
+        path.startsWith('/interno/') &&
+        /^PENDIENTE(?:_|$)/.test(operation['x-runtime-status'] ?? '') &&
+        Object.hasOwn(allowedUnclassifiedInternalErrors, operationId);
+      const hasErrorMap = Object.hasOwn(operation, 'x-error-codes');
+      if (!hasErrorMap && !internalPending)
+        throw new Error(`Missing x-error-codes for ${operationId}`);
+      const errorMap = hasErrorMap ? operation['x-error-codes'] : {};
+      if (!errorMap || typeof errorMap !== 'object' || Array.isArray(errorMap))
+        throw new Error(`Invalid x-error-codes for ${operationId}`);
+      for (const [status, codes] of Object.entries(errorMap)) {
+        const response = operation.responses[status];
+        if (
+          !response ||
+          !dereference(response).content?.['application/problem+json'] ||
+          !Array.isArray(codes) ||
+          codes.length === 0 ||
+          codes.some(
+            (code) =>
+              typeof code !== 'string' || !/^[A-Z][A-Z0-9_]*$/.test(code),
+          ) ||
+          new Set(codes).size !== codes.length
+        )
+          throw new Error(
+            `Invalid x-error-codes entry ${status} for ${operationId}`,
+          );
+      }
+      for (const [status, rawResponse] of Object.entries(operation.responses)) {
+        const response = dereference(rawResponse);
+        if (!response.content?.['application/problem+json']) continue;
+        if (
+          !Object.hasOwn(errorMap, status) &&
+          !(
+            internalPending &&
+            allowedUnclassifiedInternalErrors[operationId].includes(status)
+          )
+        )
+          throw new Error(`Missing x-error-codes ${status} for ${operationId}`);
+      }
+    }
+  }
+}
+validateErrorMetadata();
 const routes = [];
 for (const [path, item] of Object.entries(spec.paths)) {
   for (const [method, operation] of Object.entries(item)) {
@@ -97,6 +168,8 @@ for (const [path, item] of Object.entries(spec.paths)) {
     )
       continue;
     if (operation.operationId !== operationId) continue;
+    if (operation['x-internal'] === true)
+      throw new Error(`Internal operation cannot be routed: ${operationId}`);
     const service = owners[path.split('/')[1]];
     if (
       !service ||

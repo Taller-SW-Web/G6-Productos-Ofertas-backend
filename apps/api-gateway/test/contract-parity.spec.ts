@@ -5,6 +5,7 @@ import { G5_H5_ROUTES } from '../src/routing/g5-h5-routes.js';
 
 interface ContractSnapshot {
   docsSha: string;
+  contractState: string;
   openApiVersion: string;
   approvalStatus: string;
   operationCount: number;
@@ -33,6 +34,7 @@ interface ContractSnapshot {
     internal: boolean;
     runtimeStatus: string | null;
     errorCodesDeclared: boolean;
+    unclassifiedErrorStatuses: string[];
   }[];
 }
 
@@ -62,13 +64,22 @@ const legacyPricingOperationIds = [
 ];
 const missingPublicOperationIds = [...pendingProviderOperationIds];
 const missingErrorCodeMetadataOperationIds = [
-  'listarSaldosFisicosAdministracion',
-  'listarAlertasOperativasInventario',
-  'listarUbicacionesInventario',
-  'listarTrasladosInventario',
-  'obtenerTrasladoInventario',
   'filtrarSkusVendiblesInterno',
   'obtenerEvidenciaReservaCuponInterno',
+];
+const unclassifiedInternalErrorStatuses = [
+  {
+    operationId: 'filtrarSkusVendiblesInterno',
+    statuses: ['400', '401', '403', '429', '500', '503'],
+  },
+  {
+    operationId: 'obtenerContenidoCargaMasivaInternoH5',
+    statuses: ['400'],
+  },
+  {
+    operationId: 'obtenerEvidenciaReservaCuponInterno',
+    statuses: ['400', '401', '403', '404', '429', '500', '503'],
+  },
 ];
 const h5OperationIds = [
   'admitirConsumoCuponH5',
@@ -119,7 +130,8 @@ function routeMetadata(route: (typeof CONTRACT_ROUTES)[number]) {
 describe('Gateway parity with the pinned H5 OpenAPI snapshot', () => {
   it('uses the latest internally approved Docs snapshot and its full inventory', () => {
     expect(snapshot).toMatchObject({
-      docsSha: '61726e2db227a8763fbea6d9cc055651804661c4',
+      docsSha: '354f5a93e4ec03ca5f9262a3767911c8c9211638',
+      contractState: 'PR_CANDIDATE_UNMERGED',
       openApiVersion: '0.7.0-rc.3',
       approvalStatus: 'APPROVED_G6',
       operationCount: 154,
@@ -225,6 +237,19 @@ describe('Gateway parity with the pinned H5 OpenAPI snapshot', () => {
           .map((operation) => operation.operationId),
       ),
     ).toEqual(sorted(missingErrorCodeMetadataOperationIds));
+    expect(
+      snapshot.operations
+        .filter((operation) => operation.unclassifiedErrorStatuses.length > 0)
+        .map((operation) => ({
+          operationId: operation.operationId,
+          statuses: operation.unclassifiedErrorStatuses,
+        }))
+        .sort((a, b) => a.operationId.localeCompare(b.operationId)),
+    ).toEqual(
+      [...unclassifiedInternalErrorStatuses].sort((a, b) =>
+        a.operationId.localeCompare(b.operationId),
+      ),
+    );
     for (const route of [...CONTRACT_ROUTES, ...G5_H5_ROUTES]) {
       const operation = contractById.get(route.operationId);
       if (!operation) {

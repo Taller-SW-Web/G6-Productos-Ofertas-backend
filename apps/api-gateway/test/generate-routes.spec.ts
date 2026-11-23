@@ -146,6 +146,51 @@ describe('focused Gateway contract route generation', () => {
     expect(readFileSync(routesPath, 'utf8')).toBe(before);
   });
 
+  it('rejects missing x-error-codes on an implemented contract operation', () => {
+    const spec = JSON.parse(readFileSync(specPath, 'utf8'));
+    delete spec.paths['/inventario/disponibilidad/comercial/verificar'].post[
+      'x-error-codes'
+    ];
+    writeFileSync(specPath, JSON.stringify(spec));
+    const before = readFileSync(routesPath, 'utf8');
+    const result = runGenerator(operationId);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`Missing x-error-codes for ${operationId}`);
+    expect(readFileSync(routesPath, 'utf8')).toBe(before);
+  });
+
+  it('permits unclassified problem responses only for pending internal operations', () => {
+    const spec = JSON.parse(readFileSync(specPath, 'utf8'));
+    spec.paths['/interno/productos/skus/filtrar'] = {
+      post: {
+        operationId: 'filtrarSkusVendiblesInterno',
+        'x-internal': true,
+        'x-runtime-status': 'PENDIENTE_IMPLEMENTACION',
+        responses: {
+          '403': {
+            content: { 'application/problem+json': { schema: {} } },
+          },
+        },
+      },
+    };
+    writeFileSync(specPath, JSON.stringify(spec));
+    const before = readFileSync(routesPath, 'utf8');
+    expect(runGenerator(operationId).status).toBe(0);
+    expect(readFileSync(routesPath, 'utf8')).not.toBe(before);
+
+    spec.paths['/interno/productos/skus/filtrar'].post['x-runtime-status'] =
+      'IMPLEMENTADO';
+    writeFileSync(specPath, JSON.stringify(spec));
+    const afterFirstRun = readFileSync(routesPath, 'utf8');
+    const result = runGenerator(operationId);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      'Missing x-error-codes for filtrarSkusVendiblesInterno',
+    );
+    expect(readFileSync(routesPath, 'utf8')).toBe(afterFirstRun);
+  });
+
   it('updates only the selected operation and is byte-idempotent on rerun', () => {
     const before = readFileSync(routesPath, 'utf8');
     const otherOperation = before.match(

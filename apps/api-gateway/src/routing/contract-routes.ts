@@ -1,4 +1,4 @@
-// Generated from Docs OpenAPI 0.7.0-rc.3; focused update: resolverSkusAdministracion.
+// Generated from Docs OpenAPI 0.7.0-rc.3; focused update: conciliarImportacionGeneralPorCorrelacion.
 import type { ContractRoute } from './contract-route.js';
 export const CONTRACT_ROUTES: readonly ContractRoute[] = [
   {
@@ -5750,10 +5750,26 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     requestTypes: [],
     responses: {
       '200': { types: ['application/json'], codes: [], headers: [] },
-      '401': { types: ['application/problem+json'], codes: [], headers: [] },
-      '403': { types: ['application/problem+json'], codes: [], headers: [] },
-      '500': { types: ['application/problem+json'], codes: [], headers: [] },
-      '503': { types: ['application/problem+json'], codes: [], headers: [] },
+      '401': {
+        types: ['application/problem+json'],
+        codes: ['TOKEN_INVALIDO'],
+        headers: [],
+      },
+      '403': {
+        types: ['application/problem+json'],
+        codes: ['SCOPE_INSUFICIENTE'],
+        headers: [],
+      },
+      '500': {
+        types: ['application/problem+json'],
+        codes: ['ERROR_INTERNO'],
+        headers: [],
+      },
+      '503': {
+        types: ['application/problem+json'],
+        codes: ['SERVICIO_NO_DISPONIBLE'],
+        headers: [],
+      },
     },
   },
   {
@@ -5767,11 +5783,31 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     requestTypes: [],
     responses: {
       '200': { types: ['application/json'], codes: [], headers: [] },
-      '401': { types: ['application/problem+json'], codes: [], headers: [] },
-      '403': { types: ['application/problem+json'], codes: [], headers: [] },
-      '404': { types: ['application/problem+json'], codes: [], headers: [] },
-      '500': { types: ['application/problem+json'], codes: [], headers: [] },
-      '503': { types: ['application/problem+json'], codes: [], headers: [] },
+      '401': {
+        types: ['application/problem+json'],
+        codes: ['TOKEN_INVALIDO'],
+        headers: [],
+      },
+      '403': {
+        types: ['application/problem+json'],
+        codes: ['SCOPE_INSUFICIENTE'],
+        headers: [],
+      },
+      '404': {
+        types: ['application/problem+json'],
+        codes: ['TRASLADO_NO_ENCONTRADO'],
+        headers: [],
+      },
+      '500': {
+        types: ['application/problem+json'],
+        codes: ['ERROR_INTERNO'],
+        headers: [],
+      },
+      '503': {
+        types: ['application/problem+json'],
+        codes: ['SERVICIO_NO_DISPONIBLE'],
+        headers: [],
+      },
     },
   },
   {
@@ -6233,16 +6269,36 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     requestTypes: [],
     responses: {
       '200': { types: ['application/json'], codes: [], headers: [] },
-      '400': { types: ['application/problem+json'], codes: [], headers: [] },
-      '401': { types: ['application/problem+json'], codes: [], headers: [] },
-      '403': { types: ['application/problem+json'], codes: [], headers: [] },
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
+      '401': {
+        types: ['application/problem+json'],
+        codes: ['TOKEN_INVALIDO'],
+        headers: [],
+      },
+      '403': {
+        types: ['application/problem+json'],
+        codes: ['SCOPE_INSUFICIENTE'],
+        headers: [],
+      },
       '429': {
         types: ['application/problem+json'],
-        codes: [],
+        codes: ['RATE_LIMIT_EXCEDIDO'],
         headers: ['retry-after'],
       },
-      '500': { types: ['application/problem+json'], codes: [], headers: [] },
-      '503': { types: ['application/problem+json'], codes: [], headers: [] },
+      '500': {
+        types: ['application/problem+json'],
+        codes: ['ERROR_INTERNO'],
+        headers: [],
+      },
+      '503': {
+        types: ['application/problem+json'],
+        codes: ['SERVICIO_NO_DISPONIBLE'],
+        headers: [],
+      },
     },
   },
   {
@@ -6366,6 +6422,16 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
       '409': {
         types: ['application/problem+json'],
         codes: ['IDEMPOTENCY_CONFLICT'],
+        headers: [],
+      },
+      '422': {
+        types: ['application/problem+json'],
+        codes: [
+          'COMBO_ANIDADO_NO_PERMITIDO',
+          'COMBO_COMPONENTES_INSUFICIENTES',
+          'COMBO_COMPONENTE_DUPLICADO',
+          'COMBO_PRECIO_INVALIDO',
+        ],
         headers: [],
       },
       '500': {
