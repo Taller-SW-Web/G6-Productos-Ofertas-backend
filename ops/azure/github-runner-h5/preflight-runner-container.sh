@@ -13,7 +13,7 @@ trap 'rm -rf "$work"' EXIT
 for tool in bash curl getent grep git jq node openssl timeout; do
   command -v "$tool" >/dev/null 2>&1 || fail "falta dependencia requerida: $tool"
 done
-printf 'PASS imagen/arquitectura/dependencias: x86_64; runner y herramientas smoke/checkout disponibles\n'
+printf 'PASS imagen/arquitectura/dependencias: x86_64; runner y prerrequisitos Git/Node para checkout disponibles\n'
 
 git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$ref" "$repo" "$work/backend" || fail 'git clone HTTPS del repositorio falló'
 cd "$work/backend"
@@ -33,4 +33,4 @@ set -e
 [[ "$smoke_status" != 0 ]] || fail 'smoke-service.sh should fail closed without a target URL'
 [[ "$smoke_output" == *'BLOQUEADO: falta AZURE_SMOKE_URL_CATALOG_SVC'* ]] || fail 'smoke-service.sh did not report the expected closed gate'
 printf 'PASS checkout/script: Git cloned %s and smoke-service.sh failed closed without issuing HTTP\n' "$ref"
-printf 'PREFLIGHT PASS: container image can run the checkout transport and smoke prerequisites; no Docker command used\n'
+printf 'PREFLIGHT PASS: container image can run Git transport and smoke prerequisites; actions/checkout itself was not executed; no Docker command used\n'

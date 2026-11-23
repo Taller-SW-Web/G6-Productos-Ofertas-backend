@@ -94,5 +94,15 @@ bash "$work/preflight.sh"
     }
 }
 finally {
+    if ($executionName) {
+        try {
+            $finalExecution = Invoke-AzJson @('containerapp','job','execution','show','--name',$JobName,'--resource-group',$ResourceGroup,'--job-execution-name',$executionName,'--subscription',$subscriptionId,'--output','json')
+            if ($finalExecution.properties.status -in @('Running','Processing','Starting')) {
+                $null = Invoke-AzJson @('containerapp','job','stop','--name',$JobName,'--resource-group',$ResourceGroup,'--job-execution-name',$executionName,'--subscription',$subscriptionId,'--output','json')
+            }
+        } catch {
+            Write-Warning "CLEANUP REQUIRED: check/stop Container Apps Job execution $executionName manually."
+        }
+    }
     if ($templatePath -and (Test-Path -LiteralPath $templatePath)) { Remove-Item -LiteralPath $templatePath -Force -ErrorAction SilentlyContinue }
 }

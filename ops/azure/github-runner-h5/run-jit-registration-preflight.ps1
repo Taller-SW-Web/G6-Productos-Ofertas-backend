@@ -21,6 +21,7 @@ $jobSecretInstalled = $false
 $jobSecretName = 'h5jit'
 $startedAt = [DateTimeOffset]::UtcNow
 $registrationOnline = $false
+$stage = 'initialization'
 
 function Invoke-GhJson {
     param([Parameter(Mandatory)][string[]]$Arguments)
@@ -70,7 +71,22 @@ function Set-TemporaryJobSecret {
         $null = Invoke-RestMethod -Method Put -Uri $snapshot.Uri -Headers $headers -ContentType 'application/json' -Body $body
         $script:jobSecretInstalled = $true
     } catch {
-        throw "Temporary Job secret installation failed (HTTP $([int]$_.Exception.Response.StatusCode)); no secret value was logged."
+        $putFailure = $_
+        try {
+            $verification = Get-ArmJob
+            $script:jobSecretInstalled = @($verification.Resource.properties.configuration.secrets | Where-Object { $_.name -eq $jobSecretName }).Count -gt 0
+        } catch {
+            $script:jobSecretInstalled = $true
+            Write-Warning "CLEANUP REQUIRED: could not verify whether temporary Job secret '$jobSecretName' persisted."
+        }
+        $statusCode = [int]$putFailure.Exception.Response.StatusCode
+        $detail = [string]$putFailure.ErrorDetails.Message
+        if (-not $detail -and $putFailure.Exception.Response.Content) {
+            try { $detail = [string]$putFailure.Exception.Response.Content.ReadAsStringAsync().GetAwaiter().GetResult() } catch { }
+        }
+        if ($Value) { $detail = $detail.Replace($Value, '[REDACTED]') }
+        if ($detail.Length -gt 500) { $detail = $detail.Substring(0, 500) }
+        throw "Temporary Job secret installation failed (HTTP $statusCode): $detail No secret value was logged."
     }
 }
 
@@ -78,6 +94,12 @@ function Remove-TemporaryJobSecret {
     if (-not $jobSecretInstalled) { return }
     try {
         $snapshot = Get-ArmJob
+        $temporarySecret = @($snapshot.Resource.properties.configuration.secrets | Where-Object { $_.name -eq $jobSecretName })
+        if ($temporarySecret.Count -eq 0) {
+            $script:jobSecretInstalled = $false
+            Write-Output 'PASS no temporary JIT secret remained in Azure.'
+            return
+        }
         $secrets = @($snapshot.Resource.properties.configuration.secrets | Where-Object { $_.name -ne $jobSecretName })
         if ($secrets.Count -eq 0) { $snapshot.Resource.properties.configuration.secrets = $null }
         else { $snapshot.Resource.properties.configuration.secrets = $secrets }
@@ -155,6 +177,7 @@ try {
         if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "Required CLI not found: $tool" }
     }
 
+    $stage = 'runner-group authorization check'
     $group = Invoke-GhJson @('api',"orgs/$Organization/actions/runner-groups/$RunnerGroupId")
     if ($group.restricted_to_workflows -ne $true -or @($group.selected_workflows).Count -ne 1 -or $group.selected_workflows[0] -cne $expectedWorkflow) {
         throw 'Runner group does not restrict exactly to the CD workflow on master; JIT registration was not requested.'
@@ -164,11 +187,15 @@ try {
         throw 'Runner group repository allowlist is not exactly the G6 backend repository.'
     }
 
+    $stage = 'CD queue check'
+    $workflow = Invoke-GhJson @('api',"repos/$Repository/actions/workflows/cd-services-azure.yml")
+    if (-not $workflow.id) { throw 'Could not resolve the official CD workflow ID; refusing diagnostic registration.' }
     foreach ($status in @('queued','in_progress')) {
-        $runs = Invoke-GhJson @('api',"repos/$Repository/actions/runs?workflow_id=cd-services-azure.yml&status=$status&per_page=100")
+        $runs = Invoke-GhJson @('api',"repos/$Repository/actions/workflows/$($workflow.id)/runs?status=$status&per_page=100")
         if ($runs.total_count -gt 0) { throw "CD workflow has $status runs; refusing diagnostic registration to avoid taking a release job." }
     }
 
+    $stage = 'azure-h5 protection check'
     $environment = Invoke-GhJson @('api',"repos/$Repository/environments/azure-h5")
     $hasReviewer = @($environment.protection_rules | Where-Object { $_.type -eq 'required_reviewers' -and $_.prevent_self_review -eq $true -and @($_.reviewers).Count -gt 0 }).Count -gt 0
     $hasMasterOnly = $environment.deployment_branch_policy.custom_branch_policies -eq $true -and $environment.deployment_branch_policy.protected_branches -eq $false
@@ -176,6 +203,7 @@ try {
         throw 'azure-h5 protections failed verification; JIT registration was not requested.'
     }
 
+    $stage = 'Container Apps Job template check'
     $job = Invoke-AzJson @('containerapp','job','show','--name',$JobName,'--resource-group',$ResourceGroup,'--output','json')
     if (-not $job.id -or $job.location -ne 'Brazil South' -or $job.properties.template.containers.Count -ne 1) {
         throw 'Existing Container Apps Job is absent or its template shape differs; no JIT runner was requested.'
@@ -193,6 +221,7 @@ try {
 
     # Deliberately omit azure-h5-smoke. This registration cannot match the CD
     # smoke job, which requires self-hosted + linux + azure-h5-smoke.
+    $stage = 'GitHub JIT generation'
     $request = @{
         name = $runnerName
         runner_group_id = $RunnerGroupId
@@ -210,12 +239,14 @@ try {
         throw 'JIT labels are not diagnostic-only; deleting runner without starting the Azure Job.'
     }
 
+    $stage = 'temporary Job secret install'
     Set-TemporaryJobSecret -Value $jitConfig
     $templateJson = $job.properties.template | ConvertTo-Json -Depth 100 -Compress
     $rendered = $templateJson | & python (Join-Path $PSScriptRoot 'render-execution-template.py') --set-secret "H5_RUNNER_JIT_CONFIG=$jobSecretName" 2>$null
     if ($LASTEXITCODE -ne 0 -or -not $rendered) { throw 'Could not render the one-execution JIT template.' }
     $templateFile = New-RestrictedTemplateFile -Content ($rendered -join "`n")
     $startedAt = [DateTimeOffset]::UtcNow
+    $stage = 'Container Apps JIT execution start'
     $startOutput = & az containerapp job start --name $JobName --resource-group $ResourceGroup --yaml $templateFile --only-show-errors --output json 2>&1
     if ($LASTEXITCODE -ne 0) {
         $safeError = $startOutput -join ' '
@@ -231,6 +262,7 @@ try {
     if (-not $jobExecutionName) { throw 'Job start returned without an execution name; cleanup will remove the JIT runner.' }
 
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds($OnlineTimeoutSeconds)
+    $stage = 'GitHub JIT runner online poll'
     while ([DateTimeOffset]::UtcNow -lt $deadline) {
         $runner = & gh api "orgs/$Organization/actions/runners/$jitRunnerId" 2>$null
         if ($LASTEXITCODE -eq 0) {
@@ -246,7 +278,7 @@ try {
 }
 catch {
     $failure = $_.Exception.Message
-    throw $failure
+    throw "JIT preflight failed during ${stage}: $failure"
 }
 finally {
     if ($jitRunnerId -or $jobExecutionName -or $templateFile) { Remove-JitRegistration }
