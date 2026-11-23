@@ -54,7 +54,49 @@ describe('Gateway → Bulk real → PostgreSQL 17 descartable (conciliación por
     request(gatewayOrigin).get(`${basePath}/${correlation}`);
   const persistenceSnapshot = () =>
     postgres.sql(
-      "SELECT (SELECT count(*) FROM bulk.batch_jobs)::text || ':' || (SELECT count(*) FROM bulk.file_manifests)::text || ':' || (SELECT count(*) FROM bulk.outbox)::text || ':' || (SELECT count(*) FROM bulk.inbox)::text;",
+      `SELECT jsonb_build_object(
+        'batch', COALESCE((
+          SELECT to_jsonb(batch)
+          FROM bulk.batch_jobs AS batch
+          WHERE batch.batch_id = '${batchId}'
+        ), 'null'::jsonb),
+        'manifests', COALESCE((
+          SELECT jsonb_agg(to_jsonb(manifest) ORDER BY manifest.id)
+          FROM bulk.file_manifests AS manifest
+          WHERE manifest.id IN (
+            SELECT batch.input_file_id
+            FROM bulk.batch_jobs AS batch
+            WHERE batch.batch_id = '${batchId}'
+            UNION
+            SELECT batch.report_file_id
+            FROM bulk.batch_jobs AS batch
+            WHERE batch.batch_id = '${batchId}' AND batch.report_file_id IS NOT NULL
+          )
+        ), '[]'::jsonb),
+        'rows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(batch_row) ORDER BY batch_row.id)
+          FROM bulk.batch_rows AS batch_row
+          JOIN bulk.batch_jobs AS batch ON batch.id = batch_row.batch_job_id
+          WHERE batch.batch_id = '${batchId}'
+        ), '[]'::jsonb),
+        'steps', COALESCE((
+          SELECT jsonb_agg(to_jsonb(step) ORDER BY step.id)
+          FROM bulk.row_domain_steps AS step
+          JOIN bulk.batch_rows AS batch_row ON batch_row.id = step.batch_row_id
+          JOIN bulk.batch_jobs AS batch ON batch.id = batch_row.batch_job_id
+          WHERE batch.batch_id = '${batchId}'
+        ), '[]'::jsonb),
+        'outbox', COALESCE((
+          SELECT jsonb_agg(to_jsonb(event) ORDER BY event.id)
+          FROM bulk.outbox AS event
+          WHERE event.correlation_id = '${correlationId}'
+        ), '[]'::jsonb),
+        'inbox', COALESCE((
+          SELECT jsonb_agg(to_jsonb(receipt) ORDER BY receipt.id)
+          FROM bulk.inbox AS receipt
+          WHERE receipt.correlation_id = '${correlationId}'
+        ), '[]'::jsonb)
+      )::text;`,
     );
 
   beforeAll(async () => {
