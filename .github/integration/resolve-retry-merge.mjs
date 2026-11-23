@@ -31,7 +31,7 @@ resolveConflict(
   `        { provide: BulkImportService, useValue: imports },\n        {\n          provide: BulkStorageService,\n          useValue: {\n            put: vi.fn().mockResolvedValue('private://imports/file.csv'),\n          },\n        },\n        { provide: BulkContentService, useValue: { download: vi.fn() } },`,
 );
 
-const unresolved = execFileSync(
+execFileSync(
   'git',
   ['-C', root, 'diff', '--name-only', '--diff-filter=U'],
   { encoding: 'utf8' },
@@ -49,3 +49,5 @@ execFileSync(
   ],
   { stdio: 'inherit' },
 );
+
+const unresolved = 
