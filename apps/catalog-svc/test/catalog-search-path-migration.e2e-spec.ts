@@ -23,8 +23,12 @@ const psql = (sql: string) =>
     [
       'exec',
       '-i',
+      '-e',
+      'PGPASSWORD=disposable-only',
       container,
       'psql',
+      '-h',
+      '127.0.0.1',
       '-U',
       'postgres',
       '-v',
@@ -71,10 +75,25 @@ describe('CAT-D04: PostgreSQL 17 disposable search_path migration', () => {
     ]);
     let ready = false;
     for (let attempt = 0; attempt < 60; attempt++) {
+      // The image briefly starts a socket-only server for initialization; only
+      // the authenticated TCP probe proves the final server is ready.
       if (
         spawnSync(
           'docker',
-          ['exec', container, 'pg_isready', '-U', 'postgres'],
+          [
+            'exec',
+            '-e',
+            'PGPASSWORD=disposable-only',
+            container,
+            'psql',
+            '-h',
+            '127.0.0.1',
+            '-U',
+            'postgres',
+            '-At',
+            '-c',
+            'SELECT 1',
+          ],
           { windowsHide: true, stdio: 'ignore' },
         ).status === 0
       ) {
