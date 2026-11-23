@@ -44,8 +44,11 @@ import {
 import type { CatalogEnvelope } from '../../catalog-svc/src/catalog-messages.js';
 import { BULK_TEMPLATE_HEADERS } from '../src/domain/bulk-template-v2.js';
 
-const databaseUrl = process.env.BULK_RETRY_INTEGRATION_DATABASE_URL;
-const integration = databaseUrl ? describe : describe.skip;
+const bulkDatabaseUrl = process.env.BULK_RETRY_INTEGRATION_BULK_DATABASE_URL;
+const catalogDatabaseUrl =
+  process.env.BULK_RETRY_INTEGRATION_CATALOG_DATABASE_URL;
+const integration =
+  bulkDatabaseUrl && catalogDatabaseUrl ? describe : describe.skip;
 const ownerSub = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 let pool: Pool;
 let bulkDatabase: ReturnType<typeof drizzle<typeof bulkSchema>>;
@@ -86,14 +89,30 @@ integration(
   'Bulk ↔ Catalog BULK_RETRY_V1 against one disposable PostgreSQL 17',
   () => {
     beforeAll(async () => {
-      if (!databaseUrl)
-        throw new Error('BULK_RETRY_INTEGRATION_DATABASE_URL required');
-      const url = new URL(databaseUrl);
+      if (!bulkDatabaseUrl || !catalogDatabaseUrl)
+        throw new Error(
+          'BULK_RETRY_INTEGRATION_BULK_DATABASE_URL and BULK_RETRY_INTEGRATION_CATALOG_DATABASE_URL required',
+        );
+      const bulkUrl = new URL(bulkDatabaseUrl);
+      const catalogUrl = new URL(catalogDatabaseUrl);
+      for (const url of [bulkUrl, catalogUrl]) {
+        if (
+          !['localhost', '127.0.0.1', '::1'].includes(url.hostname) ||
+          url.searchParams.get('sslmode') !== 'disable'
+        )
+          throw new Error(
+            'Integration requires disposable loopback PostgreSQL',
+          );
+      }
       if (
-        !['localhost', '127.0.0.1', '::1'].includes(url.hostname) ||
-        url.searchParams.get('sslmode') !== 'disable'
+        bulkUrl.hostname !== catalogUrl.hostname ||
+        bulkUrl.port !== catalogUrl.port ||
+        bulkUrl.pathname !== catalogUrl.pathname ||
+        bulkUrl.username === catalogUrl.username
       )
-        throw new Error('Integration requires disposable loopback PostgreSQL');
+        throw new Error(
+          'Bulk and Catalog must use distinct roles on the same disposable PostgreSQL database',
+        );
       setFlag('NODE_ENV', 'test');
       setFlag('G6_SECURITY_MODE', 'G7_AUTHENTICATED');
       setFlag('G7_JWT_ISSUER', 'bulk-retry-integration');
@@ -104,7 +123,7 @@ integration(
       setFlag('BULK_RETRY_ELIGIBILITY_ENABLED', 'true');
       setFlag('CATALOG_BULK_RETRY_V1_ENABLED', 'true');
       setFlag('CATALOG_BULK_RESULT_V2_ENABLED', 'true');
-      pool = new Pool({ connectionString: databaseUrl, max: 6 });
+      pool = new Pool({ connectionString: bulkDatabaseUrl, max: 6 });
       bulkDatabase = drizzle(pool, { schema: bulkSchema, logger: false });
       bulkRepository = new BulkPersistenceRepository(bulkDatabase);
       const version = await pool.query<{ server_version_num: string }>(
@@ -117,18 +136,18 @@ integration(
 
       const catalogSettings: PostgresSettings = {
         pool: {
-          host: url.hostname,
-          port: Number(url.port || 5432),
-          database: url.pathname.slice(1),
-          user: decodeURIComponent(url.username),
-          password: decodeURIComponent(url.password),
+          host: catalogUrl.hostname,
+          port: Number(catalogUrl.port || 5432),
+          database: catalogUrl.pathname.slice(1),
+          user: decodeURIComponent(catalogUrl.username),
+          password: decodeURIComponent(catalogUrl.password),
           ssl: false,
           max: 6,
         },
-        expectedRole: decodeURIComponent(url.username),
-        database: url.pathname.slice(1),
-        user: decodeURIComponent(url.username),
-        password: decodeURIComponent(url.password),
+        expectedRole: decodeURIComponent(catalogUrl.username),
+        database: catalogUrl.pathname.slice(1),
+        user: decodeURIComponent(catalogUrl.username),
+        password: decodeURIComponent(catalogUrl.password),
         mode: 'direct',
       };
       catalogDatabase = new Database(catalogSettings);
