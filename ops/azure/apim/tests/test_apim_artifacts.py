@@ -9,6 +9,8 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
+EXPECTED_DOCS_SHA = "490172c11cb4b83ddd1996f8d5834d0402184cf8"
+EXPECTED_GATEWAY_SHA = "57899dbbfb82758135eb67ad08c94bec03ff19cb"
 SPEC = importlib.util.spec_from_file_location("filter_openapi", ROOT / "filter-openapi.py")
 FILTER = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -333,8 +335,89 @@ class CompiledArmTests(unittest.TestCase):
         cls.filtered = json.loads((ROOT / "openapi" / "gateway-filtered.json").read_text(encoding="utf-8"))
         cls.manifest = json.loads((ROOT / "openapi" / "operation-security.json").read_text(encoding="utf-8"))
 
+    def test_source_provenance_rebuilds_exact_openapi_and_manifest(self):
+        source = {
+            "openapi": "3.1.0",
+            "info": {"title": "fixture", "version": "0.7.0-rc.3"},
+            "servers": [{"url": "/api/v1"}],
+            "security": [{"userBearer": []}],
+            "paths": {
+                **{
+                    f"/interno/{index}": {
+                        "get": {"operationId": f"interno{index}", "x-internal": True}
+                    }
+                    for index in range(1, 6)
+                },
+                "/productos": {
+                    "get": {"operationId": "listarProductos", "summary": "Listado"}
+                },
+                **{
+                    f"/g5/{index}": {
+                        "get": {"operationId": f"operacionG5{index}"}
+                    }
+                    for index in range(1, 5)
+                },
+            },
+        }
+        with tempfile.TemporaryDirectory(prefix="apim-source-integrity-") as temp_dir:
+            directory = Path(temp_dir)
+            source_path = directory / "openapi.yaml"
+            gateway_path = directory / "contract-routes.ts"
+            g5_path = directory / "g5-h5-routes.ts"
+            source_path.write_text(json.dumps(source), encoding="utf-8")
+            gateway_path.write_text(
+                "[{ method: 'GET', path: '/api/v1/productos', operationId: 'listarProductos' }]",
+                encoding="utf-8",
+            )
+            g5_path.write_text(
+                "[\n"
+                + ",\n".join(
+                    f"{{ method: 'GET', path: '/api/v1/g5/{index}', operationId: 'operacionG5{index}' }}"
+                    for index in range(1, 5)
+                )
+                + "\n]",
+                encoding="utf-8",
+            )
+            filtered, manifest = FILTER.filter_spec(
+                source,
+                FILTER.read_registry(gateway_path),
+                FILTER.read_registry(g5_path),
+                False,
+                EXPECTED_DOCS_SHA,
+                EXPECTED_GATEWAY_SHA,
+            )
+            ARM.validate_source_artifacts(
+                source_path,
+                gateway_path,
+                g5_path,
+                filtered,
+                manifest,
+                EXPECTED_DOCS_SHA,
+                EXPECTED_GATEWAY_SHA,
+            )
+            filtered["paths"]["/productos"]["get"]["summary"] = "Documento obsoleto"
+            with self.assertRaisesRegex(ValueError, "no se regeneran exactamente"):
+                ARM.validate_source_artifacts(
+                    source_path,
+                    gateway_path,
+                    g5_path,
+                    filtered,
+                    manifest,
+                    EXPECTED_DOCS_SHA,
+                    EXPECTED_GATEWAY_SHA,
+                )
+
     def test_compiled_arm_has_exact_hierarchical_policy_set_and_exclusions(self):
-        self.assertEqual(ARM.validate(self.template, self.filtered, self.manifest), 143)
+        self.assertEqual(
+            ARM.validate(
+                self.template,
+                self.filtered,
+                self.manifest,
+                EXPECTED_DOCS_SHA,
+                EXPECTED_GATEWAY_SHA,
+            ),
+            len(self.manifest["operations"]),
+        )
 
     def test_compiled_arm_rejects_wrong_policy_hierarchy_or_dependencies(self):
         for change in ("name", "dependsOn"):
@@ -344,18 +427,49 @@ class CompiledArmTests(unittest.TestCase):
             else:
                 mutated["resources"]["operationPolicies"]["dependsOn"].remove("issuerNamedValue")
             with self.subTest(change=change), self.assertRaises(ValueError):
-                ARM.validate(mutated, self.filtered, self.manifest)
+                ARM.validate(
+                    mutated,
+                    self.filtered,
+                    self.manifest,
+                    EXPECTED_DOCS_SHA,
+                    EXPECTED_GATEWAY_SHA,
+                )
 
     def test_compiled_arm_rejects_stale_manifest_or_private_route_leak(self):
         stale = copy.deepcopy(self.template)
         symbol = stale["variables"]["operationsManifest"][len("[variables('") : -3]
         stale["variables"][symbol]["operations"][0]["operationId"] = "operacion-obsoleta"
         with self.assertRaisesRegex(ValueError, "manifiesto compilado"):
-            ARM.validate(stale, self.filtered, self.manifest)
+            ARM.validate(
+                stale,
+                self.filtered,
+                self.manifest,
+                EXPECTED_DOCS_SHA,
+                EXPECTED_GATEWAY_SHA,
+            )
         leaked = copy.deepcopy(self.manifest)
         leaked["operations"][0]["operationId"] = leaked["privateOperationIds"][0]
         with self.assertRaises(ValueError):
-            ARM.validate(self.template, self.filtered, leaked)
+            ARM.validate(
+                self.template,
+                self.filtered,
+                leaked,
+                EXPECTED_DOCS_SHA,
+                EXPECTED_GATEWAY_SHA,
+            )
+
+    def test_compiled_arm_rejects_stale_contract_or_gateway_provenance(self):
+        for field in ("docsSha", "gatewaySha"):
+            stale = copy.deepcopy(self.manifest)
+            stale[field] = "0" * 40
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "procedencia"):
+                ARM.validate(
+                    self.template,
+                    self.filtered,
+                    stale,
+                    EXPECTED_DOCS_SHA,
+                    EXPECTED_GATEWAY_SHA,
+                )
 
 
 if __name__ == "__main__":

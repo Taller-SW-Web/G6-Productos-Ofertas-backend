@@ -699,6 +699,20 @@ jobs:
     steps:
     - name: Obtener código fuente
       uses: actions/checkout@v4
+    - name: Obtener OpenAPI de Docs integrado
+      uses: actions/checkout@v4
+      with:
+        repository: Taller-SW-Web/G6-Productos-Ofertas-docs
+        ref: 490172c11cb4b83ddd1996f8d5834d0402184cf8
+        path: .ci/G6-Productos-Ofertas-docs
+        persist-credentials: 'false'
+    - name: Obtener registro Gateway integrado
+      uses: actions/checkout@v4
+      with:
+        repository: Taller-SW-Web/G6-Productos-Ofertas-backend
+        ref: 57899dbbfb82758135eb67ad08c94bec03ff19cb
+        path: .ci/G6-Productos-Ofertas-gateway
+        persist-credentials: 'false'
     - name: Configurar Python 3.12
       uses: actions/setup-python@v5
       with:
@@ -714,7 +728,14 @@ jobs:
         APIM_ARM_TEMPLATE: ${{ runner.temp }}/apim-h5-arm.json
       run: python -m unittest discover -s ops/azure/apim/tests -p 'test_*.py' -v
     - name: Validar jerarquía ARM y correspondencia exacta de operaciones
-      run: python ops/azure/apim/verify-arm-template.py --template "${RUNNER_TEMP}/apim-h5-arm.json"
+      run: >-
+        python ops/azure/apim/verify-arm-template.py
+        --template "${RUNNER_TEMP}/apim-h5-arm.json"
+        --source-openapi .ci/G6-Productos-Ofertas-docs/contratos/http/openapi.yaml
+        --gateway-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/contract-routes.ts
+        --g5-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/g5-h5-routes.ts
+        --expected-docs-sha 490172c11cb4b83ddd1996f8d5834d0402184cf8
+        --expected-gateway-sha 57899dbbfb82758135eb67ad08c94bec03ff19cb
   integral:
     name: Validación integral de integración continua
     runs-on: ubuntu-latest

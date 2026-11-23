@@ -1,6 +1,6 @@
 {
-  "docsSha": "9dc8b2193c76d7a1fd53d0634316445f1f0bad20",
-  "gatewaySha": "85a7894a817aaeede26e5e45fa700de104454474",
+  "docsSha": "490172c11cb4b83ddd1996f8d5834d0402184cf8",
+  "gatewaySha": "57899dbbfb82758135eb67ad08c94bec03ff19cb",
   "privateOperationIds": [
     "filtrarSkusVendiblesInterno",
     "obtenerContenidoCargaMasivaInternoH5",
@@ -511,6 +511,14 @@
       "g5OptIn": false
     },
     {
+      "operationId": "listarAlertasOperativasInventario",
+      "apimOperationId": "listaralertasoperativasinventario",
+      "method": "GET",
+      "path": "/inventario/alertas",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
       "operationId": "listarAuditoriaPrecios",
       "apimOperationId": "listarauditoriaprecios",
       "method": "GET",
@@ -667,6 +675,14 @@
       "apimOperationId": "listartrasladosinventario",
       "method": "GET",
       "path": "/inventario/traslados",
+      "secured": true,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "listarUbicacionesInventario",
+      "apimOperationId": "listarubicacionesinventario",
+      "method": "GET",
+      "path": "/inventario/ubicaciones",
       "secured": true,
       "g5OptIn": false
     },
@@ -1159,6 +1175,6 @@
       "g5OptIn": false
     }
   ],
-  "operationSetSha256": "565eae67d9ae7384d387c4b980ff1a6c43ea539fb6ae5f37b9937eac94ed05ec",
-  "filteredOpenApiCanonicalSha256": "b584804dc6add14aa9b0b5f038ca3481896bf533049445d2edf1652a7311280e"
+  "operationSetSha256": "040544e1666747ff00c9eb77c6509b6831c83368dcba7b0ef29f3668ac7365fb",
+  "filteredOpenApiCanonicalSha256": "aa13be424d904393efc2ea1dc83212506388b56a1eb39ce63bfb70895edc41e8"
 }

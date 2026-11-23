@@ -31,14 +31,17 @@ La prevención de bypass requiere que el owner de infraestructura de Gateway per
 ## Validación local sin Azure
 
 ```powershell
+az bicep build --file ops/azure/apim/main.bicep --outfile $env:TEMP/apim-h5.json
+$env:APIM_ARM_TEMPLATE = "$env:TEMP\apim-h5.json"
 python -m unittest discover ops/azure/apim/tests -v
 python ops/azure/apim/validate-parameters.py <parametros-revisados.json> --openapi ops/azure/apim/openapi/gateway-filtered.json --manifest ops/azure/apim/openapi/operation-security.json
-az bicep build --file ops/azure/apim/main.bicep --outfile $env:TEMP/apim-h5.json
+python ops/azure/apim/verify-arm-template.py --template $env:TEMP/apim-h5.json --source-openapi <openapi-integrado.yaml> --gateway-routes <contract-routes-integrado.ts> --g5-routes <g5-routes-integrado.ts> --expected-docs-sha <sha-docs-integrado> --expected-gateway-sha <sha-gateway-integrado>
+Remove-Item Env:APIM_ARM_TEMPLATE
 ```
 
 No ejecutar `az deployment`, `what-if`, importaciones APIM ni comandos que creen o modifiquen recursos.
 
-El preflight verifica que el parámetro `filteredOpenApi`, el archivo filtrado y el manifiesto coincidan exactamente en SHA canónico y en operationId/método/ruta; un manifiesto viejo o una sustitución del parámetro falla antes de cualquier ejecución de Azure. La importación mantiene `servers=/api/v1`, el sufijo público APIM `api/v1` y `gatewayBackendUrl=https://<hostname-privado-aprobado>/api/v1`; una operación pública `/api/v1/productos` llega al Gateway como `/api/v1/productos`. No se añade `rewrite-uri`.
+El preflight verifica que el parámetro `filteredOpenApi`, el archivo filtrado y el manifiesto coincidan exactamente en SHA canónico y en operationId/método/ruta; un manifiesto viejo o una sustitución del parámetro falla antes de cualquier ejecución de Azure. El verificador del ARM liga el bucle de políticas al manifiesto compilado, exige correspondencia con los SHA Docs/Gateway aprobados para esta revisión y deriva el número de políticas del conjunto generado, sin un conteo fijo de operaciones. La importación mantiene `servers=/api/v1`, el sufijo público APIM `api/v1` y `gatewayBackendUrl=https://<hostname-privado-aprobado>/api/v1`; una operación pública `/api/v1/productos` llega al Gateway como `/api/v1/productos`. No se añade `rewrite-uri`.
 
 ## Plan de aceptación APIM-T01–T08 / RL-01–RL-06
 

@@ -24322,6 +24322,178 @@
         "x-route-basis": "existing-contract"
       }
     },
+    "/inventario/alertas": {
+      "get": {
+        "operationId": "listarAlertasOperativasInventario",
+        "tags": [
+          "Inventario"
+        ],
+        "summary": "Listar alertas operativas de stock",
+        "description": "Lectura administrativa para navegador mediante Gateway/APIM y JWT humano validado; requiere rol GESTOR_COMERCIAL y capacidad autorizada. No es an\u00f3nima ni M2M. Es lectura pura de snapshots; no env\u00eda notificaciones ni publica eventos. Excluye ubicaciones inactivas y SKU sin saldo observado. AGOTADO cuando available es cero; STOCK_BAJO cuando es positivo y menor o igual al umbral efectivo. No clasifica valores NULL como disponibles.",
+        "x-owner": "inventory-svc",
+        "x-source-spec": [
+          "SPEC-016"
+        ],
+        "x-contract-status": "SEMIFINAL_G6",
+        "x-runtime-status": "PENDIENTE_ENDPOINT_HTTP",
+        "x-g7-grant-status": "PENDIENTE_VERIFICACION",
+        "x-required-role": "GESTOR_COMERCIAL",
+        "security": [
+          {
+            "userBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sku",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "locationId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "estado",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "AGOTADO",
+                "STOCK_BAJO"
+              ]
+            }
+          },
+          {
+            "name": "pagina",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "tamanio",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CorrelationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Snapshot paginado; lista vac\u00eda devuelve 200 con total cero.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListadoAlertasOperativas"
+                },
+                "examples": {
+                  "vacio": {
+                    "value": {
+                      "items": [],
+                      "meta": {
+                        "pagina": 1,
+                        "tamanio": 20,
+                        "total": 0,
+                        "totalPaginas": 0
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDACION",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "TOKEN_INVALIDO",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCOPE_INSUFICIENTE",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitExceeded"
+          },
+          "500": {
+            "description": "ERROR_INTERNO",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICIO_NO_DISPONIBLE",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-error-codes": {
+          "400": [
+            "VALIDACION"
+          ],
+          "401": [
+            "TOKEN_INVALIDO"
+          ],
+          "403": [
+            "SCOPE_INSUFICIENTE"
+          ],
+          "429": [
+            "RATE_LIMIT_EXCEDIDO"
+          ],
+          "500": [
+            "ERROR_INTERNO"
+          ],
+          "503": [
+            "SERVICIO_NO_DISPONIBLE"
+          ]
+        }
+      }
+    },
     "/auditoria-precios": {
       "get": {
         "tags": [
@@ -27297,6 +27469,160 @@
           ],
           "403": [
             "SCOPE_INSUFICIENTE"
+          ],
+          "500": [
+            "ERROR_INTERNO"
+          ],
+          "503": [
+            "SERVICIO_NO_DISPONIBLE"
+          ]
+        }
+      }
+    },
+    "/inventario/ubicaciones": {
+      "get": {
+        "operationId": "listarUbicacionesInventario",
+        "tags": [
+          "Inventario"
+        ],
+        "summary": "Listar ubicaciones de inventario",
+        "description": "Lectura administrativa para navegador mediante Gateway/APIM y JWT humano validado; requiere rol GESTOR_COMERCIAL y capacidad autorizada. No es an\u00f3nima ni M2M. Incluye ubicaciones sin saldo. soloActivas=true filtra activas; false o ausente incluye todas. Orden code, name e id ascendente.",
+        "x-owner": "inventory-svc",
+        "x-source-spec": [
+          "SPEC-015",
+          "SPEC-016"
+        ],
+        "x-contract-status": "SEMIFINAL_G6",
+        "x-runtime-status": "PENDIENTE_ENDPOINT_HTTP",
+        "x-g7-grant-status": "PENDIENTE_VERIFICACION",
+        "x-required-role": "GESTOR_COMERCIAL",
+        "security": [
+          {
+            "userBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "soloActivas",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "pagina",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "tamanio",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CorrelationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ubicaciones paginadas, incluidas las que a\u00fan no tienen saldos.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListadoUbicacionesInventario"
+                },
+                "examples": {
+                  "vacio": {
+                    "value": {
+                      "items": [],
+                      "meta": {
+                        "pagina": 1,
+                        "tamanio": 20,
+                        "total": 0,
+                        "totalPaginas": 0
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDACION",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "TOKEN_INVALIDO",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCOPE_INSUFICIENTE",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitExceeded"
+          },
+          "500": {
+            "description": "ERROR_INTERNO",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICIO_NO_DISPONIBLE",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-error-codes": {
+          "400": [
+            "VALIDACION"
+          ],
+          "401": [
+            "TOKEN_INVALIDO"
+          ],
+          "403": [
+            "SCOPE_INSUFICIENTE"
+          ],
+          "429": [
+            "RATE_LIMIT_EXCEDIDO"
           ],
           "500": [
             "ERROR_INTERNO"
@@ -46670,10 +46996,10 @@
     "forbidden_source": "service-token sub/client_id"
   },
   "x-apim-filter": {
-    "docsSha": "9dc8b2193c76d7a1fd53d0634316445f1f0bad20",
-    "gatewaySha": "85a7894a817aaeede26e5e45fa700de104454474",
+    "docsSha": "490172c11cb4b83ddd1996f8d5834d0402184cf8",
+    "gatewaySha": "57899dbbfb82758135eb67ad08c94bec03ff19cb",
     "g5EnabledByDefault": false,
     "privateOperationCount": 5,
-    "operationSetSha256": "565eae67d9ae7384d387c4b980ff1a6c43ea539fb6ae5f37b9937eac94ed05ec"
+    "operationSetSha256": "040544e1666747ff00c9eb77c6509b6831c83368dcba7b0ef29f3668ac7365fb"
   }
 }
