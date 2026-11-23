@@ -1,0 +1,15 @@
+{
+  "Name": "G6 H5 Container Apps Environment Reader",
+  "IsCustom": true,
+  "Description": "Read the G6 H5 resource group and Managed Environments; no write permissions.",
+  "Actions": [
+    "Microsoft.App/managedEnvironments/read",
+    "Microsoft.Resources/subscriptions/resourceGroups/read"
+  ],
+  "NotActions": [],
+  "DataActions": [],
+  "NotDataActions": [],
+  "AssignableScopes": [
+    "/subscriptions/fef42188-accd-4470-ae88-78f583eb4906/resourceGroups/rg-g6-sb-h5-int-fork"
+  ]
+}
