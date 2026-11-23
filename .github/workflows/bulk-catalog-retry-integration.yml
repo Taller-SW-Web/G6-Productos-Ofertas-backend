@@ -209,9 +209,10 @@ jobs:
         env:
           TREE_SHA: ${{ steps.integration-tree.outputs.integration_sha }}
         run: |
+          set -euo pipefail
           {
             echo '## Integración Bulk–Catalog Retry';
-            echo "Árbol integrado ejecutado: `$TREE_SHA`";
+            printf 'Árbol integrado ejecutado: `%s`\n' "$TREE_SHA";
             echo 'PostgreSQL: service container `postgres:17-alpine`; DDL Catalog y Bulk aplicado en la misma instancia.';
             echo 'Migraciones: Catalog fixtures 0001, barcode 0002, outbox candidate 0001, retry candidate 0002, publication 0003 e historical 0004; Bulk 0001 a 0007; Bulk 0005 a 0007 reaplicadas.';
             echo 'E2E HTTP y consumidores: ver pasos de prueba anteriores; un paso fallido invalida el run.';
