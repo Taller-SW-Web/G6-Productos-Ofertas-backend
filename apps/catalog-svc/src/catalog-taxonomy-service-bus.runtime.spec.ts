@@ -1,5 +1,7 @@
 import type { CatalogMessageService } from './catalog-message.service.js';
 import type { Database } from './database.js';
+import type { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import {
   bulkRequestQueue,
   catalogIncomingQueues,
@@ -10,7 +12,6 @@ import {
 } from './catalog-service-bus.js';
 import { relayCatalogDelivery } from './catalog-service-bus-relay.js';
 import { CatalogTaxonomyServiceBusRuntime } from './catalog-taxonomy-service-bus.runtime.js';
-import { createCatalogBulkConsumer } from './catalog-service-bus.runtime.js';
 
 vi.mock('./catalog-service-bus.js', async (original) => ({
   ...(await original<typeof import('./catalog-service-bus.js')>()),
@@ -39,7 +40,9 @@ describe('Catalog H5 transport readiness', () => {
 
   function fixture(destinations = taxonomyReplyQueue) {
     vi.stubEnv('CATALOG_H5_DESTINATIONS', destinations);
-    const storage = vi.fn().mockResolvedValue({ rows: [{ ready: true }] });
+    const storage = vi.fn((_query: unknown) =>
+      Promise.resolve({ rows: [{ ready: true as boolean }] }),
+    );
     const probe = vi.fn().mockResolvedValue([]);
     const close = vi.fn().mockResolvedValue(undefined);
     const verifySender = vi.fn().mockResolvedValue(undefined);
@@ -74,6 +77,10 @@ describe('Catalog H5 transport readiness', () => {
     return {
       runtime,
       storage,
+      preflight: () =>
+        new PgDialect().sqlToQuery(
+          storage.mock.calls[storage.mock.calls.length - 1]?.[0] as SQL,
+        ),
       probe,
       verifySender,
       subscribeWithProbe,
@@ -200,18 +207,55 @@ describe('Catalog H5 transport readiness', () => {
     expect(f.subscribeWithProbe).toHaveBeenCalledTimes(12);
   });
 
-  it('reports unavailable until migration and runtime privileges are present', async () => {
-    const f = fixture();
-    f.storage.mockResolvedValue({ rows: [{ ready: false }] });
-    await expect(f.runtime.onApplicationBootstrap()).resolves.toBeUndefined();
-    expect(f.runtime.ready).toBe(false);
-    expect(f.subscribeWithProbe).not.toHaveBeenCalled();
-    f.storage.mockResolvedValue({ rows: [{ ready: true }] });
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(f.subscribeWithProbe).toHaveBeenCalledTimes(4);
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(f.runtime.ready).toBe(true);
-  });
+  const allowlists = [
+    { name: 'empty', destinations: '' },
+    { name: 'Bulk only', destinations: 'g6.bulk.from.catalog' },
+    { name: 'Taxonomy only', destinations: taxonomyReplyQueue },
+  ];
+
+  it.each(allowlists)(
+    'keeps H5 unavailable for the $name allowlist when only migration 0001 is present',
+    async ({ destinations }) => {
+      const f = fixture(destinations);
+      f.storage.mockResolvedValue({ rows: [{ ready: false }] });
+
+      await f.runtime.onApplicationBootstrap();
+
+      const query = f.preflight();
+      expect(query.sql).toContain('catalog.outbox_delivery');
+      expect(query.sql).toContain('has_table_privilege');
+      expect(query.sql).toContain('has_column_privilege');
+      expect(query.sql).toContain('catalog.enqueue_h5_outbox_deliveries()');
+      expect(query.sql).toContain('tr_catalog_outbox_h5_delivery');
+      expect(query.sql).toContain('delivery_transport');
+      expect(query.sql).toContain('catalog.mark_taxonomy_reply_transport()');
+      expect(query.sql).toContain('trg_catalog_taxonomy_reply_transport');
+      expect(query.params).toEqual([]);
+      expect(f.runtime.ready).toBe(false);
+      expect(f.subscribeWithProbe).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(allowlists)(
+    'becomes ready for the $name allowlist when both H5 migrations and broker checks are healthy',
+    async ({ destinations }) => {
+      const f = fixture(destinations);
+
+      await f.runtime.onApplicationBootstrap();
+      await vi.advanceTimersByTimeAsync(0);
+
+      const query = f.preflight();
+      expect(query.sql).toContain('delivery_transport');
+      expect(query.sql).toContain('catalog.mark_taxonomy_reply_transport()');
+      expect(query.sql).toContain('trg_catalog_taxonomy_reply_transport');
+      expect(query.params).toEqual([]);
+      expect(f.runtime.ready).toBe(true);
+      expect(f.subscribeWithProbe).toHaveBeenCalledTimes(
+        catalogIncomingQueues.length,
+      );
+      expect(f.verifySender).toHaveBeenCalledTimes(destinations.trim() ? 1 : 0);
+    },
+  );
 
   it('keeps the runtime disabled for the existing H4 provider', async () => {
     vi.stubEnv('MESSAGING_PROVIDER', 'RABBITMQ');
@@ -219,6 +263,7 @@ describe('Catalog H5 transport readiness', () => {
     await f.runtime.onApplicationBootstrap();
     expect(f.runtime.required).toBe(false);
     expect(f.runtime.ready).toBe(true);
+    expect(f.storage).not.toHaveBeenCalled();
     expect(f.subscribeWithProbe).not.toHaveBeenCalled();
   });
 });

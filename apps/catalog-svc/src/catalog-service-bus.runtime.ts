@@ -161,8 +161,6 @@ export class CatalogServiceBusRuntime
   }
 
   private async verifyStorage(): Promise<void> {
-    const requiresTaxonomyReply =
-      this.destinations.includes(taxonomyReplyQueue);
     const result = await this.database.read((db) =>
       db.execute(sql`
         SELECT
@@ -180,23 +178,18 @@ export class CatalogServiceBusRuntime
               AND tgrelid = to_regclass('catalog.outbox')
               AND tgenabled IN ('O', 'A')
           )
-          AND (
-            NOT ${requiresTaxonomyReply}
-            OR (
-              EXISTS (
-                SELECT FROM pg_attribute
-                WHERE attrelid = to_regclass('catalog.outbox')
-                  AND attname = 'delivery_transport'
-                  AND NOT attisdropped
-              )
-              AND to_regprocedure('catalog.mark_taxonomy_reply_transport()') IS NOT NULL
-              AND EXISTS (
-                SELECT FROM pg_trigger
-                WHERE tgname = 'trg_catalog_taxonomy_reply_transport'
-                  AND tgrelid = to_regclass('catalog.outbox')
-                  AND tgenabled IN ('O', 'A')
-              )
-            )
+          AND EXISTS (
+            SELECT FROM pg_attribute
+            WHERE attrelid = to_regclass('catalog.outbox')
+              AND attname = 'delivery_transport'
+              AND NOT attisdropped
+          )
+          AND to_regprocedure('catalog.mark_taxonomy_reply_transport()') IS NOT NULL
+          AND EXISTS (
+            SELECT FROM pg_trigger
+            WHERE tgname = 'trg_catalog_taxonomy_reply_transport'
+              AND tgrelid = to_regclass('catalog.outbox')
+              AND tgenabled IN ('O', 'A')
           ) AS ready
       `),
     );
