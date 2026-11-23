@@ -211,7 +211,7 @@ try {
     }
 
     Set-TemporaryJobSecret -Value $jitConfig
-    $container.env = @(@{name='H5_RUNNER_JIT_CONFIG'; secretRef=$jobSecretName})
+    $container | Add-Member -NotePropertyName env -NotePropertyValue @(@{name='H5_RUNNER_JIT_CONFIG'; secretRef=$jobSecretName}) -Force
     $templateJson = $job.properties.template | ConvertTo-Json -Depth 100 -Compress
     $templateFile = New-RestrictedTemplateFile -Content $templateJson
     $startedAt = [DateTimeOffset]::UtcNow

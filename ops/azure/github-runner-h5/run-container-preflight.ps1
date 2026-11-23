@@ -51,7 +51,7 @@ try {
     if ((@($container.command) -join ' ') -ne '/bin/bash -c') { throw 'Job command differs from the approved bash entrypoint.' }
     if (@($container.env | Where-Object name -eq 'H5_PREFLIGHT_REF').Count -gt 0) { throw 'Job execution already defines H5_PREFLIGHT_REF.' }
 
-    $container.env = @(@($container.env), @{name='H5_PREFLIGHT_REF';value=$Ref}) | Where-Object { $_ }
+    $container | Add-Member -NotePropertyName env -NotePropertyValue (@(@($container.env), @{name='H5_PREFLIGHT_REF';value=$Ref}) | Where-Object { $_ }) -Force
     $bootstrap = @'
 set -Eeuo pipefail
 work="$(mktemp -d)"
