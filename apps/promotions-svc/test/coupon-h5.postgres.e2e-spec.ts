@@ -241,7 +241,11 @@ describe.skipIf(process.env.PROMOTIONS_H5_POSTGRES_TESTS !== '1')(
               (SELECT count(*)::int FROM promotions.coupon_command_receipts WHERE order_id=$1 AND intention='RESTAURAR' AND status='REJECTED') AS restorations,
               (SELECT count(*)::int FROM promotions.inbox WHERE message_id=$2) AS inbox,
               (SELECT count(*)::int FROM promotions.outbox WHERE operation_id=$3) AS results`,
-            [restore.command.data.order_id, restore.command.message_id, restore.command.operation_id],
+            [
+              restore.command.data.order_id,
+              restore.command.message_id,
+              restore.command.operation_id,
+            ],
           )
         ).rows[0],
       ).toEqual({ uses: 0, restorations: 1, inbox: 1, results: 1 });
