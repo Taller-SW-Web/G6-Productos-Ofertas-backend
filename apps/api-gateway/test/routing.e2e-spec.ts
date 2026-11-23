@@ -182,6 +182,52 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
     },
   );
 
+  it('keeps all five internal contract operations unreachable with valid identities and G5 enabled', async () => {
+    const previous = {
+      securityMode: settings.securityMode,
+      g5H5Enabled: settings.g5H5Enabled,
+    };
+    const serviceToken = signed.token({
+      sub: 'modulo-productos',
+      scope: 'catalogo:leer precios:leer',
+    });
+    const humanToken = signed.token({
+      tipo: 'acceso',
+      sub: '11111111-1111-4111-8111-111111111111',
+      roles: ['GESTOR_COMERCIAL'],
+    });
+    const internalRoutes = [
+      { method: 'get', path: '/api/v1/productos/skus/SKU-1/contexto' },
+      { method: 'post', path: '/api/v1/productos/skus/contexto/lote' },
+      { method: 'post', path: '/api/v1/interno/productos/skus/filtrar' },
+      {
+        method: 'get',
+        path: '/api/v1/interno/inventario/reservas/11111111-1111-4111-8111-111111111111/evidencia-cupon',
+      },
+      {
+        method: 'get',
+        path: '/api/v1/interno/carga-masiva/contenidos/11111111-1111-4111-8111-111111111111',
+      },
+    ] as const;
+
+    try {
+      Object.assign(settings, {
+        securityMode: 'G7_AUTHENTICATED',
+        g5H5Enabled: true,
+      });
+      for (const route of internalRoutes) {
+        for (const token of [undefined, serviceToken, humanToken]) {
+          let call = request(app.getHttpServer())[route.method](route.path);
+          if (token) call = call.set('Authorization', `Bearer ${token}`);
+          await call.expect(404);
+        }
+      }
+      expect(calls).toHaveLength(0);
+    } finally {
+      Object.assign(settings, previous);
+    }
+  });
+
   it('forwards the administrative SKU resolver only for a human commercial manager', async () => {
     const path = '/api/v1/productos/administracion/skus/resolver';
     const humanToken = signed.token({
