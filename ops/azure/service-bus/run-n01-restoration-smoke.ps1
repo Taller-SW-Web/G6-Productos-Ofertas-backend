@@ -3,6 +3,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$supportModule = Join-Path $PSScriptRoot 'n01-runner-support.psm1'
+Import-Module $supportModule -Force
 $resourceGroup = 'rg-g6-sb-h5-int-fork'
 $templatePath = Join-Path $PSScriptRoot 'n01-restoration-smoke.bicep'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
@@ -54,8 +56,9 @@ $armPath = Join-Path $tempDirectory 'template.json'
 $whatIfPath = Join-Path $tempDirectory 'what-if.private.json'
 $runnerLog = Join-Path $EvidenceDirectory 'runner.log'
 $postgresLog = Join-Path $EvidenceDirectory 'postgres.log'
-$deploymentCreated = $false
+$containerDeploymentAttempted = $false
 $runError = $null
+$cleanupErrors = @()
 
 try {
   $parameters = @{
@@ -84,7 +87,7 @@ try {
     throw 'N01_WHAT_IF_UNEXPECTED_RESOURCE_CHANGE'
   }
 
-  $deploymentCreated = $true
+  $containerDeploymentAttempted = $true
   az deployment group create --name $deploymentName --resource-group $resourceGroup --template-file $templatePath --parameters "@$parametersPath" --output none
   if ($LASTEXITCODE -ne 0) { throw 'N01_ACI_DEPLOYMENT_FAILED' }
 
@@ -119,6 +122,7 @@ try {
   $sql = @($jsonEvents | Where-Object step -eq 'sql-verification' | Select-Object -Last 1)[0]
   $settlements = @($jsonEvents | Where-Object step -eq 'settlement')
   $terminal = @($settlements | Select-Object -Last 1)[0]
+  Assert-N01EvidenceBinding -TerminalEvent $terminal -SqlEvent $sql -ExpectedSha $sourceSha | Out-Null
   if ($summary.status -ne 'PASS' -or $terminal.terminal -ne 'REJECTED' -or
       $terminal.result_code -ne 'COUPON_IDENTITY_MISMATCH' -or
       $summary.settled -ne 2 -or $summary.inbox_rows -ne 1 -or
@@ -167,23 +171,17 @@ try {
 } catch {
   $runError = $_
 } finally {
-  if ($deploymentCreated) {
-    $existingGroups = az container list --resource-group $resourceGroup -o json | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0) { throw 'N01_ACI_CLEANUP_STATE_QUERY_FAILED' }
-    if (@($existingGroups | Where-Object name -eq $containerGroupName).Count -gt 0) {
-      az container logs --name $containerGroupName --resource-group $resourceGroup --container-name runner *> $runnerLog
-      az container logs --name $containerGroupName --resource-group $resourceGroup --container-name postgres *> $postgresLog
-      az container delete --name $containerGroupName --resource-group $resourceGroup --yes --output none
-      if ($LASTEXITCODE -ne 0) { throw 'N01_ACI_CLEANUP_FAILED' }
-    }
-    $remainingGroups = az container list --resource-group $resourceGroup -o json | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0 -or @($remainingGroups | Where-Object name -eq $containerGroupName).Count -ne 0) { throw 'N01_ACI_CLEANUP_NOT_VERIFIED' }
+  try {
+    $temporaryPaths = @($parametersPath, $armPath, $whatIfPath, $tempDirectory)
+    $cleanup = Invoke-N01Cleanup -ResourceGroup $resourceGroup `
+      -ContainerGroupName $containerGroupName `
+      -ContainerDeploymentAttempted $containerDeploymentAttempted `
+      -TemporaryPaths $temporaryPaths
+    $cleanupErrors = @($cleanup.Errors)
+  } catch {
+    $cleanupErrors = @('N01_CLEANUP_HELPER_FAILED')
   }
-  Remove-Item -LiteralPath $parametersPath -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $armPath -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $whatIfPath -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $tempDirectory -Force -Recurse -ErrorAction SilentlyContinue
 }
 
-if ($runError) { throw $runError }
+Complete-N01RunOutcome -OriginalError $runError -CleanupErrors $cleanupErrors
 Get-Content -Raw -LiteralPath (Join-Path $EvidenceDirectory 'summary.json')
