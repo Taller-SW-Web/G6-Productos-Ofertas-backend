@@ -14,7 +14,7 @@ $startedAt = [DateTimeOffset]::UtcNow
 
 function Invoke-AzJson {
     param([Parameter(Mandatory)][string[]]$Arguments)
-    $output = & az @Arguments 2>&1
+    $output = & az @Arguments 2>$null
     if ($LASTEXITCODE -ne 0) { throw "Azure CLI failed: $($Arguments[0]) (exit $LASTEXITCODE). $($output -join ' ')" }
     return (($output -join "`n") | ConvertFrom-Json)
 }
@@ -24,6 +24,55 @@ function Invoke-GhJson {
     $output = & gh @Arguments 2>$null
     if ($LASTEXITCODE -ne 0) { throw "GitHub CLI call failed: $($Arguments[0]) (exit $LASTEXITCODE)." }
     return (($output -join "`n") | ConvertFrom-Json)
+}
+
+function Write-ExecutionDiagnostics {
+    param([Parameter(Mandatory)][string]$ExecutionName)
+    $token = & az account get-access-token --resource https://management.azure.com/ --query accessToken --output tsv 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $token) {
+        Write-Output "BLOCKED_NO_EXECUTION_LOGS execution=$ExecutionName metadata=Azure-token-unavailable"
+        return
+    }
+    $uri = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.App/jobs/$JobName/executions/$ExecutionName?api-version=2026-07-01"
+    try {
+        $headers = @{Authorization="Bearer $($token -join '')"}
+        $detail = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
+        $containers = @($detail.properties.detailedStatus.replicas | ForEach-Object { $_.containers } | ForEach-Object { $_ })
+        $containerSummary = @($containers | ForEach-Object { "name=$($_.name),status=$($_.status),code=$($_.code),termination=$($_.additionalInformation)" }) -join ';'
+        Write-Output "EXECUTION_DIAGNOSTIC execution=$ExecutionName status=$($detail.properties.status) reason=$($detail.properties.reason) message=$($detail.properties.message) containers=$containerSummary"
+    } catch {
+        Write-Output "BLOCKED_NO_EXECUTION_LOGS execution=$ExecutionName metadata=ARM-details-unavailable"
+    }
+
+    $extension = & az extension list --query "[?name=='containerapp'].version | [0]" --output tsv 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $extension) {
+        Write-Output "BLOCKED_NO_EXECUTION_LOGS execution=$ExecutionName logExtension=containerapp-not-installed"
+        return
+    }
+    $replicas = & az containerapp job replica list --name $JobName --resource-group $ResourceGroup --execution $ExecutionName --subscription $subscriptionId --output json 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Output "BLOCKED_NO_EXECUTION_LOGS execution=$ExecutionName replicaList=unavailable"
+        return
+    }
+    $replicaRecords = @($replicas -join "`n" | ConvertFrom-Json)
+    if ($replicaRecords.Count -eq 0) {
+        Write-Output "BLOCKED_NO_EXECUTION_LOGS execution=$ExecutionName replicas=cleaned-or-unavailable"
+        return
+    }
+    foreach ($replica in $replicaRecords) {
+        $logOutput = & az containerapp job logs show --name $JobName --resource-group $ResourceGroup --execution $ExecutionName --replica $replica.name --container runner --tail 50 --subscription $subscriptionId --output json 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            $logText = $logOutput -join "`n"
+            $sha = [System.Security.Cryptography.SHA256]::Create()
+            $digest = [System.BitConverter]::ToString($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($logText))).Replace('-','').ToLowerInvariant()
+            $sha.Dispose()
+            Write-Output "EXECUTION_LOGS_AVAILABLE execution=$ExecutionName replica=$($replica.name) lines=$(@($logOutput).Count) sha256=$digest"
+        } else {
+            $safeFailure = ($logOutput -join ' ') -replace '[\r\n]+',' '
+            if ($safeFailure.Length -gt 200) { $safeFailure = $safeFailure.Substring(0,200) }
+            Write-Output "BLOCKED_NO_EXECUTION_LOGS execution=$ExecutionName replica=$($replica.name) result=$safeFailure"
+        }
+    }
 }
 
 try {
@@ -49,7 +98,8 @@ try {
         throw 'Job image is not the pinned actions-runner image.'
     }
     if ((@($container.command) -join ' ') -ne '/bin/bash -c') { throw 'Job command differs from the approved bash entrypoint.' }
-    if (@($container.env | Where-Object name -eq 'H5_PREFLIGHT_REF').Count -gt 0) { throw 'Job execution already defines H5_PREFLIGHT_REF.' }
+    $containerEnv = if ($container.PSObject.Properties.Name -contains 'env') { @($container.env) } else { @() }
+    if (@($containerEnv | Where-Object name -eq 'H5_PREFLIGHT_REF').Count -gt 0) { throw 'Job execution already defines H5_PREFLIGHT_REF.' }
 
     $bootstrap = @'
 set -Eeuo pipefail
@@ -90,7 +140,8 @@ bash "$work/preflight.sh"
     } elseif ($execution.properties.status -eq 'Running') {
         throw "Preflight execution $executionName exceeded timeout $TimeoutSeconds seconds."
     } else {
-        throw "Preflight execution $executionName ended with status '$($execution.properties.status)'. Container log destination is not configured on this Environment."
+        Write-ExecutionDiagnostics -ExecutionName $executionName
+        throw "BLOCKED_NO_EXECUTION_LOGS: preflight execution $executionName ended '$($execution.properties.status)'; inspect its structured diagnostic above."
     }
 }
 finally {

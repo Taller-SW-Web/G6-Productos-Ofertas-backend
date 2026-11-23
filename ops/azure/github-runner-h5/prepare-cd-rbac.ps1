@@ -18,7 +18,7 @@ $temporaryFiles = [System.Collections.Generic.List[string]]::new()
 
 function Invoke-AzJson {
     param([Parameter(Mandatory)][string[]]$Arguments)
-    $output = & az @Arguments 2>&1
+    $output = & az @Arguments 2>$null
     if ($LASTEXITCODE -ne 0) {
         throw "Azure CLI falló al consultar/aplicar el plan: $($Arguments[0]) (exit $LASTEXITCODE). $($output -join ' ')"
     }
@@ -33,11 +33,22 @@ function Save-RoleDefinition {
     if ($existing -and $existing.Count -gt 0) {
         $found = @($existing | Where-Object { $_.roleName -eq $Role.Name }) | Select-Object -First 1
         if (-not $found) { throw "No se pudo validar la definición existente '$($Role.Name)'" }
+        if ([string]$found.roleType -cne 'CustomRole') { throw "La definición '$($Role.Name)' no es un rol personalizado; revisión RBAC manual requerida." }
         $existingActions = @($found.permissions | ForEach-Object { $_.actions } | ForEach-Object { $_ }) | Sort-Object -Unique
         $expectedActions = @($Role.Actions) | Sort-Object -Unique
+        $existingNotActions = @($found.permissions | ForEach-Object { $_.notActions } | ForEach-Object { $_ }) | Sort-Object -Unique
+        $expectedNotActions = @($Role.NotActions) | Sort-Object -Unique
+        $existingDataActions = @($found.permissions | ForEach-Object { $_.dataActions } | ForEach-Object { $_ }) | Sort-Object -Unique
+        $expectedDataActions = @($Role.DataActions) | Sort-Object -Unique
+        $existingNotDataActions = @($found.permissions | ForEach-Object { $_.notDataActions } | ForEach-Object { $_ }) | Sort-Object -Unique
+        $expectedNotDataActions = @($Role.NotDataActions) | Sort-Object -Unique
         $existingScopes = @($found.assignableScopes) | Sort-Object -Unique
         $expectedScopes = @($Role.AssignableScopes) | Sort-Object -Unique
-        if ((Compare-Object $existingActions $expectedActions) -or (Compare-Object $existingScopes $expectedScopes)) {
+        if ((Compare-Object $existingActions $expectedActions) -or
+            (Compare-Object $existingNotActions $expectedNotActions) -or
+            (Compare-Object $existingDataActions $expectedDataActions) -or
+            (Compare-Object $existingNotDataActions $expectedNotDataActions) -or
+            (Compare-Object $existingScopes $expectedScopes)) {
             throw "La definición existente '$($Role.Name)' difiere del template; revisión RBAC manual requerida."
         }
         return
@@ -73,6 +84,7 @@ try {
     $principalId = [string]$identity.principalId
     if (-not $groupId -or -not $environment.id -or -not $principalId) { throw 'No se pudo resolver RG, Environment o principal desde Azure CLI.' }
 
+    $effectiveAssignments = Invoke-AzJson @('role','assignment','list','--assignee-object-id',$principalId,'--all','--include-inherited','--output','json','--subscription',$subscriptionId)
     $apps = @()
     $missing = @()
     foreach ($appName in $requiredApps) {
@@ -89,8 +101,19 @@ try {
         }
         $apps += $app
     }
+
+    foreach ($assignment in @($effectiveAssignments)) {
+        $scope = ([string]$assignment.scope).TrimEnd('/')
+        $roleName = [string]$assignment.roleDefinitionName
+        $allowedRoleScope = ($roleName -eq $envRoleName -and $scope -ieq $groupId.TrimEnd('/')) -or
+            ($roleName -eq $appRoleName -and @($apps | Where-Object { ([string]$_.id).TrimEnd('/') -ieq $scope }).Count -eq 1)
+        if (-not $allowedRoleScope) {
+            throw "RBAC bloqueado: asignación heredada o directa inesperada '$roleName' en scope '$scope'; el owner Azure debe revisarla antes del CD."
+        }
+    }
+
     if ($missing.Count -gt 0) {
-        throw "Aplicación bloqueada: faltan ACA en $EnvironmentName ($($missing -join ', ')); no se crearon roles ni asignaciones."
+        throw "Aplicación bloqueada: faltan ACA en $EnvironmentName ($($missing -join ', ')); se verificó RBAC heredado, no se crearon roles ni asignaciones."
     }
     if ($apps.Count -ne $requiredApps.Count) { throw 'El conjunto de ACA no coincide con las cinco apps autorizadas.' }
 
