@@ -179,7 +179,10 @@ export class TaxonomyServiceBusRuntime {
   constructor(
     private readonly config: Config,
     private readonly store: Store,
-  ) {}
+  ) {
+    // Un transporte pausado no constituye una dependencia activa de readiness.
+    this.available = !config.enabled;
+  }
 
   start(): void {
     if (!this.config.enabled || this.client || this.stopped) return;

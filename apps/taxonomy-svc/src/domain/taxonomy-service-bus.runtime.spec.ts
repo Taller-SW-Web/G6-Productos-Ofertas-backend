@@ -228,6 +228,46 @@ describe('Taxonomy H5 transport readiness', () => {
     vi.resetAllMocks();
   });
 
+  it('does not require Service Bus readiness when both directions are disabled', () => {
+    const config = readTaxonomyServiceBus({
+      MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
+      TAXONOMY_SERVICE_BUS_ENABLED: 'true',
+      SERVICE_BUS_NAMESPACE_FQDN: 'g6-taxonomy-local.servicebus.windows.net',
+    });
+    if (!config) throw new Error('CONFIG_REQUIRED');
+    const verifyServiceBusStorage = vi.fn();
+    runtime = new TaxonomyServiceBusRuntime(config, {
+      verifyServiceBusStorage,
+      claimServiceBusDelivery: vi.fn(),
+      finishServiceBusDelivery: vi.fn(),
+      consumir: vi.fn(),
+    });
+    runtime.start();
+    expect(runtime.available).toBe(true);
+    expect(vi.mocked(ServiceBusClient)).not.toHaveBeenCalled();
+    expect(verifyServiceBusStorage).not.toHaveBeenCalled();
+  });
+
+  it('accepts an absent namespace only while both directions are disabled', () => {
+    const env = {
+      MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
+      TAXONOMY_SERVICE_BUS_ENABLED: 'true',
+    };
+    expect(readTaxonomyServiceBus(env)).toMatchObject({ enabled: false });
+    expect(() =>
+      readTaxonomyServiceBus({
+        ...env,
+        TAXONOMY_SERVICE_BUS_SEND_ENABLED: 'true',
+      }),
+    ).toThrow('TAXONOMY_SERVICE_BUS_CONFIGURATION_INVALID');
+    expect(() =>
+      readTaxonomyServiceBus({
+        ...env,
+        TAXONOMY_SERVICE_BUS_RECEIVE_ENABLED: 'true',
+      }),
+    ).toThrow('TAXONOMY_SERVICE_BUS_CONFIGURATION_INVALID');
+  });
+
   it.each([
     { sendEnabled: true, receiveEnabled: false },
     { sendEnabled: false, receiveEnabled: true },
