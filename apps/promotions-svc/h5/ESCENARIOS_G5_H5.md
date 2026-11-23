@@ -47,10 +47,10 @@ En todas las filas, `technical_status` registra el resultado de la etapa ejecuta
 - **Pedido/reserva:** pedido anulado ↔ reserva sin confirmar; no hay operation_id de consumo que restaurar.
 - **HTTP:** G6 verifica constancia firmada; POST /api/v1/inventario/reservas/{reservaId}/liberar; GET /api/v1/inventario/operaciones/{operationId}; M1 verifica estado G5.
 - **Identidad/scopes:** G5 firma anulación; G7 modulo-ventas con inventario:reservas:liberar y scope de lectura.
-- **Respuesta esperada:** Restauración de cupón apuntando a una operación de consumo inexistente termina REJECTED/COUPON_IDENTITY_MISMATCH; liberación de reserva COMPLETED; ningún efecto de cupón.
-- **SQL de evidencia:** Promotions: receipt de restauración REJECTED y cero coupon_uses para el pedido; Inventory: liberación idempotente de la reserva.
-- **Service Bus:** Un mensaje de restauración rechazado y uno de liberación; mismo MessageId durante retries, Inbox/receipt sin efecto comercial de cupón.
-- **Reintento/UUID estable:** Reusar pedido, reservation_id, operations.coupon como referencia negativa inexistente, operations.restore, operations.release, correlation_id y firma original con coupon_operation_id=null.
+- **Respuesta esperada:** Liberación de reserva COMPLETED después de verificar la anulación firmada. Este escenario no llama al endpoint de restauración de cupón.
+- **SQL de evidencia:** Inventory: operación de liberación idempotente y reserva liberada. La restauración negativa sin consumo previo solo se comprueba en el test PostgreSQL descartable.
+- **Service Bus:** Comprobar el efecto interno de liberación solo si lo genera la topología aprobada; no publicar una restauración de cupón desde este caso.
+- **Reintento/UUID estable:** Reusar pedido, reservation_id, operations.release, correlation_id y firma original con coupon_operation_id=null.
 
 ## G5-H5-05 — CUPON_202_Y_COMPLETED
 
@@ -107,7 +107,7 @@ En todas las filas, `technical_status` registra el resultado de la etapa ejecuta
 - **Pedido/reserva:** M1 vuelve a consultar el mismo pedido/operación tras reiniciar; no crea pedido duplicado.
 - **HTTP:** Operación HTTP G6 usada por M1, luego GET status durable en Gateway; ruta según operation_type en plan.
 - **Identidad/scopes:** G5 identidad M1 + G7 JWT de servicio con scopes de operación/lectura aplicables.
-- **Respuesta esperada:** M1 recupera resultado terminal y conserva una sola intención/pedido.
+- **Respuesta esperada:** Tras el reinicio coordinado de M1, `follow` consulta la misma operación y observa su estado terminal; G5 constata que mantiene una sola intención/pedido. La homologación exige ejecución técnica y constancia bilateral, nunca una firma aislada.
 - **SQL de evidencia:** G5 evidencia de la única operación M1; G6 operación durable con el UUID referenciado.
 - **Service Bus:** Correlacionar el MessageId procesado y verificar que no hubo efecto duplicado.
 - **Reintento/UUID estable:** Reusar follow_operation_id, pedido y correlation_id persistidos por M1; reinicio no genera nuevos UUID.

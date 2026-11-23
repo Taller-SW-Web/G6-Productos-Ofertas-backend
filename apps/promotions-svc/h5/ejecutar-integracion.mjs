@@ -3,6 +3,9 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { constanciaComercial } from './evidencia-integracion.mjs';
+import { authorizeMutation, readMutationAuthorization } from './autorizacion-mutaciones.mjs';
+import { verificarDespliegue } from './verificar-despliegue.mjs';
+import { pathToFileURL } from 'node:url';
 
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 const sha = /^[a-f0-9]{40}$/i;
@@ -22,12 +25,54 @@ const ensure = (condition, code) => {
 const segment = encodeURIComponent;
 const orderQuery = (order) => '?' + new URLSearchParams({ order_id: order });
 
+export function cancellationSteps(plan) {
+  if (plan.cancel_mode === 'release-only') return ['release'];
+  if (plan.cancel_mode === 'restore-consumption' || plan.cancel_mode === 'reject-unbacked-restore')
+    return ['restore', 'release'];
+  throw new Error('CANCEL_MODE_REQUIRED');
+}
+
+export async function executeCancellation(plan, cancellation, submit, operationId, reservationPath) {
+  for (const step of cancellationSteps(plan)) {
+    if (step === 'restore') {
+      const restore = {
+        order_id: plan.order_id,
+        operation_id: operationId('restore'),
+        consumption_operation_id: operationId('coupon'),
+        cancellation_reason: 'ANULACION',
+        cancelled_at: cancellation.occurred_at,
+      };
+      const restored = await submit('cupones', '/cupones/restauraciones', restore);
+      if (plan.cancel_mode === 'reject-unbacked-restore')
+        ensure(restored.status === 'REJECTED' && restored.result?.result_code === 'COUPON_IDENTITY_MISMATCH', 'UNBACKED_RESTORE_WAS_NOT_REJECTED');
+      else ensure(restored.status === 'COMPLETED' && restored.result?.outcome === plan.expected_restore_outcome, 'RESTORE_RESULT_DIFFERED');
+      continue;
+    }
+    const released = await submit('inventario', reservationPath() + '/liberar', {
+      order_id: plan.order_id,
+      operation_id: operationId('release'),
+      reason: 'ANULACION',
+    });
+    ensure(released.status === 'COMPLETED', 'RELEASE_RESULT_DIFFERED');
+  }
+}
+
 async function main() {
-  const [action, planPath, statePath = `${planPath}.runtime.json`] =
+  const [action, planPath, statePath = `${planPath}.runtime.json`, authorizationPath, executeFlag] =
     process.argv.slice(2);
   ensure(actions.includes(action) && planPath, 'USE_ACTION_AND_PLAN_FILE');
   ensure(resolve(statePath) !== resolve(planPath), 'RUNTIME_STATE_PATH_MUST_DIFFER');
   const plan = JSON.parse(await readFile(planPath, 'utf8'));
+  if (['reserve', 'coupon', 'confirm', 'cancel'].includes(action)) {
+    const authorization = await readMutationAuthorization(authorizationPath);
+    await authorizeMutation({
+      stage: action,
+      plan,
+      authorization,
+      execute: executeFlag === 'true',
+    });
+    await verificarDespliegue(plan);
+  }
   const runtimeState = await readFile(statePath, 'utf8')
     .then((text) => JSON.parse(text))
     .catch((error) => {
@@ -59,10 +104,6 @@ async function main() {
   ensure(token && !/\s/.test(token), 'G7_VENTAS_TOKEN_REQUIRED');
   const mutates = ['reserve', 'coupon', 'confirm', 'cancel'].includes(action);
   if (mutates) {
-    ensure(
-      process.env.G5_H5_MUTATIONS === 'integration-only',
-      'INTEGRATION_MUTATIONS_NOT_APPROVED',
-    );
     ensure(
       sha.test(plan.g5_sha) &&
         typeof plan.order_id === 'string' &&
@@ -125,12 +166,39 @@ async function main() {
       typeof data?.code === 'string' && /^[A-Z0-9_]{1,80}$/.test(data.code)
         ? data.code
         : undefined;
+    const route = path.split('?')[0];
+    const check = method === 'GET' && route === '/inventario/disponibilidad'
+      ? 'availability'
+      : method === 'GET' && route === '/precios/skus/' + segment(scenario?.sku ?? '')
+        ? 'price'
+        : method === 'POST' && route === '/cupones/validar'
+          ? 'coupon'
+          : undefined;
+    const query = Object.fromEntries(new URLSearchParams(path.split('?')[1] ?? ''));
+    const requestEvidence = method === 'GET'
+      ? query
+      : body ? {
+        channel_id: body.channel_id,
+        coupon_code: body.coupon_code,
+        lines: body.lines,
+      } : {};
     report({
       event: 'http',
       method,
-      route: path.split('?')[0],
+      route,
       status: response.status,
       code,
+      check,
+      request: requestEvidence,
+      case_id: plan.case_id,
+      scenario: scenario ? {
+        sku: scenario.sku,
+        quantity: scenario.quantity,
+        channel_id: scenario.channel_id,
+        coupon_code: scenario.coupon_code,
+        currency: scenario.currency,
+        location_id: location,
+      } : undefined,
       operation_id: body?.operation_id,
     });
     return { status: response.status, data };
@@ -274,6 +342,12 @@ async function main() {
       available,
       price: pricing.precio_regular,
       discount: coupon.discount_amount,
+      sku: scenario.sku,
+      currency: scenario.currency,
+      eligible: coupon.valid,
+      price_sku: pricing.sku,
+      price_currency: pricing.currency,
+      discount_currency: coupon.currency,
     });
     return;
   }
@@ -496,41 +570,14 @@ async function main() {
     kind: cancellation.event,
     evidence_id: cancellation.event_id,
   });
-  if (plan.cancel_mode === 'restore-consumption' ||
-      plan.cancel_mode === 'reject-unbacked-restore') {
-    const restore = {
-      order_id: order,
-      operation_id: operationId('restore'),
-      consumption_operation_id: operationId('coupon'),
-      cancellation_reason: 'ANULACION',
-      cancelled_at: cancellation.occurred_at,
-    };
-    const restored = await submit('cupones', '/cupones/restauraciones', restore);
-    if (plan.cancel_mode === 'reject-unbacked-restore')
-      ensure(
-        restored.status === 'REJECTED' &&
-          restored.result?.result_code === 'COUPON_IDENTITY_MISMATCH',
-        'UNBACKED_RESTORE_WAS_NOT_REJECTED',
-      );
-    else
-      ensure(
-        restored.status === 'COMPLETED' &&
-          restored.result?.outcome === plan.expected_restore_outcome,
-        'RESTORE_RESULT_DIFFERED',
-      );
-  } else ensure(plan.cancel_mode === 'release-only', 'CANCEL_MODE_REQUIRED');
-  const released = await submit('inventario', reservation + '/liberar', {
-    order_id: order,
-    operation_id: operationId('release'),
-    reason: 'ANULACION',
-  });
-  ensure(released.status === 'COMPLETED', 'RELEASE_RESULT_DIFFERED');
+  await executeCancellation(plan, cancellation, submit, operationId, reservationPath);
 }
 
-main().catch((error) => {
-  const code = /^[A-Z0-9_]{1,100}$/.test(error?.message ?? '')
-    ? error.message
-    : 'INTEGRATION_RUN_FAILED';
-  console.error(JSON.stringify({ event: 'failed', code }));
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  main().catch((error) => {
+    const code = /^[A-Z0-9_]{1,100}$/.test(error?.message ?? '')
+      ? error.message
+      : 'INTEGRATION_RUN_FAILED';
+    console.error(JSON.stringify({ event: 'failed', code }));
+    process.exitCode = 1;
+  });

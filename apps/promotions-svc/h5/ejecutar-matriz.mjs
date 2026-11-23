@@ -4,125 +4,10 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { constanciaFirmada } from './evidencia-integracion.mjs';
 import { verificarDespliegue } from './verificar-despliegue.mjs';
+import { authorizeMutation, loadMutationAuthorization } from './autorizacion-mutaciones.mjs';
 
-const scenarios = [
-  ['G6', 'reserve', 'Pedido de prueba y saldo disponible', 'RESERVA_COMPLETED'],
-  [
-    'G5+G6',
-    'reserve',
-    'Pedido de prueba sin saldo suficiente',
-    'RESERVA_REJECTED_SIN_PAGO',
-  ],
-  [
-    'G5+G6',
-    'confirm',
-    'Pago confirmado por G5, cupón completado y reserva vigente',
-    'STOCK_CONFIRMED',
-  ],
-  [
-    'G5+G6',
-    'cancel',
-    'Pedido anulado por G5 y reserva sin confirmar',
-    'RESERVA_LIBERADA',
-  ],
-  [
-    'G5+G6',
-    'coupon',
-    'Reserva vigente, snapshot y cliente real habilitado por G7',
-    'CUPON_202_Y_COMPLETED',
-  ],
-  [
-    'G5+G6',
-    'cancel',
-    'Consumo previo, anulación firmada y política aplicable',
-    'RESTAURACION_TERMINAL',
-  ],
-  [
-    'G6',
-    'follow',
-    'Pérdida controlada de respuesta con UUID original',
-    'INTENCION_UNICA_RECUPERADA',
-  ],
-  [
-    'G6',
-    'coupon',
-    'Consumo existente y misma identidad con otro contenido',
-    'CONFLICTO_409',
-  ],
-  [
-    'G5',
-    null,
-    'M1 detenido con operación pendiente persistida',
-    'M1_RECUPERA_AL_REINICIAR',
-  ],
-  [
-    'G6',
-    'expired',
-    'Reserva aún ACTIVA después de expires_at',
-    'ACTIVA_VENCIDA',
-  ],
-  [
-    'G5+G6',
-    'expired',
-    'Reserva EXPIRADA entre barridos M1',
-    'EXPIRADA_Y_CONCILIADA',
-  ],
-  [
-    'G5+G6',
-    null,
-    'Pago y anulación concurrentes cerca del vencimiento',
-    'UN_ESTADO_COMERCIAL_COHERENTE',
-  ],
-  [
-    'G6',
-    'auth',
-    'Operación real y dos referencias, una ajena y otra inexistente',
-    '404_UNIFORME',
-  ],
-  [
-    'G6+G7',
-    'auth',
-    'JWT G7 real positivo, expirado, otra audiencia y scope insuficiente',
-    'AUTORIZACION_REAL_VERIFICADA',
-  ],
-  [
-    'G6',
-    'follow',
-    'Worker reiniciado con Outbox pendiente y reserva de prueba',
-    'OUTBOX_RECUPERADO_TRAS_REINICIO',
-  ],
-  [
-    'G6',
-    'follow',
-    'Mismo MessageId entregado dos veces o pérdida del settlement',
-    'UN_EFECTO_Y_SETTLEMENT',
-  ],
-  [
-    'G5+G6',
-    null,
-    'M2 con recepción parcial confirmada y saldo previo',
-    'REINTEGRO_UNICO',
-  ],
-  [
-    'G5+G6+G2',
-    null,
-    'Cambio aprobado, orden de reemplazo y entrega en sandbox',
-    'REEMPLAZO_CONSUMIDO_ANTES_DESPACHO',
-  ],
-  [
-    'G5+G6',
-    'follow',
-    'Corte aprobado, auditoría de pendientes y ruta de vuelta',
-    'PENDIENTES_CONCILIADOS',
-  ],
-  [
-    'G6',
-    null,
-    'Destinatarios obligatorios identificados para cada productor',
-    'EFECTOS_VERIFICADOS_POR_DESTINO',
-  ],
-];
-const idOf = (index) => 'G5-H5-' + String(index + 1).padStart(2, '0');
+const scenarios = JSON.parse(await readFile(resolve(dirname(fileURLToPath(import.meta.url)), 'escenarios.json'), 'utf8'));
+const idOf = (index) => scenarios[index].id;
 const sha = /^[0-9a-f]{40}$/i;
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const runner = fileURLToPath(
@@ -295,10 +180,10 @@ function stageIdentifier(id, stage, plan) {
   return plan.operations?.[stage];
 }
 
-const executeStage = (stage, plan, statePath) =>
+const executeStage = (stage, plan, statePath, authorizationPath) =>
   spawnSync(
     process.execPath,
-    [runner, stage, plan, ...(statePath ? [statePath] : [])],
+    [runner, stage, plan, ...(statePath ? [statePath] : []), ...(authorizationPath ? [authorizationPath, 'true'] : [])],
     {
       encoding: 'utf8',
       timeout: 420_000,
@@ -342,14 +227,13 @@ export async function ejecutarMatriz(
   selected = [],
   execute = executeStage,
   verifyDeployment = verificarDespliegue,
+  authorize = authorizeMutation,
+  loadAuthorization = loadMutationAuthorization,
 ) {
   const recordedAt = new Date().toISOString();
   const results = [];
-  for (const [
-    index,
-    [actor, stage, preconditions, expected],
-  ] of scenarios.entries()) {
-    const id = idOf(index);
+  for (const scenario of scenarios) {
+    const { id, actor, stage, preconditions, expected } = scenario;
     const fixture = manifest[id];
     const row = {
       id,
@@ -376,7 +260,7 @@ export async function ejecutarMatriz(
       plan?.environment !== 'integration' ||
       !sha.test(plan.g6_sha) ||
       (actor.includes('G5') && !sha.test(plan.g5_sha)) ||
-      (idOf(index) !== 'G5-H5-20' &&
+      (id !== 'G5-H5-20' &&
         (typeof plan.order_id !== 'string' || !plan.order_id.trim())) ||
       !g5DeploymentVerified(plan)
     ) {
@@ -406,6 +290,19 @@ export async function ejecutarMatriz(
       row.reason = 'FALTA_EJECUCION_TECNICA';
       continue;
     }
+    if (['reserve', 'coupon', 'confirm', 'cancel'].includes(stage)) {
+      try {
+        if (typeof fixture.mutation_authorization !== 'string')
+          throw new Error('MUTATION_AUTHORIZATION_FILE_REQUIRED');
+        const authorization = await loadAuthorization(fixture.mutation_authorization);
+        await authorize({ stage, plan, authorization, execute: fixture.execute === true });
+      } catch (error) {
+        row.reason = /^[A-Z0-9_-]{1,100}$/.test(error?.message ?? '')
+          ? error.message
+          : 'MUTATION_AUTHORIZATION_INVALID';
+        continue;
+      }
+    }
     if (stage === null && !fixture.attestation) continue;
     try {
       row.deployment = await verifyDeployment(plan);
@@ -418,7 +315,7 @@ export async function ejecutarMatriz(
     const observe = observations.get(id);
     const needsRuntime = supervisedRuntimeCases.has(id);
     if (stage !== null) {
-      const run = execute(stage, fixture.plan, fixture.state);
+      const run = execute(stage, fixture.plan, fixture.state, fixture.mutation_authorization);
       row.technical_status = 'FAIL';
       const detail = /"code":"([A-Z0-9_]+)"/.exec(
         String(run.stderr ?? ''),
@@ -594,6 +491,9 @@ async function main() {
         ? {
             ...fixture,
             plan: resolve(manifestDirectory, fixture.plan),
+            ...(typeof fixture.mutation_authorization === 'string'
+              ? { mutation_authorization: resolve(manifestDirectory, fixture.mutation_authorization) }
+              : {}),
             ...(fixture.state
               ? { state: resolve(manifestDirectory, fixture.state) }
               : {}),

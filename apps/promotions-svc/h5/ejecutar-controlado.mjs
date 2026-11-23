@@ -3,13 +3,12 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ejecutarMatriz } from './ejecutar-matriz.mjs';
+import { authorizeMutation, loadMutationAuthorization } from './autorizacion-mutaciones.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const runner = resolve(here, 'ejecutar-integracion.mjs');
 const scenarios = JSON.parse(await readFile(resolve(here, 'escenarios.json'), 'utf8'));
-const mutatingStages = new Set(['reserve', 'coupon', 'confirm', 'cancel']);
 const manualWindowCases = new Set(['G5-H5-12', 'G5-H5-17', 'G5-H5-18', 'G5-H5-19']);
-const requiresWindow = (id, scenario) => mutatingStages.has(scenario.stage) || manualWindowCases.has(id);
 const isHttpsEvidence = (value) => {
   try {
     const url = new URL(value);
@@ -17,6 +16,99 @@ const isHttpsEvidence = (value) => {
   } catch { return false; }
 };
 const fail = (code) => { throw new Error(code); };
+const sha = /^[a-f0-9]{40}$/i;
+const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
+const preflightChecks = {
+  availability: { method: 'GET', route: '/inventario/disponibilidad' },
+  price: { method: 'GET' },
+  coupon: { method: 'POST', route: '/cupones/validar' },
+};
+const complementaryPreflightServices = new Set([
+  'gateway-readiness', 'catalog-readiness', 'pricing-readiness', 'inventory-readiness',
+]);
+
+export function validatePreflightEvidence(events, plan) {
+  if (!Array.isArray(events) || events.length < 4 || !plan?.scenario ||
+      plan.environment !== 'integration' || !sha.test(plan.g5_sha ?? '') ||
+      !sha.test(plan.g6_sha ?? '') || !uuid.test(plan.correlation_id ?? '') ||
+      typeof plan.order_id !== 'string' || !plan.order_id.trim() ||
+      typeof plan.case_id !== 'string') return false;
+  const scenario = plan.scenario;
+  const expectedScenario = {
+    sku: scenario.sku,
+    quantity: scenario.quantity,
+    channel_id: scenario.channel_id,
+    coupon_code: scenario.coupon_code,
+    currency: scenario.currency,
+    location_id: scenario.location_id,
+  };
+  if (typeof scenario.sku !== 'string' || !scenario.sku.trim() ||
+      !Number.isSafeInteger(scenario.quantity) || scenario.quantity < 1 ||
+      typeof scenario.channel_id !== 'string' || !scenario.channel_id.trim() ||
+      typeof scenario.coupon_code !== 'string' || !scenario.coupon_code.trim() ||
+      typeof scenario.currency !== 'string' || !scenario.currency.trim() ||
+      !uuid.test(scenario.location_id ?? '')) return false;
+
+  const checks = new Map();
+  const complements = new Set();
+  let terminal;
+  for (const event of events) {
+    if (!event || typeof event !== 'object' || Array.isArray(event) ||
+        event.environment !== plan.environment || event.g5_sha !== plan.g5_sha ||
+        event.g6_sha !== plan.g6_sha || event.order_id !== plan.order_id ||
+        event.correlation_id !== plan.correlation_id || event.case_id !== plan.case_id)
+      return false;
+    if (event.event === 'http') {
+      const rule = preflightChecks[event.check];
+      if (!rule || checks.has(event.check) || event.status !== 200 ||
+          event.method !== rule.method ||
+          (rule.route && event.route !== rule.route) ||
+          (event.check === 'price' && event.route !== '/precios/skus/' + encodeURIComponent(scenario.sku)) ||
+          event.scenario?.sku !== expectedScenario.sku ||
+          event.scenario?.quantity !== expectedScenario.quantity ||
+          event.scenario?.channel_id !== expectedScenario.channel_id ||
+          event.scenario?.coupon_code !== expectedScenario.coupon_code ||
+          event.scenario?.currency !== expectedScenario.currency ||
+          event.scenario?.location_id !== expectedScenario.location_id ||
+          !event.request || typeof event.request !== 'object')
+        return false;
+      if (event.check === 'availability' &&
+          (event.request.skus !== scenario.sku || event.request.location_id !== scenario.location_id)) return false;
+      if (event.check === 'price' && event.request.canal !== scenario.channel_id) return false;
+      if (event.check === 'coupon' &&
+          (event.request.channel_id !== scenario.channel_id || event.request.coupon_code !== scenario.coupon_code ||
+           !Array.isArray(event.request.lines) || event.request.lines.length !== 1 ||
+           event.request.lines[0].sku !== scenario.sku || event.request.lines[0].quantity !== scenario.quantity)) return false;
+      checks.set(event.check, event);
+      continue;
+    }
+    if (event.event === 'read_only_preflight') {
+      if (terminal) return false;
+      terminal = event;
+      continue;
+    }
+    if (event.event === 'preflight_dependency') {
+      if (!complementaryPreflightServices.has(event.service) ||
+          complements.has(event.service) || event.status !== 'PASS') return false;
+      complements.add(event.service);
+      continue;
+    }
+    return false;
+  }
+  if (checks.size !== 3 || !['availability', 'price', 'coupon'].every((key) => checks.has(key)) || !terminal)
+    return false;
+  const available = Number(terminal.available);
+  const price = Number(terminal.price);
+  const discount = Number(terminal.discount);
+  const total = price * scenario.quantity;
+  return Number.isFinite(available) && available >= scenario.quantity &&
+    Number.isFinite(price) && price > 0 &&
+    (scenario.expected_regular_price === undefined || price === Number(scenario.expected_regular_price)) &&
+    Number.isFinite(discount) && discount > 0 && discount <= total &&
+    terminal.sku === scenario.sku && terminal.currency === scenario.currency &&
+    terminal.price_sku === scenario.sku && terminal.price_currency === scenario.currency &&
+    terminal.discount_currency === scenario.currency && terminal.eligible === true;
+}
 
 function targetOrigin(plan) {
   const gateway = new URL(plan.gateway);
@@ -33,6 +125,9 @@ async function readManifest(manifestPath) {
   const resolved = Object.fromEntries(Object.entries(manifest).map(([id, fixture]) => [id, fixture?.plan ? {
     ...fixture,
     plan: resolve(root, fixture.plan),
+    ...(typeof fixture.mutation_authorization === 'string'
+      ? { mutation_authorization: resolve(root, fixture.mutation_authorization) }
+      : {}),
     ...(fixture.state ? { state: resolve(root, fixture.state) } : {}),
   } : fixture]));
   return { absolute, manifest, resolved };
@@ -46,22 +141,25 @@ function selectedFixtures(manifest, requested) {
   return ids;
 }
 
-function runStage(stage, plan, state) {
-  return spawnSync(process.execPath, [runner, stage, plan, state], {
+function runStage(stage, plan, state, authorizationPath) {
+  return spawnSync(process.execPath, [runner, stage, plan, state, ...(authorizationPath ? [authorizationPath, 'true'] : [])], {
     encoding: 'utf8',
     timeout: 420_000,
     env: process.env,
   });
 }
 
-function checkMutationAuthorization(id, fixture, plan, scenario) {
-  if (!requiresWindow(id, scenario)) return;
-  if (fixture.execute !== true || process.env.G5_H5_MUTATIONS !== 'integration-only')
+async function checkMutationAuthorization(id, fixture, plan, scenario) {
+  if (['reserve', 'coupon', 'confirm', 'cancel'].includes(scenario.stage)) {
+    if (typeof fixture.mutation_authorization !== 'string')
+      fail('MUTATION_AUTHORIZATION_FILE_REQUIRED_' + id);
+    const authorization = await loadMutationAuthorization(fixture.mutation_authorization);
+    await authorizeMutation({ stage: scenario.stage, plan, authorization, execute: fixture.execute === true });
+    return;
+  }
+  if (manualWindowCases.has(id) && (fixture.execute !== true ||
+      !isHttpsEvidence(fixture.window_approval_ref) || !isHttpsEvidence(fixture.fixture_authorization_ref)))
     fail('MUTATION_NOT_AUTHORIZED_' + id);
-  if (!isHttpsEvidence(fixture.window_approval_ref) || !isHttpsEvidence(fixture.fixture_authorization_ref))
-    fail('WINDOW_AND_FIXTURE_AUTHORIZATION_REQUIRED_' + id);
-  if (scenario.requires_g5_signature && !plan.g5_evidence)
-    fail('SIGNED_G5_EVIDENCE_REQUIRED_' + id);
 }
 
 export async function ejecutarPreflight(manifest, ids, outputPath, execute = runStage) {
@@ -80,16 +178,13 @@ export async function ejecutarPreflight(manifest, ids, outputPath, execute = run
     if (!scenarioHasPreflight(plan)) fail('AUTHORIZED_PREFLIGHT_FIXTURE_REQUIRED_' + id);
     const run = execute('preflight', fixture.plan, fixture.state ?? `${fixture.plan}.runtime.json`);
     const row = byId.get(id);
-    const lines = String(run.stdout ?? '').trim().split(/\r?\n/).filter(Boolean);
+    const stdout = String(run.stdout ?? '').trim();
+    const lines = stdout ? stdout.split(/\r?\n/) : [];
     try { row.evidence = lines.map((line) => JSON.parse(line)); }
     catch { row.technical_status = 'FAIL'; row.reason = 'PREFLIGHT_EVIDENCE_INVALID'; continue; }
-    const allowed = row.evidence.every((event) =>
-      event.event !== 'http' || event.method === 'GET' ||
-      (event.method === 'POST' && event.route === '/cupones/validar'),
-    );
-    if (run.status !== 0 || !allowed) {
+    if (run.status !== 0 || !validatePreflightEvidence(row.evidence, plan)) {
       row.technical_status = 'FAIL';
-      row.reason = 'PREFLIGHT_FAILED_OR_MUTATING_ROUTE';
+      row.reason = 'PREFLIGHT_EVIDENCE_INCOMPLETE_INVALID_OR_MUTATING_ROUTE';
       continue;
     }
     row.technical_status = 'PASS';
@@ -119,7 +214,7 @@ export async function ejecutarBateria(manifest, ids, outputPath, verifyDeploymen
     const fixture = manifest[id];
     const plan = JSON.parse(await readFile(fixture.plan, 'utf8'));
     targetOrigin(plan);
-    checkMutationAuthorization(id, fixture, plan, scenario);
+    await checkMutationAuthorization(id, fixture, plan, scenario);
   }
   const report = await ejecutarMatriz(manifest, ids, runStage, verifyDeployment);
   await writeFile(outputPath, JSON.stringify(report, null, 2) + '\n', { flag: 'wx' });

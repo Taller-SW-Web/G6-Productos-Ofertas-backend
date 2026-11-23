@@ -37,7 +37,7 @@ export async function constanciaComercial(plan, evento) {
     proof.order_id !== plan.order_id ||
     proof.reservation_id !== plan.reservation_id ||
     proof.coupon_operation_id !==
-      (plan.cancel_mode === 'reject-unbacked-restore'
+      (plan.cancel_mode === 'reject-unbacked-restore' || plan.cancel_mode === 'release-only'
         ? null
         : plan.operations?.coupon) ||
     typeof proof.event_id !== 'string' ||

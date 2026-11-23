@@ -3,7 +3,6 @@
   "title": "Fixture autorizado G5-G6 H5 para preparar planes",
   "type": "object",
   "additionalProperties": false,
-  "required": ["environment", "gateway", "g6_sha", "g6_cd_runs", "g5_sha", "g5_deployment", "cases"],
   "properties": {
     "environment": { "const": "integration" },
     "gateway": { "type": "string", "format": "uri", "pattern": "^https://" },
@@ -12,7 +11,6 @@
     "g6_cd_runs": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["api-gateway", "catalog-svc", "inventory-svc", "promotions-svc"],
       "properties": {
         "api-gateway": { "type": ["string", "integer"], "pattern": "^[1-9][0-9]{0,15}$" },
         "catalog-svc": { "type": ["string", "integer"], "pattern": "^[1-9][0-9]{0,15}$" },
@@ -23,7 +21,6 @@
     "g5_deployment": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["verification_status", "commit_sha", "image_digest", "revision", "evidence_url", "verified_at", "verified_by"],
       "properties": {
         "verification_status": { "const": "VERIFIED" },
         "commit_sha": { "$ref": "#/$defs/sha" },
@@ -43,10 +40,10 @@
         "properties": {
           "order_id": { "type": "string", "minLength": 1 },
           "foreign_order_id": { "type": "string", "minLength": 1 },
+          "existing_coupon_operation_id": { "type": "string", "format": "uuid" },
           "scenario": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["sku", "quantity", "channel_id", "coupon_code", "currency", "location_id"],
             "properties": {
               "sku": { "type": "string", "minLength": 1 },
               "quantity": { "type": "integer", "minimum": 1 },
@@ -66,6 +63,7 @@
           "expected_restore_outcome": { "enum": ["RESTORED", "POLICY_KEEPS_CONSUMPTION", "NO_CONSUMPTION"] },
           "correlation_id": { "type": "string", "format": "uuid" },
           "expected_reserve_status": { "enum": ["COMPLETED", "REJECTED"] },
+          "message_ids": { "type": "array", "items": { "type": "string", "format": "uuid" }, "minItems": 1 },
           "fixture_origin": { "type": "string", "minLength": 1 },
           "operations": {
             "type": "object",

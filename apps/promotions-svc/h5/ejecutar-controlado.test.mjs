@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { ejecutarPreflight } from './ejecutar-controlado.mjs';
+import { ejecutarBateria, ejecutarPreflight, validatePreflightEvidence } from './ejecutar-controlado.mjs';
 
 const vars = ['G5_H5_AUTHORIZED_GATEWAY_ORIGIN', 'G5_H5_VENTAS_JWT'];
 function assignEnv(name, value) {
@@ -13,37 +13,81 @@ function assignEnv(name, value) {
   return () => previous === undefined ? delete process.env[name] : process.env[name] = previous;
 }
 
-test('preflight queda BLOCKED para homologación y acepta solo GET y validación de cupón', async (t) => {
+test('preflight exige las tres comprobaciones reales, correlacionadas y no mutantes', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'g6-h5-preflight-'));
   const gateway = 'https://private-gateway.example.invalid';
   const restore = vars.map((name) => assignEnv(name, name.endsWith('ORIGIN') ? gateway : 'test.jwt.value'));
   t.after(async () => { restore.forEach((fn) => fn()); await rm(dir, { recursive: true, force: true }); });
-  const plan = join(dir, 'plan.json');
-  await writeFile(plan, JSON.stringify({
-    environment: 'integration',
-    gateway,
-    scenario: { sku: 'SYNTHETIC-SKU', quantity: 1, channel_id: 'SYNTHETIC', coupon_code: 'SYNTHETIC', currency: 'PEN', location_id: randomUUID() },
+  const plan = {
+    environment: 'integration', gateway, case_id: 'G5-H5-01', order_id: 'PEDIDO-SINTETICO-01',
+    g5_sha: '1'.repeat(40), g6_sha: '2'.repeat(40), correlation_id: randomUUID(),
     customer_ref: randomUUID(),
-  }));
-  const manifest = { 'G5-H5-01': { plan } };
+    scenario: { sku: 'SKU-VALIDADO', quantity: 2, channel_id: 'WEB', coupon_code: 'CUPON-VALIDADO', currency: 'PEN', location_id: randomUUID() },
+  };
+  const metadata = { environment: plan.environment, case_id: plan.case_id, order_id: plan.order_id,
+    g5_sha: plan.g5_sha, g6_sha: plan.g6_sha, correlation_id: plan.correlation_id,
+    scenario: { ...plan.scenario } };
+  const validEvents = [
+    { ...metadata, event: 'http', check: 'availability', method: 'GET', route: '/inventario/disponibilidad', request: { skus: plan.scenario.sku, location_id: plan.scenario.location_id }, status: 200 },
+    { ...metadata, event: 'http', check: 'price', method: 'GET', route: '/precios/skus/SKU-VALIDADO', request: { canal: plan.scenario.channel_id }, status: 200 },
+    { ...metadata, event: 'http', check: 'coupon', method: 'POST', route: '/cupones/validar', request: { channel_id: plan.scenario.channel_id, coupon_code: plan.scenario.coupon_code, lines: [{ sku: plan.scenario.sku, quantity: plan.scenario.quantity }] }, status: 200 },
+    { ...metadata, event: 'read_only_preflight', available: 10, price: 20, discount: 5, sku: plan.scenario.sku, currency: 'PEN', eligible: true, price_sku: plan.scenario.sku, price_currency: 'PEN', discount_currency: 'PEN' },
+  ];
+  assert.equal(validatePreflightEvidence(validEvents, plan), true);
+  assert.equal(validatePreflightEvidence([...validEvents, { ...metadata, event: 'preflight_dependency', service: 'catalog-readiness', status: 'PASS' }], plan), true);
+  assert.equal(validatePreflightEvidence([...validEvents, { ...metadata, event: 'preflight_dependency', service: 'unknown', status: 'PASS' }], plan), false);
+
+  const invalid = [
+    [],
+    validEvents.slice(0, 3),
+    validEvents.filter((event) => event.check !== 'price'),
+    validEvents.filter((event) => event.check !== 'availability'),
+    validEvents.filter((event) => event.check !== 'coupon'),
+    [...validEvents, validEvents[0]],
+    [...validEvents, { ...validEvents[0], status: 503 }],
+    validEvents.map((event, index) => index === 0 ? { ...event, method: 'POST', route: '/cupones/consumos' } : event),
+    validEvents.map((event, index) => index === 1 ? { ...event, route: '/precios/skus/OTRO' } : event),
+    validEvents.map((event, index) => index === 0 ? { ...event, request: { ...event.request, skus: 'OTHER-SKU' } } : event),
+    validEvents.map((event, index) => index === 2 ? { ...event, order_id: 'PEDIDO-AJENO' } : event),
+    validEvents.map((event, index) => index === 0 ? { ...event, correlation_id: randomUUID() } : event),
+    validEvents.map((event, index) => index === 0 ? { ...event, g6_sha: 'f'.repeat(40) } : event),
+    validEvents.map((event, index) => index === 2 ? { ...event, g5_sha: 'f'.repeat(40) } : event),
+    validEvents.map((event, index) => index === 3 ? { ...event, eligible: false } : event),
+    validEvents.map((event, index) => index === 3 ? { ...event, available: 0 } : event),
+    validEvents.map((event, index) => index === 3 ? { ...event, price: 0 } : event),
+    validEvents.map((event, index) => index === 3 ? { ...event, discount: 1000 } : event),
+    [...validEvents, { ...metadata, event: 'http', check: 'extra', method: 'DELETE', route: '/x', status: 200 }],
+    [...validEvents, { ...metadata, event: 'unrecognized' }],
+  ];
+  for (const events of invalid) assert.equal(validatePreflightEvidence(events, plan), false);
+
+  const planPath = join(dir, 'plan.json');
+  await writeFile(planPath, JSON.stringify(plan));
+  const manifest = { 'G5-H5-01': { plan: planPath } };
   const safeOutput = join(dir, 'safe.json');
   const safe = await ejecutarPreflight(manifest, ['G5-H5-01'], safeOutput, () => ({
-    status: 0,
-    stdout: [
-      { event: 'http', method: 'GET', route: '/inventario/disponibilidad', status: 200 },
-      { event: 'http', method: 'POST', route: '/cupones/validar', status: 200 },
-    ].map((event) => JSON.stringify(event)).join('\n'),
+    status: 0, stdout: validEvents.map((event) => JSON.stringify(event)).join('\n'),
   }));
   assert.equal(safe.results[0].technical_status, 'PASS');
   assert.equal(safe.results[0].status, 'BLOCKED');
   assert.equal(JSON.parse(await readFile(safeOutput, 'utf8')).results[0].status, 'BLOCKED');
 
-  const unsafeOutput = join(dir, 'unsafe.json');
-  const unsafe = await ejecutarPreflight(manifest, ['G5-H5-01'], unsafeOutput, () => ({
-    status: 0,
-    stdout: JSON.stringify({ event: 'http', method: 'POST', route: '/cupones/consumos', status: 202 }),
-  }));
-  assert.equal(unsafe.results[0].technical_status, 'FAIL');
-  assert.equal(unsafe.results[0].status, 'BLOCKED');
-  assert.equal(unsafe.results[0].reason, 'PREFLIGHT_FAILED_OR_MUTATING_ROUTE');
+  for (const [index, events] of invalid.entries()) {
+    const output = join(dir, `invalid-${index}.json`);
+    const report = await ejecutarPreflight(manifest, ['G5-H5-01'], output, () => ({
+      status: 0, stdout: events.map((event) => JSON.stringify(event)).join('\n'),
+    }));
+    assert.equal(report.results[0].technical_status, 'FAIL', `invalid fixture ${index}`);
+    assert.equal(report.results[0].status, 'BLOCKED', `invalid fixture ${index}`);
+  }
+  const malformed = await ejecutarPreflight(manifest, ['G5-H5-01'], join(dir, 'malformed.json'), () => ({ status: 0, stdout: '{not-json' }));
+  assert.equal(malformed.results[0].technical_status, 'FAIL');
+
+  const mutationPlan = join(dir, 'mutation-plan.json');
+  await writeFile(mutationPlan, JSON.stringify({ ...plan, case_id: 'G5-H5-01' }));
+  await assert.rejects(ejecutarBateria({
+    'G5-H5-01': { plan: mutationPlan, execute: true },
+  }, ['G5-H5-01'], join(dir, 'matrix.json'), async () => {
+    throw new Error('deployment must not be queried before mutation authorization');
+  }), /MUTATION_AUTHORIZATION_FILE_REQUIRED_G5-H5-01/);
 });
