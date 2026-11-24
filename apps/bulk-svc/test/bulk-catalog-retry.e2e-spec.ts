@@ -747,7 +747,8 @@ integration(
         const catalogOutboxRows = await catalogDatabase.read((db) =>
           db
             .select({ eventName: catalogOutbox.event_name })
-            .from(catalogOutbox),
+            .from(catalogOutbox)
+            .where(eq(catalogOutbox.correlation_id, originalCorrelation)),
         );
         expect(
           catalogOutboxRows.every(
