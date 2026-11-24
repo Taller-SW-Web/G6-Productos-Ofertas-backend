@@ -1,4 +1,9 @@
-import { randomUUID, createSign, generateKeyPairSync } from 'node:crypto';
+import {
+  createHash,
+  randomUUID,
+  createSign,
+  generateKeyPairSync,
+} from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -19,6 +24,7 @@ import {
   bulkSchema,
   batchJobs,
   batchRows,
+  contentDocuments,
   domainAttempts,
   outbox as bulkOutbox,
 } from '../src/persistence/bulk.schema.js';
@@ -51,8 +57,13 @@ import { BULK_TEMPLATE_HEADERS } from '../src/domain/bulk-template-v2.js';
 const bulkDatabaseUrl = process.env.BULK_RETRY_INTEGRATION_BULK_DATABASE_URL;
 const catalogDatabaseUrl =
   process.env.BULK_RETRY_INTEGRATION_CATALOG_DATABASE_URL;
+const storageUrl = process.env.BULK_RETRY_INTEGRATION_STORAGE_URL;
+const storageServiceKey =
+  process.env.BULK_RETRY_INTEGRATION_STORAGE_SERVICE_ROLE_KEY;
 const integration =
-  bulkDatabaseUrl && catalogDatabaseUrl ? describe : describe.skip;
+  bulkDatabaseUrl && catalogDatabaseUrl && storageUrl && storageServiceKey
+    ? describe
+    : describe.skip;
 const ownerSub = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const jwtKeys = generateKeyPairSync('rsa', { modulusLength: 2048 });
 let pool: Pool;
@@ -117,6 +128,10 @@ integration(
         throw new Error(
           'BULK_RETRY_INTEGRATION_BULK_DATABASE_URL and BULK_RETRY_INTEGRATION_CATALOG_DATABASE_URL required',
         );
+      if (!storageUrl || !storageServiceKey)
+        throw new Error(
+          'BULK_RETRY_INTEGRATION_STORAGE_URL and BULK_RETRY_INTEGRATION_STORAGE_SERVICE_ROLE_KEY required',
+        );
       const bulkUrl = new URL(bulkDatabaseUrl);
       const catalogUrl = new URL(catalogDatabaseUrl);
       for (const url of [bulkUrl, catalogUrl]) {
@@ -141,6 +156,8 @@ integration(
       setFlag('G6_SECURITY_MODE', 'G7_AUTHENTICATED');
       setFlag('G7_JWT_ISSUER', 'bulk-retry-integration');
       setFlag('BULK_STORAGE_BUCKET', 'bulk-retry-integration');
+      setFlag('SUPABASE_URL', storageUrl);
+      setFlag('SUPABASE_SERVICE_ROLE_KEY', storageServiceKey);
       setFlag('BULK_CATALOG_V3_ENABLED', 'true');
       setFlag('BULK_CATALOG_V3_AUTHORIZATION_VERIFIED', 'true');
       setFlag('BULK_RETRY_CATALOG_V1_ENABLED', 'true');
@@ -229,26 +246,11 @@ integration(
           correlationId: randomUUID(),
         },
       );
-      const storageObjects = new Map<string, Buffer>();
-      const storageFixture = {
-        put: vi.fn(async (bytes: Buffer, _mime: string, key: string) => {
-          storageObjects.set(key, Buffer.from(bytes));
-          return `supabase://bulk-retry-integration/${key}`;
-        }),
-        get: vi.fn(async (reference: string) => {
-          const key = reference.replace(
-            'supabase://bulk-retry-integration/',
-            '',
-          );
-          const bytes = storageObjects.get(key);
-          if (!bytes) throw new Error('Claim-check object was not stored');
-          return Buffer.from(bytes);
-        }),
-      };
-      const imports = new BulkImportService(
-        bulkRepository,
-        storageFixture as unknown as BulkStorageService,
-      );
+      const storage = new BulkStorageService();
+      const storageGet = vi.spyOn(storage, 'get');
+      const storagePut = vi.spyOn(storage, 'put');
+      await expect(storage.ready()).resolves.toBe(true);
+      const imports = new BulkImportService(bulkRepository, storage);
       const moduleRef = await Test.createTestingModule({
         controllers: [BulkSvcController],
         providers: [
@@ -261,7 +263,7 @@ integration(
           },
           { provide: BulkImportService, useValue: imports },
           { provide: BulkPersistenceRepository, useValue: bulkRepository },
-          { provide: BulkStorageService, useValue: storageFixture },
+          { provide: BulkStorageService, useValue: storage },
           { provide: BulkExportService, useValue: {} },
           BulkContentService,
         ],
@@ -362,12 +364,20 @@ integration(
         expect(originalOutbox?.schemaVersion).toBe(3);
         const original = originalOutbox?.payload as unknown as CatalogEnvelope;
         const contentRef = original.data.content_ref as { content_id: string };
-        const contentKey = [...storageObjects.keys()].find((key) =>
-          key.includes('/catalog-'),
+        const [storedContentDocument] = await bulkDatabase
+          .select()
+          .from(contentDocuments)
+          .where(eq(contentDocuments.contentId, contentRef.content_id));
+        if (!storedContentDocument)
+          throw new Error('V3 private content document was not persisted');
+        const contentBytes = await storage.get(
+          storedContentDocument.contentRef,
         );
-        if (!contentKey)
-          throw new Error('V3 private content document was not stored');
-        const contentBytes = storageObjects.get(contentKey)!;
+        expect(contentBytes).toHaveLength(storedContentDocument.byteLength);
+        expect(createHash('sha256').update(contentBytes).digest('hex')).toBe(
+          storedContentDocument.sha256,
+        );
+        expect(storagePut).toHaveBeenCalled();
         const decodedDocument = JSON.parse(
           contentBytes.toString('utf8'),
         ) as unknown;
@@ -413,7 +423,7 @@ integration(
         );
         await expect(initialCatalog.consume(original)).resolves.toBe('APPLIED');
         expect(contentIdentity.authorization).toHaveBeenCalledOnce();
-        expect(storageFixture.get).toHaveBeenCalledOnce();
+        expect(storageGet).toHaveBeenCalledTimes(2);
         const [initialResultRow] = await catalogDatabase.read((db) =>
           db
             .select()
@@ -545,7 +555,7 @@ integration(
           'DUPLICATE',
         ]);
         expect(contentIdentity.authorization).toHaveBeenCalledTimes(2);
-        expect(storageFixture.get).toHaveBeenCalledTimes(2);
+        expect(storageGet).toHaveBeenCalledTimes(3);
         const [retryResultRow] = await catalogDatabase.read((db) =>
           db
             .select()

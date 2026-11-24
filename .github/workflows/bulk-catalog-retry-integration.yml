@@ -111,6 +111,36 @@ jobs:
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c 'SHOW server_version_num'
       - name: Preparar directorio de evidencia MK-001
         run: mkdir -p .ci/evidence
+      - name: Iniciar Supabase Storage local aislado (CLI 3.4.0)
+        run: |
+          set -euo pipefail
+          supabase_dir="$RUNNER_TEMP/mk001-supabase-storage"
+          mkdir -p "$supabase_dir"
+          (
+            cd "$supabase_dir"
+            npx --yes supabase@3.4.0 init > "$RUNNER_TEMP/mk001-supabase-init.log" 2>&1
+            npx --yes supabase@3.4.0 start \
+              --exclude studio,edge-runtime,logflare,vector,mailpit,imgproxy,supavisor \
+              > "$RUNNER_TEMP/mk001-supabase-start.log" 2>&1
+            npx --yes supabase@3.4.0 status -o env > "$RUNNER_TEMP/mk001-supabase-status.env"
+          )
+          set -a
+          source "$RUNNER_TEMP/mk001-supabase-status.env"
+          set +a
+          test -n "${SERVICE_ROLE_KEY:-}"
+          storage_url="http://127.0.0.1:54321"
+          curl --fail --silent --show-error \
+            -X POST "$storage_url/storage/v1/bucket" \
+            -H "apikey: $SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+            -H 'Content-Type: application/json' \
+            --data '{"id":"bulk-retry-integration","name":"bulk-retry-integration","public":false}' \
+            > /dev/null
+          {
+            echo "BULK_RETRY_INTEGRATION_STORAGE_URL=$storage_url"
+            echo "BULK_RETRY_INTEGRATION_STORAGE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+          } >> "$GITHUB_ENV"
+          echo 'Supabase Storage local: iniciado con CLI 3.4.0; bucket privado y efímero.' >> "$GITHUB_STEP_SUMMARY"
       - name: Ejecutar E2E persistente Bulk-Catalog y seguridad Gateway
         env:
           NODE_ENV: test
@@ -143,7 +173,8 @@ jobs:
         run: |
           {
             printf 'HEAD probado: `%s`\n' "$(git rev-parse HEAD)"
-            echo 'E2E integral: Bulk HTTP + Catalog real contra PostgreSQL 17 y Gateway autenticado/JWKS loopback contra PostgreSQL 17.'
+            echo 'E2E integral: Bulk HTTP + Catalog real con PostgreSQL 17 y Supabase Storage local; Gateway autenticado/JWKS loopback con PostgreSQL 17.'
+            echo 'Supabase CLI fijado: 3.4.0; bucket exclusivo privado; no se usa Supabase hospedado.'
             echo 'Escenarios exigidos: 8/8 ejecutados, cero omitidos (se valida el reporte JSON).'
             echo 'PostgreSQL: postgres:17-alpine descartable; roles catalog_app y bulk_app aislados.'
             echo 'Código ejecutado desde el HEAD del PR; no se combinan otros PRs ni se aplican cambios temporales de pruebas.'
@@ -158,3 +189,15 @@ jobs:
           path: .ci/evidence/bulk-h5-e2e.json
           if-no-files-found: error
           retention-days: 30
+      - name: Detener y eliminar volúmenes del Supabase local
+        if: always()
+        run: |
+          set -euo pipefail
+          supabase_dir="$RUNNER_TEMP/mk001-supabase-storage"
+          if [[ -f "$supabase_dir/supabase/config.jsonc" ]]; then
+            npx --yes supabase@3.4.0 stop --no-backup --workdir "$supabase_dir" \
+              > "$RUNNER_TEMP/mk001-supabase-stop.log" 2>&1
+            echo 'Supabase local y volúmenes temporales eliminados.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'No se creó instancia Supabase local.' >> "$GITHUB_STEP_SUMMARY"
+          fi
