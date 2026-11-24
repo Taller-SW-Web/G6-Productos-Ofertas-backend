@@ -459,7 +459,7 @@ integration(
         );
         await expect(initialCatalog.consume(original)).resolves.toBe('APPLIED');
         expect(contentIdentity.authorization).toHaveBeenCalledOnce();
-        expect(storageGet).toHaveBeenCalledTimes(2);
+        expect(storageGet).toHaveBeenCalledTimes(3);
         const [initialResultRow] = await catalogDatabase.read((db) =>
           db
             .select()
