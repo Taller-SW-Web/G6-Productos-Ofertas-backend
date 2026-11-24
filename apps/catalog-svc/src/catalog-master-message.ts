@@ -15,7 +15,6 @@ import {
   persistedAssociation,
 } from './catalog-master-barriers.js';
 import type { CatalogTelemetry } from './catalog-telemetry.js';
-import { enqueueCatalogDeliveries } from './catalog-service-bus-relay.js';
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
@@ -176,7 +175,6 @@ export async function consumeMasterMessage(
             });
             if (stored?.transport !== 'AZURE_SERVICE_BUS')
               throw new Error('CATALOG_H5_REPLY_TRANSPORT_NOT_PERSISTED');
-            await enqueueCatalogDeliveries(tx, response);
           } else {
             await publication;
           }

@@ -83,6 +83,8 @@ try {
             '/' +
             database,
           G6_E2E_DOCS_PATH: docs,
+          MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
+          CATALOG_H5_DESTINATIONS: 'g6.taxonomy.from.catalog',
         },
       },
     );
