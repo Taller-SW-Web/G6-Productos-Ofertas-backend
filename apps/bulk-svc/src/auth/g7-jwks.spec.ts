@@ -75,6 +75,7 @@ describe('G7 and independent simulated JWKS on real HTTP transport', () => {
     });
     const second = encode({
       iss: g7Issuer,
+      aud: 'api-productos',
       tipo: 'acceso',
       sub: '10000000-0000-4000-8000-000000000001',
       iat: now,
@@ -108,7 +109,7 @@ describe('G7 and independent simulated JWKS on real HTTP transport', () => {
     );
   }
 
-  it('accepts RS256 human G7 tokens without inventing aud and without a static key', async () => {
+  it('accepts RS256 human G7 tokens with api-productos audience and without a static key', async () => {
     await expect(authorize('Bearer ' + token())).resolves.toBe(true);
   });
   it.each(['null', '[]', '"text"'])(

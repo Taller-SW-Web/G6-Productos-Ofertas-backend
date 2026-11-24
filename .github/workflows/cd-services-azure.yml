@@ -1,7 +1,16 @@
 name: CD Azure Container Apps H5
+run-name: H5 CD ${{ inputs.destination }} ${{ inputs.pilot_self_review && 'azure-h5-pilot-234' || (inputs.destination == 'chile-shared' && 'azure-h5-chile' || 'azure-h5') }} ${{ inputs.service }} ${{ inputs.sha }} pilot=${{ inputs.pilot_self_review }}
 'on':
   workflow_dispatch:
     inputs:
+      destination:
+        description: Destino explícito; Chile requiere despliegue individual
+        required: true
+        type: choice
+        options:
+          - brazil-isolated
+          - chile-shared
+        default: brazil-isolated
       service:
         description: Servicio a publicar y desplegar (o all para los nueve)
         required: true
@@ -29,7 +38,6 @@ name: CD Azure Container Apps H5
 
 permissions: {}
 env:
-  H5_DEPLOY_ENVIRONMENT: ${{ inputs.pilot_self_review && 'azure-h5-pilot-234' || 'azure-h5' }}
   H5_PILOT_SERVICE: ${{ inputs.service }}
 concurrency:
   group: g6-azure-h5-${{ github.repository }}
@@ -47,6 +55,10 @@ jobs:
       sha: ${{ steps.source.outputs.sha }}
       services: ${{ steps.source.outputs.services }}
       mode: ${{ steps.mode.outputs.value }}
+      destination: ${{ steps.target.outputs.destination }}
+      environment: ${{ steps.target.outputs.github_environment }}
+      runner_label: ${{ steps.target.outputs.runner_label }}
+      pilot_self_review: ${{ steps.target.outputs.pilot_self_review }}
     steps:
       - name: Obtener validadores oficiales de master
         uses: actions/checkout@v4
@@ -65,6 +77,20 @@ jobs:
           [[ "$TRIGGER_EVENT" == workflow_dispatch && "$DISPATCH_SHA" =~ ^[0-9a-f]{40}$ ]]
           echo 'value=manual' >> "$GITHUB_OUTPUT"
           echo "sha=$DISPATCH_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Validar destino explícito sin fallback
+        id: target
+        env:
+          DESTINATION: ${{ inputs.destination }}
+          PILOT_SELF_REVIEW: ${{ inputs.pilot_self_review }}
+          DISPATCH_SERVICE: ${{ inputs.service }}
+        run: |
+          set -Eeuo pipefail
+          target="$(bash ops/azure/container-apps/resolve-deployment-target.sh "$DESTINATION" "$PILOT_SELF_REVIEW" "$DISPATCH_SERVICE")"
+          printf 'destination=%s\n' "$(jq -r '.destination' <<< "$target")" >> "$GITHUB_OUTPUT"
+          printf 'github_environment=%s\n' "$(jq -r '.githubEnvironment' <<< "$target")" >> "$GITHUB_OUTPUT"
+          printf 'runner_label=%s\n' "$(jq -r '.smokeLabel' <<< "$target")" >> "$GITHUB_OUTPUT"
+          printf 'pilot_self_review=%s\n' "$(jq -r '.pilotSelfReview' <<< "$target")" >> "$GITHUB_OUTPUT"
 
       - name: Validar CI exitosa, HEAD vigente de master y allowlist de servicios
         id: source
@@ -86,10 +112,13 @@ jobs:
             *) echo 'PILOT_SELF_REVIEW_SCOPE_REJECTED' >&2; exit 1 ;;
           esac
 
-      - name: Preflight read-only de protección azure-h5 antes de publicar
+      - name: Preflight read-only de protección del Environment antes de publicar
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash ops/azure/container-apps/verify-environment-protection.sh "$GITHUB_REPOSITORY" "$H5_DEPLOY_ENVIRONMENT" "$H5_PILOT_SERVICE"
+          DEPLOYMENT_ENVIRONMENT: ${{ steps.target.outputs.github_environment }}
+          DESTINATION: ${{ steps.target.outputs.destination }}
+          PILOT_SELF_REVIEW: ${{ steps.target.outputs.pilot_self_review }}
+        run: bash ops/azure/container-apps/verify-environment-protection.sh "$GITHUB_REPOSITORY" "$DEPLOYMENT_ENVIRONMENT" "$H5_PILOT_SERVICE" "$DESTINATION" deploy "$PILOT_SELF_REVIEW"
 
       - name: Registrar origen y selección
         env:
@@ -165,6 +194,17 @@ jobs:
         with:
           ref: refs/heads/master
           persist-credentials: false
+
+      - name: Revalidar selección de destino antes de publicar
+        env:
+          DESTINATION: ${{ needs.prepare.outputs.destination }}
+          DEPLOYMENT_ENVIRONMENT: ${{ needs.prepare.outputs.environment }}
+          PILOT_SELF_REVIEW: ${{ needs.prepare.outputs.pilot_self_review }}
+          REQUESTED_SERVICE: ${{ matrix.service }}
+        run: |
+          set -Eeuo pipefail
+          target="$(bash ops/azure/container-apps/resolve-deployment-target.sh "$DESTINATION" "$PILOT_SELF_REVIEW" "$REQUESTED_SERVICE")"
+          [[ "$(jq -r '.githubEnvironment' <<< "$target")" == "$DEPLOYMENT_ENVIRONMENT" ]]
 
       - name: Obtener el SHA validado
         uses: actions/checkout@v4
@@ -302,7 +342,12 @@ jobs:
     needs: [prepare, publish]
     if: needs.prepare.outputs.sha != '' && needs.prepare.outputs.services != ''
     runs-on: ubuntu-latest
-    environment: ${{ inputs.pilot_self_review && 'azure-h5-pilot-234' || 'azure-h5' }}
+    environment: ${{ needs.prepare.outputs.environment }}
+    env:
+      H5_DEPLOY_DESTINATION: ${{ needs.prepare.outputs.destination }}
+      H5_DEPLOY_ENVIRONMENT: ${{ needs.prepare.outputs.environment }}
+      H5_PILOT_SELF_REVIEW: ${{ needs.prepare.outputs.pilot_self_review }}
+      AZURE_CHILE_DEPLOY_ENABLED: ${{ vars.AZURE_CHILE_DEPLOY_ENABLED }}
     concurrency:
       group: g6-azure-h5-${{ github.repository }}-azure-h5-${{ matrix.service }}
       cancel-in-progress: false
@@ -338,11 +383,11 @@ jobs:
           [[ "$image" =~ ^ghcr\.io/taller-sw-web/g6-productos-ofertas-backend/${SERVICE}@sha256:[0-9a-f]{64}$ ]]
           echo "value=$image" >> "$GITHUB_OUTPUT"
 
-      - name: Comprobar variables del entorno azure-h5
+      - name: Comprobar variables del Environment seleccionado
         run: |
           set -Eeuo pipefail
           for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID; do
-            [[ -n "${!name:-}" ]] || { echo "Falta la variable ${name} en el environment azure-h5." >&2; exit 1; }
+            [[ -n "${!name:-}" ]] || { echo "Falta la variable ${name} en el Environment seleccionado." >&2; exit 1; }
           done
         env:
           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
@@ -352,7 +397,15 @@ jobs:
       - name: Revalidar reglas reales del environment inmediatamente antes de OIDC
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash ops/azure/container-apps/verify-environment-protection.sh "$GITHUB_REPOSITORY" "$H5_DEPLOY_ENVIRONMENT" "$H5_PILOT_SERVICE"
+          DESTINATION: ${{ needs.prepare.outputs.destination }}
+          PILOT_SELF_REVIEW: ${{ needs.prepare.outputs.pilot_self_review }}
+        run: bash ops/azure/container-apps/verify-environment-protection.sh "$GITHUB_REPOSITORY" "$H5_DEPLOY_ENVIRONMENT" "$H5_PILOT_SERVICE" "$DESTINATION" deploy "$PILOT_SELF_REVIEW"
+
+      - name: Exigir ventana Chile abierta después de la aprobación
+        if: needs.prepare.outputs.destination == 'chile-shared'
+        run: |
+          set -Eeuo pipefail
+          [[ "$AZURE_CHILE_DEPLOY_ENABLED" == true ]] || { echo 'AZURE_CHILE_DEPLOY_ENABLED del Environment azure-h5-chile debe ser exactamente true.' >&2; exit 1; }
 
       - name: Autenticar en Azure mediante OIDC
         uses: azure/login@v2
@@ -377,6 +430,7 @@ jobs:
           SERVICE: ${{ matrix.service }}
           IMAGE: ${{ steps.image.outputs.value }}
           DEPLOY_RECEIPT: ${{ matrix.service }}.receipt
+          GITHUB_RUN_ID: ${{ github.run_id }}
         run: bash ops/azure/container-apps/deploy.sh "$SERVICE" "$IMAGE"
       - name: Guardar recibo de recuperación coordinada
         if: always()
@@ -391,8 +445,12 @@ jobs:
     name: Smoke HTTPS posterior al despliegue
     needs: [prepare, deploy]
     if: needs.prepare.outputs.sha != '' && needs.prepare.outputs.services != ''
-    runs-on: [self-hosted, linux, azure-h5-smoke]
-    environment: ${{ inputs.pilot_self_review && 'azure-h5-pilot-234' || 'azure-h5' }}
+    runs-on: [self-hosted, linux, "${{ needs.prepare.outputs.runner_label }}"]
+    environment: ${{ needs.prepare.outputs.environment }}
+    env:
+      H5_DEPLOY_DESTINATION: ${{ needs.prepare.outputs.destination }}
+      H5_DEPLOY_ENVIRONMENT: ${{ needs.prepare.outputs.environment }}
+      H5_PILOT_SELF_REVIEW: ${{ needs.prepare.outputs.pilot_self_review }}
     permissions:
       contents: read
     strategy:
@@ -405,9 +463,18 @@ jobs:
         with:
           ref: refs/heads/master
           persist-credentials: false
+      - name: Descargar recibo del mismo servicio y run
+        uses: actions/download-artifact@v4
+        with:
+          name: azure-receipt-${{ matrix.service }}
+          path: smoke-receipts
       - name: Smoke funcional obligatorio desde la red autorizada
         env:
           SERVICE: ${{ matrix.service }}
+          SMOKE_RECEIPT: smoke-receipts/${{ matrix.service }}.receipt
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          H5_DEPLOY_DESTINATION: ${{ needs.prepare.outputs.destination }}
+          H5_DEPLOY_ENVIRONMENT: ${{ needs.prepare.outputs.environment }}
           SMOKE_URL_API_GATEWAY: ${{ vars.AZURE_SMOKE_URL_API_GATEWAY }}
           SMOKE_URL_BULK_SVC: ${{ vars.AZURE_SMOKE_URL_BULK_SVC }}
           SMOKE_URL_CATALOG_SVC: ${{ vars.AZURE_SMOKE_URL_CATALOG_SVC }}
@@ -438,11 +505,15 @@ jobs:
           bash ops/azure/container-apps/smoke-service.sh "$SERVICE"
 
   recover:
-    name: Recuperación supervisada (sujeta a protección azure-h5)
+    name: Recuperación supervisada (sujeta al Environment seleccionado)
     needs: [prepare, deploy, smoke]
     if: always() && needs.prepare.outputs.sha != '' && (needs.deploy.result == 'failure' || needs.smoke.result == 'failure')
     runs-on: ubuntu-latest
-    environment: ${{ inputs.pilot_self_review && 'azure-h5-pilot-234' || 'azure-h5' }}
+    environment: ${{ needs.prepare.outputs.environment }}
+    env:
+      H5_DEPLOY_DESTINATION: ${{ needs.prepare.outputs.destination }}
+      H5_DEPLOY_ENVIRONMENT: ${{ needs.prepare.outputs.environment }}
+      H5_PILOT_SELF_REVIEW: ${{ needs.prepare.outputs.pilot_self_review }}
     permissions:
       actions: read
       contents: read
@@ -463,7 +534,9 @@ jobs:
       - name: Revalidar reglas reales del environment inmediatamente antes de OIDC para recuperación
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash ops/azure/container-apps/verify-environment-protection.sh "$GITHUB_REPOSITORY" "$H5_DEPLOY_ENVIRONMENT" "$H5_PILOT_SERVICE"
+          DESTINATION: ${{ needs.prepare.outputs.destination }}
+          PILOT_SELF_REVIEW: ${{ needs.prepare.outputs.pilot_self_review }}
+        run: bash ops/azure/container-apps/verify-environment-protection.sh "$GITHUB_REPOSITORY" "$H5_DEPLOY_ENVIRONMENT" "$H5_PILOT_SERVICE" "$DESTINATION" recovery "$PILOT_SELF_REVIEW"
       - name: Autenticar en Azure mediante OIDC para recuperación
         uses: azure/login@v2
         with:
@@ -477,7 +550,7 @@ jobs:
             echo '{"jobs":[]}' > "$RUNNER_TEMP/jobs.json"
             echo 'No se pudo recuperar la evidencia de pasos GitHub; servicios sin recibo quedarán como desconocidos.' >> "$GITHUB_STEP_SUMMARY"
           fi
-          bash ops/azure/container-apps/reconcile-recovery.sh "$SELECTED_SERVICES" receipts "$RUNNER_TEMP/jobs.json"
+          bash ops/azure/container-apps/reconcile-recovery.sh "$SELECTED_SERVICES" receipts "$RUNNER_TEMP/jobs.json" "$H5_DEPLOY_DESTINATION" "$H5_DEPLOY_ENVIRONMENT"
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { setTimeout as pause } from 'node:timers/promises';
 const config = JSON.parse(readFileSync(0, 'utf8'));
+if (typeof config.ownerSub !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(config.ownerSub)) throw new Error('Test actor identity is required');
 const require = createRequire(join(config.build, 'bulk-import.service.js'));
 const { Pool } = require('pg');
 const { drizzle } = require('drizzle-orm/node-postgres');
@@ -25,7 +26,7 @@ try {
   const permission = await pool.query("SELECT has_schema_privilege(current_user, 'catalog', 'USAGE') AS catalog_access");
   if (permission.rows[0].catalog_access) throw new Error('Bulk role unexpectedly accesses Catalog');
   const csv = bulkSimpleCsv(config.sku);
-  const input = { bytes: Buffer.from(csv), format: 'CSV', templateVersion: 2, correlationId: config.correlation, contentRef: `test://${config.batch}`, batchId: config.batch };
+  const input = { bytes: Buffer.from(csv), format: 'CSV', templateVersion: 2, ownerSub: config.ownerSub, correlationId: config.correlation, contentRef: `test://${config.batch}`, batchId: config.batch };
   phase = 'import';
   await importer.receiveImport(input);
   phase = 'consume-start';
@@ -36,7 +37,7 @@ try {
   let snapshot;
   const deadline = Date.now() + 60000;
   while (Date.now() < deadline) {
-    snapshot = await importer.getSnapshot(config.batch);
+    snapshot = await importer.getSnapshot(config.batch, config.ownerSub);
     if (snapshot.rows[0]?.steps.some(step => step.domain === 'CATALOGO' && step.status === 'COMPLETED')) break;
     await pause(100);
   }

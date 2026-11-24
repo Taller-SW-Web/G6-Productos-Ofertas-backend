@@ -1,0 +1,74 @@
+{
+  "approvalStatus": "PENDING_APPROVAL",
+  "approvalReference": "",
+  "namespaceFqdn": "g6-sb-h5-int-32cdqgbnlk7ow.servicebus.windows.net",
+  "commercialFlags": {
+    "api-gateway": {
+      "GATEWAY_G5_H5_ENABLED": "true"
+    },
+    "pricing-svc": {
+      "PRICING_PRICE_CHANGED_PUBLISH_ENABLED": "true"
+    },
+    "promotions-svc": {
+      "PROMOTIONS_H5_COUPON_COMMANDS_ENABLED": "true"
+    }
+  },
+  "services": {
+    "catalog-svc": {
+      "identityResourceId": "",
+      "identityClientId": "",
+      "env": {
+        "MESSAGING_PROVIDER": "AZURE_SERVICE_BUS",
+        "SERVICE_BUS_NAMESPACE_FQDN": "g6-sb-h5-int-32cdqgbnlk7ow.servicebus.windows.net",
+        "G6_SECURITY_MODE": "G7_AUTHENTICATED",
+        "G6_SERVICE_BUS_PRODUCTION_ENABLED": "true",
+        "AZURE_CLIENT_ID": "",
+        "CATALOG_H5_DESTINATIONS": ""
+      },
+      "queueGrants": []
+    },
+    "inventory-svc": {
+      "identityResourceId": "",
+      "identityClientId": "",
+      "env": {
+        "MESSAGING_PROVIDER": "AZURE_SERVICE_BUS",
+        "SERVICE_BUS_NAMESPACE_FQDN": "g6-sb-h5-int-32cdqgbnlk7ow.servicebus.windows.net",
+        "G6_SECURITY_MODE": "G7_AUTHENTICATED",
+        "G6_SERVICE_BUS_PILOT_ENABLED": "true",
+        "G6_SERVICE_BUS_PRODUCTION_ENABLED": "true",
+        "INVENTORY_SERVICE_BUS_PUBLISH_ENABLED": "true",
+        "INVENTORY_SERVICE_BUS_CONSUME_ENABLED": "true",
+        "AZURE_CLIENT_ID": ""
+      },
+      "queueGrants": []
+    },
+    "pricing-svc": {
+      "identityResourceId": "",
+      "identityClientId": "",
+      "env": {
+        "MESSAGING_PROVIDER": "AZURE_SERVICE_BUS",
+        "SERVICE_BUS_NAMESPACE_FQDN": "g6-sb-h5-int-32cdqgbnlk7ow.servicebus.windows.net",
+        "G6_SECURITY_MODE": "G7_AUTHENTICATED",
+        "G6_SERVICE_BUS_PILOT_ENABLED": "true",
+        "G6_SERVICE_BUS_PRODUCTION_ENABLED": "true",
+        "PRICING_PRICE_CHANGED_PUBLISH_ENABLED": "true",
+        "AZURE_CLIENT_ID": ""
+      },
+      "queueGrants": []
+    },
+    "promotions-svc": {
+      "identityResourceId": "",
+      "identityClientId": "",
+      "env": {
+        "MESSAGING_PROVIDER": "AZURE_SERVICE_BUS",
+        "SERVICE_BUS_NAMESPACE_FQDN": "g6-sb-h5-int-32cdqgbnlk7ow.servicebus.windows.net",
+        "G6_SECURITY_MODE": "G7_AUTHENTICATED",
+        "G6_SERVICE_BUS_PRODUCTION_ENABLED": "true",
+        "PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED": "true",
+        "PROMOTIONS_H5_COUPON_COMMANDS_ENABLED": "true",
+        "AZURE_CLIENT_ID": ""
+      },
+      "queueGrants": []
+    }
+  }
+}

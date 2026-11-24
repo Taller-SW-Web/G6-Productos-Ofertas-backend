@@ -7,10 +7,16 @@ import {
   type BulkRow,
   type BulkRowResult,
 } from '../src/catalog-bulk.service.js';
+import {
+  CatalogBulkContentClient,
+  CatalogBulkContentIdentity,
+} from '../src/catalog-bulk-content.js';
 import { CatalogTokenVerifier } from '../src/catalog-auth.js';
+import { CatalogIdentityAcquisitionError } from '../src/catalog-pricing-identity.js';
 import { HttpException, ServiceUnavailableException } from '@nestjs/common';
 import type { CatalogEnvelope } from '../src/catalog-messages.js';
 import { spawn, spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
 import {
   writeFileSync,
   symlinkSync,
@@ -39,6 +45,7 @@ import { runData002Psql, type Data002Step } from './support/data002-psql.js';
 import { CatalogGatewayHarness } from './support/catalog-gateway-harness.js';
 import type { ProductSummary } from '../src/commercial.types.js';
 import { CatalogAmqpRuntime } from '../src/catalog-amqp.js';
+import { relayCatalogDelivery } from '../src/catalog-service-bus-relay.js';
 import { CatalogTelemetry } from '../src/catalog-telemetry.js';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import {
@@ -55,6 +62,8 @@ import { historicalRequests } from '../src/historical-recovery.schema.js';
 import { CatalogQueryRepository } from '../src/catalog-query.repository.js';
 import {
   activeAttempt,
+  assertCatalogPublication,
+  initialBulkAttemptId,
   parseCatalogMessage,
   UUID,
 } from '../src/catalog-messages.js';
@@ -77,6 +86,7 @@ import {
 } from '../src/catalog-master-barriers.js';
 import {
   products,
+  bulkRetryAttemptReceipts,
   variants,
   masterBarriers,
   inbox,
@@ -313,6 +323,40 @@ describe.skipIf(!dockerAvailable)(
             'utf8',
           ),
       );
+      command(
+        'docker',
+        [
+          'exec',
+          '-i',
+          container,
+          'psql',
+          '-U',
+          'postgres',
+          '-v',
+          'ON_ERROR_STOP=1',
+        ],
+        'SET ROLE po_catalog_owner;\n' +
+          readFileSync(
+            resolve(
+              'apps/catalog-svc/migrations-candidate/h5/0001_outbox_delivery.sql',
+            ),
+            'utf8',
+          ) +
+          '\n' +
+          readFileSync(
+            resolve(
+              'apps/catalog-svc/migrations-candidate/h5/0002_taxonomy_reply_transport.sql',
+            ),
+            'utf8',
+          ) +
+          '\n' +
+          readFileSync(
+            resolve(
+              'apps/catalog-svc/migrations-candidate/h5/0003_bulk_retry_receipts.sql',
+            ),
+            'utf8',
+          ),
+      );
       port = command('docker', ['port', container, '5432/tcp'])
         .split(':')
         .at(-1)!;
@@ -357,6 +401,281 @@ describe.skipIf(!dockerAvailable)(
         rmSync(directory, { recursive: true, force: true });
       }
     }, 30000);
+
+    afterEach(() => vi.unstubAllEnvs());
+
+    it('keeps H4 deliveries disabled and commits the H5 trigger fan-out atomically', async () => {
+      vi.stubEnv('MESSAGING_PROVIDER', 'RABBITMQ');
+      vi.stubEnv('CATALOG_H5_DESTINATIONS', '');
+      const h4MessageId = randomUUID();
+      const correlationId = randomUUID();
+      await database.transaction((tx) =>
+        tx.insert(outbox).values({
+          message_id: h4MessageId,
+          event_name: 'catalog.product.deactivated',
+          kind: 'event',
+          correlation_id: correlationId,
+          occurred_at: new Date('2000-01-01T00:00:00Z'),
+          payload: {
+            product_id: randomUUID(),
+            product_version: 1,
+            changed_at: '2000-01-01T00:00:00.000Z',
+          },
+        }),
+      );
+      const h4Transport = await database.read((db) =>
+        db.execute(sql`
+          SELECT delivery_transport
+          FROM catalog.outbox WHERE message_id = ${h4MessageId}
+        `),
+      );
+      expect(h4Transport.rows[0]?.delivery_transport).toBe('RABBITMQ');
+      const h4Deliveries = await database.read((db) =>
+        db.execute(sql`
+          SELECT count(*)::integer AS count
+          FROM catalog.outbox_delivery WHERE message_id = ${h4MessageId}
+        `),
+      );
+      expect(h4Deliveries.rows[0]?.count).toBe(0);
+
+      vi.stubEnv('MESSAGING_PROVIDER', 'AZURE_SERVICE_BUS');
+      vi.stubEnv('CATALOG_H5_DESTINATIONS', '');
+      const noDestinationMessageId = randomUUID();
+      await database.transaction((tx) =>
+        tx.insert(outbox).values({
+          message_id: noDestinationMessageId,
+          event_name: 'catalog.product.deactivated',
+          kind: 'event',
+          correlation_id: randomUUID(),
+          occurred_at: new Date('2010-01-01T00:00:00Z'),
+          payload: {
+            product_id: randomUUID(),
+            product_version: 2,
+            changed_at: '2010-01-01T00:00:00.000Z',
+          },
+        }),
+      );
+      const noDestination = await database.read((db) =>
+        db.execute(sql`
+          SELECT
+            o.delivery_transport,
+            count(d.message_id)::integer AS deliveries
+          FROM catalog.outbox o
+          LEFT JOIN catalog.outbox_delivery d USING (message_id)
+          WHERE o.message_id = ${noDestinationMessageId}
+          GROUP BY o.delivery_transport
+        `),
+      );
+      expect(noDestination.rows[0]).toEqual({
+        delivery_transport: 'AZURE_SERVICE_BUS',
+        deliveries: 0,
+      });
+
+      vi.stubEnv('MESSAGING_PROVIDER', 'RABBITMQ');
+      const markerReplyMessageId = randomUUID();
+      await database.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT set_config('g6.catalog_taxonomy_reply', 'AZURE_SERVICE_BUS', true)`,
+        );
+        await tx.insert(outbox).values({
+          message_id: markerReplyMessageId,
+          event_name: 'catalog.master.deactivation.checked',
+          kind: 'result',
+          correlation_id: randomUUID(),
+          operation_id: randomUUID(),
+          occurred_at: new Date('2011-01-01T00:00:00Z'),
+          payload: {
+            entity_type: 'CATEGORY',
+            entity_id: randomUUID(),
+            version: 1,
+            result: 'CLEAR',
+          },
+        });
+      });
+      const explicitMarker = await database.read((db) =>
+        db.execute(sql`
+          SELECT
+            o.delivery_transport,
+            count(d.message_id)::integer AS deliveries
+          FROM catalog.outbox o
+          LEFT JOIN catalog.outbox_delivery d USING (message_id)
+          WHERE o.message_id = ${markerReplyMessageId}
+          GROUP BY o.delivery_transport
+        `),
+      );
+      expect(explicitMarker.rows[0]).toEqual({
+        delivery_transport: 'AZURE_SERVICE_BUS',
+        deliveries: 0,
+      });
+
+      vi.stubEnv('MESSAGING_PROVIDER', 'AZURE_SERVICE_BUS');
+      vi.stubEnv(
+        'CATALOG_H5_DESTINATIONS',
+        'g6.promotions.from.catalog,g6.combos.from.catalog',
+      );
+      const rolledBackMessageId = randomUUID();
+      await expect(
+        database.transaction(async (tx) => {
+          await tx.insert(outbox).values({
+            message_id: rolledBackMessageId,
+            event_name: 'catalog.product.deactivated',
+            kind: 'event',
+            correlation_id: randomUUID(),
+            occurred_at: new Date('2020-01-01T00:00:00Z'),
+            payload: {
+              product_id: randomUUID(),
+              product_version: 3,
+              changed_at: '2020-01-01T00:00:00.000Z',
+            },
+          });
+          throw new Error('rollback H5 outbox');
+        }),
+      ).rejects.toThrow('rollback H5 outbox');
+      const rolledBack = await database.read((db) =>
+        db.execute(sql`
+          SELECT
+            EXISTS (SELECT FROM catalog.outbox WHERE message_id = ${rolledBackMessageId}) AS outbox_exists,
+            EXISTS (SELECT FROM catalog.outbox_delivery WHERE message_id = ${rolledBackMessageId}) AS delivery_exists
+        `),
+      );
+      expect(rolledBack.rows[0]).toEqual({
+        outbox_exists: false,
+        delivery_exists: false,
+      });
+
+      const fanoutMessageId = randomUUID();
+      await database.transaction((tx) =>
+        tx.insert(outbox).values({
+          message_id: fanoutMessageId,
+          event_name: 'catalog.product.deactivated',
+          kind: 'event',
+          correlation_id: randomUUID(),
+          occurred_at: new Date('2021-01-01T00:00:00Z'),
+          payload: {
+            product_id: randomUUID(),
+            product_version: 4,
+            changed_at: '2021-01-01T00:00:00.000Z',
+          },
+        }),
+      );
+      const fanoutTransport = await database.read((db) =>
+        db.execute(sql`
+          SELECT delivery_transport
+          FROM catalog.outbox WHERE message_id = ${fanoutMessageId}
+        `),
+      );
+      expect(fanoutTransport.rows[0]?.delivery_transport).toBe(
+        'AZURE_SERVICE_BUS',
+      );
+      const fanout = await database.read((db) =>
+        db.execute(sql`
+          SELECT destination
+          FROM catalog.outbox_delivery
+          WHERE message_id = ${fanoutMessageId}
+          ORDER BY destination
+        `),
+      );
+      expect(fanout.rows.map((row) => row.destination)).toEqual([
+        'g6.combos.from.catalog',
+        'g6.promotions.from.catalog',
+      ]);
+
+      vi.stubEnv('CATALOG_H5_DESTINATIONS', 'g6.promotions.from.catalog');
+      const restrictedMessageId = randomUUID();
+      await database.transaction((tx) =>
+        tx.insert(outbox).values({
+          message_id: restrictedMessageId,
+          event_name: 'catalog.product.deactivated',
+          kind: 'event',
+          correlation_id: randomUUID(),
+          occurred_at: new Date('2022-01-01T00:00:00Z'),
+          payload: {
+            product_id: randomUUID(),
+            product_version: 5,
+            changed_at: '2022-01-01T00:00:00.000Z',
+          },
+        }),
+      );
+      const restricted = await database.read((db) =>
+        db.execute(sql`
+          SELECT destination
+          FROM catalog.outbox_delivery
+          WHERE message_id = ${restrictedMessageId}
+        `),
+      );
+      expect(restricted.rows.map((row) => row.destination)).toEqual([
+        'g6.promotions.from.catalog',
+      ]);
+
+      vi.stubEnv(
+        'CATALOG_H5_DESTINATIONS',
+        'g6.promotions.from.catalog,g6.combos.from.catalog',
+      );
+      const publish = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('ambiguous send'))
+        .mockResolvedValue(undefined);
+      const bus = { publish };
+      expect(
+        await relayCatalogDelivery(database, bus, 'g6.combos.from.catalog'),
+      ).toBe('RETRY');
+      await database.transaction((tx) =>
+        tx.execute(sql`
+          UPDATE catalog.outbox_delivery
+          SET available_at = now()
+          WHERE message_id = ${fanoutMessageId}
+            AND destination = 'g6.combos.from.catalog'
+            AND published_at IS NULL
+        `),
+      );
+      expect(
+        await relayCatalogDelivery(database, bus, 'g6.combos.from.catalog'),
+      ).toBe('CONFIRMED');
+      expect(publish.mock.calls[1]?.[1].message_id).toBe(
+        publish.mock.calls[0]?.[1].message_id,
+      );
+      expect(publish.mock.calls[1]?.[0]).toBe(publish.mock.calls[0]?.[0]);
+      expect(
+        await relayCatalogDelivery(database, bus, 'g6.promotions.from.catalog'),
+      ).toBe('CONFIRMED');
+      expect(
+        await relayCatalogDelivery(database, bus, 'g6.promotions.from.catalog'),
+      ).toBe('CONFIRMED');
+      expect(publish).toHaveBeenCalledTimes(4);
+      const publishedFanout = await database.read((db) =>
+        db.execute(sql`
+          SELECT destination, published_at IS NOT NULL AS published
+          FROM catalog.outbox_delivery
+          WHERE message_id = ${fanoutMessageId}
+          ORDER BY destination
+        `),
+      );
+      expect(publishedFanout.rows).toEqual([
+        { destination: 'g6.combos.from.catalog', published: true },
+        { destination: 'g6.promotions.from.catalog', published: true },
+      ]);
+
+      vi.stubEnv('MESSAGING_PROVIDER', 'RABBITMQ');
+      vi.stubEnv('CATALOG_H5_DESTINATIONS', '');
+      const h4Publisher = { publish: vi.fn().mockResolvedValue(undefined) };
+      const messages = new CatalogMessageService(database);
+      expect(await messages.relayOne(h4Publisher)).toBe('PUBLISHED');
+      expect(await messages.relayOne(h4Publisher)).toBe('EMPTY');
+      expect(h4Publisher.publish).toHaveBeenCalledTimes(1);
+      expect(h4Publisher.publish.mock.calls[0]?.[0].message_id).toBe(
+        h4MessageId,
+      );
+      const skippedH5 = await database.read((db) =>
+        db.execute(sql`
+          SELECT message_id
+          FROM catalog.outbox
+          WHERE message_id IN (
+            ${noDestinationMessageId}, ${markerReplyMessageId}, ${fanoutMessageId}, ${restrictedMessageId}
+          ) AND published_at IS NOT NULL
+        `),
+      );
+      expect(skippedH5.rows).toEqual([]);
+    });
 
     function productInput(sku: string) {
       return {
@@ -3246,7 +3565,10 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         },
       };
     }
-    function bulkHandler(mutations = mutationService()) {
+    function bulkHandler(
+      mutations = mutationService(),
+      contentClient?: { getDocument: (reference: unknown) => Promise<unknown> },
+    ) {
       const identity = new CatalogBulkIdentity(
         undefined,
         new CatalogTokenVerifier(undefined),
@@ -3254,7 +3576,12 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
       vi.spyOn(identity, 'authorization').mockResolvedValue(
         actor.authorization,
       );
-      return new CatalogBulkService(database, mutations, identity);
+      return new CatalogBulkService(
+        database,
+        mutations,
+        identity,
+        contentClient as never,
+      );
     }
     async function bulkReply(command: CatalogEnvelope) {
       return database.read(
@@ -3331,6 +3658,568 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         'IDEMPOTENCY_CONFLICT',
       );
     });
+    it('BULK V3: replays an applied operation without downloading its claim-check document again', async () => {
+      const row = bulkRow();
+      const operationId = randomUUID();
+      const batchId = randomUUID();
+      const getDocument = vi.fn().mockResolvedValue({ rows: [row] });
+      const service = bulkHandler(mutationService(), { getDocument });
+      const message: CatalogEnvelope = {
+        message_id: randomUUID(),
+        schema_version: 3,
+        occurred_at: new Date().toISOString(),
+        correlation_id: randomUUID(),
+        causation_id: null,
+        operation_id: operationId,
+        producer: 'bulk-svc',
+        kind: 'command',
+        name: 'catalog.bulk.upsert.requested',
+        data: {
+          batch_id: batchId,
+          batch_operation_id: operationId,
+          template_version: 2,
+          mode: 'ALTA',
+          content_ref: {
+            content_id: randomUUID(),
+            sha256: 'a'.repeat(64),
+            byte_length: 300 * 1024,
+            content_type: 'application/json',
+          },
+        },
+      };
+      await expect(service.consume(message)).resolves.toBe('APPLIED');
+      expect(getDocument).toHaveBeenCalledOnce();
+      const replay = { ...message, message_id: randomUUID() };
+      getDocument.mockRejectedValue(new Error('original document unavailable'));
+      await expect(service.consume(replay)).resolves.toBe('APPLIED');
+      expect(getDocument).toHaveBeenCalledOnce();
+      expect((await bulkReply(replay)).payload).toMatchObject({
+        batch_id: batchId,
+      });
+    });
+    it('BULK V3: downloads a valid >256 KiB claim-check over private HTTP and commits rows, result, and receipts in PostgreSQL', async () => {
+      const row = bulkRow({
+        ...createRequest(),
+        // OpenAPI requires a non-empty string and places no maximum on the
+        // description. Exercise the 50 MiB claim-check flow with one ordinary
+        // Catalog product row whose document exceeds the former 256 KiB limit.
+        descripcion: 'x'.repeat(300 * 1024),
+      });
+      const documentBytes = Buffer.from(
+        JSON.stringify({ rows: [row] }),
+        'utf8',
+      );
+      const digest = createHash('sha256').update(documentBytes).digest('hex');
+      expect(documentBytes.byteLength).toBeGreaterThan(256 * 1024);
+
+      const contentId = randomUUID();
+      const requests: Array<{
+        method?: string;
+        url?: string;
+        authorization?: string;
+        accept?: string;
+      }> = [];
+      const contentServer = createServer((request, response) => {
+        requests.push({
+          method: request.method,
+          url: request.url,
+          authorization: request.headers.authorization,
+          accept: request.headers.accept,
+        });
+        if (
+          request.method !== 'GET' ||
+          request.url !== `/interno/carga-masiva/contenidos/${contentId}` ||
+          request.headers.authorization !==
+            'Bearer private-bulk-content-fixture' ||
+          request.headers.accept !== 'application/json'
+        ) {
+          response.writeHead(403).end('{}');
+          return;
+        }
+        response.writeHead(200, {
+          'content-type': 'application/json',
+          'content-length': String(documentBytes.byteLength),
+          'x-content-sha256': digest,
+        });
+        response.end(documentBytes);
+      });
+
+      const previousOrigin = process.env.CATALOG_BULK_CONTENTS_URL;
+      const previousNodeEnv = process.env.NODE_ENV;
+      try {
+        await new Promise<void>((resolve, reject) => {
+          contentServer.once('error', reject);
+          contentServer.listen(0, '127.0.0.1', resolve);
+        });
+        const address = contentServer.address();
+        if (!address || typeof address === 'string')
+          throw new Error('Private content fixture did not bind loopback');
+        process.env.NODE_ENV = 'test';
+        process.env.CATALOG_BULK_CONTENTS_URL = `http://127.0.0.1:${address.port}`;
+
+        const contentIdentity = new CatalogBulkContentIdentity(
+          undefined,
+          new CatalogTokenVerifier(undefined),
+        );
+        vi.spyOn(contentIdentity, 'authorization').mockResolvedValue(
+          'Bearer private-bulk-content-fixture',
+        );
+        const service = bulkHandler(
+          mutationService(),
+          new CatalogBulkContentClient(contentIdentity),
+        );
+        const operationId = randomUUID();
+        const batchId = randomUUID();
+        const messageId = randomUUID();
+        const message: CatalogEnvelope = {
+          message_id: messageId,
+          schema_version: 3,
+          occurred_at: new Date().toISOString(),
+          correlation_id: randomUUID(),
+          causation_id: null,
+          operation_id: operationId,
+          producer: 'bulk-svc',
+          kind: 'command',
+          name: 'catalog.bulk.upsert.requested',
+          data: {
+            batch_id: batchId,
+            batch_operation_id: operationId,
+            template_version: 2,
+            mode: 'ALTA',
+            content_ref: {
+              content_id: contentId,
+              sha256: digest,
+              byte_length: documentBytes.byteLength,
+              content_type: 'application/json',
+            },
+          },
+        };
+
+        await expect(service.consume(message)).resolves.toBe('APPLIED');
+        expect(requests).toEqual([
+          {
+            method: 'GET',
+            url: `/interno/carga-masiva/contenidos/${contentId}`,
+            authorization: 'Bearer private-bulk-content-fixture',
+            accept: 'application/json',
+          },
+        ]);
+
+        const storedProduct = await database.read(
+          async (db) =>
+            (
+              await db
+                .select()
+                .from(products)
+                .where(eq(products.sku_base, row.sku_base))
+            )[0],
+        );
+        expect(storedProduct).toMatchObject({
+          sku_base: row.sku_base,
+          descripcion: row.product.descripcion,
+        });
+        const storedIdentity = await database.read((db) =>
+          db
+            .select()
+            .from(skuIdentity)
+            .where(eq(skuIdentity.sku, row.sku_base)),
+        );
+        expect(storedIdentity).toHaveLength(1);
+
+        const reply = await bulkReply(message);
+        expect(reply.event_name).toBe('catalog.bulk.upsert.completed');
+        expect(reply.payload).toMatchObject({
+          batch_id: batchId,
+          batch_operation_id: operationId,
+          results: [
+            {
+              row_operation_id: row.row_operation_id,
+              product_id: storedProduct!.id,
+              sku_base: row.sku_base,
+              status: 'COMPLETED',
+              code: null,
+            },
+          ],
+        });
+
+        const receipts = await database.read((db) =>
+          db
+            .select()
+            .from(inbox)
+            .where(
+              and(
+                inArray(inbox.message_id, [
+                  operationId,
+                  row.row_operation_id,
+                  messageId,
+                ]),
+                inArray(inbox.handler, [
+                  'catalog.bulk.command.v1',
+                  'catalog.bulk.row.v1',
+                  'catalog.bulk.delivery.v1',
+                ]),
+              ),
+            ),
+        );
+        expect(receipts).toHaveLength(3);
+        expect(receipts).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              message_id: operationId,
+              handler: 'catalog.bulk.command.v1',
+              result: 'APPLIED',
+            }),
+            expect.objectContaining({
+              message_id: row.row_operation_id,
+              handler: 'catalog.bulk.row.v1',
+              result: 'APPLIED',
+            }),
+            expect.objectContaining({
+              message_id: messageId,
+              handler: 'catalog.bulk.delivery.v1',
+              result: 'APPLIED',
+            }),
+          ]),
+        );
+
+        await expect(service.consume(message)).resolves.toBe('DUPLICATE');
+        expect(requests).toHaveLength(1);
+        expect(
+          await database.read((db) =>
+            db
+              .select()
+              .from(products)
+              .where(eq(products.sku_base, row.sku_base)),
+          ),
+        ).toHaveLength(1);
+      } finally {
+        if (previousOrigin === undefined)
+          delete process.env.CATALOG_BULK_CONTENTS_URL;
+        else process.env.CATALOG_BULK_CONTENTS_URL = previousOrigin;
+        if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = previousNodeEnv;
+        contentServer.closeAllConnections();
+        await new Promise<void>((resolve) =>
+          contentServer.close(() => resolve()),
+        );
+      }
+    }, 60000);
+    it('BULK V3 result V2: records only a pre-mutation identity outage and leaves all commercial tables unchanged', async () => {
+      const previousFlag = process.env.CATALOG_BULK_RESULT_V2_ENABLED;
+      process.env.CATALOG_BULK_RESULT_V2_ENABLED = 'true';
+      const row = bulkRow();
+      const operation = randomUUID();
+      const batchId = randomUUID();
+      const correlationId = randomUUID();
+      const reference = {
+        content_id: randomUUID(),
+        sha256: 'b'.repeat(64),
+        byte_length: 128,
+        content_type: 'application/json',
+      };
+      const message: CatalogEnvelope = {
+        message_id: randomUUID(),
+        schema_version: 3,
+        occurred_at: new Date().toISOString(),
+        correlation_id: correlationId,
+        causation_id: null,
+        operation_id: operation,
+        producer: 'bulk-svc',
+        kind: 'command',
+        name: 'catalog.bulk.upsert.requested',
+        data: {
+          batch_id: batchId,
+          batch_operation_id: operation,
+          template_version: 2,
+          mode: 'ALTA',
+          content_ref: reference,
+        },
+      };
+      const snapshot = async () =>
+        database.read(async (db) => {
+          const result = await db.execute(sql`SELECT jsonb_build_object(
+            'products', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.products t), '[]'::jsonb),
+            'variants', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.variants t), '[]'::jsonb),
+            'sku_identity', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.sku_identity t), '[]'::jsonb),
+            'product_images', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.product_images t), '[]'::jsonb),
+            'variant_images', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.variant_images t), '[]'::jsonb),
+            'product_attribute_values', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.product_attribute_values t), '[]'::jsonb),
+            'variant_attribute_values', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.variant_attribute_values t), '[]'::jsonb),
+            'product_identifying_characteristics', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.product_identifying_characteristics t), '[]'::jsonb),
+            'sku_physical_profiles', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.sku_physical_profiles t), '[]'::jsonb),
+            'activation_checks', COALESCE((SELECT jsonb_agg(to_jsonb(t) ORDER BY t.id) FROM catalog.activation_checks t), '[]'::jsonb)
+          ) AS snapshot`);
+          return result.rows[0]?.snapshot;
+        });
+      const before = await snapshot();
+      const identity = new CatalogBulkIdentity(
+        undefined,
+        new CatalogTokenVerifier(undefined),
+      );
+      vi.spyOn(identity, 'authorizationForBulkRetry').mockRejectedValue(
+        new CatalogIdentityAcquisitionError('TRANSIENT'),
+      );
+      const service = new CatalogBulkService(
+        database,
+        mutationService(),
+        identity,
+        { getDocument: vi.fn().mockResolvedValue({ rows: [row] }) } as never,
+      );
+      try {
+        await expect(service.consume(message)).resolves.toBe('APPLIED');
+      } finally {
+        if (previousFlag === undefined)
+          delete process.env.CATALOG_BULK_RESULT_V2_ENABLED;
+        else process.env.CATALOG_BULK_RESULT_V2_ENABLED = previousFlag;
+      }
+      expect(await snapshot()).toEqual(before);
+      const stored = await bulkReply(message);
+      const reply: CatalogEnvelope = {
+        message_id: stored.message_id,
+        schema_version: stored.schema_version,
+        occurred_at: stored.occurred_at.toISOString(),
+        correlation_id: stored.correlation_id,
+        causation_id: stored.causation_id,
+        operation_id: stored.operation_id,
+        producer: 'catalog-svc',
+        kind: 'result',
+        name: stored.event_name,
+        data: stored.payload,
+      };
+      expect(() => assertCatalogPublication(reply)).not.toThrow();
+      expect(reply.data.results).toMatchObject([
+        {
+          row_operation_id: row.row_operation_id,
+          attempt_id: initialBulkAttemptId(operation, row.row_operation_id),
+          attempt_number: 1,
+          status: 'REJECTED',
+          effect_state: 'NONE',
+          retriable: true,
+          code: 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE',
+        },
+      ]);
+      expect(
+        await database.read((db) =>
+          db
+            .select()
+            .from(bulkRetryAttemptReceipts)
+            .where(
+              eq(bulkRetryAttemptReceipts.rowOperationId, row.row_operation_id),
+            ),
+        ),
+      ).toMatchObject([
+        {
+          status: 'REJECTED',
+          effectState: 'NONE',
+          retriable: true,
+          errorCode: 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE',
+          attemptNumber: 1,
+          receiptMessageId: stored.message_id,
+        },
+      ]);
+      const replay = { ...message, message_id: randomUUID() };
+      await expect(service.consume(replay)).resolves.toBe('APPLIED');
+      const replayReply = await bulkReply(replay);
+      expect(replayReply.schema_version).toBe(2);
+      expect(replayReply.payload.results).toMatchObject([
+        {
+          attempt_id: initialBulkAttemptId(operation, row.row_operation_id),
+          attempt_number: 1,
+          effect_state: 'NONE',
+          retriable: true,
+        },
+      ]);
+    });
+    it('BULK_RETRY_V1: consumes one V4 family after a durable initial V3 retryable receipt and deduplicates redelivery', async () => {
+      const previousResultFlag = process.env.CATALOG_BULK_RESULT_V2_ENABLED;
+      const previousRetryFlag = process.env.CATALOG_BULK_RETRY_V1_ENABLED;
+      process.env.CATALOG_BULK_RESULT_V2_ENABLED = 'true';
+      process.env.CATALOG_BULK_RETRY_V1_ENABLED = 'true';
+      const row = bulkRow();
+      const operation = randomUUID();
+      const correlation = randomUUID();
+      const batchId = randomUUID();
+      const reference = {
+        content_id: randomUUID(),
+        sha256: 'd'.repeat(64),
+        byte_length: 128,
+        content_type: 'application/json',
+      };
+      const original: CatalogEnvelope = {
+        message_id: randomUUID(),
+        schema_version: 3,
+        occurred_at: new Date().toISOString(),
+        correlation_id: correlation,
+        causation_id: null,
+        operation_id: operation,
+        producer: 'bulk-svc',
+        kind: 'command',
+        name: 'catalog.bulk.upsert.requested',
+        data: {
+          batch_id: batchId,
+          batch_operation_id: operation,
+          template_version: 2,
+          mode: 'ALTA',
+          content_ref: reference,
+        },
+      };
+      const contentClient = {
+        getDocument: vi.fn().mockResolvedValue({ rows: [row] }),
+      };
+      const transientIdentity = new CatalogBulkIdentity(
+        undefined,
+        new CatalogTokenVerifier(undefined),
+      );
+      vi.spyOn(
+        transientIdentity,
+        'authorizationForBulkRetry',
+      ).mockRejectedValue(new CatalogIdentityAcquisitionError('TRANSIENT'));
+      const initialService = new CatalogBulkService(
+        database,
+        mutationService(),
+        transientIdentity,
+        contentClient as never,
+      );
+      const commercialRows = () =>
+        database.read(async (db) => ({
+          products: await db
+            .select()
+            .from(products)
+            .where(eq(products.sku_base, row.sku_base)),
+          variants: await db
+            .select()
+            .from(variants)
+            .where(eq(variants.sku, row.sku_base)),
+          skuIdentity: await db
+            .select()
+            .from(skuIdentity)
+            .where(eq(skuIdentity.sku, row.sku_base)),
+        }));
+      const beforeRejectedAttempt = await commercialRows();
+      try {
+        await expect(initialService.consume(original)).resolves.toBe('APPLIED');
+        const initialReply = await bulkReply(original);
+        const initialAttempt = (
+          initialReply.payload.results as Array<Record<string, unknown>>
+        )[0]!;
+        expect(initialAttempt).toMatchObject({
+          status: 'REJECTED',
+          effect_state: 'NONE',
+          retriable: true,
+          attempt_number: 1,
+        });
+        expect(await commercialRows()).toEqual(beforeRejectedAttempt);
+        const commandAttemptId = randomUUID();
+        const newAttemptId = randomUUID();
+        const retryRequestCorrelation = randomUUID();
+        expect(retryRequestCorrelation).not.toBe(correlation);
+        const retry: CatalogEnvelope = {
+          message_id: randomUUID(),
+          schema_version: 4,
+          occurred_at: new Date().toISOString(),
+          correlation_id: correlation,
+          causation_id: original.message_id,
+          operation_id: operation,
+          producer: 'bulk-svc',
+          kind: 'command',
+          name: 'catalog.bulk.upsert.requested',
+          data: {
+            batch_id: batchId,
+            batch_operation_id: operation,
+            template_version: 2,
+            mode: 'ALTA',
+            content_ref: reference,
+            retry: {
+              protocol: 'BULK_RETRY_V1',
+              command_attempt_id: commandAttemptId,
+              attempt_number: 2,
+              previous_command_message_id: original.message_id,
+              rows: [
+                {
+                  row_operation_id: row.row_operation_id,
+                  attempt_id: newAttemptId,
+                  previous_attempt_id: String(initialAttempt.attempt_id),
+                },
+              ],
+            },
+          },
+        };
+        const retryIdentity = new CatalogBulkIdentity(
+          undefined,
+          new CatalogTokenVerifier(undefined),
+        );
+        vi.spyOn(retryIdentity, 'authorizationForBulkRetry').mockResolvedValue(
+          actor.authorization,
+        );
+        const retryService = new CatalogBulkService(
+          database,
+          mutationService(),
+          retryIdentity,
+          contentClient as never,
+        );
+        await expect(retryService.consume(retry)).resolves.toBe('APPLIED');
+        const retryReply = await bulkReply(retry);
+        expect(retryReply.schema_version).toBe(2);
+        expect(retryReply.payload).toMatchObject({
+          command_attempt_id: commandAttemptId,
+          results: [
+            {
+              row_operation_id: row.row_operation_id,
+              attempt_id: newAttemptId,
+              attempt_number: 2,
+              status: 'COMPLETED',
+              effect_state: 'APPLIED',
+              retriable: false,
+            },
+          ],
+        });
+        await expect(retryService.consume(retry)).resolves.toBe('DUPLICATE');
+        expect(
+          await database.read((db) =>
+            db
+              .select()
+              .from(products)
+              .where(eq(products.sku_base, row.sku_base)),
+          ),
+        ).toHaveLength(1);
+        expect(
+          await database.read((db) =>
+            db
+              .select()
+              .from(bulkRetryAttemptReceipts)
+              .where(
+                eq(
+                  bulkRetryAttemptReceipts.rowOperationId,
+                  row.row_operation_id,
+                ),
+              )
+              .orderBy(bulkRetryAttemptReceipts.attemptNumber),
+          ),
+        ).toMatchObject([
+          {
+            attemptNumber: 1,
+            status: 'REJECTED',
+            effectState: 'NONE',
+            retriable: true,
+          },
+          {
+            attemptNumber: 2,
+            status: 'COMPLETED',
+            effectState: 'APPLIED',
+            retriable: false,
+            previousAttemptId: initialAttempt.attempt_id,
+          },
+        ]);
+      } finally {
+        if (previousResultFlag === undefined)
+          delete process.env.CATALOG_BULK_RESULT_V2_ENABLED;
+        else process.env.CATALOG_BULK_RESULT_V2_ENABLED = previousResultFlag;
+        if (previousRetryFlag === undefined)
+          delete process.env.CATALOG_BULK_RETRY_V1_ENABLED;
+        else process.env.CATALOG_BULK_RETRY_V1_ENABLED = previousRetryFlag;
+      }
+    });
+
     it('BULK: reports a real slug UNIQUE as SLUG_DUPLICADO, never SKU_DUPLICADO, and preserves replay', async () => {
       const existing = await mutationService().createProduct(
         createRequest(),
@@ -3588,6 +4477,8 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
           'ON_ERROR_STOP=1',
         ],
         `CREATE ROLE po_bulk_owner NOLOGIN; CREATE ROLE bulk_fixture_app LOGIN PASSWORD 'isolated-bulk-password'; CREATE SCHEMA bulk AUTHORIZATION po_bulk_owner; SET ROLE po_bulk_owner; ${readFileSync(resolve('apps/catalog-svc/test/fixtures/0001_create_bulk_persistence.sql'), 'utf8')}
+${readFileSync(resolve('apps/bulk-svc/migrations/0005_actor_ownership.sql'), 'utf8')}
+${readFileSync(resolve('apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql'), 'utf8')}
 GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA bulk TO bulk_fixture_app; GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
       );
       writeFileSync(
@@ -3618,7 +4509,8 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
       jointRuntime = new CatalogAmqpRuntime(messages, jointBroker.settings);
       jointRuntime.onModuleInit();
       const sku = 'BULK-JOINT-' + randomUUID(),
-        batch = randomUUID();
+        batch = randomUUID(),
+        ownerSub = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
       try {
         const child = spawn(
           process.execPath,
@@ -3641,6 +4533,7 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
             broker: jointBroker.bulkUrl,
             sku,
             batch,
+            ownerSub,
             correlation: randomUUID(),
           }),
         );
@@ -6591,7 +7484,7 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
         ),
       ).toMatchObject({ status: 'ACTIVO', catalog_version: 2 });
     });
-    it('persists the exact product deactivation event once under concurrent retries', async () => {
+    it('persists product and sellable-SKU deactivation atomically once under retries', async () => {
       const service = mutationService();
       const product = await service.createProduct(createRequest(), actor);
       await complete(product.product_id, 'pricing');
@@ -6640,6 +7533,22 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
           )
         )[0]?.estado,
       ).toBe('ACTIVO');
+      expect(
+        await database.read((db) =>
+          db
+            .select()
+            .from(outbox)
+            .where(
+              and(
+                sql`${outbox.payload}->>'product_id' = ${product.product_id}`,
+                inArray(outbox.event_name, [
+                  'catalog.sku.deactivated',
+                  'catalog.product.deactivated',
+                ]),
+              ),
+            ),
+        ),
+      ).toHaveLength(0);
       rollbackFixtureSql(
         'DROP TRIGGER test_reject_product_deactivation ON catalog.outbox',
       );
@@ -6662,23 +7571,57 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
           .from(outbox)
           .where(
             and(
-              eq(outbox.event_name, 'catalog.product.deactivated'),
               sql`${outbox.payload}->>'product_id' = ${product.product_id}`,
+              inArray(outbox.event_name, [
+                'catalog.sku.deactivated',
+                'catalog.product.deactivated',
+              ]),
             ),
           ),
       );
-      expect(events).toHaveLength(1);
-      expect(Object.keys(events[0]!.payload).sort()).toEqual([
+      expect(events).toHaveLength(2);
+      expect(new Set(events.map((event) => event.message_id)).size).toBe(2);
+      const skuEvents = events.filter(
+          (event) => event.event_name === 'catalog.sku.deactivated',
+        ),
+        productEvents = events.filter(
+          (event) => event.event_name === 'catalog.product.deactivated',
+        ),
+        identities = await database.read((db) =>
+          db
+            .select()
+            .from(skuIdentity)
+            .where(eq(skuIdentity.product_id, product.product_id)),
+        );
+      expect(skuEvents).toHaveLength(1);
+      expect(productEvents).toHaveLength(1);
+      expect(identities).toHaveLength(1);
+      const skuEvent = skuEvents[0]!,
+        productEvent = productEvents[0]!;
+      expect(Object.keys(skuEvent.payload).sort()).toEqual([
+        'changed_at',
+        'product_id',
+        'sku',
+        'sku_version',
+      ]);
+      expect(skuEvent.payload).toEqual({
+        product_id: product.product_id,
+        sku: identities[0]!.sku,
+        sku_version: Number(persisted!.catalog_version),
+        changed_at: persisted!.updated_at.toISOString(),
+      });
+      expect(Object.keys(productEvent.payload).sort()).toEqual([
         'changed_at',
         'product_id',
         'product_version',
       ]);
-      expect(events[0]!.payload).toEqual({
+      expect(productEvent.payload).toEqual({
         product_id: product.product_id,
         product_version: Number(persisted!.catalog_version),
         changed_at: persisted!.updated_at.toISOString(),
       });
-      expect(events[0]!.correlation_id).toBe(actor.correlationId);
+      expect(skuEvent.correlation_id).toBe(actor.correlationId);
+      expect(productEvent.correlation_id).toBe(actor.correlationId);
     });
 
     it('serializes last-variant deactivation and preserves independent parent/child reactivation', async () => {

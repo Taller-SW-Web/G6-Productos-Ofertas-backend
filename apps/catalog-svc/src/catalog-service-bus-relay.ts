@@ -1,30 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { CatalogEnvelope } from './catalog-messages.js';
-import {
-  destinationsFor,
-  type CatalogServiceBus,
-} from './catalog-service-bus.js';
-import type { CatalogTransaction, Database } from './database.js';
-
-/** Called in the same transaction as the outbox insert, only by the H5 writer. */
-export async function enqueueCatalogDeliveries(
-  tx: CatalogTransaction,
-  message: CatalogEnvelope,
-) {
-  const values = destinationsFor(message).map(
-    (destination) => sql`(${message.message_id}, ${destination})`,
-  );
-  await tx.execute(sql`
-    INSERT INTO catalog.outbox_delivery (message_id, destination)
-    VALUES ${sql.join(values, sql`, `)}
-    ON CONFLICT (message_id, destination) DO NOTHING
-  `);
-}
+import type { CatalogServiceBus } from './catalog-service-bus.js';
+import type { Database } from './database.js';
 
 export async function relayCatalogDelivery(
   database: Pick<Database, 'transaction'>,
   bus: Pick<CatalogServiceBus, 'publish'>,
+  destination?: string,
 ): Promise<'EMPTY' | 'CONFIRMED' | 'RETRY' | 'LEASE_LOST'> {
   const lease = randomUUID();
   const {
@@ -38,6 +21,7 @@ export async function relayCatalogDelivery(
       SELECT message_id, destination
       FROM catalog.outbox_delivery
       WHERE published_at IS NULL AND available_at <= now()
+        AND (${destination ?? null}::text IS NULL OR destination = ${destination ?? null})
       ORDER BY available_at, created_at, message_id, destination
       LIMIT 1 FOR UPDATE SKIP LOCKED
     ), claimed AS (
@@ -85,6 +69,7 @@ export async function relayCatalogDelivery(
     WHERE message_id = ${delivery.envelope.message_id}
       AND destination = ${delivery.destination}
       AND lease_token = ${lease}
+      AND available_at > now() AND published_at IS NULL
   `),
   );
   if (result.rowCount !== 1) return 'LEASE_LOST';

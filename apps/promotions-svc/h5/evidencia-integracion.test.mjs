@@ -82,6 +82,20 @@ test('exige una firma G5 vinculada a la operación y usa su instante original', 
       ).occurred_at,
       record.occurred_at,
     );
+    const noConsumptionPlan = {
+      ...plan,
+      cancel_mode: 'reject-unbacked-restore',
+    };
+    const noConsumption = createProof({ ...record, coupon_operation_id: null });
+    assert.equal(
+      (
+        await constanciaComercial(
+          { ...noConsumptionPlan, g5_evidence: noConsumption },
+          'ANULACION_CONFIRMADA',
+        )
+      ).coupon_operation_id,
+      null,
+    );
   } finally {
     if (previous === undefined) delete process.env[variable];
     else process.env[variable] = previous;

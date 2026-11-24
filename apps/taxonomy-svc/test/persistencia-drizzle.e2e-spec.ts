@@ -28,6 +28,7 @@ import { DeactivationCheckService } from '../src/domain/deactivation-check.servi
 import { DeactivationIntentService } from '../src/domain/deactivation-intent.service.js';
 import { BrandReactivationService } from '../src/domain/brand-reactivation.service.js';
 import { CategoryReactivationService } from '../src/domain/category-reactivation.service.js';
+import { CategorySeoService } from '../src/domain/category-seo.service.js';
 import { CategoryCreateService } from '../src/domain/category-create.service.js';
 import { CategoryUpdateService } from '../src/domain/category-update.service.js';
 import { CharacteristicValueService } from '../src/domain/characteristic-value.service.js';
@@ -2616,6 +2617,39 @@ describeIntegracion(
         await request(nest.getHttpServer())
           .get(`/api/v1/seo/categoria-seo-${brandId}`)
           .expect(401);
+        const segundoSlug = `categoria-final-${brandId}`;
+        await request(nest.getHttpServer())
+          .patch(`/api/v1/categorias/${categoryCreated}/seo`)
+          .set('Authorization', `Bearer ${token('', true)}`)
+          .send({ slug: segundoSlug })
+          .expect(200);
+        const historialTrasSegundoCambio = await request(nest.getHttpServer())
+          .get(`/api/v1/categorias/${categoryCreated}/seo/historial`)
+          .set('Authorization', `Bearer ${token('', true)}`)
+          .expect(200);
+        expect(historialTrasSegundoCambio.body).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              oldSlug: slugOriginal,
+              newSlug: `categoria-seo-${brandId}`,
+            }),
+            expect.objectContaining({
+              oldSlug: `categoria-seo-${brandId}`,
+              newSlug: segundoSlug,
+            }),
+          ]),
+        );
+        const seoService = nest.get(CategorySeoService);
+        await expect(seoService.publico(segundoSlug)).resolves.toMatchObject({
+          slug: segundoSlug,
+        });
+        for (const slugAnterior of [slugOriginal, `categoria-seo-${brandId}`]) {
+          await expect(seoService.resolver(slugAnterior)).resolves.toEqual({
+            old_slug: slugAnterior,
+            new_slug: segundoSlug,
+            resolution: 'PERMANENT',
+          });
+        }
       } finally {
         vi.unstubAllEnvs();
         if (directorioLogos) {
@@ -2946,6 +2980,43 @@ describeIntegracion(
               code: null,
             });
           });
+        for (const caso of [
+          {
+            status: 'COMPLETED',
+            reason: null,
+            esperado: 'COMPLETED',
+            result: 'CLEAR',
+          },
+          {
+            status: 'REJECTED',
+            reason: 'IN_USE',
+            esperado: 'REJECTED',
+            result: 'IN_USE',
+          },
+          {
+            status: 'FAILED',
+            reason: null,
+            esperado: 'REJECTED',
+            result: null,
+          },
+        ] as const) {
+          await admin.query(
+            'UPDATE taxonomy.master_deactivation_operations SET status = $2, reason = $3 WHERE operation_id = $1',
+            [operationId, caso.status, caso.reason],
+          );
+          await request(appHttp.getHttpServer())
+            .get(`/api/v1/taxonomia/operaciones/${operationId}`)
+            .set('Authorization', 'Bearer gestor')
+            .expect(200)
+            .expect(({ body }) => {
+              expect(body).toMatchObject({
+                operation_id: operationId,
+                status: caso.esperado,
+                result: caso.result,
+                code: null,
+              });
+            });
+        }
       } finally {
         await appHttp.close();
         await admin.query(

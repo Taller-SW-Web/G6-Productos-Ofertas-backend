@@ -1,0 +1,17 @@
+{
+  "Name": "G6 H5 Existing Container Apps Operator",
+  "IsCustom": true,
+  "Description": "Read and update the complete configuration of existing G6 H5 Container Apps at app resource scope; no delete permission. Container Apps write can change app configuration, including identity, ingress, and networking.",
+  "Actions": [
+    "Microsoft.App/containerApps/read",
+    "Microsoft.App/containerApps/write"
+  ],
+  "NotActions": [
+    "Microsoft.App/containerApps/delete"
+  ],
+  "DataActions": [],
+  "NotDataActions": [],
+  "AssignableScopes": [
+    "__AZURE_INTEGRATION_RESOURCE_GROUP_ID__"
+  ]
+}

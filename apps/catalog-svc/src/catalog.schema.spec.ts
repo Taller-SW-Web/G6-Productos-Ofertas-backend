@@ -2,6 +2,8 @@ import { getTableConfig } from 'drizzle-orm/pg-core';
 import { readFileSync } from 'node:fs';
 import {
   activationChecks,
+  bulkRetryAttemptReceipts,
+  bulkRetryCommandReceipts,
   catalogSchema,
   estadoProducto,
   estadoVariante,
@@ -20,23 +22,31 @@ import {
 } from './catalog.schema.js';
 
 describe('catalog Drizzle schema', () => {
-  // This immutable fixture is copied from Docs, not generated from Drizzle.
-  const migration = readFileSync(
-    new URL('../test/fixtures/0001_create_catalog.sql', import.meta.url),
-    'utf8',
-  );
+  // The base fixture is immutable; candidate tables use their own additive DDL.
+  const migration =
+    readFileSync(
+      new URL('../test/fixtures/0001_create_catalog.sql', import.meta.url),
+      'utf8',
+    ) +
+    readFileSync(
+      new URL(
+        '../migrations-candidate/h5/0003_bulk_retry_receipts.sql',
+        import.meta.url,
+      ),
+      'utf8',
+    );
 
   it.each(Object.values(catalogSchema).map(getTableConfig))(
     'matches every column and named constraint in the official $name table',
     (table) => {
       const definition = new RegExp(
-        `CREATE TABLE catalog\\.${table.name} \\(([\\s\\S]*?)\\n\\);`,
+        `CREATE TABLE(?: IF NOT EXISTS)? catalog\\.${table.name} \\(([\\s\\S]*?)\\n\\);`,
       ).exec(migration)?.[1];
       expect(definition).toBeDefined();
       if (!definition) throw new Error('Missing official table definition');
       const columns = [
         ...definition.matchAll(
-          /^    (\w+) (uuid|text|boolean|bigint|integer|jsonb|numeric|timestamptz|catalog\.estado_\w+)([^\n]*)/gm,
+          /^    (\w+) (uuid|text|boolean|bigint|integer|jsonb|numeric|char\(\d+\)|timestamptz|catalog\.estado_\w+)([^\n]*)/gm,
         ),
       ].map(([, name, type, modifiers]) => ({
         name,
@@ -70,9 +80,9 @@ describe('catalog Drizzle schema', () => {
     },
   );
 
-  it('maps exactly the 13 tables in the physical model to catalog', () => {
+  it('maps the physical model and additive retry receipt tables to catalog', () => {
     const tables = Object.values(catalogSchema).map(getTableConfig);
-    expect(tables).toHaveLength(13);
+    expect(tables).toHaveLength(15);
     expect(tables.map((table) => table.name).sort()).toEqual(
       [
         'products',
@@ -88,6 +98,8 @@ describe('catalog Drizzle schema', () => {
         'master_barriers',
         'outbox',
         'inbox',
+        'bulk_retry_command_receipts',
+        'bulk_retry_attempt_receipts',
       ].sort(),
     );
     expect(tables.every((table) => table.schema === 'catalog')).toBe(true);
@@ -234,6 +246,37 @@ describe('catalog Drizzle schema', () => {
         'processed_at',
         'created_at',
       ],
+      bulk_retry_command_receipts: [
+        'command_attempt_id',
+        'message_id',
+        'batch_id',
+        'batch_operation_id',
+        'previous_command_message_id',
+        'payload_hash',
+        'result_message_id',
+        'result_payload',
+        'created_at',
+        'completed_at',
+      ],
+      bulk_retry_attempt_receipts: [
+        'attempt_id',
+        'command_attempt_id',
+        'batch_id',
+        'batch_operation_id',
+        'row_operation_id',
+        'previous_attempt_id',
+        'original_attempt_id',
+        'receipt_message_id',
+        'attempt_number',
+        'payload_hash',
+        'intent_hash',
+        'status',
+        'effect_state',
+        'retriable',
+        'error_code',
+        'created_at',
+        'updated_at',
+      ],
     });
   });
 
@@ -299,5 +342,15 @@ describe('catalog Drizzle schema', () => {
     expect(
       getTableConfig(inbox).uniqueConstraints.map((key) => key.name),
     ).toContain('uq_inbox_message_handler');
+    expect(
+      getTableConfig(bulkRetryCommandReceipts).uniqueConstraints.map(
+        (key) => key.name,
+      ),
+    ).toContain('uq_catalog_bulk_retry_command_message');
+    expect(
+      getTableConfig(bulkRetryAttemptReceipts).indexes.map(
+        (key) => key.config.name,
+      ),
+    ).toContain('uq_catalog_bulk_retry_previous_attempt');
   });
 });

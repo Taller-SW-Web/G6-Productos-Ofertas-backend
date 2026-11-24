@@ -38,11 +38,14 @@ class PricingImportFilter extends PricingHttpFilter {
 function upload(
   file: { buffer: Buffer } | undefined,
   body: Record<string, unknown> | undefined,
+  admission = false,
 ) {
   const allowPartial = body?.allow_partial;
   if (
     !file ||
-    Object.keys(body ?? {}).some((field) => field !== 'allow_partial') ||
+    Object.keys(body ?? {}).some(
+      (field) => !admission || field !== 'allow_partial',
+    ) ||
     (allowPartial !== undefined &&
       allowPartial !== 'true' &&
       allowPartial !== 'false')
@@ -102,7 +105,7 @@ export class PricingImportController {
     );
     if (!key || !/^[!-~]{1,128}$/.test(key) || key.includes(','))
       throw new PricingHttpError(400, 'ARCHIVO_INVALIDO');
-    const request = upload(file, body);
+    const request = upload(file, body, true);
     return this.imports.admit(
       request.file,
       request.allowPartial,

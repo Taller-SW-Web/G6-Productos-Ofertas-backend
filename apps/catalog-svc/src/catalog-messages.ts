@@ -1,5 +1,5 @@
 import { taxonomyUpdate, taxonomyUpdates } from './catalog-taxonomy-update.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { object } from './catalog-mutation.input.js';
 import {
   masterTypes,
@@ -83,7 +83,11 @@ export function assertCatalogPublication(message: CatalogEnvelope): void {
   if (
     !(catalogProduced as readonly string[]).includes(message.name) ||
     message.producer !== 'catalog-svc' ||
-    message.schema_version !== 1 ||
+    (message.schema_version !== 1 &&
+      !(
+        message.schema_version === 2 &&
+        message.name.startsWith('catalog.bulk.upsert.')
+      )) ||
     !UUID.test(message.message_id) ||
     !UUID.test(message.correlation_id) ||
     !object(message.data)
@@ -100,29 +104,53 @@ export function assertCatalogPublication(message: CatalogEnvelope): void {
       data.batch_operation_id !== message.operation_id
     )
       throw new InvalidCatalogMessage();
+    if (
+      message.schema_version === 2 &&
+      data.command_attempt_id !== null &&
+      !UUID.test(String(data.command_attempt_id))
+    )
+      throw new InvalidCatalogMessage();
     if (message.name.endsWith('.completed')) {
       if (
-        Object.keys(data).length !== 3 ||
+        Object.keys(data).length !== (message.schema_version === 2 ? 4 : 3) ||
         !Array.isArray(data.results) ||
         !data.results.length ||
         data.results.some(
           (row) =>
             !object(row) ||
-            Object.keys(row).length !== 6 ||
+            Object.keys(row).length !==
+              (message.schema_version === 2 ? 10 : 6) ||
             !Number.isSafeInteger(row.row_number) ||
             Number(row.row_number) < 2 ||
             !UUID.test(String(row.row_operation_id)) ||
             !(row.product_id === null || typeof row.product_id === 'string') ||
             typeof row.sku_base !== 'string' ||
             !row.sku_base ||
+            (message.schema_version === 2 &&
+              (!UUID.test(String(row.attempt_id)) ||
+                !Number.isSafeInteger(row.attempt_number) ||
+                Number(row.attempt_number) < 1 ||
+                !['NONE', 'APPLIED', 'UNKNOWN'].includes(
+                  String(row.effect_state),
+                ) ||
+                typeof row.retriable !== 'boolean')) ||
             (row.status === 'COMPLETED'
-              ? row.code !== null || typeof row.product_id !== 'string'
-              : row.status !== 'REJECTED' || typeof row.code !== 'string'),
+              ? row.code !== null ||
+                typeof row.product_id !== 'string' ||
+                (message.schema_version === 2 &&
+                  (row.effect_state !== 'APPLIED' || row.retriable))
+              : row.status !== 'REJECTED' ||
+                typeof row.code !== 'string' ||
+                (message.schema_version === 2 &&
+                  (row.effect_state === 'APPLIED' ||
+                    (row.retriable === true &&
+                      (row.effect_state !== 'NONE' ||
+                        row.code !== 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE'))))),
         )
       )
         throw new InvalidCatalogMessage();
     } else if (
-      Object.keys(data).length !== 4 ||
+      Object.keys(data).length !== (message.schema_version === 2 ? 5 : 4) ||
       typeof data.code !== 'string' ||
       !data.code ||
       typeof data.detail !== 'string' ||
@@ -219,12 +247,14 @@ export function envelope(
   correlationId: string,
   operationId: string | null = null,
   causationId: string | null = null,
+  schemaVersion: 1 | 2 = 1,
+  messageId: string = randomUUID(),
 ): CatalogEnvelope {
   if (!(catalogProduced as readonly string[]).includes(name))
     throw new InvalidCatalogMessage();
   const message: CatalogEnvelope = {
-    message_id: randomUUID(),
-    schema_version: 1,
+    message_id: messageId,
+    schema_version: schemaVersion,
     occurred_at: new Date().toISOString(),
     correlation_id: correlationId,
     operation_id: operationId,
@@ -241,17 +271,41 @@ export function envelope(
   assertCatalogPublication(message);
   return message;
 }
+
+/** UUIDv5-shaped deterministic identity: algorithm v1 is SHA-256 over a fixed namespace string. */
+export function initialBulkAttemptId(
+  businessOperationId: string,
+  rowOperationId: string,
+): string {
+  const digest = createHash('sha256')
+    .update(`catalog-bulk-attempt-v1:${businessOperationId}:${rowOperationId}`)
+    .digest()
+    .subarray(0, 16);
+  digest[6] = (digest[6]! & 0x0f) | 0x50;
+  digest[8] = (digest[8]! & 0x3f) | 0x80;
+  const hex = digest.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 export function parseCatalogMessage(value: unknown): CatalogEnvelope {
   if (
     !object(value) ||
     !UUID.test(String(value.message_id)) ||
     !UUID.test(String(value.correlation_id)) ||
+    (value.causation_id !== undefined &&
+      value.causation_id !== null &&
+      typeof value.causation_id !== 'string') ||
+    (value.operation_id !== undefined &&
+      value.operation_id !== null &&
+      (typeof value.operation_id !== 'string' ||
+        !UUID.test(value.operation_id))) ||
     (value.schema_version !== 1 &&
       !(
         (value.name === 'catalog.bulk.upsert.requested' ||
           value.name === 'inventory.sku.initialization.completed' ||
           value.name === 'inventory.sku.initialization.rejected') &&
-        value.schema_version === 2
+        (value.schema_version === 2 ||
+          (value.name === 'catalog.bulk.upsert.requested' &&
+            (value.schema_version === 3 || value.schema_version === 4)))
       )) ||
     typeof value.occurred_at !== 'string' ||
     !Number.isFinite(Date.parse(value.occurred_at)) ||
@@ -282,6 +336,68 @@ export function parseCatalogMessage(value: unknown): CatalogEnvelope {
             : 'event')
   )
     throw new InvalidCatalogMessage();
+  if (
+    value.name === 'catalog.bulk.upsert.requested' &&
+    (value.schema_version === 3 || value.schema_version === 4)
+  ) {
+    const data = value.data;
+    const reference = data.content_ref;
+    if (
+      Object.keys(data).length !== (value.schema_version === 4 ? 6 : 5) ||
+      !UUID.test(String(data.batch_id)) ||
+      !UUID.test(String(data.batch_operation_id)) ||
+      (value.schema_version === 4 &&
+        value.operation_id !== data.batch_operation_id) ||
+      (value.schema_version === 3 &&
+        value.operation_id != null &&
+        value.operation_id !== data.batch_operation_id) ||
+      data.template_version !== 2 ||
+      !['ALTA', 'ACTUALIZACION'].includes(String(data.mode)) ||
+      !object(reference) ||
+      Object.keys(reference).length !== 4 ||
+      !UUID.test(String(reference.content_id)) ||
+      typeof reference.sha256 !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(reference.sha256) ||
+      !Number.isSafeInteger(reference.byte_length) ||
+      Number(reference.byte_length) < 1 ||
+      reference.content_type !== 'application/json'
+    )
+      throw new InvalidCatalogMessage();
+    if (value.schema_version === 4) {
+      const retry = data.retry;
+      if (
+        !object(retry) ||
+        Object.keys(retry).length !== 5 ||
+        retry.protocol !== 'BULK_RETRY_V1' ||
+        !UUID.test(String(retry.command_attempt_id)) ||
+        !Number.isSafeInteger(retry.attempt_number) ||
+        Number(retry.attempt_number) < 2 ||
+        !UUID.test(String(retry.previous_command_message_id)) ||
+        value.causation_id !== retry.previous_command_message_id ||
+        !Array.isArray(retry.rows) ||
+        retry.rows.length === 0 ||
+        retry.rows.some(
+          (row) =>
+            !object(row) ||
+            Object.keys(row).length !== 3 ||
+            !UUID.test(String(row.row_operation_id)) ||
+            !UUID.test(String(row.attempt_id)) ||
+            !UUID.test(String(row.previous_attempt_id)),
+        ) ||
+        new Set(
+          retry.rows.map((row) =>
+            object(row) ? String(row.row_operation_id).toLowerCase() : '',
+          ),
+        ).size !== retry.rows.length ||
+        new Set(
+          retry.rows.map((row) =>
+            object(row) ? String(row.attempt_id).toLowerCase() : '',
+          ),
+        ).size !== retry.rows.length
+      )
+        throw new InvalidCatalogMessage();
+    }
+  }
   if (value.name.startsWith('taxonomy.master.')) {
     assertMasterData(value.data, value.operation_id);
     if (value.data.entity_type === 'PRODUCT_TYPE_CHARACTERISTIC') {
@@ -321,7 +437,8 @@ export function parseCatalogMessage(value: unknown): CatalogEnvelope {
       : 'REJECTED';
     if (
       !UUID.test(String(value.operation_id)) ||
-      !UUID.test(String(value.causation_id)) ||
+      typeof value.causation_id !== 'string' ||
+      value.causation_id.length === 0 ||
       typeof d.product_id !== 'string' ||
       !d.product_id ||
       d.status !== status ||

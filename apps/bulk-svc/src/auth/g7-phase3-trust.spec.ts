@@ -31,6 +31,7 @@ describe('bulk-svc: phase 3 trust lifecycle', () => {
       '.' +
       encode({
         iss: issuer,
+        aud: 'api-productos',
         sub: '11111111-1111-4111-8111-111111111111',
         tipo: 'acceso',
         email: 'test@example.invalid',
@@ -94,7 +95,7 @@ describe('bulk-svc: phase 3 trust lifecycle', () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
-  it('accepts the human G7 profile without inventing aud and rejects other issuers or altered signatures', async () => {
+  it('accepts the human G7 profile with api-productos audience and rejects other issuers or altered signatures', async () => {
     await expect(verify(token())).resolves.toBeDefined();
     await expect(
       verify(

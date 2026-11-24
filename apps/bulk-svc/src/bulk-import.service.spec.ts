@@ -36,6 +36,7 @@ describe('BulkImportService', () => {
       ),
       format: 'CSV',
       templateVersion: 2,
+      ownerSub: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       correlationId: '11111111-1111-4111-8111-111111111111',
       contentRef: 'private://stored',
     });
@@ -87,6 +88,7 @@ describe('BulkImportService', () => {
       ),
       format: 'CSV',
       templateVersion: 2,
+      ownerSub: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       correlationId: '11111111-1111-4111-8111-111111111111',
       contentRef: 'private://stored',
     });
@@ -140,6 +142,7 @@ describe('BulkImportService', () => {
       ),
       format: 'CSV',
       templateVersion: 2,
+      ownerSub: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       correlationId: '11111111-1111-4111-8111-111111111111',
       batchId: '33333333-3333-4333-8333-333333333333',
       contentRef: 'private://stored',
@@ -213,6 +216,7 @@ describe('BulkImportService', () => {
     } as never);
     await service.createImport({
       batchId: '33333333-3333-4333-8333-333333333333',
+      ownerSub: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       correlationId: '11111111-1111-4111-8111-111111111111',
       contentRef: 'private://stored',
       format: 'CSV',
@@ -244,6 +248,7 @@ describe('BulkImportService', () => {
     await expect(
       service.createImport({
         batchId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        ownerSub: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
         correlationId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
         contentRef: 'content://input/1',
         format: 'CSV',
@@ -280,6 +285,7 @@ describe('BulkImportService', () => {
     await expect(
       service.createImport({
         batchId: 'batch',
+        ownerSub: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
         correlationId: 'corr',
         contentRef: 'ref',
         format: 'JSON',

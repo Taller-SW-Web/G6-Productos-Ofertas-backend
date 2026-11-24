@@ -62,6 +62,10 @@ import {
   CATALOG_PRICING_IDENTITY,
 } from './catalog-price-filter.js';
 import { CatalogPricingIdentityProvider } from './catalog-pricing-identity.js';
+import {
+  CatalogBulkContentClient,
+  CatalogBulkContentIdentity,
+} from './catalog-bulk-content.js';
 import { BarcodeRepository } from './barcode.repository.js';
 import { BarcodeService } from './barcode.service.js';
 import { HistoricalRecoveryController } from './historical-recovery.controller.js';
@@ -72,6 +76,7 @@ import {
   readHistoricalRecoveryCapabilities,
 } from './historical-recovery.service.js';
 import { readHistoricalPricingContract } from './historical-pricing.contract.js';
+import { CatalogServiceBusRuntime } from './catalog-service-bus.runtime.js';
 
 @Module({
   imports: [],
@@ -95,6 +100,8 @@ import { readHistoricalPricingContract } from './historical-pricing.contract.js'
     CommercialService,
     CatalogPriceFilter,
     CatalogPricingIdentityProvider,
+    CatalogBulkContentIdentity,
+    CatalogBulkContentClient,
     {
       provide: CATALOG_PRICING_IDENTITY,
       useExisting: CatalogPricingIdentityProvider,
@@ -124,6 +131,7 @@ import { readHistoricalPricingContract } from './historical-pricing.contract.js'
     { provide: CATALOG_TAXONOMY_IDENTITY, useExisting: CatalogBulkIdentity },
     CatalogTelemetry,
     CatalogAmqpRuntime,
+    CatalogServiceBusRuntime,
     {
       provide: CATALOG_AMQP_SETTINGS,
       useFactory: () => ({ connection: readCatalogAmqpConfig() }),

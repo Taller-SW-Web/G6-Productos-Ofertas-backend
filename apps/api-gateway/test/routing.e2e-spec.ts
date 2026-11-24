@@ -31,6 +31,7 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
     body: '{"items":[]}',
     delay: 0,
     location: '',
+    cacheControl: '',
     early: false,
   };
 
@@ -69,6 +70,7 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
         'content-type': reply.type,
         'set-cookie': 'private=secret',
         ...(reply.location ? { location: reply.location } : {}),
+        ...(reply.cacheControl ? { 'cache-control': reply.cacheControl } : {}),
       });
       res.end(reply.body);
     });
@@ -110,12 +112,15 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
   });
   beforeEach(() => {
     calls = [];
+    settings.securityMode = 'PUBLIC_READ_ONLY';
+    settings.g5H5Enabled = false;
     reply = {
       status: 200,
       type: 'application/json',
       body: '{"items":[]}',
       delay: 0,
       location: '',
+      cacheControl: '',
       early: false,
     };
   });
@@ -157,6 +162,68 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('preserves Pricing CSV idempotency and 409 through the multipart proxy', async () => {
+    const path = '/api/v1/precios/importaciones';
+    const token = signed.token({
+      tipo: 'acceso',
+      sub: '11111111-1111-1111-1111-111111111111',
+      roles: ['GESTOR_COMERCIAL'],
+    });
+    const upload = (key?: string) => {
+      const test = request(app.getHttpServer())
+        .post(path)
+        .auth(token, { type: 'bearer' });
+      if (key !== undefined) test.set('Idempotency-Key', key);
+      return test
+        .field('allow_partial', 'false')
+        .attach('archivo', Buffer.from('sku\nSKU-TEST\n'), 'precios.csv');
+    };
+    await request(app.getHttpServer()).post(path).expect(401);
+    await request(app.getHttpServer())
+      .post(path)
+      .auth(
+        signed.token({
+          tipo: 'acceso',
+          sub: '11111111-1111-1111-1111-111111111111',
+          roles: [],
+        }),
+        { type: 'bearer' },
+      )
+      .expect(403);
+    expect(calls).toHaveLength(0);
+    const authorize = vi
+      .spyOn(signed.identity, 'authorize')
+      .mockResolvedValue(undefined);
+    try {
+      await upload().expect(400);
+      await upload('A'.repeat(129)).expect(400);
+      expect(calls).toHaveLength(0);
+      const key = 'Intent-'.padEnd(128, 'x');
+      reply.status = 202;
+      await upload(key).expect(202);
+      expect(calls[0].headers['idempotency-key']).toBe(key);
+      expect(calls[0].body).toContain('SKU-TEST');
+      expect(calls[0].body).toContain('name="allow_partial"');
+      expect(authorize).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          role: 'GESTOR_COMERCIAL',
+          introspection: true,
+        }),
+        `Bearer ${token}`,
+      );
+      reply.status = 409;
+      reply.type = 'application/problem+json';
+      reply.body = '{"code":"IDEMPOTENCY_CONFLICT"}';
+      const conflict = await upload(key)
+        .expect(409)
+        .expect('content-type', /application\/problem\+json/);
+      expect(conflict.body.code).toBe('IDEMPOTENCY_CONFLICT');
+      expect(calls[1].headers['idempotency-key']).toBe(key);
+    } finally {
+      authorize.mockRestore();
+    }
+  });
+
   it.each([
     '/api/v1/productos/administracion',
     '/api/v1/productos/administracion/11111111-1111-4111-8111-111111111111',
@@ -181,6 +248,152 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
       expect(calls).toHaveLength(0);
     },
   );
+
+  it('keeps all five internal contract operations unreachable with valid identities and G5 enabled', async () => {
+    const previous = {
+      securityMode: settings.securityMode,
+      g5H5Enabled: settings.g5H5Enabled,
+    };
+    const serviceToken = signed.token({
+      sub: 'modulo-productos',
+      scope: 'catalogo:leer precios:leer',
+    });
+    const humanToken = signed.token({
+      tipo: 'acceso',
+      sub: '11111111-1111-4111-8111-111111111111',
+      roles: ['GESTOR_COMERCIAL'],
+    });
+    const internalRoutes = [
+      { method: 'get', path: '/api/v1/productos/skus/SKU-1/contexto' },
+      { method: 'post', path: '/api/v1/productos/skus/contexto/lote' },
+      { method: 'post', path: '/api/v1/interno/productos/skus/filtrar' },
+      {
+        method: 'get',
+        path: '/api/v1/interno/inventario/reservas/11111111-1111-4111-8111-111111111111/evidencia-cupon',
+      },
+      {
+        method: 'get',
+        path: '/api/v1/interno/carga-masiva/contenidos/11111111-1111-4111-8111-111111111111',
+      },
+    ] as const;
+
+    try {
+      Object.assign(settings, {
+        securityMode: 'G7_AUTHENTICATED',
+        g5H5Enabled: true,
+      });
+      for (const route of internalRoutes) {
+        for (const token of [undefined, serviceToken, humanToken]) {
+          let call = request(app.getHttpServer())[route.method](route.path);
+          if (token) call = call.set('Authorization', `Bearer ${token}`);
+          await call.expect(404);
+        }
+      }
+      expect(calls).toHaveLength(0);
+    } finally {
+      Object.assign(settings, previous);
+    }
+  });
+
+  it('proxies Inventory H01/H02 only to an authenticated manager', async () => {
+    settings.securityMode = 'G7_AUTHENTICATED';
+    const manager = signed.token({
+      tipo: 'acceso',
+      sub: '11111111-1111-4111-8111-111111111111',
+      roles: ['GESTOR_COMERCIAL'],
+    });
+    const otherUser = signed.token({
+      tipo: 'acceso',
+      sub: '22222222-2222-4222-8222-222222222222',
+      roles: ['VENDEDOR'],
+    });
+    for (const path of [
+      '/api/v1/inventario/alertas',
+      '/api/v1/inventario/ubicaciones',
+    ]) {
+      await request(app.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${manager}`)
+        .expect(200);
+      await request(app.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${otherUser}`)
+        .expect(403);
+    }
+    expect(calls.map(({ url }) => url)).toEqual([
+      '/api/v1/inventario/alertas',
+      '/api/v1/inventario/ubicaciones',
+    ]);
+  });
+
+  it('proxies Bulk correlation reconciliation as an authorized no-store read', async () => {
+    const path =
+      '/api/v1/carga-masiva/productos/importaciones/por-correlacion/22222222-2222-4222-8222-222222222222';
+    const manager = signed.token({
+      tipo: 'acceso',
+      sub: '11111111-1111-4111-8111-111111111111',
+      roles: ['GESTOR_COMERCIAL'],
+    });
+    reply.body = JSON.stringify({
+      batch_id: '33333333-3333-4333-8333-333333333333',
+      correlation_id: '22222222-2222-4222-8222-222222222222',
+      status: 'QUEUED',
+      template_version: 2,
+    });
+    reply.cacheControl = 'public, max-age=3600';
+
+    const result = await request(app.getHttpServer())
+      .get(path)
+      .set('Authorization', `Bearer ${manager}`)
+      .expect(200)
+      .expect('Cache-Control', 'no-store');
+    expect(result.body).toMatchObject({
+      correlation_id: '22222222-2222-4222-8222-222222222222',
+      status: 'QUEUED',
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      method: 'GET',
+      url: path,
+      headers: { authorization: `Bearer ${manager}` },
+      body: '',
+    });
+
+    calls = [];
+    await request(app.getHttpServer())
+      .get(path)
+      .expect(401)
+      .expect('Cache-Control', 'no-store');
+    await request(app.getHttpServer())
+      .get(path)
+      .set('Authorization', `Bearer ${signed.token()}`)
+      .expect(403)
+      .expect('Cache-Control', 'no-store');
+    expect(calls).toHaveLength(0);
+
+    for (const [status, code] of [
+      [400, 'VALIDACION'],
+      [404, 'LOTE_NO_ENCONTRADO'],
+      [503, 'SERVICIO_NO_DISPONIBLE'],
+    ] as const) {
+      calls = [];
+      reply.status = status;
+      reply.type = 'application/problem+json';
+      reply.cacheControl = 'public, max-age=3600';
+      reply.body = JSON.stringify({ code, detail: 'provider-secret-detail' });
+      const failure = await request(app.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${manager}`)
+        .expect(status)
+        .expect('Cache-Control', 'no-store');
+      expect(failure.body.code).toBe(code);
+      expect(JSON.stringify(failure.body)).not.toContain(
+        'provider-secret-detail',
+      );
+      expect(calls).toHaveLength(1);
+    }
+    expect(calls.every((call) => call.method === 'GET')).toBe(true);
+  });
 
   it('forwards the administrative SKU resolver only for a human commercial manager', async () => {
     const path = '/api/v1/productos/administracion/skus/resolver';
@@ -309,7 +522,11 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
         if (header.required)
           send.set(
             header.name,
-            header.name === 'idempotency-key' ? 'isolated-intent-key' : '1',
+            header.name === 'idempotency-key'
+              ? '11111111-1111-4111-8111-111111111111'
+              : header.name === 'x-correlation-id'
+                ? '22222222-2222-4222-8222-222222222222'
+                : '1',
           );
       if (route.requestTypes.includes('application/json'))
         send.set('Content-Type', 'application/json').send({ fixture: true });
@@ -593,6 +810,212 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
         '/api/v1/inventario/disponibilidad/comercial/verificar',
       );
       expect(calls[0].headers['x-correlation-id']).toBe(correlationId);
+    },
+  );
+
+  it.each([
+    [
+      'listarSaldosFisicosAdministracion',
+      'GET',
+      '/api/v1/inventario/administracion/saldos',
+      400,
+      'VALIDACION',
+      'human',
+    ],
+    [
+      'listarSaldosFisicosAdministracion',
+      'GET',
+      '/api/v1/inventario/administracion/saldos',
+      401,
+      'TOKEN_INVALIDO',
+      'human',
+    ],
+    [
+      'listarSaldosFisicosAdministracion',
+      'GET',
+      '/api/v1/inventario/administracion/saldos',
+      403,
+      'SCOPE_INSUFICIENTE',
+      'human',
+    ],
+    [
+      'listarSaldosFisicosAdministracion',
+      'GET',
+      '/api/v1/inventario/administracion/saldos',
+      500,
+      'ERROR_INTERNO',
+      'human',
+    ],
+    [
+      'listarSaldosFisicosAdministracion',
+      'GET',
+      '/api/v1/inventario/administracion/saldos',
+      503,
+      'SERVICIO_NO_DISPONIBLE',
+      'human',
+    ],
+    [
+      'listarTrasladosInventario',
+      'GET',
+      '/api/v1/inventario/traslados',
+      401,
+      'TOKEN_INVALIDO',
+      'human',
+    ],
+    [
+      'listarTrasladosInventario',
+      'GET',
+      '/api/v1/inventario/traslados',
+      403,
+      'SCOPE_INSUFICIENTE',
+      'human',
+    ],
+    [
+      'listarTrasladosInventario',
+      'GET',
+      '/api/v1/inventario/traslados',
+      500,
+      'ERROR_INTERNO',
+      'human',
+    ],
+    [
+      'listarTrasladosInventario',
+      'GET',
+      '/api/v1/inventario/traslados',
+      503,
+      'SERVICIO_NO_DISPONIBLE',
+      'human',
+    ],
+    [
+      'obtenerTrasladoInventario',
+      'GET',
+      '/api/v1/inventario/traslados/11111111-1111-4111-8111-111111111111',
+      401,
+      'TOKEN_INVALIDO',
+      'human',
+    ],
+    [
+      'obtenerTrasladoInventario',
+      'GET',
+      '/api/v1/inventario/traslados/11111111-1111-4111-8111-111111111111',
+      403,
+      'SCOPE_INSUFICIENTE',
+      'human',
+    ],
+    [
+      'obtenerTrasladoInventario',
+      'GET',
+      '/api/v1/inventario/traslados/11111111-1111-4111-8111-111111111111',
+      404,
+      'TRASLADO_NO_ENCONTRADO',
+      'human',
+    ],
+    [
+      'obtenerTrasladoInventario',
+      'GET',
+      '/api/v1/inventario/traslados/11111111-1111-4111-8111-111111111111',
+      500,
+      'ERROR_INTERNO',
+      'human',
+    ],
+    [
+      'obtenerTrasladoInventario',
+      'GET',
+      '/api/v1/inventario/traslados/11111111-1111-4111-8111-111111111111',
+      503,
+      'SERVICIO_NO_DISPONIBLE',
+      'human',
+    ],
+    [
+      'crearComboAdministracion',
+      'POST',
+      '/api/v1/combos/administracion',
+      422,
+      'COMBO_ANIDADO_NO_PERMITIDO',
+      'human',
+    ],
+    [
+      'crearComboAdministracion',
+      'POST',
+      '/api/v1/combos/administracion',
+      422,
+      'COMBO_COMPONENTES_INSUFICIENTES',
+      'human',
+    ],
+    [
+      'crearComboAdministracion',
+      'POST',
+      '/api/v1/combos/administracion',
+      422,
+      'COMBO_COMPONENTE_DUPLICADO',
+      'human',
+    ],
+    [
+      'crearComboAdministracion',
+      'POST',
+      '/api/v1/combos/administracion',
+      422,
+      'COMBO_PRECIO_INVALIDO',
+      'human',
+    ],
+    [
+      'obtenerOperacionCuponH5',
+      'GET',
+      '/api/v1/cupones/operaciones/11111111-1111-4111-8111-111111111111?order_id=ORDER-1',
+      400,
+      'VALIDACION',
+      'service',
+    ],
+    [
+      'obtenerEstadoReservaH5',
+      'GET',
+      '/api/v1/inventario/reservas/11111111-1111-4111-8111-111111111111/estado?order_id=ORDER-1',
+      400,
+      'VALIDACION',
+      'service',
+    ],
+  ] as const)(
+    'preserves declared provider error for %s (%s %s %s)',
+    async (operationId, method, path, status, code, identity) => {
+      if (operationId.endsWith('H5')) {
+        settings.securityMode = 'G7_AUTHENTICATED';
+        settings.g5H5Enabled = true;
+      }
+      reply.status = status;
+      reply.type = 'application/problem+json';
+      reply.body = JSON.stringify({
+        status,
+        code,
+        detail: 'private provider detail',
+      });
+      const token =
+        identity === 'service'
+          ? signed.token({
+              sub: 'modulo-ventas',
+              scope:
+                operationId === 'obtenerOperacionCuponH5'
+                  ? 'cupones:operaciones:leer'
+                  : 'inventario:reservas:estado:leer',
+            })
+          : signed.token({
+              tipo: 'acceso',
+              sub: '11111111-1111-4111-8111-111111111111',
+              roles: ['GESTOR_COMERCIAL'],
+            });
+      const client = request(app.getHttpServer());
+      const send = method === 'POST' ? client.post(path) : client.get(path);
+      send.set('Authorization', `Bearer ${token}`);
+      if (method === 'POST')
+        send
+          .set('Idempotency-Key', 'combo-intent-unique')
+          .set('Content-Type', 'application/json')
+          .send({});
+      const response = await send;
+      expect(response.status, operationId).toBe(status);
+      expect(response.body).toMatchObject({ status, code });
+      expect(response.text).not.toContain('private provider detail');
+      expect(calls).toHaveLength(1);
+      expect(calls[0].method).toBe(method);
     },
   );
 

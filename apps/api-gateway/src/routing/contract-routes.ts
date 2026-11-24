@@ -1,4 +1,4 @@
-// Generated from Docs OpenAPI 0.6.0-rc.5; focused update: obtenerAuditoriaPrecioAdministracion.
+// Generated from Docs OpenAPI 0.7.0-rc.3; focused update: conciliarImportacionGeneralPorCorrelacion.
 import type { ContractRoute } from './contract-route.js';
 export const CONTRACT_ROUTES: readonly ContractRoute[] = [
   {
@@ -11,19 +11,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -68,19 +59,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'catalog-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '201': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '201': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -131,21 +113,17 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer', 'serviceBearer'],
     scope: 'catalogo:leer',
     audience: 'api-productos',
-    clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
-    introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
+    clients: [
+      'modulo-marketplace',
+      'modulo-chatbot',
+      'modulo-retail',
+      'modulo-productos',
     ],
+    introspection: false,
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -190,19 +168,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'catalog-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -259,19 +228,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -311,19 +271,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '201': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '201': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -371,19 +322,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -423,19 +365,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['multipart/form-data'],
     responses: {
-      '201': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '201': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -486,21 +419,17 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer', 'serviceBearer'],
     scope: 'precios:leer',
     audience: 'api-productos',
-    clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
-    introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
+    clients: [
+      'modulo-marketplace',
+      'modulo-chatbot',
+      'modulo-retail',
+      'modulo-productos',
     ],
+    introspection: false,
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -536,21 +465,17 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer', 'serviceBearer'],
     scope: 'precios:leer',
     audience: 'api-productos',
-    clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
-    introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
+    clients: [
+      'modulo-marketplace',
+      'modulo-chatbot',
+      'modulo-retail',
+      'modulo-productos',
     ],
+    introspection: false,
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -596,19 +521,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer'],
     role: 'GESTOR_COMERCIAL',
     introspection: true,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION', 'MOTIVO_CAMBIO_REQUERIDO'],
@@ -666,19 +582,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -718,19 +625,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '201': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '201': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -773,19 +671,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -833,19 +722,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -888,19 +768,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -943,19 +814,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: [],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -995,19 +857,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'combos-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -1065,19 +918,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: ['modulo-ventas', 'modulo-postventa'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -1116,24 +960,12 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     clients: ['modulo-ventas'],
     introspection: false,
     headers: [
-      {
-        name: 'idempotency-key',
-        required: true,
-        minLength: 8,
-        maxLength: 128,
-      },
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
+      { name: 'idempotency-key', required: true, minLength: 1, maxLength: 128 },
+      { name: 'x-correlation-id', required: false },
     ],
     requestTypes: ['application/json'],
     responses: {
-      '202': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '202': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -1182,24 +1014,12 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     clients: ['modulo-ventas'],
     introspection: false,
     headers: [
-      {
-        name: 'idempotency-key',
-        required: true,
-        minLength: 8,
-        maxLength: 128,
-      },
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
+      { name: 'idempotency-key', required: true, minLength: 1, maxLength: 128 },
+      { name: 'x-correlation-id', required: false },
     ],
     requestTypes: ['application/json'],
     responses: {
-      '202': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '202': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -1252,24 +1072,12 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     clients: ['modulo-ventas'],
     introspection: false,
     headers: [
-      {
-        name: 'idempotency-key',
-        required: true,
-        minLength: 8,
-        maxLength: 128,
-      },
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
+      { name: 'idempotency-key', required: true, minLength: 1, maxLength: 128 },
+      { name: 'x-correlation-id', required: false },
     ],
     requestTypes: ['application/json'],
     responses: {
-      '202': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '202': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -1317,19 +1125,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: ['modulo-despacho'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -1347,7 +1146,7 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
       },
       '422': {
         types: ['application/problem+json'],
-        codes: ['SKU_INVALIDO'],
+        codes: ['SKU_INVALIDO', 'DATOS_FISICOS_INCOMPLETOS'],
         headers: [],
       },
       '500': {
@@ -1369,19 +1168,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -1419,11 +1209,7 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     headers: [],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '404': {
         types: ['application/problem+json'],
         codes: ['SLUG_NO_ENCONTRADO'],
@@ -1446,11 +1232,7 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     headers: [],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '404': {
         types: ['application/problem+json'],
         codes: ['SLUG_NO_ENCONTRADO'],
@@ -1470,19 +1252,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'catalog-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -1537,19 +1310,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'catalog-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -1594,19 +1358,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'catalog-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -1664,19 +1419,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -1716,19 +1462,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'catalog-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -1768,19 +1505,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'catalog-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '202': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '202': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -1825,19 +1553,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'catalog-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -1877,19 +1596,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'catalog-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '201': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '201': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -1948,19 +1658,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'catalog-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -2000,19 +1701,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'catalog-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -2062,19 +1754,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'catalog-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -2124,19 +1807,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'catalog-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -2176,19 +1850,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'catalog-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -2238,19 +1903,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'catalog-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '202': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '202': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -2295,19 +1951,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'combos-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -2342,19 +1989,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'combos-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '201': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '201': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -2404,19 +2042,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'combos-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -2454,19 +2083,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: [],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -2501,19 +2121,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -2548,19 +2159,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '201': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '201': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -2605,19 +2207,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -2652,19 +2245,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -2714,19 +2298,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -2761,19 +2336,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -2808,19 +2374,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -2855,19 +2412,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -2912,19 +2460,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -2959,19 +2498,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -3006,19 +2536,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -3053,19 +2574,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '201': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '201': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -3108,19 +2620,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -3155,19 +2658,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -3215,19 +2709,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -3262,19 +2747,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -3307,21 +2783,15 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     path: '/api/v1/categorias/arbol',
     operationId: 'obtenerArbolCategoriasAdmin',
     service: 'taxonomy-svc',
-    security: ['userBearer'],
+    security: ['userBearer', 'serviceBearer'],
+    scope: 'catalogo:leer',
+    audience: 'api-productos',
+    clients: ['modulo-productos'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -3349,24 +2819,15 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     path: '/api/v1/categorias/{categoriaId}',
     operationId: 'obtenerCategoriaAdmin',
     service: 'taxonomy-svc',
-    clients: ['modulo-productos'],
-    audience: 'api-productos',
-    scope: 'catalogo:leer',
     security: ['userBearer', 'serviceBearer'],
+    scope: 'catalogo:leer',
+    audience: 'api-productos',
+    clients: ['modulo-productos'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -3401,19 +2862,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -3467,19 +2919,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '202': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '202': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -3522,19 +2965,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -3574,19 +3008,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -3621,19 +3046,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '201': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '201': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -3673,19 +3089,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -3720,19 +3127,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -3782,19 +3180,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -3829,19 +3218,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '201': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '201': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -3886,19 +3266,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -3938,19 +3309,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '202': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '202': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -3990,19 +3352,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -4037,19 +3390,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -4089,19 +3433,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -4139,21 +3474,15 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     path: '/api/v1/tipos-producto',
     operationId: 'listarTiposProducto',
     service: 'taxonomy-svc',
-    security: ['userBearer'],
+    security: ['userBearer', 'serviceBearer'],
+    scope: 'catalogo:leer',
+    audience: 'api-productos',
+    clients: ['modulo-productos'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -4188,19 +3517,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '201': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '201': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -4233,21 +3553,15 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     path: '/api/v1/tipos-producto/{tipoProductoId}',
     operationId: 'obtenerTipoProducto',
     service: 'taxonomy-svc',
-    security: ['userBearer'],
+    security: ['userBearer', 'serviceBearer'],
+    scope: 'catalogo:leer',
+    audience: 'api-productos',
+    clients: ['modulo-productos'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -4282,19 +3596,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '202': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '202': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -4334,19 +3639,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -4384,21 +3680,15 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     path: '/api/v1/tipos-producto/{tipoProductoId}/caracteristicas',
     operationId: 'obtenerEsquemaTipoProducto',
     service: 'taxonomy-svc',
-    security: ['userBearer'],
+    security: ['userBearer', 'serviceBearer'],
+    scope: 'catalogo:leer',
+    audience: 'api-productos',
+    clients: ['modulo-productos'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -4433,19 +3723,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '201': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '201': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -4495,19 +3776,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -4547,19 +3819,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '202': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '202': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -4601,21 +3864,15 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     path: '/api/v1/marcas/{marcaId}',
     operationId: 'obtenerMarcaAdmin',
     service: 'taxonomy-svc',
-    security: ['userBearer'],
+    security: ['userBearer', 'serviceBearer'],
+    scope: 'catalogo:leer',
+    audience: 'api-productos',
+    clients: ['modulo-productos'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -4650,19 +3907,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['multipart/form-data'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -4717,19 +3965,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '202': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '202': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -4772,19 +4011,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -4819,19 +4049,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -4866,19 +4087,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -4913,19 +4125,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -4975,19 +4178,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'taxonomy-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -5022,19 +4216,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'pricing-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -5070,19 +4255,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer'],
     role: 'GESTOR_COMERCIAL',
     introspection: true,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '201': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '201': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION', 'MOTIVO_CAMBIO_REQUERIDO'],
@@ -5132,19 +4308,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'pricing-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['multipart/form-data'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['ARCHIVO_INVALIDO'],
@@ -5191,24 +4358,12 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     role: 'GESTOR_COMERCIAL',
     introspection: true,
     headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-      {
-        name: 'idempotency-key',
-        required: true,
-        minLength: 1,
-        maxLength: 128,
-      },
+      { name: 'x-correlation-id', required: false },
+      { name: 'idempotency-key', required: true, minLength: 1, maxLength: 128 },
     ],
     requestTypes: ['multipart/form-data'],
     responses: {
-      '202': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '202': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['ARCHIVO_INVALIDO', 'VALIDACION'],
@@ -5258,19 +4413,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'pricing-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -5305,19 +4451,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'pricing-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['text/csv'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['text/csv'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -5352,19 +4489,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'price-audit-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -5399,19 +4527,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'price-audit-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -5446,19 +4565,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'price-audit-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '202': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '202': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -5498,19 +4608,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'price-audit-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -5545,19 +4646,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'price-audit-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['text/csv', 'application/pdf'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['text/csv', 'application/pdf'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -5592,12 +4684,7 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'bulk-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
       '200': {
@@ -5642,19 +4729,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'bulk-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['multipart/form-data'],
     responses: {
-      '202': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '202': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['ARCHIVO_INVALIDO'],
@@ -5699,19 +4777,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'bulk-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -5746,19 +4815,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'bulk-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['text/csv'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['text/csv'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -5793,17 +4853,13 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'bulk-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: true }],
     requestTypes: ['application/json'],
     responses: {
-      '202': {
-        types: ['application/json'],
-        codes: [],
+      '202': { types: ['application/json'], codes: [], headers: [] },
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
         headers: [],
       },
       '401': {
@@ -5823,7 +4879,11 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
       },
       '409': {
         types: ['application/problem+json'],
-        codes: ['IDEMPOTENCY_CONFLICT'],
+        codes: [
+          'IDEMPOTENCY_CONFLICT',
+          'RETRY_PROTOCOL_NOT_APPROVED',
+          'RETRY_NOT_ELIGIBLE',
+        ],
         headers: [],
       },
       '500': {
@@ -5845,19 +4905,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'bulk-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '202': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '202': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -5892,19 +4943,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'bulk-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -5939,12 +4981,7 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'bulk-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
       '200': {
@@ -5989,19 +5026,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'inventory-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -6031,19 +5059,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'inventory-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -6078,19 +5097,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'inventory-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -6130,19 +5140,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'inventory-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '204': {
-        types: [],
-        codes: [],
-        headers: [],
-      },
+      '204': { types: [], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -6177,19 +5178,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'inventory-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -6222,21 +5214,15 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     path: '/api/v1/categorias/administracion',
     operationId: 'listarCategoriasAdmin',
     service: 'taxonomy-svc',
-    security: ['userBearer'],
+    security: ['userBearer', 'serviceBearer'],
+    scope: 'catalogo:leer',
+    audience: 'api-productos',
+    clients: ['modulo-productos'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -6264,21 +5250,15 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     path: '/api/v1/marcas/administracion',
     operationId: 'listarMarcasAdmin',
     service: 'taxonomy-svc',
-    security: ['userBearer'],
+    security: ['userBearer', 'serviceBearer'],
+    scope: 'catalogo:leer',
+    audience: 'api-productos',
+    clients: ['modulo-productos'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -6308,19 +5288,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'promotions-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -6350,19 +5321,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'pricing-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -6398,19 +5360,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer'],
     role: 'GESTOR_COMERCIAL',
     introspection: true,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION', 'MOTIVO_CAMBIO_REQUERIDO'],
@@ -6465,19 +5418,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     service: 'pricing-svc',
     security: ['userBearer'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -6513,19 +5457,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer'],
     role: 'GESTOR_COMERCIAL',
     introspection: true,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '201': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '201': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION', 'MOTIVO_CAMBIO_REQUERIDO'],
@@ -6579,24 +5514,12 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     clients: ['modulo-retail'],
     introspection: false,
     headers: [
-      {
-        name: 'idempotency-key',
-        required: true,
-        minLength: 8,
-        maxLength: 128,
-      },
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
+      { name: 'idempotency-key', required: true, minLength: 1, maxLength: 128 },
+      { name: 'x-correlation-id', required: false },
     ],
     requestTypes: ['application/json'],
     responses: {
-      '201': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '201': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -6650,24 +5573,12 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     clients: ['modulo-retail'],
     introspection: false,
     headers: [
-      {
-        name: 'idempotency-key',
-        required: true,
-        minLength: 8,
-        maxLength: 128,
-      },
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
+      { name: 'idempotency-key', required: true, minLength: 1, maxLength: 128 },
+      { name: 'x-correlation-id', required: false },
     ],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -6721,24 +5632,12 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     clients: ['modulo-ventas', 'modulo-postventa'],
     introspection: false,
     headers: [
-      {
-        name: 'idempotency-key',
-        required: true,
-        minLength: 8,
-        maxLength: 128,
-      },
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
+      { name: 'idempotency-key', required: true, minLength: 1, maxLength: 128 },
+      { name: 'x-correlation-id', required: false },
     ],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -6792,24 +5691,12 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     clients: ['modulo-ventas'],
     introspection: false,
     headers: [
-      {
-        name: 'idempotency-key',
-        required: true,
-        minLength: 8,
-        maxLength: 128,
-      },
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
+      { name: 'idempotency-key', required: true, minLength: 1, maxLength: 128 },
+      { name: 'x-correlation-id', required: false },
     ],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -6862,11 +5749,7 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     headers: [],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -6899,11 +5782,7 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     headers: [],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -6939,24 +5818,12 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer'],
     introspection: false,
     headers: [
-      {
-        name: 'idempotency-key',
-        required: true,
-        minLength: 8,
-        maxLength: 128,
-      },
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
+      { name: 'idempotency-key', required: true, minLength: 1, maxLength: 128 },
+      { name: 'x-correlation-id', required: false },
     ],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
@@ -7007,19 +5874,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: ['modulo-retail'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -7072,19 +5930,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
       'modulo-productos',
     ],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -7127,32 +5976,23 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: ['modulo-ventas'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
-        codes: [],
+        codes: ['VALIDACION'],
         headers: [],
       },
       '401': {
         types: ['application/problem+json'],
-        codes: [],
+        codes: ['TOKEN_INVALIDO'],
         headers: [],
       },
       '403': {
         types: ['application/problem+json'],
-        codes: [],
+        codes: ['SCOPE_INSUFICIENTE'],
         headers: [],
       },
       '404': {
@@ -7167,12 +6007,12 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
       },
       '500': {
         types: ['application/problem+json'],
-        codes: [],
+        codes: ['ERROR_INTERNO'],
         headers: [],
       },
       '503': {
         types: ['application/problem+json'],
-        codes: [],
+        codes: ['SERVICIO_NO_DISPONIBLE'],
         headers: [],
       },
     },
@@ -7187,19 +6027,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     audience: 'api-productos',
     clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -7245,43 +6076,34 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer'],
     role: 'GESTOR_COMERCIAL',
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: ['x-correlation-id'],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
-        headers: ['x-correlation-id'],
+        headers: [],
       },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
-        headers: ['x-correlation-id'],
+        headers: [],
       },
       '403': {
         types: ['application/problem+json'],
         codes: ['SCOPE_INSUFICIENTE'],
-        headers: ['x-correlation-id'],
+        headers: [],
       },
       '500': {
         types: ['application/problem+json'],
         codes: ['ERROR_INTERNO'],
-        headers: ['x-correlation-id'],
+        headers: [],
       },
       '503': {
         types: ['application/problem+json'],
         codes: ['SERVICIO_NO_DISPONIBLE'],
-        headers: ['x-correlation-id'],
+        headers: [],
       },
     },
   },
@@ -7293,48 +6115,39 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer'],
     role: 'GESTOR_COMERCIAL',
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: ['x-correlation-id'],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
-        headers: ['x-correlation-id'],
+        headers: [],
       },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
-        headers: ['x-correlation-id'],
+        headers: [],
       },
       '403': {
         types: ['application/problem+json'],
         codes: ['SCOPE_INSUFICIENTE'],
-        headers: ['x-correlation-id'],
+        headers: [],
       },
       '404': {
         types: ['application/problem+json'],
         codes: ['PRODUCTO_NO_ENCONTRADO'],
-        headers: ['x-correlation-id'],
+        headers: [],
       },
       '500': {
         types: ['application/problem+json'],
         codes: ['ERROR_INTERNO'],
-        headers: ['x-correlation-id'],
+        headers: [],
       },
       '503': {
         types: ['application/problem+json'],
         codes: ['SERVICIO_NO_DISPONIBLE'],
-        headers: ['x-correlation-id'],
+        headers: [],
       },
     },
   },
@@ -7452,43 +6265,39 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer'],
     role: 'GESTOR_COMERCIAL',
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: ['x-correlation-id'],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
-        headers: ['x-correlation-id'],
+        headers: [],
       },
       '401': {
         types: ['application/problem+json'],
         codes: ['TOKEN_INVALIDO'],
-        headers: ['x-correlation-id'],
+        headers: [],
       },
       '403': {
         types: ['application/problem+json'],
         codes: ['SCOPE_INSUFICIENTE'],
-        headers: ['x-correlation-id'],
+        headers: [],
+      },
+      '429': {
+        types: ['application/problem+json'],
+        codes: ['RATE_LIMIT_EXCEDIDO'],
+        headers: ['retry-after'],
       },
       '500': {
         types: ['application/problem+json'],
         codes: ['ERROR_INTERNO'],
-        headers: ['x-correlation-id'],
+        headers: [],
       },
       '503': {
         types: ['application/problem+json'],
         codes: ['SERVICIO_NO_DISPONIBLE'],
-        headers: ['x-correlation-id'],
+        headers: [],
       },
     },
   },
@@ -7500,19 +6309,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer'],
     role: 'GESTOR_COMERCIAL',
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -7548,19 +6348,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer'],
     role: 'GESTOR_COMERCIAL',
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
-      '200': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '200': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -7602,24 +6393,12 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     role: 'GESTOR_COMERCIAL',
     introspection: false,
     headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-      {
-        name: 'idempotency-key',
-        required: true,
-        minLength: 1,
-        maxLength: 128,
-      },
+      { name: 'idempotency-key', required: true, minLength: 1, maxLength: 128 },
+      { name: 'x-correlation-id', required: false },
     ],
     requestTypes: ['application/json'],
     responses: {
-      '201': {
-        types: ['application/json'],
-        codes: [],
-        headers: [],
-      },
+      '201': { types: ['application/json'], codes: [], headers: [] },
       '400': {
         types: ['application/problem+json'],
         codes: ['VALIDACION'],
@@ -7675,18 +6454,46 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer'],
     role: 'GESTOR_COMERCIAL',
     introspection: false,
-    headers: [
-      {
-        name: 'x-correlation-id',
-        required: false,
-      },
-    ],
+    headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: ['application/json'],
+    responses: {
+      '200': { types: ['application/json'], codes: [], headers: [] },
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
+      '401': {
+        types: ['application/problem+json'],
+        codes: ['TOKEN_INVALIDO'],
+        headers: [],
+      },
+      '403': {
+        types: ['application/problem+json'],
+        codes: ['SCOPE_INSUFICIENTE'],
+        headers: [],
+      },
+      '503': {
+        types: ['application/problem+json'],
+        codes: ['SERVICIO_NO_DISPONIBLE'],
+        headers: [],
+      },
+    },
+  },
+  {
+    method: 'GET',
+    path: '/api/v1/carga-masiva/productos/importaciones/por-correlacion/{correlationId}',
+    operationId: 'conciliarImportacionGeneralPorCorrelacion',
+    service: 'bulk-svc',
+    security: ['userBearer'],
+    introspection: false,
+    headers: [{ name: 'x-correlation-id', required: false }],
+    requestTypes: [],
     responses: {
       '200': {
         types: ['application/json'],
         codes: [],
-        headers: [],
+        headers: ['cache-control'],
       },
       '400': {
         types: ['application/problem+json'],
@@ -7701,6 +6508,99 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
       '403': {
         types: ['application/problem+json'],
         codes: ['SCOPE_INSUFICIENTE'],
+        headers: [],
+      },
+      '404': {
+        types: ['application/problem+json'],
+        codes: ['LOTE_NO_ENCONTRADO'],
+        headers: [],
+      },
+      '503': {
+        types: ['application/problem+json'],
+        codes: ['SERVICIO_NO_DISPONIBLE'],
+        headers: [],
+      },
+    },
+  },
+  {
+    method: 'GET',
+    path: '/api/v1/inventario/alertas',
+    operationId: 'listarAlertasOperativasInventario',
+    service: 'inventory-svc',
+    security: ['userBearer'],
+    role: 'GESTOR_COMERCIAL',
+    introspection: false,
+    headers: [{ name: 'x-correlation-id', required: false }],
+    requestTypes: [],
+    responses: {
+      '200': { types: ['application/json'], codes: [], headers: [] },
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
+      '401': {
+        types: ['application/problem+json'],
+        codes: ['TOKEN_INVALIDO'],
+        headers: [],
+      },
+      '403': {
+        types: ['application/problem+json'],
+        codes: ['SCOPE_INSUFICIENTE'],
+        headers: [],
+      },
+      '429': {
+        types: ['application/problem+json'],
+        codes: ['RATE_LIMIT_EXCEDIDO'],
+        headers: ['retry-after'],
+      },
+      '500': {
+        types: ['application/problem+json'],
+        codes: ['ERROR_INTERNO'],
+        headers: [],
+      },
+      '503': {
+        types: ['application/problem+json'],
+        codes: ['SERVICIO_NO_DISPONIBLE'],
+        headers: [],
+      },
+    },
+  },
+  {
+    method: 'GET',
+    path: '/api/v1/inventario/ubicaciones',
+    operationId: 'listarUbicacionesInventario',
+    service: 'inventory-svc',
+    security: ['userBearer'],
+    role: 'GESTOR_COMERCIAL',
+    introspection: false,
+    headers: [{ name: 'x-correlation-id', required: false }],
+    requestTypes: [],
+    responses: {
+      '200': { types: ['application/json'], codes: [], headers: [] },
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
+      '401': {
+        types: ['application/problem+json'],
+        codes: ['TOKEN_INVALIDO'],
+        headers: [],
+      },
+      '403': {
+        types: ['application/problem+json'],
+        codes: ['SCOPE_INSUFICIENTE'],
+        headers: [],
+      },
+      '429': {
+        types: ['application/problem+json'],
+        codes: ['RATE_LIMIT_EXCEDIDO'],
+        headers: ['retry-after'],
+      },
+      '500': {
+        types: ['application/problem+json'],
+        codes: ['ERROR_INTERNO'],
         headers: [],
       },
       '503': {

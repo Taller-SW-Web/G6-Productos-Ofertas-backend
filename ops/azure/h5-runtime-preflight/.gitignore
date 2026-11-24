@@ -1,0 +1,5 @@
+# Only this preflight's private runtime parameters belong outside Git.
+*.private.json
+*.private.psv
+.env*
+evidence-private/

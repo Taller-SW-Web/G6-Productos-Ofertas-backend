@@ -6,9 +6,10 @@ export interface CatalogServiceCredentials {
 export function readCatalogServiceCredentials(
   env: Record<string, string | undefined>,
   issuer?: string,
+  prefix = 'CATALOG_SERVICE',
 ) {
-  const tokenUrl = env.CATALOG_SERVICE_TOKEN_URL,
-    clientSecret = env.CATALOG_SERVICE_CLIENT_SECRET;
+  const tokenUrl = env[`${prefix}_TOKEN_URL`],
+    clientSecret = env[`${prefix}_CLIENT_SECRET`];
   if (tokenUrl === undefined && clientSecret === undefined) return undefined;
   try {
     if (!tokenUrl || !clientSecret?.trim() || !issuer) throw new Error();
@@ -31,7 +32,7 @@ export function readCatalogServiceCredentials(
     return Object.freeze({ tokenUrl: url.href, clientSecret });
   } catch {
     throw new Error(
-      'CATALOG_SERVICE_TOKEN_URL y CATALOG_SERVICE_CLIENT_SECRET deben configurarse juntos con el emisor autorizado.',
+      `${prefix}_TOKEN_URL y ${prefix}_CLIENT_SECRET deben configurarse juntos con el emisor autorizado.`,
     );
   }
 }

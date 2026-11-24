@@ -33,6 +33,7 @@ export async function consumeMasterMessage(
   database: Database,
   message: CatalogEnvelope,
   telemetry: CatalogTelemetry,
+  replyViaServiceBus = false,
 ) {
   message = parseCatalogMessage(message);
   assertMasterData(message.data, message.operation_id);
@@ -153,7 +154,11 @@ export async function consumeMasterMessage(
             source_version: BigInt(data.version),
             payload: { request: message, result: response.data.result },
           });
-          await tx.insert(outbox).values({
+          if (replyViaServiceBus)
+            await tx.execute(
+              sql`SELECT set_config('g6.catalog_taxonomy_reply', 'AZURE_SERVICE_BUS', true)`,
+            );
+          const publication = tx.insert(outbox).values({
             message_id: response.message_id,
             event_name: response.name,
             kind: response.kind,
@@ -164,6 +169,15 @@ export async function consumeMasterMessage(
             occurred_at: new Date(response.occurred_at),
             payload: response.data,
           });
+          if (replyViaServiceBus) {
+            const [stored] = await publication.returning({
+              transport: sql<string>`delivery_transport`,
+            });
+            if (stored?.transport !== 'AZURE_SERVICE_BUS')
+              throw new Error('CATALOG_H5_REPLY_TRANSPORT_NOT_PERSISTED');
+          } else {
+            await publication;
+          }
         }
         result = 'APPLIED';
       }

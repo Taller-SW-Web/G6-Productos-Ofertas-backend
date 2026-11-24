@@ -164,15 +164,16 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
           },
         ],
       });
+      const withBom = await post(
+        base + '/prevalidar',
+        Buffer.from('\uFEFF' + file.toString('utf8').replaceAll('\r\n', '\n')),
+      ).expect(200);
+      expect(withBom.body).toEqual(preview.body);
       for (const policy of [false, true]) {
-        const result = await post(
-          base + '/prevalidar',
-          Buffer.from(
-            '\uFEFF' + file.toString('utf8').replaceAll('\r\n', '\n'),
-          ),
-          policy,
-        ).expect(200);
-        expect(result.body).toEqual(preview.body);
+        const rejected = await post(base + '/prevalidar', file, policy).expect(
+          400,
+        );
+        expect(rejected.body.code).toBe('ARCHIVO_INVALIDO');
       }
       await post(base + '/prevalidar', Buffer.from('otra,cabecera\n')).expect(
         422,

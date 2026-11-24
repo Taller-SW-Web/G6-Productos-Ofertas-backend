@@ -1,0 +1,15 @@
+{
+  "Name": "G6 H5 Container Apps Environment Reader",
+  "IsCustom": true,
+  "Description": "Read the G6 H5 resource group and Managed Environments; no write permissions.",
+  "Actions": [
+    "Microsoft.App/managedEnvironments/read",
+    "Microsoft.Resources/subscriptions/resourceGroups/read"
+  ],
+  "NotActions": [],
+  "DataActions": [],
+  "NotDataActions": [],
+  "AssignableScopes": [
+    "__AZURE_INTEGRATION_RESOURCE_GROUP_ID__"
+  ]
+}

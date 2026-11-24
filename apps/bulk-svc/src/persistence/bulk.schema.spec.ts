@@ -1,12 +1,15 @@
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import {
   batchJobs,
+  batchResumeRequests,
   batchRows,
+  domainAttempts,
   exportJobs,
   fileManifests,
   inbox,
   outbox,
   rowDomainSteps,
+  retryCommands,
 } from './bulk.schema.js';
 
 describe('bulk Drizzle schema', () => {
@@ -114,6 +117,8 @@ describe('bulk Drizzle schema', () => {
       steps.columns.find((column) => column.name === 'status')?.getSQLType(),
     ).toBe('step_status');
     expect(jobs.indexes.map((index) => index.config.name)).toEqual([
+      'uq_batch_jobs_owner_correlation',
+      'ix_batch_jobs_owner_created_at',
       'ix_batch_jobs_input_file_id',
       'ix_batch_jobs_status_created_at',
       'ix_batch_jobs_reconciliation',
@@ -124,5 +129,42 @@ describe('bulk Drizzle schema', () => {
       'ix_batch_rows_failed_domain',
     ]);
     expect(getTableConfig(exportJobs).foreignKeys).toHaveLength(1);
+    expect(
+      getTableConfig(exportJobs).indexes.map((index) => index.config.name),
+    ).toContain('ix_export_jobs_owner_created_at');
+  });
+
+  it('declares retry receipts with distinct request, command, and row-attempt identities', () => {
+    expect(
+      getTableConfig(batchResumeRequests).columns.map((column) => column.name),
+    ).toContain('intent_hash');
+    expect(
+      getTableConfig(batchResumeRequests).uniqueConstraints.map((item) =>
+        item.getName(),
+      ),
+    ).toContain('uq_batch_resume_requests_batch_correlation');
+    expect(
+      getTableConfig(retryCommands).primaryKeys[0]?.columns.map(
+        (column) => column.name,
+      ),
+    ).toEqual(['command_attempt_id']);
+    expect(
+      getTableConfig(retryCommands).uniqueConstraints.map((item) =>
+        item.getName(),
+      ),
+    ).toContain('uq_retry_commands_request_family');
+    expect(
+      getTableConfig(domainAttempts).primaryKeys[0]?.columns.map(
+        (column) => column.name,
+      ),
+    ).toEqual(['attempt_id']);
+    expect(
+      getTableConfig(domainAttempts).indexes.map((item) => item.config.name),
+    ).toContain('uq_domain_attempts_previous_attempt');
+    expect(
+      getTableConfig(domainAttempts).uniqueConstraints.map((item) =>
+        item.getName(),
+      ),
+    ).toContain('uq_domain_attempts_row_domain_number');
   });
 });

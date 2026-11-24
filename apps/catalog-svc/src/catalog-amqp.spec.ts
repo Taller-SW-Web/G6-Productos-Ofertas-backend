@@ -266,5 +266,11 @@ describe('Confirmed catalog publisher (transport fixture, not live broker eviden
         }),
       }),
     ).toMatchObject({ user: 'catalog' });
+    expect(() =>
+      readCatalogAmqpConfig({
+        MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
+        CATALOG_AMQP_ENABLED: 'true',
+      }),
+    ).toThrow('no pueden activarse juntos');
   });
 });

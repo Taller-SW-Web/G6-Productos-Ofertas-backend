@@ -98,6 +98,54 @@ it('canonicalizes object key order without conflating array order or opaque SKU 
   expect(canonicalBulk(['0', '00'])).not.toBe(canonicalBulk(['00', '0']));
 });
 
+it('validates V3 claim-check framing with optional envelope operation and causation IDs', () => {
+  const operation = randomUUID();
+  const contentRef = {
+    content_id: randomUUID(),
+    sha256: 'b'.repeat(64),
+    byte_length: 108,
+    content_type: 'application/json',
+  };
+  const message: Record<string, unknown> = {
+    message_id: randomUUID(),
+    schema_version: 3,
+    occurred_at: new Date().toISOString(),
+    correlation_id: randomUUID(),
+    producer: 'bulk-svc',
+    kind: 'command',
+    name: 'catalog.bulk.upsert.requested',
+    data: {
+      batch_id: randomUUID(),
+      batch_operation_id: operation,
+      template_version: 2,
+      mode: 'ALTA',
+      content_ref: contentRef,
+    },
+  };
+  expect(parseCatalogMessage(message)).toBe(message);
+  expect(
+    parseCatalogMessage({ ...message, causation_id: null, operation_id: null }),
+  ).toBeTruthy();
+  expect(() => parseCatalogMessage({ ...message, causation_id: 42 })).toThrow(
+    InvalidCatalogMessage,
+  );
+  expect(() =>
+    parseCatalogMessage({
+      ...message,
+      operation_id: 'not-a-uuid',
+    }),
+  ).toThrow(InvalidCatalogMessage);
+  expect(() =>
+    parseCatalogMessage({
+      ...message,
+      data: {
+        ...(message.data as Record<string, unknown>),
+        content_ref: { ...contentRef, sha256: 'not-a-digest' },
+      },
+    }),
+  ).toThrow(InvalidCatalogMessage);
+});
+
 describe('Bulk command version compatibility', () => {
   it.each([1, 2])(
     'accepts only the requested command at version %s without changing ALTA',

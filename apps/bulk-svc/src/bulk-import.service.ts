@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { Optional } from '@nestjs/common';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   buildCatalogBulkCommands,
   stableUuid,
@@ -23,15 +24,20 @@ import {
   BulkPersistenceRepository,
   type DomainResultInput,
 } from './persistence/bulk.repository.js';
+import { BulkStorageService } from './storage/bulk-storage.service.js';
 
 @Injectable()
 export class BulkImportService {
-  constructor(private readonly repository: BulkPersistenceRepository) {}
+  constructor(
+    private readonly repository: BulkPersistenceRepository,
+    @Optional() private readonly storage?: BulkStorageService,
+  ) {}
 
   async receiveImport(input: {
     bytes: Buffer;
     format: 'CSV' | 'XLSX';
     templateVersion: number;
+    ownerSub: string;
     correlationId: string;
     contentRef: string;
     batchId?: string;
@@ -77,29 +83,57 @@ export class BulkImportService {
       contentRef: input.contentRef,
       format: input.format,
       templateVersion: parsed.templateVersion,
+      ownerSub: input.ownerSub,
       rows,
       intentRows: parsed.rows,
-      catalogCommandVersion: commandV2 ? 2 : 1,
+      catalogCommandVersion: catalogV3EmissionEnabled() ? 3 : commandV2 ? 2 : 1,
     });
     return { ...result, parsed };
   }
 
-  async getSnapshot(batchId: string) {
-    const snapshot = await this.repository.loadBatchSnapshot(batchId);
+  async getSnapshot(batchId: string, ownerSub: string) {
+    const snapshot = await this.repository.loadBatchSnapshot(batchId, ownerSub);
     if (!snapshot)
       throw new BulkDomainError('BATCH_NOT_FOUND', 'El lote no existe.');
     return snapshot;
   }
 
+  async getRetryEligibility(batchId: string, ownerSub: string) {
+    try {
+      return await this.repository.getRetryEligibility(batchId, ownerSub);
+    } catch (error) {
+      if (
+        error instanceof BulkPersistenceError &&
+        error.code === 'FOREIGN_KEY_VIOLATION'
+      )
+        throw new BulkDomainError('BATCH_NOT_FOUND', 'El lote no existe.', {
+          cause: error,
+        });
+      throw mapBulkPersistenceError(error);
+    }
+  }
+
+  async findByOwnerAndCorrelation(ownerSub: string, correlationId: string) {
+    try {
+      return await this.repository.findBatchByOwnerAndCorrelation(
+        ownerSub,
+        correlationId,
+      );
+    } catch (error) {
+      throw mapBulkPersistenceError(error);
+    }
+  }
+
   async createImport(input: {
     batchId: string;
+    ownerSub: string;
     correlationId: string;
     contentRef: string;
     format: string;
     templateVersion: number;
     rows: NormalizedBulkRow[];
     intentRows?: unknown[];
-    catalogCommandVersion?: 1 | 2;
+    catalogCommandVersion?: 1 | 2 | 3;
   }) {
     const normalized = validateBulkImport(input);
     const uuid =
@@ -144,6 +178,7 @@ export class BulkImportService {
     try {
       priorAdmission = await this.repository.findImportAdmissionIntent(
         input.batchId,
+        input.ownerSub,
       );
     } catch (error) {
       throw mapBulkPersistenceError(error);
@@ -151,6 +186,44 @@ export class BulkImportService {
     const persistedCommands = Array.isArray(priorAdmission?.catalogCommands)
       ? priorAdmission.catalogCommands
       : null;
+    let contentDocument:
+      | {
+          contentId: string;
+          batchId: string;
+          batchOperationId: string;
+          contentRef: string;
+          sha256: string;
+          byteLength: number;
+        }
+      | undefined;
+    if (input.catalogCommandVersion === 3 && !persistedCommands) {
+      if (!catalogV3EmissionEnabled() || !this.storage || !catalogRows.length)
+        throw new BulkDomainError(
+          'STORAGE_UNAVAILABLE',
+          'La emisión Bulk V3 está deshabilitada o el almacenamiento privado no está configurado.',
+        );
+      const documentBytes = Buffer.from(
+        JSON.stringify({ rows: catalogRows }),
+        'utf8',
+      );
+      const sha256 = createHash('sha256').update(documentBytes).digest('hex');
+      const contentId = stableUuid(`${input.batchId}:catalog-bulk-v3-content`);
+      const contentRef = await this.storage.put(
+        documentBytes,
+        'application/json',
+        `imports/${input.batchId}/catalog-${sha256}.json`,
+      );
+      contentDocument = {
+        contentId,
+        batchId: input.batchId,
+        batchOperationId: stableUuid(
+          `${input.batchId}:catalog-bulk-upsert:0:operation`,
+        ),
+        contentRef,
+        sha256,
+        byteLength: documentBytes.length,
+      };
+    }
     const commands: CatalogBulkCommand[] = persistedCommands
       ? persistedCommands.map((value) => {
           const envelope = value as CatalogBulkCommand['envelope'];
@@ -162,12 +235,23 @@ export class BulkImportService {
             correlationId: input.correlationId,
             rows: catalogRows,
             schemaVersion: input.catalogCommandVersion ?? 1,
+            ...(contentDocument
+              ? {
+                  contentReference: {
+                    content_id: contentDocument.contentId,
+                    sha256: contentDocument.sha256,
+                    byte_length: contentDocument.byteLength,
+                    content_type: 'application/json' as const,
+                  },
+                }
+              : {}),
             occurredAt: new Date(),
           })
         : [];
     try {
       return await this.repository.createImportBatch({
         batchId: input.batchId,
+        ownerSub: input.ownerSub,
         correlationId: input.correlationId,
         templateVersion: input.templateVersion,
         inputFile: {
@@ -185,6 +269,7 @@ export class BulkImportService {
           occurredAt: new Date(envelope.occurred_at),
           payload: envelope as unknown as Record<string, unknown>,
         })),
+        ...(contentDocument ? { contentDocument } : {}),
         admissionIntent: {
           format: input.format,
           templateVersion: input.templateVersion,
@@ -242,9 +327,19 @@ export class BulkImportService {
     }
   }
 
-  async resumeBatch(batchId: string) {
+  async resumeBatch(
+    batchId: string,
+    ownerSub: string,
+    correlationId?: string,
+    motivo: string | null = null,
+  ) {
     try {
-      return await this.repository.requeueBatch(batchId);
+      return await this.repository.requeueBatch(
+        batchId,
+        ownerSub,
+        correlationId,
+        motivo,
+      );
     } catch (error) {
       if (
         error instanceof BulkPersistenceError &&
@@ -258,11 +353,31 @@ export class BulkImportService {
         error instanceof BulkPersistenceError &&
         error.code === 'CHECK_VIOLATION'
       ) {
-        throw new BulkDomainError('INVALID_TRANSITION', error.message, {
+        throw new BulkDomainError('RETRY_NOT_ELIGIBLE', error.message, {
           cause: error,
         });
+      }
+      if (
+        error instanceof BulkPersistenceError &&
+        error.code === 'NOT_CONFIGURED'
+      ) {
+        throw new BulkDomainError(
+          'RETRY_PROTOCOL_NOT_APPROVED',
+          'El protocolo de reanudación no está aprobado.',
+          { cause: error },
+        );
       }
       throw mapBulkPersistenceError(error);
     }
   }
+}
+
+/** The claim-check stays closed unless an operator records both approval gates. */
+export function catalogV3EmissionEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return (
+    env.BULK_CATALOG_V3_ENABLED === 'true' &&
+    env.BULK_CATALOG_V3_AUTHORIZATION_VERIFIED === 'true'
+  );
 }

@@ -77,7 +77,10 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function validateEnvelope(value: unknown, message: ConsumeMessage): Envelope {
+export function validateEnvelope(
+  value: unknown,
+  message: ConsumeMessage,
+): Envelope {
   if (!record(value)) throw new Error('INVALID_ENVELOPE');
   const required = [
     'message_id',
@@ -100,7 +103,7 @@ function validateEnvelope(value: unknown, message: ConsumeMessage): Envelope {
     typeof value.message_id !== 'string' ||
     value.message_id.length === 0 ||
     value.message_id !== message.properties.messageId ||
-    value.schema_version !== 1 ||
+    ![1, 2].includes(Number(value.schema_version)) ||
     typeof value.occurred_at !== 'string' ||
     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
       value.occurred_at,
@@ -123,14 +126,18 @@ function validateEnvelope(value: unknown, message: ConsumeMessage): Envelope {
   )
     throw new Error('INVALID_ENVELOPE');
   const data = value.data;
+  const version2 = value.schema_version === 2;
   if (
     !uuid.test(String(data.batch_id)) ||
-    !uuid.test(String(data.batch_operation_id))
+    !uuid.test(String(data.batch_operation_id)) ||
+    (version2 &&
+      data.command_attempt_id !== null &&
+      !uuid.test(String(data.command_attempt_id)))
   )
     throw new Error('INVALID_PAYLOAD');
   if (value.name === 'catalog.bulk.upsert.completed') {
     if (
-      Object.keys(data).length !== 3 ||
+      Object.keys(data).length !== (version2 ? 4 : 3) ||
       !Array.isArray(data.results) ||
       data.results.length === 0
     )
@@ -138,7 +145,7 @@ function validateEnvelope(value: unknown, message: ConsumeMessage): Envelope {
     for (const item of data.results) {
       if (
         !record(item) ||
-        Object.keys(item).length !== 6 ||
+        Object.keys(item).length !== (version2 ? 10 : 6) ||
         !Number.isSafeInteger(item.row_number) ||
         Number(item.row_number) < 2 ||
         typeof item.row_operation_id !== 'string' ||
@@ -149,16 +156,34 @@ function validateEnvelope(value: unknown, message: ConsumeMessage): Envelope {
         !['COMPLETED', 'REJECTED'].includes(String(item.status)) ||
         !(typeof item.code === 'string' || item.code === null) ||
         (item.status === 'COMPLETED' && item.code !== null) ||
-        (item.status === 'REJECTED' && typeof item.code !== 'string')
+        (item.status === 'REJECTED' && typeof item.code !== 'string') ||
+        (version2 &&
+          (!uuid.test(String(item.attempt_id)) ||
+            !Number.isSafeInteger(item.attempt_number) ||
+            Number(item.attempt_number) < 1 ||
+            !['NONE', 'APPLIED', 'UNKNOWN'].includes(
+              String(item.effect_state),
+            ) ||
+            typeof item.retriable !== 'boolean' ||
+            (item.status === 'COMPLETED' &&
+              (item.effect_state !== 'APPLIED' || item.retriable)) ||
+            (item.status === 'REJECTED' &&
+              (item.effect_state === 'APPLIED' ||
+                (item.retriable === true &&
+                  (item.effect_state !== 'NONE' ||
+                    item.code !== 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE'))))))
       )
         throw new Error('INVALID_PAYLOAD');
     }
   } else if (
-    Object.keys(data).length !== 4 ||
+    Object.keys(data).length !== (version2 ? 5 : 4) ||
     typeof data.code !== 'string' ||
     !data.code ||
     typeof data.detail !== 'string' ||
-    !data.detail
+    !data.detail ||
+    (version2 &&
+      data.command_attempt_id !== null &&
+      !uuid.test(String(data.command_attempt_id)))
   ) {
     throw new Error('INVALID_PAYLOAD');
   }
@@ -233,6 +258,98 @@ export class CatalogBulkResultConsumer
 
   getOperationalState(): CatalogResultConsumerState {
     return this.state;
+  }
+
+  /** Persists a Service Bus result before its Peek-Lock delivery is completed. */
+  async consumeServiceBusMessage(input: {
+    messageId: string;
+    correlationId: string | undefined;
+    subject: string | undefined;
+    contentType: string | undefined;
+    body: Uint8Array;
+  }): Promise<void> {
+    if (!input.messageId) throw new Error('INVALID_SERVICE_BUS_MESSAGE_ID');
+    const content = Buffer.from(input.body);
+    const message = {
+      content,
+      fields: { routingKey: input.subject ?? '' },
+      properties: {
+        messageId: input.messageId,
+        correlationId: input.correlationId,
+        type: input.subject,
+        contentType: input.contentType,
+      },
+    } as ConsumeMessage;
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(
+        new TextDecoder('utf-8', { fatal: true }).decode(content),
+      );
+    } catch {
+      await this.persistInvalidMessage(input, content, 'INVALID_JSON');
+      return;
+    }
+    let envelope: Envelope;
+    try {
+      envelope = validateEnvelope(decoded, message);
+    } catch {
+      await this.persistInvalidMessage(
+        input,
+        content,
+        'INVALID_CATALOG_RESULT',
+      );
+      return;
+    }
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await this.repository.recordCatalogBulkResult({
+          messageId: envelope.message_id,
+          operationId: envelope.operation_id,
+          causationId: envelope.causation_id,
+          eventName: envelope.name as
+            'catalog.bulk.upsert.completed' | 'catalog.bulk.upsert.rejected',
+          correlationId: envelope.correlation_id,
+          payload: envelope as unknown as Record<string, unknown>,
+        });
+        return;
+      } catch (error) {
+        if (error instanceof BulkDomainError) {
+          await this.repository.persistPendingContractResult({
+            messageId: envelope.message_id,
+            eventName: envelope.name,
+            correlationId: envelope.correlation_id,
+            payload: envelope as unknown as Record<string, unknown>,
+          });
+          return;
+        }
+        if (attempt === 2) throw error;
+        await new Promise((resolve) =>
+          setTimeout(resolve, 100 * (attempt + 1)),
+        );
+      }
+    }
+  }
+
+  private async persistInvalidMessage(
+    input: {
+      messageId: string;
+      correlationId: string | undefined;
+      subject: string | undefined;
+    },
+    content: Buffer,
+    disposition: string,
+  ): Promise<void> {
+    const digest = createHash('sha256').update(content).digest('hex');
+    await this.repository.processInboxOnce(
+      {
+        messageId: input.messageId,
+        handler: 'bulk.catalog.invalid-result',
+        eventName: input.subject ?? 'unknown',
+        correlationId: input.correlationId ?? null,
+        payload: { disposition, content_sha256: digest },
+      },
+      async () => 'DURABLY_REJECTED',
+    );
   }
 
   private async connectConsumer(): Promise<void> {
