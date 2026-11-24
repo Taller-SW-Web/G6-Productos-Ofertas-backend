@@ -12,6 +12,8 @@ $script:jobName = 'azure-h5-smoke'
 $script:resourceGroup = 'rg-g6-sb-h5-int-fork'
 $script:environmentId = '/subscriptions/test/resourceGroups/rg/providers/Microsoft.App/managedEnvironments/env-g6-h5-int'
 $script:image = 'ghcr.io/actions/actions-runner@sha256:' + ('a' * 64)
+$script:journalTestRoot = Join-Path $env:TEMP ('g6-h5-journal-test-' + [guid]::NewGuid().ToString('N'))
+Set-AcaPatchJournalPathOverride (Join-Path $script:journalTestRoot 'operations.jsonl')
 $script:jobUri = "https://management.azure.com/subscriptions/test/resourceGroups/$($script:resourceGroup)/providers/Microsoft.App/jobs/$($script:jobName)?api-version=2025-07-01"
 
 function New-FakeJob {
@@ -131,6 +133,20 @@ try {
     try { Add-AcaJobSecret @common -SecretValue $script:testSecret -TimeoutSeconds 0 -Sleep $noSleep; throw 'timeout case unexpectedly succeeded.' }
     catch { if ($_.Exception.Message -notmatch 'ARM_OPERATION_TIMEOUT') { throw } }
     if ($script:AcaLastPatchOutcome -ne 'Ambiguous') { throw 'timed-out PATCH was not retained as ambiguous.' }
+    try { Assert-AcaPatchJournalReady; throw 'unresolved LRO did not block a new PATCH.' } catch { if ($_.Exception.Message -notmatch 'ARM_PATCH_JOURNAL_BLOCKED') { throw } }
+    $script:patchMode='async'; $script:secretName='h5jit'; $script:operationReplies.Clear(); $script:operationReplies.Enqueue('Succeeded')
+    $reconciled = @(Resolve-AcaPatchJournalOperations -Token $script:testToken -Uri $script:jobUri -JobName $script:jobName -ResourceGroup $script:resourceGroup -EnvironmentId $script:environmentId -ExpectedImage $script:image -Sleep $noSleep)
+    if ($reconciled.Count -ne 1 -or $reconciled[0].State -ne 'Succeeded' -or $reconciled[0].Readback -ne 'VerifiedPresent') { throw 'interrupted LRO was not reconciled with terminal state and readback.' }
+    Assert-AcaPatchJournalReady
+    $journalText = [System.IO.File]::ReadAllText((Get-AcaPatchJournalPath))
+    if ($journalText.Contains($script:testToken) -or $journalText.Contains($script:testSecret)) { throw 'PATCH journal contains a credential value.' }
+    if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+        $journalAcl = Get-Acl -LiteralPath $script:journalTestRoot
+        $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        if (-not $journalAcl.AreAccessRulesProtected -or @($journalAcl.Access | Where-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -ne $currentSid }).Count -gt 0) { throw 'PATCH journal directory ACL is not restricted to the current user.' }
+    }
+    $journalEvents = @($journalText -split "`n" | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json })
+    if (-not ($journalEvents | Where-Object { $_.event -eq 'PatchResponse' -and $_.httpStatus -eq 202 -and $_.requestId -eq 'timeout-req' -and $_.lroReference -eq 'https://management.azure.com/operation-test' })) { throw 'PATCH journal omitted recoverable response metadata.' }
     $script:patchMode='success'; $script:secretName='h5jit'
     $cleanupCalled=$false
     try {
@@ -146,9 +162,17 @@ try {
         if ($_.Exception.Message -notmatch 'CLEANUP_INCOMPLETE') { throw 'cleanup failure was not surfaced as CLEANUP_INCOMPLETE.' }
     }
 
+    Write-AcaPatchJournalEvent -EventType AttemptStarted -ResourceId ([System.Uri]::new($script:jobUri).AbsolutePath) -Operation 'simulated ambiguous response'
+    Write-AcaPatchJournalEvent -EventType PatchResponse -HttpStatus 202 -RequestId 'ambiguous-req'
+    $unverifiable = @(Resolve-AcaPatchJournalOperations -Token $script:testToken -Uri $script:jobUri -JobName $script:jobName -ResourceGroup $script:resourceGroup -EnvironmentId $script:environmentId -ExpectedImage $script:image -Sleep $noSleep)
+    if (-not ($unverifiable | Where-Object State -eq 'HISTORICAL_LRO_UNVERIFIABLE')) { throw 'missing operation URI was not classified as unverifiable.' }
+    try { Assert-AcaPatchJournalReady; throw 'unverifiable operation did not retain the block.' } catch { if ($_.Exception.Message -notmatch 'ARM_PATCH_JOURNAL_BLOCKED') { throw } }
+
     $allOutput = 'PATCH tests completed'
     if ($allOutput.Contains($script:testSecret) -or $allOutput.Contains($script:testToken)) { throw 'test output includes a credential marker.' }
     Write-Output 'PASS ACA Job secret PATCH: 200, 202 polling, ETag conflict, 400 redaction, timeout and start-failure cleanup.'
 } finally {
     Clear-AcaArmRequestOverride
+    Set-AcaPatchJournalPathOverride $null
+    if (Test-Path -LiteralPath $script:journalTestRoot) { Remove-Item -LiteralPath $script:journalTestRoot -Recurse -Force }
 }

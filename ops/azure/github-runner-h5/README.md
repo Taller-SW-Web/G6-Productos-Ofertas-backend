@@ -50,3 +50,42 @@ Validaciones locales auxiliares: `bash ops/azure/github-runner-h5/tests/workflow
 ## Costes / límites
 
 No se crearon recursos persistentes. Se lanzaron dos ejecuciones preflight fallidas del Job Consumption, con posible cargo por cómputo mínimo, además de la transferencia de imagen/GitHub; no se calculó una tarifa. Las ejecuciones futuras pueden generar cargos por cómputo, transferencia, GHCR, DNS privado, Private Endpoint y logs según diseño/región. El Environment y otros recursos preexistentes podrían generar costos fuera de esta tarea.
+
+## Recuperación de PATCH/LRO y bloqueo histórico (2026-11-24)
+
+### Operación histórica
+
+El recurso investigado en solo lectura fue exactamente `/subscriptions/fef42188-accd-4470-ae88-78f583eb4906/resourceGroups/rg-g6-sb-h5-int-fork/providers/Microsoft.App/jobs/azure-h5-smoke`, en la suscripción `fef42188-accd-4470-ae88-78f583eb4906`. Activity Log conserva dos correlaciones de `Microsoft.App/jobs/write` con `Started` y `Accepted`, pero sin evento terminal ni URI `Azure-AsyncOperation`/`Location`:
+
+| Correlation ID | Started (UTC), eventDataId | Accepted (UTC), eventDataId |
+|---|---|---|
+| `f22d607f-842f-4147-aeac-2d817e13dc64` | `2026-11-24T00:00:21.292604Z`, `85cbfb08-f7f1-46e0-8852-25e217c52d47` | `2026-11-24T00:00:24.0426133Z`, `3a451a66-e991-46dd-b5f5-574fe32ef4c8` |
+| `706a114c-738d-43bb-a8b3-5f505514e3f8` | `2026-11-24T00:00:29.6923187Z`, `af38f8c3-0f4d-4270-a46a-befbc8f5c508` | `2026-11-24T00:00:30.3485694Z`, `e1cc87c1-85ae-4e0c-b707-48fca83d28d2` |
+
+The Activity Log request client IDs were empty and supplied no ARM request IDs for these events. Local shell history and local attempt files contain no matching request IDs or operation references. The exact operation cannot be polled or reconstructed from these records. Its permanent classification is **`HISTORICAL_LRO_UNVERIFIABLE`**; the Job's current `provisioningState=Succeeded` does not prove the old operation's result. Azure's supported async-operation polling requires the exact URL returned in the original response; do not synthesize one from a correlation ID. See [Microsoft's ARM asynchronous operation guidance](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/async-operations).
+
+### Current-state observations (not historical LRO proof)
+
+Two read-only snapshots were compared while no operator initiated a write. Observation 1 completed `2026-11-24T01:56:16.7182175Z`; observation 2 ran `2026-11-24T02:05:49.9072419Z`–`02:06:10.9311689Z`, over nine minutes later. Both showed:
+
+- Correct subscription, resource group, Job name and Environment ID; ARM reports `provisioningState=Succeeded`.
+- Job template remained the pinned runner image with the approved `/bin/bash -c` JIT entrypoint; no unexpected persistent command or environment override was observed.
+- No `h5jit` secret or secret reference. ARM represents the empty secrets collection as `null`.
+- All eight listed executions were terminal (`Succeeded` or `Failed`); none was active or indeterminate.
+- Authorized GitHub runner group 3 returned `total_count=0`; historical runner ID 42 returned HTTP 404.
+- No queued/running CD workflow was found. The marker SHA256 remained `3D2140E1856659A5AF72788B2828812895462E26DD14138ED192930DE874825E`.
+- No candidate sensitive temporary file was found in the local temp directory. Activity Log has no later write for either of the two historical correlations.
+
+These observations describe only the resource state at those times. They are not proof that an older ARM LRO cannot later apply a change. The existing `%LOCALAPPDATA%\G6\azure-h5-smoke\CLEANUP_INCOMPLETE.json` was not changed. An authorized Azure subscription owner must record a formal confirmation that no pending operation for this resource can subsequently alter the Job, or obtain an Azure Support determination. Supply the exact resource, two correlation IDs, four eventDataIds and timestamps above. If support must be engaged, the subscription owner should open the case and retain its case ID and written disposition. Only after that review may the human operator assess and manually remove the marker; this runbook never removes, renames, edits or bypasses it. No JIT attempt is authorized while it exists.
+
+### Durable local tracking for future PATCH operations
+
+`aca-job-secret-patch.ps1` now writes a JSON Lines journal at `%LOCALAPPDATA%\G6\azure-h5-smoke\patch-lro-tracking\operations.jsonl` before a PATCH and after each response, poll, terminal state and readback. Windows ACLs are restricted to the current user's SID; non-Windows permissions are set to `0700` on the directory and `0600` on the file. The journal contains attempt ID, UTC timestamps, exact resource path, operation, HTTP status, ARM request/correlation IDs, any exact LRO reference returned by ARM, terminal state and readback status. It never stores the ARM bearer token, Authorization header, JIT configuration or secret values. An LRO reference is treated as sensitive and remains only in that ACL-restricted local journal.
+
+An interrupted/ambiguous operation remains a hard gate for subsequent PATCHes. With the same authorized Azure CLI subscription and local user profile, an operator can run:
+
+```powershell
+pwsh -NoProfile -File ops/azure/github-runner-h5/resolve-patch-journal.ps1
+```
+
+The resolver polls only the exact persisted LRO reference and verifies the Job readback. If no exact LRO reference was persisted, it reports `HISTORICAL_LRO_UNVERIFIABLE` and preserves the block; it will not guess an operation URI. Keep the journal and marker until reconciliation and authorized human review are complete.

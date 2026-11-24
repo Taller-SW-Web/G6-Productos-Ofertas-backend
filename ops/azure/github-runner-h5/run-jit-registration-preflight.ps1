@@ -82,7 +82,9 @@ function Set-TemporaryJobSecret {
         try {
             $verification = Get-AcaJobSnapshot -Uri $armUri -Token $armToken -JobName $JobName -ResourceGroup $ResourceGroup -EnvironmentId $expectedEnvironmentId -ExpectedImage $expectedImage
             $script:jobSecretInstalled = @($verification.Resource.properties.configuration.secrets | Where-Object { $_ -and $_.name -eq $jobSecretName }).Count -gt 0
+            Write-AcaPatchJournalEvent -EventType Readback -ReadbackResult $(if($script:jobSecretInstalled){'VerifiedPresent'}else{'VerifiedAbsent'})
         } catch {
+            try { Write-AcaPatchJournalEvent -EventType Readback -ReadbackResult 'Unverified' } catch { }
             $script:jobSecretInstalled = $true
             Write-Warning "CLEANUP REQUIRED: could not verify whether temporary Job secret '$jobSecretName' persisted."
         }
@@ -425,6 +427,8 @@ try {
     }
     if (Test-Path -LiteralPath $cleanupMarker) { throw "CLEANUP_INCOMPLETE: marker exists at $cleanupMarker; verify runner, Job execution and secret absence before clearing it manually." }
     if (Test-Path -LiteralPath $attemptRecordPath) { throw "CLEANUP_INCOMPLETE: unresolved JIT attempt record exists at $attemptRecordPath; reconcile it before another request." }
+    $stage = 'local ARM PATCH/LRO journal check'
+    Assert-AcaPatchJournalReady
     $account = Invoke-AzJson @('account','show','--output','json')
     $script:subscriptionId = [string]$account.id
     if ([string]::IsNullOrWhiteSpace($subscriptionId)) { throw 'Azure CLI has no active subscription.' }
