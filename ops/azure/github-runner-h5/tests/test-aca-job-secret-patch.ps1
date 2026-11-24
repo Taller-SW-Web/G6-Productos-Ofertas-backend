@@ -88,6 +88,7 @@ try {
     # 200 success: only the configuration secrets property is patched, and ETag is sent.
     $script:patchMode='success'; $script:secretName=$null; $script:requestLog.Clear()
     Add-AcaJobSecret @common -SecretValue $script:testSecret -Sleep $noSleep | Out-Null
+    if ($script:AcaLastPatchOutcome -ne 'Completed') { throw '200 PATCH outcome was not marked completed after readback.' }
     $patch = @($script:requestLog | Where-Object Method -eq 'PATCH')[0]
     if (($patch.Body.properties.PSObject.Properties.Name -contains 'template') -or $patch.Body.properties.configuration.secrets[0].name -ne 'h5jit' -or $patch.Headers['If-Match'] -ne '"etag-test"') { throw '200 case did not send a minimal ETag-guarded PATCH.' }
     if (-not (Remove-AcaJobSecret @common -Sleep $noSleep)) { throw 'cleanup did not remove the temporary secret.' }
@@ -96,6 +97,7 @@ try {
     # The live ARM API can omit ETag; continue only with the isolated merge-patch body.
     $script:emitEtag=$false; $script:patchMode='success'; $script:secretName=$null; $script:requestLog.Clear()
     Add-AcaJobSecret @common -SecretValue $script:testSecret -Sleep $noSleep | Out-Null
+    if ($script:AcaLastPatchOutcome -ne 'Completed') { throw '202 PATCH outcome was not marked completed after LRO.' }
     $unguardedPatch = @($script:requestLog | Where-Object Method -eq 'PATCH')[0]
     if ($unguardedPatch.Headers.ContainsKey('If-Match') -or $unguardedPatch.Body.properties.configuration.secrets[0].name -ne 'h5jit') { throw 'No-ETag case did not omit If-Match or send the bounded patch.' }
     $script:emitEtag=$true
@@ -115,17 +117,20 @@ try {
     $script:patchMode='conflict'; $script:secretName=$null
     try { Add-AcaJobSecret @common -SecretValue $script:testSecret -Sleep $noSleep; throw '412 case unexpectedly succeeded.' }
     catch { if ($_.Exception.Message -notmatch 'HTTP 412.*PreconditionFailed.*conflict-req') { throw } }
+    if ($script:AcaLastPatchOutcome -ne 'Rejected') { throw 'ETag conflict was not distinguished from an ambiguous PATCH.' }
     $script:patchMode='bad-request'; $script:secretName=$null
     try { Add-AcaJobSecret @common -SecretValue $script:testSecret -Sleep $noSleep; throw '400 case unexpectedly succeeded.' }
     catch {
         $message = $_.Exception.Message
         if ($message -notmatch 'HTTP 400.*InvalidSecret.*bad-req' -or $message.Contains($script:testSecret) -or $message.Contains($script:testToken)) { throw '400 error was not structured/redacted.' }
     }
+    if ($script:AcaLastPatchOutcome -ne 'Rejected') { throw 'HTTP 400 was not distinguished from an ambiguous PATCH.' }
 
     # Async timeout and cleanup after a failed Job start.
     $script:patchMode='timeout'; $script:secretName=$null; $script:operationReplies.Clear()
     try { Add-AcaJobSecret @common -SecretValue $script:testSecret -TimeoutSeconds 0 -Sleep $noSleep; throw 'timeout case unexpectedly succeeded.' }
     catch { if ($_.Exception.Message -notmatch 'ARM_OPERATION_TIMEOUT') { throw } }
+    if ($script:AcaLastPatchOutcome -ne 'Ambiguous') { throw 'timed-out PATCH was not retained as ambiguous.' }
     $script:patchMode='success'; $script:secretName='h5jit'
     $cleanupCalled=$false
     try {

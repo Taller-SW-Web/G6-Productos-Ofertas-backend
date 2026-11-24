@@ -1,5 +1,51 @@
 Set-StrictMode -Version Latest
 
+function Get-AcaExecutionState {
+    [CmdletBinding()]
+    param([AllowNull()][string]$Status)
+
+    # ACA JobExecutionRunningState: Running/Processing can still use the
+    # execution secret; only the explicitly terminal values below permit cleanup.
+    $active = @('Starting','Running','Processing')
+    $terminal = @('Succeeded','Failed','Stopped')
+    if ([string]::IsNullOrWhiteSpace($Status)) {
+        return [pscustomobject]@{State='Unknown';Status=''}
+    }
+    if ($Status -cin $active) { return [pscustomobject]@{State='Active';Status=$Status} }
+    if ($Status -cin $terminal) { return [pscustomobject]@{State='Terminal';Status=$Status} }
+    return [pscustomobject]@{State='Unknown';Status=$Status}
+}
+
+function Test-AcaExecutionsSafeForSecretCleanup {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Executions)
+
+    foreach ($execution in $Executions) {
+        if ($null -eq $execution) { return [pscustomobject]@{Safe=$false;Reason='execution inventory contains an unverifiable null item'} }
+        $state = Get-AcaExecutionState -Status ([string]$execution.properties.status)
+        if ($state.State -ne 'Terminal') {
+            return [pscustomobject]@{Safe=$false;Reason="execution '$($execution.name)' has $($state.State) status '$($state.Status)'"}
+        }
+    }
+    return [pscustomobject]@{Safe=$true;Reason='all listed executions have recognized terminal states'}
+}
+
+function Resolve-JitRunnerRegistration {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RunnerName,
+        [Parameter(Mandatory)][bool]$QuerySucceeded,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Runners
+    )
+
+    if (-not $QuerySucceeded) { return [pscustomobject]@{State='Unknown';RunnerId=$null} }
+    $matches = @($Runners | Where-Object { [string]$_.name -ceq $RunnerName })
+    if ($matches.Count -eq 0) { return [pscustomobject]@{State='Absent';RunnerId=$null} }
+    if ($matches.Count -gt 1) { return [pscustomobject]@{State='Ambiguous';RunnerId=$null} }
+    if (-not $matches[0].id -or [int]$matches[0].id -le 0) { return [pscustomobject]@{State='Unknown';RunnerId=$null} }
+    return [pscustomobject]@{State='Found';RunnerId=[int]$matches[0].id}
+}
+
 function New-GitHubJitRequestJson {
     [CmdletBinding()]
     param(

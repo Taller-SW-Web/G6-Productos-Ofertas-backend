@@ -22,6 +22,7 @@ $jitConfig = $null
 $templateFile = $null
 $subscriptionId = $null
 $jobSecretInstalled = $false
+$jobPatchOutcomeAmbiguous = $false
 $jobSecretName = 'h5jit'
 $registrationOnline = $false
 $jitSecretTouched = $false
@@ -36,6 +37,9 @@ $cleanupFailures = [System.Collections.Generic.List[string]]::new()
 $executionNamesBefore = @()
 $executionCorrelationFailed = $false
 $cleanupMarker = Join-Path (Join-Path $env:LOCALAPPDATA 'G6\azure-h5-smoke') 'CLEANUP_INCOMPLETE.json'
+$attemptRecordPath = Join-Path (Split-Path -Parent $cleanupMarker) 'JIT_ATTEMPT.json'
+$jitRegistrationAttempted = $false
+$jitRunnerAbsenceVerified = $false
 
 . (Join-Path $PSScriptRoot 'aca-job-secret-patch.ps1')
 . (Join-Path $PSScriptRoot 'jit-runner-operations.ps1')
@@ -74,6 +78,7 @@ function Set-TemporaryJobSecret {
         $script:jobSecretInstalled = $true
     } catch {
         $patchFailure = $_.Exception.Message
+        if ($script:AcaLastPatchOutcome -eq 'Ambiguous') { $script:jobPatchOutcomeAmbiguous = $true }
         try {
             $verification = Get-AcaJobSnapshot -Uri $armUri -Token $armToken -JobName $JobName -ResourceGroup $ResourceGroup -EnvironmentId $expectedEnvironmentId -ExpectedImage $expectedImage
             $script:jobSecretInstalled = @($verification.Resource.properties.configuration.secrets | Where-Object { $_ -and $_.name -eq $jobSecretName }).Count -gt 0
@@ -88,6 +93,7 @@ function Set-TemporaryJobSecret {
 function Remove-TemporaryJobSecret {
     if (-not $jobSecretInstalled -and -not $jitSecretTouched) { return }
     try {
+        if ($jobPatchOutcomeAmbiguous) { throw 'ARM_PATCH_OUTCOME_AMBIGUOUS: previous Job secret PATCH must be reconciled before another PATCH.' }
         if (-not $armUri -or -not $armToken -or -not $expectedEnvironmentId -or -not $expectedImage) {
             $context = Get-ArmRequestContext
             $script:armUri = $context.Uri
@@ -96,8 +102,10 @@ function Remove-TemporaryJobSecret {
         $null = Remove-AcaJobSecret -Uri $armUri -Token $armToken -JobName $JobName -ResourceGroup $ResourceGroup -EnvironmentId $expectedEnvironmentId -ExpectedImage $expectedImage -SecretName $jobSecretName
         $script:jobSecretInstalled = $false
         $script:jitSecretTouched = $false
+        $script:jobPatchOutcomeAmbiguous = $false
         Write-Output 'PASS no temporary JIT secret remained in Azure.'
     } catch {
+        if ($script:AcaLastPatchOutcome -eq 'Ambiguous') { $script:jobPatchOutcomeAmbiguous = $true }
         $script:cleanupFailures.Add('temporary Job secret absent check failed')
         Write-Warning "CLEANUP_INCOMPLETE: temporary Job secret absence could not be confirmed. $($_.Exception.Message)"
     }
@@ -127,14 +135,17 @@ function New-RestrictedTemplateFile {
 function Remove-JitRegistration {
     $script:cleanupFailures.Clear()
     $script:cleanupWasRun = $true
+    $executionState = [pscustomobject]@{State='Unknown';Status=''}
     if (-not $jobExecutionName -and $jobStartAttempted) { $script:cleanupFailures.Add('CLEANUP_INCOMPLETE: Azure start was attempted but its execution ID was not correlated unequivocally') }
-    if ($jitRegistrationAccepted -and -not $jitRunnerId -and $jitRunnerName) {
+    if ($jitRegistrationAttempted -and $jitRunnerName) {
         try {
             $groupRunners = Invoke-GhJson @('api',"orgs/$Organization/actions/runner-groups/$RunnerGroupId/runners?per_page=100")
-            $matchingRunner = @($groupRunners.runners | Where-Object { $_.name -ceq $jitRunnerName })
-            if ($matchingRunner.Count -eq 1) { $script:jitRunnerId = [int]$matchingRunner[0].id }
-            elseif ($matchingRunner.Count -gt 1) { $script:cleanupFailures.Add("multiple JIT registrations named $jitRunnerName cannot be cleaned safely") }
-        } catch { $script:cleanupFailures.Add('accepted GitHub JIT registration could not be identified by ID or unique name') }
+            $reconciliation = Resolve-JitRunnerRegistration -RunnerName $jitRunnerName -QuerySucceeded $true -Runners @($groupRunners.runners)
+            if ($reconciliation.State -eq 'Found') { $script:jitRunnerId = [int]$reconciliation.RunnerId }
+            elseif ($reconciliation.State -eq 'Ambiguous') { $script:cleanupFailures.Add("multiple JIT registrations named $jitRunnerName cannot be cleaned safely") }
+            elseif ($reconciliation.State -eq 'Absent') { $script:jitRunnerAbsenceVerified = $true }
+            else { $script:cleanupFailures.Add('JIT registration absence could not be verified from the authorized runner group') }
+        } catch { $script:cleanupFailures.Add('JIT registration attempt could not be reconciled by exact name in the authorized runner group') }
     }
     if ($jitRunnerId) {
         $null = & gh api --method DELETE "orgs/$Organization/actions/runners/$jitRunnerId" 2>$null
@@ -152,25 +163,27 @@ function Remove-JitRegistration {
     if ($jobExecutionName) {
         try {
             $execution = Invoke-AzJson @('containerapp','job','execution','show','--name',$JobName,'--resource-group',$ResourceGroup,'--job-execution-name',$jobExecutionName,'--output','json')
-            if ($execution.properties.status -in @('Running','Processing','Starting')) {
+            $executionState = Get-AcaExecutionState -Status ([string]$execution.properties.status)
+            if ($executionState.State -eq 'Active') {
                 $null = Invoke-AzJson @('containerapp','job','stop','--name',$JobName,'--resource-group',$ResourceGroup,'--job-execution-name',$jobExecutionName,'--output','json')
                 $deadline = [DateTimeOffset]::UtcNow.AddSeconds(120)
                 do {
                     Start-Sleep -Seconds 5
                     $execution = Invoke-AzJson @('containerapp','job','execution','show','--name',$JobName,'--resource-group',$ResourceGroup,'--job-execution-name',$jobExecutionName,'--output','json')
-                } while ($execution.properties.status -in @('Running','Processing','Starting') -and [DateTimeOffset]::UtcNow -lt $deadline)
+                    $executionState = Get-AcaExecutionState -Status ([string]$execution.properties.status)
+                } while ($executionState.State -eq 'Active' -and [DateTimeOffset]::UtcNow -lt $deadline)
             }
-            if ($execution.properties.status -in @('Running','Processing','Starting')) { $script:cleanupFailures.Add("Job execution $jobExecutionName is still active") }
+            if ($executionState.State -ne 'Terminal') { $script:cleanupFailures.Add("Job execution $jobExecutionName is not verifiably terminal (state=$($executionState.State), status='$($executionState.Status)')") }
         } catch {
             $script:cleanupFailures.Add("Job execution $jobExecutionName could not be stopped/verified")
         }
     }
-    $safeToRemoveSecret = -not $jobStartAttempted -or [bool]$jobExecutionName
-    if ($jobExecutionName) {
+    $safeToRemoveSecret = -not $jobStartAttempted -or ($jobExecutionName -and $executionState.State -eq 'Terminal')
+    if ($jobStartAttempted -or $jitSecretTouched) {
         try {
-            $remaining = Invoke-AzJson @('containerapp','job','execution','list','--name',$JobName,'--resource-group',$ResourceGroup,'--output','json')
-            $activeRemaining = @($remaining | Where-Object { $_.properties.status -in @('Running','Processing','Starting') })
-            if ($activeRemaining.Count -gt 0) { $safeToRemoveSecret = $false; $script:cleanupFailures.Add('an ACA Job execution remains active; temporary secret retained') }
+            $remaining = @(Invoke-AzJson @('containerapp','job','execution','list','--name',$JobName,'--resource-group',$ResourceGroup,'--output','json'))
+            $executionSafety = Test-AcaExecutionsSafeForSecretCleanup -Executions $remaining
+            if (-not $executionSafety.Safe) { $safeToRemoveSecret = $false; $script:cleanupFailures.Add("ACA executions are not all verifiably terminal; temporary secret retained ($($executionSafety.Reason))") }
         } catch { $safeToRemoveSecret = $false; $script:cleanupFailures.Add('active ACA Job executions could not be checked; temporary secret retained') }
     }
     if (($jitSecretTouched -or $jitRunnerId -or $jobExecutionName) -and $safeToRemoveSecret) { Remove-TemporaryJobSecret }
@@ -181,16 +194,19 @@ function Remove-JitRegistration {
             $script:cleanupFailures.Add('protected temporary execution template could not be removed')
         }
     }
+    if ($jitRegistrationAttempted -and -not ($jitRunnerId -or $jitRunnerAbsenceVerified)) { $script:cleanupFailures.Add('JIT registration absence was not independently verified in the authorized group') }
     if ($script:cleanupFailures.Count -gt 0) {
         $parent = Split-Path -Parent $cleanupMarker
         $null = New-Item -ItemType Directory -Path $parent -Force
-        $marker = @{ createdAt=[DateTimeOffset]::UtcNow.ToString('o'); runnerId=$jitRunnerId; executionName=$jobExecutionName; failures=@($script:cleanupFailures) } | ConvertTo-Json -Depth 5
+        $patchOutcome = if ($jobPatchOutcomeAmbiguous) { 'Ambiguous' } else { $script:AcaLastPatchOutcome }
+        $marker = @{ createdAt=[DateTimeOffset]::UtcNow.ToString('o'); runnerName=$jitRunnerName; runnerId=$jitRunnerId; executionName=$jobExecutionName; patchOutcome=$patchOutcome; failures=@($script:cleanupFailures) } | ConvertTo-Json -Depth 5
         [System.IO.File]::WriteAllText($cleanupMarker,$marker,[System.Text.UTF8Encoding]::new($false))
         throw "CLEANUP_INCOMPLETE: $($script:cleanupFailures -join '; '). New JIT attempts are blocked by $cleanupMarker."
     }
-    if ($jitRunnerId -or $jobExecutionName -or $jitSecretTouched) {
-        Write-Output "CLEANUP_VERIFIED: runner absent=$([bool]$jitRunnerId), execution inactive=$([bool]$jobExecutionName), secret absent=$(-not $jobSecretInstalled)."
+    if ($jitRegistrationAttempted -or $jobExecutionName -or $jitSecretTouched) {
+        Write-Output "CLEANUP_VERIFIED: runner absent=$([bool]($jitRunnerAbsenceVerified -or $jitRunnerId)), execution terminal=$([bool](-not $jobStartAttempted -or ($jobExecutionName -and $executionState.State -eq 'Terminal'))), secret absent=$(-not $jobSecretInstalled)."
     }
+    if (Test-Path -LiteralPath $attemptRecordPath) { Remove-Item -LiteralPath $attemptRecordPath -Force }
     $script:jitConfig = $null
     $script:armToken = $null
     $script:jitRegistrationAccepted = $false
@@ -250,6 +266,11 @@ function Start-JitCycle {
     $script:jitRunnerName = $cycleRunnerName
     $requestJson = New-GitHubJitRequestJson -Mode $CycleMode -Name $cycleRunnerName -RunnerGroupId $RunnerGroupId -DiagnosticLabel $diagnosticLabel
     Write-Information "JIT_REQUEST_JSON: $requestJson" -InformationAction Continue
+    $attemptRecord = @{ attemptedAt=[DateTimeOffset]::UtcNow.ToString('o'); organization=$Organization; runnerGroupId=$RunnerGroupId; runnerName=$cycleRunnerName; mode=$CycleMode } | ConvertTo-Json -Compress
+    $parent = Split-Path -Parent $attemptRecordPath
+    $null = New-Item -ItemType Directory -Path $parent -Force
+    [System.IO.File]::WriteAllText($attemptRecordPath,$attemptRecord,[System.Text.UTF8Encoding]::new($false))
+    $script:jitRegistrationAttempted = $true
     $jitProcess = Invoke-GhJitConfigRequest -GhExecutable ((Get-Command gh).Source) -Organization $Organization -RequestJson $requestJson
     $jitResponse = Get-GitHubJitResponseFields -ResponseText ([string]$jitProcess.Stdout)
     if ($jitResponse.StatusCode -ne 201 -or $jitProcess.ExitCode -ne 0 -or -not $jitResponse.Json) {
@@ -350,10 +371,12 @@ function Wait-AzureExecutionSuccess {
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds(180)
     do {
         $execution = Invoke-AzJson @('containerapp','job','execution','show','--name',$JobName,'--resource-group',$ResourceGroup,'--job-execution-name',$Runner.ExecutionName,'--output','json')
-        if ($execution.properties.status -notin @('Running','Processing','Starting')) {
-            if ($execution.properties.status -ne 'Succeeded') { throw "JIT_JOB_EXECUTION_FAILED: Azure execution $($Runner.ExecutionName) concluded '$($execution.properties.status)'." }
-            return [string]$execution.properties.status
+        $state = Get-AcaExecutionState -Status ([string]$execution.properties.status)
+        if ($state.State -eq 'Terminal') {
+            if ($state.Status -ne 'Succeeded') { throw "JIT_JOB_EXECUTION_FAILED: Azure execution $($Runner.ExecutionName) concluded '$($state.Status)'." }
+            return $state.Status
         }
+        if ($state.State -eq 'Unknown') { throw "JIT_JOB_EXECUTION_STATUS_UNKNOWN: Azure execution $($Runner.ExecutionName) reported '$($state.Status)'; cleanup is blocked." }
         Start-Sleep -Seconds 5
     } while ([DateTimeOffset]::UtcNow -lt $deadline)
     throw "JIT_JOB_EXECUTION_TIMEOUT: Azure execution $($Runner.ExecutionName) is still active."
@@ -362,26 +385,33 @@ function Wait-AzureExecutionSuccess {
 function Stop-DiagnosticExecutionAfterHandshake {
     param([Parameter(Mandatory)]$Runner)
     $execution = Invoke-AzJson @('containerapp','job','execution','show','--name',$JobName,'--resource-group',$ResourceGroup,'--job-execution-name',$Runner.ExecutionName,'--output','json')
-    if ($execution.properties.status -in @('Running','Processing','Starting')) {
+    $state = Get-AcaExecutionState -Status ([string]$execution.properties.status)
+    if ($state.State -eq 'Unknown') { throw "DIAGNOSTIC_EXECUTION_STATUS_UNKNOWN: exact execution $($Runner.ExecutionName) reported '$($state.Status)'; cleanup is blocked." }
+    if ($state.State -eq 'Active') {
         $null = Invoke-AzJson @('containerapp','job','stop','--name',$JobName,'--resource-group',$ResourceGroup,'--job-execution-name',$Runner.ExecutionName,'--output','json')
     }
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds(120)
     do {
         Start-Sleep -Seconds 3
         $execution = Invoke-AzJson @('containerapp','job','execution','show','--name',$JobName,'--resource-group',$ResourceGroup,'--job-execution-name',$Runner.ExecutionName,'--output','json')
-    } while ($execution.properties.status -in @('Running','Processing','Starting') -and [DateTimeOffset]::UtcNow -lt $deadline)
-    if ($execution.properties.status -in @('Running','Processing','Starting')) { throw "DIAGNOSTIC_STOP_TIMEOUT: exact execution $($Runner.ExecutionName) remains active." }
-    Write-Output "DIAGNOSTIC_EXECUTION_TERMINAL: $($Runner.ExecutionName) status=$($execution.properties.status); runner handshake observed and execution stopped/terminalized before cleanup."
+        $state = Get-AcaExecutionState -Status ([string]$execution.properties.status)
+        if ($state.State -eq 'Unknown') { throw "DIAGNOSTIC_EXECUTION_STATUS_UNKNOWN: exact execution $($Runner.ExecutionName) reported '$($state.Status)'; cleanup is blocked." }
+    } while ($state.State -eq 'Active' -and [DateTimeOffset]::UtcNow -lt $deadline)
+    if ($state.State -ne 'Terminal') { throw "DIAGNOSTIC_STOP_TIMEOUT: exact execution $($Runner.ExecutionName) remains active." }
+    Write-Output "DIAGNOSTIC_EXECUTION_TERMINAL: $($Runner.ExecutionName) status=$($state.Status); runner handshake observed and execution stopped/terminalized before cleanup."
 }
 
 function Reset-JitCycleState {
     $script:jitRunnerId = $null
     $script:jitRunnerName = $null
     $script:jitRegistrationAccepted = $false
+    $script:jitRegistrationAttempted = $false
+    $script:jitRunnerAbsenceVerified = $false
     $script:jobExecutionName = $null
     $script:jitConfig = $null
     $script:templateFile = $null
     $script:jobSecretInstalled = $false
+    $script:jobPatchOutcomeAmbiguous = $false
     $script:jitSecretTouched = $false
     $script:jobStartAttempted = $false
     $script:executionNamesBefore = @()
@@ -394,6 +424,7 @@ try {
         if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "Required CLI not found: $tool" }
     }
     if (Test-Path -LiteralPath $cleanupMarker) { throw "CLEANUP_INCOMPLETE: marker exists at $cleanupMarker; verify runner, Job execution and secret absence before clearing it manually." }
+    if (Test-Path -LiteralPath $attemptRecordPath) { throw "CLEANUP_INCOMPLETE: unresolved JIT attempt record exists at $attemptRecordPath; reconcile it before another request." }
     $account = Invoke-AzJson @('account','show','--output','json')
     $script:subscriptionId = [string]$account.id
     if ([string]::IsNullOrWhiteSpace($subscriptionId)) { throw 'Azure CLI has no active subscription.' }
@@ -460,9 +491,9 @@ try {
     $jobSnapshot = Get-AcaJobSnapshot -Uri $armUri -Token $armToken -JobName $JobName -ResourceGroup $ResourceGroup -EnvironmentId $expectedEnvironmentId -ExpectedImage $expectedImage
     $existingJobSecrets = @($jobSnapshot.Resource.properties.configuration.secrets | Where-Object { $_ -and $_.name })
     if ($existingJobSecrets.Count -ne 0) { throw 'JOB_SECRET_COLLECTION_NOT_EMPTY: no secret will be overwritten or removed; resolve existing secrets manually.' }
-    $existingExecutions = Invoke-AzJson @('containerapp','job','execution','list','--name',$JobName,'--resource-group',$ResourceGroup,'--output','json')
-    $activeExecutions = @($existingExecutions | Where-Object { $_.properties.status -in @('Running','Processing','Starting') })
-    if ($activeExecutions.Count -gt 0) { throw 'JOB_NOT_EXCLUSIVE: an ACA Job execution is active; refusing a JIT secret update without ETag.' }
+    $existingExecutions = @(Invoke-AzJson @('containerapp','job','execution','list','--name',$JobName,'--resource-group',$ResourceGroup,'--output','json'))
+    $executionSafety = Test-AcaExecutionsSafeForSecretCleanup -Executions $existingExecutions
+    if (-not $executionSafety.Safe) { throw "JOB_NOT_EXCLUSIVE: refusing JIT secret update without ETag; $($executionSafety.Reason)." }
     $groupRunnersBeforeJit = Invoke-GhJson @('api',"orgs/$Organization/actions/runner-groups/$RunnerGroupId/runners?per_page=100")
     if ($groupRunnersBeforeJit.total_count -ne 0) { throw 'RUNNER_GROUP_NOT_EXCLUSIVE: existing runner registrations are present; refusing no-ETag secret update.' }
 
@@ -509,7 +540,7 @@ catch {
     throw "JIT preflight failed during ${stage}: $failure"
 }
 finally {
-    if (-not $cleanupWasRun -and ($jitRunnerId -or $jobExecutionName -or $templateFile)) { Remove-JitRegistration }
+    if (-not $cleanupWasRun -and ($jitRegistrationAttempted -or $jitRunnerId -or $jobExecutionName -or $templateFile -or $jitSecretTouched)) { Remove-JitRegistration }
 }
 
 if (-not $registrationOnline -and $Mode -eq 'Diagnostic') { throw 'JIT registration preflight did not complete.' }

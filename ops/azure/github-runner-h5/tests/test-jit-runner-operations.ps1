@@ -4,6 +4,32 @@ $ErrorActionPreference = 'Stop'
 function Assert-True([bool]$Condition,[string]$Message) { if (-not $Condition) { throw $Message } }
 function Get-RequestBody([string]$Json) { [System.Text.Json.JsonDocument]::Parse($Json) }
 
+# An accepted HTTP response without a locally parsed runner ID is reconciled by
+# the exact generated name. Query errors and ambiguous matches never prove absence.
+$acceptedWithoutLocalId = Resolve-JitRunnerRegistration -RunnerName 'h5-jit-preflight-test' -QuerySucceeded $true -Runners @(@{id=321;name='h5-jit-preflight-test'})
+Assert-True ($acceptedWithoutLocalId.State -eq 'Found' -and $acceptedWithoutLocalId.RunnerId -eq 321) 'accepted registration without local ID was not recovered by exact name'
+$provenAbsent = Resolve-JitRunnerRegistration -RunnerName 'h5-jit-preflight-test' -QuerySucceeded $true -Runners @()
+Assert-True ($provenAbsent.State -eq 'Absent') 'successful exact-name query did not establish absence'
+$unverifiableAbsence = Resolve-JitRunnerRegistration -RunnerName 'h5-jit-preflight-test' -QuerySucceeded $false -Runners @()
+Assert-True ($unverifiableAbsence.State -eq 'Unknown') 'failed runner query incorrectly established absence'
+$ambiguous = Resolve-JitRunnerRegistration -RunnerName 'h5-jit-preflight-test' -QuerySucceeded $true -Runners @(@{id=1;name='h5-jit-preflight-test'},@{id=2;name='h5-jit-preflight-test'})
+Assert-True ($ambiguous.State -eq 'Ambiguous') 'duplicate runner name was not rejected as ambiguous'
+
+foreach ($status in @('Starting','Running','Processing')) {
+    Assert-True ((Get-AcaExecutionState -Status $status).State -eq 'Active') "ACA status '$status' was not classified active"
+}
+foreach ($status in @('Succeeded','Failed','Stopped')) {
+    Assert-True ((Get-AcaExecutionState -Status $status).State -eq 'Terminal') "ACA status '$status' was not classified terminal"
+}
+foreach ($status in @('','Queued','Degraded','Unknown','FutureState')) {
+    Assert-True ((Get-AcaExecutionState -Status $status).State -eq 'Unknown') "ACA status '$status' was not classified unknown"
+}
+$unknownExecutionSafety = Test-AcaExecutionsSafeForSecretCleanup -Executions @(@{name='uncertain';properties=@{status='FutureState'}})
+$emptyExecutionSafety = Test-AcaExecutionsSafeForSecretCleanup -Executions @(@{name='empty';properties=@{status=''}})
+$activeExecutionSafety = Test-AcaExecutionsSafeForSecretCleanup -Executions @(@{name='active';properties=@{status='Running'}})
+$terminalExecutionSafety = Test-AcaExecutionsSafeForSecretCleanup -Executions @(@{name='done';properties=@{status='Succeeded'}})
+Assert-True (-not $unknownExecutionSafety.Safe -and -not $emptyExecutionSafety.Safe -and -not $activeExecutionSafety.Safe -and $terminalExecutionSafety.Safe) 'ACA execution safety gate did not fail closed'
+
 foreach ($mode in @('Diagnostic','Smoke')) {
     $json = New-GitHubJitRequestJson -Mode $mode -Name 'h5-jit-test' -RunnerGroupId 3
     $doc = Get-RequestBody $json

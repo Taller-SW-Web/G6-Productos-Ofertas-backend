@@ -1,6 +1,7 @@
 Set-StrictMode -Version Latest
 
 $script:AcaArmRequestOverride = $null
+$script:AcaLastPatchOutcome = 'NotStarted'
 
 function Set-AcaArmRequestOverride {
     param([Parameter(Mandatory)][scriptblock]$Invoker)
@@ -156,9 +157,9 @@ function Wait-AcaOperation {
         elseif ($response.StatusCode -eq 200) { return }
         switch ($stateValue) {
             'Succeeded' { return }
-            'Failed' { Throw-AcaResponseError -Response $response -Operation 'ARM async operation' -RedactValues $RedactValues }
-            'Canceled' { throw 'ARM_OPERATION_CANCELED: asynchronous Job patch was canceled.' }
-            'Cancelled' { throw 'ARM_OPERATION_CANCELED: asynchronous Job patch was canceled.' }
+            'Failed' { $script:AcaLastPatchOutcome='TerminalFailure'; Throw-AcaResponseError -Response $response -Operation 'ARM async operation' -RedactValues $RedactValues }
+            'Canceled' { $script:AcaLastPatchOutcome='TerminalFailure'; throw 'ARM_OPERATION_CANCELED: asynchronous Job patch was canceled.' }
+            'Cancelled' { $script:AcaLastPatchOutcome='TerminalFailure'; throw 'ARM_OPERATION_CANCELED: asynchronous Job patch was canceled.' }
         }
         if ([string]::IsNullOrWhiteSpace($stateValue) -and $response.StatusCode -eq 202) { throw 'ARM_OPERATION_STATE_UNAVAILABLE: 202 poll response had no status/provisioningState.' }
         & $Sleep
@@ -177,19 +178,27 @@ function Invoke-AcaJobSecretPatch {
         [scriptblock]$Sleep = { Start-Sleep -Seconds 3 },
         [string[]]$RedactValues = @()
     )
-    $body = @{properties=@{configuration=@{secrets=@($Secrets)}}}
-    $headers = @{}
-    if (-not [string]::IsNullOrWhiteSpace($ETag)) { $headers['If-Match'] = $ETag }
-    $response = Invoke-AcaArmRequest -Method PATCH -Uri $Uri -Token $Token -Headers $headers -Body $body
-    if ($response.StatusCode -eq 200) { return }
-    if ($response.StatusCode -eq 202) {
-        $operationUri = Get-AcaHeaderValue $response.Headers 'Azure-AsyncOperation'
-        if (-not $operationUri) { $operationUri = Get-AcaHeaderValue $response.Headers 'Location' }
-        if (-not $operationUri) { Throw-AcaResponseError -Response $response -Operation "$Operation LRO location missing" -RedactValues $RedactValues }
-        Wait-AcaOperation -OperationUri $operationUri -Token $Token -TimeoutSeconds $TimeoutSeconds -Sleep $Sleep -RedactValues $RedactValues
-        return
+    $script:AcaLastPatchOutcome = 'Ambiguous'
+    try {
+        $body = @{properties=@{configuration=@{secrets=@($Secrets)}}}
+        $headers = @{}
+        if (-not [string]::IsNullOrWhiteSpace($ETag)) { $headers['If-Match'] = $ETag }
+        $response = Invoke-AcaArmRequest -Method PATCH -Uri $Uri -Token $Token -Headers $headers -Body $body
+        if ($response.StatusCode -eq 200) { $script:AcaLastPatchOutcome='Completed'; return }
+        if ($response.StatusCode -eq 202) {
+            $operationUri = Get-AcaHeaderValue $response.Headers 'Azure-AsyncOperation'
+            if (-not $operationUri) { $operationUri = Get-AcaHeaderValue $response.Headers 'Location' }
+            if (-not $operationUri) { Throw-AcaResponseError -Response $response -Operation "$Operation LRO location missing" -RedactValues $RedactValues }
+            Wait-AcaOperation -OperationUri $operationUri -Token $Token -TimeoutSeconds $TimeoutSeconds -Sleep $Sleep -RedactValues $RedactValues
+            if ($script:AcaLastPatchOutcome -ne 'TerminalFailure') { $script:AcaLastPatchOutcome='Completed' }
+            return
+        }
+        if ([int]$response.StatusCode -ge 400 -and [int]$response.StatusCode -lt 500) { $script:AcaLastPatchOutcome='Rejected' }
+        Throw-AcaResponseError -Response $response -Operation $Operation -RedactValues $RedactValues
+    } catch {
+        if ($script:AcaLastPatchOutcome -notin @('Completed','Rejected','TerminalFailure')) { $script:AcaLastPatchOutcome='Ambiguous' }
+        throw
     }
-    Throw-AcaResponseError -Response $response -Operation $Operation -RedactValues $RedactValues
 }
 
 function Add-AcaJobSecret {
