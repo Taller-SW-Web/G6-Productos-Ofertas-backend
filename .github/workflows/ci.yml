@@ -67,6 +67,7 @@ jobs:
       run: |
         set -Eeuo pipefail
         bash ops/azure/container-apps/tests/validate-source.test.sh
+        bash ops/azure/container-apps/tests/deployment-targets.test.sh
         bash ops/azure/container-apps/tests/deploy.test.sh
         bash ops/azure/container-apps/tests/smoke.test.sh
         bash ops/azure/container-apps/tests/verify-environment-protection.test.sh
@@ -75,8 +76,14 @@ jobs:
         bash ops/shared/tests/ensure-ghcr-sha-image.test.sh
         bash ops/shared/tests/publish-only-workflow.test.sh
         bash scripts/ci/tests/marketplace-prebuilt.test.sh
-        for file in ops/shared/build-service.sh ops/shared/validate-publish-only-source.sh ops/shared/ensure-ghcr-sha-image.sh ops/shared/tests/services-ci.test.sh ops/shared/tests/ensure-ghcr-sha-image.test.sh ops/shared/tests/publish-only-workflow.test.sh ops/azure/container-apps/validate-source.sh ops/azure/container-apps/verify-environment-protection.sh ops/azure/container-apps/deploy.sh ops/azure/container-apps/reconcile-recovery.sh ops/azure/container-apps/smoke-service.sh ops/azure/container-apps/tests/validate-source.test.sh ops/azure/container-apps/tests/verify-environment-protection.test.sh ops/azure/container-apps/tests/deploy.test.sh ops/azure/container-apps/tests/smoke.test.sh ops/azure/container-apps/tests/reconcile-recovery.test.sh ops/azure/container-apps/tests/workflow.test.sh; do bash -n "$file"; done
-        shellcheck scripts/ci/marketplace-docker.sh scripts/ci/tests/marketplace-prebuilt.test.sh ops/shared/build-service.sh ops/shared/validate-publish-only-source.sh ops/shared/ensure-ghcr-sha-image.sh ops/shared/tests/services-ci.test.sh ops/shared/tests/ensure-ghcr-sha-image.test.sh ops/shared/tests/publish-only-workflow.test.sh ops/azure/container-apps/validate-source.sh ops/azure/container-apps/verify-environment-protection.sh ops/azure/container-apps/deploy.sh ops/azure/container-apps/reconcile-recovery.sh ops/azure/container-apps/smoke-service.sh ops/azure/container-apps/tests/validate-source.test.sh ops/azure/container-apps/tests/verify-environment-protection.test.sh ops/azure/container-apps/tests/deploy.test.sh ops/azure/container-apps/tests/smoke.test.sh ops/azure/container-apps/tests/reconcile-recovery.test.sh ops/azure/container-apps/tests/workflow.test.sh
+        for file in ops/shared/build-service.sh ops/shared/validate-publish-only-source.sh ops/shared/ensure-ghcr-sha-image.sh ops/shared/tests/services-ci.test.sh ops/shared/tests/ensure-ghcr-sha-image.test.sh ops/shared/tests/publish-only-workflow.test.sh ops/azure/container-apps/validate-source.sh ops/azure/container-apps/resolve-deployment-target.sh ops/azure/container-apps/verify-environment-protection.sh ops/azure/container-apps/deploy.sh ops/azure/container-apps/reconcile-recovery.sh ops/azure/container-apps/smoke-service.sh ops/azure/container-apps/tests/validate-source.test.sh ops/azure/container-apps/tests/deployment-targets.test.sh ops/azure/container-apps/tests/verify-environment-protection.test.sh ops/azure/container-apps/tests/deploy.test.sh ops/azure/container-apps/tests/smoke.test.sh ops/azure/container-apps/tests/reconcile-recovery.test.sh ops/azure/container-apps/tests/workflow.test.sh; do bash -n "$file"; done
+        shellcheck scripts/ci/marketplace-docker.sh scripts/ci/tests/marketplace-prebuilt.test.sh ops/shared/build-service.sh ops/shared/validate-publish-only-source.sh ops/shared/ensure-ghcr-sha-image.sh ops/shared/tests/services-ci.test.sh ops/shared/tests/ensure-ghcr-sha-image.test.sh ops/shared/tests/publish-only-workflow.test.sh ops/azure/container-apps/validate-source.sh ops/azure/container-apps/resolve-deployment-target.sh ops/azure/container-apps/verify-environment-protection.sh ops/azure/container-apps/deploy.sh ops/azure/container-apps/reconcile-recovery.sh ops/azure/container-apps/smoke-service.sh ops/azure/container-apps/tests/validate-source.test.sh ops/azure/container-apps/tests/deployment-targets.test.sh ops/azure/container-apps/tests/verify-environment-protection.test.sh ops/azure/container-apps/tests/deploy.test.sh ops/azure/container-apps/tests/smoke.test.sh ops/azure/container-apps/tests/reconcile-recovery.test.sh ops/azure/container-apps/tests/workflow.test.sh
+    - name: Probar bindings JIT y planificación RBAC
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        ./ops/azure/github-runner-h5/tests/test-jit-runner-operations.ps1
+        ./ops/azure/github-runner-h5/tests/test-rbac-plan.ps1
   tipos:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
@@ -599,7 +606,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b
+        ref: 490172c11cb4b83ddd1996f8d5834d0402184cf8
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Configurar Node.js
@@ -636,7 +643,7 @@ jobs:
           const passed = tests.filter((test) => test.status === "passed").length;
           const skipped = tests.filter((test) => ["pending", "skipped", "todo"].includes(test.status)).length;
           console.log(`Pruebas E2E: ${passed} aprobadas, ${skipped} omitidas, ${tests.length} totales`);
-          if (files.length !== 1 || passed !== 7 || skipped !== 1 || tests.length !== 8 || report.numTotalTests !== 8 || report.numPendingTests !== 1 || report.numTodoTests !== 0 || report.numFailedTests !== 0) process.exit(1);
+          if (files.length !== 1 || passed !== 8 || skipped !== 1 || tests.length !== 9 || report.numTotalTests !== 9 || report.numPendingTests !== 1 || report.numTodoTests !== 0 || report.numFailedTests !== 0) process.exit(1);
         '
     - name: Verificar limpieza de recursos Docker desechables
       if: always()
@@ -693,6 +700,54 @@ jobs:
         path: ${{ runner.temp }}/dependency-audit-evidence/
         if-no-files-found: error
         retention-days: 30
+  apim_h5_estatico:
+    name: APIM H5 — artefactos y ARM estáticos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
+    steps:
+    - name: Obtener código fuente
+      uses: actions/checkout@v4
+    - name: Obtener OpenAPI de Docs integrado
+      uses: actions/checkout@v4
+      with:
+        repository: Taller-SW-Web/G6-Productos-Ofertas-docs
+        ref: 490172c11cb4b83ddd1996f8d5834d0402184cf8
+        path: .ci/G6-Productos-Ofertas-docs
+        persist-credentials: 'false'
+    - name: Obtener registro Gateway integrado
+      uses: actions/checkout@v4
+      with:
+        repository: Taller-SW-Web/G6-Productos-Ofertas-backend
+        ref: 05f6b929f8aebfd745acd2e70959e36967c96d09
+        path: .ci/G6-Productos-Ofertas-gateway
+        persist-credentials: 'false'
+    - name: Configurar Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Instalar dependencias APIM
+      run: python -m pip install -r ops/azure/apim/requirements.txt
+    - name: Compilar Bicep a ARM sin despliegue
+      run: |
+        az bicep install
+        az bicep build --file ops/azure/apim/main.bicep --outfile "${RUNNER_TEMP}/apim-h5-arm.json"
+    - name: Probar herramientas contractuales y jerarquía ARM
+      env:
+        APIM_ARM_TEMPLATE: ${{ runner.temp }}/apim-h5-arm.json
+      run: python -m unittest discover -s ops/azure/apim/tests -p 'test_*.py' -v
+    - name: Validar jerarquía ARM y correspondencia exacta de operaciones
+      run: >-
+        python ops/azure/apim/verify-arm-template.py
+        --template "${RUNNER_TEMP}/apim-h5-arm.json"
+        --source-openapi .ci/G6-Productos-Ofertas-docs/contratos/http/openapi.yaml
+        --gateway-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/contract-routes.ts
+        --g5-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/g5-h5-routes.ts
+        --expected-docs-sha 490172c11cb4b83ddd1996f8d5834d0402184cf8
+        --expected-gateway-sha 05f6b929f8aebfd745acd2e70959e36967c96d09
   integral:
     name: Validación integral de integración continua
     runs-on: ubuntu-latest
@@ -715,6 +770,7 @@ jobs:
       - gateway_inventory_postgres
       - azure_cd_h5
       - seguridad_dependencias
+      - apim_h5_estatico
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
       (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark') &&
@@ -731,7 +787,7 @@ jobs:
         RESULTADOS: ${{ toJSON(needs) }}
       run: |
         printf '%s\n' "$RESULTADOS"
-        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias
+        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias apim_h5_estatico
   compatibilidad:
     name: Lint, Typecheck, Test, Build & Smoke Test
     runs-on: ubuntu-latest
@@ -754,6 +810,7 @@ jobs:
     - gateway_inventory_postgres
     - azure_cd_h5
     - seguridad_dependencias
+    - apim_h5_estatico
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
       (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark') &&
@@ -770,7 +827,7 @@ jobs:
         RESULTADOS: ${{ toJSON(needs) }}
       run: |
         printf '%s\n' "$RESULTADOS"
-        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias
+        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias apim_h5_estatico
   benchmark_focalizado:
     name: Benchmark focalizado solicitado
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'benchmark'

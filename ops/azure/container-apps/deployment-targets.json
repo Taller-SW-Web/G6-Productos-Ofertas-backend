@@ -1,0 +1,62 @@
+{
+  "subscriptionId": "fef42188-accd-4470-ae88-78f583eb4906",
+  "services": [
+    "api-gateway",
+    "bulk-svc",
+    "catalog-svc",
+    "combos-svc",
+    "inventory-svc",
+    "price-audit-svc",
+    "pricing-svc",
+    "promotions-svc",
+    "taxonomy-svc"
+  ],
+  "destinations": {
+    "brazil-isolated": {
+      "resourceGroup": "rg-g6-sb-h5-int-fork",
+      "acaEnvironment": "env-g6-h5-int",
+      "location": "Brazil South",
+      "githubEnvironment": "azure-h5",
+      "runnerGroupId": 3,
+      "jobName": "azure-h5-smoke",
+      "smokeLabel": "azure-h5-smoke",
+      "cdIdentity": "g6-h5-int-github-cd",
+      "initialServices": [
+        "api-gateway",
+        "catalog-svc",
+        "inventory-svc",
+        "pricing-svc",
+        "promotions-svc"
+      ]
+    },
+    "chile-shared": {
+      "resourceGroup": "rg-g6-aca-chile",
+      "acaEnvironment": "env-g6-phase1-chile",
+      "location": "Chile Central",
+      "githubEnvironment": "azure-h5-chile",
+      "runnerGroupId": 3,
+      "jobName": "azure-h5-smoke-chile",
+      "smokeLabel": "azure-h5-smoke-chile",
+      "cdIdentity": "g6-h5-chile-github-cd",
+      "initialServices": [
+        "catalog-svc",
+        "inventory-svc",
+        "pricing-svc",
+        "promotions-svc",
+        "api-gateway"
+      ]
+    }
+  },
+  "pilot": {
+    "githubEnvironment": "azure-h5-pilot-234",
+    "runnerGroupId": 3,
+    "smokeLabel": "azure-h5-smoke",
+    "resourceGroup": "rg-g6-aca-chile",
+    "acaEnvironment": "env-g6-phase1-chile",
+    "location": "Chile Central",
+    "services": [
+      "pricing-svc",
+      "price-audit-svc"
+    ]
+  }
+}

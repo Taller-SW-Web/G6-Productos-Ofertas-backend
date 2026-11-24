@@ -1,13 +1,27 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-[[ $# == 3 ]] || { echo 'uso: reconcile-recovery.sh <servicios-json> <directorio-artefactos> <jobs-json>' >&2; exit 2; }
+[[ $# == 5 ]] || { echo 'uso: reconcile-recovery.sh <servicios-json> <directorio-artefactos> <jobs-json> <destino> <environment>' >&2; exit 2; }
 selected_json="$1"
 artifact_dir="$2"
 jobs_json="$3"
+destination="$4"
+environment="$5"
+case "$destination:$environment" in brazil-isolated:azure-h5|brazil-isolated:azure-h5-pilot-234|chile-shared:azure-h5-chile) ;; *) echo 'destino/Environment no autorizados' >&2; exit 2 ;; esac
+if [[ "$destination" == chile-shared ]] && [[ "$(jq 'length' <<< "$selected_json")" != 1 ]]; then echo 'Chile shared recovery solo admite el servicio individual del run.' >&2; exit 2; fi
+targets_file="$(dirname "$0")/deployment-targets.json"
+case "$destination:$environment" in
+  brazil-isolated:azure-h5) target_path='destinations.brazil-isolated' ;;
+  brazil-isolated:azure-h5-pilot-234) target_path='pilot' ;;
+  chile-shared:azure-h5-chile) target_path='destinations.chile-shared' ;;
+esac
+target_resource_group="$(jq -r --arg key "$target_path" 'getpath($key | split(".")).resourceGroup' "$targets_file")"
+target_environment="$(jq -r --arg key "$target_path" 'getpath($key | split(".")).acaEnvironment' "$targets_file")"
+target_location="$(jq -r --arg key "$target_path" 'getpath($key | split(".")).location' "$targets_file")"
+target_subscription="$(jq -r '.subscriptionId' "$targets_file")"
 deploy_script="${DEPLOY_SCRIPT:-$(dirname "$0")/deploy.sh}"
 summary_file="${GITHUB_STEP_SUMMARY:-/dev/null}"
-readonly selected_json artifact_dir jobs_json deploy_script summary_file
+readonly selected_json artifact_dir jobs_json destination environment deploy_script summary_file
 
 jq -e 'type == "array" and length > 0 and all(.[]; type == "string")' <<< "$selected_json" >/dev/null || {
   echo 'ESTADO DESCONOCIDO: selección de servicios inválida.' | tee -a "$summary_file"
@@ -30,17 +44,29 @@ while IFS= read -r service; do
   deploy_step_conclusion="$(jq -r '[.steps[]? | select(.name == "Actualizar solo la imagen y verificar revisión/rollback") | .conclusion // empty] | first // empty' <<< "$job_json")"
 
   if [[ -f "$receipt_file" ]]; then
-    service_in_receipt="$(sed -n 's/^service=//p' "$receipt_file")"
-    previous="$(sed -n 's/^previous=//p' "$receipt_file")"
-    target="$(sed -n 's/^target=//p' "$receipt_file")"
-    config_hash="$(sed -n 's/^config_sha256=//p' "$receipt_file")"
-    if [[ "$service_in_receipt" != "$service" || ! -f "$image_file" || "$(cat "$image_file")" != "$target" ]]; then
+    service_in_receipt="$(jq -r '.service // empty' "$receipt_file" 2>/dev/null || true)"
+    receipt_destination="$(jq -r '.destination // empty' "$receipt_file" 2>/dev/null || true)"
+    receipt_environment="$(jq -r '.github_environment // empty' "$receipt_file" 2>/dev/null || true)"
+    previous="$(jq -r '.previous // empty' "$receipt_file" 2>/dev/null || true)"
+    target="$(jq -r '.target // empty' "$receipt_file" 2>/dev/null || true)"
+    config_hash="$(jq -r '.config_sha256 // empty' "$receipt_file" 2>/dev/null || true)"
+    receipt_rg="$(jq -r '.resource_group // empty' "$receipt_file" 2>/dev/null || true)"
+    receipt_aca_environment="$(jq -r '.aca_environment // empty' "$receipt_file" 2>/dev/null || true)"
+    receipt_location="$(jq -r '.location // empty' "$receipt_file" 2>/dev/null || true)"
+    receipt_subscription="$(jq -r '.subscription_id // empty' "$receipt_file" 2>/dev/null || true)"
+    receipt_app_id="$(jq -r '.app_resource_id // empty' "$receipt_file" 2>/dev/null || true)"
+    receipt_container="$(jq -r '.container // empty' "$receipt_file" 2>/dev/null || true)"
+    expected_app_id="/subscriptions/${target_subscription,,}/resourcegroups/${target_resource_group,,}/providers/microsoft.app/containerapps/${service,,}"
+    if [[ "$service_in_receipt" != "$service" || "$receipt_destination" != "$destination" || "$receipt_environment" != "$environment" ||
+          "$receipt_rg" != "$target_resource_group" || "$receipt_aca_environment" != "$target_environment" || "$receipt_location" != "$target_location" ||
+          "${receipt_subscription,,}" != "${target_subscription,,}" || "${receipt_app_id,,}" != "$expected_app_id" || "$receipt_container" != "$service" ||
+          ! -f "$image_file" || "$(cat "$image_file")" != "$target" ]]; then
       printf 'ESTADO DESCONOCIDO: %s tiene recibo incompleto o no coincide con la imagen publicada; no se modifica ACA.\n' "$service" | tee -a "$summary_file"
       failed=1
       continue
     fi
     printf 'ACTUALIZADO CON RECIBO: %s target=%s\n' "$service" "$target" | tee -a "$summary_file"
-    if recovery_output="$("$deploy_script" --restore "$service" "$previous" "$target" "$config_hash" 2>&1)"; then
+    if recovery_output="$(H5_DEPLOY_DESTINATION="$destination" H5_DEPLOY_ENVIRONMENT="$environment" H5_PILOT_SELF_REVIEW="$([[ "$environment" == azure-h5-pilot-234 ]] && echo true || echo false)" "$deploy_script" --restore "$service" "$previous" "$target" "$config_hash" 2>&1)"; then
       printf '%s\n' "$recovery_output"
       printf 'RECUPERADO: %s digest=%s; estado y configuración verificados.\n' "$service" "$previous" | tee -a "$summary_file"
     else
@@ -61,7 +87,7 @@ while IFS= read -r service; do
     continue
   fi
   target="$(cat "$image_file")"
-  if inspection_output="$("$deploy_script" --inspect "$service" "$target" 2>&1)"; then
+  if inspection_output="$(H5_DEPLOY_DESTINATION="$destination" H5_DEPLOY_ENVIRONMENT="$environment" H5_PILOT_SELF_REVIEW="$([[ "$environment" == azure-h5-pilot-234 ]] && echo true || echo false)" "$deploy_script" --inspect "$service" "$target" 2>&1)"; then
     if [[ "$inspection_output" == TARGET_ACTIVE:* ]]; then
       printf 'ACTUALIZADO SIN RECIBO: %s tiene activo el digest candidato %s. No se restaura sin el digest/configuración previos del recibo.\n' "$service" "$target" | tee -a "$summary_file"
     else

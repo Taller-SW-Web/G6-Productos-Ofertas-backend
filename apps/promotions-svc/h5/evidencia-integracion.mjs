@@ -36,7 +36,10 @@ export async function constanciaComercial(plan, evento) {
     proof.gateway !== new URL(plan.gateway).origin ||
     proof.order_id !== plan.order_id ||
     proof.reservation_id !== plan.reservation_id ||
-    proof.coupon_operation_id !== plan.operations?.coupon ||
+    proof.coupon_operation_id !==
+      (plan.cancel_mode === 'reject-unbacked-restore' || plan.cancel_mode === 'release-only'
+        ? null
+        : plan.operations?.coupon) ||
     typeof proof.event_id !== 'string' ||
     !/^[A-Za-z0-9_-]{1,100}$/.test(proof.event_id) ||
     !Number.isFinite(occurred) ||

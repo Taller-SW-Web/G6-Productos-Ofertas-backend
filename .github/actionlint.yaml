@@ -1,3 +1,4 @@
 self-hosted-runner:
   labels:
     - azure-h5-smoke
+    - azure-h5-smoke-chile
