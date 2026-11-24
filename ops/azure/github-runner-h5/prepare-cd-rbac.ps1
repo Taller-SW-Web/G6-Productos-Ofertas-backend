@@ -1,19 +1,37 @@
 param(
     [switch]$Apply,
     [string]$ApprovalCode,
-    [string]$ResourceGroup = 'rg-g6-sb-h5-int-fork',
-    [string]$EnvironmentName = 'env-g6-h5-int',
-    [string]$IdentityName = 'g6-h5-int-github-cd'
+    [ValidateSet('brazil-isolated','chile-shared')][string]$Destination = 'brazil-isolated',
+    [string[]]$Services,
+    [switch]$AuthorizeAdditionalServices,
+    [string]$ResourceGroup,
+    [string]$EnvironmentName,
+    [string]$IdentityName
 )
 
 $ErrorActionPreference = 'Stop'
-$requiredApps = @('api-gateway', 'catalog-svc', 'inventory-svc', 'pricing-svc', 'promotions-svc')
-$appRoleName = 'G6 H5 Existing Container Apps Operator'
-$envRoleName = 'G6 H5 Container Apps Environment Reader'
+. (Join-Path $PSScriptRoot 'rbac-plan.ps1')
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
+$targetsPath = Join-Path $scriptDirectory '..\container-apps\deployment-targets.json'
+$targets = Get-Content -LiteralPath $targetsPath -Raw | ConvertFrom-Json
+$target = $targets.destinations.$Destination
+if (-not $target) { throw "Destino no autorizado: $Destination" }
+$expectedServices = if ($Services) { @($Services) } else { @($target.initialServices) }
+$additionalServices = @($expectedServices | Where-Object { $_ -notin @($target.initialServices) })
+if ($Destination -ceq 'chile-shared' -and $additionalServices.Count -gt 0 -and -not $AuthorizeAdditionalServices) { throw 'Los otros cuatro servicios requieren -AuthorizeAdditionalServices explícito.' }
+if (@($expectedServices | Select-Object -Unique).Count -ne $expectedServices.Count -or @($expectedServices | Where-Object { $_ -notin @($targets.services) }).Count -gt 0) { throw 'Selección de servicios duplicada o fuera de allowlist.' }
+$ResourceGroup = if ($ResourceGroup) { $ResourceGroup } else { [string]$target.resourceGroup }
+$EnvironmentName = if ($EnvironmentName) { $EnvironmentName } else { [string]$target.acaEnvironment }
+$IdentityName = if ($IdentityName) { $IdentityName } else { [string]$target.cdIdentity }
+if ($ResourceGroup -cne $target.resourceGroup -or $EnvironmentName -cne $target.acaEnvironment -or $IdentityName -cne $target.cdIdentity) { throw 'Overrides RG, Environment o identidad no coinciden con el destino aprobado.' }
+$requiredApps = @($expectedServices)
+$roleSuffix = if ($Destination -ceq 'chile-shared') { 'Chile' } else { '' }
+$appRoleName = "G6 H5 $roleSuffix Existing Container Apps Operator".Replace('H5  Existing','H5 Existing')
+$envRoleName = "G6 H5 $roleSuffix Container Apps Environment Reader".Replace('H5  Container','H5 Container')
 $repositoryRoot = (Resolve-Path (Join-Path $scriptDirectory '..\..\..\..')).Path
-$appRoleTemplatePath = Join-Path $scriptDirectory 'role-aca-existing-apps.json'
-$envRoleTemplatePath = Join-Path $scriptDirectory 'role-aca-environment-reader.json'
+$templateSuffix = if ($Destination -ceq 'chile-shared') { '-chile' } else { '' }
+$appRoleTemplatePath = Join-Path $scriptDirectory "role-aca-existing-apps$templateSuffix.json"
+$envRoleTemplatePath = Join-Path $scriptDirectory "role-aca-environment-reader$templateSuffix.json"
 $temporaryFiles = [System.Collections.Generic.List[string]]::new()
 
 function Invoke-AzJson {
@@ -76,15 +94,22 @@ try {
     $account = Invoke-AzJson @('account','show','--output','json')
     $subscriptionId = [string]$account.id
     if ([string]::IsNullOrWhiteSpace($subscriptionId)) { throw 'Azure CLI no tiene una suscripción activa.' }
+    if ($subscriptionId -cne [string]$targets.subscriptionId) { throw 'La suscripción activa no es la suscripción autorizada en el plan de destino.' }
 
     $group = Invoke-AzJson @('group','show','--name',$ResourceGroup,'--output','json','--subscription',$subscriptionId)
     $groupId = [string]$group.id
     $environment = Invoke-AzJson @('containerapp','env','show','--name',$EnvironmentName,'--resource-group',$ResourceGroup,'--output','json','--subscription',$subscriptionId)
-    $identity = Invoke-AzJson @('identity','show','--name',$IdentityName,'--resource-group',$ResourceGroup,'--output','json','--subscription',$subscriptionId)
-    $principalId = [string]$identity.principalId
-    if (-not $groupId -or -not $environment.id -or -not $principalId) { throw 'No se pudo resolver RG, Environment o principal desde Azure CLI.' }
+    if ([string]$environment.location -ine [string]$target.location) { throw "Environment $EnvironmentName no está en la región esperada $($target.location)." }
+    $identity = $null
+    try { $identity = Invoke-AzJson @('identity','show','--name',$IdentityName,'--resource-group',$ResourceGroup,'--output','json','--subscription',$subscriptionId) }
+    catch {
+        if ($Apply -or $Destination -cne 'chile-shared') { throw }
+        Write-Warning "La identidad futura $IdentityName aún no existe. El plan de Chile será informativo y no consultará ni aplicará asignaciones para un principal inexistente."
+    }
+    $principalId = if ($identity) { [string]$identity.principalId } else { '' }
+    if (-not $groupId -or -not $environment.id -or ($Apply -and -not $principalId)) { throw 'No se pudo resolver RG, Environment o principal requerido.' }
 
-    $effectiveAssignments = Invoke-AzJson @('role','assignment','list','--assignee-object-id',$principalId,'--all','--include-inherited','--output','json','--subscription',$subscriptionId)
+    $effectiveAssignments = if ($principalId) { Invoke-AzJson @('role','assignment','list','--assignee-object-id',$principalId,'--all','--include-inherited','--output','json','--subscription',$subscriptionId) } else { @() }
     $apps = @()
     $missing = @()
     foreach ($appName in $requiredApps) {
@@ -115,11 +140,13 @@ try {
     if ($missing.Count -gt 0) {
         throw "Aplicación bloqueada: faltan ACA en $EnvironmentName ($($missing -join ', ')); se verificó RBAC heredado, no se crearon roles ni asignaciones."
     }
-    if ($apps.Count -ne $requiredApps.Count) { throw 'El conjunto de ACA no coincide con las cinco apps autorizadas.' }
+    if ($apps.Count -ne $requiredApps.Count) { throw 'El conjunto de ACA no coincide con la selección autorizada.' }
+    $rbacPlan = New-H5RbacPlan -TargetConfig $targets -Destination $Destination -Services $requiredApps -ResourceGroupId $groupId -EnvironmentId ([string]$environment.id) -Apps $apps -AuthorizeAdditionalServices:$AuthorizeAdditionalServices
+    if ($rbacPlan.AppRoleName -cne $appRoleName -or $rbacPlan.EnvironmentReaderRoleName -cne $envRoleName) { throw 'Los nombres de roles no coinciden con el plan delimitado del destino.' }
 
     foreach ($pair in @(@{Path=$appRoleTemplatePath; Name=$appRoleName}, @{Path=$envRoleTemplatePath; Name=$envRoleName})) {
         $role = Get-Content -LiteralPath $pair.Path -Raw | ConvertFrom-Json
-        if ($role.Name -cne $pair.Name) { throw "Nombre de rol inesperado en $($pair.Path)" }
+        $role.Name = $pair.Name
         $role.AssignableScopes = @($groupId)
         $outputPath = [System.IO.Path]::GetTempFileName()
         $temporaryFiles.Add($outputPath)
@@ -127,8 +154,9 @@ try {
         Save-RoleDefinition -Role $role -Path $outputPath
     }
 
-    Write-Output "Subscription y scopes obtenidos del contexto Azure; identidad $IdentityName resuelta en runtime."
-    Write-Output "Plan: '$envRoleName' en el RG y '$appRoleName' en $($apps.Count) scopes ACA existentes. No hay permisos de app write en scope RG/subscription."
+    if ($principalId) { Write-Output "Subscription y scopes obtenidos del contexto Azure; identidad $IdentityName resuelta para revisión." }
+    else { Write-Output "Plan informativo; identidad futura $IdentityName pendiente de creación autorizada y sin principal/RBAC real." }
+    Write-Output "Plan destino ${Destination}: '$envRoleName' en el RG y '$appRoleName' en $($apps.Count) scopes ACA existentes para $($requiredApps -join ', '). No hay permisos de app write en scope RG/subscription."
     if (-not $Apply) {
         Write-Output 'DRY RUN: no se crearon roles ni asignaciones. Reejecutar con autorización del owner, -Apply y el código de aprobación.'
         exit 0

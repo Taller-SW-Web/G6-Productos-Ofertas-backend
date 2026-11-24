@@ -16,8 +16,19 @@ cat > "$TEMP/bin/az" <<'MOCK'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 state="${MOCK_STATE:?}"
-[[ "$*" == *"--resource-group ${MOCK_RESOURCE_GROUP:-rg-g6-aca-chile}"* ]] || { echo 'wrong resource group' >&2; exit 61; }
-if [[ "${1:-}" == containerapp && "${2:-}" == show ]]; then cat "$state"; exit 0; fi
+subscription='fef42188-accd-4470-ae88-78f583eb4906'
+[[ "${MOCK_BAD_SUBSCRIPTION:-false}" != true ]] || subscription='00000000-0000-0000-0000-000000000000'
+group="${MOCK_RESOURCE_GROUP:-rg-g6-aca-chile}"
+aca_env='env-g6-phase1-chile'
+location='chilecentral'
+if [[ "$group" == rg-g6-sb-h5-int-fork ]]; then aca_env='env-g6-h5-int'; location='brazilsouth'; fi
+env_id="/subscriptions/$subscription/resourceGroups/$group/providers/Microsoft.App/managedEnvironments/$aca_env"
+app_id="/subscriptions/$subscription/resourceGroups/$group/providers/Microsoft.App/containerApps/api-gateway"
+if [[ "${1:-}" == account && "${2:-}" == show ]]; then printf '%s\n' "$subscription"; exit 0; fi
+if [[ "${1:-}" == containerapp ]]; then [[ "$*" == *"--resource-group ${MOCK_RESOURCE_GROUP:-rg-g6-aca-chile}"* ]] || { echo 'wrong resource group' >&2; exit 61; }; fi
+if [[ "${1:-}" == group && "${2:-}" == show ]]; then printf '{"id":"/subscriptions/%s/resourceGroups/%s"}\n' "$subscription" "$group"; exit 0; fi
+if [[ "${1:-}" == containerapp && "${2:-}" == env && "${3:-}" == show ]]; then [[ "${MOCK_BAD_ENVIRONMENT:-false}" != true ]] || env_id="$env_id-wrong"; printf '{"id":"%s","location":"%s"}\n' "$env_id" "$location"; exit 0; fi
+if [[ "${1:-}" == containerapp && "${2:-}" == show ]]; then jq --arg id "$app_id" --arg env "$env_id" '. + {id:$id} | .properties.managedEnvironmentId=$env' "$state"; exit 0; fi
 if [[ "${1:-}" == containerapp && "${2:-}" == revision && "${3:-}" == show ]]; then
   jq -c --arg startup "${MOCK_STARTUP:-false}" '(.revisionPolls += 1) | if $startup == "true" and .revisionPolls == 1 then .revision.properties.runningState="Processing" elif $startup == "true" and .revisionPolls >= 2 then .revision.properties.runningState="Running" else . end | .revision' "$state"
   jq --arg startup "${MOCK_STARTUP:-false}" '(.revisionPolls += 1) | if $startup == "true" and .revisionPolls == 1 then .revision.properties.runningState="Processing" elif $startup == "true" and .revisionPolls >= 2 then .revision.properties.runningState="Running" else . end' "$state" > "$state.tmp"
@@ -51,14 +62,15 @@ chmod +x "$TEMP/bin/az"
 export PATH="$TEMP/bin:$PATH" MOCK_STATE="$TEMP/state.json" ACA_POLL_ATTEMPTS=2 ACA_POLL_INTERVAL_SECONDS=0
 export DEPLOY_RECEIPT="$TEMP/gateway.receipt"
 export MOCK_STARTUP=true
-export H5_DEPLOY_ENVIRONMENT=azure-h5-pilot-234
+export H5_DEPLOY_ENVIRONMENT=azure-h5-chile
+export H5_DEPLOY_DESTINATION=chile-shared H5_PILOT_SELF_REVIEW=false
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
 if bash "$DEPLOY" bad-service "$TARGET" >/dev/null 2>&1; then fail 'servicio no autorizado'; fi
 if bash "$DEPLOY" api-gateway "${TARGET%api-gateway@*}catalog-svc@${TARGET##*@}" >/dev/null 2>&1; then fail 'imagen de otro servicio'; fi
 if bash "$DEPLOY" api-gateway "${TARGET%@*}" >/dev/null 2>&1; then fail 'imagen sin digest'; fi
 printf 'PASS: rechaza servicio, paquete cruzado e imagen sin digest\n'
-MOCK_RESOURCE_GROUP=rg-g6-sb-h5-int-fork H5_DEPLOY_ENVIRONMENT=azure-h5 \
+MOCK_RESOURCE_GROUP=rg-g6-sb-h5-int-fork H5_DEPLOY_ENVIRONMENT=azure-h5 H5_DEPLOY_DESTINATION=brazil-isolated H5_PILOT_SELF_REVIEW=false \
   bash "$DEPLOY" --inspect api-gateway "$PREVIOUS" > "$TEMP/isolated.log" 2>&1 ||
   { cat "$TEMP/isolated.log"; fail 'azure-h5 no consultó su grupo aislado'; }
 if H5_DEPLOY_ENVIRONMENT=production bash "$DEPLOY" --inspect api-gateway "$PREVIOUS" >/dev/null 2>&1; then
@@ -68,6 +80,12 @@ if H5_DEPLOY_ENVIRONMENT='' bash "$DEPLOY" --inspect api-gateway "$PREVIOUS" >/d
   fail 'acepta un environment ausente'
 fi
 printf 'PASS: azure-h5 usa su destino aislado y el ejecutor rechaza otros environments\n'
+
+updates_before_validation="$(jq -r .updates "$MOCK_STATE")"
+if MOCK_BAD_SUBSCRIPTION=true bash "$DEPLOY" api-gateway "$TARGET" >/dev/null 2>&1; then fail 'acepta otra suscripción'; fi
+if MOCK_BAD_ENVIRONMENT=true bash "$DEPLOY" api-gateway "$TARGET" >/dev/null 2>&1; then fail 'acepta ACA de otro Environment'; fi
+[[ "$(jq -r .updates "$MOCK_STATE")" == "$updates_before_validation" ]] || fail 'validación de destino fallida modificó ACA'
+echo 'PASS: suscripción/Environment incorrectos fallan antes de cualquier actualización'
 
 if bash "$DEPLOY" api-gateway "$TARGET" > "$TEMP/deploy.log" 2>&1; then :; else cat "$TEMP/deploy.log"; fail 'despliegue esperado'; fi
 grep -Fq 'modo=running réplicas=1 salud=Healthy' "$TEMP/deploy.log" || fail 'arranque Processing→Running no se verificó'
@@ -88,10 +106,11 @@ grep -Fq Idempotencia "$TEMP/idempotent.log" || fail 'idempotencia no registrada
 grep -Fq 'modo=scale-to-zero réplicas=0 salud=None' "$TEMP/idempotent.log" || fail 'estado Scale to 0 no fue distinguido'
 printf 'PASS: idempotencia tras inactividad acepta Stopped/0 sin crear revisión\n'
 
-previous_from_receipt="$(sed -n 's/^previous=//p' "$TEMP/first.receipt")"
-target_from_receipt="$(sed -n 's/^target=//p' "$TEMP/first.receipt")"
-config_from_receipt="$(sed -n 's/^config_sha256=//p' "$TEMP/first.receipt")"
+previous_from_receipt="$(jq -r '.previous' "$TEMP/first.receipt")"
+target_from_receipt="$(jq -r '.target' "$TEMP/first.receipt")"
+config_from_receipt="$(jq -r '.config_sha256' "$TEMP/first.receipt")"
 [[ "$previous_from_receipt" == "$PREVIOUS" && "$target_from_receipt" == "$TARGET" && "$config_from_receipt" =~ ^[0-9a-f]{64}$ ]] || fail 'recibo no conserva digests/configuración necesarios'
+jq -e '.destination=="chile-shared" and .github_environment=="azure-h5-chile" and .resource_group=="rg-g6-aca-chile" and .aca_environment=="env-g6-phase1-chile" and .location=="Chile Central" and .subscription_id=="fef42188-accd-4470-ae88-78f583eb4906" and (.app_resource_id|contains("/containerApps/api-gateway")) and .container=="api-gateway"' "$TEMP/first.receipt" >/dev/null || { cat "$TEMP/first.receipt"; fail 'recibo no queda vinculado al destino y recurso Chile'; }
 jq '.properties.configuration.ingress.targetPort=3001' "$MOCK_STATE" > "$TEMP/state.tmp"
 mv "$TEMP/state.tmp" "$MOCK_STATE"
 if bash "$DEPLOY" --restore api-gateway "$PREVIOUS" "$TARGET" "$config_from_receipt" > "$TEMP/concurrent.log" 2>&1; then fail 'recuperación sobrescribió cambio concurrente de ingress'; fi

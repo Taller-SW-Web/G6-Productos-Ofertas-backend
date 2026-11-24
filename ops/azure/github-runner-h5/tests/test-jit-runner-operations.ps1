@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '..\jit-runner-operations.ps1')
+. (Join-Path $PSScriptRoot '..\deployment-targets.ps1')
 
 function Assert-True([bool]$Condition,[string]$Message) { if (-not $Condition) { throw $Message } }
 function Get-RequestBody([string]$Json) { [System.Text.Json.JsonDocument]::Parse($Json) }
@@ -47,6 +48,30 @@ foreach ($mode in @('Diagnostic','Smoke')) {
             Assert-True ($actualLabels.Count -eq 2 -and $actualLabels -contains 'linux' -and $actualLabels -contains 'azure-h5-smoke') 'Smoke labels incorrect'
         }
     } finally { $doc.Dispose() }
+}
+$chileTarget = Resolve-H5DeploymentTarget -Destination chile-shared -GitHubEnvironment azure-h5-chile -Service catalog-svc
+$brazilTarget = Resolve-H5DeploymentTarget -Destination brazil-isolated -GitHubEnvironment azure-h5 -Service catalog-svc
+Assert-True ($chileTarget.ResourceGroup -eq 'rg-g6-aca-chile' -and $chileTarget.AcaEnvironment -eq 'env-g6-phase1-chile' -and $chileTarget.Location -eq 'Chile Central' -and $chileTarget.JobName -eq 'azure-h5-smoke-chile' -and $chileTarget.SmokeLabel -eq 'azure-h5-smoke-chile' -and $chileTarget.RunnerGroupId -eq 3) 'Chile destination map is incorrect'
+Assert-True ($brazilTarget.SmokeLabel -eq 'azure-h5-smoke' -and $brazilTarget.ResourceGroup -eq 'rg-g6-sb-h5-int-fork') 'Brazil compatibility map changed'
+$chileBody = New-GitHubJitRequestJson -Mode Smoke -Name 'chile-jit' -RunnerGroupId 3 -SmokeLabel $chileTarget.SmokeLabel
+$chileDoc = Get-RequestBody $chileBody
+try { $chileLabels = @($chileDoc.RootElement.GetProperty('labels').EnumerateArray() | ForEach-Object GetString); Assert-True ($chileLabels -contains 'azure-h5-smoke-chile' -and $chileLabels -notcontains 'azure-h5-smoke') 'Chile runner labels overlap Brazil smoke' } finally { $chileDoc.Dispose() }
+$diagnosticBody = New-GitHubJitRequestJson -Mode Diagnostic -Name 'diag' -RunnerGroupId 3 -SmokeLabel $chileTarget.SmokeLabel
+$diagnosticDoc = Get-RequestBody $diagnosticBody
+try { $diagnosticLabels = @($diagnosticDoc.RootElement.GetProperty('labels').EnumerateArray() | ForEach-Object GetString); Assert-True ($diagnosticLabels -notcontains 'azure-h5-smoke' -and $diagnosticLabels -notcontains 'azure-h5-smoke-chile') 'Diagnostic runner could pick up smoke work' } finally { $diagnosticDoc.Dispose() }
+try { Resolve-H5DeploymentTarget -Destination chile-shared -GitHubEnvironment azure-h5 -Service catalog-svc | Out-Null; throw 'wrong environment accepted for Chile' } catch { if ($_.Exception.Message -eq 'wrong environment accepted for Chile') { throw } }
+$releaseSha = 'a'.PadRight(40,'a')
+$goodRun = [pscustomobject]@{display_title="H5 CD chile-shared azure-h5-chile catalog-svc $releaseSha pilot=false";head_branch='master';head_sha=$releaseSha}
+Assert-H5SmokeRunBinding -Run $goodRun -Target $chileTarget -MasterSha $releaseSha
+try { $foreignRun=[pscustomobject]@{display_title="H5 CD brazil-isolated azure-h5 catalog-svc $releaseSha pilot=false";head_branch='master';head_sha=$releaseSha}; Assert-H5SmokeRunBinding -Run $foreignRun -Target $chileTarget -MasterSha $releaseSha; throw 'foreign destination run accepted' } catch { if ($_.Exception.Message -eq 'foreign destination run accepted') { throw } }
+try { Assert-H5SmokeRunBinding -Run $goodRun -Target $chileTarget -MasterSha ('b'.PadRight(40,'b')); throw 'foreign release SHA accepted' } catch { if ($_.Exception.Message -eq 'foreign release SHA accepted') { throw } }
+$chileJobId="/subscriptions/$($chileTarget.SubscriptionId)/resourceGroups/$($chileTarget.ResourceGroup)/providers/Microsoft.App/jobs/$($chileTarget.JobName)"
+$chileEnvId="/subscriptions/$($chileTarget.SubscriptionId)/resourceGroups/$($chileTarget.ResourceGroup)/providers/Microsoft.App/managedEnvironments/$($chileTarget.AcaEnvironment)"
+$job=[pscustomobject]@{id=$chileJobId;location='Chile Central';properties=[pscustomobject]@{environmentId=$chileEnvId}}
+$managed=[pscustomobject]@{id=$chileEnvId;location='Chile Central'}
+Assert-H5AcaJobBinding -Job $job -ManagedEnvironment $managed -Target $chileTarget
+foreach ($badJob in @([pscustomobject]@{id=$chileJobId;location='Brazil South';properties=[pscustomobject]@{environmentId=$chileEnvId}},[pscustomobject]@{id=$chileJobId;location='Chile Central';properties=[pscustomobject]@{environmentId="$chileEnvId/wrong"}})) {
+    try { Assert-H5AcaJobBinding -Job $badJob -ManagedEnvironment $managed -Target $chileTarget; throw 'incorrect region/environment Job accepted' } catch { if ($_.Exception.Message -eq 'incorrect region/environment Job accepted') { throw } }
 }
 
 $one = @(

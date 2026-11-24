@@ -1,8 +1,11 @@
 param(
     [string]$Organization = 'Taller-SW-Web',
     [string]$Repository = 'Taller-SW-Web/G6-Productos-Ofertas-backend',
-    [string]$ResourceGroup = 'rg-g6-sb-h5-int-fork',
-    [string]$JobName = 'azure-h5-smoke',
+    [ValidateSet('brazil-isolated','chile-shared')][string]$Destination = 'brazil-isolated',
+    [string]$ResourceGroup,
+    [string]$EnvironmentName,
+    [string]$Region,
+    [string]$JobName,
     [int]$RunnerGroupId = 3,
     [int]$OnlineTimeoutSeconds = 180,
     [ValidateSet('Diagnostic','Smoke')][string]$Mode = 'Diagnostic',
@@ -11,6 +14,20 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'deployment-targets.ps1')
+$deploymentTargets = Get-H5DeploymentTargets
+$destinationTarget = Resolve-H5DeploymentTarget -Destination $Destination
+if ($RunnerGroupId -ne $destinationTarget.RunnerGroupId) { throw 'RunnerGroupId override does not match the destination configuration.' }
+foreach ($override in @(@{Name='ResourceGroup';Value=$ResourceGroup;Expected=$destinationTarget.ResourceGroup},@{Name='EnvironmentName';Value=$EnvironmentName;Expected=$destinationTarget.AcaEnvironment},@{Name='Region';Value=$Region;Expected=$destinationTarget.Region},@{Name='JobName';Value=$JobName;Expected=$destinationTarget.JobName})) {
+    if ($override.Value -and $override.Value -cne $override.Expected) { throw "$($override.Name) override no coincide con el destino $Destination." }
+}
+$ResourceGroup = $destinationTarget.ResourceGroup
+$EnvironmentName = $destinationTarget.AcaEnvironment
+$Region = $destinationTarget.Location
+$JobName = $destinationTarget.JobName
+$RunnerGroupId = $destinationTarget.RunnerGroupId
+$SmokeLabel = $destinationTarget.SmokeLabel
+$GitHubEnvironment = $destinationTarget.GitHubEnvironment
 $diagnosticLabel = 'h5-runner-preflight-only'
 $workflowPath = "$Repository/.github/workflows/cd-services-azure.yml"
 $expectedWorkflow = "$workflowPath@refs/heads/master"
@@ -240,16 +257,17 @@ function Get-ApprovedSmokeMatrix {
         throw 'SMOKE_DEPLOYMENT_NOT_APPROVED: prepare and every deploy matrix job must have completed successfully.'
     }
     $plan = Get-SmokeMatrixPlan -Jobs $jobs.jobs
-    $deployments = Invoke-GhJson @('api',"repos/$Repository/deployments?ref=$($run.head_sha)&environment=azure-h5&per_page=100")
+    Assert-H5SmokeRunBinding -Run $run -Target $destinationTarget -MasterSha ([string]$master.sha)
+    $deployments = Invoke-GhJson @('api',"repos/$Repository/deployments?ref=$($run.head_sha)&environment=$GitHubEnvironment&per_page=100")
     $runCreatedAt = [DateTimeOffset]::Parse([string]$run.created_at)
     $matching = @($deployments | Where-Object {
-        $_.environment -ceq 'azure-h5' -and $_.sha -ceq $run.head_sha -and
+        $_.environment -ceq $GitHubEnvironment -and $_.sha -ceq $run.head_sha -and
         [DateTimeOffset]::Parse([string]$_.created_at) -ge $runCreatedAt
     })
-    if ($matching.Count -lt $deployJobs.Count) { throw 'SMOKE_ENVIRONMENT_NOT_VERIFIED: deployment objects do not cover every selected job in azure-h5 after this run began.' }
+    if ($matching.Count -lt $deployJobs.Count) { throw "SMOKE_ENVIRONMENT_NOT_VERIFIED: deployment objects do not cover every selected job in $GitHubEnvironment after this run began." }
     foreach ($deployment in $matching) {
         $statuses = Invoke-GhJson @('api',"repos/$Repository/deployments/$($deployment.id)/statuses?per_page=1")
-        if (@($statuses).Count -eq 0 -or $statuses[0].state -ne 'success') { throw 'SMOKE_ENVIRONMENT_DEPLOYMENT_NOT_SUCCESSFUL: a matched azure-h5 deployment lacks a successful latest status.' }
+        if (@($statuses).Count -eq 0 -or $statuses[0].state -ne 'success') { throw "SMOKE_ENVIRONMENT_DEPLOYMENT_NOT_SUCCESSFUL: a matched $GitHubEnvironment deployment lacks a successful latest status." }
     }
     $completedSmoke = @($plan.Services | Where-Object { $_ -notin (Get-PendingSmokeServices -SmokeJobs $plan.SmokeJobs) })
     return [pscustomobject]@{Run=$run;Plan=$plan;Completed=$completedSmoke}
@@ -266,7 +284,7 @@ function Start-JitCycle {
     $script:executionCorrelationFailed = $false
     $cycleRunnerName = (($CycleMode -eq 'Smoke' ? 'h5-jit-smoke-' : 'h5-jit-preflight-') + [guid]::NewGuid().ToString('N').Substring(0,10)).ToLowerInvariant()
     $script:jitRunnerName = $cycleRunnerName
-    $requestJson = New-GitHubJitRequestJson -Mode $CycleMode -Name $cycleRunnerName -RunnerGroupId $RunnerGroupId -DiagnosticLabel $diagnosticLabel
+    $requestJson = New-GitHubJitRequestJson -Mode $CycleMode -Name $cycleRunnerName -RunnerGroupId $RunnerGroupId -DiagnosticLabel $diagnosticLabel -SmokeLabel $SmokeLabel
     Write-Information "JIT_REQUEST_JSON: $requestJson" -InformationAction Continue
     $attemptRecord = @{ attemptedAt=[DateTimeOffset]::UtcNow.ToString('o'); organization=$Organization; runnerGroupId=$RunnerGroupId; runnerName=$cycleRunnerName; mode=$CycleMode } | ConvertTo-Json -Compress
     $parent = Split-Path -Parent $attemptRecordPath
@@ -286,8 +304,8 @@ function Start-JitCycle {
     $script:jitConfig = [string]$jit.encoded_jit_config
     if (-not $script:jitRunnerId -or [string]::IsNullOrWhiteSpace($script:jitConfig)) { throw 'GitHub JIT response lacked runner ID/config.' }
     $actualLabels = @($jit.runner.labels | ForEach-Object name)
-    if ($CycleMode -eq 'Diagnostic' -and ($actualLabels -notcontains $diagnosticLabel -or $actualLabels -contains 'azure-h5-smoke')) { throw 'JIT diagnostic labels are unsafe; registration will be removed.' }
-    if ($CycleMode -eq 'Smoke' -and ($actualLabels -notcontains 'linux' -or $actualLabels -notcontains 'azure-h5-smoke')) { throw 'JIT smoke labels do not match the official workflow selector.' }
+    if ($CycleMode -eq 'Diagnostic' -and ($actualLabels -notcontains $diagnosticLabel -or $actualLabels -contains 'azure-h5-smoke' -or $actualLabels -contains 'azure-h5-smoke-chile')) { throw 'JIT diagnostic labels are unsafe; registration will be removed.' }
+    if ($CycleMode -eq 'Smoke' -and ($actualLabels -notcontains 'linux' -or $actualLabels -notcontains $SmokeLabel)) { throw 'JIT smoke labels do not match the official workflow selector.' }
     $groupRunners = Invoke-GhJson @('api',"orgs/$Organization/actions/runner-groups/$RunnerGroupId/runners?per_page=100")
     if ($groupRunners.total_count -ne 1 -or @($groupRunners.runners | Where-Object { [int]$_.id -eq $script:jitRunnerId }).Count -ne 1) { throw 'RUNNER_GROUP_NOT_EXCLUSIVE: JIT creation did not produce exactly this one registered runner.' }
 
@@ -333,10 +351,10 @@ function Start-JitCycle {
         $runnerRecord = Invoke-GhJson @('api',"orgs/$Organization/actions/runners/$script:jitRunnerId")
         if ($runnerRecord.status -eq 'online') {
             $onlineLabels = @($runnerRecord.labels | ForEach-Object name)
-            if ($CycleMode -eq 'Smoke' -and ($runnerRecord.os -ne 'linux' -or $onlineLabels -notcontains 'self-hosted' -or $onlineLabels -notcontains 'linux' -or $onlineLabels -notcontains 'azure-h5-smoke')) {
-                throw 'JIT_RUNNER_LABELS_INVALID: online runner lacks self-hosted/linux/azure-h5-smoke or Linux OS.'
+            if ($CycleMode -eq 'Smoke' -and ($runnerRecord.os -ne 'linux' -or $onlineLabels -notcontains 'self-hosted' -or $onlineLabels -notcontains 'linux' -or $onlineLabels -notcontains $SmokeLabel)) {
+                throw "JIT_RUNNER_LABELS_INVALID: online runner lacks self-hosted/linux/$SmokeLabel or Linux OS."
             }
-            if ($CycleMode -eq 'Diagnostic' -and $onlineLabels -contains 'azure-h5-smoke') { throw 'JIT_DIAGNOSTIC_LABEL_LEAK: diagnostic runner unexpectedly has azure-h5-smoke.' }
+            if ($CycleMode -eq 'Diagnostic' -and ($onlineLabels -contains 'azure-h5-smoke' -or $onlineLabels -contains 'azure-h5-smoke-chile')) { throw 'JIT_DIAGNOSTIC_LABEL_LEAK: diagnostic runner unexpectedly has a smoke label.' }
             return [pscustomobject]@{Id=$script:jitRunnerId;ExecutionName=$script:jobExecutionName;Mode=$CycleMode}
         }
         Start-Sleep -Seconds 5
@@ -432,6 +450,7 @@ try {
     $account = Invoke-AzJson @('account','show','--output','json')
     $script:subscriptionId = [string]$account.id
     if ([string]::IsNullOrWhiteSpace($subscriptionId)) { throw 'Azure CLI has no active subscription.' }
+    if ($subscriptionId -cne $destinationTarget.SubscriptionId) { throw 'Azure CLI subscription does not match the selected destination.' }
 
     $stage = 'runner-group authorization check'
     $group = Invoke-GhJson @('api',"orgs/$Organization/actions/runner-groups/$RunnerGroupId")
@@ -455,21 +474,21 @@ try {
         $approvedSmoke = Get-ApprovedSmokeMatrix -WorkflowId ([long]$workflow.id)
     }
 
-    $stage = 'azure-h5 protection check'
-    $environment = Invoke-GhJson @('api',"repos/$Repository/environments/azure-h5")
+    $stage = "$GitHubEnvironment protection check"
+    $environment = Invoke-GhJson @('api',"repos/$Repository/environments/$GitHubEnvironment")
     $hasReviewer = @($environment.protection_rules | Where-Object { $_.type -eq 'required_reviewers' -and $_.prevent_self_review -eq $true -and @($_.reviewers).Count -gt 0 }).Count -gt 0
     $hasMasterOnly = $environment.deployment_branch_policy.custom_branch_policies -eq $true -and $environment.deployment_branch_policy.protected_branches -eq $false
     if ($environment.can_admins_bypass -ne $false -or -not $hasReviewer -or -not $hasMasterOnly) {
-        throw 'azure-h5 protections failed verification; JIT registration was not requested.'
+        throw "$GitHubEnvironment protections failed verification; JIT registration was not requested."
     }
-    $branchPolicies = Invoke-GhJson @('api',"repos/$Repository/environments/azure-h5/deployment-branch-policies?per_page=100")
+    $branchPolicies = Invoke-GhJson @('api',"repos/$Repository/environments/$GitHubEnvironment/deployment-branch-policies?per_page=100")
     if ($branchPolicies.total_count -ne 1 -or @($branchPolicies.branch_policies | Where-Object { $_.type -eq 'branch' -and $_.name -ceq 'master' }).Count -ne 1) {
-        throw 'azure-h5 deployment branch policies are not exactly branch master; JIT registration was not requested.'
+        throw "$GitHubEnvironment deployment branch policies are not exactly branch master; JIT registration was not requested."
     }
 
     $stage = 'Container Apps Job template check'
     $job = Invoke-AzJson @('containerapp','job','show','--name',$JobName,'--resource-group',$ResourceGroup,'--output','json')
-    if (-not $job.id -or $job.location -ne 'Brazil South' -or $job.properties.template.containers.Count -ne 1) {
+    if (-not $job.id -or $job.properties.template.containers.Count -ne 1) {
         throw 'Existing Container Apps Job is absent or its template shape differs; no JIT runner was requested.'
     }
     $container = @($job.properties.template.containers | Where-Object { $_.name -eq 'runner' }) | Select-Object -First 1
@@ -485,10 +504,8 @@ try {
     }
     $expectedImage = [string]$container.image
     $expectedEnvironmentId = [string]$job.properties.environmentId
-    $managedEnvironment = Invoke-AzJson @('containerapp','env','show','--name','env-g6-h5-int','--resource-group',$ResourceGroup,'--output','json')
-    if (-not $expectedEnvironmentId -or $expectedEnvironmentId -ine [string]$managedEnvironment.id) {
-        throw 'Existing Job is not attached to env-g6-h5-int; JIT registration was not requested.'
-    }
+    $managedEnvironment = Invoke-AzJson @('containerapp','env','show','--name',$EnvironmentName,'--resource-group',$ResourceGroup,'--output','json')
+    Assert-H5AcaJobBinding -Job $job -ManagedEnvironment $managedEnvironment -Target $destinationTarget
     $armContext = Get-ArmRequestContext
     $script:armUri = $armContext.Uri
     $script:armToken = $armContext.Token

@@ -10,8 +10,8 @@ printf '%s\n' "$target" > "$TEMP/artifacts/image-taxonomy-svc.txt"
 printf '%s\n' 'ghcr.io/taller-sw-web/g6-productos-ofertas-backend/inventory-svc@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' > "$TEMP/artifacts/image-inventory-svc.txt"
 printf '%s\n' 'ghcr.io/taller-sw-web/g6-productos-ofertas-backend/combos-svc@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' > "$TEMP/artifacts/image-combos-svc.txt"
 printf '%s\n' 'ghcr.io/taller-sw-web/g6-productos-ofertas-backend/promotions-svc@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' > "$TEMP/artifacts/image-promotions-svc.txt"
-printf '%s\n' 'service=taxonomy-svc' "previous=$previous" "target=$target" 'config_sha256=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff' > "$TEMP/artifacts/taxonomy-svc.receipt"
-printf '%s\n' 'service=combos-svc' 'previous=ghcr.io/taller-sw-web/g6-productos-ofertas-backend/combos-svc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "target=$(cat "$TEMP/artifacts/image-combos-svc.txt")" 'config_sha256=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff' > "$TEMP/artifacts/combos-svc.receipt"
+jq -n --arg target "$target" --arg previous "$previous" '{service:"taxonomy-svc",destination:"brazil-isolated",github_environment:"azure-h5",resource_group:"rg-g6-sb-h5-int-fork",aca_environment:"env-g6-h5-int",location:"Brazil South",subscription_id:"fef42188-accd-4470-ae88-78f583eb4906",app_resource_id:"/subscriptions/fef42188-accd-4470-ae88-78f583eb4906/resourceGroups/rg-g6-sb-h5-int-fork/providers/Microsoft.App/containerApps/taxonomy-svc",container:"taxonomy-svc",previous:$previous,target:$target,config_sha256:"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}' > "$TEMP/artifacts/taxonomy-svc.receipt"
+jq -n --arg target "$(cat "$TEMP/artifacts/image-combos-svc.txt")" '{service:"combos-svc",destination:"chile-shared",github_environment:"azure-h5-chile",resource_group:"rg-g6-aca-chile",aca_environment:"env-g6-phase1-chile",location:"Chile Central",subscription_id:"fef42188-accd-4470-ae88-78f583eb4906",app_resource_id:"/subscriptions/fef42188-accd-4470-ae88-78f583eb4906/resourceGroups/rg-g6-aca-chile/providers/Microsoft.App/containerApps/combos-svc",container:"combos-svc",previous:"ghcr.io/taller-sw-web/g6-productos-ofertas-backend/combos-svc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",target:$target,config_sha256:"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}' > "$TEMP/artifacts/combos-svc.receipt"
 
 cat > "$TEMP/jobs.json" <<'JOBS'
 {"jobs":[
@@ -42,7 +42,7 @@ STUB
 chmod +x "$TEMP/deploy-stub.sh"
 
 if DEPLOY_SCRIPT="$TEMP/deploy-stub.sh" GITHUB_STEP_SUMMARY="$TEMP/partial.md" bash "$ROOT/ops/azure/container-apps/reconcile-recovery.sh" \
-  '["catalog-svc","taxonomy-svc","inventory-svc","combos-svc","promotions-svc","price-audit-svc","bulk-svc"]' "$TEMP/artifacts" "$TEMP/jobs.json" > "$TEMP/partial.log" 2>&1; then
+  '["catalog-svc","taxonomy-svc","inventory-svc","combos-svc","promotions-svc","price-audit-svc","bulk-svc"]' "$TEMP/artifacts" "$TEMP/jobs.json" brazil-isolated azure-h5 > "$TEMP/partial.log" 2>&1; then
   echo 'FAIL: faltantes/desconocidos no pueden declarar recuperación completa' >&2
   exit 1
 fi
@@ -58,6 +58,6 @@ cat > "$TEMP/jobs-skipped.json" <<'JOBS'
 ]}
 JOBS
 DEPLOY_SCRIPT="$TEMP/deploy-stub.sh" GITHUB_STEP_SUMMARY="$TEMP/complete.md" bash "$ROOT/ops/azure/container-apps/reconcile-recovery.sh" \
-  '["catalog-svc","taxonomy-svc"]' "$TEMP/artifacts" "$TEMP/jobs-skipped.json" > "$TEMP/complete.log" 2>&1 || { cat "$TEMP/complete.log"; exit 1; }
+  '["catalog-svc","taxonomy-svc"]' "$TEMP/artifacts" "$TEMP/jobs-skipped.json" brazil-isolated azure-h5 > "$TEMP/complete.log" 2>&1 || { cat "$TEMP/complete.log"; exit 1; }
 grep -Fq 'RECUPERACIÓN COMPLETA:' "$TEMP/complete.log"
 echo 'PASS: solo recuperación verificada más servicios omitidos con evidencia permite completar'
