@@ -4,7 +4,8 @@ Fecha: 2026-11-24 (America/Lima)
 Backend base sincronizada: `origin/master` `49bab9e2075819d922c63b06fcc6fc6ac16ce703` (PR #273 mergeado).
 Docs `origin/master` revisado: `c9e1e5c217616d28229fccf5315fb97a1ae061a9`.
 Rama de trabajo: `trabajo/castilla/h5-fixtures-integracion-g5`.
-PR: se completará al publicar el Draft.
+Draft PR: [#275](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/275), abierto contra `master`.  
+HEAD publicado: `f3b3ebf1ca86d519d39d8907cc5a461cfe67c3e0`.  
 Freeze Chile: `AZURE_CHILE_DEPLOY_ENABLED=false`, según evidencia operativa previa; no se cambió.
 
 ## Resumen ejecutivo
@@ -134,10 +135,10 @@ Marketplace: restauración de escala previamente terminó con código 0 y nueve 
 
 ## Archivos entregables y PR
 
-- Draft PR de implementación/fixtures: **pendiente de publicación**.
+- Draft PR [#275](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/275), OPEN / Draft / CLEAN; HEAD `f3b3ebf1ca86d519d39d8907cc5a461cfe67c3e0`. No se pasó a Ready ni se fusionó.
 - Candidatos y tests bajo `ops/supabase/g5-fixtures/` y `ops/azure/h5-runtime-preflight/`.
 - Handoffs actualizados Fase 3/4 y este Fase 5.
-- Paquete sanitizado se generará después del cierre local, con la limitación de que el archivo independiente Fase 2A no existe en los worktrees/Downloads consultados; el handoff de auditoría Supabase directo sí se incluyó como fuente.
+- Paquete local sanitizado: `G6-H5-F-Fases-2A-5-sanitizado.zip`. Incluye handoffs 3–5, auditoría directa de Supabase sanitizada, scripts y evidencias; el handoff independiente Fase 2A no estaba disponible en Downloads ni en los worktrees consultados y se marca como ausente en el paquete, no se recrea de memoria.
 
 ## Límites
 
