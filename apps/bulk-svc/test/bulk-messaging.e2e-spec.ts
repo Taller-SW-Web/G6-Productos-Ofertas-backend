@@ -336,7 +336,7 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       repository.claimPendingServiceBusDeliveries(),
     ]);
     const claims = [...firstClaim, ...concurrentClaim].filter(
-      (delivery) => delivery.message.messageId === commandId,
+      (delivery) => delivery.messageId === commandId,
     );
     expect(claims).toHaveLength(1);
     await repository.markServiceBusDeliveryPublished(
