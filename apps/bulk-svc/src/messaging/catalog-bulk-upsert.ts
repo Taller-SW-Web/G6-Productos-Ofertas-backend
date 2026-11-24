@@ -16,7 +16,7 @@ export interface CatalogBulkRow {
 
 export interface CatalogBulkEnvelope {
   message_id: string;
-  schema_version: number;
+  schema_version: 1 | 2 | 3;
   occurred_at: string;
   correlation_id: string;
   causation_id: string | null;
@@ -29,7 +29,13 @@ export interface CatalogBulkEnvelope {
     batch_operation_id: string;
     template_version: 2;
     mode: 'ALTA' | 'ACTUALIZACION';
-    rows: CatalogBulkRow[];
+    rows?: CatalogBulkRow[];
+    content_ref?: {
+      content_id: string;
+      sha256: string;
+      byte_length: number;
+      content_type: 'application/json';
+    };
   };
 }
 
@@ -66,10 +72,35 @@ export function buildCatalogBulkCommands(input: {
   batchId: string;
   correlationId: string;
   rows: CatalogBulkRow[];
-  schemaVersion?: 1 | 2;
+  schemaVersion?: 1 | 2 | 3;
+  contentReference?: CatalogBulkEnvelope['data']['content_ref'];
   occurredAt?: Date;
 }): CatalogBulkCommand[] {
   if (input.rows.length === 0) return [];
+  if (input.schemaVersion === 3) {
+    if (
+      !input.contentReference ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        input.contentReference.content_id,
+      ) ||
+      !/^[a-f0-9]{64}$/.test(input.contentReference.sha256) ||
+      !Number.isSafeInteger(input.contentReference.byte_length) ||
+      input.contentReference.byte_length < 1 ||
+      input.contentReference.content_type !== 'application/json'
+    )
+      throw new Error('content_ref no cumple el contrato Bulk V3.');
+    const envelope = makeEnvelope(
+      {
+        ...input,
+        occurredAt: input.occurredAt ?? new Date(),
+        schemaVersion: 3,
+      },
+      input.rows,
+      0,
+    );
+    const serialized = encode(envelope);
+    return [{ envelope, serialized }];
+  }
   const commandInput = {
     ...input,
     schemaVersion: input.schemaVersion ?? 1,
@@ -126,8 +157,9 @@ function makeEnvelope(
     batchId: string;
     correlationId: string;
     rows: CatalogBulkRow[];
-    schemaVersion: 1 | 2;
+    schemaVersion: 1 | 2 | 3;
     occurredAt?: Date;
+    contentReference?: CatalogBulkEnvelope['data']['content_ref'];
   },
   rows: CatalogBulkRow[],
   index: number,
@@ -187,7 +219,9 @@ function makeEnvelope(
       ),
       template_version: 2,
       mode,
-      rows: serializedRows,
+      ...(input.schemaVersion === 3
+        ? { content_ref: input.contentReference }
+        : { rows: serializedRows }),
     },
   };
 }

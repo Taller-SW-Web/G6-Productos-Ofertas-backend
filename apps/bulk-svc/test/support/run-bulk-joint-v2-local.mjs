@@ -29,6 +29,8 @@ const extension = `    it('BULK-JOINT v2: real Bulk CSV producer, Catalog consum
       }
       const exportSnapshotColumnExists = command('docker', ['exec', container, 'psql', '-U', 'postgres', '-tAc', "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'bulk' AND table_name = 'file_manifests' AND column_name = 'metadata')"]);
       if (exportSnapshotColumnExists !== 't') command('docker', ['exec', '-i', container, 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], 'SET ROLE po_bulk_owner; ' + readFileSync(resolve('apps/bulk-svc/migrations/0002_export_source_snapshot.sql'), 'utf8'));
+      const deliveryTableExists = command('docker', ['exec', container, 'psql', '-U', 'postgres', '-tAc', "SELECT to_regclass('bulk.outbox_delivery') IS NOT NULL"]);
+      if (deliveryTableExists !== 't') command('docker', ['exec', '-i', container, 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], 'SET ROLE po_bulk_owner; ' + readFileSync(resolve('apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql'), 'utf8'));
       command('docker', ['exec', '-i', container, 'psql', '-U', 'postgres', '-v', 'ON_ERROR_STOP=1'], 'GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA bulk TO bulk_fixture_app; GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;');
       const productInputValue = createRequest(true);
       const created = await mutationService().createProduct(productInputValue, actor);

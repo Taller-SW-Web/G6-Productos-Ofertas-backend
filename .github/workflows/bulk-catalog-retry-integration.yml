@@ -138,6 +138,7 @@ jobs:
             apps/bulk-svc/migrations/0005_actor_ownership.sql \
             apps/bulk-svc/migrations/0006_owner_correlation_identity.sql \
             apps/bulk-svc/migrations/0007_bulk_retry_v1.sql
+            apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql
           apply_as po_bulk_owner \
             apps/bulk-svc/migrations/0005_actor_ownership.sql \
             apps/bulk-svc/migrations/0006_owner_correlation_identity.sql \
@@ -214,7 +215,7 @@ jobs:
             echo '## Integración Bulk–Catalog Retry';
             printf 'Árbol integrado ejecutado: `%s`\n' "$TREE_SHA";
             echo 'PostgreSQL: service container `postgres:17-alpine`; DDL Catalog y Bulk aplicado en la misma instancia.';
-            echo 'Migraciones: Catalog fixtures 0001, barcode 0002, outbox candidate 0001, retry candidate 0002, publication 0003 e historical 0004; Bulk 0001 a 0007; Bulk 0005 a 0007 reaplicadas.';
+            echo 'Migraciones: Catalog fixtures 0001, barcode 0002, outbox candidate 0001, retry candidate 0002, publication 0003 e historical 0004; Bulk 0001 a 0008; Bulk 0005 a 0007 reaplicadas.';
             echo 'E2E HTTP y consumidores: ver pasos de prueba anteriores; un paso fallido invalida el run.';
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Publicar HEADs y diff de adaptaciones temporales

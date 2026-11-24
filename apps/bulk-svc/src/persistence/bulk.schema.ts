@@ -135,6 +135,40 @@ export const batchJobs = bulk.table(
   ],
 );
 
+/** Opaque private claim-check identities; Storage paths remain Bulk-owned. */
+export const contentDocuments = bulk.table(
+  'content_documents',
+  {
+    contentId: uuid('content_id').notNull(),
+    batchId: uuid('batch_id').notNull(),
+    batchOperationId: uuid('batch_operation_id').notNull(),
+    contentRef: text('content_ref').notNull(),
+    sha256: text('sha256').notNull(),
+    byteLength: integer('byte_length').notNull(),
+    contentType: text('content_type').notNull().default('application/json'),
+    createdAt: tz('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'pk_content_documents', columns: [t.contentId] }),
+    foreignKey({
+      name: 'fk_content_documents_batch_id',
+      columns: [t.batchId],
+      foreignColumns: [batchJobs.batchId],
+    }).onDelete('restrict'),
+    unique('uq_content_documents_batch_operation').on(
+      t.batchId,
+      t.batchOperationId,
+    ),
+    check('ck_content_documents_sha256', sql`${t.sha256} ~ '^[a-f0-9]{64}$'`),
+    check('ck_content_documents_byte_length', sql`${t.byteLength} > 0`),
+    check(
+      'ck_content_documents_content_type',
+      sql`${t.contentType} = 'application/json'`,
+    ),
+    index('ix_content_documents_batch_id').on(t.batchId),
+  ],
+);
+
 export const batchRows = bulk.table(
   'batch_rows',
   {
@@ -333,6 +367,44 @@ export const outbox = bulk.table(
   ],
 );
 
+/** Durable per-recipient delivery for the H5 Basic queue topology. */
+export const outboxDeliveries = bulk.table(
+  'outbox_delivery',
+  {
+    messageId: text('message_id').notNull(),
+    destination: text('destination').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    createdAt: tz('created_at').notNull().defaultNow(),
+    availableAt: tz('available_at').notNull().defaultNow(),
+    leaseToken: uuid('lease_token'),
+    publishedAt: tz('published_at'),
+    lastError: text('last_error'),
+  },
+  (t) => [
+    primaryKey({
+      name: 'pk_outbox_delivery',
+      columns: [t.messageId, t.destination],
+    }),
+    foreignKey({
+      name: 'fk_outbox_delivery_message_id',
+      columns: [t.messageId],
+      foreignColumns: [outbox.messageId],
+    }),
+    check(
+      'ck_outbox_delivery_destination',
+      sql`${t.destination} = 'g6.catalog.from.bulk'`,
+    ),
+    check('ck_outbox_delivery_attempts', sql`${t.attempts} >= 0`),
+    check(
+      'ck_outbox_delivery_lease',
+      sql`${t.publishedAt} IS NULL OR ${t.leaseToken} IS NULL`,
+    ),
+    index('ix_outbox_delivery_pending')
+      .on(t.availableAt, t.createdAt, t.messageId, t.destination)
+      .where(sql`${t.publishedAt} IS NULL`),
+  ],
+);
+
 export const inbox = bulk.table(
   'inbox',
   {
@@ -483,10 +555,12 @@ export const domainAttempts = bulk.table(
 export const bulkSchema = {
   fileManifests,
   batchJobs,
+  contentDocuments,
   batchRows,
   rowDomainSteps,
   exportJobs,
   outbox,
+  outboxDeliveries,
   inbox,
   batchResumeRequests,
   retryCommands,

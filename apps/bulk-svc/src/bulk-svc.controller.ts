@@ -26,6 +26,8 @@ import { BulkStorageService } from './storage/bulk-storage.service.js';
 import { BulkUserBearerGuard } from './auth/bulk-user-bearer.guard.js';
 import type { BulkAuthenticatedRequest } from './auth/bulk-user-bearer.guard.js';
 import { BulkExportService } from './bulk-export.service.js';
+import { BulkContentService } from './bulk-content.service.js';
+import { BulkServiceBearerGuard } from './auth/bulk-service-bearer.guard.js';
 import {
   createBulkTemplateCsv,
   createBulkTemplateXlsx,
@@ -41,7 +43,24 @@ export class BulkSvcController {
     private readonly imports: BulkImportService,
     private readonly storage: BulkStorageService,
     private readonly exports: BulkExportService,
+    private readonly contents: BulkContentService,
   ) {}
+
+  @UseGuards(BulkServiceBearerGuard)
+  @Get('interno/carga-masiva/contenidos/:contentId')
+  async obtenerContenidoInterno(
+    @Param('contentId') contentId: string,
+    @Res() response: Response,
+  ) {
+    const result = await this.contents.download(contentId);
+    response.setHeader('Content-Type', 'application/json');
+    response.setHeader('Content-Length', String(result.bytes.length));
+    response.setHeader('X-Content-SHA256', result.sha256);
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.setHeader('Vary', 'Authorization');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    return response.status(200).send(result.bytes);
+  }
 
   @Get('health') getHealth() {
     return this.service.getHealth();

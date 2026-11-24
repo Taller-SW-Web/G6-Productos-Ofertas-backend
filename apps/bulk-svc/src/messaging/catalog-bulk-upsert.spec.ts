@@ -132,6 +132,32 @@ describe('Catalog bulk upsert command construction', () => {
     );
   });
 
+  it('builds one V3 claim-check command without embedding rows', () => {
+    const input = {
+      batchId: 'batch-v3',
+      correlationId: 'correlation-v3',
+      rows: [updateVariant(0, 'BASE', 'variant-sku')],
+      schemaVersion: 3 as const,
+      contentReference: {
+        content_id: 'cf215311-d17a-4308-876e-b20b79a7ce4f',
+        sha256: 'a'.repeat(64),
+        byte_length: 77,
+        content_type: 'application/json' as const,
+      },
+      occurredAt: new Date('2026-11-18T00:00:00.000Z'),
+    };
+    const [command] = buildCatalogBulkCommands(input);
+    const [retry] = buildCatalogBulkCommands(input);
+    expect(command).toEqual(retry);
+    expect(command!.envelope.schema_version).toBe(3);
+    expect(command!.envelope.data).toMatchObject({
+      batch_operation_id: command!.envelope.operation_id,
+      content_ref: input.contentReference,
+    });
+    expect(command!.envelope.data).not.toHaveProperty('rows');
+    expect(Buffer.byteLength(command!.serialized, 'utf8')).toBeLessThan(2048);
+  });
+
   it('preserves the exact v1 row shape and emits opaque SKU only as a v2 selector', () => {
     const [legacy] = buildCatalogBulkCommands({
       batchId: 'batch-v1',

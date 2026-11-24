@@ -260,6 +260,98 @@ export class CatalogBulkResultConsumer
     return this.state;
   }
 
+  /** Persists a Service Bus result before its Peek-Lock delivery is completed. */
+  async consumeServiceBusMessage(input: {
+    messageId: string;
+    correlationId: string | undefined;
+    subject: string | undefined;
+    contentType: string | undefined;
+    body: Uint8Array;
+  }): Promise<void> {
+    if (!input.messageId) throw new Error('INVALID_SERVICE_BUS_MESSAGE_ID');
+    const content = Buffer.from(input.body);
+    const message = {
+      content,
+      fields: { routingKey: input.subject ?? '' },
+      properties: {
+        messageId: input.messageId,
+        correlationId: input.correlationId,
+        type: input.subject,
+        contentType: input.contentType,
+      },
+    } as ConsumeMessage;
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(
+        new TextDecoder('utf-8', { fatal: true }).decode(content),
+      );
+    } catch {
+      await this.persistInvalidMessage(input, content, 'INVALID_JSON');
+      return;
+    }
+    let envelope: Envelope;
+    try {
+      envelope = validateEnvelope(decoded, message);
+    } catch {
+      await this.persistInvalidMessage(
+        input,
+        content,
+        'INVALID_CATALOG_RESULT',
+      );
+      return;
+    }
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await this.repository.recordCatalogBulkResult({
+          messageId: envelope.message_id,
+          operationId: envelope.operation_id,
+          causationId: envelope.causation_id,
+          eventName: envelope.name as
+            'catalog.bulk.upsert.completed' | 'catalog.bulk.upsert.rejected',
+          correlationId: envelope.correlation_id,
+          payload: envelope as unknown as Record<string, unknown>,
+        });
+        return;
+      } catch (error) {
+        if (error instanceof BulkDomainError) {
+          await this.repository.persistPendingContractResult({
+            messageId: envelope.message_id,
+            eventName: envelope.name,
+            correlationId: envelope.correlation_id,
+            payload: envelope as unknown as Record<string, unknown>,
+          });
+          return;
+        }
+        if (attempt === 2) throw error;
+        await new Promise((resolve) =>
+          setTimeout(resolve, 100 * (attempt + 1)),
+        );
+      }
+    }
+  }
+
+  private async persistInvalidMessage(
+    input: {
+      messageId: string;
+      correlationId: string | undefined;
+      subject: string | undefined;
+    },
+    content: Buffer,
+    disposition: string,
+  ): Promise<void> {
+    const digest = createHash('sha256').update(content).digest('hex');
+    await this.repository.processInboxOnce(
+      {
+        messageId: input.messageId,
+        handler: 'bulk.catalog.invalid-result',
+        eventName: input.subject ?? 'unknown',
+        correlationId: input.correlationId ?? null,
+        payload: { disposition, content_sha256: digest },
+      },
+      async () => 'DURABLY_REJECTED',
+    );
+  }
+
   private async connectConsumer(): Promise<void> {
     if (!this.amqpUrl || this.stopping || this.paused || this.channel) return;
     this.state = 'CONNECTING';
