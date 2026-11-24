@@ -266,6 +266,8 @@ exit /b 0
   Assert ($rbacAssessment.Status -eq 'INVALID' -and $rbacAssessment.Direct.Count -eq 1 -and $rbacAssessment.Inherited.Count -eq 1) 'RBAC distinguishes direct and inherited grants and rejects broad inherited data access'
   $directOnly = @(@{principalId='p';scope=$directScope;roleDefinitionName='Azure Service Bus Data Sender'},@{principalId='p';scope=$directScope;roleDefinitionName='Azure Service Bus Data Receiver'})
   Assert ((Get-H5ServiceBusRbacAssessment $directOnly 'p' $directScope @('Azure Service Bus Data Sender','Azure Service Bus Data Receiver') @()).Status -eq 'PASS') 'RBAC accepts exact direct queue grants with least privilege'
+  $unknownRole = @(@{principalId='p';scope=$directScope;roleDefinitionName='Custom Data Role'})
+  Assert ((Get-H5ServiceBusRbacAssessment $unknownRole 'p' $directScope @('Azure Service Bus Data Sender') @()).Status -eq 'UNAVAILABLE') 'RBAC does not PASS when a relevant custom role definition has not been examined'
   Assert ((Get-H5ServiceBusRbacAssessment @() 'p' $directScope @('Azure Service Bus Data Sender') @() 'UNAVAILABLE').Status -eq 'UNAVAILABLE') 'RBAC query without visibility is unavailable, never missing or pass'
   $unapprovedGrant = $syntheticTarget | ConvertTo-Json -Depth 30 | ConvertFrom-Json -AsHashtable; $unapprovedGrant.services['catalog-svc'].queueGrants[0].roles = @('Azure Service Bus Data Owner')
   Assert ((@((Test-H5IntegrationTarget $unapprovedGrant $resolvedGuarded $guardedParameters).Errors) -join ',') -match 'QUEUE_ROLE_INCOMPATIBLE_catalog-svc') 'H5 target rejects broad or unrecognized Service Bus roles'

@@ -265,7 +265,7 @@ function Test-H5TargetQueueGrants($Target, $ContractMatrix) {
 }
 
 function Get-H5ServiceBusRbacAssessment($Assignments, [string]$PrincipalId, [string]$QueueScope, [string[]]$RequiredRoles, [string[]]$BroaderScopes, [string]$QueryStatus='PASS') {
-  if ($QueryStatus -ne 'PASS') { return [pscustomobject]@{Status='UNAVAILABLE';Direct=@();Inherited=@();Excess=@()} }
+  if ($QueryStatus -ne 'PASS') { return [pscustomobject]@{Status='UNAVAILABLE';Direct=@();Inherited=@();Excess=@();Unverified=@()} }
   $mine = @($Assignments | Where-Object { $_.principalId -ceq $PrincipalId })
   $direct = @($mine | Where-Object { ([string]$_.scope).TrimEnd('/') -ceq $QueueScope.TrimEnd('/') })
   $inherited = @($mine | Where-Object { ([string]$_.scope).TrimEnd('/') -cne $QueueScope.TrimEnd('/') })
@@ -273,8 +273,11 @@ function Get-H5ServiceBusRbacAssessment($Assignments, [string]$PrincipalId, [str
   $directNames = @($direct.roleDefinitionName | Sort-Object -Unique)
   $missing = @($RequiredRoles | Where-Object { $_ -notin $directNames })
   $excess = @($effective | Where-Object { $_.roleDefinitionName -eq 'Azure Service Bus Data Owner' -or (($_.scope.TrimEnd('/') -in $BroaderScopes) -and $_.roleDefinitionName -in @('Azure Service Bus Data Sender','Azure Service Bus Data Receiver')) -or (($_.scope.TrimEnd('/') -ceq $QueueScope.TrimEnd('/')) -and $_.roleDefinitionName -notin $RequiredRoles) })
-  $status = if ($excess.Count) {'INVALID'} elseif ($missing.Count) {'MISSING'} else {'PASS'}
-  return [pscustomobject]@{ Status=$status; Direct=@($direct); Inherited=@($inherited); Excess=@($excess); Missing=@($missing) }
+  $knownDataRoles = @('Azure Service Bus Data Owner','Azure Service Bus Data Sender','Azure Service Bus Data Receiver')
+  $checkedScopes = @($BroaderScopes + $QueueScope | ForEach-Object { ([string]$_).TrimEnd('/') })
+  $unverified = @($mine | Where-Object { ([string]$_.scope).TrimEnd('/') -in $checkedScopes -and $_.roleDefinitionName -notin $knownDataRoles })
+  $status = if ($excess.Count) {'INVALID'} elseif ($unverified.Count) {'UNAVAILABLE'} elseif ($missing.Count) {'MISSING'} else {'PASS'}
+  return [pscustomobject]@{ Status=$status; Direct=@($direct); Inherited=@($inherited); Excess=@($excess); Unverified=@($unverified); Missing=@($missing) }
 }
 
 function Test-H5IntegrationTarget($Target, $GuardedEnvironment, $ParameterDocument, $ContractMatrix) {

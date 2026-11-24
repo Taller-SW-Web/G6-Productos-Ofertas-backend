@@ -105,9 +105,11 @@ duplicados, roles incompatibles, colas ajenas o permisos adicionales.
 Para los grants observables, el probe distingue asignaciones directas en el
 scope de la cola de las heredadas. Exige cada rol contractual directamente en
 esa cola y rechaza Data Sender/Receiver en namespace, resource group o
-suscripción, así como Data Owner. Si Azure CLI no puede leer el scope o sus
-asignaciones, el resultado es `UNAVAILABLE`, nunca una presunción de ausencia
-ni `PASS`. La misma política se usa en `promotions-servicebus-queue-rbac`.
+suscripción, así como Data Owner. Asignaciones con roles desconocidos en los
+scopes relevantes quedan `UNAVAILABLE` hasta inspeccionar sus definiciones; si
+Azure CLI no puede leer el scope o sus asignaciones, tampoco se presume
+ausencia ni se informa `PASS`. La misma política se usa en
+`promotions-servicebus-queue-rbac`.
 No se crean, eliminan ni alteran asignaciones.
 
 ## Procedencia OCI GHCR
@@ -186,7 +188,7 @@ Las pruebas PowerShell cubren outcomes fail-closed, psql ausente, modos,
 `INVALID`/`UNAVAILABLE`, scopes requeridos, valores `guardedEnv`, colisiones,
 X.509, cleanup TLS, estados RBAC/GHCR, cinco imágenes `VERIFIED`, estados JWT
 malformados estructurados y la separación del objetivo H5 respecto a
-`guardedEnv` cerrado. El test PowerShell ejecuta 76 assertions. El test de
+`guardedEnv` cerrado. El test PowerShell ejecuta 77 assertions. El test de
 PostgreSQL crea y elimina un contenedor PostgreSQL 17 desechable. Sus tablas y
 roles son sintéticos; las consultas de roles/grants corren como logins runtime
 no-superuser. Ese contenedor no configura PostgreSQL TLS: demuestra SQL y
