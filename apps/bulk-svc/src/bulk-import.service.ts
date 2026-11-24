@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { Optional } from '@nestjs/common';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   buildCatalogBulkCommands,
   stableUuid,
@@ -23,10 +24,14 @@ import {
   BulkPersistenceRepository,
   type DomainResultInput,
 } from './persistence/bulk.repository.js';
+import { BulkStorageService } from './storage/bulk-storage.service.js';
 
 @Injectable()
 export class BulkImportService {
-  constructor(private readonly repository: BulkPersistenceRepository) {}
+  constructor(
+    private readonly repository: BulkPersistenceRepository,
+    @Optional() private readonly storage?: BulkStorageService,
+  ) {}
 
   async receiveImport(input: {
     bytes: Buffer;
@@ -81,7 +86,7 @@ export class BulkImportService {
       ownerSub: input.ownerSub,
       rows,
       intentRows: parsed.rows,
-      catalogCommandVersion: commandV2 ? 2 : 1,
+      catalogCommandVersion: catalogV3EmissionEnabled() ? 3 : commandV2 ? 2 : 1,
     });
     return { ...result, parsed };
   }
@@ -128,7 +133,7 @@ export class BulkImportService {
     templateVersion: number;
     rows: NormalizedBulkRow[];
     intentRows?: unknown[];
-    catalogCommandVersion?: 1 | 2;
+    catalogCommandVersion?: 1 | 2 | 3;
   }) {
     const normalized = validateBulkImport(input);
     const uuid =
@@ -181,6 +186,44 @@ export class BulkImportService {
     const persistedCommands = Array.isArray(priorAdmission?.catalogCommands)
       ? priorAdmission.catalogCommands
       : null;
+    let contentDocument:
+      | {
+          contentId: string;
+          batchId: string;
+          batchOperationId: string;
+          contentRef: string;
+          sha256: string;
+          byteLength: number;
+        }
+      | undefined;
+    if (input.catalogCommandVersion === 3 && !persistedCommands) {
+      if (!catalogV3EmissionEnabled() || !this.storage || !catalogRows.length)
+        throw new BulkDomainError(
+          'STORAGE_UNAVAILABLE',
+          'La emisión Bulk V3 está deshabilitada o el almacenamiento privado no está configurado.',
+        );
+      const documentBytes = Buffer.from(
+        JSON.stringify({ rows: catalogRows }),
+        'utf8',
+      );
+      const sha256 = createHash('sha256').update(documentBytes).digest('hex');
+      const contentId = stableUuid(`${input.batchId}:catalog-bulk-v3-content`);
+      const contentRef = await this.storage.put(
+        documentBytes,
+        'application/json',
+        `imports/${input.batchId}/catalog-${sha256}.json`,
+      );
+      contentDocument = {
+        contentId,
+        batchId: input.batchId,
+        batchOperationId: stableUuid(
+          `${input.batchId}:catalog-bulk-upsert:0:operation`,
+        ),
+        contentRef,
+        sha256,
+        byteLength: documentBytes.length,
+      };
+    }
     const commands: CatalogBulkCommand[] = persistedCommands
       ? persistedCommands.map((value) => {
           const envelope = value as CatalogBulkCommand['envelope'];
@@ -192,6 +235,16 @@ export class BulkImportService {
             correlationId: input.correlationId,
             rows: catalogRows,
             schemaVersion: input.catalogCommandVersion ?? 1,
+            ...(contentDocument
+              ? {
+                  contentReference: {
+                    content_id: contentDocument.contentId,
+                    sha256: contentDocument.sha256,
+                    byte_length: contentDocument.byteLength,
+                    content_type: 'application/json' as const,
+                  },
+                }
+              : {}),
             occurredAt: new Date(),
           })
         : [];
@@ -216,6 +269,7 @@ export class BulkImportService {
           occurredAt: new Date(envelope.occurred_at),
           payload: envelope as unknown as Record<string, unknown>,
         })),
+        ...(contentDocument ? { contentDocument } : {}),
         admissionIntent: {
           format: input.format,
           templateVersion: input.templateVersion,
@@ -316,4 +370,14 @@ export class BulkImportService {
       throw mapBulkPersistenceError(error);
     }
   }
+}
+
+/** The claim-check stays closed unless an operator records both approval gates. */
+export function catalogV3EmissionEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return (
+    env.BULK_CATALOG_V3_ENABLED === 'true' &&
+    env.BULK_CATALOG_V3_AUTHORIZATION_VERIFIED === 'true'
+  );
 }

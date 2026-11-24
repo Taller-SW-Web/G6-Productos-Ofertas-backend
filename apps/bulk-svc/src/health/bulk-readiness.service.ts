@@ -14,6 +14,7 @@ import {
 import { BULK_AMQP_URL } from '../messaging/bulk-rabbitmq.js';
 import { BulkOutboxRelay } from '../messaging/bulk-outbox-relay.js';
 import { CatalogBulkResultConsumer } from '../messaging/catalog-bulk-result-consumer.js';
+import { BulkServiceBusRuntime } from '../messaging/bulk-service-bus.runtime.js';
 
 export interface BulkReadinessPool {
   query(sql: string): Promise<unknown>;
@@ -29,7 +30,9 @@ export type BulkReadinessReason =
   | 'AMQP_NOT_CONFIGURED'
   | 'AMQP_DISABLED'
   | 'AMQP_TEMPORARY_UNAVAILABLE'
-  | 'AMQP_TOPOLOGY_BLOCKED';
+  | 'AMQP_TOPOLOGY_BLOCKED'
+  | 'SERVICE_BUS_NOT_CONFIGURED'
+  | 'SERVICE_BUS_TEMPORARY_UNAVAILABLE';
 
 export type BulkReadReadinessReason =
   | 'READY'
@@ -75,6 +78,7 @@ export class BulkReadinessService implements OnModuleDestroy {
     private readonly amqpUrl: string | null = null,
     @Optional() private readonly relay?: BulkOutboxRelay,
     @Optional() private readonly resultConsumer?: CatalogBulkResultConsumer,
+    @Optional() private readonly serviceBus?: BulkServiceBusRuntime,
   ) {}
 
   async check(): Promise<boolean> {
@@ -106,6 +110,14 @@ export class BulkReadinessService implements OnModuleDestroy {
     } catch {
       this.logger.warn('La comprobación de PostgreSQL no está disponible.');
       return { ready: false, reason: 'DATABASE_UNAVAILABLE' };
+    }
+
+    if (process.env.MESSAGING_PROVIDER === 'AZURE_SERVICE_BUS') {
+      if (!this.serviceBus?.enabled)
+        return { ready: false, reason: 'SERVICE_BUS_NOT_CONFIGURED' };
+      if (this.serviceBus.getOperationalState() !== 'READY')
+        return { ready: false, reason: 'SERVICE_BUS_TEMPORARY_UNAVAILABLE' };
+      return { ready: true, reason: 'READY' };
     }
 
     if (!this.amqpUrl) {

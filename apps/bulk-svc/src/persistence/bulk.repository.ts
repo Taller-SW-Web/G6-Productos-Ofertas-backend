@@ -6,6 +6,8 @@ import {
   batchResumeRequests,
   batchRows,
   domainAttempts,
+  contentDocuments,
+  outboxDeliveries,
   exportJobs,
   fileManifests,
   inbox,
@@ -48,6 +50,14 @@ export interface CreateImportBatchInput {
   rows: ImportRowInput[];
   admissionIntent?: Record<string, unknown>;
   catalogCommands?: OutboxInput[];
+  contentDocument?: {
+    contentId: string;
+    batchId: string;
+    batchOperationId: string;
+    contentRef: string;
+    sha256: string;
+    byteLength: number;
+  };
 }
 export interface CreateImportBatchResult {
   manifest: typeof fileManifests.$inferSelect;
@@ -349,6 +359,19 @@ export class BulkPersistenceRepository {
           row,
           steps: stepsByRow.get(row.id) ?? [],
         }));
+        if (input.contentDocument) {
+          if (
+            input.contentDocument.batchId !== input.batchId ||
+            !Number.isSafeInteger(input.contentDocument.byteLength) ||
+            input.contentDocument.byteLength < 1 ||
+            !/^[a-f0-9]{64}$/.test(input.contentDocument.sha256)
+          )
+            throw new BulkPersistenceError('CHECK_VIOLATION');
+          await tx.insert(contentDocuments).values({
+            ...input.contentDocument,
+            contentType: 'application/json',
+          });
+        }
         if (input.admissionIntent) {
           await tx.insert(inbox).values({
             messageId: input.batchId,
@@ -371,6 +394,11 @@ export class BulkPersistenceRepository {
             occurredAt: command.occurredAt,
             payload: command.payload,
           });
+          if (command.eventName === 'catalog.bulk.upsert.requested')
+            await tx.insert(outboxDeliveries).values({
+              messageId: command.messageId,
+              destination: 'g6.catalog.from.bulk',
+            });
         }
         return { manifest, batch, rows: createdRows };
       });
@@ -2697,6 +2725,10 @@ export class BulkPersistenceRepository {
             occurredAt: new Date(payload.occurred_at),
             payload,
           });
+          await tx.insert(outboxDeliveries).values({
+            messageId,
+            destination: 'g6.catalog.from.bulk',
+          });
           for (let index = 0; index < current.length; index++) {
             const entry = current[index]!;
             await tx.insert(domainAttempts).values({
@@ -2974,6 +3006,27 @@ export class BulkPersistenceRepository {
     }
   }
 
+  async findContentDocument(contentId: string) {
+    try {
+      const [document] = await this.db
+        .select({
+          contentId: contentDocuments.contentId,
+          batchId: contentDocuments.batchId,
+          batchOperationId: contentDocuments.batchOperationId,
+          contentRef: contentDocuments.contentRef,
+          sha256: contentDocuments.sha256,
+          byteLength: contentDocuments.byteLength,
+          contentType: contentDocuments.contentType,
+        })
+        .from(contentDocuments)
+        .where(eq(contentDocuments.contentId, contentId))
+        .limit(1);
+      return document ?? null;
+    } catch (error) {
+      throw persistenceError(error);
+    }
+  }
+
   /** Reconciles an upload after an uncertain completion response. Any durable manifest reference wins. */
   async isExportArtifactReferenced(contentRef: string): Promise<boolean> {
     try {
@@ -3172,6 +3225,11 @@ export class BulkPersistenceRepository {
           })
           .returning();
         if (!message) throw new Error('Outbox insert returned no row');
+        if (input.eventName === 'catalog.bulk.upsert.requested')
+          await tx.insert(outboxDeliveries).values({
+            messageId: input.messageId,
+            destination: 'g6.catalog.from.bulk',
+          });
         return message;
       });
     } catch (error) {
@@ -3194,6 +3252,101 @@ export class BulkPersistenceRepository {
         )
         .orderBy(asc(outbox.occurredAt), asc(outbox.id))
         .limit(Math.max(1, Math.min(limit, 1000)));
+    } catch (error) {
+      throw persistenceError(error);
+    }
+  }
+
+  async claimPendingServiceBusDeliveries(limit = 20) {
+    try {
+      return await this.db.transaction(async (tx) => {
+        const due = await tx
+          .select({ delivery: outboxDeliveries, message: outbox })
+          .from(outboxDeliveries)
+          .innerJoin(outbox, eq(outbox.messageId, outboxDeliveries.messageId))
+          .where(
+            and(
+              eq(outboxDeliveries.destination, 'g6.catalog.from.bulk'),
+              sql`${outboxDeliveries.publishedAt} IS NULL`,
+              sql`${outboxDeliveries.availableAt} <= now()`,
+            ),
+          )
+          .orderBy(asc(outboxDeliveries.availableAt), asc(outbox.createdAt))
+          .limit(limit)
+          .for('update', { skipLocked: true });
+        const claimed = [];
+        for (const item of due) {
+          const leaseToken = randomUUID();
+          const [delivery] = await tx
+            .update(outboxDeliveries)
+            .set({
+              leaseToken,
+              availableAt: new Date(Date.now() + 30_000),
+            })
+            .where(
+              and(
+                eq(outboxDeliveries.messageId, item.delivery.messageId),
+                eq(outboxDeliveries.destination, item.delivery.destination),
+                sql`${outboxDeliveries.publishedAt} IS NULL`,
+              ),
+            )
+            .returning();
+          if (delivery) claimed.push({ ...item.message, delivery });
+        }
+        return claimed;
+      });
+    } catch (error) {
+      throw persistenceError(error);
+    }
+  }
+
+  async markServiceBusDeliveryPublished(
+    messageId: string,
+    leaseToken: string,
+  ): Promise<void> {
+    try {
+      const [updated] = await this.db
+        .update(outboxDeliveries)
+        .set({ publishedAt: new Date(), leaseToken: null, lastError: null })
+        .where(
+          and(
+            eq(outboxDeliveries.messageId, messageId),
+            eq(outboxDeliveries.destination, 'g6.catalog.from.bulk'),
+            eq(outboxDeliveries.leaseToken, leaseToken),
+            sql`${outboxDeliveries.publishedAt} IS NULL`,
+          ),
+        )
+        .returning({ messageId: outboxDeliveries.messageId });
+      if (!updated) throw new BulkPersistenceError('UNIQUE_CONFLICT');
+    } catch (error) {
+      throw persistenceError(error);
+    }
+  }
+
+  async releaseServiceBusDelivery(
+    messageId: string,
+    leaseToken: string,
+    errorCode: string,
+    attempts: number,
+  ): Promise<void> {
+    try {
+      const backoffMs = Math.min(30_000, 250 * 2 ** Math.min(attempts, 7));
+      await this.db
+        .update(outboxDeliveries)
+        .set({
+          attempts: attempts + 1,
+          availableAt: new Date(Date.now() + backoffMs),
+          leaseToken: null,
+          lastError: errorCode,
+        })
+        .where(
+          and(
+            eq(outboxDeliveries.messageId, messageId),
+            eq(outboxDeliveries.destination, 'g6.catalog.from.bulk'),
+            eq(outboxDeliveries.leaseToken, leaseToken),
+            sql`${outboxDeliveries.publishedAt} IS NULL`,
+          ),
+        );
     } catch (error) {
       throw persistenceError(error);
     }
