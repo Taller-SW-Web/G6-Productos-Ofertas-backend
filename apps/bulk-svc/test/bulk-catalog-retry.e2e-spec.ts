@@ -100,17 +100,20 @@ function signedUserToken(sub: string, roles = ['GESTOR_COMERCIAL']) {
   return `${header}.${claims}.${signer.sign(jwtKeys.privateKey, 'base64url')}`;
 }
 
-function signedServiceToken() {
+function signedServiceToken(
+  clientId = 'catalog-svc',
+  scope = 'carga-masiva:contenidos:leer',
+) {
   const encode = (value: object) =>
     Buffer.from(JSON.stringify(value)).toString('base64url');
   const header = encode({ alg: 'RS256', typ: 'JWT' });
   const claims = encode({
     iss: 'bulk-retry-integration',
     sub: 'catalog-svc',
-    client_id: 'catalog-svc',
+    client_id: clientId,
     tipo: 'servicio',
     aud: 'api-productos',
-    scope: 'carga-masiva:contenidos:leer',
+    scope,
     iat: Math.floor(Date.now() / 1000),
     exp: Math.floor(Date.now() / 1000) + 900,
     jti: randomUUID(),
@@ -378,6 +381,39 @@ integration(
           storedContentDocument.sha256,
         );
         expect(storagePut).toHaveBeenCalled();
+        const privateContentPath = `/interno/carga-masiva/contenidos/${contentRef.content_id}`;
+        await request(server).get(privateContentPath).expect(401);
+        await request(server)
+          .get(privateContentPath)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(401);
+        await request(server)
+          .get(privateContentPath)
+          .set('Authorization', `Bearer ${signedServiceToken('otro-servicio')}`)
+          .expect(403);
+        await request(server)
+          .get(privateContentPath)
+          .set(
+            'Authorization',
+            `Bearer ${signedServiceToken('catalog-svc', 'scope-ajeno')}`,
+          )
+          .expect(403);
+        const authorizedContent = await request(server)
+          .get(privateContentPath)
+          .set('Authorization', `Bearer ${signedServiceToken()}`)
+          .expect(200);
+        expect(authorizedContent.headers['content-type']).toContain(
+          'application/json',
+        );
+        expect(authorizedContent.headers['content-length']).toBe(
+          String(storedContentDocument.byteLength),
+        );
+        expect(authorizedContent.headers['x-content-sha256']).toBe(
+          storedContentDocument.sha256,
+        );
+        expect(authorizedContent.headers['cache-control']).toBe(
+          'private, no-store',
+        );
         const decodedDocument = JSON.parse(
           contentBytes.toString('utf8'),
         ) as unknown;
