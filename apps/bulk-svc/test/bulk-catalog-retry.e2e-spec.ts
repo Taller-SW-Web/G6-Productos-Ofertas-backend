@@ -455,6 +455,33 @@ integration(
           `Bearer ${signedServiceToken()}`,
         );
         const contentClient = new CatalogBulkContentClient(contentIdentity);
+        const catalogBeforeInvalidClaimChecks = await catalogDatabase.read(
+          (db) => db.select().from(products),
+        );
+        await expect(
+          contentClient.getDocument({
+            ...storedContentDocument.contentRef,
+            content_id: randomUUID(),
+          }),
+        ).rejects.toThrow();
+        recordScenario('claim-check.missing-reference-no-mutation');
+        await expect(
+          contentClient.getDocument({
+            ...storedContentDocument.contentRef,
+            byte_length: storedContentDocument.byteLength + 1,
+          }),
+        ).rejects.toThrow();
+        recordScenario('claim-check.wrong-length-no-mutation');
+        await expect(
+          contentClient.getDocument({
+            ...storedContentDocument.contentRef,
+            sha256: '0'.repeat(64),
+          }),
+        ).rejects.toThrow();
+        recordScenario('claim-check.wrong-sha256-no-mutation');
+        expect(
+          await catalogDatabase.read((db) => db.select().from(products)),
+        ).toEqual(catalogBeforeInvalidClaimChecks);
         const mutations = new CatalogMutationService(
           transactions,
           new PostgresCatalogWriteRepository(),
