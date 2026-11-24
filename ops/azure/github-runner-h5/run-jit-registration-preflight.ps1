@@ -11,22 +11,19 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$runnerPrefix = if ($Mode -eq 'Smoke') { 'h5-jit-smoke-' } else { 'h5-jit-preflight-' }
-$runnerName = ($runnerPrefix + [guid]::NewGuid().ToString('N').Substring(0, 10)).ToLowerInvariant()
 $diagnosticLabel = 'h5-runner-preflight-only'
 $workflowPath = "$Repository/.github/workflows/cd-services-azure.yml"
 $expectedWorkflow = "$workflowPath@refs/heads/master"
 $jitRunnerId = $null
+$jitRunnerName = $null
+$jitRegistrationAccepted = $false
 $jobExecutionName = $null
 $jitConfig = $null
 $templateFile = $null
 $subscriptionId = $null
 $jobSecretInstalled = $false
 $jobSecretName = 'h5jit'
-$startedAt = [DateTimeOffset]::UtcNow
 $registrationOnline = $false
-$smokeJobId = $null
-$smokeJobConclusion = $null
 $jitSecretTouched = $false
 $cleanupWasRun = $false
 $jobStartAttempted = $false
@@ -36,9 +33,12 @@ $expectedEnvironmentId = $null
 $armUri = $null
 $armToken = $null
 $cleanupFailures = [System.Collections.Generic.List[string]]::new()
+$executionNamesBefore = @()
+$executionCorrelationFailed = $false
 $cleanupMarker = Join-Path (Join-Path $env:LOCALAPPDATA 'G6\azure-h5-smoke') 'CLEANUP_INCOMPLETE.json'
 
 . (Join-Path $PSScriptRoot 'aca-job-secret-patch.ps1')
+. (Join-Path $PSScriptRoot 'jit-runner-operations.ps1')
 
 function Invoke-GhJson {
     param([Parameter(Mandatory)][string[]]$Arguments)
@@ -49,7 +49,9 @@ function Invoke-GhJson {
 
 function Invoke-AzJson {
     param([Parameter(Mandatory)][string[]]$Arguments)
-    $output = & az @Arguments 2>$null
+    $effectiveArguments = @($Arguments)
+    if ($subscriptionId -and $effectiveArguments -notcontains '--subscription') { $effectiveArguments += @('--subscription',$subscriptionId) }
+    $output = & az @effectiveArguments 2>$null
     if ($LASTEXITCODE -ne 0) { throw "Azure CLI call failed: $($Arguments[0]) (exit $LASTEXITCODE). $($output -join ' ')" }
     return (($output -join "`n") | ConvertFrom-Json)
 }
@@ -59,7 +61,7 @@ function Get-ArmRequestContext {
         $script:subscriptionId = [string](& az account show --query id --output tsv 2>$null)
         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($subscriptionId)) { throw 'Could not resolve the active Azure subscription for the protected JIT secret operation.' }
     }
-    $tokenOutput = & az account get-access-token --resource https://management.azure.com/ --query accessToken --output tsv 2>$null
+    $tokenOutput = & az account get-access-token --resource https://management.azure.com/ --subscription $subscriptionId --query accessToken --output tsv 2>$null
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($tokenOutput -join ''))) { throw 'Could not obtain an Azure management token for the protected JIT secret operation.' }
     $uri = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.App/jobs/${JobName}?api-version=2025-07-01"
     return [pscustomobject]@{Token=($tokenOutput -join '');Uri=$uri}
@@ -74,7 +76,7 @@ function Set-TemporaryJobSecret {
         $patchFailure = $_.Exception.Message
         try {
             $verification = Get-AcaJobSnapshot -Uri $armUri -Token $armToken -JobName $JobName -ResourceGroup $ResourceGroup -EnvironmentId $expectedEnvironmentId -ExpectedImage $expectedImage
-            $script:jobSecretInstalled = @($verification.Resource.properties.configuration.secrets | Where-Object { $_.name -eq $jobSecretName }).Count -gt 0
+            $script:jobSecretInstalled = @($verification.Resource.properties.configuration.secrets | Where-Object { $_ -and $_.name -eq $jobSecretName }).Count -gt 0
         } catch {
             $script:jobSecretInstalled = $true
             Write-Warning "CLEANUP REQUIRED: could not verify whether temporary Job secret '$jobSecretName' persisted."
@@ -125,12 +127,14 @@ function New-RestrictedTemplateFile {
 function Remove-JitRegistration {
     $script:cleanupFailures.Clear()
     $script:cleanupWasRun = $true
-    if (-not $jobExecutionName -and $jitRunnerId -and $jobStartAttempted) {
+    if (-not $jobExecutionName -and $jobStartAttempted) { $script:cleanupFailures.Add('CLEANUP_INCOMPLETE: Azure start was attempted but its execution ID was not correlated unequivocally') }
+    if ($jitRegistrationAccepted -and -not $jitRunnerId -and $jitRunnerName) {
         try {
-            $runs = Invoke-AzJson @('containerapp','job','execution','list','--name',$JobName,'--resource-group',$ResourceGroup,'--output','json')
-            $recent = @($runs | Where-Object { $_.properties.startTime -and [DateTimeOffset]::Parse($_.properties.startTime) -ge $startedAt.AddMinutes(-1) } | Sort-Object { [DateTimeOffset]::Parse($_.properties.startTime) } -Descending | Select-Object -First 1)
-            if ($recent.Count -gt 0) { $script:jobExecutionName = [string]$recent[0].name }
-        } catch { $script:cleanupFailures.Add('new Job execution state could not be inspected') }
+            $groupRunners = Invoke-GhJson @('api',"orgs/$Organization/actions/runner-groups/$RunnerGroupId/runners?per_page=100")
+            $matchingRunner = @($groupRunners.runners | Where-Object { $_.name -ceq $jitRunnerName })
+            if ($matchingRunner.Count -eq 1) { $script:jitRunnerId = [int]$matchingRunner[0].id }
+            elseif ($matchingRunner.Count -gt 1) { $script:cleanupFailures.Add("multiple JIT registrations named $jitRunnerName cannot be cleaned safely") }
+        } catch { $script:cleanupFailures.Add('accepted GitHub JIT registration could not be identified by ID or unique name') }
     }
     if ($jitRunnerId) {
         $null = & gh api --method DELETE "orgs/$Organization/actions/runners/$jitRunnerId" 2>$null
@@ -161,7 +165,15 @@ function Remove-JitRegistration {
             $script:cleanupFailures.Add("Job execution $jobExecutionName could not be stopped/verified")
         }
     }
-    if ($jitSecretTouched -or $jitRunnerId -or $jobExecutionName) { Remove-TemporaryJobSecret }
+    $safeToRemoveSecret = -not $jobStartAttempted -or [bool]$jobExecutionName
+    if ($jobExecutionName) {
+        try {
+            $remaining = Invoke-AzJson @('containerapp','job','execution','list','--name',$JobName,'--resource-group',$ResourceGroup,'--output','json')
+            $activeRemaining = @($remaining | Where-Object { $_.properties.status -in @('Running','Processing','Starting') })
+            if ($activeRemaining.Count -gt 0) { $safeToRemoveSecret = $false; $script:cleanupFailures.Add('an ACA Job execution remains active; temporary secret retained') }
+        } catch { $safeToRemoveSecret = $false; $script:cleanupFailures.Add('active ACA Job executions could not be checked; temporary secret retained') }
+    }
+    if (($jitSecretTouched -or $jitRunnerId -or $jobExecutionName) -and $safeToRemoveSecret) { Remove-TemporaryJobSecret }
     if ($templateFile -and (Test-Path -LiteralPath $templateFile)) {
         try {
             Remove-Item -LiteralPath $templateFile -Force
@@ -181,9 +193,11 @@ function Remove-JitRegistration {
     }
     $script:jitConfig = $null
     $script:armToken = $null
+    $script:jitRegistrationAccepted = $false
+    $script:jitRunnerName = $null
 }
 
-function Get-ApprovedSmokeJob {
+function Get-ApprovedSmokeMatrix {
     param([Parameter(Mandatory)][long]$WorkflowId)
     if ($Mode -ne 'Smoke') { return $null }
     if ($WorkflowRunId -le 0) { throw 'SMOKE_RUN_ID_REQUIRED: Mode Smoke requires one official CD workflow run ID.' }
@@ -204,17 +218,175 @@ function Get-ApprovedSmokeJob {
     $jobs = Invoke-GhJson @('api',"repos/$Repository/actions/runs/$WorkflowRunId/jobs?per_page=100")
     $prepare = @($jobs.jobs | Where-Object { $_.name -eq 'Validar procedencia y servicios' })
     $deployJobs = @($jobs.jobs | Where-Object { $_.name -like 'Desplegar *' })
-    $smokeJobs = @($jobs.jobs | Where-Object { $_.name -like 'Smoke HTTPS posterior al despliegue*' })
-    if ($prepare.Count -ne 1 -or $prepare[0].conclusion -ne 'success' -or $deployJobs.Count -eq 0 -or @($deployJobs | Where-Object conclusion -ne 'success').Count -gt 0) {
+    if ($prepare.Count -ne 1 -or $prepare[0].conclusion -ne 'success') {
         throw 'SMOKE_DEPLOYMENT_NOT_APPROVED: prepare and every deploy matrix job must have completed successfully.'
     }
-    if ($smokeJobs.Count -ne 1 -or $smokeJobs[0].status -ne 'queued') {
-        throw 'SMOKE_JOB_NOT_QUEUED: require exactly one smoke job queued after deployment and Environment approval.'
-    }
+    $plan = Get-SmokeMatrixPlan -Jobs $jobs.jobs
     $deployments = Invoke-GhJson @('api',"repos/$Repository/deployments?ref=$($run.head_sha)&environment=azure-h5&per_page=100")
-    $matching = @($deployments | Where-Object { [long]$_.payload.run_id -eq $WorkflowRunId -and $_.environment -ceq 'azure-h5' })
-    if ($matching.Count -eq 0) { throw 'SMOKE_ENVIRONMENT_NOT_VERIFIED: no deployment from this run targets protected azure-h5.' }
-    return [pscustomobject]@{Run=$run;Job=$smokeJobs[0]}
+    $runCreatedAt = [DateTimeOffset]::Parse([string]$run.created_at)
+    $matching = @($deployments | Where-Object {
+        $_.environment -ceq 'azure-h5' -and $_.sha -ceq $run.head_sha -and
+        [DateTimeOffset]::Parse([string]$_.created_at) -ge $runCreatedAt
+    })
+    if ($matching.Count -lt $deployJobs.Count) { throw 'SMOKE_ENVIRONMENT_NOT_VERIFIED: deployment objects do not cover every selected job in azure-h5 after this run began.' }
+    foreach ($deployment in $matching) {
+        $statuses = Invoke-GhJson @('api',"repos/$Repository/deployments/$($deployment.id)/statuses?per_page=1")
+        if (@($statuses).Count -eq 0 -or $statuses[0].state -ne 'success') { throw 'SMOKE_ENVIRONMENT_DEPLOYMENT_NOT_SUCCESSFUL: a matched azure-h5 deployment lacks a successful latest status.' }
+    }
+    $completedSmoke = @($plan.Services | Where-Object { $_ -notin (Get-PendingSmokeServices -SmokeJobs $plan.SmokeJobs) })
+    return [pscustomobject]@{Run=$run;Plan=$plan;Completed=$completedSmoke}
+}
+
+function Get-AzureJobExecutions {
+    return @(Invoke-AzJson @('containerapp','job','execution','list','--name',$JobName,'--resource-group',$ResourceGroup,'--output','json'))
+}
+
+function Start-JitCycle {
+    param([Parameter(Mandatory)][ValidateSet('Diagnostic','Smoke')][string]$CycleMode)
+    $script:cleanupWasRun = $false
+    $script:jobStartAttempted = $false
+    $script:executionCorrelationFailed = $false
+    $cycleRunnerName = (($CycleMode -eq 'Smoke' ? 'h5-jit-smoke-' : 'h5-jit-preflight-') + [guid]::NewGuid().ToString('N').Substring(0,10)).ToLowerInvariant()
+    $script:jitRunnerName = $cycleRunnerName
+    $requestJson = New-GitHubJitRequestJson -Mode $CycleMode -Name $cycleRunnerName -RunnerGroupId $RunnerGroupId -DiagnosticLabel $diagnosticLabel
+    Write-Information "JIT_REQUEST_JSON: $requestJson" -InformationAction Continue
+    $jitProcess = Invoke-GhJitConfigRequest -GhExecutable ((Get-Command gh).Source) -Organization $Organization -RequestJson $requestJson
+    $jitResponse = Get-GitHubJitResponseFields -ResponseText ([string]$jitProcess.Stdout)
+    if ($jitResponse.StatusCode -ne 201 -or $jitProcess.ExitCode -ne 0 -or -not $jitResponse.Json) {
+        $safeErrors = @($jitResponse.Errors | ForEach-Object { "$($_.field):$($_.code):$($_.resource)" }) -join ','
+        $safeStatus = if ($jitResponse.StatusCode) { $jitResponse.StatusCode } else { [regex]::Match([string]$jitProcess.Stderr,'HTTP\s+(\d{3})').Groups[1].Value }
+        throw "GITHUB_JIT_REJECTED: HTTP $safeStatus; message=$($jitResponse.Message); validations=$safeErrors; gh-exit=$($jitProcess.ExitCode). stderr captured separately; response secrets suppressed."
+    }
+    $script:jitRegistrationAccepted = $true
+    $jit = $jitResponse.Json
+    $script:jitRunnerId = [int]$jit.runner.id
+    $script:jitConfig = [string]$jit.encoded_jit_config
+    if (-not $script:jitRunnerId -or [string]::IsNullOrWhiteSpace($script:jitConfig)) { throw 'GitHub JIT response lacked runner ID/config.' }
+    $actualLabels = @($jit.runner.labels | ForEach-Object name)
+    if ($CycleMode -eq 'Diagnostic' -and ($actualLabels -notcontains $diagnosticLabel -or $actualLabels -contains 'azure-h5-smoke')) { throw 'JIT diagnostic labels are unsafe; registration will be removed.' }
+    if ($CycleMode -eq 'Smoke' -and ($actualLabels -notcontains 'linux' -or $actualLabels -notcontains 'azure-h5-smoke')) { throw 'JIT smoke labels do not match the official workflow selector.' }
+    $groupRunners = Invoke-GhJson @('api',"orgs/$Organization/actions/runner-groups/$RunnerGroupId/runners?per_page=100")
+    if ($groupRunners.total_count -ne 1 -or @($groupRunners.runners | Where-Object { [int]$_.id -eq $script:jitRunnerId }).Count -ne 1) { throw 'RUNNER_GROUP_NOT_EXCLUSIVE: JIT creation did not produce exactly this one registered runner.' }
+
+    $beforeSnapshot = Get-AcaJobSnapshot -Uri $armUri -Token $armToken -JobName $JobName -ResourceGroup $ResourceGroup -EnvironmentId $expectedEnvironmentId -ExpectedImage $expectedImage
+    $beforeSecrets = @($beforeSnapshot.Resource.properties.configuration.secrets | Where-Object { $_ -and $_.name })
+    if ($beforeSecrets.Count -ne 0) { throw 'JOB_SECRET_COLLECTION_NOT_EMPTY: refusing to alter an existing secret.' }
+    $beforeExecutions = Get-AzureJobExecutions
+    if (@($beforeExecutions | Where-Object { $_.properties.status -in @('Running','Processing','Starting') }).Count -ne 0) { throw 'JOB_NOT_EXCLUSIVE: an ACA execution is active and ARM supplied no ETag.' }
+    $script:executionNamesBefore = @($beforeExecutions | ForEach-Object { [string]$_.name })
+
+    $script:jitSecretTouched = $true
+    $stage = 'temporary Job secret PATCH'
+    Set-TemporaryJobSecret -Value $script:jitConfig
+    $afterPatch = Get-AcaJobSnapshot -Uri $armUri -Token $armToken -JobName $JobName -ResourceGroup $ResourceGroup -EnvironmentId $expectedEnvironmentId -ExpectedImage $expectedImage
+    $patchedSecrets = @($afterPatch.Resource.properties.configuration.secrets | Where-Object { $_ -and $_.name })
+    if ($patchedSecrets.Count -ne 1 -or $patchedSecrets[0].name -cne $jobSecretName) { throw 'JOB_SECRET_EXCLUSIVITY_FAILED: post-PATCH readback found unexpected secret names.' }
+
+    $templateJson = $job.properties.template | ConvertTo-Json -Depth 100 -Compress
+    $rendered = $templateJson | & python (Join-Path $PSScriptRoot 'render-execution-template.py') --set-secret "H5_RUNNER_JIT_CONFIG=$jobSecretName" 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $rendered) { throw 'Could not render the one-execution JIT template.' }
+    $script:templateFile = New-RestrictedTemplateFile -Content ($rendered -join "`n")
+    $script:startedAt = [DateTimeOffset]::UtcNow
+    $script:jobStartAttempted = $true
+    $startOutput = & az containerapp job start --name $JobName --resource-group $ResourceGroup --subscription $subscriptionId --yaml $script:templateFile --only-show-errors --output json 2>$null
+    if ($LASTEXITCODE -ne 0) { throw "Azure Container Apps Job start failed (exit $LASTEXITCODE); response body suppressed." }
+    $startResult = (($startOutput -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue)
+    $script:jobExecutionName = if ($startResult -and $startResult.name) { [string]$startResult.name } else { $null }
+    if (-not $script:jobExecutionName) {
+        $deadline = [DateTimeOffset]::UtcNow.AddSeconds(30)
+        do {
+            Start-Sleep -Seconds 3
+            $afterExecutions = Get-AzureJobExecutions
+            try { $script:jobExecutionName = Resolve-NewAzureExecutionId -BeforeNames $script:executionNamesBefore -AfterExecutions $afterExecutions; break } catch {
+                if ($_.Exception.Message -notmatch 'found 0') { $script:executionCorrelationFailed = $true; throw }
+            }
+        } while ([DateTimeOffset]::UtcNow -lt $deadline)
+    }
+    if (-not $script:jobExecutionName) { $script:executionCorrelationFailed = $true; throw 'AZURE_EXECUTION_CORRELATION_FAILED: start response omitted execution ID and no unique new execution appeared.' }
+    $null = Invoke-AzJson @('containerapp','job','execution','show','--name',$JobName,'--resource-group',$ResourceGroup,'--job-execution-name',$script:jobExecutionName,'--output','json')
+
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($OnlineTimeoutSeconds)
+    while ([DateTimeOffset]::UtcNow -lt $deadline) {
+        $runnerRecord = Invoke-GhJson @('api',"orgs/$Organization/actions/runners/$script:jitRunnerId")
+        if ($runnerRecord.status -eq 'online') {
+            $onlineLabels = @($runnerRecord.labels | ForEach-Object name)
+            if ($CycleMode -eq 'Smoke' -and ($runnerRecord.os -ne 'linux' -or $onlineLabels -notcontains 'self-hosted' -or $onlineLabels -notcontains 'linux' -or $onlineLabels -notcontains 'azure-h5-smoke')) {
+                throw 'JIT_RUNNER_LABELS_INVALID: online runner lacks self-hosted/linux/azure-h5-smoke or Linux OS.'
+            }
+            if ($CycleMode -eq 'Diagnostic' -and $onlineLabels -contains 'azure-h5-smoke') { throw 'JIT_DIAGNOSTIC_LABEL_LEAK: diagnostic runner unexpectedly has azure-h5-smoke.' }
+            return [pscustomobject]@{Id=$script:jitRunnerId;ExecutionName=$script:jobExecutionName;Mode=$CycleMode}
+        }
+        Start-Sleep -Seconds 5
+    }
+    throw "JIT runner $script:jitRunnerId did not become online within $OnlineTimeoutSeconds seconds."
+}
+
+function Wait-AssignedSmokeJob {
+    param([Parameter(Mandatory)]$Runner,[Parameter(Mandatory)][string[]]$PendingServices)
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($OnlineTimeoutSeconds)
+    while ([DateTimeOffset]::UtcNow -lt $deadline) {
+        $jobs = Invoke-GhJson @('api',"repos/$Repository/actions/runs/$WorkflowRunId/jobs?per_page=100")
+        $assignment = Get-SmokeJobAssignedToRunner -Jobs $jobs.jobs -RunnerId ([int]$Runner.Id) -PendingServices $PendingServices
+        if ($assignment) { return $assignment }
+        Start-Sleep -Seconds 5
+    }
+    throw "SMOKE_JOB_ASSIGNMENT_TIMEOUT: runner $($Runner.Id) was not assigned a pending matrix job."
+}
+
+function Wait-SmokeJobSuccess {
+    param([Parameter(Mandatory)]$Runner,[Parameter(Mandatory)]$Assignment)
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($JobCompletionTimeoutSeconds)
+    do {
+        $jobState = Invoke-GhJson @('api',"repos/$Repository/actions/jobs/$($Assignment.Job.id)")
+        if ($jobState.runner_id -and [int]$jobState.runner_id -ne [int]$Runner.Id) { throw 'SMOKE_RUNNER_ASSIGNMENT_CHANGED: GitHub job runner ID differs from the JIT runner.' }
+        if ($jobState.status -eq 'completed') { return [string]$jobState.conclusion }
+        Start-Sleep -Seconds 5
+    } while ([DateTimeOffset]::UtcNow -lt $deadline)
+    throw "SMOKE_JOB_TIMEOUT: job $($Assignment.Job.id) did not complete."
+}
+
+function Wait-AzureExecutionSuccess {
+    param([Parameter(Mandatory)]$Runner)
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds(180)
+    do {
+        $execution = Invoke-AzJson @('containerapp','job','execution','show','--name',$JobName,'--resource-group',$ResourceGroup,'--job-execution-name',$Runner.ExecutionName,'--output','json')
+        if ($execution.properties.status -notin @('Running','Processing','Starting')) {
+            if ($execution.properties.status -ne 'Succeeded') { throw "JIT_JOB_EXECUTION_FAILED: Azure execution $($Runner.ExecutionName) concluded '$($execution.properties.status)'." }
+            return [string]$execution.properties.status
+        }
+        Start-Sleep -Seconds 5
+    } while ([DateTimeOffset]::UtcNow -lt $deadline)
+    throw "JIT_JOB_EXECUTION_TIMEOUT: Azure execution $($Runner.ExecutionName) is still active."
+}
+
+function Stop-DiagnosticExecutionAfterHandshake {
+    param([Parameter(Mandatory)]$Runner)
+    $execution = Invoke-AzJson @('containerapp','job','execution','show','--name',$JobName,'--resource-group',$ResourceGroup,'--job-execution-name',$Runner.ExecutionName,'--output','json')
+    if ($execution.properties.status -in @('Running','Processing','Starting')) {
+        $null = Invoke-AzJson @('containerapp','job','stop','--name',$JobName,'--resource-group',$ResourceGroup,'--job-execution-name',$Runner.ExecutionName,'--output','json')
+    }
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds(120)
+    do {
+        Start-Sleep -Seconds 3
+        $execution = Invoke-AzJson @('containerapp','job','execution','show','--name',$JobName,'--resource-group',$ResourceGroup,'--job-execution-name',$Runner.ExecutionName,'--output','json')
+    } while ($execution.properties.status -in @('Running','Processing','Starting') -and [DateTimeOffset]::UtcNow -lt $deadline)
+    if ($execution.properties.status -in @('Running','Processing','Starting')) { throw "DIAGNOSTIC_STOP_TIMEOUT: exact execution $($Runner.ExecutionName) remains active." }
+    Write-Output "DIAGNOSTIC_EXECUTION_TERMINAL: $($Runner.ExecutionName) status=$($execution.properties.status); runner handshake observed and execution stopped/terminalized before cleanup."
+}
+
+function Reset-JitCycleState {
+    $script:jitRunnerId = $null
+    $script:jitRunnerName = $null
+    $script:jitRegistrationAccepted = $false
+    $script:jobExecutionName = $null
+    $script:jitConfig = $null
+    $script:templateFile = $null
+    $script:jobSecretInstalled = $false
+    $script:jitSecretTouched = $false
+    $script:jobStartAttempted = $false
+    $script:executionNamesBefore = @()
+    $script:executionCorrelationFailed = $false
+    $script:cleanupWasRun = $false
 }
 
 try {
@@ -222,6 +394,9 @@ try {
         if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "Required CLI not found: $tool" }
     }
     if (Test-Path -LiteralPath $cleanupMarker) { throw "CLEANUP_INCOMPLETE: marker exists at $cleanupMarker; verify runner, Job execution and secret absence before clearing it manually." }
+    $account = Invoke-AzJson @('account','show','--output','json')
+    $script:subscriptionId = [string]$account.id
+    if ([string]::IsNullOrWhiteSpace($subscriptionId)) { throw 'Azure CLI has no active subscription.' }
 
     $stage = 'runner-group authorization check'
     $group = Invoke-GhJson @('api',"orgs/$Organization/actions/runner-groups/$RunnerGroupId")
@@ -242,7 +417,7 @@ try {
             if ($runs.total_count -gt 0) { throw "CD workflow has $status runs; refusing diagnostic registration to avoid taking a release job." }
         }
     } else {
-        $approvedSmoke = Get-ApprovedSmokeJob -WorkflowId ([long]$workflow.id)
+        $approvedSmoke = Get-ApprovedSmokeMatrix -WorkflowId ([long]$workflow.id)
     }
 
     $stage = 'azure-h5 protection check'
@@ -251,6 +426,10 @@ try {
     $hasMasterOnly = $environment.deployment_branch_policy.custom_branch_policies -eq $true -and $environment.deployment_branch_policy.protected_branches -eq $false
     if ($environment.can_admins_bypass -ne $false -or -not $hasReviewer -or -not $hasMasterOnly) {
         throw 'azure-h5 protections failed verification; JIT registration was not requested.'
+    }
+    $branchPolicies = Invoke-GhJson @('api',"repos/$Repository/environments/azure-h5/deployment-branch-policies?per_page=100")
+    if ($branchPolicies.total_count -ne 1 -or @($branchPolicies.branch_policies | Where-Object { $_.type -eq 'branch' -and $_.name -ceq 'master' }).Count -ne 1) {
+        throw 'azure-h5 deployment branch policies are not exactly branch master; JIT registration was not requested.'
     }
 
     $stage = 'Container Apps Job template check'
@@ -278,118 +457,51 @@ try {
     $armContext = Get-ArmRequestContext
     $script:armUri = $armContext.Uri
     $script:armToken = $armContext.Token
-    $null = Get-AcaJobSnapshot -Uri $armUri -Token $armToken -JobName $JobName -ResourceGroup $ResourceGroup -EnvironmentId $expectedEnvironmentId -ExpectedImage $expectedImage
+    $jobSnapshot = Get-AcaJobSnapshot -Uri $armUri -Token $armToken -JobName $JobName -ResourceGroup $ResourceGroup -EnvironmentId $expectedEnvironmentId -ExpectedImage $expectedImage
+    $existingJobSecrets = @($jobSnapshot.Resource.properties.configuration.secrets | Where-Object { $_ -and $_.name })
+    if ($existingJobSecrets.Count -ne 0) { throw 'JOB_SECRET_COLLECTION_NOT_EMPTY: no secret will be overwritten or removed; resolve existing secrets manually.' }
+    $existingExecutions = Invoke-AzJson @('containerapp','job','execution','list','--name',$JobName,'--resource-group',$ResourceGroup,'--output','json')
+    $activeExecutions = @($existingExecutions | Where-Object { $_.properties.status -in @('Running','Processing','Starting') })
+    if ($activeExecutions.Count -gt 0) { throw 'JOB_NOT_EXCLUSIVE: an ACA Job execution is active; refusing a JIT secret update without ETag.' }
+    $groupRunnersBeforeJit = Invoke-GhJson @('api',"orgs/$Organization/actions/runner-groups/$RunnerGroupId/runners?per_page=100")
+    if ($groupRunnersBeforeJit.total_count -ne 0) { throw 'RUNNER_GROUP_NOT_EXCLUSIVE: existing runner registrations are present; refusing no-ETag secret update.' }
 
-    # Diagnostic label cannot match CD. Smoke mode requires the active official
-    # workflow run, successful deploy, and its single queued smoke job.
-    $stage = 'GitHub JIT generation'
-    $jitLabels = if ($Mode -eq 'Smoke') { @('linux','azure-h5-smoke') } else { @($diagnosticLabel) }
-    $request = @{
-        name = $runnerName
-        runner_group_id = $RunnerGroupId
-        labels = $jitLabels
-        work_folder = '_work'
-    } | ConvertTo-Json -Compress
-    $oldErrorActionPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $response = $request | & gh api --method POST "orgs/$Organization/actions/runners/generate-jitconfig" --input - 2>&1
-    $jitRequestExitCode = $LASTEXITCODE
-    $ErrorActionPreference = $oldErrorActionPreference
-    if ($jitRequestExitCode -ne 0) {
-        $safeHttpStatus = [regex]::Match(($response -join ' '), 'HTTP\s+(\d{3})').Groups[1].Value
-        $safeGithubCode = ''
-        $safeGithubMessage = ''
-        $responseJson = (($response | Where-Object { $_ -is [string] }) -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue
-        if ($responseJson.message) {
-            $safeGithubMessage = [string]$responseJson.message -replace '[\r\n]+',' '
-            if ($safeGithubMessage.Length -gt 240) { $safeGithubMessage = $safeGithubMessage.Substring(0,240) }
-        }
-        if ($responseJson -and $responseJson.PSObject.Properties.Name -contains 'errors' -and $responseJson.errors) {
-            $safeGithubCode = (@($responseJson.errors | ForEach-Object { if($_.code){$_.code}else{$_.field} }) -join ',')
-        }
-        throw "GitHub generate-jitconfig failed with exit $jitRequestExitCode$(if($safeHttpStatus){", HTTP $safeHttpStatus"})$(if($safeGithubCode){", code=$safeGithubCode"})$(if($safeGithubMessage){", message=$safeGithubMessage"}); response body suppressed."
-    }
-    $jit = ($response -join "`n") | ConvertFrom-Json
-    $jitRunnerId = [int]$jit.runner.id
-    $jitConfig = [string]$jit.encoded_jit_config
-    if (-not $jitRunnerId -or [string]::IsNullOrWhiteSpace($jitConfig)) { throw 'GitHub JIT response lacked runner ID/config.' }
-    $labels = @($jit.runner.labels | ForEach-Object name)
-    if ($Mode -eq 'Diagnostic' -and ($labels -notcontains $diagnosticLabel -or $labels -contains 'azure-h5-smoke')) {
-        throw 'JIT labels are not diagnostic-only; deleting runner without starting the Azure Job.'
-    }
-    if ($Mode -eq 'Smoke' -and ($labels -notcontains 'linux' -or $labels -notcontains 'azure-h5-smoke')) {
-        throw 'JIT labels do not match the official CD smoke selector; deleting runner without starting the Azure Job.'
-    }
-    $authorizedRunners = Invoke-GhJson @('api',"orgs/$Organization/actions/runner-groups/$RunnerGroupId/runners?per_page=100")
-    if (@($authorizedRunners.runners | Where-Object { $_.status -eq 'online' -or $_.busy -eq $true }).Count -gt 0) {
-        throw 'RUNNER_RACE: another online or busy runner exists in the protected group.'
-    }
-
-    $script:jitSecretTouched = $true
-    $stage = 'temporary Job secret PATCH'
-    Set-TemporaryJobSecret -Value $jitConfig
-    $templateJson = $job.properties.template | ConvertTo-Json -Depth 100 -Compress
-    $rendered = $templateJson | & python (Join-Path $PSScriptRoot 'render-execution-template.py') --set-secret "H5_RUNNER_JIT_CONFIG=$jobSecretName" 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $rendered) { throw 'Could not render the one-execution JIT template.' }
-    $templateFile = New-RestrictedTemplateFile -Content ($rendered -join "`n")
-    $startedAt = [DateTimeOffset]::UtcNow
-    $script:jobStartAttempted = $true
-    $stage = 'Container Apps JIT execution start'
-    $startOutput = Invoke-AcaJitStartWithCleanup -StartAction {
-        $output = & az containerapp job start --name $JobName --resource-group $ResourceGroup --yaml $templateFile --only-show-errors --output json 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            $safeError = $output -join ' '
-            if ($jitConfig) { $safeError = $safeError.Replace($jitConfig, '[REDACTED]') }
-            throw "Azure Job start denied/failed: $safeError"
-        }
-        return $output
-    } -CleanupAction {
-        Remove-JitRegistration
-    }
-    $startResult = ($startOutput -join "`n") | ConvertFrom-Json
-    $jobExecutionName = [string]$startResult.name
-    if (-not $jobExecutionName) {
-        $jobRuns = Invoke-AzJson @('containerapp','job','execution','list','--name',$JobName,'--resource-group',$ResourceGroup,'--output','json')
-        $jobExecutionName = [string](@($jobRuns | Where-Object { [DateTimeOffset]::Parse($_.properties.startTime) -ge $startedAt.AddMinutes(-1) } | Sort-Object { [DateTimeOffset]::Parse($_.properties.startTime) } -Descending | Select-Object -First 1).name)
-    }
-    if (-not $jobExecutionName) { throw 'Job start returned without an execution name; cleanup will remove the JIT runner.' }
-
-    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($OnlineTimeoutSeconds)
-    $stage = 'GitHub JIT runner online poll'
-    while ([DateTimeOffset]::UtcNow -lt $deadline) {
-        $runner = & gh api "orgs/$Organization/actions/runners/$jitRunnerId" 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            $runnerRecord = ($runner -join "`n") | ConvertFrom-Json
-            if ($runnerRecord.status -eq 'online') { $registrationOnline = $true; break }
-        }
-        Start-Sleep -Seconds 5
-    }
-    if (-not $registrationOnline) { throw "JIT runner $jitRunnerId did not become online within $OnlineTimeoutSeconds seconds." }
-
-    Write-Output "PASS JIT registration: temporary runner ID $jitRunnerId became online in group $RunnerGroupId using mode $Mode."
     if ($Mode -eq 'Diagnostic') {
-        Write-Output 'The required azure-h5-smoke label was intentionally absent, so no CD job could match this diagnostic runner.'
+        $stage = 'diagnostic JIT cycle'
+        $diagnosticRunner = Start-JitCycle -CycleMode Diagnostic
+        $script:registrationOnline = $true
+        Write-Output "PASS JIT registration: temporary runner ID $($diagnosticRunner.Id) became online in group $RunnerGroupId with diagnostic-only label $diagnosticLabel."
+        Stop-DiagnosticExecutionAfterHandshake -Runner $diagnosticRunner
+        Remove-JitRegistration
     } else {
-        $stage = 'official smoke job completion'
-        $jobDeadline = [DateTimeOffset]::UtcNow.AddSeconds($JobCompletionTimeoutSeconds)
-        do {
-            $liveJob = Invoke-GhJson @('api',"repos/$Repository/actions/jobs/$($approvedSmoke.Job.id)")
-            if ($liveJob.status -eq 'completed') { $smokeJobConclusion = [string]$liveJob.conclusion; break }
-            Start-Sleep -Seconds 5
-        } while ([DateTimeOffset]::UtcNow -lt $jobDeadline)
-        if (-not $smokeJobConclusion) { throw "SMOKE_JOB_TIMEOUT: job $($approvedSmoke.Job.id) did not complete within $JobCompletionTimeoutSeconds seconds." }
-        if ($smokeJobConclusion -ne 'success') { throw "SMOKE_JOB_FAILED: official smoke job $($approvedSmoke.Job.id) concluded '$smokeJobConclusion'." }
-        Write-Output "PASS official smoke job $($approvedSmoke.Job.id) completed successfully for workflow run $WorkflowRunId."
-        $executionDeadline = [DateTimeOffset]::UtcNow.AddSeconds(120)
-        do {
-            $execution = Invoke-AzJson @('containerapp','job','execution','show','--name',$JobName,'--resource-group',$ResourceGroup,'--job-execution-name',$jobExecutionName,'--output','json')
-            if ($execution.properties.status -notin @('Running','Processing','Starting')) { break }
-            Start-Sleep -Seconds 5
-        } while ([DateTimeOffset]::UtcNow -lt $executionDeadline)
-        if ($execution.properties.status -ne 'Succeeded') {
-            $executionStatus = ([string]$execution.properties.status).ToUpperInvariant()
-            throw "JIT_JOB_EXECUTION_$executionStatus`: Azure execution $jobExecutionName did not finish successfully."
+        $stage = 'sequential official smoke matrix'
+        $pendingServices = @(Get-PendingSmokeServices -SmokeJobs $approvedSmoke.Plan.SmokeJobs)
+        if ($pendingServices.Count -eq 0) { throw 'SMOKE_MATRIX_ALREADY_COMPLETE: no pending jobs remain for a fresh runner.' }
+        $null = Invoke-SmokeMatrixSequential -Services $pendingServices -RegisterRunner {
+            param($pending)
+            $null = $pending
+            Start-JitCycle -CycleMode Smoke
+        } -WaitForAssignment {
+            param($runner,$pending)
+            Wait-AssignedSmokeJob -Runner $runner -PendingServices $pending
+        } -WaitForJob {
+            param($runner,$assignment)
+            Wait-SmokeJobSuccess -Runner $runner -Assignment $assignment
+        } -WaitForExecution {
+            param($runner,$assignment)
+            $null = $assignment
+            Wait-AzureExecutionSuccess -Runner $runner
+        } -CleanupRunner {
+            param($runner)
+            $null = $runner
+            Remove-JitRegistration
+            Reset-JitCycleState
         }
+        $finalJobs = Invoke-GhJson @('api',"repos/$Repository/actions/runs/$WorkflowRunId/jobs?per_page=100")
+        $finalPlan = Get-SmokeMatrixPlan -Jobs $finalJobs.jobs
+        $notSuccessful = @(Get-PendingSmokeServices -SmokeJobs $finalPlan.SmokeJobs)
+        if ($notSuccessful.Count -gt 0) { throw 'SMOKE_MATRIX_INCOMPLETE: not all expected smoke matrix jobs are SUCCESS.' }
+        Write-Output "PASS official smoke matrix: all $($finalPlan.Services.Count) services succeeded sequentially with distinct JIT runners."
     }
 }
 catch {
@@ -400,5 +512,5 @@ finally {
     if (-not $cleanupWasRun -and ($jitRunnerId -or $jobExecutionName -or $templateFile)) { Remove-JitRegistration }
 }
 
-if (-not $registrationOnline) { throw 'JIT registration preflight did not complete.' }
-Write-Output 'CLEANUP_VERIFIED: temporary GitHub JIT registration removed, Job execution terminal, and temporary secret absent.'
+if (-not $registrationOnline -and $Mode -eq 'Diagnostic') { throw 'JIT registration preflight did not complete.' }
+Write-Output 'CLEANUP_VERIFIED: temporary GitHub JIT registration removed, correlated Job execution terminal, and temporary secret absent.'

@@ -15,7 +15,7 @@ $script:image = 'ghcr.io/actions/actions-runner@sha256:' + ('a' * 64)
 $script:jobUri = "https://management.azure.com/subscriptions/test/resourceGroups/$($script:resourceGroup)/providers/Microsoft.App/jobs/$($script:jobName)?api-version=2025-07-01"
 
 function New-FakeJob {
-    $secrets = @()
+    $secrets = $null
     if ($script:secretName) { $secrets = @(@{name=$script:secretName}) }
     return @{
         id = "/subscriptions/test/resourceGroups/$($script:resourceGroup)/providers/Microsoft.App/jobs/$($script:jobName)"
@@ -41,6 +41,8 @@ Set-AcaArmRequestOverride {
     if ($Uri -like '*operation-test*') {
         $state = 'Succeeded'
         if ($script:operationReplies.Count -gt 0) { $state = $script:operationReplies.Dequeue() }
+        if ($script:patchMode -eq 'provisioning-state') { return [pscustomobject]@{StatusCode=200;Headers=@{};Content=(@{properties=@{provisioningState=$state}}|ConvertTo-Json -Compress)} }
+        if ($script:patchMode -eq 'no-state-200') { return [pscustomobject]@{StatusCode=200;Headers=@{};Content='{}'} }
         return [pscustomobject]@{StatusCode=200;Headers=@{};Content=(@{status=$state}|ConvertTo-Json -Compress)}
     }
     if ($Method -eq 'GET') {
@@ -59,7 +61,7 @@ Set-AcaArmRequestOverride {
         }
         $names = @($Body.properties.configuration.secrets | ForEach-Object name)
         $script:secretName = $names | Select-Object -First 1
-        if ($script:patchMode -eq 'async') {
+        if ($script:patchMode -in @('async','provisioning-state')) {
             if ($script:operationReplies.Count -eq 0) {
                 $script:operationReplies.Enqueue('Running')
                 $script:operationReplies.Enqueue('Succeeded')
@@ -103,6 +105,11 @@ try {
     $script:patchMode='async'; $script:secretName=$null; $script:requestLog.Clear(); $script:operationReplies.Clear()
     Add-AcaJobSecret @common -SecretValue $script:testSecret -Sleep $noSleep | Out-Null
     if (@($script:requestLog | Where-Object Uri -like '*operation-test*').Count -ne 2) { throw '202 case did not poll to completion.' }
+    $script:patchMode='provisioning-state';$script:secretName=$null;$script:operationReplies.Clear()
+    Add-AcaJobSecret @common -SecretValue $script:testSecret -Sleep $noSleep | Out-Null
+    if (-not (Remove-AcaJobSecret @common -Sleep $noSleep)) { throw 'provisioningState response cleanup failed.' }
+    $script:patchMode='no-state-200';$script:secretName='h5jit'
+    Wait-AcaOperation -OperationUri 'https://management.azure.com/operation-test' -Token $script:testToken -TimeoutSeconds 10 -Sleep $noSleep
 
     # ETag conflict and 400 expose only structured error fields; never body/token/secret.
     $script:patchMode='conflict'; $script:secretName=$null

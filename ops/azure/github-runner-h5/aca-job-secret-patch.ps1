@@ -147,12 +147,20 @@ function Wait-AcaOperation {
         $response = Invoke-AcaArmRequest -Method GET -Uri $OperationUri -Token $Token
         if ($response.StatusCode -notin @(200, 202)) { Throw-AcaResponseError -Response $response -Operation 'ARM async operation' -RedactValues $RedactValues }
         $state = ConvertFrom-AcaResponseContent ([string]$response.Content)
-        switch ([string]$state.status) {
+        $stateValue = $null
+        $statePropertyNames = @()
+        if ($null -ne $state) { $statePropertyNames = @($state.PSObject.Properties | ForEach-Object { $_.Name }) }
+        if ($state -and $statePropertyNames -contains 'status') { $stateValue = [string]$state.status }
+        elseif ($state -and $statePropertyNames -contains 'provisioningState') { $stateValue = [string]$state.provisioningState }
+        elseif ($state -and $statePropertyNames -contains 'properties' -and @($state.properties.PSObject.Properties | ForEach-Object { $_.Name }) -contains 'provisioningState') { $stateValue = [string]$state.properties.provisioningState }
+        elseif ($response.StatusCode -eq 200) { return }
+        switch ($stateValue) {
             'Succeeded' { return }
             'Failed' { Throw-AcaResponseError -Response $response -Operation 'ARM async operation' -RedactValues $RedactValues }
             'Canceled' { throw 'ARM_OPERATION_CANCELED: asynchronous Job patch was canceled.' }
             'Cancelled' { throw 'ARM_OPERATION_CANCELED: asynchronous Job patch was canceled.' }
         }
+        if ([string]::IsNullOrWhiteSpace($stateValue) -and $response.StatusCode -eq 202) { throw 'ARM_OPERATION_STATE_UNAVAILABLE: 202 poll response had no status/provisioningState.' }
         & $Sleep
     }
     throw 'ARM_OPERATION_TIMEOUT: asynchronous Job patch exceeded its timeout.'
@@ -198,7 +206,7 @@ function Add-AcaJobSecret {
         [scriptblock]$Sleep = { Start-Sleep -Seconds 3 }
     )
     $snapshot = Get-AcaJobSnapshot -Uri $Uri -Token $Token -JobName $JobName -ResourceGroup $ResourceGroup -EnvironmentId $EnvironmentId -ExpectedImage $ExpectedImage
-    $existing = @($snapshot.Resource.properties.configuration.secrets)
+    $existing = @($snapshot.Resource.properties.configuration.secrets | Where-Object { $_ -and $_.name })
     if (@($existing | Where-Object { $_.name -eq $SecretName }).Count -gt 0) {
         throw 'TEMPORARY_SECRET_ALREADY_PRESENT: refusing to overwrite an existing secret.'
     }
@@ -209,7 +217,7 @@ function Add-AcaJobSecret {
     Invoke-AcaJobSecretPatch -Uri $Uri -Token $Token -ETag $snapshot.ETag -Secrets @($newSecret) -Operation 'PATCH add Job secret' -TimeoutSeconds $TimeoutSeconds -Sleep $Sleep -RedactValues @($SecretValue,$Token)
 
     $verified = Get-AcaJobSnapshot -Uri $Uri -Token $Token -JobName $JobName -ResourceGroup $ResourceGroup -EnvironmentId $EnvironmentId -ExpectedImage $ExpectedImage
-    if (@($verified.Resource.properties.configuration.secrets | Where-Object { $_.name -eq $SecretName }).Count -ne 1) {
+    if (@($verified.Resource.properties.configuration.secrets | Where-Object { $_ -and $_.name -eq $SecretName }).Count -ne 1) {
         throw 'TEMPORARY_SECRET_VERIFY_FAILED: PATCH completed but the secret name was not present after readback.'
     }
     return $verified
@@ -228,14 +236,14 @@ function Remove-AcaJobSecret {
         [scriptblock]$Sleep = { Start-Sleep -Seconds 3 }
     )
     $snapshot = Get-AcaJobSnapshot -Uri $Uri -Token $Token -JobName $JobName -ResourceGroup $ResourceGroup -EnvironmentId $EnvironmentId -ExpectedImage $ExpectedImage
-    $existing = @($snapshot.Resource.properties.configuration.secrets)
+    $existing = @($snapshot.Resource.properties.configuration.secrets | Where-Object { $_ -and $_.name })
     $temporary = @($existing | Where-Object { $_.name -eq $SecretName })
     if ($temporary.Count -eq 0) { return $false }
     if ($existing.Count -ne 1) { throw 'JOB_HAS_OTHER_SECRETS: refusing to remove/replace a mixed secret collection.' }
     Invoke-AcaJobSecretPatch -Uri $Uri -Token $Token -ETag $snapshot.ETag -Secrets @() -Operation 'PATCH remove Job secret' -TimeoutSeconds $TimeoutSeconds -Sleep $Sleep -RedactValues @($Token)
 
     $verified = Get-AcaJobSnapshot -Uri $Uri -Token $Token -JobName $JobName -ResourceGroup $ResourceGroup -EnvironmentId $EnvironmentId -ExpectedImage $ExpectedImage
-    if (@($verified.Resource.properties.configuration.secrets | Where-Object { $_.name -eq $SecretName }).Count -ne 0) {
+    if (@($verified.Resource.properties.configuration.secrets | Where-Object { $_ -and $_.name -eq $SecretName }).Count -ne 0) {
         throw 'TEMPORARY_SECRET_CLEANUP_VERIFY_FAILED: secret name remains after PATCH cleanup.'
     }
     return $true
