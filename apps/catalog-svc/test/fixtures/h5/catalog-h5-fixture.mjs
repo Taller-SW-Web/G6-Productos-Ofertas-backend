@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
 export const FIXTURE_SEED = 20261123;
+export const COMMERCIAL_CHANNELS = Object.freeze(['MARKETPLACE', 'CHATBOT', 'RETAIL', 'VENTAS']);
 export const FIXTURE_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 export const MANIFEST_PATH = join(FIXTURE_DIRECTORY, 'manifest.json');
 export const CHECKSUM_PATH = join(FIXTURE_DIRECTORY, 'manifest.sha256');
@@ -134,6 +135,12 @@ export function buildManifest(seed = FIXTURE_SEED) {
       sku_base: definition.sku,
       state: definition.state,
       eligible: definition.eligible,
+      eligible_channels:
+        definition.eligible &&
+        definition.state === 'ACTIVO' &&
+        (variants.length === 0 || variants.some((variant) => variant.eligible && variant.state === 'ACTIVA'))
+          ? [...COMMERCIAL_CHANNELS]
+          : [],
       variants,
     };
   });
@@ -208,6 +215,15 @@ export function buildManifest(seed = FIXTURE_SEED) {
         .filter((product) => !product.eligible || product.state !== 'ACTIVO')
         .map((product) => product.product_id)
         .sort(),
+      commercial_product_ids_by_channel: Object.fromEntries(
+        COMMERCIAL_CHANNELS.map((channel) => [
+          channel,
+          products
+            .filter((product) => product.eligible_channels.includes(channel))
+            .map((product) => product.product_id)
+            .sort(),
+        ]),
+      ),
     },
   };
 }
@@ -308,6 +324,15 @@ export function validateManifest(manifest) {
           : [],
     )
     .sort((left, right) => left.sku.localeCompare(right.sku, 'en'));
+  const computedCommercialIds = Object.fromEntries(
+    COMMERCIAL_CHANNELS.map((channel) => [
+      channel,
+      manifest.products
+        .filter((product) => product.eligible_channels?.includes(channel))
+        .map((product) => product.product_id)
+        .sort(),
+    ]),
+  );
   if (
     JSON.stringify(manifest.expected.product_ids) !==
       JSON.stringify(computedIds) ||
@@ -315,6 +340,9 @@ export function validateManifest(manifest) {
       JSON.stringify(computedBases) ||
     !canonicalJsonBytes(manifest.expected.sellable_skus).equals(
       canonicalJsonBytes(computedSellable),
+    )
+    || !canonicalJsonBytes(manifest.expected.commercial_product_ids_by_channel).equals(
+      canonicalJsonBytes(computedCommercialIds),
     )
   )
     throw new Error('MANIFEST_EXPECTED_IDENTITIES_MISMATCH');

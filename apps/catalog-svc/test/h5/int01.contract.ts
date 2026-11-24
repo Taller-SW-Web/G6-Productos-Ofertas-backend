@@ -32,6 +32,14 @@ const scenarios = JSON.parse(
   ),
 ) as Scenario[];
 
+const preparation = (status: 'PENDING' | 'COMPLETED' | 'REJECTED') => ({
+  product_id: '3c81175c-7c2c-5ec8-8a99-c76e29955338',
+  tiene_variantes: false,
+  pricing: { status, manual_retry_allowed: status === 'REJECTED' },
+  inventario: { status, manual_retry_allowed: status === 'REJECTED' },
+  variantes: [],
+});
+
 describe('INT-01 L0 contractual scenario registry', () => {
   it('registra escenarios sin atribuirles ejecución de proveedores', () => {
     expect(scenarios.length).toBeGreaterThanOrEqual(12);
@@ -95,20 +103,19 @@ describe('INT-01 L0 contractual scenario registry', () => {
 
   it('acredita polling acotado y nunca trata HTTP 202 como estado terminal', async () => {
     const sequence = [
-      { httpStatus: 202, preparationStatus: 'COMPLETED' },
-      { httpStatus: 200, preparationStatus: 'PENDING' },
-      { httpStatus: 200, preparationStatus: 'COMPLETED' },
+      { httpStatus: 200, body: preparation('PENDING') },
+      { httpStatus: 200, body: preparation('COMPLETED') },
     ];
     let attempts = 0;
     const result = await pollPreparation(async () => sequence[attempts++], {
       deadlineMs: 5000,
       intervalMs: 0,
-      maxAttempts: 3,
+      maxAttempts: 2,
       wait: async () => undefined,
     });
     expect(result).toEqual({
       state: 'COMPLETED',
-      attempts: 3,
+      attempts: 2,
       httpStatus: 200,
     });
   });
@@ -120,30 +127,19 @@ describe('INT-01 L0 contractual scenario registry', () => {
       maxAttempts: 2,
       wait: async () => undefined,
     };
+    await expect(pollPreparation(async () => ({ httpStatus: 200, body: preparation('REJECTED') }), options))
+      .resolves.toMatchObject({ state: 'REJECTED' });
+    await expect(pollPreparation(async () => ({ httpStatus: 200, body: preparation('PENDING') }), { ...options, maxAttempts: 1 }))
+      .resolves.toMatchObject({ state: 'INCONCLUSIVE', reason: 'POLL_DEADLINE_EXCEEDED' });
     await expect(
-      pollPreparation(
-        async () => ({ httpStatus: 200, preparationStatus: 'REJECTED' }),
-        options,
-      ),
-    ).resolves.toMatchObject({ state: 'REJECTED' });
+      pollPreparation(async () => ({ httpStatus: 202, body: { status: 'ACCEPTED' } }), options),
+    ).rejects.toThrow('POLL_HTTP_STATUS_UNEXPECTED');
     await expect(
-      pollPreparation(
-        async () => ({ httpStatus: 200, preparationStatus: 'INDETERMINATE' }),
-        options,
-      ),
-    ).resolves.toMatchObject({
-      state: 'INCONCLUSIVE',
-      reason: 'DEPENDENCY_INDETERMINATE',
-    });
+      pollPreparation(async () => ({ httpStatus: 503, preparationStatus: 'COMPLETED' }), options),
+    ).rejects.toThrow('POLL_HTTP_STATUS_UNEXPECTED');
     await expect(
-      pollPreparation(
-        async () => ({ httpStatus: 202, preparationStatus: 'ACCEPTED' }),
-        options,
-      ),
-    ).resolves.toMatchObject({
-      state: 'INCONCLUSIVE',
-      reason: 'POLL_DEADLINE_EXCEEDED',
-    });
+      pollPreparation(async () => ({ httpStatus: 401, preparationStatus: 'COMPLETED' }), options),
+    ).rejects.toThrow('POLL_HTTP_STATUS_UNEXPECTED');
   });
 
   it('rechaza evidencia que contenga secretos o datos personales mediante canarios', async () => {
@@ -172,23 +168,32 @@ describe('INT-01 L0 contractual scenario registry', () => {
     expect(CONTRACT_VERSION).toBe('0.7.0-rc.3');
     expect(CONTRACT_OPERATIONS.map(({ id, method, path, success }) => [id, method, path, success])).toEqual([
       ['catalog-admin-list', 'GET', '/productos/administracion', 200],
+      ['catalog-commercial-list', 'GET', '/productos?canal={channel}&pagina={page}&tamanio={pageSize}', 200],
+      ['catalog-commercial-detail', 'GET', '/productos/{productoId}?canal={channel}', 200],
       ['catalog-product-create', 'POST', '/productos', 201],
       ['catalog-product-edit', 'PATCH', '/productos/{productoId}', 200],
       ['catalog-product-activate', 'POST', '/productos/{productoId}/activar', 200],
       ['catalog-preparation-read', 'GET', '/productos/{productoId}/preparacion', 200],
       ['catalog-preparation-retry', 'POST', '/productos/{productoId}/preparacion/reintentar', 202],
-      ['pricing-effective-read', 'GET', '/precios?skus={sku}&canal={channel}', 200],
-      ['inventory-availability-read', 'GET', '/inventario/disponibilidad?skus={sku}&location_id={location}', 200],
+      ['pricing-effective-read', 'GET', '/precios/skus/{sku}?canal={channel}', 200],
+      ['pricing-update', 'PATCH', '/precios/skus/{sku}', 200],
+      ['inventory-availability-read', 'GET', '/inventario/disponibilidad?skus={sku}', 200],
     ]);
   });
 
-  it('clasifica admisión 202 como PENDING y solo acepta terminales contractuales observados por polling', () => {
-    expect(classifyPreparationResponse(202, { status: 'ACCEPTED', operation_id: 'op-1', correlation_id: 'corr-1' })).toEqual({ state: 'PENDING', terminal: false });
-    expect(classifyPreparationResponse(200, { status: 'PENDING' })).toEqual({ state: 'PENDING', terminal: false });
-    expect(classifyPreparationResponse(200, { status: 'COMPLETED' })).toEqual({ state: 'COMPLETED', terminal: true });
-    expect(classifyPreparationResponse(200, { status: 'REJECTED' })).toEqual({ state: 'REJECTED', terminal: true });
-    expect(classifyPreparationResponse(200, { status: 'INDETERMINATE' })).toEqual({ state: 'INDETERMINATE', terminal: false });
-    expect(() => classifyPreparationResponse(202, { status: 'COMPLETED', operation_id: 'op-1', correlation_id: 'corr-1' })).toThrow('INT01_ACCEPTED_RESPONSE_INVALID');
+  it('clasifica 202 solo como admisión con receipt y terminales solo desde la consulta normativa', () => {
+    const accepted = { status: 'ACCEPTED', operation_id: '00000000-0000-4000-8000-000000000001', correlation_id: '00000000-0000-4000-8000-000000000002' };
+    expect(classifyPreparationResponse(202, accepted, 'catalog-preparation-retry')).toEqual({ state: 'PENDING', terminal: false });
+    expect(classifyPreparationResponse(200, preparation('PENDING'), 'catalog-preparation-read')).toEqual({ state: 'PENDING', terminal: false });
+    expect(classifyPreparationResponse(200, preparation('COMPLETED'), 'catalog-preparation-read')).toEqual({ state: 'COMPLETED', terminal: true });
+    expect(classifyPreparationResponse(200, preparation('REJECTED'), 'catalog-preparation-read')).toEqual({ state: 'REJECTED', terminal: true });
+    expect(() => classifyPreparationResponse(202, { ...accepted, status: 'COMPLETED' }, 'catalog-preparation-retry')).toThrow('INT01_ACCEPTED_RESPONSE_INVALID');
+    expect(() => classifyPreparationResponse(202, { ...accepted, operation_id: '' }, 'catalog-preparation-retry')).toThrow('INT01_ACCEPTED_RESPONSE_INVALID');
+    expect(() => classifyPreparationResponse(200, preparation('COMPLETED'), 'catalog-preparation-retry')).toThrow('INT01_PREPARATION_HTTP_STATUS_INVALID');
+    for (const status of [401, 403, 404, 409, 503]) {
+      expect(() => classifyPreparationResponse(status, preparation('COMPLETED'), 'catalog-preparation-read')).toThrow('INT01_PREPARATION_HTTP_STATUS_INVALID');
+    }
+    expect(() => classifyPreparationResponse(200, { ...preparation('PENDING'), pricing: { status: 'INDETERMINATE', manual_retry_allowed: false } }, 'catalog-preparation-read')).toThrow('INT01_PREPARATION_DEPENDENCY_INVALID');
   });
 
   it('requiere participación real, correlacionada y autorizada de los tres proveedores para INT-01 L1', () => {

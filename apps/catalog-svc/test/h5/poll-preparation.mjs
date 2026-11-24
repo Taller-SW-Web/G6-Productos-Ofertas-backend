@@ -1,7 +1,5 @@
 import { setTimeout as sleep } from 'node:timers/promises';
-
-const terminalStatuses = new Set(['COMPLETED', 'REJECTED']);
-const pendingStatuses = new Set(['PENDING', 'ACCEPTED']);
+import { classifyPreparationResponse } from './int01-contract-oracles.mjs';
 
 export async function pollPreparation(readStatus, options = {}) {
   if (typeof readStatus !== 'function') throw new TypeError('POLL_READER_REQUIRED');
@@ -19,17 +17,10 @@ export async function pollPreparation(readStatus, options = {}) {
     const response = await readStatus();
     attempts += 1;
     if (!response || !Number.isInteger(response.httpStatus)) throw new Error('POLL_RESPONSE_INVALID');
-    const status = response.preparationStatus;
-    lastStatus = typeof status === 'string' ? status : 'UNKNOWN';
-    if (response.httpStatus === 202) {
-      lastStatus = 'HTTP_202_NON_TERMINAL';
-    } else if (terminalStatuses.has(status)) {
-      return { state: status, attempts, httpStatus: response.httpStatus };
-    } else if (status === 'INDETERMINATE') {
-      return { state: 'INCONCLUSIVE', reason: 'DEPENDENCY_INDETERMINATE', attempts, httpStatus: response.httpStatus };
-    } else if (!pendingStatuses.has(status)) {
-      throw new Error('POLL_STATUS_UNEXPECTED');
-    }
+    if (response.httpStatus !== 200) throw new Error('POLL_HTTP_STATUS_UNEXPECTED');
+    const classified = classifyPreparationResponse(200, response.body, response.operationId ?? 'catalog-preparation-read');
+    lastStatus = classified.state;
+    if (classified.terminal) return { state: classified.state, attempts, httpStatus: response.httpStatus };
     if (attempts < maxAttempts && now() < deadline) await wait(intervalMs);
   }
   return { state: 'INCONCLUSIVE', reason: 'POLL_DEADLINE_EXCEEDED', attempts, lastStatus };
