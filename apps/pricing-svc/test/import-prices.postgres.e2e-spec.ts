@@ -170,10 +170,12 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
       ).expect(200);
       expect(withBom.body).toEqual(preview.body);
       for (const policy of [false, true]) {
-        const rejected = await post(base + '/prevalidar', file, policy).expect(
-          400,
-        );
-        expect(rejected.body.code).toBe('ARCHIVO_INVALIDO');
+        const withPolicy = await post(
+          base + '/prevalidar',
+          file,
+          policy,
+        ).expect(200);
+        expect(withPolicy.body).toEqual(preview.body);
       }
       await post(base + '/prevalidar', Buffer.from('otra,cabecera\n')).expect(
         422,
