@@ -130,6 +130,7 @@ export function buildManifest(seed = FIXTURE_SEED) {
     }));
     return {
       product_id: productId,
+      nombre: `Poma H5 ${definition.suffix}`,
       sku_base: definition.sku,
       state: definition.state,
       eligible: definition.eligible,
@@ -193,7 +194,7 @@ export function buildManifest(seed = FIXTURE_SEED) {
     schema_version: 1,
     dataset_id: `poma-catalog-h5-${seed}`,
     seed,
-    pagination: { page_size: 10, stable_sort: 'product_id:asc' },
+    pagination: { page_size: 10, stable_sort: 'nombre:asc,product_id:asc' },
     products: products.sort((left, right) =>
       left.product_id.localeCompare(right.product_id, 'en'),
     ),
@@ -261,7 +262,9 @@ export function validateManifest(manifest) {
     !manifest ||
     manifest.schema_version !== 1 ||
     manifest.seed !== FIXTURE_SEED ||
-    !Array.isArray(manifest.products)
+    !Array.isArray(manifest.products) ||
+    manifest.pagination?.stable_sort !== 'nombre:asc,product_id:asc' ||
+    manifest.products.some((product) => typeof product.nombre !== 'string' || product.nombre.length === 0)
   )
     throw new Error('MANIFEST_SCHEMA_INVALID');
   const productIds = manifest.products.map((product) => product.product_id);

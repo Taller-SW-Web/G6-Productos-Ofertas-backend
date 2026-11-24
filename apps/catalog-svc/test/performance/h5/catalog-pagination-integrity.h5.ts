@@ -9,15 +9,13 @@ const manifest = buildManifest();
 function validSnapshot() {
   const expected = manifest.products
     .filter((product) => product.eligible && product.state === 'ACTIVO')
-    .sort((left, right) =>
-      left.product_id.localeCompare(right.product_id, 'en'),
-    );
+    .sort((left, right) => left.nombre.localeCompare(right.nombre, 'es') || left.product_id.localeCompare(right.product_id, 'en'));
   const pageSize = manifest.pagination.page_size;
   const pages = [];
   for (let index = 0; index < expected.length; index += pageSize) {
     const items = expected
       .slice(index, index + pageSize)
-      .map(({ product_id, sku_base }) => ({ product_id, sku_base }));
+      .map(({ product_id, nombre, sku_base }) => ({ product_id, nombre, sku_base }));
     pages.push({
       items,
       meta: {
@@ -52,6 +50,13 @@ describe('PERF-01 manifest data-integrity oracle', () => {
     expect(result.sellableSkuCount).toBe(
       manifest.expected.sellable_skus.length,
     );
+  });
+
+  it('enforces contract name and product identity ordering plus the complete name oracle', () => {
+    const snapshot = validSnapshot();
+    expect(manifest.pagination.stable_sort).toBe('nombre:asc,product_id:asc');
+    snapshot.pages[0].items[0].nombre = 'nombre alterado';
+    expect(validateCatalogSnapshot(snapshot).status).toBe('FAIL');
   });
 
   it.each([

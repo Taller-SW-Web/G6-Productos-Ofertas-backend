@@ -44,7 +44,7 @@ describe('manifest canónico Poma H5', () => {
     expect(manifest.expected.sku_bases).toHaveLength(25);
     expect(manifest.pagination).toEqual({
       page_size: 10,
-      stable_sort: 'product_id:asc',
+      stable_sort: 'nombre:asc,product_id:asc',
     });
     expect(manifest.expected.sellable_skus).toContainEqual(
       expect.objectContaining({ sku: 'POMA-H5-VAR-RED-S-0002' }),

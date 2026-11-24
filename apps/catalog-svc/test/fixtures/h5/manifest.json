@@ -368,7 +368,7 @@
   ],
   "pagination": {
     "page_size": 10,
-    "stable_sort": "product_id:asc"
+    "stable_sort": "nombre:asc,product_id:asc"
   },
   "pricing": [
     {
@@ -583,6 +583,7 @@
   "products": [
     {
       "eligible": true,
+      "nombre": "Poma H5 page-015",
       "product_id": "036d75e8-ce90-54a8-9f63-ca33db8cda28",
       "sku_base": "POMA-H5-PAGE-0015",
       "state": "ACTIVO",
@@ -590,6 +591,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 variable",
       "product_id": "085c54c9-bc1f-50b2-a758-d8ed1ff12fc8",
       "sku_base": "POMA-H5-VARIABLE-0002",
       "state": "ACTIVO",
@@ -610,6 +612,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 page-016",
       "product_id": "161d6139-21cc-5231-8737-c80bd9eb4c8d",
       "sku_base": "POMA-H5-PAGE-0016",
       "state": "ACTIVO",
@@ -617,6 +620,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 page-008",
       "product_id": "1729a402-e13b-5ae1-850c-f9ad2f3ab539",
       "sku_base": "POMA-H5-PAGE-0008",
       "state": "ACTIVO",
@@ -624,6 +628,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 page-017",
       "product_id": "17e02198-93ba-5e08-9ac6-3f8ffb89fc4b",
       "sku_base": "POMA-H5-PAGE-0017",
       "state": "ACTIVO",
@@ -631,6 +636,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 page-009",
       "product_id": "3b7992bf-e9af-535c-a542-ed121d3803e3",
       "sku_base": "POMA-H5-PAGE-0009",
       "state": "ACTIVO",
@@ -638,6 +644,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 page-010",
       "product_id": "44fa124d-7f0a-58ff-a7f2-e3433971dbb3",
       "sku_base": "POMA-H5-PAGE-0010",
       "state": "ACTIVO",
@@ -645,6 +652,7 @@
     },
     {
       "eligible": false,
+      "nombre": "Poma H5 inactive",
       "product_id": "57d95e88-e400-599a-bf05-f29c112de12c",
       "sku_base": "POMA-H5-INACTIVE-0003",
       "state": "INACTIVO",
@@ -652,6 +660,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 no-price",
       "product_id": "5d75f2e8-1a13-562a-8e34-ec2c4a185c9b",
       "sku_base": "POMA-H5-NO-PRICE-0005",
       "state": "ACTIVO",
@@ -659,6 +668,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 simple",
       "product_id": "62ee55b0-e8ad-5cd5-8917-74c4971afacd",
       "sku_base": "POMA-H5-SIMPLE-0001",
       "state": "ACTIVO",
@@ -666,6 +676,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 page-025",
       "product_id": "7ab7c96f-134d-5dec-8704-7ee1145bc4e4",
       "sku_base": "POMA-H5-PAGE-0025",
       "state": "ACTIVO",
@@ -673,6 +684,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 page-019",
       "product_id": "7cd4fde2-1869-56ed-a5ee-a4c90d0d9bbc",
       "sku_base": "POMA-H5-PAGE-0019",
       "state": "ACTIVO",
@@ -680,6 +692,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 page-023",
       "product_id": "8e34f5a9-3324-587b-a17f-5a85beccf06a",
       "sku_base": "POMA-H5-PAGE-0023",
       "state": "ACTIVO",
@@ -687,6 +700,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 variant-disabled",
       "product_id": "9901f99a-03b2-5c83-b047-1c40ec47a062",
       "sku_base": "POMA-H5-VARIANT-0004",
       "state": "ACTIVO",
@@ -707,6 +721,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 page-022",
       "product_id": "9a3ec037-635e-512c-ac10-c8cfb0a45128",
       "sku_base": "POMA-H5-PAGE-0022",
       "state": "ACTIVO",
@@ -714,6 +729,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 page-011",
       "product_id": "9e86e28d-0db0-54f3-9f15-ea33d7af1b6b",
       "sku_base": "POMA-H5-PAGE-0011",
       "state": "ACTIVO",
@@ -721,6 +737,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 page-018",
       "product_id": "9eb51837-fc74-5af7-9197-58266d171038",
       "sku_base": "POMA-H5-PAGE-0018",
       "state": "ACTIVO",
@@ -728,6 +745,7 @@
     },
     {
       "eligible": false,
+      "nombre": "Poma H5 not-sellable",
       "product_id": "a5c4f66c-80a8-549c-b4bf-dcef3913e59b",
       "sku_base": "POMA-H5-NOT-SELLABLE-0007",
       "state": "ACTIVO",
@@ -735,6 +753,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 page-024",
       "product_id": "b6898acf-8828-56b0-88a8-e4e90b125165",
       "sku_base": "POMA-H5-PAGE-0024",
       "state": "ACTIVO",
@@ -742,6 +761,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 page-013",
       "product_id": "b89788f1-d7cb-5ac4-9b15-cef48bbf97ec",
       "sku_base": "POMA-H5-PAGE-0013",
       "state": "ACTIVO",
@@ -749,6 +769,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 page-012",
       "product_id": "ce3f8504-f786-567b-adf2-2016deb8e541",
       "sku_base": "POMA-H5-PAGE-0012",
       "state": "ACTIVO",
@@ -756,6 +777,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 page-014",
       "product_id": "e2b1323a-5da8-59b9-8899-c593969167b2",
       "sku_base": "POMA-H5-PAGE-0014",
       "state": "ACTIVO",
@@ -763,6 +785,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 page-020",
       "product_id": "ed836306-6909-5f5c-a071-71cc07673de3",
       "sku_base": "POMA-H5-PAGE-0020",
       "state": "ACTIVO",
@@ -770,6 +793,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 no-observed-stock",
       "product_id": "f56e4d91-3356-5cf6-8a11-9e4b0c0617ad",
       "sku_base": "POMA-H5-NO-STOCK-0006",
       "state": "ACTIVO",
@@ -777,6 +801,7 @@
     },
     {
       "eligible": true,
+      "nombre": "Poma H5 page-021",
       "product_id": "fe95bf5a-6dbc-5f60-a672-cd0363a7ae56",
       "sku_base": "POMA-H5-PAGE-0021",
       "state": "ACTIVO",

@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildManifest } from '../fixtures/h5/catalog-h5-fixture.mjs';
 import { pollPreparation } from './poll-preparation.mjs';
+import { classifyPreparationResponse, CONTRACT_OPERATIONS, CONTRACT_VERSION, DOCS_SHA, verifyRealProviderTrace } from './int01-contract-oracles.mjs';
 
 type Scenario = {
   id: string;
@@ -164,5 +165,50 @@ describe('INT-01 L0 contractual scenario registry', () => {
     ]) {
       expect(() => assertSafeEvidenceText(canary)).toThrow('EVIDENCE_REJECTED');
     }
+  });
+
+  it('fija las operaciones usadas por INT-01 al OpenAPI rc.3 revisado', () => {
+    expect(DOCS_SHA).toBe('40524e96c6973f84d74160076781702fe2a3da19');
+    expect(CONTRACT_VERSION).toBe('0.7.0-rc.3');
+    expect(CONTRACT_OPERATIONS.map(({ id, method, path, success }) => [id, method, path, success])).toEqual([
+      ['catalog-admin-list', 'GET', '/productos/administracion', 200],
+      ['catalog-product-create', 'POST', '/productos', 201],
+      ['catalog-product-edit', 'PATCH', '/productos/{productoId}', 200],
+      ['catalog-product-activate', 'POST', '/productos/{productoId}/activar', 200],
+      ['catalog-preparation-read', 'GET', '/productos/{productoId}/preparacion', 200],
+      ['catalog-preparation-retry', 'POST', '/productos/{productoId}/preparacion/reintentar', 202],
+      ['pricing-effective-read', 'GET', '/precios?skus={sku}&canal={channel}', 200],
+      ['inventory-availability-read', 'GET', '/inventario/disponibilidad?skus={sku}&location_id={location}', 200],
+    ]);
+  });
+
+  it('clasifica admisión 202 como PENDING y solo acepta terminales contractuales observados por polling', () => {
+    expect(classifyPreparationResponse(202, { status: 'ACCEPTED', operation_id: 'op-1', correlation_id: 'corr-1' })).toEqual({ state: 'PENDING', terminal: false });
+    expect(classifyPreparationResponse(200, { status: 'PENDING' })).toEqual({ state: 'PENDING', terminal: false });
+    expect(classifyPreparationResponse(200, { status: 'COMPLETED' })).toEqual({ state: 'COMPLETED', terminal: true });
+    expect(classifyPreparationResponse(200, { status: 'REJECTED' })).toEqual({ state: 'REJECTED', terminal: true });
+    expect(classifyPreparationResponse(200, { status: 'INDETERMINATE' })).toEqual({ state: 'INDETERMINATE', terminal: false });
+    expect(() => classifyPreparationResponse(202, { status: 'COMPLETED', operation_id: 'op-1', correlation_id: 'corr-1' })).toThrow('INT01_ACCEPTED_RESPONSE_INVALID');
+  });
+
+  it('requiere participación real, correlacionada y autorizada de los tres proveedores para INT-01 L1', () => {
+    const trace = ['catalog-svc', 'pricing-svc', 'inventory-svc'].map(provider => ({
+      provider, started: true, queried: true, participated: true, simulated: false, identityAuthorized: true,
+      sourceSha: 'a'.repeat(40), operationId: 'op-1', correlationId: 'corr-1',
+    }));
+    expect(verifyRealProviderTrace(trace, ['catalog-svc', 'pricing-svc', 'inventory-svc'], 'a'.repeat(40))).toMatchObject({ providers: ['catalog-svc', 'pricing-svc', 'inventory-svc'] });
+    expect(() => verifyRealProviderTrace(trace.filter(item => item.provider !== 'inventory-svc'), ['catalog-svc', 'pricing-svc', 'inventory-svc'], 'a'.repeat(40))).toThrow('INT01_PROVIDER_NOT_EFFECTIVELY_PARTICIPATING');
+    expect(() => verifyRealProviderTrace(trace.map(item => item.provider === 'pricing-svc' ? { ...item, simulated: true } : item), ['catalog-svc', 'pricing-svc', 'inventory-svc'], 'a'.repeat(40))).toThrow('INT01_PROVIDER_SIMULATED');
+    expect(() => verifyRealProviderTrace(trace.map(item => item.provider === 'inventory-svc' ? { ...item, identityAuthorized: false } : item), ['catalog-svc', 'pricing-svc', 'inventory-svc'], 'a'.repeat(40))).toThrow('INT01_PROVIDER_AUTHORIZATION_UNVERIFIED');
+  });
+
+  it('rechaza trazas de proveedor con SHA u operación/correlación divergentes', () => {
+    const trace = ['catalog-svc', 'pricing-svc', 'inventory-svc'].map(provider => ({
+      provider, started: true, queried: true, participated: true, simulated: false, identityAuthorized: true,
+      sourceSha: 'a'.repeat(40), operationId: 'op-1', correlationId: 'corr-1',
+    }));
+    expect(() => verifyRealProviderTrace(trace.map(item => item.provider === 'pricing-svc' ? { ...item, operationId: 'op-2' } : item), ['catalog-svc', 'pricing-svc', 'inventory-svc'], 'a'.repeat(40))).toThrow('INT01_PROVIDER_TRACE_NOT_CORRELATED');
+    expect(() => verifyRealProviderTrace(trace.map(item => item.provider === 'inventory-svc' ? { ...item, sourceSha: 'bad-sha' } : item), ['catalog-svc', 'pricing-svc', 'inventory-svc'], 'a'.repeat(40))).toThrow('INT01_PROVIDER_PROVENANCE_INVALID');
+    expect(() => verifyRealProviderTrace(trace, ['catalog-svc', 'pricing-svc', 'inventory-svc'], 'b'.repeat(40))).toThrow('INT01_PROVIDER_SOURCE_SHA_MISMATCH');
   });
 });
