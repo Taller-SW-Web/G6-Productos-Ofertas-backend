@@ -207,3 +207,7 @@ El manifiesto de release permanece `PREPARATION_ONLY`; SHAs productivos base cor
 | `CHILE_DEPLOY_FREEZE` | PASS | `AZURE_CHILE_DEPLOY_ENABLED=false`; sin despliegues |
 
 No se modificaron Supabase compartido, Azure/ACA, Service Bus, Marketplace, tráfico, secretos ni cuentas. No se ejecutaron grants, migraciones reales, publicaciones, CD, HTTP ni pruebas comerciales. El resultado funcional del retest Marketplace sigue `NOT_VERIFIED` según la evidencia aceptada previamente.
+
+### Publicación en PR #275
+
+La corrección H01–H03, el runner lifecycle integrado en CI y los handoffs se publicaron en la misma rama/PR #275, conservándolo OPEN / Draft. Código publicado en este corte: `772c5807eb0a8d9dae684246396f4a8f0f24bf34`. GitHub PR HEAD verificado igual al commit publicado y `mergeable=true`. Los tres workflows oficiales creados para ese SHA aparecen `completed / skipped` (run IDs `45497989627`, `45497989621`, `45497989520`) porque el PR sigue Draft; no son evidencia de CI SUCCESS. No se solicitó Ready, y no se hizo merge.
