@@ -15,13 +15,20 @@ type Scenario = {
   oracles: Record<string, string>;
   expected_result: Record<string, unknown>;
   observed_result: unknown;
-  identity_authorization: { identity: string; scope_source: string; verification: string };
+  identity_authorization: {
+    identity: string;
+    scope_source: string;
+    verification: string;
+  };
   evidence_level: string;
   state: string;
 };
 
 const scenarios = JSON.parse(
-  await readFile(resolve('apps/catalog-svc/test/h5/int01-scenarios.json'), 'utf8'),
+  await readFile(
+    resolve('apps/catalog-svc/test/h5/int01-scenarios.json'),
+    'utf8',
+  ),
 ) as Scenario[];
 
 describe('INT-01 L0 contractual scenario registry', () => {
@@ -66,13 +73,23 @@ describe('INT-01 L0 contractual scenario registry', () => {
 
   it('alinea las identidades de producto, sku_base y SKU vendibles al manifest', () => {
     const manifest = buildManifest();
-    const expectedProducts = scenarios.filter(({ id }) => id === 'INT01-SIMPLE-COMPLETO');
+    const expectedProducts = scenarios.filter(
+      ({ id }) => id === 'INT01-SIMPLE-COMPLETO',
+    );
     expect(expectedProducts).toHaveLength(1);
-    expect(expectedProducts[0].input.fixture_sku_base).toBe('POMA-H5-SIMPLE-0001');
-    expect(manifest.expected.product_ids).toHaveLength(manifest.products.length);
+    expect(expectedProducts[0].input.fixture_sku_base).toBe(
+      'POMA-H5-SIMPLE-0001',
+    );
+    expect(manifest.expected.product_ids).toHaveLength(
+      manifest.products.length,
+    );
     expect(manifest.expected.sku_bases).toHaveLength(manifest.products.length);
-    expect(manifest.expected.sellable_skus.map(({ sku }) => sku)).toContain('POMA-H5-SIMPLE-0001');
-    expect(manifest.expected.sellable_skus.map(({ sku }) => sku)).not.toContain('POMA-H5-VAR-DISABLED-0004');
+    expect(manifest.expected.sellable_skus.map(({ sku }) => sku)).toContain(
+      'POMA-H5-SIMPLE-0001',
+    );
+    expect(manifest.expected.sellable_skus.map(({ sku }) => sku)).not.toContain(
+      'POMA-H5-VAR-DISABLED-0004',
+    );
   });
 
   it('acredita polling acotado y nunca trata HTTP 202 como estado terminal', async () => {
@@ -88,19 +105,52 @@ describe('INT-01 L0 contractual scenario registry', () => {
       maxAttempts: 3,
       wait: async () => undefined,
     });
-    expect(result).toEqual({ state: 'COMPLETED', attempts: 3, httpStatus: 200 });
+    expect(result).toEqual({
+      state: 'COMPLETED',
+      attempts: 3,
+      httpStatus: 200,
+    });
   });
 
   it('registra rechazo terminal, indeterminación de proveedor y timeout como resultados distintos', async () => {
-    const options = { deadlineMs: 1000, intervalMs: 0, maxAttempts: 2, wait: async () => undefined };
-    await expect(pollPreparation(async () => ({ httpStatus: 200, preparationStatus: 'REJECTED' }), options)).resolves.toMatchObject({ state: 'REJECTED' });
-    await expect(pollPreparation(async () => ({ httpStatus: 200, preparationStatus: 'INDETERMINATE' }), options)).resolves.toMatchObject({ state: 'INCONCLUSIVE', reason: 'DEPENDENCY_INDETERMINATE' });
-    await expect(pollPreparation(async () => ({ httpStatus: 202, preparationStatus: 'ACCEPTED' }), options)).resolves.toMatchObject({ state: 'INCONCLUSIVE', reason: 'POLL_DEADLINE_EXCEEDED' });
+    const options = {
+      deadlineMs: 1000,
+      intervalMs: 0,
+      maxAttempts: 2,
+      wait: async () => undefined,
+    };
+    await expect(
+      pollPreparation(
+        async () => ({ httpStatus: 200, preparationStatus: 'REJECTED' }),
+        options,
+      ),
+    ).resolves.toMatchObject({ state: 'REJECTED' });
+    await expect(
+      pollPreparation(
+        async () => ({ httpStatus: 200, preparationStatus: 'INDETERMINATE' }),
+        options,
+      ),
+    ).resolves.toMatchObject({
+      state: 'INCONCLUSIVE',
+      reason: 'DEPENDENCY_INDETERMINATE',
+    });
+    await expect(
+      pollPreparation(
+        async () => ({ httpStatus: 202, preparationStatus: 'ACCEPTED' }),
+        options,
+      ),
+    ).resolves.toMatchObject({
+      state: 'INCONCLUSIVE',
+      reason: 'POLL_DEADLINE_EXCEEDED',
+    });
   });
 
   it('rechaza evidencia que contenga secretos o datos personales mediante canarios', async () => {
     const { assertSafeEvidenceText } = await import('./evidence-security.mjs');
-    const safe = JSON.stringify({ scenario_id: 'INT01-SIMPLE-COMPLETO', state: 'NOT_RUN' });
+    const safe = JSON.stringify({
+      scenario_id: 'INT01-SIMPLE-COMPLETO',
+      state: 'NOT_RUN',
+    });
     expect(() => assertSafeEvidenceText(safe)).not.toThrow();
     for (const canary of [
       'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjYW5hcnkifQ.signature',
