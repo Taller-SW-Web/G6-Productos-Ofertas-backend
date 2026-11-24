@@ -29,7 +29,7 @@ if [[ "${1:-}" == containerapp ]]; then [[ "$*" == *"--resource-group ${MOCK_RES
 if [[ "${1:-}" == group && "${2:-}" == show ]]; then printf '{"id":"/subscriptions/%s/resourceGroups/%s"}\n' "$subscription" "$group"; exit 0; fi
 if [[ "${1:-}" == containerapp && "${2:-}" == env && "${3:-}" == show ]]; then [[ "${MOCK_BAD_ENVIRONMENT:-false}" != true ]] || env_id="$env_id-wrong"; printf '{"id":"%s","location":"%s"}\n' "$env_id" "$location"; exit 0; fi
 if [[ "${1:-}" == containerapp && "${2:-}" == show ]]; then
-  jq --arg id "$app_id" --arg env "$env_id" --arg traffic "${MOCK_TRAFFIC:-latest}" '. + {id:$id} | .properties.managedEnvironmentId=$env | .properties.configuration.ingress.fqdn="api-gateway.internal.chilecentral.azurecontainerapps.io" | .properties.configuration.ingress.allowInsecure=false | .properties.configuration.ingress.traffic=(if $traffic == "old" then [{revisionName:"rev-0",weight:100}] elif $traffic == "ambiguous" then [{latestRevision:true,weight:50},{revisionName:"rev-0",weight:50}] else [{latestRevision:true,weight:100}] end)' "$state"
+  jq --arg id "$app_id" --arg env "$env_id" --arg traffic "${MOCK_TRAFFIC:-latest}" '. + {id:$id} | .properties.managedEnvironmentId=$env | .properties.configuration.ingress.fqdn="api-gateway.internal.chilecentral.azurecontainerapps.io" | .properties.configuration.ingress.allowInsecure=false | .properties.configuration.ingress.traffic=(if $traffic == "old" then [{revisionName:"rev-0",weight:100}] elif $traffic == "ambiguous" then [{latestRevision:true,weight:50},{revisionName:"rev-0",weight:50}] elif $traffic == "old-after-rollback" and .updates >= 2 then [{revisionName:"rev-0",weight:100}] else [{latestRevision:true,weight:100}] end)' "$state"
   exit 0
 fi
 if [[ "${1:-}" == containerapp && "${2:-}" == revision && "${3:-}" == show ]]; then
@@ -135,25 +135,44 @@ jq '.properties.configuration.ingress.targetPort=3000' "$MOCK_STATE" > "$TEMP/st
 mv "$TEMP/state.tmp" "$MOCK_STATE"
 AZURE_CHILE_DEPLOY_ENABLED=false bash "$DEPLOY" --restore api-gateway "$PREVIOUS" "$TARGET" "$config_from_receipt" > "$TEMP/restore.log" 2>&1 || { cat "$TEMP/restore.log"; fail 'recuperación coordinada con ventana cerrada'; }
 grep -Fq 'ROLLBACK COORDINADO VERIFICADO' "$TEMP/restore.log" || fail 'recuperación no quedó confirmada'
+updates_before_present_restore="$(jq -r .updates "$MOCK_STATE")"
+wrong_traffic_config="$(MOCK_TRAFFIC=old az containerapp show --subscription fef42188-accd-4470-ae88-78f583eb4906 --name api-gateway --resource-group rg-g6-aca-chile --output json | jq -S -c --arg target api-gateway '{identity:.identity,location:.location,tags:.tags,kind:.kind,properties:(.properties|del(.latestRevisionName,.latestReadyRevisionName,.latestRevisionFqdn,.provisioningState)|.template|= (del(.revisionSuffix)|.containers|=map(if .name==$target then del(.image) else . end)))}')"
+wrong_traffic_hash="$(printf '%s' "$wrong_traffic_config" | sha256sum | awk '{print $1}')"
+if MOCK_TRAFFIC=old AZURE_CHILE_DEPLOY_ENABLED=false bash "$DEPLOY" --restore api-gateway "$PREVIOUS" "$TARGET" "$wrong_traffic_hash" > "$TEMP/restore-present-wrong-traffic.log" 2>&1; then fail 'recuperación ya presente aceptó una revisión saludable con tráfico en otra revisión'; fi
+grep -Fq 'RECUPERACIÓN NO VERIFICADA' "$TEMP/restore-present-wrong-traffic.log" || { cat "$TEMP/restore-present-wrong-traffic.log"; fail 'recuperación ya presente sin tráfico efectivo no fue bloqueada'; }
+[[ "$(jq -r .updates "$MOCK_STATE")" == "$updates_before_present_restore" ]] || fail 'recuperación ya presente intentó cambiar el tráfico'
 DEPLOY_RECEIPT="$TEMP/redeploy.receipt" bash "$DEPLOY" api-gateway "$TARGET" >/dev/null 2>&1 || fail 'reaplicación de fixture'
-jq --arg previous "$PREVIOUS" '.properties.template.containers |= map(if .name == "api-gateway" then .image=$previous else . end)' "$MOCK_STATE" > "$TEMP/state.tmp"
+jq --arg previous "$PREVIOUS" '.properties.template.containers |= map(if .name == "api-gateway" then .image=$previous else . end) | .revision.properties.template.containers |= map(if .name == "api-gateway" then .image=$previous else . end)' "$MOCK_STATE" > "$TEMP/state.tmp"
 mv "$TEMP/state.tmp" "$MOCK_STATE"
 MOCK_SCALE_ZERO=true DEPLOY_RECEIPT="$TEMP/scale-zero.receipt" bash "$DEPLOY" api-gateway "$TARGET" > "$TEMP/scale-zero.log" 2>&1 || { cat "$TEMP/scale-zero.log"; fail 'actualización válida con escala cero'; }
 grep -Fq 'modo=scale-to-zero réplicas=0 salud=None' "$TEMP/scale-zero.log" || fail 'revisión nueva escalada a cero no aceptada'
 printf 'PASS: revisión nueva valida Scale to 0 sin afirmar liveness/readiness\n'
 printf 'PASS: recibo digest-only permite recuperar y omite cambios concurrentes de ingress\n'
 
-jq --arg previous "$PREVIOUS" '.properties.template.containers |= map(if .name == "api-gateway" then .image=$previous else . end) | .properties.latestRevisionName="rev-restore" | .properties.latestReadyRevisionName="rev-restore" | .revision.properties.healthState="Healthy"' "$MOCK_STATE" > "$TEMP/state.tmp"
+jq --arg previous "$PREVIOUS" '.properties.template.containers |= map(if .name == "api-gateway" then .image=$previous else . end) | .properties.latestRevisionName="rev-restore" | .properties.latestReadyRevisionName="rev-restore" | .revision.properties.template.containers |= map(if .name == "api-gateway" then .image=$previous else . end) | .revision.properties.healthState="Healthy"' "$MOCK_STATE" > "$TEMP/state.tmp"
 mv "$TEMP/state.tmp" "$MOCK_STATE"
+ jq '.updates=0' "$MOCK_STATE" > "$TEMP/state.tmp"
+mv "$TEMP/state.tmp" "$MOCK_STATE"
+if MOCK_TRAFFIC=old bash "$DEPLOY" api-gateway "$TARGET" > "$TEMP/predeploy-wrong-traffic.log" 2>&1; then fail 'Chile deployment accepted traffic pinned to another revision'; fi
+grep -Fq 'tráfico Chile previo es ambiguo/incompatible' "$TEMP/predeploy-wrong-traffic.log" || fail 'pre-deploy incompatible traffic was not blocked'
+[[ "$(jq -r .updates "$MOCK_STATE")" == 0 ]] || fail 'incompatible pre-deploy traffic modified ACA'
 export MOCK_UNHEALTHY_TARGET="$TARGET"
 if bash "$DEPLOY" api-gateway "$TARGET" > "$TEMP/rollback.log" 2>&1; then fail 'despliegue unhealthy aceptado'; fi
 grep -Fq 'ROLLBACK VERIFICADO' "$TEMP/rollback.log" || { cat "$TEMP/rollback.log"; fail 'rollback no se verificó'; }
 jq -e --arg previous "$PREVIOUS" '.properties.template.containers[] | select(.name == "api-gateway") | .image == $previous' "$MOCK_STATE" >/dev/null || fail 'rollback no restauró imagen previa'
 printf 'PASS: fallo de revisión restaura y verifica digest anterior y configuración\n'
 
-jq --arg previous "$PREVIOUS" '.properties.template.containers |= map(if .name == "api-gateway" then .image=$previous else . end) | .properties.latestRevisionName="rev-restore" | .properties.latestReadyRevisionName="rev-restore" | .revision.properties.healthState="Healthy"' "$MOCK_STATE" > "$TEMP/state.tmp"
+jq --arg previous "$PREVIOUS" '.properties.template.containers |= map(if .name == "api-gateway" then .image=$previous else . end) | .properties.latestRevisionName="rev-restore" | .properties.latestReadyRevisionName="rev-restore" | .revision.properties.template.containers |= map(if .name == "api-gateway" then .image=$previous else . end) | .revision.properties.healthState="Healthy"' "$MOCK_STATE" > "$TEMP/state.tmp"
 mv "$TEMP/state.tmp" "$MOCK_STATE"
 export MOCK_UNHEALTHY_ROLLBACK=true
 if bash "$DEPLOY" api-gateway "$TARGET" > "$TEMP/rollback-fail.log" 2>&1; then fail 'rollback unhealthy aceptado'; fi
 grep -Fq 'ROLLBACK NO VERIFICADO' "$TEMP/rollback-fail.log" || fail 'fallo de rollback no reportado'
 printf 'PASS: nunca declara rollback si la verificación de recuperación falla\n'
+
+unset MOCK_UNHEALTHY_ROLLBACK
+jq --arg previous "$PREVIOUS" '.properties.template.containers |= map(if .name == "api-gateway" then .image=$previous else . end) | .properties.latestRevisionName="rev-restore" | .properties.latestReadyRevisionName="rev-restore" | .revision.properties.template.containers |= map(if .name == "api-gateway" then .image=$previous else . end) | .revision.properties.healthState="Healthy" | .updates=0' "$MOCK_STATE" > "$TEMP/state.tmp"
+mv "$TEMP/state.tmp" "$MOCK_STATE"
+if MOCK_TRAFFIC=old-after-rollback bash "$DEPLOY" api-gateway "$TARGET" > "$TEMP/rollback-wrong-traffic.log" 2>&1; then fail 'local rollback declared successful with traffic on another revision'; fi
+grep -Fq 'ROLLBACK NO VERIFICADO' "$TEMP/rollback-wrong-traffic.log" || { cat "$TEMP/rollback-wrong-traffic.log"; fail 'local rollback with wrong traffic was not rejected'; }
+if grep -Fq 'ROLLBACK VERIFICADO:' "$TEMP/rollback-wrong-traffic.log"; then fail 'local rollback incorrectly declared traffic recovery successful'; fi
+echo 'PASS: healthy previous revision is not reported recovered unless it serves 100% of Chile traffic'

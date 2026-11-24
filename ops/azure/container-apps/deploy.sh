@@ -162,6 +162,9 @@ if [[ "$mode" == restore ]]; then
   validate_target
   read_app > "$before" || fail 'no se pudo inspeccionar ACA para recuperación'
   current="$(container_image "$before")" || fail 'no se pudo verificar imagen actual'
+  if [[ "$destination" == chile-shared && "$current" == "$previous_image" ]]; then
+    verify_chile_served_revision "$previous_image" || fail 'RECUPERACIÓN NO VERIFICADA: el digest anterior no recibe el 100% del tráfico Chile'
+  fi
   normalize_app "$before" > "$work/current-normalized.json"
   current_hash="$(sha256sum "$work/current-normalized.json" | awk '{print $1}')"
   if [[ "$current" == "$previous_image" && "$current_hash" == "$expected_config_hash" ]]; then
@@ -174,6 +177,9 @@ if [[ "$mode" == restore ]]; then
   }
   az containerapp update --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --container-name "$container" --image "$previous_image" --output none || fail 'Azure rechazó la recuperación'
   verify_revision "$previous_image" || fail 'revisión de recuperación no Healthy'
+  if [[ "$destination" == chile-shared ]]; then
+    verify_chile_served_revision "$previous_image" || fail 'RECUPERACIÓN NO VERIFICADA: el digest anterior no recibe el 100% del tráfico Chile'
+  fi
   normalize_app "$after" > "$work/after-normalized.json"
   cmp -s "$work/current-normalized.json" "$work/after-normalized.json" || fail 'la configuración cambió durante la recuperación'
   printf 'ROLLBACK COORDINADO VERIFICADO: servicio=%s revision=%s image=%s.\n' "$service" "$(jq -r '.properties.latestRevisionName' "$after")" "$previous_image"
@@ -188,6 +194,9 @@ if [[ "$service" == api-gateway ]]; then
 fi
 previous_image="$(container_image "$before")" || fail 'no se encontró exactamente un contenedor de destino'
 [[ "$previous_image" == "$REPOSITORY/$service@sha256:"* && "${previous_image##*@sha256:}" =~ ^[0-9a-f]{64}$ ]] || fail 'la imagen previa no es un digest oficial verificable; rollback seguro imposible'
+if [[ "$destination" == chile-shared ]]; then
+  verify_chile_served_revision "$previous_image" || fail 'tráfico Chile previo es ambiguo/incompatible con un despliegue individual; no se modifica Azure'
+fi
 normalize_app "$before" > "$work/before-normalized.json"
 baseline_hash="$(sha256sum "$work/before-normalized.json" | awk '{print $1}')"
 if [[ -n "${DEPLOY_RECEIPT:-}" ]]; then
@@ -227,7 +236,7 @@ else
     exit 1
   fi
   if az containerapp update --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --container-name "$container" --image "$previous_image" --output none && \
-     verify_revision "$previous_image" && normalize_app "$after" > "$work/rollback-normalized.json" && \
+     verify_revision "$previous_image" && { [[ "$destination" != chile-shared ]] || verify_chile_served_revision "$previous_image"; } && normalize_app "$after" > "$work/rollback-normalized.json" && \
      cmp -s "$work/before-normalized.json" "$work/rollback-normalized.json"; then
     printf 'ROLLBACK VERIFICADO: servicio=%s revision=%s image=%s modo=%s réplicas=%s salud=%s; configuración comparada.\n' "$service" "$(jq -r '.properties.latestRevisionName' "$after")" "$previous_image" "$verified_mode" "$verified_replicas" "$verified_health" >&2
   else
