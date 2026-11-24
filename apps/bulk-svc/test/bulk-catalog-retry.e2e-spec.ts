@@ -110,7 +110,7 @@ function signedServiceToken() {
 }
 
 integration(
-  'Bulk ↔ Catalog BULK_RETRY_V1 against one disposable PostgreSQL 17',
+  'Bulk ↔ Catalog BULK_RETRY_V1 with direct local test delivery, PostgreSQL 17, no Azure transport',
   () => {
     beforeAll(async () => {
       if (!bulkDatabaseUrl || !catalogDatabaseUrl)
@@ -301,27 +301,60 @@ integration(
           `${BULK_TEMPLATE_HEADERS.join(',')}\r\n${csvValues.map((value) => `"${value.replace(/"/g, '""')}"`).join(',')}\r\n`,
           'utf8',
         );
-        const admission = await request(server)
+        const admit = () =>
+          request(server)
+            .post('/api/v1/carga-masiva/productos/importaciones')
+            .set('Authorization', `Bearer ${token}`)
+            .set('X-Correlation-Id', originalCorrelation)
+            .field('template_version', '2')
+            .attach('archivo', csv, {
+              filename: 'retry.csv',
+              contentType: 'text/csv',
+            });
+        const concurrentAdmissions = await Promise.all([admit(), admit()]);
+        for (const response of concurrentAdmissions)
+          expect(response.status).toBe(202);
+        expect(concurrentAdmissions[0]?.body).toEqual(
+          concurrentAdmissions[1]?.body,
+        );
+        const admission = concurrentAdmissions[0]!;
+        const changedBytes = Buffer.from(
+          csv.toString('utf8').replace('After retry', 'Different intent'),
+          'utf8',
+        );
+        const conflictingAdmission = await request(server)
           .post('/api/v1/carga-masiva/productos/importaciones')
           .set('Authorization', `Bearer ${token}`)
           .set('X-Correlation-Id', originalCorrelation)
           .field('template_version', '2')
-          .attach('archivo', csv, {
+          .attach('archivo', changedBytes, {
             filename: 'retry.csv',
             contentType: 'text/csv',
-          })
-          .expect((response) => {
-            if (response.status !== 202)
-              throw new Error(
-                `Admission response: ${JSON.stringify(response.body)}`,
-              );
           });
+        expect(conflictingAdmission.status).toBe(409);
         expect(admission.body).toMatchObject({
           status: 'QUEUED',
           correlation_id: originalCorrelation,
           template_version: 2,
         });
         const batchId = String(admission.body.batch_id);
+        expect(
+          await bulkDatabase
+            .select()
+            .from(batchJobs)
+            .where(eq(batchJobs.correlationId, originalCorrelation)),
+        ).toHaveLength(1);
+        expect(
+          await bulkDatabase
+            .select()
+            .from(bulkOutbox)
+            .where(
+              and(
+                eq(bulkOutbox.correlationId, originalCorrelation),
+                eq(bulkOutbox.schemaVersion, 3),
+              ),
+            ),
+        ).toHaveLength(1);
         const [originalOutbox] = await bulkDatabase
           .select()
           .from(bulkOutbox)
@@ -442,12 +475,17 @@ integration(
         });
         expect(eligible.body.reanudacion.pasos).toHaveLength(1);
         const resumePath = `${statePath}/reanudar`;
-        const resumed = await request(server)
-          .post(resumePath)
-          .set('Authorization', `Bearer ${token}`)
-          .set('X-Correlation-Id', retryHttpCorrelation)
-          .send({ motivo: 'Recuperar familia Catalog' })
-          .expect(202);
+        const resume = () =>
+          request(server)
+            .post(resumePath)
+            .set('Authorization', `Bearer ${token}`)
+            .set('X-Correlation-Id', retryHttpCorrelation)
+            .send({ motivo: 'Recuperar familia Catalog' });
+        const concurrentResumes = await Promise.all([resume(), resume()]);
+        for (const response of concurrentResumes)
+          expect(response.status).toBe(202);
+        expect(concurrentResumes[0]?.body).toEqual(concurrentResumes[1]?.body);
+        const resumed = concurrentResumes[0]!;
         expect(resumed.body).toEqual({
           batch_id: batchId,
           status: 'QUEUED',
@@ -498,9 +536,14 @@ integration(
           retryIdentity,
           contentClient as never,
         );
-        await expect(retryCatalog.consume(retryCommand)).resolves.toBe(
+        const concurrentCommandDeliveries = await Promise.all([
+          retryCatalog.consume(retryCommand),
+          retryCatalog.consume(retryCommand),
+        ]);
+        expect(concurrentCommandDeliveries.sort()).toEqual([
           'APPLIED',
-        );
+          'DUPLICATE',
+        ]);
         expect(contentIdentity.authorization).toHaveBeenCalledTimes(2);
         expect(storageFixture.get).toHaveBeenCalledTimes(2);
         const [retryResultRow] = await catalogDatabase.read((db) =>
@@ -541,16 +584,21 @@ integration(
             ],
           },
         });
-        await bulkRepository.recordCatalogBulkResult({
-          messageId: retryResult.message_id,
-          operationId: String(retryResult.operation_id),
-          causationId: String(retryResult.causation_id),
-          eventName: String(
-            retryResult.name,
-          ) as 'catalog.bulk.upsert.completed',
-          correlationId: retryResult.correlation_id,
-          payload: retryResult,
-        });
+        const recordRetryResult = () =>
+          bulkRepository.recordCatalogBulkResult({
+            messageId: retryResult.message_id,
+            operationId: String(retryResult.operation_id),
+            causationId: String(retryResult.causation_id),
+            eventName: String(
+              retryResult.name,
+            ) as 'catalog.bulk.upsert.completed',
+            correlationId: retryResult.correlation_id,
+            payload: retryResult,
+          });
+        await Promise.all([recordRetryResult(), recordRetryResult()]);
+        const replayAfterResult = await resume();
+        expect(replayAfterResult.status).toBe(202);
+        expect(replayAfterResult.body).toEqual(resumed.body);
         const firstProductCount = await catalogDatabase.read((db) =>
           db
             .select()

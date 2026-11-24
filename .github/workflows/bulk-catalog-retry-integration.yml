@@ -7,6 +7,10 @@ on:
       - '.github/workflows/bulk-catalog-retry-integration.yml'
       - 'apps/bulk-svc/**'
       - 'apps/catalog-svc/**'
+      - 'apps/api-gateway/test/bulk-postgres.gateway.e2e-spec.ts'
+      - 'apps/api-gateway/test/support/phase1-postgres.ts'
+      - 'apps/api-gateway/test/support/signed-identity.ts'
+      - 'apps/api-gateway/src/**'
       - 'package.json'
       - 'package-lock.json'
       - 'vitest.config.e2e.ts'
@@ -105,12 +109,28 @@ jobs:
           assert_denied 'postgresql://bulk_app:bulk-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable' 'SELECT 1 FROM catalog.products LIMIT 1' 'bulk_app → catalog.products'
           assert_denied 'postgresql://catalog_app:catalog-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable' 'SELECT 1 FROM bulk.batch_jobs LIMIT 1' 'catalog_app → bulk.batch_jobs'
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c 'SHOW server_version_num'
-      - name: Ejecutar E2E HTTP Bulk y consumidor Catalog en HEAD actual
+      - name: Preparar directorio de evidencia MK-001
+        run: mkdir -p .ci/evidence
+      - name: Ejecutar E2E persistente Bulk-Catalog y seguridad Gateway
         env:
           NODE_ENV: test
           BULK_RETRY_INTEGRATION_BULK_DATABASE_URL: postgresql://bulk_app:bulk-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
           BULK_RETRY_INTEGRATION_CATALOG_DATABASE_URL: postgresql://catalog_app:catalog-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
-        run: npm run test:e2e -- apps/bulk-svc/test/bulk-catalog-retry.e2e-spec.ts
+        run: >-
+          npm run test:e2e -- apps/bulk-svc/test/bulk-catalog-retry.e2e-spec.ts
+          apps/api-gateway/test/bulk-postgres.gateway.e2e-spec.ts
+          --reporter=verbose --reporter=json --outputFile=.ci/evidence/bulk-h5-e2e.json
+      - name: Fallar si falta una prueba integral o hay escenarios omitidos
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const report = JSON.parse(fs.readFileSync(".ci/evidence/bulk-h5-e2e.json", "utf8"));
+            const files = report.testResults ?? [];
+            const tests = files.flatMap((file) => file.assertionResults ?? []);
+            const skipped = tests.filter((test) => ["pending", "skipped", "todo"].includes(test.status)).length;
+            console.log(`E2E MK-001: ${report.numPassedTests} PASS, ${skipped} omitidas, ${report.numTotalTests} totales; archivos=${files.length}`);
+            if (files.length !== 2 || report.numTotalTests !== 8 || report.numPassedTests !== 8 || skipped !== 0 || report.numFailedTests !== 0) process.exit(1);
+          '
       - name: Validar tipos y builds de ambos servicios
         run: |
           set -euo pipefail
@@ -123,8 +143,18 @@ jobs:
         run: |
           {
             printf 'HEAD probado: `%s`\n' "$(git rev-parse HEAD)"
+            echo 'E2E integral: Bulk HTTP + Catalog real contra PostgreSQL 17 y Gateway autenticado/JWKS loopback contra PostgreSQL 17.'
+            echo 'Escenarios exigidos: 8/8 ejecutados, cero omitidos (se valida el reporte JSON).'
             echo 'PostgreSQL: postgres:17-alpine descartable; roles catalog_app y bulk_app aislados.'
             echo 'Código ejecutado desde el HEAD del PR; no se combinan otros PRs ni se aplican cambios temporales de pruebas.'
             echo 'Migraciones Catalog: fixture base → outbox H5 → transporte Taxonomy → receipts Bulk Retry → migraciones históricas posteriores.'
             echo 'Migraciones Bulk: fixture base → 0002–0008 en orden.'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Conservar evidencia E2E MK-001
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bulk-h5-e2e-${{ github.sha }}
+          path: .ci/evidence/bulk-h5-e2e.json
+          if-no-files-found: error
+          retention-days: 30
