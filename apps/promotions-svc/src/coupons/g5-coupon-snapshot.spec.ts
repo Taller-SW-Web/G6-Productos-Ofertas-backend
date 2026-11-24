@@ -164,6 +164,15 @@ describe('G5 private coupon evidence', () => {
     expect(fetcher).toHaveBeenCalledOnce();
   });
 
+  it('rejects VENTAS as a snapshot channel while retaining modulo-ventas as sender identity', async () => {
+    const { fetcher, source } = fixture({ ...valid, channel_id: 'VENTAS' });
+    await expect(
+      source.read(command, AbortSignal.timeout(3000)),
+    ).rejects.toThrow('COUPON_EVIDENCE_UNAVAILABLE');
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(command.producer).toBe('modulo-ventas');
+  });
+
   it.each([201, 401, 403, 404, 503])(
     'rejects HTTP %s from G5',
     async (status) => {

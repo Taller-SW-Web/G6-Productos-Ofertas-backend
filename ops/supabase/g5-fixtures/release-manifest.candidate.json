@@ -1,0 +1,61 @@
+{
+  "manifestVersion": 1,
+  "status": "PREPARATION_ONLY",
+  "repository": "Taller-SW-Web/G6-Productos-Ofertas-backend",
+  "backendMasterAtAudit": "49bab9e2075819d922c63b06fcc6fc6ac16ce703",
+  "imagesPublished": false,
+  "deploymentsPerformed": false,
+  "gate": "AZURE_CHILE_DEPLOY_ENABLED=false",
+  "services": [
+    {
+      "service": "catalog-svc",
+      "codeCandidateSha": "49bab9e2075819d922c63b06fcc6fc6ac16ce703",
+      "imageDigest": null,
+      "digestStatus": "PENDING_NEW_BUILD",
+      "openPullRequests": [268],
+      "releaseGate": "Catalog H5 DDL/outbox delivery_transport reconciliation and PR review"
+    },
+    {
+      "service": "inventory-svc",
+      "codeCandidateSha": "49bab9e2075819d922c63b06fcc6fc6ac16ce703",
+      "imageDigest": null,
+      "digestStatus": "PENDING_NEW_BUILD",
+      "openPullRequests": [],
+      "releaseGate": "Lifecycle DDL/ledger reconciliation, all versioned SKU preflight/backfill, runtime grants"
+    },
+    {
+      "service": "pricing-svc",
+      "codeCandidateSha": "49bab9e2075819d922c63b06fcc6fc6ac16ce703",
+      "imageDigest": null,
+      "digestStatus": "PENDING_NEW_BUILD",
+      "openPullRequests": [255, 256],
+      "releaseGate": "Integrate/review relevant Pricing changes and verify DB/outbox compatibility"
+    },
+    {
+      "service": "promotions-svc",
+      "codeCandidateSha": "49bab9e2075819d922c63b06fcc6fc6ac16ce703",
+      "imageDigest": null,
+      "digestStatus": "PENDING_NEW_BUILD",
+      "openPullRequests": [],
+      "releaseGate": "H5 table equivalence and exact runtime grants; protected smoke route/configuration"
+    },
+    {
+      "service": "api-gateway",
+      "codeCandidateSha": "49bab9e2075819d922c63b06fcc6fc6ac16ce703",
+      "imageDigest": null,
+      "digestStatus": "PENDING_NEW_BUILD",
+      "openPullRequests": [],
+      "releaseGate": "Cross-service route compatibility and final protected-smoke path verification"
+    }
+  ],
+  "proposedOrder": [
+    "catalog-svc",
+    "inventory-svc",
+    "pricing-svc",
+    "promotions-svc",
+    "api-gateway"
+  ],
+  "compatibilityNote": "Order is conditional on compatible reviewed SHAs and schema readiness. Do not publish/release this manifest as operational approval.",
+  "rollback": "Use per-service immutable digest receipt and supervised same-resource rollback; database changes require separately approved reconciliation and are not rolled back by image rollback.",
+  "otherExistingServicesUntouched": ["bulk-svc", "combos-svc", "price-audit-svc", "taxonomy-svc"]
+}

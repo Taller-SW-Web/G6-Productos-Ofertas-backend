@@ -1,0 +1,88 @@
+{
+  "manifestVersion": 1,
+  "fixtureRunId": "g6-h5-local-20261124",
+  "scope": "local-disposable-postgresql-only",
+  "marketplaceDataCopied": false,
+  "catalog": {
+    "products": [
+      {
+        "id": "10000000-0000-4000-8000-000000000001",
+        "skuBase": "G5F-SIMPLE-001",
+        "version": 5,
+        "status": "ACTIVO",
+        "hasVariants": false,
+        "purpose": "sellable base SKU"
+      },
+      {
+        "id": "10000000-0000-4000-8000-000000000002",
+        "skuBase": "G5F-BASE-002",
+        "version": 7,
+        "status": "ACTIVO",
+        "hasVariants": true,
+        "purpose": "non-sellable base identity plus sellable variant"
+      },
+      {
+        "id": "10000000-0000-4000-8000-000000000003",
+        "skuBase": "G5F-DRAFT-003",
+        "version": 0,
+        "status": "BORRADOR",
+        "hasVariants": false,
+        "purpose": "unversioned, unstocked draft exclusion"
+      }
+    ],
+    "variants": [
+      {
+        "id": "20000000-0000-4000-8000-000000000001",
+        "productId": "10000000-0000-4000-8000-000000000002",
+        "sku": "G5F-VARIANT-002-A",
+        "version": 4,
+        "status": "ACTIVA"
+      }
+    ]
+  },
+  "inventory": {
+    "locationId": "60000000-0000-4000-8000-000000000001",
+    "locationCode": "G5F-LOCAL-01",
+    "balances": [
+      { "sku": "G5F-SIMPLE-001", "onHand": 8, "reserved": 2, "blocked": 1, "availableGenerated": 5 },
+      { "sku": "G5F-VARIANT-002-A", "onHand": 5, "reserved": 1, "blocked": 0, "availableGenerated": 4 }
+    ],
+    "lifecycleExpected": [
+      { "sku": "G5F-SIMPLE-001", "productId": "10000000-0000-4000-8000-000000000001", "version": 5, "active": true },
+      { "sku": "G5F-BASE-002", "productId": "10000000-0000-4000-8000-000000000002", "version": 7, "active": false },
+      { "sku": "G5F-VARIANT-002-A", "productId": "10000000-0000-4000-8000-000000000002", "version": 4, "active": true }
+    ]
+  },
+  "g5Snapshot": {
+    "orderId": "PED-G5F-SYNTHETIC-001",
+    "commercialSnapshotRef": "snapshot:G5F-SYNTHETIC-001",
+    "channelId": "MARKETPLACE",
+    "customerRef": null,
+    "lines": [
+      {
+        "sku": "G5F-SIMPLE-001",
+        "productId": "10000000-0000-4000-8000-000000000001",
+        "quantity": 1,
+        "currency": "PEN",
+        "regularPrice": "79.90",
+        "offerPrice": null
+      }
+    ],
+    "sourceClientId": "modulo-ventas",
+    "note": "Fixture de contrato solamente; G5 externo no se invoca."
+  },
+  "pricingAndPromotions": {
+    "status": "synthetic-only-in-promotions-postgres-harness",
+    "couponCode": "TEST",
+    "channelId": "MARKETPLACE",
+    "operationIds": "random UUID per test to avoid cross-run collisions",
+    "evidence": "apps/promotions-svc/test/coupon-h5.postgres.e2e-spec.ts"
+  },
+  "isolation": {
+    "database": "ephemeral PostgreSQL 17.11 only",
+    "externalCredentials": false,
+    "supabaseSharedWrites": false,
+    "serviceBusTraffic": false,
+    "httpToSharedRuntime": false
+  }
+}
