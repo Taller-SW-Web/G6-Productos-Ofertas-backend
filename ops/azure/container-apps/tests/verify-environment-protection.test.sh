@@ -8,44 +8,32 @@ mkdir "$TEMP/bin"
 cat > "$TEMP/bin/gh" <<'MOCK'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+printf '%s\n' "$*" >> "${GH_CALL_LOG:?}"
 case "$*" in
-  *'can_admins_bypass'*) printf '%s\n' "${MOCK_ADMIN_BYPASS:-false}" ;;
-  *'branch_policies[].type'*) printf '%s\n' "${MOCK_BRANCH_TYPE:-branch}" ;;
-  *'deployment-branch-policies'*) printf '%s\n' "${MOCK_BRANCHES:-master}" ;;
-  *'prevent_self_review'*) printf '%s\n' "${MOCK_REVIEWERS:-1}" ;;
-  *'custom_branch_policies'*) printf '%s\n' "${MOCK_BRANCH_MODE:-custom}" ;;
-  *'/environments/azure-h5'*) [[ "${MOCK_ENV_EXISTS:-true}" == true ]] || exit 1; printf '{}\n' ;;
+  *'deployment-branch-policies'*) printf '{"branch_policies":[{"name":"%s","type":"%s"}]}' "${MOCK_BRANCH:-master}" "${MOCK_TYPE:-branch}" ;;
+  *'azure-h5-pilot-234'*) printf '{"deployment_branch_policy":{"custom_branch_policies":true,"protected_branches":false},"protection_rules":[{"type":"required_reviewers","prevent_self_review":false,"reviewers":[{"type":"User","reviewer":{"id":129343979}}]}]}' ;;
+  *'/environments/'*) [[ "${MOCK_ENV_EXISTS:-true}" == true ]] || exit 1; printf '{"can_admins_bypass":%s,"protection_rules":[{"type":"required_reviewers","prevent_self_review":%s,"reviewers":[{"type":"User","reviewer":{"id":1}}]}],"deployment_branch_policy":{"custom_branch_policies":true,"protected_branches":false}}' "${MOCK_BYPASS:-false}" "${MOCK_SELF_REVIEW:-true}" ;;
   *) exit 41 ;;
 esac
 MOCK
 chmod +x "$TEMP/bin/gh"
 export PATH="$TEMP/bin:$PATH" GH_TOKEN=fixture
-
-bash "$VERIFIER" Taller-SW-Web/G6-Productos-Ofertas-backend >/dev/null
-echo 'PASS: required reviewers, autoapproval prevention and exact master policy accepted'
-
-expect_reject() {
-  local label="$1"; shift
-  if env "$@" bash "$VERIFIER" Taller-SW-Web/G6-Productos-Ofertas-backend >/dev/null 2>&1; then
-    printf 'FAIL: %s fue aceptado\n' "$label" >&2; exit 1
-  fi
-  printf 'PASS: %s bloqueado\n' "$label"
-}
-
-expect_reject 'environment ausente' MOCK_ENV_EXISTS=false
-expect_reject 'reviewers ausentes o autoaprobación permitida' MOCK_REVIEWERS=0
-expect_reject 'bypass de administrador permitido' MOCK_ADMIN_BYPASS=true
-expect_reject 'deployment branches sin restricción personalizada a master' MOCK_BRANCH_MODE=invalid
-expect_reject 'rama adicional habilitada' MOCK_BRANCHES=master,release
-expect_reject 'master es un tag' MOCK_BRANCH_TYPE=tag
-bash "$VERIFIER" Taller-SW-Web/G6-Productos-Ofertas-backend azure-h5-pilot-234 pricing-svc >/dev/null
-bash "$VERIFIER" Taller-SW-Web/G6-Productos-Ofertas-backend azure-h5-pilot-234 price-audit-svc >/dev/null
-for forbidden in all catalog-svc api-gateway ''; do
-  if bash "$VERIFIER" Taller-SW-Web/G6-Productos-Ofertas-backend azure-h5-pilot-234 "$forbidden" >/dev/null 2>&1; then
-    echo 'FAIL: excepcion de piloto acepto otro servicio' >&2; exit 1
-  fi
+export GH_CALL_LOG="$TEMP/gh-calls.log"
+repo=Taller-SW-Web/G6-Productos-Ofertas-backend
+bash "$VERIFIER" "$repo" >/dev/null
+bash "$VERIFIER" "$repo" azure-h5-chile catalog-svc chile-shared deploy false >/dev/null
+MOCK_ENABLED=False bash "$VERIFIER" "$repo" azure-h5-chile catalog-svc chile-shared recovery false >/dev/null
+echo 'PASS: strict Brazil and Chile protection checks are independent from the job-scoped deploy gate'
+if grep -Fq '/variables/AZURE_CHILE_DEPLOY_ENABLED' "$GH_CALL_LOG"; then echo 'FAIL: variable REST endpoint was queried by protection verifier' >&2; exit 1; fi
+expect_reject() { if env "$@" bash "$VERIFIER" "$repo" azure-h5-chile catalog-svc chile-shared deploy false >/dev/null 2>&1; then echo 'FAIL: Chile protection accepted invalid state' >&2; exit 1; fi; }
+expect_reject MOCK_BYPASS=true
+expect_reject MOCK_SELF_REVIEW=false
+expect_reject MOCK_BRANCH=master,release
+expect_reject MOCK_TYPE=tag
+echo 'PASS: insufficient protections fail closed'
+bash "$VERIFIER" "$repo" azure-h5-pilot-234 pricing-svc brazil-isolated deploy true >/dev/null
+for service in all catalog-svc api-gateway; do
+  if bash "$VERIFIER" "$repo" azure-h5-pilot-234 "$service" brazil-isolated deploy true >/dev/null 2>&1; then echo 'FAIL: pilot exception scope broadened' >&2; exit 1; fi
 done
-if bash "$VERIFIER" Taller-SW-Web/G6-Productos-Ofertas-backend foreign pricing-svc >/dev/null 2>&1; then
-  echo 'FAIL: environment arbitrario aceptado' >&2; exit 1
-fi
-echo 'PASS: excepcion #234 limitada a Pricing/Audit y environment fijo'
+if bash "$VERIFIER" "$repo" azure-h5-chile catalog-svc chile-shared deploy true >/dev/null 2>&1; then echo 'FAIL: Chile pilot self review accepted' >&2; exit 1; fi
+echo 'PASS: pilot exception remains limited to historical Pricing/Audit behavior'
