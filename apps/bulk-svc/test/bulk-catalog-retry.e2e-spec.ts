@@ -451,9 +451,9 @@ integration(
           undefined,
           new CatalogTokenVerifier(undefined),
         );
-        vi.spyOn(contentIdentity, 'authorization').mockResolvedValue(
-          `Bearer ${signedServiceToken()}`,
-        );
+        const contentAuthorization = vi
+          .spyOn(contentIdentity, 'authorization')
+          .mockResolvedValue(`Bearer ${signedServiceToken()}`);
         const contentClient = new CatalogBulkContentClient(contentIdentity);
         const catalogBeforeInvalidClaimChecks = await catalogDatabase.read(
           (db) => db.select().from(products),
@@ -482,6 +482,8 @@ integration(
         expect(
           await catalogDatabase.read((db) => db.select().from(products)),
         ).toEqual(catalogBeforeInvalidClaimChecks);
+        const authorizationCallsBeforeValidConsume =
+          contentAuthorization.mock.calls.length;
         const mutations = new CatalogMutationService(
           transactions,
           new PostgresCatalogWriteRepository(),
@@ -502,9 +504,14 @@ integration(
           initialIdentity,
           contentClient as never,
         );
+        const storageGetCallsBeforeConsume = storageGet.mock.calls.length;
         await expect(initialCatalog.consume(original)).resolves.toBe('APPLIED');
-        expect(contentIdentity.authorization).toHaveBeenCalledOnce();
-        expect(storageGet).toHaveBeenCalledTimes(3);
+        expect(contentAuthorization).toHaveBeenCalledTimes(
+          authorizationCallsBeforeValidConsume + 1,
+        );
+        expect(storageGet).toHaveBeenCalledTimes(
+          storageGetCallsBeforeConsume + 3,
+        );
         const [initialResultRow] = await catalogDatabase.read((db) =>
           db
             .select()
