@@ -39,7 +39,7 @@ foreach ($file in @('role-aca-existing-apps-chile.json','role-aca-environment-re
 }
 $appRole = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\role-aca-existing-apps-chile.json') -Raw | ConvertFrom-Json
 $envRole = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\role-aca-environment-reader-chile.json') -Raw | ConvertFrom-Json
-$appActionDiff = @(Compare-Object -ReferenceObject @($appRole.Actions | Sort-Object) -DifferenceObject @('Microsoft.App/containerApps/read','Microsoft.App/containerApps/write' | Sort-Object))
+$appActionDiff = @(Compare-Object -ReferenceObject @($appRole.Actions | Sort-Object) -DifferenceObject @('Microsoft.App/containerApps/read','Microsoft.App/containerApps/write','Microsoft.App/containerApps/revisions/read' | Sort-Object))
 $appNotActionDiff = @(Compare-Object -ReferenceObject @($appRole.NotActions) -DifferenceObject @('Microsoft.App/containerApps/delete'))
 $envActionDiff = @(Compare-Object -ReferenceObject @($envRole.Actions | Sort-Object) -DifferenceObject @('Microsoft.App/managedEnvironments/read','Microsoft.Resources/subscriptions/resourceGroups/read' | Sort-Object))
 Assert-True ($appActionDiff.Count -eq 0 -and $appNotActionDiff.Count -eq 0) 'Chile ACA role actions differ from the reviewed allowlist'
