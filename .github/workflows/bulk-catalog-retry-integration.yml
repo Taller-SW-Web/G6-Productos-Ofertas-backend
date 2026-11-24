@@ -3,10 +3,18 @@ name: Integración Bulk-Catalog Retry (PostgreSQL 17 descartable)
 on:
   pull_request:
     branches: [master]
+    types: [opened, reopened, synchronize, ready_for_review]
     paths:
       - '.github/workflows/bulk-catalog-retry-integration.yml'
+      - 'scripts/ci/bulk-h5-required-scenarios.json'
+      - 'scripts/ci/verify-bulk-h5-e2e.mjs'
+      - 'scripts/ci/verify-bulk-h5-e2e.test.mjs'
       - 'apps/bulk-svc/**'
       - 'apps/catalog-svc/**'
+      - 'apps/api-gateway/test/bulk-postgres.gateway.e2e-spec.ts'
+      - 'apps/api-gateway/test/support/phase1-postgres.ts'
+      - 'apps/api-gateway/test/support/signed-identity.ts'
+      - 'apps/api-gateway/src/**'
       - 'package.json'
       - 'package-lock.json'
       - 'vitest.config.e2e.ts'
@@ -105,12 +113,59 @@ jobs:
           assert_denied 'postgresql://bulk_app:bulk-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable' 'SELECT 1 FROM catalog.products LIMIT 1' 'bulk_app → catalog.products'
           assert_denied 'postgresql://catalog_app:catalog-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable' 'SELECT 1 FROM bulk.batch_jobs LIMIT 1' 'catalog_app → bulk.batch_jobs'
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c 'SHOW server_version_num'
-      - name: Ejecutar E2E HTTP Bulk y consumidor Catalog en HEAD actual
+      - name: Preparar directorio de evidencia MK-001
+        run: mkdir -p .ci/evidence
+      - name: Probar el verificador de escenarios obligatorios
+        run: node --test scripts/ci/verify-bulk-h5-e2e.test.mjs
+      - name: Iniciar Supabase Storage local aislado (CLI 3.4.0)
+        run: |
+          set -euo pipefail
+          supabase_dir="$RUNNER_TEMP/mk001-supabase-storage"
+          mkdir -p "$supabase_dir"
+          (
+            cd "$supabase_dir"
+            npx --yes supabase@3.4.0 init > "$RUNNER_TEMP/mk001-supabase-init.log" 2>&1
+            npx --yes supabase@3.4.0 start \
+              --exclude studio,edge-runtime,logflare,vector,mailpit,imgproxy,supavisor \
+              > "$RUNNER_TEMP/mk001-supabase-start.log" 2>&1
+            npx --yes supabase@3.4.0 status -o env > "$RUNNER_TEMP/mk001-supabase-status.env"
+          )
+          set -a
+          source "$RUNNER_TEMP/mk001-supabase-status.env"
+          set +a
+          test -n "${SERVICE_ROLE_KEY:-}"
+          storage_url="http://127.0.0.1:54321"
+          curl --fail --silent --show-error \
+            -X POST "$storage_url/storage/v1/bucket" \
+            -H "apikey: $SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+            -H 'Content-Type: application/json' \
+            --data '{"id":"bulk-retry-integration","name":"bulk-retry-integration","public":false}' \
+            > /dev/null
+          {
+            echo "BULK_RETRY_INTEGRATION_STORAGE_URL=$storage_url"
+            echo "BULK_RETRY_INTEGRATION_STORAGE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+          } >> "$GITHUB_ENV"
+          echo 'Supabase Storage local: iniciado con CLI 3.4.0; bucket privado y efímero.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Ejecutar E2E persistente Bulk-Catalog y seguridad Gateway
         env:
           NODE_ENV: test
+          BULK_H5_SCENARIO_EVIDENCE: .ci/evidence/bulk-h5-scenarios.json
           BULK_RETRY_INTEGRATION_BULK_DATABASE_URL: postgresql://bulk_app:bulk-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
           BULK_RETRY_INTEGRATION_CATALOG_DATABASE_URL: postgresql://catalog_app:catalog-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
-        run: npm run test:e2e -- apps/bulk-svc/test/bulk-catalog-retry.e2e-spec.ts
+        run: >-
+          npm run test:e2e -- apps/bulk-svc/test/bulk-catalog-retry.e2e-spec.ts
+          apps/api-gateway/test/bulk-postgres.gateway.e2e-spec.ts
+          --reporter=verbose --reporter=json --reporter=junit
+          --outputFile.json=.ci/evidence/bulk-h5-e2e.json
+          --outputFile.junit=.ci/evidence/bulk-h5-e2e.junit.xml
+      - name: Verificar escenarios obligatorios sin reducir cobertura
+        if: always()
+        run: >-
+          node scripts/ci/verify-bulk-h5-e2e.mjs
+          .ci/evidence/bulk-h5-e2e.json
+          .ci/evidence/bulk-h5-scenarios.json
+          scripts/ci/bulk-h5-required-scenarios.json
       - name: Validar tipos y builds de ambos servicios
         run: |
           set -euo pipefail
@@ -120,11 +175,63 @@ jobs:
           git diff --check
       - name: Publicar SHA y resumen de evidencia
         if: always()
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          EVENT_SHA: ${{ github.sha }}
+          ADMIN_URL: postgresql://postgres:retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
         run: |
+          export CHECKOUT_SHA="$(git rev-parse HEAD)"
+          export NODE_VERSION="$(node --version)"
+          export NPM_VERSION="$(npm --version)"
+          export SUPABASE_VERSION="$(npx --yes supabase@3.4.0 --version 2>/dev/null || true)"
+          export POSTGRES_VERSION="$(psql "$ADMIN_URL" -Atc 'SHOW server_version' 2>/dev/null || true)"
+          npm ls --depth=0 --json > .ci/evidence/dependencies.json
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const metadata = {
+              pullRequestHeadSha: process.env.PR_HEAD_SHA,
+              pullRequestBaseSha: process.env.PR_BASE_SHA || null,
+              eventSha: process.env.EVENT_SHA,
+              effectiveCheckoutSha: process.env.CHECKOUT_SHA,
+              nodeVersion: process.env.NODE_VERSION,
+              npmVersion: process.env.NPM_VERSION,
+              supabaseCliVersion: process.env.SUPABASE_VERSION,
+              postgresVersion: process.env.POSTGRES_VERSION
+            };
+            fs.writeFileSync(".ci/evidence/run-metadata.json", `${JSON.stringify(metadata, null, 2)}\n`);
+          '
           {
-            printf 'HEAD probado: `%s`\n' "$(git rev-parse HEAD)"
+            printf 'HEAD del PR: `%s`\n' "$PR_HEAD_SHA"
+            printf 'Base del PR: `%s`\n' "${PR_BASE_SHA:-no disponible}"
+            printf 'SHA del evento (merge temporal PR): `%s`\n' "$EVENT_SHA"
+            printf 'SHA checkout efectivo: `%s`\n' "$CHECKOUT_SHA"
+            printf 'Node: `%s`; npm: `%s`; Supabase CLI: `%s`; PostgreSQL: `%s`\n' "$NODE_VERSION" "$NPM_VERSION" "$SUPABASE_VERSION" "$POSTGRES_VERSION"
+            echo 'E2E integral: Bulk HTTP + Catalog real con PostgreSQL 17 y Supabase Storage local; Gateway autenticado/JWKS loopback con PostgreSQL 17.'
+            echo 'Supabase CLI fijado: 3.4.0; bucket exclusivo privado; no se usa Supabase hospedado.'
+            echo 'Inventario explícito y escenarios requeridos validados contra JSON de Vitest y manifiesto producido por el E2E.'
             echo 'PostgreSQL: postgres:17-alpine descartable; roles catalog_app y bulk_app aislados.'
             echo 'Código ejecutado desde el HEAD del PR; no se combinan otros PRs ni se aplican cambios temporales de pruebas.'
             echo 'Migraciones Catalog: fixture base → outbox H5 → transporte Taxonomy → receipts Bulk Retry → migraciones históricas posteriores.'
             echo 'Migraciones Bulk: fixture base → 0002–0008 en orden.'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Conservar evidencia E2E MK-001
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bulk-h5-e2e-pr-${{ github.event.pull_request.head.sha || github.sha }}-run-${{ github.run_id }}
+          path: .ci/evidence/*
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Detener y eliminar volúmenes del Supabase local
+        if: always()
+        run: |
+          set -euo pipefail
+          supabase_dir="$RUNNER_TEMP/mk001-supabase-storage"
+          if [[ -f "$supabase_dir/supabase/config.jsonc" ]]; then
+            npx --yes supabase@3.4.0 stop --no-backup --workdir "$supabase_dir" \
+              > "$RUNNER_TEMP/mk001-supabase-stop.log" 2>&1
+            echo 'Supabase local y volúmenes temporales eliminados.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'No se creó instancia Supabase local.' >> "$GITHUB_STEP_SUMMARY"
+          fi
