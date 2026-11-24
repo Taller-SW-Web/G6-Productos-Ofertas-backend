@@ -6,6 +6,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../../../')).Path
 $candidate = Join-Path $repoRoot 'ops/azure/h5-runtime-preflight/inventory-sku-lifecycle-backfill.candidate.sql'
+$applyTransaction = Join-Path $repoRoot 'ops/supabase/g5-fixtures/inventory-sku-lifecycle-apply.transaction.sql'
+$ensayoTransaction = Join-Path $repoRoot 'ops/supabase/g5-fixtures/inventory-sku-lifecycle-ensayo.transaction.sql'
 $catalogDdl = Join-Path $repoRoot 'apps/catalog-svc/test/fixtures/0001_create_catalog.sql'
 $inventoryDdl = Join-Path $repoRoot 'apps/catalog-svc/test/fixtures/inventory-initial.sql'
 $inventoryLifecycleMigration = Join-Path $repoRoot 'apps/inventory-svc/migrations/20261104_0001_lifecycle_offline_reconciliation.sql'
@@ -83,9 +85,12 @@ RESET ROLE;
 \i /tmp/inventory-lifecycle.sql
 \i /tmp/inventory-runtime-grants.sql
 GRANT USAGE ON SCHEMA catalog TO inventory_backfill_test;
-GRANT SELECT ON catalog.sku_identity, catalog.products, catalog.variants TO inventory_backfill_test;
+GRANT SELECT ON catalog.sku_identity, catalog.products, catalog.variants, catalog.outbox TO inventory_backfill_test;
 GRANT USAGE ON SCHEMA inventory TO inventory_backfill_test;
 GRANT SELECT ON inventory.stock_balance TO inventory_backfill_test;
+GRANT SELECT ON inventory.reservations, inventory.inventory_operations,
+  inventory.kardex, inventory.outbox, inventory.offline_sale_reconciliations
+  TO inventory_backfill_test;
 GRANT SELECT, INSERT, UPDATE ON inventory.sku_lifecycle TO inventory_backfill_test;
 GRANT USAGE ON SCHEMA inventory TO inventory_app;
 GRANT SELECT ON catalog.sku_identity TO inventory_backfill_test;
@@ -105,21 +110,28 @@ if ($version.Output -ne 't') { throw 'Disposable PostgreSQL must be version 17' 
 
 # Missing explicit opt-in must fail before any persistent write.
 $beforeRows = (Invoke-ContainerSql 'SELECT count(*) FROM inventory.sku_lifecycle').Output
-$protectedEffectsBefore = Invoke-ContainerSql @'
+$protectedStateSql = @'
 SELECT jsonb_build_object(
-  'stock', (SELECT count(*) FROM inventory.stock_balance),
-  'reservations', (SELECT count(*) FROM inventory.reservations),
-  'operations', (SELECT count(*) FROM inventory.inventory_operations),
-  'kardex', (SELECT count(*) FROM inventory.kardex),
-  'outbox', (SELECT count(*) FROM inventory.outbox)
+  'stock', (SELECT md5(coalesce(string_agg(to_jsonb(t)::text, E'\n' ORDER BY sku_id, location_id),'')) FROM inventory.stock_balance t),
+  'reservations', (SELECT md5(coalesce(string_agg(to_jsonb(t)::text, E'\n' ORDER BY id),'')) FROM inventory.reservations t),
+  'operations', (SELECT md5(coalesce(string_agg(to_jsonb(t)::text, E'\n' ORDER BY id),'')) FROM inventory.inventory_operations t),
+  'kardex', (SELECT md5(coalesce(string_agg(to_jsonb(t)::text, E'\n' ORDER BY id),'')) FROM inventory.kardex t),
+  'outbox', (SELECT md5(coalesce(string_agg(to_jsonb(t)::text, E'\n' ORDER BY id),'')) FROM inventory.outbox t),
+  'offline_sale_reconciliations', (SELECT md5(coalesce(string_agg(to_jsonb(t)::text, E'\n' ORDER BY client_id, offline_sale_id),'')) FROM inventory.offline_sale_reconciliations t)
 )::text
 '@
+$protectedEffectsBefore = Invoke-ContainerSql $protectedStateSql
 $candidateText = Get-Content -Raw $candidate
-$candidateFile = Join-Path $env:TEMP 'g6-h5-lifecycle-candidate.sql'
-[System.IO.File]::WriteAllText($candidateFile, $candidateText, [System.Text.UTF8Encoding]::new($false))
+$candidateFile = Join-Path $env:TEMP 'g6-h5-lifecycle-backfill.sql'
+[System.IO.File]::WriteAllText($candidateFile, (Get-Content -Raw $applyTransaction), [System.Text.UTF8Encoding]::new($false))
 & docker cp $candidateFile "${Container}:/tmp/lifecycle-backfill.sql"
-Assert-Command 'copy lifecycle candidate'
-$missingGateOutput = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -f /tmp/lifecycle-backfill.sql 2>&1
+Assert-Command 'copy lifecycle transaction'
+$missingGateText = "BEGIN;`n$candidateText`nROLLBACK;`n"
+$missingGateFile = Join-Path $env:TEMP 'g6-h5-lifecycle-missing-gate.sql'
+[System.IO.File]::WriteAllText($missingGateFile, $missingGateText, [System.Text.UTF8Encoding]::new($false))
+& docker cp $missingGateFile "${Container}:/tmp/lifecycle-missing-gate.sql"
+Assert-Command 'copy lifecycle missing-gate transaction'
+$missingGateOutput = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -f /tmp/lifecycle-missing-gate.sql 2>&1
 if ($LASTEXITCODE -eq 0 -or ($missingGateOutput -join ' ') -notmatch 'Explicit isolated backfill opt-in') {
   throw 'Lifecycle candidate did not fail closed without the explicit opt-in'
 }
@@ -127,19 +139,23 @@ if ((Invoke-ContainerSql 'SELECT count(*) FROM inventory.sku_lifecycle').Output 
   throw 'Lifecycle candidate changed rows without opt-in'
 }
 
-$run = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -c "SET g6.inventory_sku_lifecycle_backfill = 'apply'" -f /tmp/lifecycle-backfill.sql 2>&1
+# Dry run executes identical preconditions, body, and postconditions, then rolls back.
+$dryRunFile = Join-Path $env:TEMP 'g6-h5-lifecycle-ensayo.sql'
+$dryRunText = Get-Content -Raw $ensayoTransaction
+[System.IO.File]::WriteAllText($dryRunFile, $dryRunText, [System.Text.UTF8Encoding]::new($false))
+& docker cp $dryRunFile "${Container}:/tmp/lifecycle-ensayo.sql"
+Assert-Command 'copy lifecycle ensayo transaction'
+$dryRun = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -f /tmp/lifecycle-ensayo.sql 2>&1
+if ($LASTEXITCODE -ne 0 -or ($dryRun -join ' ') -notmatch 'APPLIED\|3\|3\|0\|0\|0' -or
+    (Invoke-ContainerSql 'SELECT count(*) FROM inventory.sku_lifecycle').Output -ne $beforeRows) {
+  throw "Ensayo did not validate then roll back the full candidate: $($dryRun -join ' ')"
+}
+
+$run = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -f /tmp/lifecycle-backfill.sql 2>&1
 if ($LASTEXITCODE -ne 0) { throw "Lifecycle backfill failed: $($run -join [Environment]::NewLine)" }
 $firstSummary = ($run | Where-Object { $_ -match '^APPLIED\|' } | Select-Object -Last 1).Trim()
 if ($firstSummary -ne 'APPLIED|3|3|0|0|0') { throw "Unexpected first backfill summary: $firstSummary" }
-if ((Invoke-ContainerSql @'
-SELECT jsonb_build_object(
-  'stock', (SELECT count(*) FROM inventory.stock_balance),
-  'reservations', (SELECT count(*) FROM inventory.reservations),
-  'operations', (SELECT count(*) FROM inventory.inventory_operations),
-  'kardex', (SELECT count(*) FROM inventory.kardex),
-  'outbox', (SELECT count(*) FROM inventory.outbox)
-)::text
-'@).Output -ne $protectedEffectsBefore.Output) {
+if ((Invoke-ContainerSql $protectedStateSql).Output -ne $protectedEffectsBefore.Output) {
   throw 'Backfill changed stock, reservations, operations, kardex, or outbox'
 }
 
@@ -155,13 +171,57 @@ if ((Invoke-ContainerSql "SELECT count(*) FROM inventory.sku_lifecycle WHERE sku
 }
 
 # Replay is idempotent. Newer existing lifecycle versions are preserved.
-$replay = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -c "SET g6.inventory_sku_lifecycle_backfill = 'apply'" -f /tmp/lifecycle-backfill.sql 2>&1
+$replay = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -f /tmp/lifecycle-backfill.sql 2>&1
 if ($LASTEXITCODE -ne 0) { throw "Idempotent replay failed: $($replay -join [Environment]::NewLine)" }
 $replaySummary = ($replay | Where-Object { $_ -match '^APPLIED\|' } | Select-Object -Last 1).Trim()
 if ($replaySummary -ne 'APPLIED|3|0|0|3|0') { throw "Unexpected replay summary: $replaySummary" }
 
+# The row version and timestamp for an inactive SKU come from the authoritative
+# Catalog deactivation payload, not from a later Catalog row update.
+Invoke-ContainerSql @'
+UPDATE catalog.products SET estado='INACTIVO'
+ WHERE id='10000000-0000-4000-8000-000000000001';
+INSERT INTO catalog.outbox
+  (message_id,event_name,kind,schema_version,correlation_id,operation_id,occurred_at,payload)
+SELECT '90000000-0000-4000-8000-000000000001', 'catalog.sku.deactivated', 'event', 1,
+       '90000000-0000-4000-8000-000000000002', '90000000-0000-4000-8000-000000000003',
+       now(), jsonb_build_object('product_id', id::text, 'sku', sku_base,
+         'sku_version', catalog_version, 'changed_at', updated_at)
+  FROM catalog.products WHERE id='10000000-0000-4000-8000-000000000001';
+UPDATE catalog.products SET nombre='Fixture simple renamed after deactivation'
+ WHERE id='10000000-0000-4000-8000-000000000001';
+'@ | Out-Null
+$authoritative = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -f /tmp/lifecycle-backfill.sql 2>&1
+if ($LASTEXITCODE -ne 0) { throw "Authoritative deactivation backfill failed: $($authoritative -join ' ')" }
+$eventBinding = Invoke-ContainerSql @'
+SELECT (l.sku_version = (o.payload->>'sku_version')::integer
+        AND l.changed_at = (o.payload->>'changed_at')::timestamptz
+        AND l.active = false
+        AND p.catalog_version > l.sku_version)::text
+FROM inventory.sku_lifecycle l
+JOIN catalog.outbox o ON o.payload->>'sku'=l.sku_id
+JOIN catalog.products p ON p.id=l.product_id
+WHERE l.sku_id='G5F-SIMPLE-001' AND o.event_name='catalog.sku.deactivated'
+'@
+if ($eventBinding.Output -ne 'true') { throw 'Backfill attributed the later non-lifecycle update to the deactivation version/timestamp' }
+
+$lifecycleHashBeforeUnverifiable = (Invoke-ContainerSql "SELECT md5(coalesce(string_agg(to_jsonb(t)::text, E'\\n' ORDER BY sku_id),'')) FROM inventory.sku_lifecycle t").Output
+Invoke-ContainerSql "UPDATE catalog.products SET estado='ACTIVO' WHERE id='10000000-0000-4000-8000-000000000001'" | Out-Null
+$reactivatedWithoutEvent = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -f /tmp/lifecycle-backfill.sql 2>&1
+if ($LASTEXITCODE -eq 0 -or ($reactivatedWithoutEvent -join ' ') -notmatch 'reactivation_not_published_as_authoritative_sku_event' -or
+    (Invoke-ContainerSql "SELECT md5(coalesce(string_agg(to_jsonb(t)::text, E'\\n' ORDER BY sku_id),'')) FROM inventory.sku_lifecycle t").Output -ne $lifecycleHashBeforeUnverifiable) {
+  throw 'Reactivated Catalog SKU without an authoritative activation event was not rejected atomically'
+}
+Invoke-ContainerSql "UPDATE catalog.products SET estado='INACTIVO' WHERE id='10000000-0000-4000-8000-000000000001'" | Out-Null
+Invoke-ContainerSql "UPDATE catalog.products SET estado='INACTIVO' WHERE id='10000000-0000-4000-8000-000000000002'" | Out-Null
+$parentDeactivationWithoutSkuEvents = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -f /tmp/lifecycle-backfill.sql 2>&1
+if ($LASTEXITCODE -eq 0 -or ($parentDeactivationWithoutSkuEvents -join ' ') -notmatch 'inactive_state_without_authoritative_sku_deactivation_event') {
+  throw 'Parent deactivation without SKU events was incorrectly mapped to variant lifecycle rows'
+}
+Invoke-ContainerSql "UPDATE catalog.products SET estado='ACTIVO' WHERE id='10000000-0000-4000-8000-000000000002'" | Out-Null
+
 Invoke-ContainerSql "UPDATE inventory.sku_lifecycle SET sku_version = 100 WHERE sku_id = 'G5F-SIMPLE-001'" | Out-Null
-$newer = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -c "SET g6.inventory_sku_lifecycle_backfill = 'apply'" -f /tmp/lifecycle-backfill.sql 2>&1
+$newer = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -f /tmp/lifecycle-backfill.sql 2>&1
 if ($LASTEXITCODE -ne 0) { throw "Newer-version preservation run failed: $($newer -join [Environment]::NewLine)" }
 $newerVersion = Invoke-ContainerSql "SELECT sku_version FROM inventory.sku_lifecycle WHERE sku_id = 'G5F-SIMPLE-001'"
 if ($newerVersion.Output -ne '100') { throw 'Backfill overwrote a newer lifecycle version' }
@@ -170,8 +230,8 @@ if ($newerVersion.Output -ne '100') { throw 'Backfill overwrote a newer lifecycl
 # integer range both reject the run without partial writes.
 Invoke-ContainerSql "UPDATE inventory.sku_lifecycle SET active = false WHERE sku_id = 'G5F-VARIANT-002-A'" | Out-Null
 $countBeforeConflict = (Invoke-ContainerSql 'SELECT count(*) FROM inventory.sku_lifecycle').Output
-$conflict = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -c "SET g6.inventory_sku_lifecycle_backfill = 'apply'" -f /tmp/lifecycle-backfill.sql 2>&1
-if ($LASTEXITCODE -ne 0 -or ($conflict -join ' ') -notmatch 'same_version_lifecycle_state_mismatch') {
+$conflict = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -f /tmp/lifecycle-backfill.sql 2>&1
+if ($LASTEXITCODE -eq 0 -or ($conflict -join ' ') -notmatch 'LIFECYCLE_BACKFILL_REJECTED' -or ($conflict -join ' ') -notmatch 'same_version_lifecycle_state_mismatch') {
   throw 'Equal-version state conflict was not rejected'
 }
 if ((Invoke-ContainerSql 'SELECT count(*) FROM inventory.sku_lifecycle').Output -ne $countBeforeConflict) {
@@ -188,29 +248,42 @@ VALUES
    'QA-CAT', 'QA-TYPE', 'QA-BRAND', 'G5F-BAD-VERSION', 'g5f-bad-version', false,
    'BORRADOR', 2147483648)
 '@ | Out-Null
-$overflow = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -c "SET g6.inventory_sku_lifecycle_backfill = 'apply'" -f /tmp/lifecycle-backfill.sql 2>&1
-if ($LASTEXITCODE -ne 0 -or ($overflow -join ' ') -notmatch 'catalog_version_exceeds_inventory_integer') {
+$overflow = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -f /tmp/lifecycle-backfill.sql 2>&1
+if ($LASTEXITCODE -eq 0 -or ($overflow -join ' ') -notmatch 'LIFECYCLE_BACKFILL_REJECTED' -or ($overflow -join ' ') -notmatch 'catalog_version_exceeds_inventory_integer') {
   throw 'Out-of-range Catalog version was not rejected'
-}
-$overflowSummary = ($overflow | Where-Object { $_ -match '^REJECTED_NO_WRITES\|' } | Select-Object -Last 1).Trim()
-if (-not $overflowSummary -or $overflowSummary.Split('|')[-1] -ne '1') {
-  throw "Out-of-range Catalog version did not produce the expected rejection summary: $overflowSummary"
 }
 
 # A stock SKU without Catalog identity is rejected and the whole run writes nothing.
 Invoke-ContainerSql "INSERT INTO inventory.stock_balance (sku_id, location_id, on_hand) VALUES ('G5F-ORPHAN-STOCK', '60000000-0000-4000-8000-000000000001', 1)" | Out-Null
 $countBeforeReject = (Invoke-ContainerSql 'SELECT count(*) FROM inventory.sku_lifecycle').Output
-$reject = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -c "SET g6.inventory_sku_lifecycle_backfill = 'apply'" -f /tmp/lifecycle-backfill.sql 2>&1
-if ($LASTEXITCODE -ne 0) { throw "Fail-closed rejection scenario errored unexpectedly: $($reject -join [Environment]::NewLine)" }
-$rejectSummary = ($reject | Where-Object { $_ -match '^REJECTED_NO_WRITES\|' } | Select-Object -Last 1).Trim()
-if (-not $rejectSummary -or $rejectSummary.Split('|')[-1] -ne '2' -or
+$reject = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -f /tmp/lifecycle-backfill.sql 2>&1
+if ($LASTEXITCODE -eq 0 -or ($reject -join ' ') -notmatch 'LIFECYCLE_BACKFILL_REJECTED' -or
     ($reject -join ' ') -notmatch 'identity_owner_or_catalog_target_missing|stock_identity_missing_or_not_versioned' -or
     ($reject -join ' ') -notmatch 'catalog_version_exceeds_inventory_integer') {
-  throw "Expected both the orphan and out-of-range identities in rejection summary: $rejectSummary"
+  throw "Expected a transaction-aborting rejection summary for the orphan and out-of-range identities: $($reject -join ' ')"
 }
 if ((Invoke-ContainerSql 'SELECT count(*) FROM inventory.sku_lifecycle').Output -ne $countBeforeReject) {
   throw 'Rejected run partially wrote lifecycle rows'
 }
+
+# Mixed batch: one missing lifecycle, one older lifecycle eligible to advance,
+# and an invalid stock identity. The rejected transaction must do neither write.
+Invoke-ContainerSql @'
+DELETE FROM inventory.sku_lifecycle WHERE sku_id='G5F-SIMPLE-001';
+UPDATE inventory.sku_lifecycle SET sku_version=1
+ WHERE sku_id='G5F-VARIANT-002-A';
+'@ | Out-Null
+$mixedBeforeRows = (Invoke-ContainerSql "SELECT md5(coalesce(string_agg(to_jsonb(t)::text, E'\\n' ORDER BY sku_id),'')) FROM inventory.sku_lifecycle t").Output
+$mixedBefore = "$mixedBeforeRows|$((Invoke-ContainerSql $protectedStateSql).Output)"
+$mixed = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -f /tmp/lifecycle-backfill.sql 2>&1
+if ($LASTEXITCODE -eq 0 -or ($mixed -join ' ') -notmatch 'LIFECYCLE_BACKFILL_REJECTED' -or
+    (Invoke-ContainerSql "SELECT count(*) FROM inventory.sku_lifecycle WHERE sku_id='G5F-SIMPLE-001'").Output -ne '0' -or
+    (Invoke-ContainerSql "SELECT sku_version FROM inventory.sku_lifecycle WHERE sku_id='G5F-VARIANT-002-A'").Output -ne '1') {
+  throw "Mixed invalid batch inserted or updated a valid identity: $($mixed -join ' ')"
+}
+$mixedAfterRows = (Invoke-ContainerSql "SELECT md5(coalesce(string_agg(to_jsonb(t)::text, E'\\n' ORDER BY sku_id),'')) FROM inventory.sku_lifecycle t").Output
+$mixedAfter = "$mixedAfterRows|$((Invoke-ContainerSql $protectedStateSql).Output)"
+if ($mixedAfter -ne $mixedBefore) { throw 'Mixed rejection changed lifecycle or a protected table' }
 
 # Verify source tables and generated stock balances remain unchanged by candidate runs.
 $stockCheck = Invoke-ContainerSql "SELECT string_agg(sku_id || ':' || on_hand || ':' || reserved || ':' || blocked || ':' || available, ',' ORDER BY sku_id) FROM inventory.stock_balance"
@@ -249,4 +322,4 @@ if ($runtimeDdl.ExitCode -eq 0) { throw 'Inventory runtime login unexpectedly ha
 $runtimeCrossSchema = Invoke-ContainerSql 'SELECT count(*) FROM catalog.products' -User 'inventory_app' -AllowFailure
 if ($runtimeCrossSchema.ExitCode -eq 0) { throw 'Inventory runtime login unexpectedly has access to Catalog schema' }
 
-Write-Output 'PASS PostgreSQL 17 local lifecycle backfill: explicit gate, SKU base/variant identity, state/version mapping, idempotency, newer-version preservation, reject-without-writes, stock invariants, and runtime grants.'
+Write-Output 'PASS PostgreSQL 17 local lifecycle backfill: transaction-owned apply/ensayo, atomic fail-closed rejection, full protected-row hashes, mixed-batch no-write, SKU identities, idempotency, and runtime grants.'

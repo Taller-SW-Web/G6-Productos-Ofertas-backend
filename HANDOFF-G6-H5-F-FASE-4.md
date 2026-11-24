@@ -131,3 +131,24 @@ La suite Promotions unit enfocada pasa 40/40. El harness Promotions PostgreSQL h
 ### Addendum — repetición con Docker disponible
 
 En la continuación, la prueba lifecycle se ejecutó sobre PostgreSQL 17.11 desechable y pasó. La primera ejecución identificó un conteo esperado incorrecto para dos rechazos persistentes del mismo test (versión fuera de rango y stock huérfano); se precisó la aserción para comprobar ambas causas y se repitió exitosamente. El harness confirmó cleanup de su contenedor etiquetado. También se repitió `node apps/promotions-svc/test/run-h5-postgres.mjs`: 12/12 PASS y cleanup confirmado. El error anterior de Docker queda superado; no hubo cambios en Supabase compartido ni servicios reales.
+
+### Correcciones finales H01–H03 y repetición adicional con Docker (2026-11-24)
+
+- H01: el candidato Inventory lifecycle es ahora un cuerpo reutilizable sin `BEGIN` ni `COMMIT`. Los archivos `inventory-sku-lifecycle-apply.transaction.sql` y `inventory-sku-lifecycle-ensayo.transaction.sql` incluyen el control transaccional exterior, `SET LOCAL`, pre/postcondiciones, hashes de las tablas protegidas y resumen. Ensayo siempre termina en `ROLLBACK`; cualquier rechazo genera excepción con conteo/causas en el `DETAIL` y no puede confirmarse.
+- H02: los estados inactivos por transición usan el último payload autoritativo `catalog.sku.deactivated`; una modificación posterior del producto no altera esa versión/timestamp. El candidato falla cerrado ante reactivación sin evento SKU y cuando la baja de un padre con variantes carece de evento por SKU. No se inventa evento de activación. El test local comprueba estas reglas y el E2E real existente de Catalog para baja/re-activación de variante y padre pasó (1 prueba/102 omitidas por filtro). El test del handler Inventory relacionado pasó 5/5 y el test PostgreSQL completo del servicio pasó 62/62. El cruce método real Catalog → candidato SQL no está aún en un harness integrado y se mantiene `PARTIAL`.
+- H03: hashes deterministas completos, ordenados por PK, para stock, reservas, operaciones, kardex, outbox y conciliaciones offline; caso de lote mixto y rollback de ensayo explícito. Prueba PostgreSQL 17.11 local pasó y el contenedor etiquetado quedó eliminado.
+- H04/H05 siguen parciales: no se construyó aún un flujo positivo único con las cuatro aplicaciones en un mismo servidor/IDs y roles de servicio; la evidencia Supabase directa no detalla cada diferencia física necesaria para preparar un delta de reconciliación seguro. No se repitió auditoría general ni se modificó ledger/esquema real.
+- Pruebas de esta continuación: Inventory integración PostgreSQL/RabbitMQ desechable 62/62; handler SKU deactivated 5/5; Catalog transición persistente 1/1; Promotions unit 40/40; Promotions PostgreSQL H5 12/12; lifecycle PG17 1 harness PASS, cleanup confirmado.
+
+`SUPABASE_SCHEMA_RECONCILED=PARTIAL`; `MIGRATION_LEDGER_RECONCILED=PARTIAL`; `FIXTURES_APPLIED_ISOLATED=PASS` para harnesses independientes; `FIXTURES_FUNCTIONAL_TESTS=PARTIAL` hasta el flujo unificado. No se escribió en Supabase compartido ni se cambió Azure, ACA, Service Bus, Marketplace o G7.
+
+### Revalidación solicitada tras confirmar Docker disponible (2026-11-24)
+
+En esta sesión se verificó Docker Server `29.9.3` y se repitieron:
+
+- `pwsh -NoProfile -File ops/supabase/g5-fixtures/tests/run-local-inventory-lifecycle.ps1`: PASS contra PostgreSQL 17.11 desechable; control de transacción del wrapper, ensayo con rollback, rechazo atómico, hash completo de tablas protegidas y cleanup confirmado.
+- `node apps/promotions-svc/test/run-h5-postgres.mjs`: PASS 12/12, PostgreSQL 17.11 desechable y cleanup confirmado.
+- `npx vitest run apps/promotions-svc/src/coupons/coupon-command.spec.ts apps/promotions-svc/src/coupons/g5-coupon-snapshot.spec.ts --maxWorkers=1`: PASS 40/40.
+- `INVENTORY_REAL_INTEGRATION=1; G6_DOCS_ROOT=...; npm test -- apps/inventory-svc/test/inventory.real.integration.spec.ts --reporter=verbose`: PASS 62/62 con PostgreSQL y RabbitMQ desechables.
+
+Esta repetición confirma harnesses aislados por bounded context, no una única fixture ejecutada a través de los servicios/repositorios de Catalog, Inventory, Pricing y Promotions con IDs compartidos. La fixture unificada solicitada permanece `PARTIAL`. El preflight de reconciliación `05-release-bootstrap-preflight.sql` es de solo lectura y no se ejecutó en Supabase; el handoff directo no contiene el detalle suficiente para generar deltas físicos exactos y seguros para las migraciones con `DDL_PRESENT_LEDGER_MISSING`/`PARTIALLY_APPLIED`. No se inventaron reconciliaciones, no se tocaron ledgers y no se ejecutó DDL/DML remoto.

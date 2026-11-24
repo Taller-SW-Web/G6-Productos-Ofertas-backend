@@ -28,7 +28,11 @@ Las pruebas funcionales de Inventory existentes pueden ejecutarse con `INVENTORY
 
 ## Lifecycle de Inventory
 
-`ops/azure/h5-runtime-preflight/inventory-sku-lifecycle-backfill.candidate.sql` resuelve todos los SKU versionados mediante `catalog.sku_identity` y su dueño exacto (producto base o variante). Solo se consideran entidades con versión de Catalog positiva y representable por `integer`; estado, versión y timestamp proceden del dueño Catalog. Las versiones se comparan contra el estado actual de Inventory; un valor superior se conserva, una igualdad con datos distintos o identidad no resoluble rechaza el lote entero sin escrituras. El script requiere opt-in transaccional explícito, es idempotente y escribe solo `inventory.sku_lifecycle`, sin eventos ni cambios de stock, reservas, operaciones, kardex u outbox.
+`ops/azure/h5-runtime-preflight/inventory-sku-lifecycle-backfill.candidate.sql` resuelve las identidades mediante `catalog.sku_identity` y su dueño exacto (producto base o variante). El candidato es un cuerpo SQL reutilizable; no inicia ni termina la transacción. Los bloques completos para el conector se generan en `inventory-sku-lifecycle-apply.transaction.sql` y `inventory-sku-lifecycle-ensayo.transaction.sql`; el primero conserva `BEGIN`/`SET LOCAL`/precheck/postcheck/`COMMIT`, y el ensayo termina siempre en `ROLLBACK`. Cualquier rechazo eleva excepción con resumen y aborta el lote; no existe un estado de éxito `REJECTED_NO_WRITES`.
+
+Para un SKU inactivo por transición de lifecycle, versión y `changed_at` provienen del último evento autoritativo `catalog.sku.deactivated`. Un `updated_at` posterior por otro cambio no reemplaza ese evento. Si Catalog muestra reactivación después de una baja, o la desactivación del padre de variantes no produjo evento SKU para una identidad que ahora no es vendible, el candidato rechaza esa identidad porque la secuencia no es inequívoca. Una identidad activa sin evento previo de baja se inicializa como snapshot del Catalog actual; `updated_at` no se presenta como evento emitido. El SKU base de un producto con variantes sigue no vendible. Borradores sin versión positiva ni stock se excluyen.
+
+La verificación requiere SELECT de Catalog identities/products/variants/outbox y de las tablas Inventory protegidas para comparar hashes; la única escritura del candidato es `inventory.sku_lifecycle`. No altera stock, reservas, operaciones, kardex, outbox, conciliaciones offline, Catalog ni ledgers.
 
 La población requerida se toma del contrato operativo `sku_lifecycle` como catálogo versionado completo, no como mero conjunto de SKU con stock. El test demuestra SKU base simple, SKU base de producto con variantes (inactivo), variante activa, borrador versión cero excluido, versión superior preservada, conflicto de identidad/estado, overflow, falta de identidad y conservación del stock. La elegibilidad real se debe volver a previsualizar desde el dataset al momento de rollout.
 
@@ -40,7 +44,7 @@ En la evidencia de pedido G5, `channel_id` es el canal comercial original y acep
 
 Las lecturas directas base son el handoff sanitizado `HANDOFF-SUPABASE-G6-H5-AUDITORIA-DIRECTA.md` suministrado por coordinación y las comprobaciones focalizadas de checksums descritas en `migrations-reconciliation.md`. En esta rama no se ejecuta DDL/DML/GRANT ni se altera ledger. La presencia de una tabla u objeto no se convierte en un registro ficticio de migración.
 
-La secuencia real propuesta para posterior revisión está en `rollout-real-review-only.md`; no es un script listo para ejecución. Precondiciones y postcondiciones deben pasar primero en el ambiente aprobado, y cualquier drift bloquea el paso. Las tablas H5 existentes no se recrean.
+La secuencia de revisión está en `ROLLOUT-CHATGPT-SUPABASE.md` y `rollout-real-review-only.md`. Los dos bloques SQL completos son aptos para una solicitud única del conector; no dependen de `\\i`/`\\if`. El ensayo siempre hace rollback. No ejecutar en Supabase compartido sin autorización futura. Las tablas H5 existentes no se recrean.
 
 ## Supuestos y límites
 

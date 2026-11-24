@@ -476,6 +476,8 @@ jobs:
         cache-dependency-path: backend/package-lock.json
     - name: Instalar dependencias
       run: npm ci
+    - name: Verificar backfill de lifecycle en PostgreSQL 17 descartable
+      run: pwsh -NoProfile -File ops/supabase/g5-fixtures/tests/run-local-inventory-lifecycle.ps1
     - name: Ejecutar pruebas de Inventory con PostgreSQL y RabbitMQ desechables (obligatorias)
       env:
         INVENTORY_REAL_INTEGRATION: '1'

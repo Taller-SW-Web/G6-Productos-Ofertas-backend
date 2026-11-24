@@ -147,3 +147,63 @@ Marketplace: restauración de escala previamente terminó con código 0 y nueve 
 ## Límites
 
 No se cambió Supabase, Azure, ACA, Service Bus, Marketplace, tráfico, secretos, escala, ingress ni datos reales. No se publicó imagen, no se despachó CD, no se ejecutó HTTP, migración, grant o fixture fuera del PostgreSQL disposable anterior. El gate Chile sigue cerrado.
+
+## Addendum — correcciones finales y repetición PostgreSQL descartable (2026-11-24)
+
+### Evidencia nueva de Supabase y límites
+
+Se toma como evidencia base el handoff directo adjunto por coordinación; no se repitió la auditoría general ni se ejecutó SQL de escritura contra Supabase. La consulta focalizada comunicada por ChatGPT registra 75 identidades SKU (24 base, 51 variantes), 75 versiones positivas en rango, 57 activas según expresión del candidato, 18 inactivas/no vendibles, cero propietarios inválidos, cero lifecycle y cero SKU base no vendible con stock. El candidato no se ejecutó en el proyecto real.
+
+### Correcciones y scripts
+
+- El cuerpo `ops/azure/h5-runtime-preflight/inventory-sku-lifecycle-backfill.candidate.sql` ya no contiene `BEGIN`/`COMMIT`. El generador produce `inventory-sku-lifecycle-apply.transaction.sql` y `inventory-sku-lifecycle-ensayo.transaction.sql`: ambos incluyen `BEGIN`, `SET LOCAL`, precondiciones, cuerpo, postcondiciones, resumen y control transaccional completo; ensayo termina siempre en rollback. Un rechazo levanta excepción con detalle estructurado, por lo que el wrapper no puede tratar `REJECTED_NO_WRITES` como éxito.
+- El origen de estados de desactivación se limita a los eventos de Catalog con versión/timestamp autoritativos; modificaciones de producto no relacionadas no alteran el origen. Reactivaciones sin evento autoritativo y estados de variante no derivables se rechazan.
+- `05-release-bootstrap-preflight.sql` agrega consultas de metadata de solo lectura para las migraciones necesarias al bootstrap HTTP de Catalog, Inventory, Pricing y Promotions. Como la auditoría compartida no reportó la definición completa de cada objeto físico, no se generó SQL `ALTER/CREATE` de reconciliación para objetos parciales: eso sería una diferencia no probada. El ledger no fue manipulado.
+- `ROLLOUT-CHATGPT-SUPABASE.md` documenta los bloques SQL exactos de ensayo/apply y postchecks para revisión futura; no se ejecutó en el conector ni en Supabase real.
+- El workflow CI incorpora únicamente el runner focalizado de PostgreSQL desechable para lifecycle; no duplica suites existentes.
+
+### Pruebas repetidas en esta sesión
+
+Docker Server `29.9.3`; imagen PostgreSQL `17.11`:
+
+| Comando | Resultado |
+|---|---|
+| `pwsh -NoProfile -File ops/supabase/g5-fixtures/tests/run-local-inventory-lifecycle.ps1` | PASS; ensayo/apply simulado, lote mixto atómico, hashes íntegros y `DISPOSABLE_POSTGRES_CLEANUP_CONFIRMED` |
+| `node apps/promotions-svc/test/run-h5-postgres.mjs` | PASS 12/12; `DISPOSABLE_POSTGRES_CLEANUP_CONFIRMED` |
+| `npx vitest run apps/promotions-svc/src/coupons/coupon-command.spec.ts apps/promotions-svc/src/coupons/g5-coupon-snapshot.spec.ts --maxWorkers=1` | PASS 40/40 |
+| `$env:INVENTORY_REAL_INTEGRATION='1'; $env:G6_DOCS_ROOT='...\\docs'; npm test -- apps/inventory-svc/test/inventory.real.integration.spec.ts --reporter=verbose` | PASS 62/62 en PostgreSQL/RabbitMQ local descartable; sin interacción con Service Bus real |
+
+Las pruebas de promociones usan snapshots G5 y respuestas externas simuladas; no son homologación G5/G7. Los harnesses de Inventory y Promotions corren en bases descartables separadas. No se afirmó un recorrido integrado único Catalog→Inventory→Pricing→Promotions: no existe aún un test que ejecute esos servicios/repositorios con un set común de IDs y roles runtime sobre un mismo PostgreSQL. H04 queda `PARTIAL`.
+
+### Runtime, release y smoke
+
+La lectura local de configuración de ACA reportó los logins DB actuales Catalog `catalog_dev_login`, Inventory `inventory_dev_login`, Pricing `pricing_dev_login` y Promotions `promotions_dev_login`, todos del proyecto Supabase activo; los valores de contraseña no se imprimieron ni guardaron. La auditoría directa indicó que son logins de desarrollo con membresía `po_*_dev_runtime`, por lo que no se consideran prueba de identidad/grants de release. El candidato de Inventory conserva `inventory-runtime-grants.proposal.sql`; Promotions conserva `0002_coupon_http_runtime_role.sql`. No se concedieron permisos reales.
+
+La ruta de consulta de operaciones de cupones está protegida por identidad Promotions y requiere audience `api-productos` y scope `cupones:operaciones:leer`, pero el flag H5 efectivo no se consultó en este corte. No se modificó `azure-h5-chile`; Promotions smoke continúa pendiente. Gateway y demás smoke configurados según handoff previo no se alteraron.
+
+El manifiesto de release permanece `PREPARATION_ONLY`; SHAs productivos base corresponden a `49bab9e2075819d922c63b06fcc6fc6ac16ce703`, los digests de nuevas imágenes siguen pendientes. Bootstrap HTTP, activación asíncrona y homologación G5/G7 continúan como gates separados. Esta rama solo cambia candidatos, tests, runbooks y validación CI, no código de microservicios de runtime.
+
+### Estado consolidado
+
+| Control | Estado | Evidencia/pendiente |
+|---|---|---|
+| `CD_RBAC_VERIFIED` | PASS | Estado anterior aceptado; no repetido |
+| `OIDC_AUTH_REAL` | NOT_RUN | No se ejecutó workflow/CD |
+| `SMOKE_CONFIGURATION` | PARTIAL | Promotions no configurado; ruta/flag efectivo debe acreditarse en release |
+| `SUPABASE_SCHEMA_RECONCILED` | PARTIAL | Preflight estático disponible; falta resultado de comparación física completa |
+| `MIGRATION_LEDGER_RECONCILED` | PARTIAL | Checksums históricos documentados; drift físico candidato sin delta verificado |
+| `PROMOTIONS_CHANNEL_COMPATIBILITY` | PASS | Canal comercial separado del sender `modulo-ventas`; snapshot rechaza VENTAS |
+| `RUNTIME_GRANTS_VERIFIED_LOCAL` | PASS | Harnesses prueban mínimo privilegio en roles aislados; no equivalen al principal de release |
+| `FIXTURES_PREPARED` | PARTIAL | Scripts lifecycle/reconciliación y harnesses existentes; fixture integrada de cuatro contextos pendiente |
+| `FIXTURES_APPLIED_ISOLATED` | PASS | Lifecycle y Promotions aplicados en PostgreSQL 17.11 desechable, en harnesses independientes |
+| `FIXTURES_FUNCTIONAL_TESTS` | PARTIAL | Inventory 62/62, Promotions PG 12/12 y unitarias 40/40; falta camino integrado común de cuatro servicios |
+| `FIXTURES_CLEANUP` | PASS | Cleanup confirmado por los runners PostgreSQL repetidos |
+| `G5_SIMULATED_INTEGRATION` | PARTIAL | Snapshot doble en pruebas Promotions; sin flujo unificado cross-service |
+| `G7_SIMULATED_AUTH` | PARTIAL | Auth simulada en pruebas locales; no demuestra grants/autenticación externa |
+| `G5_G7_REAL_HOMOLOGATION` | NOT_RUN | Requiere servicios y evidencia bilateral reales |
+| `RELEASE_MANIFEST_PREPARED` | PASS | Manifiesto candidato, SHAs base y digests pendientes |
+| `RELEASE_READY` | PARTIAL | Requiere reconciliación del DDL esencial, grants runtime, imagen y smoke protegidos |
+| `SERVICE_BUS_READINESS` | PARTIAL | Pruebas locales disponibles; activación y scopes reales siguen en Fase 6 |
+| `CHILE_DEPLOY_FREEZE` | PASS | `AZURE_CHILE_DEPLOY_ENABLED=false`; sin despliegues |
+
+No se modificaron Supabase compartido, Azure/ACA, Service Bus, Marketplace, tráfico, secretos ni cuentas. No se ejecutaron grants, migraciones reales, publicaciones, CD, HTTP ni pruebas comerciales. El resultado funcional del retest Marketplace sigue `NOT_VERIFIED` según la evidencia aceptada previamente.

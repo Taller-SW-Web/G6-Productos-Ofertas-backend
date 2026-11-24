@@ -1,69 +1,34 @@
-# Secuencia SQL candidata para revisión de rollout real
+# Rollout real de Inventory SKU lifecycle — revisión solamente
 
-**NO EJECUTAR.** Preparado para revisión posterior por ChatGPT/DBA mediante el conector autorizado. No es una autorización de escritura. Nunca ejecutar en una conexión cuya identidad de proyecto/database no haya sido verificada desde esa misma sesión. Marketplace y tablas comerciales reales quedan fuera del alcance.
+**No ejecutar en esta fase.** El coordinador reserva la ejecución real mediante el conector Supabase. Este procedimiento no autoriza DDL, ledger, grants ni escrituras de fixtures. `AZURE_CHILE_DEPLOY_ENABLED` no se relaciona con Supabase.
 
-## Orden y gates
+## Secuencia única reproducible
 
-1. Obtener aprobación explícita de rollout, confirmar ventana y cerrar otros escritores/consumidores que puedan cambiar Catalog SKU/lifecycle/stock. `AZURE_CHILE_DEPLOY_ENABLED` no interviene en Supabase.
-2. Abrir transacción read-only y verificar el proyecto/ref autorizado, versión PostgreSQL 17, schemas/tablas, columnas, constraints, índices, trigger/owners y ledgers particulares. El conector debe revelar el identificador de proyecto, no una contraseña. Comparar checksums con `migrations-reconciliation.md` y comparar DDL completo contra los candidatos. Si cualquier estado difiere de lo esperado, parar; no reparar el ledger aquí.
-3. Verificar que todo `inventory.stock_balance.sku_id` tenga exactamente una fila en `catalog.sku_identity`, parent único y versión compatible; previsualizar base/variante, entidades versionadas sin stock, sin lifecycle, mismatches, cambios concurrentes y conteos. Confirmar que el baseline de stock/reservas permanece igual antes y después.
-4. Aplicar el backfill lifecycle solamente tras aprobación separada. Usar `inventory-sku-lifecycle-backfill.candidate.sql` en una misma sesión/transacción con opt-in `SET LOCAL g6.inventory_sku_lifecycle_backfill='apply'`. El candidato aborta si hay identidad ambigua/faltante, versión inválida, conflicto de versión/estado o stock huérfano; no inserta ni avanza parcialmente si encuentra rechazos.
-5. Releer lifecycle y las invariantes protegidas. Verificar conteos y digest/captura de las filas agregadas/avanzadas, además de que stock, reservas, operaciones, kardex, offline reconciliation y outbox no hayan cambiado. La salida de resumen/rechazos debe ser adjunta y sanitizada.
-6. Permisos Inventory: reutilizar `ops/azure/h5-runtime-preflight/inventory-runtime-grants.proposal.sql` únicamente cuando la identidad real de DB de la ACA esté identificada y aprobada como `inventory_app` o se haya revisado el nombre correcto. Comparar antes/después: USAGE schema, SELECT/INSERT/UPDATE solo en las dos tablas indicadas, sin DELETE/DDL ni otros esquemas.
-7. Promotions: comparar DDL existente de `h5_coupon_operations` y `h5_coupon_outbox` contra candidata 0001; no volver a ejecutar CREATE sobre tablas ya presentes. Aplicar candidata 0002 solo después de confirmar rol de runtime exacto (`po_promotions_runtime` solo si la ACA realmente hereda de él) y pre/post privilegios. Mantener `coupon_uses.restored_at` column-scoped; no conceder DELETE, TRUNCATE, REFERENCES, TRIGGER, MAINTAIN o DDL.
-8. Reabrir transacción read-only para postcondiciones y ledger. No insertar entradas ficticias: si el DDL ya está desplegado sin registro de servicio, crear una migración de reconciliación versionada y aprobada mediante el mecanismo oficial, no falsificar historial.
+1. En la misma sesión del conector, confirmar el proyecto/ref `slzglmtiyrzygpkiuthf`, PostgreSQL 17, usuario operador, schemas/tablas, owners, columnas y constraints. Consultar solo lectura el ledger de `inventory` y mantener separado el ledger global. No insertar ni modificar ledgers.
+2. Confirmar que las precondiciones del handoff directo continúan vigentes: identidades SKU inequívocas, versiones positivas dentro del rango `integer`, sin lifecycle preexistente inesperado, y sin cambios concurrentes. No repetir la auditoría general; si los resultados focalizados difieren de la evidencia aprobada, detener la operación.
+3. Verificar lectura autorizada de `catalog.sku_identity`, `catalog.products`, `catalog.variants`, `catalog.outbox`, `inventory.stock_balance` y de las seis tablas protegidas. `catalog.outbox` es necesario para ligar una baja a la versión/timestamp autoritativos de `catalog.sku.deactivated`. La escritura queda limitada a `inventory.sku_lifecycle`.
+4. Para ensayo, enviar **todo el contenido** de `inventory-sku-lifecycle-ensayo.transaction.sql` como una única solicitud SQL. Es SQL ordinario (sin `\i`, `\if`, variables psql ni dependencia de una segunda conexión); abre transacción, configura el opt-in con `SET LOCAL`, corre el cuerpo, postcondiciones y hashes de contenido y termina en `ROLLBACK`. Aceptar únicamente `POSTCHECK_OK` sin error. El rollback es obligatorio aun si las comprobaciones pasan.
+5. Tras revisar el ensayo, obtener aprobación separada de rollout. Ejecutar **todo el contenido** de `inventory-sku-lifecycle-apply.transaction.sql` como una única solicitud SQL en una sola conexión. Ese bloque usa el mismo cuerpo/pre/post que el ensayo y termina en `COMMIT` únicamente después de aprobar todas las verificaciones.
+6. Si falta una condición, cualquier identidad se rechaza, hay drift, una versión/evento no cuadra o el conector informa error, detenerse. La excepción aborta la transacción; solicitar `ROLLBACK` en esa sesión antes de cerrar. El resumen de rechazo se devuelve como `DETAIL` de la excepción `LIFECYCLE_BACKFILL_REJECTED`; no interpretarlo como éxito ni reintentar hasta resolver la causa mediante revisión.
+7. Verificar la respuesta `POSTCHECK_OK`, el resumen `eligible/inserted/advanced/preserved` y los hashes iguales para stock, reservas, operaciones, kardex, outbox y conciliaciones offline. Adjuntar evidencia sanitizada.
 
-## SQL de preflight y postcheck (solo lectura)
+Los dos archivos SQL son bloques completos ejecutables. Se generan desde `inventory-sku-lifecycle-backfill.candidate.sql` mediante:
 
-Ejecutar tras envolver cada bloque en transacción `READ ONLY` y `ROLLBACK`. Este bloque no certifica por sí solo DDL ni reemplaza el preflight del runbook:
-
-```sql
-BEGIN TRANSACTION READ ONLY;
-SELECT current_setting('server_version_num')::int AS server_version_num,
-       current_database() AS database_name,
-       current_user AS effective_role;
-SELECT count(*) AS identities,
-       count(*) FILTER (WHERE product_id IS NULL) AS no_product_id,
-       count(*) FILTER (WHERE variant_id IS NULL) AS no_variant_id
-FROM catalog.sku_identity;
-SELECT count(*) AS stock_rows,
-       count(DISTINCT b.sku_id) AS distinct_stock_skus,
-       count(*) FILTER (WHERE si.id IS NULL) AS unresolved_stock_rows,
-       count(*) FILTER (WHERE l.sku_id IS NULL) AS stock_without_lifecycle
-FROM inventory.stock_balance b
-LEFT JOIN catalog.sku_identity si ON si.sku = b.sku_id
-LEFT JOIN inventory.sku_lifecycle l ON l.sku_id = b.sku_id;
-SELECT count(*) AS lifecycle_rows,
-       count(*) FILTER (WHERE sku_version <= 0) AS invalid_versions
-FROM inventory.sku_lifecycle;
-ROLLBACK;
+```powershell
+pwsh -NoProfile -File ops/supabase/g5-fixtures/generate-lifecycle-rollout.ps1
 ```
 
-Verificar además el catálogo completo de columnas, `pg_get_constraintdef`, índices, triggers, owners, privilege tables y los ledgers `inventory.schema_migrations`/`promotions.schema_migrations` por separado. El `supabase_migrations.schema_migrations` global no es sustituto.
+La prueba local verifica el candidato en PostgreSQL 17 descartable, incluidos el ensayo y el rollback. Cualquier cambio del candidato requiere regenerar ambos bloques y repetir las pruebas antes de una revisión real.
 
-## Aplicación futura (no ejecutar en esta fase)
+## Semántica y límites
 
-El backfill ya contiene `BEGIN`, gate y checks de consistencia. Secuencia del operador, una vez autorizada:
+- Todos los propietarios provienen de `catalog.sku_identity` y de la fila exacta de producto/variante. Los SKU base de productos con variantes siguen representados como no activos vendibles.
+- Una baja actual requiere el evento autoritativo `catalog.sku.deactivated`; `sku_version` y `changed_at` salen de ese payload, no de un `updated_at` posterior. Una reactivación tras una baja se rechaza porque Catalog no publica actualmente un evento contractual de activación de SKU. Una desactivación de padre que solo produce `catalog.product.deactivated` no se convierte en eventos por variante.
+- Una fila activa sin evento de baja es una instantánea de baseline tomada del propietario actual de Catalog, no una afirmación de que `updated_at` sea un evento de activación.
+- Una identidad inválida, ambigua, sin versión requerida o incompatible aborta el lote completo. Las identidades de borrador no vendibles, sin stock y sin versión positiva quedan excluidas. Nunca se inventan versiones.
+- El candidato no emite eventos y no modifica Catalog, stock, reservas, operaciones, kardex, outbox, conciliaciones ni ledgers.
+- Los cambios a grants son un paso independiente, con revisión y autorización separadas; no están incluidos en estos bloques.
 
-```text
-1. Conectar a la base/branch aprobada y ejecutar/guardar preflight read-only.
-2. Confirmar permiso de escritura solo del operador y la ventana autorizada.
-3. En la misma conexión: SET LOCAL g6.inventory_sku_lifecycle_backfill = 'apply'; ejecutar inventory-sku-lifecycle-backfill.candidate.sql.
-4. Si resumen REJECTED_NO_WRITES o cualquier error: ROLLBACK/abortar y escalar; no repetir ni reparar manualmente.
-5. Si resumen APPLIED y postchecks íntegros: COMMIT bajo aprobación del responsable de datos.
-6. Aplicar grants mínimos solo en una transacción separada tras identidad/runtime role verificados.
-```
+## Recuperación
 
-No se publica una carga de fixtures shared. Las filas sintéticas de prueba solo se cargan en PostgreSQL local descartable, a través de sus triggers de Catalog.
-
-## Reversión
-
-- Antes de COMMIT, cualquier error o rechazo implica `ROLLBACK` de la transacción completa.
-- Después de COMMIT, no hacer un DELETE masivo por prefijo. La reversión lifecycle requiere manifiesto exacto, capturado antes del paso, de las filas lifecycle inexistentes previamente y de cualquier fila avanzada con valor original. Revertir únicamente filas que todavía coincidan exactamente con el resultado introducido por esta ejecución y solo con ventana de escritura coordinada. Si hay eventos posteriores, nuevos stock rows o versión lifecycle más alta, detenerse y conservar el estado; no sobrescribir un valor posterior.
-- Los grants se revierten solo revocando permisos exactos añadidos por este rollout, después de verificar que no los necesita otra ejecución. No revocar membresías preexistentes ni permisos de development.
-- Las tablas Promotions H5 ya existentes nunca se dropean como rollback. No se borra ni se reescribe ningún ledger histórico.
-- No existe reversión automática de eventos o efectos comerciales porque el backfill no los emite. No se debe publicar evento sintético para “compensar”.
-
-## Requisitos de aprobación futura
-
-Debe adjuntarse evidencia de identidad de proyecto, checksums, DDL equivalence, resumen de filas sin identificadores comerciales, principal ACA→rol PostgreSQL, ventana, conteos pre/post e invariantes. Marketplace sigue protegido; retest funcional `NOT_VERIFIED`. La ejecución no debe inferir consentimiento de una ventana finalizada ni de la existencia de tablas.
+Antes del commit, cualquier error debe terminar en rollback completo. Después del commit no hacer un `DELETE` por prefijo. La reversión requiere manifiesto exacto de filas insertadas/avanzadas por la ejecución y sus valores anteriores; eliminar/restaurar únicamente si las filas siguen coincidiendo con el resultado de esta ejecución y ninguna versión/evento posterior existe. Ante cualquier diferencia, detenerse. No revertir mensajes comerciales porque el backfill no publica eventos.
