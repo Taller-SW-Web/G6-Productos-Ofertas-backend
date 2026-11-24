@@ -23,7 +23,7 @@
         "G6_SECURITY_MODE": "G7_AUTHENTICATED",
         "G6_SERVICE_BUS_PRODUCTION_ENABLED": "true",
         "AZURE_CLIENT_ID": "",
-        "CATALOG_H5_DESTINATIONS": "g6.taxonomy.from.catalog"
+        "CATALOG_H5_DESTINATIONS": ""
       },
       "queueGrants": []
     },

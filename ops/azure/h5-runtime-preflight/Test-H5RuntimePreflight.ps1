@@ -46,6 +46,20 @@ try {
   Assert ((Get-H5GhcrReleaseStatus 'UNKNOWN' '' '' $false) -eq 'NO_VISIBILITY') 'GHCR access without visibility is not treated as unpublished'
   Assert ((Get-H5GhcrReleaseStatus 'VISIBLE' ('a'*40) '' $false) -eq 'MISSING_FOR_RELEASE_SHA') 'visible package without release digest is distinguished'
   Assert ((Get-H5GhcrReleaseStatus 'VISIBLE' ('a'*40) ('a'*40) $true) -eq 'VERIFIED') 'visible package with verified release digest is accepted'
+  $ociManifest = @{mediaType='application/vnd.oci.image.manifest.v1+json';config=@{digest='sha256:' + ('a'*64)}}
+  Assert ((Get-H5OciPlatformSelection $ociManifest).Status -eq 'SELECTED') 'GHCR single OCI manifest is selected'
+  Assert (Test-H5OciDigest ('sha256:' + ('a'*64)) ('sha256:' + ('a'*64))) 'GHCR manifest digest matches requested digest exactly'
+  Assert (-not (Test-H5OciDigest ('sha256:' + ('a'*64)) ('sha256:' + ('b'*64)))) 'GHCR mismatched index or child digest is rejected'
+  $ociIndex = @{mediaType='application/vnd.oci.image.index.v1+json';manifests=@(
+    @{digest='sha256:' + ('b'*64);platform=@{os='unknown';architecture='unknown'};annotations=@{'vnd.docker.reference.type'='attestation-manifest'}},
+    @{digest='sha256:' + ('c'*64);platform=@{os='linux';architecture='amd64'}},
+    @{digest='sha256:' + ('d'*64);platform=@{os='linux';architecture='arm64'}})}
+  Assert ((Get-H5OciPlatformSelection $ociIndex).Digest -eq ('sha256:' + ('c'*64))) 'GHCR OCI index selects exactly linux/amd64 and ignores attestation descriptors'
+  $ambiguousIndex = @{mediaType=$ociIndex.mediaType;manifests=@($ociIndex.manifests[1],@{digest='sha256:' + ('e'*64);platform=@{os='linux';architecture='amd64'}})}
+  Assert ((Get-H5OciPlatformSelection $ambiguousIndex).Status -eq 'PLATFORM_AMBIGUOUS') 'GHCR OCI index rejects ambiguous target platforms'
+  Assert ((Get-H5OciPlatformSelection @{mediaType=$ociIndex.mediaType;manifests=@()}).Status -eq 'PLATFORM_MISSING') 'GHCR OCI index rejects absent target platform'
+  Assert ((Test-H5OciConfig @{os='linux';architecture='amd64';config=@{Labels=@{'org.opencontainers.image.title'='catalog-svc';'org.opencontainers.image.revision'=('a'*40);'org.opencontainers.image.source'='https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend'}}} 'catalog-svc' ('a'*40)) -eq 'VERIFIED') 'GHCR image config verifies platform and exact OCI provenance labels'
+  Assert ((Test-H5OciConfig @{os='linux';architecture='arm64';config=@{Labels=@{}}} 'catalog-svc' ('a'*40)) -eq 'PLATFORM_INVALID') 'GHCR image config rejects wrong platform'
 
   Assert ((Test-H5OptionalMessagingTable 'pricing-svc' $false $false) -eq 'NOT_REQUIRED_HTTP_BOOTSTRAP') 'Pricing H5 delivery table is optional while publication is off'
   Assert ((Test-H5OptionalMessagingTable 'pricing-svc' $true $false) -eq 'MISSING') 'enabled H5 delivery reports missing storage'
@@ -105,7 +119,7 @@ exit /b 0
     $parameters = $rsa.ExportParameters($false)
     $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     $head = B64Url ([Text.Encoding]::UTF8.GetBytes('{"alg":"RS256","kid":"test-key"}'))
-    $payload = B64Url ([Text.Encoding]::UTF8.GetBytes((@{iss='https://g7-auth-service.onrender.com/api/v1/auth';aud=@('api-productos');client_id='promotions-svc';exp=$now+300;scope='promociones:leer'} | ConvertTo-Json -Compress)))
+    $payload = B64Url ([Text.Encoding]::UTF8.GetBytes((@{iss='https://g7-auth-service.onrender.com/api/v1/auth';aud=@('api-productos');sub='promotions-svc';client_id='promotions-svc';exp=$now+300;scope='promociones:leer'} | ConvertTo-Json -Compress)))
     $signingInput = [Text.Encoding]::ASCII.GetBytes("$head.$payload")
     $signature = $rsa.SignData($signingInput,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)
     $jwt = "$head.$payload.$(B64Url $signature)"
@@ -120,20 +134,33 @@ exit /b 0
     foreach ($invalidJwtCase in @(
       @{ name='malformed JWT'; token='not-a-jwt'; keys=$jwks },
       @{ name='unknown kid'; token=$jwt; keys=@{keys=@()} },
-      @{ name='unsupported algorithm'; token=("$(B64Url ([Text.Encoding]::UTF8.GetBytes('{"alg":"none","kid":"test-key"}'))).$($jwtParts[1]).$($jwtParts[2])"); keys=$jwks }
+      @{ name='unsupported algorithm'; token=("$(B64Url ([Text.Encoding]::UTF8.GetBytes('{"alg":"none","kid":"test-key"}'))).$($jwtParts[1]).$($jwtParts[2])"); keys=$jwks },
+      @{ name='wrong signing algorithm'; token=("$(B64Url ([Text.Encoding]::UTF8.GetBytes('{"alg":"RS384","kid":"test-key"}'))).$($jwtParts[1]).$($jwtParts[2])"); keys=$jwks }
     )) {
       $invalidTokenResult = Test-H5JwtAuthenticity $invalidJwtCase.token $invalidJwtCase.keys 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' 'api-productos'
       Assert ($invalidTokenResult -is [pscustomobject] -and $invalidTokenResult.Status -eq 'TOKEN_INVALID' -and $invalidTokenResult.Scopes -is [array]) "JWT $($invalidJwtCase.name) returns structured TOKEN_INVALID"
     }
-    $salesPayload = B64Url ([Text.Encoding]::UTF8.GetBytes((@{iss='https://g7-auth-service.onrender.com/api/v1/auth';aud=@('api-ventas');client_id='modulo-ventas';exp=$now+300;scope='ventas:pedidos:evidencia-cupon:leer'} | ConvertTo-Json -Compress)))
+    $salesPayload = B64Url ([Text.Encoding]::UTF8.GetBytes((@{iss='https://g7-auth-service.onrender.com/api/v1/auth';aud=@('api-ventas');sub='modulo-ventas';client_id='modulo-ventas';exp=$now+300;scope='ventas:pedidos:evidencia-cupon:leer'} | ConvertTo-Json -Compress)))
     $salesInput = [Text.Encoding]::ASCII.GetBytes("$head.$salesPayload")
     $salesJwt = "$head.$salesPayload.$(B64Url ($rsa.SignData($salesInput,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)))"
     Assert ((Test-H5JwtAuthenticity $salesJwt $jwks 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' 'api-productos').Status -eq 'TOKEN_INVALID') 'api-ventas audience/scope cannot pass as an api-productos token'
-    $unknownPayload = B64Url ([Text.Encoding]::UTF8.GetBytes((@{iss='https://g7-auth-service.onrender.com/api/v1/auth';aud=@('api-productos');client_id='promotions-svc';exp=$now+300;scope='scope:no-registrado'} | ConvertTo-Json -Compress)))
+    $unknownPayload = B64Url ([Text.Encoding]::UTF8.GetBytes((@{iss='https://g7-auth-service.onrender.com/api/v1/auth';aud=@('api-productos');sub='promotions-svc';client_id='promotions-svc';exp=$now+300;scope='scope:no-registrado'} | ConvertTo-Json -Compress)))
     $unknownInput = [Text.Encoding]::ASCII.GetBytes("$head.$unknownPayload")
     $unknownJwt = "$head.$unknownPayload.$(B64Url ($rsa.SignData($unknownInput,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)))"
     $unknownResult = Test-H5JwtAuthenticity $unknownJwt $jwks 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' 'api-productos'
     Assert ($unknownResult.Status -eq 'TOKEN_VALID' -and (Test-H5JwtRequiredScopes $unknownResult.Status $unknownResult.Scopes @('scope:no-registrado') $apiProductsScopes) -eq 'AUTHORIZATION_NOT_RUN') 'G7 token authenticity is not converted to authorization by uncontracted scopes'
+    $caseAudiencePayload = B64Url ([Text.Encoding]::UTF8.GetBytes((@{iss='https://g7-auth-service.onrender.com/api/v1/auth';aud=@('API-PRODUCTOS');sub='promotions-svc';client_id='promotions-svc';exp=$now+300;scope='promociones:leer'} | ConvertTo-Json -Compress)))
+    $caseAudienceInput = [Text.Encoding]::ASCII.GetBytes("$head.$caseAudiencePayload")
+    $caseAudienceJwt = "$head.$caseAudiencePayload.$(B64Url ($rsa.SignData($caseAudienceInput,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)))"
+    Assert ((Test-H5JwtAuthenticity $caseAudienceJwt $jwks 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' 'api-productos').Status -eq 'TOKEN_INVALID') 'JWT audience comparison is exact and case sensitive'
+    $wrongIdentityPayload = B64Url ([Text.Encoding]::UTF8.GetBytes((@{iss='https://g7-auth-service.onrender.com/api/v1/auth';aud=@('api-productos');sub='Promotions-Svc';client_id='Promotions-Svc';exp=$now+300;scope='promociones:leer'} | ConvertTo-Json -Compress)))
+    $wrongIdentityInput = [Text.Encoding]::ASCII.GetBytes("$head.$wrongIdentityPayload")
+    $wrongIdentityJwt = "$head.$wrongIdentityPayload.$(B64Url ($rsa.SignData($wrongIdentityInput,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)))"
+    Assert ((Test-H5JwtAuthenticity $wrongIdentityJwt $jwks 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' 'api-productos').Status -eq 'TOKEN_INVALID') 'JWT service identity comparison is exact and case sensitive'
+    $expiredPayload = B64Url ([Text.Encoding]::UTF8.GetBytes((@{iss='https://g7-auth-service.onrender.com/api/v1/auth';aud=@('api-productos');sub='promotions-svc';client_id='promotions-svc';exp=$now-1;scope='promociones:leer'} | ConvertTo-Json -Compress)))
+    $expiredInput = [Text.Encoding]::ASCII.GetBytes("$head.$expiredPayload")
+    $expiredJwt = "$head.$expiredPayload.$(B64Url ($rsa.SignData($expiredInput,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)))"
+    Assert ((Test-H5JwtAuthenticity $expiredJwt $jwks 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' 'api-productos').Status -eq 'TOKEN_INVALID') 'JWT expiration is enforced'
   } finally { $rsa.Dispose() }
 
   $staticGate = Get-H5PreflightOutcome 'STATIC' @(
@@ -198,17 +225,50 @@ exit /b 0
     $serviceTarget.env.AZURE_CLIENT_ID = $clientId
     $serviceTarget.queueGrants = @(@{queue="g6.test.$service";roles=@('Azure Service Bus Data Sender')})
   }
-  $targetResult = Test-H5IntegrationTarget $syntheticTarget $resolvedGuarded $guardedParameters
+  $syntheticMatrix = [pscustomobject]@{Status='APPROVED';CatalogDestinations=@();Rows=@(foreach ($service in @('catalog-svc','inventory-svc','pricing-svc','promotions-svc')) {@{service=$service;queue="g6.test.$service";role='Azure Service Bus Data Sender';approval='APPROVED'}})}
+  $targetResult = Test-H5IntegrationTarget $syntheticTarget $resolvedGuarded $guardedParameters $syntheticMatrix
   Assert ($targetResult.Status -eq 'PASS') 'approved synthetic H5 target passes with four distinct identities and per-service queue grants'
+  $contractMatrix = Get-H5ServiceBusContractMatrix
+  Assert ($contractMatrix.Rows.Count -eq 16 -and $contractMatrix.Status -eq 'PENDING' -and @($contractMatrix.Rows | Where-Object approval -ne 'APPROVED').Count -eq 16 -and $contractMatrix.SourceDocsRevision -eq '40524e96c6973f84d74160076781702fe2a3da19' -and $contractMatrix.SourceBackendRevision -eq 'c1eb244b73c5c151569ed6735761ff8c8d19b55d') 'production queue-role matrix pins independent Docs/Backend sources and remains pending until rows are approved'
+  $docsRepo = [IO.Path]::GetFullPath((Join-Path $root '..\..\..\..\docs'))
+  $officialQueueMatrix = git -C $docsRepo show 'origin/master:integraciones/MATRIZ-IMPLEMENTACION-SERVICE-BUS-H5.md' | Out-String
+  $officialRowsMatch = $true
+  foreach ($sourceRow in @($contractMatrix.Rows | Group-Object source | ForEach-Object { $_.Group | Select-Object -First 1 })) {
+    if ($officialQueueMatrix -notmatch "(?m)^\|\s*$([regex]::Escape($sourceRow.source))\s+.*$([regex]::Escape($sourceRow.queue))") { $officialRowsMatch = $false }
+  }
+  Assert $officialRowsMatch 'contract queue and operation rows correspond to the official versioned executable H5 matrix'
+  $completeCandidateTarget = $syntheticTarget | ConvertTo-Json -Depth 30 | ConvertFrom-Json -AsHashtable
+  foreach ($service in @('catalog-svc','inventory-svc','pricing-svc','promotions-svc')) {
+    $candidateRows = @($contractMatrix.Rows | Where-Object service -ceq $service)
+    $completeCandidateTarget.services[$service].queueGrants = @($candidateRows | Group-Object queue | ForEach-Object {@{queue=$_.Name;roles=@($_.Group.role)}})
+  }
+  $completeCandidateResult = Test-H5IntegrationTarget $completeCandidateTarget $resolvedGuarded $guardedParameters $contractMatrix
+  Assert ($completeCandidateResult.Status -eq 'PENDING') "complete candidate queue assignments remain pending while official approval is unresolved ($($completeCandidateResult.Status): $($completeCandidateResult.Errors -join ','))"
+  $incompleteTarget = $syntheticTarget | ConvertTo-Json -Depth 30 | ConvertFrom-Json -AsHashtable; $incompleteTarget.services['catalog-svc'].queueGrants = @()
+  Assert ((Test-H5IntegrationTarget $incompleteTarget $resolvedGuarded $guardedParameters $syntheticMatrix).Status -eq 'PENDING') 'target missing one contract-required queue assignment cannot pass'
+  $duplicateTarget = $syntheticTarget | ConvertTo-Json -Depth 30 | ConvertFrom-Json -AsHashtable; $duplicateTarget.services['catalog-svc'].queueGrants += $duplicateTarget.services['catalog-svc'].queueGrants[0]
+  Assert ((Test-H5IntegrationTarget $duplicateTarget $resolvedGuarded $guardedParameters $syntheticMatrix).Errors -contains 'QUEUE_GRANT_DUPLICATE_catalog-svc') 'duplicate target queue-role assignments are rejected'
+  $wrongRoleTarget = $syntheticTarget | ConvertTo-Json -Depth 30 | ConvertFrom-Json -AsHashtable; $wrongRoleTarget.services['catalog-svc'].queueGrants[0].roles = @('Azure Service Bus Data Receiver')
+  Assert ((Test-H5IntegrationTarget $wrongRoleTarget $resolvedGuarded $guardedParameters $syntheticMatrix).Errors -contains 'QUEUE_GRANT_NOT_APPROVED') 'target role inconsistent with contract matrix is rejected'
+  $unknownQueueTarget = $syntheticTarget | ConvertTo-Json -Depth 30 | ConvertFrom-Json -AsHashtable; $unknownQueueTarget.services['catalog-svc'].queueGrants[0].queue = 'g6.outside.scope'
+  Assert ((Test-H5IntegrationTarget $unknownQueueTarget $resolvedGuarded $guardedParameters $syntheticMatrix).Errors -contains 'QUEUE_OUTSIDE_CONTRACT_MATRIX_catalog-svc') 'queue outside phase matrix is rejected'
+  $catalogDestTarget = $syntheticTarget | ConvertTo-Json -Depth 30 | ConvertFrom-Json -AsHashtable; $catalogDestTarget.services['catalog-svc'].env.CATALOG_H5_DESTINATIONS = 'g6.taxonomy.from.catalog'
+  Assert ((Test-H5IntegrationTarget $catalogDestTarget $resolvedGuarded $guardedParameters $syntheticMatrix).Errors -contains 'CATALOG_DESTINATIONS_NOT_EXACTLY_APPROVED') 'Catalog destinations must exactly equal approved in-phase destinations'
   Assert ((@(Test-H5GuardedEnvironment ($bicep -join "`n"))).Count -eq 0 -and $resolvedGuarded['promotions-svc'].PROMOTIONS_H5_COUPON_COMMANDS_ENABLED -ceq 'false' -and $resolvedGuarded['pricing-svc'].PRICING_PRICE_CHANGED_PUBLISH_ENABLED -ceq 'false') 'H5 preparation passes while official #263 guarded commercial flags remain closed'
   $missingApproval = $syntheticTarget | ConvertTo-Json -Depth 30 | ConvertFrom-Json -AsHashtable; $missingApproval.approvalStatus = 'PENDING_APPROVAL'; $missingApproval.approvalReference = ''
-  Assert ((Test-H5IntegrationTarget $missingApproval $resolvedGuarded $guardedParameters).Status -eq 'PENDING') 'unapproved H5 commercial target stays pending'
+  Assert ((Test-H5IntegrationTarget $missingApproval $resolvedGuarded $guardedParameters $syntheticMatrix).Status -eq 'PENDING') 'unapproved H5 commercial target stays pending'
   $reusedIdentity = $syntheticTarget | ConvertTo-Json -Depth 30 | ConvertFrom-Json -AsHashtable; $reusedIdentity.services['catalog-svc'].identityClientId = $reusedIdentity.services['inventory-svc'].identityClientId; $reusedIdentity.services['catalog-svc'].env.AZURE_CLIENT_ID = $reusedIdentity.services['inventory-svc'].identityClientId
   $reusedIdentityResult = Test-H5IntegrationTarget $reusedIdentity $resolvedGuarded $guardedParameters
   Assert (($reusedIdentityResult.Errors -join ',') -match 'IDENTITY_REUSED_inventory-svc') 'H5 target rejects reusing one managed identity across services'
+  $directScope = '/subscriptions/s/resourceGroups/r/providers/Microsoft.ServiceBus/namespaces/n/queues/q'
+  $roleAssignments = @(@{principalId='p';scope=$directScope;roleDefinitionName='Azure Service Bus Data Sender'},@{principalId='p';scope='/subscriptions/s/resourceGroups/r/providers/Microsoft.ServiceBus/namespaces/n';roleDefinitionName='Azure Service Bus Data Receiver'})
+  $rbacAssessment = Get-H5ServiceBusRbacAssessment $roleAssignments 'p' $directScope @('Azure Service Bus Data Sender','Azure Service Bus Data Receiver') @('/subscriptions/s','/subscriptions/s/resourceGroups/r','/subscriptions/s/resourceGroups/r/providers/Microsoft.ServiceBus/namespaces/n')
+  Assert ($rbacAssessment.Status -eq 'INVALID' -and $rbacAssessment.Direct.Count -eq 1 -and $rbacAssessment.Inherited.Count -eq 1) 'RBAC distinguishes direct and inherited grants and rejects broad inherited data access'
+  $directOnly = @(@{principalId='p';scope=$directScope;roleDefinitionName='Azure Service Bus Data Sender'},@{principalId='p';scope=$directScope;roleDefinitionName='Azure Service Bus Data Receiver'})
+  Assert ((Get-H5ServiceBusRbacAssessment $directOnly 'p' $directScope @('Azure Service Bus Data Sender','Azure Service Bus Data Receiver') @()).Status -eq 'PASS') 'RBAC accepts exact direct queue grants with least privilege'
+  Assert ((Get-H5ServiceBusRbacAssessment @() 'p' $directScope @('Azure Service Bus Data Sender') @() 'UNAVAILABLE').Status -eq 'UNAVAILABLE') 'RBAC query without visibility is unavailable, never missing or pass'
   $unapprovedGrant = $syntheticTarget | ConvertTo-Json -Depth 30 | ConvertFrom-Json -AsHashtable; $unapprovedGrant.services['catalog-svc'].queueGrants[0].roles = @('Azure Service Bus Data Owner')
-  Assert ((@((Test-H5IntegrationTarget $unapprovedGrant $resolvedGuarded $guardedParameters).Errors) -join ',') -match 'QUEUE_GRANT_INVALID_catalog-svc') 'H5 target rejects broad or unrecognized Service Bus roles'
-  $docsRepo = [IO.Path]::GetFullPath((Join-Path $root '..\..\..\..\docs'))
+  Assert ((@((Test-H5IntegrationTarget $unapprovedGrant $resolvedGuarded $guardedParameters).Errors) -join ',') -match 'QUEUE_ROLE_INCOMPATIBLE_catalog-svc') 'H5 target rejects broad or unrecognized Service Bus roles'
   $openApiText = git -C $docsRepo show 'origin/master:contratos/http/openapi.yaml' | Out-String
   $contractOperationScopes = Get-H5ContractOperationScopes $openApiText
   $scopeOperationsValid = $true

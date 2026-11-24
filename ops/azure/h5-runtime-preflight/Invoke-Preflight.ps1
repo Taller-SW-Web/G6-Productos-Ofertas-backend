@@ -104,14 +104,15 @@ if (Test-Path -LiteralPath $BicepTemplatePath -PathType Leaf) {
 } else { Add-Result 'official-bicep-guarded-env' 'UNAVAILABLE' 'Official Bicep template is not present at the supplied local path; effective bootstrap cannot PASS.' }
 
 $h5Target = $null
+$contractMatrix = Get-H5ServiceBusContractMatrix
 $h5TargetCheck = [pscustomobject]@{ Status='NOT_REQUIRED'; Errors=@() }
 if ($Mode -eq 'H5_INTEGRATION') {
   if (Test-Path -LiteralPath $H5TargetPath -PathType Leaf) {
     try {
       $h5Target = Get-Content -LiteralPath $H5TargetPath -Raw | ConvertFrom-Json
-      $h5TargetCheck = Test-H5IntegrationTarget $h5Target $guardedValues $manifest
+      $h5TargetCheck = Test-H5IntegrationTarget $h5Target $guardedValues $manifest $contractMatrix
     } catch { $h5TargetCheck = [pscustomobject]@{ Status='INVALID'; Errors=@('H5_TARGET_JSON_INVALID') } }
-  } else { $h5TargetCheck = Test-H5IntegrationTarget $null $guardedValues $manifest }
+  } else { $h5TargetCheck = Test-H5IntegrationTarget $null $guardedValues $manifest $contractMatrix }
   Add-Result 'h5-integration-target-configuration' $h5TargetCheck.Status ($h5TargetCheck.Errors -join ', ')
 }
 
@@ -386,22 +387,37 @@ if ($runGhcr -and $ghcrComplete -and $registryUsername) {
           $state = Get-H5GhcrReleaseStatus 'VISIBLE' $sourceSha '' $false
           $detail = 'Registry grants pull visibility; exact official release SHA/digest are not available.'
         } else {
-          $manifestResponse = Invoke-WebRequest -Uri "https://ghcr.io/v2/${repository}/manifests/${digest}" -Headers @{ Authorization="Bearer $registryToken"; Accept='application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' } -Method Get -TimeoutSec 20 -SkipHttpErrorCheck
+          $manifestResponse = Invoke-WebRequest -Uri "https://ghcr.io/v2/${repository}/manifests/${digest}" -Headers @{ Authorization="Bearer $registryToken"; Accept='application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' } -Method Get -TimeoutSec 20 -SkipHttpErrorCheck
           if ($manifestResponse.StatusCode -eq 404) { $state='MISSING_FOR_RELEASE_SHA' }
           elseif ($manifestResponse.StatusCode -in @(401,403)) { $state='NO_VISIBILITY' }
           elseif ($manifestResponse.StatusCode -ne 200) { $state='UNAVAILABLE' }
           else {
             $actualDigest = [string]$manifestResponse.Headers['docker-content-digest']
             $imageManifest = $manifestResponse.Content | ConvertFrom-Json
-            $configResponse = Invoke-WebRequest -Uri "https://ghcr.io/v2/${repository}/blobs/$($imageManifest.config.digest)" -Headers @{ Authorization="Bearer $registryToken" } -Method Get -TimeoutSec 20 -SkipHttpErrorCheck
-            $packageSha = ''
-            $digestVerified = $actualDigest -ceq $digest -and $configResponse.StatusCode -eq 200
-            if ($digestVerified) {
-              $labels = ($configResponse.Content | ConvertFrom-Json).config.Labels
-              $packageSha = [string]$labels.'org.opencontainers.image.revision'
-              $digestVerified = $packageSha -ceq $sourceSha -and $labels.'org.opencontainers.image.source' -ceq 'https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend' -and $labels.'org.opencontainers.image.title' -ceq $service
+            $digestVerified = Test-H5OciDigest $digest $actualDigest
+            $selection = Get-H5OciPlatformSelection $imageManifest 'linux' 'amd64'
+            if ($selection.Status -ne 'SELECTED') {
+              $state = 'MISSING_FOR_RELEASE_SHA'
+              $detail = "Requested digest is not a unique linux/amd64 executable manifest ($($selection.Status)); attestations are excluded."
+            } else {
+              if ($selection.Kind -eq 'index') {
+                $childResponse = Invoke-WebRequest -Uri "https://ghcr.io/v2/${repository}/manifests/$($selection.Digest)" -Headers @{ Authorization="Bearer $registryToken"; Accept='application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' } -Method Get -TimeoutSec 20 -SkipHttpErrorCheck
+                $childDigest = [string]$childResponse.Headers['docker-content-digest']
+                $childManifest = $childResponse.Content | ConvertFrom-Json
+                $digestVerified = $digestVerified -and $childResponse.StatusCode -eq 200 -and (Test-H5OciDigest $selection.Digest $childDigest) -and $childManifest.mediaType -in @('application/vnd.oci.image.manifest.v1+json','application/vnd.docker.distribution.manifest.v2+json')
+                $imageManifest = $childManifest
+              }
+              $configResponse = if ($digestVerified) { Invoke-WebRequest -Uri "https://ghcr.io/v2/${repository}/blobs/$($imageManifest.config.digest)" -Headers @{ Authorization="Bearer $registryToken" } -Method Get -TimeoutSec 20 -SkipHttpErrorCheck } else { $null }
+              $packageSha = ''
+              if ($digestVerified -and $configResponse.StatusCode -eq 200 -and (Test-H5OciDigest ([string]$imageManifest.config.digest) ([string]$configResponse.Headers['docker-content-digest']))) {
+                $config = $configResponse.Content | ConvertFrom-Json
+                $configStatus = Test-H5OciConfig $config $service $sourceSha 'linux' 'amd64'
+                $packageSha = [string]$config.config.Labels.'org.opencontainers.image.revision'
+                $digestVerified = $configStatus -ceq 'VERIFIED'
+                if (-not $digestVerified) { $detail = "Image config verification failed: $configStatus" }
+              } else { $digestVerified = $false; if ($configResponse -and $configResponse.StatusCode -eq 200) { $detail = 'Image config blob digest does not match its descriptor.' } }
+              $state = Get-H5GhcrReleaseStatus 'VISIBLE' $sourceSha $packageSha $digestVerified
             }
-            $state = Get-H5GhcrReleaseStatus 'VISIBLE' $sourceSha $packageSha $digestVerified
           }
         }
       }
@@ -438,13 +454,16 @@ if (-not $allowExternal) {
       $namespace = $namespaceOutput | ConvertFrom-Json; $identity = $identityOutput | ConvertFrom-Json
       $namespaceHost = ([uri]$namespace.serviceBusEndpoint).Host
       $expectedHost = [string]$guardedValues['promotions-svc'].SERVICE_BUS_NAMESPACE_FQDN
-      $paramsOk = $namespace.sku.name -ceq 'Basic' -and $namespaceHost -ceq $expectedHost -and $identity.id -ceq [string]$manifest.parameters.promotionsIdentityResourceId.value -and $identity.clientId -ceq [string]$manifest.parameters.promotionsIdentityClientId.value -and $queue.id -match '/queues/g6\.promotions\.commands$'
+      $paramsOk = $namespace.sku.name -ceq 'Basic' -and $namespaceHost -ceq $expectedHost -and $identity.id -ceq [string]$manifest.parameters.promotionsIdentityResourceId.value -and $identity.clientId -ceq [string]$manifest.parameters.promotionsIdentityClientId.value -and [string]$identity.principalId -cmatch '^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$' -and $queue.id -match '/queues/g6\.promotions\.commands$'
       Add-Result 'promotions-managed-identity-and-servicebus-parameters' $(if ($paramsOk -and $queue.status -ceq 'Active') { 'PASS' } else { 'FAIL' }) 'Existing identity and exact active queue metadata checked read-only.'
       $roleOutput = az role assignment list --scope $queue.id --include-inherited -o json 2>$null | Out-String
       if ($LASTEXITCODE -eq 0) {
-        $roles = @(($roleOutput | ConvertFrom-Json | Where-Object { $_.principalId -ceq $identity.principalId }).roleDefinitionName)
-        $rbacState = Get-H5QueueRbacStatus 'PASS' $roles
-        Add-Result 'promotions-servicebus-queue-rbac' $rbacState 'Data Sender and Data Receiver checked on the exact queue scope, including inherited assignments.'
+        $assignmentRows = @($roleOutput | ConvertFrom-Json)
+        $subscriptionScope = ($queue.id -split '/resourceGroups/')[0]
+        $resourceGroupScope = ($queue.id -split '/providers/')[0]
+        $broaderScopes = @($subscriptionScope,$resourceGroupScope,[string]$namespace.id)
+        $rbacAssessment = Get-H5ServiceBusRbacAssessment $assignmentRows ([string]$identity.principalId) ([string]$queue.id) @('Azure Service Bus Data Sender','Azure Service Bus Data Receiver') $broaderScopes
+        Add-Result 'promotions-servicebus-queue-rbac' $rbacAssessment.Status 'Direct versus inherited grants and excessive namespace/resource-group/subscription Service Bus data permissions checked read-only.'
       } else { Add-Result 'promotions-servicebus-queue-rbac' (Get-H5QueueRbacStatus 'UNAVAILABLE' @()) 'Queue-scope assignment query failed; no absence is inferred.' }
     } else {
       Add-Result 'promotions-managed-identity-and-servicebus-parameters' 'UNAVAILABLE' 'Read-only identity or queue lookup failed.'
@@ -461,13 +480,15 @@ if (-not $allowExternal) {
     } else {
       $targetIdentityMap = @{}
       $identityStates = [System.Collections.Generic.List[string]]::new()
+      $principalIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
       foreach ($service in @('catalog-svc','inventory-svc','pricing-svc','promotions-svc')) {
         $targetIdentity = $h5Target.services.$service
         try {
           $identityJson = az identity show --ids ([string]$targetIdentity.identityResourceId) -o json 2>$null | Out-String
           if ($LASTEXITCODE -ne 0) { $identityStates.Add('UNAVAILABLE'); continue }
           $identity = $identityJson | ConvertFrom-Json
-          if ($identity.id -ine [string]$targetIdentity.identityResourceId -or $identity.clientId -ine [string]$targetIdentity.identityClientId) { $identityStates.Add('INVALID') }
+          if ($identity.id -ine [string]$targetIdentity.identityResourceId -or $identity.clientId -cne [string]$targetIdentity.identityClientId -or [string]$identity.principalId -notmatch '^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$') { $identityStates.Add('INVALID') }
+          elseif (-not $principalIds.Add([string]$identity.principalId)) { $identityStates.Add('INVALID') }
           else {
             $appJson = az containerapp show --resource-group rg-g6-sb-h5-int-fork --name $service -o json 2>$null | Out-String
             if ($LASTEXITCODE -ne 0) { $identityStates.Add('UNAVAILABLE'); continue }
@@ -493,8 +514,14 @@ if (-not $allowExternal) {
               $queue = $targetQueue | ConvertFrom-Json
               $assignments = az role assignment list --scope $queue.id --include-inherited -o json 2>$null | Out-String
               if ($LASTEXITCODE -ne 0) { $rbacStates.Add('UNAVAILABLE'); continue }
-              $effectiveRoles = @(($assignments | ConvertFrom-Json | Where-Object { $_.principalId -ceq $identity.principalId }).roleDefinitionName)
-              if (@($grant.roles | Where-Object { $_ -notin $effectiveRoles }).Count -gt 0) { $rbacStates.Add('MISSING') } else { $rbacStates.Add('PASS') }
+              $namespaceJson = az servicebus namespace show --resource-group rg-g6-sb-h5-int-fork --name $namespaceName -o json 2>$null | Out-String
+              if ($LASTEXITCODE -ne 0) { $rbacStates.Add('UNAVAILABLE'); continue }
+              $namespaceResource = $namespaceJson | ConvertFrom-Json
+              $requiredRoles = @($contractMatrix.Rows | Where-Object { $_.service -ceq $service -and $_.queue -ceq $grant.queue -and $_.approval -ceq 'APPROVED' } | ForEach-Object role)
+              $subscriptionScope = ($queue.id -split '/resourceGroups/')[0]
+              $resourceGroupScope = ($queue.id -split '/providers/')[0]
+              $assessment = Get-H5ServiceBusRbacAssessment ($assignments | ConvertFrom-Json) ([string]$identity.principalId) ([string]$queue.id) $requiredRoles @($subscriptionScope,$resourceGroupScope,[string]$namespaceResource.id)
+              $rbacStates.Add($assessment.Status)
             } catch { $rbacStates.Add('UNAVAILABLE') }
           }
         }

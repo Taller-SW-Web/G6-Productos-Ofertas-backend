@@ -172,6 +172,31 @@ function Get-H5GhcrReleaseStatus([string]$Visibility, [string]$ExpectedSha, [str
   return 'VERIFIED'
 }
 
+function Get-H5OciPlatformSelection($Manifest, [string]$TargetOS='linux', [string]$TargetArchitecture='amd64') {
+  if ($null -eq $Manifest) { return [pscustomobject]@{Status='INVALID';Digest='';Kind=''} }
+  $media = [string]$Manifest.mediaType
+  if ($media -in @('application/vnd.oci.image.manifest.v1+json','application/vnd.docker.distribution.manifest.v2+json')) {
+    if (-not $Manifest.config.digest) { return [pscustomobject]@{Status='INVALID';Digest='';Kind='manifest'} }
+    return [pscustomobject]@{Status='SELECTED';Digest='';Kind='manifest'}
+  }
+  if ($media -notin @('application/vnd.oci.image.index.v1+json','application/vnd.docker.distribution.manifest.list.v2+json')) { return [pscustomobject]@{Status='INVALID';Digest='';Kind=''} }
+  $matches = @($Manifest.manifests | Where-Object { $_.platform.os -ceq $TargetOS -and $_.platform.architecture -ceq $TargetArchitecture -and -not $_.platform.variant -and -not $_.artifactType -and [string]$_.annotations.'vnd.docker.reference.type' -notmatch 'attestation' })
+  if ($matches.Count -eq 0) { return [pscustomobject]@{Status='PLATFORM_MISSING';Digest='';Kind='index'} }
+  if ($matches.Count -ne 1) { return [pscustomobject]@{Status='PLATFORM_AMBIGUOUS';Digest='';Kind='index'} }
+  return [pscustomobject]@{Status='SELECTED';Digest=[string]$matches[0].digest;Kind='index'}
+}
+
+function Test-H5OciDigest([string]$Expected, [string]$Actual) {
+  return $Expected -cmatch '^sha256:[a-f0-9]{64}$' -and $Actual -ceq $Expected
+}
+
+function Test-H5OciConfig($Config, [string]$Service, [string]$SourceSha, [string]$ExpectedOS='linux', [string]$ExpectedArchitecture='amd64') {
+  if ([string]$Config.os -cne $ExpectedOS -or [string]$Config.architecture -cne $ExpectedArchitecture) { return 'PLATFORM_INVALID' }
+  $labels = $Config.config.Labels
+  if ([string]$labels.'org.opencontainers.image.title' -cne $Service -or [string]$labels.'org.opencontainers.image.revision' -cne $SourceSha -or [string]$labels.'org.opencontainers.image.source' -cne 'https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend') { return 'PROVENANCE_INVALID' }
+  return 'VERIFIED'
+}
+
 function Resolve-H5GuardedEnvironmentReferences($GuardedEnvironment, $ParameterDocument) {
   $resolved = @{}
   foreach ($service in $GuardedEnvironment.Keys) {
@@ -187,7 +212,72 @@ function Resolve-H5GuardedEnvironmentReferences($GuardedEnvironment, $ParameterD
   return $resolved
 }
 
-function Test-H5IntegrationTarget($Target, $GuardedEnvironment, $ParameterDocument) {
+function Get-H5ServiceBusContractMatrix {
+  # Derived from Docs TOPOLOGIA-SERVICE-BUS-BASIC-H5.md and
+  # MATRIZ-IMPLEMENTACION-SERVICE-BUS-H5.md, cross-checked with the four
+  # services' H5 adapters. These source rows remain pending verification;
+  # they are not permission approvals or authorization to enable the flows.
+  $rows = @(
+    @{ service='catalog-svc'; queue='g6.inventory.from.catalog'; role='Azure Service Bus Data Sender'; source='R06'; operations=@('catalog.sku.deactivated','inventory.sku.initialization.requested'); evidence='apps/catalog-svc/src/catalog-service-bus.ts'; approval='PENDING' },
+    @{ service='inventory-svc'; queue='g6.inventory.from.catalog'; role='Azure Service Bus Data Receiver'; source='R06'; operations=@('catalog.sku.deactivated','inventory.sku.initialization.requested'); evidence='apps/inventory-svc/src/messaging/service-bus-consumer.ts'; approval='PENDING' },
+    @{ service='catalog-svc'; queue='g6.pricing.from.catalog'; role='Azure Service Bus Data Sender'; source='R07'; operations=@('catalog.sku.deactivated','pricing.product.initialization.requested'); evidence='apps/catalog-svc/src/catalog-service-bus.ts'; approval='PENDING' },
+    @{ service='pricing-svc'; queue='g6.pricing.from.catalog'; role='Azure Service Bus Data Receiver'; source='R07'; operations=@('catalog.sku.deactivated','pricing.product.initialization.requested'); evidence='apps/pricing-svc/src'; approval='PENDING' },
+    @{ service='catalog-svc'; queue='g6.promotions.from.catalog'; role='Azure Service Bus Data Sender'; source='R08'; operations=@('catalog.product.deactivated','catalog.sku.deactivated'); evidence='apps/catalog-svc/src/catalog-service-bus.ts'; approval='PENDING' },
+    @{ service='promotions-svc'; queue='g6.promotions.from.catalog'; role='Azure Service Bus Data Receiver'; source='R08'; operations=@('catalog.product.deactivated','catalog.sku.deactivated'); evidence='apps/promotions-svc/src/coupons/service-bus-events.ts'; approval='PENDING' },
+    @{ service='inventory-svc'; queue='g6.catalog.from.inventory'; role='Azure Service Bus Data Sender'; source='R11'; operations=@('inventory.sku.initialization.completed','inventory.sku.initialization.rejected'); evidence='apps/inventory-svc/src'; approval='PENDING' },
+    @{ service='catalog-svc'; queue='g6.catalog.from.inventory'; role='Azure Service Bus Data Receiver'; source='R11'; operations=@('inventory.sku.initialization.completed','inventory.sku.initialization.rejected'); evidence='apps/catalog-svc/src/catalog-service-bus.ts'; approval='PENDING' },
+    @{ service='promotions-svc'; queue='g6.promotions.from.inventory'; role='Azure Service Bus Data Receiver'; source='R13'; operations=@('inventory.stock.changed'); evidence='apps/promotions-svc/src/coupons/service-bus-events.ts'; approval='PENDING' },
+    @{ service='inventory-svc'; queue='g6.promotions.from.inventory'; role='Azure Service Bus Data Sender'; source='R13'; operations=@('inventory.stock.changed'); evidence='apps/inventory-svc/src'; approval='PENDING' },
+    @{ service='pricing-svc'; queue='g6.catalog.from.pricing'; role='Azure Service Bus Data Sender'; source='R15'; operations=@('pricing.product.initialization.completed','pricing.product.initialization.rejected'); evidence='apps/pricing-svc/src'; approval='PENDING' },
+    @{ service='catalog-svc'; queue='g6.catalog.from.pricing'; role='Azure Service Bus Data Receiver'; source='R15'; operations=@('pricing.product.initialization.completed','pricing.product.initialization.rejected'); evidence='apps/catalog-svc/src/catalog-service-bus.ts'; approval='PENDING' },
+    @{ service='promotions-svc'; queue='g6.promotions.from.pricing'; role='Azure Service Bus Data Receiver'; source='R17'; operations=@('pricing.price.changed'); evidence='apps/promotions-svc/src/coupons/service-bus-events.ts'; approval='PENDING' },
+    @{ service='pricing-svc'; queue='g6.promotions.from.pricing'; role='Azure Service Bus Data Sender'; source='R17'; operations=@('pricing.price.changed'); evidence='apps/pricing-svc/src'; approval='PENDING' },
+    @{ service='promotions-svc'; queue='g6.promotions.commands'; role='Azure Service Bus Data Sender'; source='N01'; operations=@('promotions.coupon.consumption.requested','promotions.coupon.restoration.requested'); evidence='apps/promotions-svc/src/coupons/coupon-h5-delivery.ts'; approval='PENDING' },
+    @{ service='promotions-svc'; queue='g6.promotions.commands'; role='Azure Service Bus Data Receiver'; source='N01'; operations=@('promotions.coupon.consumption.requested','promotions.coupon.restoration.requested'); evidence='apps/promotions-svc/src/coupons/coupon-consumer.ts'; approval='PENDING' }
+  )
+  return [pscustomobject]@{ Status='PENDING'; SourceDocsRevision='40524e96c6973f84d74160076781702fe2a3da19'; SourceBackendRevision='c1eb244b73c5c151569ed6735761ff8c8d19b55d'; SourceFiles=@('contratos/eventos/TOPOLOGIA-SERVICE-BUS-BASIC-H5.md','integraciones/MATRIZ-IMPLEMENTACION-SERVICE-BUS-H5.md','apps/catalog-svc/src/catalog-service-bus.ts','apps/inventory-svc/src/messaging/service-bus-consumer.ts','apps/promotions-svc/src/coupons/service-bus-events.ts'); Rows=@($rows); CatalogDestinations=@(); Blockers=@('R06/R07/R08/R11/R13/R15/R17 remain PENDING_VERIFICACION in the official executable matrix; candidate adapter paths are not proof of complete runtime wiring. N01 adapter/worker wiring remains pending. g6.taxonomy.from.catalog is R09 outside this four-service scope. No queue-role grants are approved by these contract rows.') }
+}
+
+function Test-H5TargetQueueGrants($Target, $ContractMatrix) {
+  $errors = [System.Collections.Generic.List[string]]::new(); $pending = [System.Collections.Generic.List[string]]::new()
+  if ($null -eq $ContractMatrix -or $ContractMatrix.Status -ne 'APPROVED') { $pending.Add('CONTRACT_QUEUE_MATRIX_NOT_APPROVED') }
+  $expected = @($ContractMatrix.Rows | ForEach-Object { "$($_.service)|$($_.queue)|$($_.role)" })
+  $actual = [System.Collections.Generic.List[string]]::new()
+  foreach ($service in @('catalog-svc','inventory-svc','pricing-svc','promotions-svc')) {
+    foreach ($grant in @($Target.services.$service.queueGrants)) {
+      $queue = [string]$grant.queue
+      if ($queue -notin @($ContractMatrix.Rows.queue)) { $errors.Add("QUEUE_OUTSIDE_CONTRACT_MATRIX_$service") }
+      foreach ($role in @($grant.roles)) {
+        $tuple = "$service|$queue|$([string]$role)"
+        if ($role -notin @('Azure Service Bus Data Sender','Azure Service Bus Data Receiver')) { $errors.Add("QUEUE_ROLE_INCOMPATIBLE_$service") }
+        if ($actual.Contains($tuple)) { $errors.Add("QUEUE_GRANT_DUPLICATE_$service") }
+        $actual.Add($tuple)
+      }
+    }
+  }
+  foreach ($tuple in $expected) { if (-not $actual.Contains($tuple)) { $pending.Add('QUEUE_GRANT_REQUIRED_MISSING') } }
+  foreach ($tuple in $actual) { if ($tuple -notin $expected) { $errors.Add('QUEUE_GRANT_NOT_APPROVED') } }
+  $destinations = @($ContractMatrix.CatalogDestinations | Sort-Object -Unique)
+  $catalogValue = [string]$Target.services.'catalog-svc'.env.CATALOG_H5_DESTINATIONS
+  $actualDestinations = @($catalogValue -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+  if (Compare-Object $destinations $actualDestinations) { $errors.Add('CATALOG_DESTINATIONS_NOT_EXACTLY_APPROVED') }
+  return [pscustomobject]@{ Status=$(if ($errors.Count) {'INVALID'} elseif ($pending.Count) {'PENDING'} else {'PASS'}); Errors=@($errors + $pending) }
+}
+
+function Get-H5ServiceBusRbacAssessment($Assignments, [string]$PrincipalId, [string]$QueueScope, [string[]]$RequiredRoles, [string[]]$BroaderScopes, [string]$QueryStatus='PASS') {
+  if ($QueryStatus -ne 'PASS') { return [pscustomobject]@{Status='UNAVAILABLE';Direct=@();Inherited=@();Excess=@()} }
+  $mine = @($Assignments | Where-Object { $_.principalId -ceq $PrincipalId })
+  $direct = @($mine | Where-Object { ([string]$_.scope).TrimEnd('/') -ceq $QueueScope.TrimEnd('/') })
+  $inherited = @($mine | Where-Object { ([string]$_.scope).TrimEnd('/') -cne $QueueScope.TrimEnd('/') })
+  $effective = @($mine | Where-Object { $_.roleDefinitionName -in @('Azure Service Bus Data Sender','Azure Service Bus Data Receiver','Azure Service Bus Data Owner') })
+  $directNames = @($direct.roleDefinitionName | Sort-Object -Unique)
+  $missing = @($RequiredRoles | Where-Object { $_ -notin $directNames })
+  $excess = @($effective | Where-Object { $_.roleDefinitionName -eq 'Azure Service Bus Data Owner' -or (($_.scope.TrimEnd('/') -in $BroaderScopes) -and $_.roleDefinitionName -in @('Azure Service Bus Data Sender','Azure Service Bus Data Receiver')) -or (($_.scope.TrimEnd('/') -ceq $QueueScope.TrimEnd('/')) -and $_.roleDefinitionName -notin $RequiredRoles) })
+  $status = if ($excess.Count) {'INVALID'} elseif ($missing.Count) {'MISSING'} else {'PASS'}
+  return [pscustomobject]@{ Status=$status; Direct=@($direct); Inherited=@($inherited); Excess=@($excess); Missing=@($missing) }
+}
+
+function Test-H5IntegrationTarget($Target, $GuardedEnvironment, $ParameterDocument, $ContractMatrix) {
   $pending = [System.Collections.Generic.List[string]]::new()
   $invalid = [System.Collections.Generic.List[string]]::new()
   if ($null -eq $Target) { return [pscustomobject]@{ Status='PENDING'; Errors=@('H5_TARGET_FILE_MISSING') } }
@@ -199,10 +289,12 @@ function Test-H5IntegrationTarget($Target, $GuardedEnvironment, $ParameterDocume
   elseif ($null -eq $GuardedEnvironment) { $pending.Add('BICEP_NAMESPACE_UNAVAILABLE') }
   elseif ($namespace -cne [string]$GuardedEnvironment['promotions-svc'].SERVICE_BUS_NAMESPACE_FQDN) { $invalid.Add('NAMESPACE_MISMATCH') }
 
+  if ($null -eq $ContractMatrix) { $ContractMatrix = Get-H5ServiceBusContractMatrix }
   $serviceNames = @('catalog-svc','inventory-svc','pricing-svc','promotions-svc')
   $clientIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  $resourceIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
   $requiredEnv = @{
-    'catalog-svc' = @('MESSAGING_PROVIDER','SERVICE_BUS_NAMESPACE_FQDN','G6_SECURITY_MODE','G6_SERVICE_BUS_PRODUCTION_ENABLED','AZURE_CLIENT_ID','CATALOG_H5_DESTINATIONS')
+    'catalog-svc' = @('MESSAGING_PROVIDER','SERVICE_BUS_NAMESPACE_FQDN','G6_SECURITY_MODE','G6_SERVICE_BUS_PRODUCTION_ENABLED','AZURE_CLIENT_ID')
     'inventory-svc' = @('MESSAGING_PROVIDER','SERVICE_BUS_NAMESPACE_FQDN','G6_SECURITY_MODE','G6_SERVICE_BUS_PILOT_ENABLED','G6_SERVICE_BUS_PRODUCTION_ENABLED','INVENTORY_SERVICE_BUS_PUBLISH_ENABLED','INVENTORY_SERVICE_BUS_CONSUME_ENABLED','AZURE_CLIENT_ID')
     'pricing-svc' = @('MESSAGING_PROVIDER','SERVICE_BUS_NAMESPACE_FQDN','G6_SECURITY_MODE','G6_SERVICE_BUS_PILOT_ENABLED','G6_SERVICE_BUS_PRODUCTION_ENABLED','PRICING_PRICE_CHANGED_PUBLISH_ENABLED','AZURE_CLIENT_ID')
     'promotions-svc' = @('MESSAGING_PROVIDER','SERVICE_BUS_NAMESPACE_FQDN','G6_SECURITY_MODE','G6_SERVICE_BUS_PRODUCTION_ENABLED','PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED','PROMOTIONS_H5_COUPON_COMMANDS_ENABLED','AZURE_CLIENT_ID')
@@ -215,6 +307,7 @@ function Test-H5IntegrationTarget($Target, $GuardedEnvironment, $ParameterDocume
     if (-not $clientId -or -not $resourceId) { $pending.Add("IDENTITY_PENDING_$service") }
     elseif ($clientId -notmatch '^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$' -or $resourceId -notmatch '^/subscriptions/[^/]+/resourceGroups/[^/]+/providers/Microsoft\.ManagedIdentity/userAssignedIdentities/[^/]+$') { $invalid.Add("IDENTITY_INVALID_$service") }
     elseif (-not $clientIds.Add($clientId)) { $invalid.Add("IDENTITY_REUSED_$service") }
+    elseif (-not $resourceIds.Add($resourceId)) { $invalid.Add("IDENTITY_RESOURCE_REUSED_$service") }
     $environment = $entry.env
     foreach ($name in $requiredEnv[$service]) {
       if ($null -eq $environment -or [string]::IsNullOrWhiteSpace([string]$environment.$name)) { $pending.Add("TARGET_ENV_PENDING_$service.$name") }
@@ -227,16 +320,13 @@ function Test-H5IntegrationTarget($Target, $GuardedEnvironment, $ParameterDocume
       foreach ($flag in @('G6_SERVICE_BUS_PRODUCTION_ENABLED','G6_SERVICE_BUS_PILOT_ENABLED','INVENTORY_SERVICE_BUS_PUBLISH_ENABLED','INVENTORY_SERVICE_BUS_CONSUME_ENABLED','PRICING_PRICE_CHANGED_PUBLISH_ENABLED','PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED','PROMOTIONS_H5_COUPON_COMMANDS_ENABLED')) {
         if ($requiredEnv[$service] -contains $flag -and [string]$environment.$flag -and [string]$environment.$flag -cne 'true') { $invalid.Add("TARGET_FLAG_NOT_ENABLED_$service.$flag") }
       }
-      if ($service -eq 'catalog-svc' -and [string]$environment.CATALOG_H5_DESTINATIONS -notmatch '^g6\.[a-z0-9.-]+$') { $invalid.Add('CATALOG_DESTINATION_INVALID') }
       if ($service -eq 'promotions-svc' -and [string]$ParameterDocument.parameters.promotionsIdentityClientId.value -and $clientId -cne [string]$ParameterDocument.parameters.promotionsIdentityClientId.value) { $invalid.Add('PROMOTIONS_IDENTITY_BICEP_PARAMETER_MISMATCH') }
     }
-    $queueGrants = @($entry.queueGrants)
-    if ($queueGrants.Count -eq 0) { $pending.Add("QUEUE_GRANTS_PENDING_$service") }
-    foreach ($grant in $queueGrants) {
-      if ([string]$grant.queue -notmatch '^g6\.[a-z0-9.-]+$' -or @($grant.roles).Count -eq 0 -or @($grant.roles | Where-Object { $_ -notin @('Azure Service Bus Data Sender','Azure Service Bus Data Receiver') }).Count -gt 0) { $invalid.Add("QUEUE_GRANT_INVALID_$service") }
-    }
+    foreach ($grant in @($entry.queueGrants)) { if (@($grant.roles).Count -eq 0) { $invalid.Add("QUEUE_GRANT_INVALID_$service") } }
     if ($entry.env.RABBITMQ_URL -or $entry.env.PRICING_AMQP_URL -or $entry.env.CATALOG_AMQP_ENABLED) { $invalid.Add("INCOMPATIBLE_BROKER_$service") }
   }
+  $matrixCheck = Test-H5TargetQueueGrants $Target $ContractMatrix
+  foreach ($error in @($matrixCheck.Errors)) { if ($error -ceq 'CONTRACT_QUEUE_MATRIX_NOT_APPROVED' -or $error -match 'REQUIRED_MISSING') { $pending.Add($error) } else { $invalid.Add($error) } }
   $flags = $Target.commercialFlags
   foreach ($pair in @(@('api-gateway','GATEWAY_G5_H5_ENABLED'),@('pricing-svc','PRICING_PRICE_CHANGED_PUBLISH_ENABLED'),@('promotions-svc','PROMOTIONS_H5_COUPON_COMMANDS_ENABLED'))) {
     if ([string]$flags.($pair[0]).($pair[1]) -cne 'true') { $pending.Add("COMMERCIAL_FLAG_PENDING_$($pair[0]).$($pair[1])") }
@@ -360,7 +450,7 @@ function Test-H5JwtAuthenticity([string]$Jwt, $Jwks, [string]$Issuer, [string]$E
     $input = [Text.Encoding]::ASCII.GetBytes($parts[0] + '.' + $parts[1])
     $signature = & $decode $parts[2]
     $validSignature = $false
-    if ($header.alg -eq 'RS256' -and $key.kty -eq 'RSA') {
+    if ($header.alg -ceq 'RS256' -and $key.kty -ceq 'RSA') {
       $rsa = [Security.Cryptography.RSA]::Create()
       try {
         $rsaParameters = [Security.Cryptography.RSAParameters]::new()
@@ -369,22 +459,13 @@ function Test-H5JwtAuthenticity([string]$Jwt, $Jwks, [string]$Issuer, [string]$E
         $rsa.ImportParameters($rsaParameters)
         $validSignature = $rsa.VerifyData($input,$signature,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.RSASignaturePadding]::Pkcs1)
       } finally { $rsa.Dispose() }
-    } elseif ($header.alg -eq 'ES256' -and $key.kty -eq 'EC' -and $key.crv -eq 'P-256') {
-      $ec = [Security.Cryptography.ECDsa]::Create([Security.Cryptography.ECCurve]::NamedCurves.nistP256)
-      try {
-        $ecParameters = [Security.Cryptography.ECParameters]::new()
-        $ecParameters.Curve = [Security.Cryptography.ECCurve]::NamedCurves.nistP256
-        $point = [Security.Cryptography.ECPoint]::new()
-        $point.X = & $decode $key.x; $point.Y = & $decode $key.y
-        $ecParameters.Q = $point
-        $ec.ImportParameters($ecParameters)
-        $validSignature = $ec.VerifyData($input,$signature,[Security.Cryptography.HashAlgorithmName]::SHA256,[Security.Cryptography.DSASignatureFormat]::IeeeP1363FixedFieldConcatenation)
-      } finally { $ec.Dispose() }
     } else { return [pscustomobject]@{ Status='TOKEN_INVALID'; Scopes=@(); Audience=$ExpectedAudience; Client='' } }
     $aud = @($claims.aud)
-    $client = if ($claims.client_id) { [string]$claims.client_id } else { [string]$claims.sub }
+    $client = [string]$claims.sub
     $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-    $valid = $validSignature -and [string]$claims.iss -ceq $Issuer -and $aud -contains $ExpectedAudience -and $client -ceq $ExpectedClient -and [long]$claims.exp -gt $now -and (-not $claims.nbf -or [long]$claims.nbf -le $now)
+    $audMatch = @($aud | Where-Object { [string]$_ -ceq $ExpectedAudience }).Count -gt 0
+    $clientClaimConsistent = $null -eq $claims.client_id -or [string]$claims.client_id -ceq $client
+    $valid = $validSignature -and [string]$claims.iss -ceq $Issuer -and $audMatch -and $client -ceq $ExpectedClient -and $clientClaimConsistent -and [long]$claims.exp -gt $now -and (-not $claims.nbf -or [long]$claims.nbf -le $now)
     $scopeText = if ($claims.scope) { [string]$claims.scope } else { (@($claims.scp) -join ' ') }
     return [pscustomobject]@{ Status=$(if ($valid) { 'TOKEN_VALID' } else { 'TOKEN_INVALID' }); Scopes=@(($scopeText -split '\s+') | Where-Object { $_ }); Audience=$ExpectedAudience; Client=$client }
   } catch { return [pscustomobject]@{ Status='TOKEN_INVALID'; Scopes=@(); Audience=$ExpectedAudience; Client='' } }
@@ -416,4 +497,4 @@ function Get-H5PreflightOutcome([string]$Mode, [object[]]$Results) {
   return [pscustomobject]@{ Mode=$Mode; OverallStatus=$overall; ExitCode=$exitCode; DeploymentAuthorized=$false; RequiredChecks=@($required[$Mode]); MandatoryResults=@($mandatory) }
 }
 
-Export-ModuleMember -Function Get-H5ReservedEnvironment,Test-H5ManifestEnvironment,Test-H5ManifestCompleteness,Get-H5GuardedEnvironment,Test-H5GuardedEnvironment,Resolve-H5GuardedEnvironmentReferences,Test-H5IntegrationTarget,Get-H5CheckSuccessStatus,Get-H5QueueRbacStatus,Test-H5PsqlAvailable,Get-H5GhcrReleaseStatus,Get-H5ContractScopes,Get-H5ContractOperationScopes,Get-H5PromotionsRequiredOperations,Test-H5JwtRequiredScopes,Get-H5ScopeAuthorizationStatus,Test-H5OptionalMessagingTable,Test-H5PemCertificate,New-H5ProtectedCaFile,Invoke-H5ReadOnlySql,Test-H5JwtAuthenticity,Get-H5PreflightOutcome
+Export-ModuleMember -Function Get-H5ReservedEnvironment,Test-H5ManifestEnvironment,Test-H5ManifestCompleteness,Get-H5GuardedEnvironment,Test-H5GuardedEnvironment,Resolve-H5GuardedEnvironmentReferences,Get-H5ServiceBusContractMatrix,Test-H5TargetQueueGrants,Get-H5ServiceBusRbacAssessment,Test-H5IntegrationTarget,Get-H5CheckSuccessStatus,Get-H5QueueRbacStatus,Test-H5PsqlAvailable,Get-H5GhcrReleaseStatus,Get-H5OciPlatformSelection,Test-H5OciDigest,Test-H5OciConfig,Get-H5ContractScopes,Get-H5ContractOperationScopes,Get-H5PromotionsRequiredOperations,Test-H5JwtRequiredScopes,Get-H5ScopeAuthorizationStatus,Test-H5OptionalMessagingTable,Test-H5PemCertificate,New-H5ProtectedCaFile,Invoke-H5ReadOnlySql,Test-H5JwtAuthenticity,Get-H5PreflightOutcome

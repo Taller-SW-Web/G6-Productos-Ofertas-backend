@@ -11,8 +11,8 @@ PostgreSQL. No crea ACA, ejecuta CD, modifica grants, aplica SQL ni cambia datos
   `51f8441a2adb2e0484b2a2d3072617908f9672dc`. El validador no fue modificado.
 - #263 está integrado en `master`; el test Node valida contra el SHA fijado y
   contra el validador presente en `origin/master`.
-- Docs `master`: `490172c11cb4b83ddd1996f8d5834d0402184cf8`; los seis contratos
-  H5 revisados no cambiaron respecto a la lectura anterior.
+- Docs `master`: `40524e96c6973f84d74160076781702fe2a3da19`; topología Basic y
+  matriz ejecutable contrastadas para este cierre.
 - H5 Service Bus Basic es mensajería entre bounded contexts G6; G5 consume por
   HTTP autenticado a través de APIM/Gateway. La plantilla de bootstrap conserva
   las banderas comerciales y de eventos deshabilitadas.
@@ -77,6 +77,58 @@ la plantilla #263. En el bootstrap inicial quedan cerrados bypass demo,
 operaciones públicas, fan-out, publicación Pricing y comandos comerciales de
 Promotions.
 
+## Matriz contractual de colas y roles (H5_INTEGRATION)
+
+La matriz de referencia la produce `Get-H5ServiceBusContractMatrix()` dentro
+del módulo, independientemente de `h5-integration-target.private.json`. Se
+deriva de `TOPOLOGIA-SERVICE-BUS-BASIC-H5.md` y de las filas R06, R07, R08,
+R11, R13, R15, R17 de `MATRIZ-IMPLEMENTACION-SERVICE-BUS-H5.md`, contrastadas
+con adaptadores examinados en Backend
+`c1eb244b73c5c151569ed6735761ff8c8d19b55d` en Catalog, Inventory, Pricing y
+Promotions. Cada fila registra mensajes/operaciones y el path de evidencia
+candidato. Las
+tuplas por productor llevan Data Sender; las del servicio destinatario llevan
+Data Receiver. N01 añade las dos funciones de Promotions en
+`g6.promotions.commands`.
+
+Estas filas siguen `PENDING_VERIFICACION` en la matriz oficial y N01 aún no
+acredita wiring runtime. Por ello la matriz del preflight tiene 16 tuplas
+contractuales candidatas pero no aprobadas y `H5_INTEGRATION` queda PENDING;
+los candidatos no son grants autorizados. La preparación de Catalog exige
+`CATALOG_H5_DESTINATIONS` exactamente igual al conjunto aprobado para los
+cuatro servicios; hoy ese conjunto es vacío y
+`g6.taxonomy.from.catalog` (R09) queda fuera de alcance. No se habilita una
+cola por deducción. Cuando las fuentes oficiales aprueben una fila, el target
+debe incluir exactamente sus tuplas; el preflight rechaza omisiones,
+duplicados, roles incompatibles, colas ajenas o permisos adicionales.
+
+Para los grants observables, el probe distingue asignaciones directas en el
+scope de la cola de las heredadas. Exige cada rol contractual directamente en
+esa cola y rechaza Data Sender/Receiver en namespace, resource group o
+suscripción, así como Data Owner. Si Azure CLI no puede leer el scope o sus
+asignaciones, el resultado es `UNAVAILABLE`, nunca una presunción de ausencia
+ni `PASS`. La misma política se usa en `promotions-servicebus-queue-rbac`.
+No se crean, eliminan ni alteran asignaciones.
+
+## Procedencia OCI GHCR
+
+El workflow oficial `publish-only-images.yml` publica un tag inmutable por SHA,
+con `docker/build-push-action` (`load: true`) y `docker push`; la verificación
+del propio workflow exige labels `source`, `revision` y `title`. El preflight
+acepta manifests OCI/Docker individuales y también indexes/lists. Para estos
+últimos valida el digest del index solicitado, requiere un único descriptor
+ejecutable `linux/amd64`, busca el manifest hijo por digest y verifica su
+digest, el digest de configuración, plataforma y las tres labels exactas.
+Los descriptors `unknown/unknown` de attestations no se tratan como imágenes;
+plataforma ausente o ambigua no puede producir `VERIFIED`.
+
+Los probes JWT admiten solo RS256 como el runtime G7 de la fase. Comparan
+issuer, audiencia y `sub` con igualdad sensible a mayúsculas; si está presente,
+`client_id` debe ser idéntico a `sub`, como en el guard efectivo de Inventory.
+Firma, `kid`, `exp` y `nbf` se validan antes de scopes. La autenticidad
+(`TOKEN_VALID`), la inclusión de scopes requeridos (`REQUIRED_SCOPES_VERIFIED`)
+y la integración HTTP real son resultados distintos.
+
 ## Comprobaciones repetibles
 
 ```powershell
@@ -134,7 +186,7 @@ Las pruebas PowerShell cubren outcomes fail-closed, psql ausente, modos,
 `INVALID`/`UNAVAILABLE`, scopes requeridos, valores `guardedEnv`, colisiones,
 X.509, cleanup TLS, estados RBAC/GHCR, cinco imágenes `VERIFIED`, estados JWT
 malformados estructurados y la separación del objetivo H5 respecto a
-`guardedEnv` cerrado. El test PowerShell ejecuta 53 assertions. El test de
+`guardedEnv` cerrado. El test PowerShell ejecuta 76 assertions. El test de
 PostgreSQL crea y elimina un contenedor PostgreSQL 17 desechable. Sus tablas y
 roles son sintéticos; las consultas de roles/grants corren como logins runtime
 no-superuser. Ese contenedor no configura PostgreSQL TLS: demuestra SQL y
@@ -246,5 +298,10 @@ de PostgreSQL 17 valida ejecutabilidad, no la presencia de fixtures reales.
 | G7 Seguridad | Token y autorización `promotions-svc` | Proveer secreto técnico y evidencia token firmado con `api-productos` y scopes contractuales. La concesión `ventas:pedidos:evidencia-cupon:leer` sigue aparte para `api-ventas`. |
 | G5/owners de fixtures | Preflight comercial autenticado | Confirmar contexto de prueba y fixture; ejecutar las cuatro consultas read-only y el flujo real autorizado. |
 
-No se requiere un grant Azure adicional para el principal Promotions en la cola
-consultada. Los flags comerciales continúan cerrados en el primer bootstrap.
+La evidencia RBAC anterior sobre la cola Promotions no se reutiliza como PASS
+para la política nueva de scope directo/heredado y mínimo privilegio; esta
+política se debe ejecutar con visibilidad Azure válida. En este cierre no se
+consultaron recursos reales. El target de ejemplo continúa
+`PENDING_APPROVAL`, `deployment_authorized=false` y los `guardedEnv` comerciales
+siguen cerrados. No hubo cambios en Azure, Service Bus, PostgreSQL compartido,
+precios, inventario, cupones ni pedidos.
