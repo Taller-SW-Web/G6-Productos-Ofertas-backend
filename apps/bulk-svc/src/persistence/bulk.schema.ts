@@ -367,6 +367,44 @@ export const outbox = bulk.table(
   ],
 );
 
+/** Durable per-recipient delivery for the H5 Basic queue topology. */
+export const outboxDeliveries = bulk.table(
+  'outbox_delivery',
+  {
+    messageId: text('message_id').notNull(),
+    destination: text('destination').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    createdAt: tz('created_at').notNull().defaultNow(),
+    availableAt: tz('available_at').notNull().defaultNow(),
+    leaseToken: uuid('lease_token'),
+    publishedAt: tz('published_at'),
+    lastError: text('last_error'),
+  },
+  (t) => [
+    primaryKey({
+      name: 'pk_outbox_delivery',
+      columns: [t.messageId, t.destination],
+    }),
+    foreignKey({
+      name: 'fk_outbox_delivery_message_id',
+      columns: [t.messageId],
+      foreignColumns: [outbox.messageId],
+    }),
+    check(
+      'ck_outbox_delivery_destination',
+      sql`${t.destination} = 'g6.catalog.from.bulk'`,
+    ),
+    check('ck_outbox_delivery_attempts', sql`${t.attempts} >= 0`),
+    check(
+      'ck_outbox_delivery_lease',
+      sql`${t.publishedAt} IS NULL OR ${t.leaseToken} IS NULL`,
+    ),
+    index('ix_outbox_delivery_pending')
+      .on(t.availableAt, t.createdAt, t.messageId, t.destination)
+      .where(sql`${t.publishedAt} IS NULL`),
+  ],
+);
+
 export const inbox = bulk.table(
   'inbox',
   {
@@ -522,6 +560,7 @@ export const bulkSchema = {
   rowDomainSteps,
   exportJobs,
   outbox,
+  outboxDeliveries,
   inbox,
   batchResumeRequests,
   retryCommands,

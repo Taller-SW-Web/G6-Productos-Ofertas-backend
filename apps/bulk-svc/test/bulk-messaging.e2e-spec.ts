@@ -92,8 +92,16 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       resolve(process.cwd(), 'apps/bulk-svc/migrations/0007_bulk_retry_v1.sql'),
       'utf8',
     );
+    const serviceBusDeliveryMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        'apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql',
+      ),
+      'utf8',
+    );
     await pool.query(retryMigration);
     await pool.query(retryMigration);
+    await pool.query(serviceBusDeliveryMigration);
     const retryTables = await pool.query<{ table_name: string }>(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'bulk' AND table_name IN ('batch_resume_requests','retry_commands','domain_attempts') ORDER BY table_name",
     );
@@ -301,6 +309,7 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       steps: string;
       inbox: string;
       outbox: string;
+      deliveries: string;
     }>(
       `SELECT
          (SELECT count(*) FROM bulk.batch_jobs WHERE batch_id = $1)::text AS batches,
@@ -308,7 +317,8 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
          (SELECT count(*) FROM bulk.batch_rows WHERE batch_job_id = $3)::text AS rows,
          (SELECT count(*) FROM bulk.row_domain_steps WHERE batch_row_id IN (SELECT id FROM bulk.batch_rows WHERE batch_job_id = $3))::text AS steps,
          (SELECT count(*) FROM bulk.inbox WHERE message_id = $1::text AND handler = 'bulk.import.admission')::text AS inbox,
-         (SELECT count(*) FROM bulk.outbox WHERE message_id = $4::text)::text AS outbox`,
+         (SELECT count(*) FROM bulk.outbox WHERE message_id = $4::text)::text AS outbox,
+         (SELECT count(*) FROM bulk.outbox_delivery WHERE message_id = $4::text AND destination = 'g6.catalog.from.bulk')::text AS deliveries`,
       [batchId, first.manifest.id, first.batch.id, commandId],
     );
     expect(counts.rows[0]).toEqual({
@@ -318,7 +328,22 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       steps: '1',
       inbox: '1',
       outbox: '1',
+      deliveries: '1',
     });
+
+    const [firstClaim, concurrentClaim] = await Promise.all([
+      repository.claimPendingServiceBusDeliveries(),
+      repository.claimPendingServiceBusDeliveries(),
+    ]);
+    const claims = [...firstClaim, ...concurrentClaim].filter(
+      (delivery) => delivery.message.messageId === commandId,
+    );
+    expect(claims).toHaveLength(1);
+    await repository.markServiceBusDeliveryPublished(
+      commandId,
+      claims[0].delivery.leaseToken!,
+    );
+    expect(await repository.claimPendingServiceBusDeliveries()).toHaveLength(0);
 
     await expect(
       repository.createImportBatch({

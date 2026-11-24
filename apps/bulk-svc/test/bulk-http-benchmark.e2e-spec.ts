@@ -116,6 +116,10 @@ describe.skipIf(process.env.G6_PERFORMANCE_HTTP !== '1')(
         ),
         'utf8',
       );
+      const serviceBusDelivery = await readFile(
+        resolve('apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql'),
+        'utf8',
+      );
       docker(
         [
           'exec',
@@ -136,6 +140,7 @@ SET ROLE po_bulk_owner;
 ${migration}
 ${snapshot}
 ${claimCheck}
+${serviceBusDelivery}
 GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA bulk TO bulk_fixture_app;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,

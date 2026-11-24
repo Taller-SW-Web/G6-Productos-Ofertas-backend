@@ -24,6 +24,7 @@ import {
   configuredBulkAmqpUrl,
 } from './messaging/bulk-rabbitmq.js';
 import { CatalogBulkResultConsumer } from './messaging/catalog-bulk-result-consumer.js';
+import { BulkServiceBusRuntime } from './messaging/bulk-service-bus.runtime.js';
 import { BULK_EXPORT_SOURCE } from './export/bulk-export-source.js';
 
 @Module({
@@ -40,6 +41,7 @@ import { BULK_EXPORT_SOURCE } from './export/bulk-export-source.js';
     BulkServiceBearerGuard,
     BulkOutboxRelay,
     CatalogBulkResultConsumer,
+    BulkServiceBusRuntime,
     BulkReadinessService,
     bulkDatabaseProvider,
     bulkRepositoryProvider,

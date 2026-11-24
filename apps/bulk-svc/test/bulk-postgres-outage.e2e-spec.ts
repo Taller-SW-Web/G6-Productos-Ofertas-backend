@@ -334,6 +334,10 @@ describe('Bulk recovery after a real PostgreSQL outage (disposable Docker only)'
       resolve('apps/bulk-svc/migrations/0007_bulk_retry_v1.sql'),
       'utf8',
     );
+    const serviceBusDeliveryMigration = readFileSync(
+      resolve('apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql'),
+      'utf8',
+    );
     docker(
       [
         'exec',
@@ -358,6 +362,7 @@ ${claimCheckMigration}
 ${actorOwnershipMigration}
 ${ownerCorrelationMigration}
 ${retryMigration}
+${serviceBusDeliveryMigration}
 GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA bulk TO bulk_fixture_app;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
