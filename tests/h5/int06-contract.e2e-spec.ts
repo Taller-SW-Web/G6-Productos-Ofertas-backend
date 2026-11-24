@@ -1,12 +1,20 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { loadR18Contract } from './int06-asyncapi.mjs';
 import { parseChecked } from '../../apps/taxonomy-svc/src/persistence/taxonomy-message.store.js';
 import { evaluarCheckBaja } from '../../apps/taxonomy-svc/src/domain/deactivation-check.js';
 
-describe('INT-06 AsyncAPI rc.3 — R09/R18 contractual', () => {
+const configuredDocs = process.env.G6_E2E_DOCS_PATH?.trim();
+const defaultDocs = resolve('../G6-Productos-Ofertas-docs');
+const docs =
+  configuredDocs ||
+  (existsSync(join(defaultDocs, 'contratos/eventos/asyncapi.yaml'))
+    ? defaultDocs
+    : undefined);
+
+describe.skipIf(!docs)('INT-06 AsyncAPI rc.3 — R09/R18 contractual', () => {
   it('validates six R18 events against the official contract', async () => {
-    const docs = process.env.G6_E2E_DOCS_PATH;
-    if (!docs) throw new Error('G6_E2E_DOCS_PATH_REQUIRED');
     const schemas = await loadR18Contract(docs);
     for (const name of [
       'taxonomy.category.updated',
@@ -60,8 +68,6 @@ describe('INT-06 AsyncAPI rc.3 — R09/R18 contractual', () => {
   it.each(['CATEGORY', 'BRAND'] as const)(
     'correlates %s CLEAR and IN_USE and ignores stale/foreign results',
     async (entityType) => {
-      const docs = process.env.G6_E2E_DOCS_PATH;
-      if (!docs) throw new Error('G6_E2E_DOCS_PATH_REQUIRED');
       const validate = (await loadR18Contract(docs)).get(
         'catalog.master.deactivation.checked',
       );
