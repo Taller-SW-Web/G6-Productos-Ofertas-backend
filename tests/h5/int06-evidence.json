@@ -1,0 +1,85 @@
+{
+  "repo": "G6-Productos-Ofertas-backend",
+  "source_sha": "daf4882b7dc6895c6601a1f4af209ec92c8215b0",
+  "source_tree_dirty": true,
+  "source_fingerprint_sha256": "aa6b0e18bec16bf366728422c092676746c699bd72d5683f9fee9b0489dd9e47",
+  "docs_sha": "c9e1e5c217616d28229fccf5315fb97a1ae061a9",
+  "asyncapi_sha256": "f3331a6630b68039a1d33063000c600ec74db7429d78846da922141101e6c0eb",
+  "docs_verified": true,
+  "timestamp_utc": "2026-11-24T22:55:38.181Z",
+  "node_version": "v24.22.0",
+  "environment": "LOCAL_DISPOSABLE_POSTGRES",
+  "config_version": "ASYNCAPI_0.7.0-rc.3",
+  "dataset_seed": "synthetic-random-uuid-per-test",
+  "cases": [
+    {
+      "case_id": "TAX-HTTP-READ",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS",
+      "reason": null,
+      "exit_code": 0,
+      "tool_error": null,
+      "tests_passed": "71",
+      "test_command": "node scripts/ci/run-taxonomy-integration.mjs",
+      "level": "L1_ISOLATED",
+      "coverage": [
+        "tree",
+        "category",
+        "brand",
+        "seo",
+        "product_type",
+        "401",
+        "403"
+      ]
+    },
+    {
+      "case_id": "TAX-HTTP-DEACTIVATE",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS",
+      "reason": null,
+      "exit_code": 0,
+      "tool_error": null,
+      "tests_passed": "71",
+      "test_command": "node scripts/ci/run-taxonomy-integration.mjs",
+      "level": "L1_ISOLATED",
+      "coverage": [
+        "202",
+        "pending",
+        "operation_poll",
+        "completed",
+        "rejected"
+      ]
+    },
+    {
+      "case_id": "TAX-CONTRACT-R09-R18",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS",
+      "reason": null,
+      "exit_code": 0,
+      "tool_error": null,
+      "tests_passed": "5",
+      "test_command": "node tests/h5/run-int06.mjs contract",
+      "level": "L1_ISOLATED"
+    },
+    {
+      "case_id": "TAX-DB-BARRIER",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "PASS",
+      "reason": null,
+      "exit_code": 0,
+      "tool_error": null,
+      "tests_passed": "7",
+      "test_command": "node tests/h5/run-int06.mjs barrier",
+      "level": "L1_ISOLATED"
+    },
+    {
+      "case_id": "TAX-AZURE-R18",
+      "implementation_state": "BLOCKED_DEPENDENCY",
+      "execution_result": "BLOCKED_SB",
+      "level": "L2_PENDING",
+      "owner": "Axel / Azure",
+      "reason": "AUTHORIZED_DEPLOYMENT_RBAC_AND_TEST_DATA_REQUIRED",
+      "test_command": "node tests/h5/run-int06.mjs azure"
+    }
+  ]
+}
