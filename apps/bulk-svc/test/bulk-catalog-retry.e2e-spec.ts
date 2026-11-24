@@ -4,6 +4,8 @@ import {
   createSign,
   generateKeyPairSync,
 } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -71,6 +73,11 @@ let bulkDatabase: ReturnType<typeof drizzle<typeof bulkSchema>>;
 let bulkRepository: BulkPersistenceRepository;
 let catalogDatabase: Database;
 let restoreFlags: Array<[string, string | undefined]> = [];
+const executedScenarios = new Set<string>();
+
+function recordScenario(name: string) {
+  executedScenarios.add(name);
+}
 
 function setFlag(name: string, value: string) {
   restoreFlags.push([name, process.env[name]]);
@@ -205,11 +212,19 @@ integration(
         if (oldValue === undefined) delete process.env[name];
         else process.env[name] = oldValue;
       }
+      const evidencePath = process.env.BULK_H5_SCENARIO_EVIDENCE;
+      if (evidencePath) {
+        await mkdir(dirname(evidencePath), { recursive: true });
+        await writeFile(
+          evidencePath,
+          `${JSON.stringify({ scenarios: [...executedScenarios].sort() }, null, 2)}\n`,
+        );
+      }
     });
 
     it('admits, rejects without commercial effects, retries through V4, and closes without duplicate effects', async () => {
       const originalCorrelation = randomUUID();
-      const retryHttpCorrelation = randomUUID();
+      let retryHttpCorrelation = randomUUID();
       expect(retryHttpCorrelation).not.toBe(originalCorrelation);
       const token = signedUserToken(ownerSub);
       const transactions = new CatalogTransactionManager(catalogDatabase);
@@ -322,6 +337,7 @@ integration(
         expect(concurrentAdmissions[0]?.body).toEqual(
           concurrentAdmissions[1]?.body,
         );
+        recordScenario('admission.concurrent-identical-intent');
         const admission = concurrentAdmissions[0]!;
         const changedBytes = Buffer.from(
           csv.toString('utf8').replace('After retry', 'Different intent'),
@@ -337,6 +353,7 @@ integration(
             contentType: 'text/csv',
           });
         expect(conflictingAdmission.status).toBe(409);
+        recordScenario('admission.conflicting-bytes-409');
         expect(admission.body).toMatchObject({
           status: 'QUEUED',
           correlation_id: originalCorrelation,
@@ -414,6 +431,7 @@ integration(
         expect(authorizedContent.headers['cache-control']).toBe(
           'private, no-store',
         );
+        recordScenario('content.private-service-authz-and-integrity-headers');
         const decodedDocument = JSON.parse(
           contentBytes.toString('utf8'),
         ) as unknown;
@@ -499,6 +517,7 @@ integration(
         expect(
           await catalogDatabase.read((db) => db.select().from(products)),
         ).toEqual(productsBefore);
+        recordScenario('catalog.rejection-has-no-commercial-mutation');
         await bulkRepository.recordCatalogBulkResult({
           messageId: initialResult.message_id,
           operationId: String(initialResult.operation_id),
@@ -521,16 +540,32 @@ integration(
         });
         expect(eligible.body.reanudacion.pasos).toHaveLength(1);
         const resumePath = `${statePath}/reanudar`;
-        const resume = () =>
+        const resume = (correlationId = retryHttpCorrelation) =>
           request(server)
             .post(resumePath)
             .set('Authorization', `Bearer ${token}`)
-            .set('X-Correlation-Id', retryHttpCorrelation)
+            .set('X-Correlation-Id', correlationId)
             .send({ motivo: 'Recuperar familia Catalog' });
+        const competingCorrelations = [randomUUID(), randomUUID()];
+        const competingRetries = await Promise.all(
+          competingCorrelations.map((correlationId) => resume(correlationId)),
+        );
+        expect(
+          competingRetries.map((response) => response.status).sort(),
+        ).toEqual([202, 409]);
+        const acceptedCompetingRetry = competingRetries.find(
+          (response) => response.status === 202,
+        );
+        if (!acceptedCompetingRetry)
+          throw new Error('No concurrent retry request was accepted');
+        const acceptedIndex = competingRetries.indexOf(acceptedCompetingRetry);
+        const retryHttpCorrelation = competingCorrelations[acceptedIndex]!;
+        recordScenario('retry.distinct-correlations-single-effective-attempt');
         const concurrentResumes = await Promise.all([resume(), resume()]);
         for (const response of concurrentResumes)
           expect(response.status).toBe(202);
         expect(concurrentResumes[0]?.body).toEqual(concurrentResumes[1]?.body);
+        recordScenario('retry.same-correlation-concurrent-replay');
         const resumed = concurrentResumes[0]!;
         expect(resumed.body).toEqual({
           batch_id: batchId,
@@ -551,6 +586,7 @@ integration(
           .set('X-Correlation-Id', retryHttpCorrelation)
           .send({ motivo: 'Motivo distinto' });
         expect(conflict.status).toBe(409);
+        recordScenario('retry.same-correlation-different-reason-409');
         const [retryOutbox] = await bulkDatabase
           .select()
           .from(bulkOutbox)
@@ -590,6 +626,7 @@ integration(
           'APPLIED',
           'DUPLICATE',
         ]);
+        recordScenario('retry.v4-concurrent-redelivery-once');
         expect(contentIdentity.authorization).toHaveBeenCalled();
         expect(storageGet).toHaveBeenCalled();
         const [retryResultRow] = await catalogDatabase.read((db) =>
@@ -642,6 +679,7 @@ integration(
             payload: retryResult,
           });
         await Promise.all([recordRetryResult(), recordRetryResult()]);
+        recordScenario('retry.v2-concurrent-result-redelivery-once');
         const replayAfterResult = await resume();
         expect(replayAfterResult.status).toBe(202);
         expect(replayAfterResult.body).toEqual(resumed.body);
@@ -662,6 +700,43 @@ integration(
         expect(firstProductCount).toHaveLength(1);
         expect(firstProductCount[0]?.id).toBe(seed.product_id);
         expect(firstProductCount[0]?.descripcion).toBe('After retry');
+        const contradictoryLateResult = structuredClone(initialResult);
+        contradictoryLateResult.message_id = randomUUID();
+        const contradictoryRows = Reflect.get(
+          contradictoryLateResult.data,
+          'results',
+        ) as Array<Record<string, unknown>>;
+        contradictoryRows[0] = {
+          ...contradictoryRows[0],
+          status: 'COMPLETED',
+          effect_state: 'APPLIED',
+          retriable: false,
+          code: null,
+        };
+        const lateResultOutcome = await bulkRepository.recordCatalogBulkResult({
+          messageId: contradictoryLateResult.message_id,
+          operationId: String(contradictoryLateResult.operation_id),
+          causationId: String(contradictoryLateResult.causation_id),
+          eventName: String(
+            contradictoryLateResult.name,
+          ) as 'catalog.bulk.upsert.completed',
+          correlationId: contradictoryLateResult.correlation_id,
+          payload: contradictoryLateResult,
+        });
+        expect(lateResultOutcome).toMatchObject({
+          processed: false,
+          result: 'STALE',
+        });
+        const catalogOutboxRows = await catalogDatabase.read((db) =>
+          db.select({ eventName: catalogOutbox.eventName }).from(catalogOutbox),
+        );
+        expect(
+          catalogOutboxRows.every(
+            ({ eventName }) => !/pricing|inventory/i.test(eventName),
+          ),
+        ).toBe(true);
+        recordScenario('result.tardy-contradictory-result-is-stale');
+        recordScenario('effects.catalog-only-no-pricing-inventory');
         const persistedAttempts = await catalogDatabase.read((db) =>
           db
             .select()

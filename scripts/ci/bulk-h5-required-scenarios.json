@@ -1,0 +1,28 @@
+{
+  "testFiles": [
+    "apps/bulk-svc/test/bulk-catalog-retry.e2e-spec.ts",
+    "apps/api-gateway/test/bulk-postgres.gateway.e2e-spec.ts"
+  ],
+  "requiredGatewayTests": [
+    "autentica a A, concilia su lote persistido y conserva no-store sin mutaciones",
+    "oculta el lote de A a B con 404 y sin datos privados",
+    "devuelve 404 para correlación inexistente y 400 para UUID inválido",
+    "rechaza ausencia de JWT y JWT humano sin rol con 401/403 sin filtrar datos",
+    "rechaza JWT mal formado, firma inválida, expirado, issuer y audience incorrectos",
+    "bloquea retry y reporte de un lote ajeno sin cambiar persistencia",
+    "devuelve 503 no-store cuando el proveedor real se detiene"
+  ],
+  "requiredBulkScenarios": [
+    "admission.concurrent-identical-intent",
+    "admission.conflicting-bytes-409",
+    "content.private-service-authz-and-integrity-headers",
+    "catalog.rejection-has-no-commercial-mutation",
+    "retry.distinct-correlations-single-effective-attempt",
+    "retry.same-correlation-concurrent-replay",
+    "retry.same-correlation-different-reason-409",
+    "retry.v4-concurrent-redelivery-once",
+    "retry.v2-concurrent-result-redelivery-once",
+    "result.tardy-contradictory-result-is-stale",
+    "effects.catalog-only-no-pricing-inventory"
+  ]
+}
