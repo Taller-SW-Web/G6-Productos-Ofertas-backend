@@ -37,6 +37,10 @@ import {
 import { CatalogTokenVerifier } from '../../catalog-svc/src/catalog-auth.js';
 import { CatalogIdentityAcquisitionError } from '../../catalog-svc/src/catalog-pricing-identity.js';
 import {
+  CatalogBulkContentClient,
+  CatalogBulkContentIdentity,
+} from '../../catalog-svc/src/catalog-bulk-content.js';
+import {
   outbox as catalogOutbox,
   products,
   bulkRetryAttemptReceipts,
@@ -50,6 +54,7 @@ const catalogDatabaseUrl =
 const integration =
   bulkDatabaseUrl && catalogDatabaseUrl ? describe : describe.skip;
 const ownerSub = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const jwtKeys = generateKeyPairSync('rsa', { modulusLength: 2048 });
 let pool: Pool;
 let bulkDatabase: ReturnType<typeof drizzle<typeof bulkSchema>>;
 let bulkRepository: BulkPersistenceRepository;
@@ -62,7 +67,6 @@ function setFlag(name: string, value: string) {
 }
 
 function signedUserToken(sub: string, roles = ['GESTOR_COMERCIAL']) {
-  const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const encode = (value: object) =>
     Buffer.from(JSON.stringify(value)).toString('base64url');
   const header = encode({ alg: 'RS256', typ: 'JWT' });
@@ -80,9 +84,29 @@ function signedUserToken(sub: string, roles = ['GESTOR_COMERCIAL']) {
   signer.update(`${header}.${claims}`);
   setFlag(
     'G7_JWT_PUBLIC_KEY',
-    keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+    jwtKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
   );
-  return `${header}.${claims}.${signer.sign(keys.privateKey, 'base64url')}`;
+  return `${header}.${claims}.${signer.sign(jwtKeys.privateKey, 'base64url')}`;
+}
+
+function signedServiceToken() {
+  const encode = (value: object) =>
+    Buffer.from(JSON.stringify(value)).toString('base64url');
+  const header = encode({ alg: 'RS256', typ: 'JWT' });
+  const claims = encode({
+    iss: 'bulk-retry-integration',
+    sub: 'catalog-svc',
+    client_id: 'catalog-svc',
+    tipo: 'servicio',
+    aud: 'api-productos',
+    scope: 'carga-masiva:contenidos:leer',
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 900,
+    jti: randomUUID(),
+  });
+  const signer = createSign('RSA-SHA256');
+  signer.update(`${header}.${claims}`);
+  return `${header}.${claims}.${signer.sign(jwtKeys.privateKey, 'base64url')}`;
 }
 
 integration(
@@ -211,6 +235,15 @@ integration(
           storageObjects.set(key, Buffer.from(bytes));
           return `supabase://bulk-retry-integration/${key}`;
         }),
+        get: vi.fn(async (reference: string) => {
+          const key = reference.replace(
+            'supabase://bulk-retry-integration/',
+            '',
+          );
+          const bytes = storageObjects.get(key);
+          if (!bytes) throw new Error('Claim-check object was not stored');
+          return Buffer.from(bytes);
+        }),
       };
       const imports = new BulkImportService(
         bulkRepository,
@@ -227,22 +260,21 @@ integration(
             useValue: { probe: async () => ({ ready: true }) },
           },
           { provide: BulkImportService, useValue: imports },
+          { provide: BulkPersistenceRepository, useValue: bulkRepository },
           { provide: BulkStorageService, useValue: storageFixture },
           { provide: BulkExportService, useValue: {} },
-          {
-            provide: BulkContentService,
-            useValue: {
-              download: async () => {
-                throw new Error('unused');
-              },
-            },
-          },
+          BulkContentService,
         ],
       }).compile();
       const http = moduleRef.createNestApplication();
       http.useGlobalFilters(new BulkProblemFilter());
       await http.init();
+      await http.listen(0, '127.0.0.1');
       const server = http.getHttpServer();
+      const address = server.address();
+      if (!address || typeof address === 'string')
+        throw new Error('Bulk private HTTP fixture did not bind loopback');
+      setFlag('CATALOG_BULK_CONTENTS_URL', `http://127.0.0.1:${address.port}`);
       try {
         const csvValues = [
           'ACTUALIZACION',
@@ -318,13 +350,14 @@ integration(
           initialIdentity,
           'authorizationForBulkRetry',
         ).mockRejectedValue(new CatalogIdentityAcquisitionError('TRANSIENT'));
-        const contentClient = {
-          getDocument: vi.fn(async (reference: { content_id: string }) => {
-            if (reference.content_id !== contentRef.content_id)
-              throw new Error('Unexpected claim-check reference');
-            return decodedDocument;
-          }),
-        };
+        const contentIdentity = new CatalogBulkContentIdentity(
+          undefined,
+          new CatalogTokenVerifier(undefined),
+        );
+        vi.spyOn(contentIdentity, 'authorization').mockResolvedValue(
+          `Bearer ${signedServiceToken()}`,
+        );
+        const contentClient = new CatalogBulkContentClient(contentIdentity);
         const mutations = new CatalogMutationService(
           transactions,
           new PostgresCatalogWriteRepository(),
@@ -346,6 +379,8 @@ integration(
           contentClient as never,
         );
         await expect(initialCatalog.consume(original)).resolves.toBe('APPLIED');
+        expect(contentIdentity.authorization).toHaveBeenCalledOnce();
+        expect(storageFixture.get).toHaveBeenCalledOnce();
         const [initialResultRow] = await catalogDatabase.read((db) =>
           db
             .select()
@@ -466,6 +501,8 @@ integration(
         await expect(retryCatalog.consume(retryCommand)).resolves.toBe(
           'APPLIED',
         );
+        expect(contentIdentity.authorization).toHaveBeenCalledTimes(2);
+        expect(storageFixture.get).toHaveBeenCalledTimes(2);
         const [retryResultRow] = await catalogDatabase.read((db) =>
           db
             .select()

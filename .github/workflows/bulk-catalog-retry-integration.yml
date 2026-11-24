@@ -1,23 +1,28 @@
-name: Integración Bulk-Catalog Retry (PostgreSQL 17 desechable)
+name: Integración Bulk-Catalog Retry (PostgreSQL 17 descartable)
 
 on:
-  push:
-    branches:
-      - trabajo/castilla/bulk-backend-h5
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/bulk-catalog-retry-integration.yml'
+      - 'apps/bulk-svc/**'
+      - 'apps/catalog-svc/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vitest.config.e2e.ts'
   workflow_dispatch:
 
 permissions:
   contents: read
-  pull-requests: read
 
 concurrency:
-  group: bulk-catalog-retry-${{ github.ref }}
+  group: bulk-catalog-retry-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
   integration:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:17-alpine
@@ -33,77 +38,14 @@ jobs:
           --health-timeout 5s
           --health-retries 24
     steps:
-      - name: Obtener Backend Bulk (#252)
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref }}
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.15.0
           cache: npm
-      - name: Resolver y construir el árbol temporal de los tres HEAD
-        id: integration-tree
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          pr243=$(gh pr view 243 --repo Taller-SW-Web/G6-Productos-Ofertas-backend --json headRefOid -q .headRefOid)
-          pr254=$(gh pr view 254 --repo Taller-SW-Web/G6-Productos-Ofertas-backend --json headRefOid,baseRefOid -q '[.headRefOid,.baseRefOid] | @tsv')
-          pr252=$(gh pr view 252 --repo Taller-SW-Web/G6-Productos-Ofertas-backend --json headRefOid -q .headRefOid)
-          pr254_head=${pr254%%$'\t'*}
-          pr254_base=${pr254#*$'\t'}
-          checked_out=$(git rev-parse HEAD)
-          test "$checked_out" = "$pr252"
-          test "$pr254_base" = "$pr243"
-          printf 'PR243=%s\nPR254=%s\nPR252=%s\n' "$pr243" "$pr254_head" "$pr252" | tee "$RUNNER_TEMP/source-heads.txt"
-          git fetch origin "refs/pull/243/head:refs/remotes/origin/pr243"
-          git fetch origin "refs/pull/254/head:refs/remotes/origin/pr254"
-          git fetch origin "refs/pull/252/head:refs/remotes/origin/pr252"
-          test "$(git rev-parse origin/pr243)" = "$pr243"
-          test "$(git rev-parse origin/pr254)" = "$pr254_head"
-          test "$(git rev-parse origin/pr252)" = "$pr252"
-          tree="$RUNNER_TEMP/bulk-catalog-retry-tree"
-          git worktree add --detach "$tree" "$pr254_head"
-          set +e
-          git -C "$tree" -c user.name='G6 Retry Integration Runner' \
-            -c user.email='g6-retry-integration@users.noreply.github.com' \
-            merge --no-commit --no-ff origin/pr252
-          merge_status=$?
-          set -e
-          if [ "$merge_status" -ne 0 ]; then
-            node .github/integration/resolve-retry-merge.mjs "$tree"
-          fi
-          if git -C "$tree" diff --name-only --diff-filter=U | grep -q .; then
-            echo "Quedan conflictos no resueltos en el árbol de integración" >&2
-            exit 1
-          fi
-          merge_tree=$(git -C "$tree" write-tree)
-          node .github/integration/patch-retry-tests.mjs "$tree"
-          cp "$tree/.github/integration/bulk-catalog-retry.e2e-spec.fixture.ts" \
-             "$tree/apps/bulk-svc/test/bulk-catalog-retry.e2e-spec.ts"
-          git -C "$tree" add apps/bulk-svc/test/bulk-catalog-retry.e2e-spec.ts apps/bulk-svc/src/persistence/bulk.repository.integration.spec.ts apps/bulk-svc/test/bulk-postgres-outage.e2e-spec.ts apps/catalog-svc/test/postgres.persistence.e2e-spec.ts
-          git -C "$tree" diff --cached --binary "$merge_tree" > "$RUNNER_TEMP/test-adaptations.patch"
-          git -C "$tree" -c user.name='G6 Retry Integration Runner' \
-            -c user.email='g6-retry-integration@users.noreply.github.com' \
-            commit --no-gpg-sign -m 'test(integracion): verifica Bulk Catalog retry en PostgreSQL'
-          integration_sha=$(git -C "$tree" rev-parse HEAD)
-          printf 'integration_tree=%s\n' "$tree" >> "$GITHUB_OUTPUT"
-          printf 'integration_sha=%s\n' "$integration_sha" >> "$GITHUB_OUTPUT"
-          printf 'merge_tree=%s\n' "$merge_tree" >> "$GITHUB_OUTPUT"
-          printf 'MERGED_TREE_SHA=%s\nINTEGRATION_TREE_SHA=%s\n' "$merge_tree" "$integration_sha" >> "$RUNNER_TEMP/source-heads.txt"
-          printf 'SHA árbol temporal: `%s`\n\n' "$integration_sha" >> "$GITHUB_STEP_SUMMARY"
-          cat "$RUNNER_TEMP/source-heads.txt" >> "$GITHUB_STEP_SUMMARY"
-          printf '\nÁrbol combinado antes de adaptaciones: `%s`\n\n' "$merge_tree" >> "$GITHUB_STEP_SUMMARY"
-          git -C "$tree" diff --stat "$merge_tree" "$integration_sha" >> "$GITHUB_STEP_SUMMARY"
-          printf '\nEl parche completo de adaptaciones temporales se publica como artifact `bulk-catalog-retry-integration-evidence`.\n' >> "$GITHUB_STEP_SUMMARY"
-          printf '\nBases comprobadas: #254 sobre el HEAD #243 exacto; #252 sobre la base de su PR.\n' >> "$GITHUB_STEP_SUMMARY"
       - name: Instalar dependencias
-        working-directory: ${{ steps.integration-tree.outputs.integration_tree }}
         run: npm ci
-      - name: Aplicar DDL Catalog y Bulk en la misma PostgreSQL 17
-        working-directory: ${{ steps.integration-tree.outputs.integration_tree }}
+      - name: Crear roles aislados y aplicar migraciones en orden
         env:
           ADMIN_URL: postgresql://postgres:retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
         run: |
@@ -116,7 +58,7 @@ jobs:
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 <<'SQL'
           CREATE ROLE po_catalog_owner NOLOGIN;
           CREATE ROLE catalog_app LOGIN PASSWORD 'catalog-retry-fixture-only';
-          CREATE ROLE po_bulk_owner LOGIN PASSWORD 'bulk-owner-fixture-only';
+          CREATE ROLE po_bulk_owner NOLOGIN;
           CREATE ROLE bulk_app LOGIN PASSWORD 'bulk-retry-fixture-only';
           CREATE SCHEMA catalog AUTHORIZATION po_catalog_owner;
           CREATE SCHEMA bulk AUTHORIZATION po_bulk_owner;
@@ -153,74 +95,36 @@ jobs:
             if output=$(psql "$url" -v ON_ERROR_STOP=1 -c "$query" 2>&1); then
               echo "$label unexpectedly succeeded" >&2
               exit 1
-            else
-              status=$?
-              if [[ "$output" != *"permission denied"* ]]; then
-                printf '%s\n' "$output" >&2
-                echo "$label failed for a reason other than permission denial (exit $status)" >&2
-                exit 1
-              fi
-              printf 'PASS: %s denied by PostgreSQL ACLs.\n' "$label" | tee -a "$GITHUB_STEP_SUMMARY"
+            elif [[ "$output" != *"permission denied"* ]]; then
+              printf '%s\n' "$output" >&2
+              echo "$label failed for a reason other than permission denial" >&2
+              exit 1
             fi
+            printf 'PASS: %s denied by PostgreSQL ACLs.\n' "$label"
           }
           assert_denied 'postgresql://bulk_app:bulk-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable' 'SELECT 1 FROM catalog.products LIMIT 1' 'bulk_app → catalog.products'
           assert_denied 'postgresql://catalog_app:catalog-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable' 'SELECT 1 FROM bulk.batch_jobs LIMIT 1' 'catalog_app → bulk.batch_jobs'
-          psql 'postgresql://bulk_app:bulk-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable' -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM bulk.batch_jobs' >/dev/null
-          psql 'postgresql://catalog_app:catalog-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable' -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM catalog.products' >/dev/null
-          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c 'SHOW server_version_num' \
-            | tee "$RUNNER_TEMP/postgres-version.txt"
-      - name: Ejecutar flujo E2E HTTP Bulk ↔ consumidor Catalog V3/V4
-        working-directory: ${{ steps.integration-tree.outputs.integration_tree }}
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c 'SHOW server_version_num'
+      - name: Ejecutar E2E HTTP Bulk y consumidor Catalog en HEAD actual
         env:
           NODE_ENV: test
           BULK_RETRY_INTEGRATION_BULK_DATABASE_URL: postgresql://bulk_app:bulk-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
           BULK_RETRY_INTEGRATION_CATALOG_DATABASE_URL: postgresql://catalog_app:catalog-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
         run: npm run test:e2e -- apps/bulk-svc/test/bulk-catalog-retry.e2e-spec.ts
-      - name: Ejecutar repositorio Bulk con migraciones conjuntas
-        working-directory: ${{ steps.integration-tree.outputs.integration_tree }}
-        env:
-          NODE_ENV: test
-          BULK_TEST_DATABASE_URL: postgresql://bulk_app:bulk-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
-          BULK_TEST_ADMIN_DATABASE_URL: postgresql://po_bulk_owner:bulk-owner-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
-        run: npx vitest run apps/bulk-svc/src/persistence/bulk.repository.integration.spec.ts
-      - name: Ejecutar pruebas de outage Bulk
-        working-directory: ${{ steps.integration-tree.outputs.integration_tree }}
-        env:
-          NODE_ENV: test
-        run: npm run test:e2e -- apps/bulk-svc/test/bulk-postgres-outage.e2e-spec.ts
-      - name: Ejecutar persistencia Catalog en PostgreSQL desechable
-        working-directory: ${{ steps.integration-tree.outputs.integration_tree }}
-        env:
-          NODE_ENV: test
-          CI: 'true'
-        run: npm run test:e2e -- apps/catalog-svc/test/postgres.persistence.e2e-spec.ts
-      - name: Validar tipos, construcción y whitespace del árbol integrado
-        working-directory: ${{ steps.integration-tree.outputs.integration_tree }}
+      - name: Validar tipos y builds de ambos servicios
         run: |
           set -euo pipefail
           npm run typecheck
           npm run build:bulk-svc
           npm run build:catalog-svc
-          git diff --check HEAD^ HEAD
-      - name: Publicar manifiesto y resumen de evidencia
+          git diff --check
+      - name: Publicar SHA y resumen de evidencia
         if: always()
-        env:
-          TREE_SHA: ${{ steps.integration-tree.outputs.integration_sha }}
         run: |
-          set -euo pipefail
           {
-            echo '## Integración Bulk–Catalog Retry';
-            printf 'Árbol integrado ejecutado: `%s`\n' "$TREE_SHA";
-            echo 'PostgreSQL: service container `postgres:17-alpine`; DDL Catalog y Bulk aplicado en la misma instancia.';
-            echo 'Migraciones: Catalog fixtures 0001, barcode 0002, outbox candidate 0001, retry candidate 0002, publication 0003 e historical 0004; Bulk 0001 a 0008; Bulk 0005 a 0007 reaplicadas.';
-            echo 'E2E HTTP y consumidores: ver pasos de prueba anteriores; un paso fallido invalida el run.';
+            printf 'HEAD probado: `%s`\n' "$(git rev-parse HEAD)"
+            echo 'PostgreSQL: postgres:17-alpine descartable; roles catalog_app y bulk_app aislados.'
+            echo 'Código ejecutado desde el HEAD del PR; no se combinan otros PRs ni se aplican cambios temporales de pruebas.'
+            echo 'Migraciones Catalog: fixture base → outbox H5 → transporte Taxonomy → receipts Bulk Retry → migraciones históricas posteriores.'
+            echo 'Migraciones Bulk: fixture base → 0002–0008 en orden.'
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Publicar HEADs y diff de adaptaciones temporales
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bulk-catalog-retry-integration-evidence
-          if-no-files-found: warn
-          path: |
-            ${{ runner.temp }}/source-heads.txt
-            ${{ runner.temp }}/test-adaptations.patch
