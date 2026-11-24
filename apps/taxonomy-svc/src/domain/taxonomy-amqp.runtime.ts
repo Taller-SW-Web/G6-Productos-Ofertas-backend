@@ -71,6 +71,9 @@ export class TaxonomyAmqpRuntime implements OnModuleDestroy {
     }
     this.config = leerAmqp(env);
   }
+  async verificarAlmacenamientoH5(): Promise<void> {
+    if (this.azure) await this.store.verifyServiceBusStorage();
+  }
   disponible(): boolean {
     if (this.azure) return this.azure.available;
     return (

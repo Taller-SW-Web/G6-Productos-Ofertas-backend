@@ -8,7 +8,10 @@ describe('readiness de Taxonomy', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('mantiene readiness cuando Azure está configurado pero ambas direcciones están apagadas', async () => {
-    const store = {} as TaxonomyMessageStore;
+    const storage = vi.fn().mockResolvedValue(undefined);
+    const store = {
+      verifyServiceBusStorage: storage,
+    } as unknown as TaxonomyMessageStore;
     const messaging = new TaxonomyAmqpRuntime(store);
     messaging.configurar({
       MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
@@ -25,6 +28,13 @@ describe('readiness de Taxonomy', () => {
       service: 'taxonomy-svc',
     });
     expect(verify).toHaveBeenCalledOnce();
+    storage.mockRejectedValueOnce(new Error('storage unavailable'));
+    await expect(controller.obtenerReadiness()).rejects.toMatchObject({
+      status: 503,
+    });
+    await expect(controller.obtenerReadiness()).resolves.toMatchObject({
+      status: 'ready',
+    });
     verify.mockRejectedValueOnce(new Error('postgres unavailable'));
     await expect(controller.obtenerReadiness()).rejects.toMatchObject({
       status: 503,
@@ -39,6 +49,7 @@ describe('readiness de Taxonomy', () => {
         .spyOn(Logger.prototype, 'warn')
         .mockImplementation(() => undefined);
       const messaging = {
+        verificarAlmacenamientoH5: vi.fn().mockResolvedValue(undefined),
         disponible: () => false,
         dependenciaNoDisponible: () => dependency,
       } as unknown as TaxonomyAmqpRuntime;

@@ -48,6 +48,7 @@ export class ReadinessController {
       | undefined;
     let dependencia: 'postgres' | 'amqp' | 'service_bus' = 'postgres';
     try {
+      await this.amqp.verificarAlmacenamientoH5();
       if (!this.amqp.disponible()) {
         dependencia = this.amqp.dependenciaNoDisponible();
         throw ProblemDetailsException.noDisponible(

@@ -9,7 +9,11 @@ const suffix = randomUUID().replaceAll('-', '');
 const name = 'g6-taxonomy-h5-' + suffix;
 const database = 'g6_taxonomy_h5_test_' + suffix;
 const password = randomUUID();
-const docs = resolve(process.argv[2] ?? '../G6-Productos-Ofertas-docs');
+const docs = resolve(
+  process.argv[2] ??
+    process.env.G6_E2E_DOCS_PATH ??
+    '../G6-Productos-Ofertas-docs',
+);
 const image =
   'postgres@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24';
 const docker = (args) =>

@@ -13,3 +13,27 @@ Esta candidata es la variante seleccionada para la reconciliación R18/R09. La m
 El flujo conserva orden causal por operación. Una entrega terminal sin envío queda pendiente de revisión y bloquea las siguientes de la misma operación. El resto continúa. Monitorizar edad del Outbox, DLQ y disponibilidad de enlaces.
 
 [Orden de aplicación, esquema instalado y corte R18/R09](../../../../docs/hito-5/RECONCILIACION_R18_R09_PR258.md).
+
+## Clasificación del corte (solo lectura)
+
+Tras verificar el ledger, la estructura y los permisos con `preflight-readonly.sql`, el owner debe revisar cada fila histórica antes del corte. En un esquema que ya tenga instalada esta candidata, la siguiente consulta identifica la operación, el transporte y el estado de cada entrega sin generar envíos ni modificar datos:
+
+```sql
+BEGIN READ ONLY;
+SELECT o.message_id, o.operation_id, o.event_name, o.occurred_at,
+       o.delivery_transport,
+       CASE WHEN o.delivery_transport = 'RABBITMQ' AND o.published_at IS NULL THEN 'PENDIENTE_H4'
+            WHEN o.delivery_transport = 'RABBITMQ' THEN 'PUBLICADO_H4'
+            WHEN d.message_id IS NULL THEN 'H5_SIN_DELIVERY_REVISAR'
+            WHEN d.sent_at IS NULL THEN 'PENDIENTE_H5'
+            ELSE 'PUBLICADO_H5' END AS clasificacion,
+       d.destination, d.sent_at, d.last_error
+FROM taxonomy.outbox o
+LEFT JOIN taxonomy.outbox_delivery d ON d.message_id = o.message_id
+ORDER BY o.occurred_at, o.message_id;
+ROLLBACK;
+```
+
+Los pendientes H4 permanecen en H4 y no se convierten automáticamente en entregas Azure. El owner debe documentar por cada `message_id` la evidencia de entrega o el procedimiento de recuperación autorizado, con coordinación del consumidor; una fila no clasificada bloquea su corte. Ejecutar la consulta solo donde existan la candidata y los permisos de lectura correspondientes. El ensayo en PostgreSQL descartable no demuestra el estado del entorno compartido.
+
+Para reproducir el ensayo H5, situar el repositorio Docs junto al Backend o indicar `G6_E2E_DOCS_PATH` apuntando a un checkout de Docs que contenga la versión contractual `0.7.0-rc.3`; ejecutar `node tests/h5/run-taxonomy-catalog-postgres.mjs`. La prueba carga el AsyncAPI de ese checkout y falla si la versión o la cola R18 difieren.
