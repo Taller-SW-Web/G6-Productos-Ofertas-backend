@@ -127,7 +127,8 @@ jobs:
             apps/catalog-svc/test/fixtures/0001_create_catalog.sql \
             apps/catalog-svc/migrations/0002_create_sku_barcodes.sql \
             apps/catalog-svc/migrations-candidate/h5/0001_outbox_delivery.sql \
-            apps/catalog-svc/migrations-candidate/h5/0002_bulk_retry_receipts.sql \
+            apps/catalog-svc/migrations-candidate/h5/0002_taxonomy_reply_transport.sql \
+            apps/catalog-svc/migrations-candidate/h5/0003_bulk_retry_receipts.sql \
             apps/catalog-svc/migrations/0003_product_publication_history.sql \
             apps/catalog-svc/migrations/0004_historical_preparation_requests.sql
           apply_as po_bulk_owner \
@@ -137,12 +138,8 @@ jobs:
             apps/bulk-svc/migrations/0004_catalog_claim_check_content.sql \
             apps/bulk-svc/migrations/0005_actor_ownership.sql \
             apps/bulk-svc/migrations/0006_owner_correlation_identity.sql \
-            apps/bulk-svc/migrations/0007_bulk_retry_v1.sql
+            apps/bulk-svc/migrations/0007_bulk_retry_v1.sql \
             apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql
-          apply_as po_bulk_owner \
-            apps/bulk-svc/migrations/0005_actor_ownership.sql \
-            apps/bulk-svc/migrations/0006_owner_correlation_identity.sql \
-            apps/bulk-svc/migrations/0007_bulk_retry_v1.sql
           psql "$ADMIN_URL" -v ON_ERROR_STOP=1 <<'SQL'
           GRANT USAGE ON SCHEMA catalog TO catalog_app;
           GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA catalog TO catalog_app;

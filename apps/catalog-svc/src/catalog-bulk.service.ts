@@ -282,6 +282,8 @@ export class CatalogBulkService {
     message: CatalogEnvelope,
     name: string,
     result: Record<string, unknown>,
+    schemaVersion: 1 | 2 = 1,
+    replyMessageId?: string,
   ) {
     const reply = envelope(
       name,
@@ -289,6 +291,8 @@ export class CatalogBulkService {
       message.correlation_id,
       String(message.data.batch_operation_id),
       message.message_id,
+      schemaVersion,
+      replyMessageId,
     );
     await tx.insert(outbox).values({
       message_id: reply.message_id,
@@ -324,6 +328,9 @@ export class CatalogBulkService {
           throw new InvalidCatalogMessage();
         return 'DUPLICATE';
       }
+      // V4 is authorized by its per-row retry receipts, not by the root
+      // command receipt that was created for the initial V3 attempt.
+      if (message.schema_version === 4) return undefined;
       const old = await this.previous(
         tx,
         String(message.data.batch_operation_id),
@@ -344,6 +351,7 @@ export class CatalogBulkService {
         message,
         String(old.payload.name),
         old.payload.result as Record<string, unknown>,
+        old.payload.schema_version === 2 ? 2 : 1,
       );
       return 'APPLIED';
     });
@@ -1066,10 +1074,16 @@ export class CatalogBulkService {
             schema_version: resultSchemaVersion,
           },
         );
-      }
       // Receipt checks above are repeated here under the transaction locks
       // after any V3 content download, before applying effects.
-      await this.persistReply(tx, message, name, result);
+      await this.persistReply(
+        tx,
+        message,
+        name,
+        result,
+        resultSchemaVersion,
+        replyMessageId,
+      );
       return 'APPLIED';
     });
   }

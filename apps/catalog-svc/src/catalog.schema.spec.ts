@@ -30,7 +30,7 @@ describe('catalog Drizzle schema', () => {
     ) +
     readFileSync(
       new URL(
-        '../migrations-candidate/h5/0002_bulk_retry_receipts.sql',
+        '../migrations-candidate/h5/0003_bulk_retry_receipts.sql',
         import.meta.url,
       ),
       'utf8',
