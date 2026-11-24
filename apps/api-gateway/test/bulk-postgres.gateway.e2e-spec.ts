@@ -280,6 +280,64 @@ describe('Gateway → Bulk real → PostgreSQL 17 descartable (conciliación por
     expect(persistenceSnapshot()).toBe(before);
   });
 
+  it('rechaza JWT mal formado, firma inválida, expirado, issuer y audience incorrectos', async () => {
+    const before = persistenceSnapshot();
+    const valid = signed.token({
+      tipo: 'acceso',
+      sub: ownerA,
+      roles: ['GESTOR_COMERCIAL'],
+    });
+    const [header, payload, signature] = valid.split('.');
+    if (!header || !payload || !signature)
+      throw new Error('JWT fixture inválido');
+    const firstSignatureByte = signature.startsWith('a') ? 'b' : 'a';
+    const invalidSignature = `${header}.${payload}.${firstSignatureByte}${signature.slice(1)}`;
+    const badTokens = [
+      'not.a.jwt',
+      invalidSignature,
+      signed.token({
+        tipo: 'acceso',
+        sub: ownerA,
+        roles: ['GESTOR_COMERCIAL'],
+        exp: Math.floor(Date.now() / 1000) - 60,
+      }),
+      signed.token({
+        tipo: 'acceso',
+        sub: ownerA,
+        roles: ['GESTOR_COMERCIAL'],
+        iss: 'https://wrong.test/issuer',
+      }),
+      signed.token({
+        tipo: 'acceso',
+        sub: ownerA,
+        roles: ['GESTOR_COMERCIAL'],
+        aud: ['wrong-audience'],
+      }),
+    ];
+    for (const badToken of badTokens) {
+      const response = await requestCorrelation()
+        .set('Authorization', `Bearer ${badToken}`)
+        .expect(401);
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(JSON.stringify(response.body)).not.toContain(batchId);
+    }
+    expect(persistenceSnapshot()).toBe(before);
+  });
+
+  it('bloquea retry y reporte de un lote ajeno sin cambiar persistencia', async () => {
+    const before = persistenceSnapshot();
+    await request(gatewayOrigin)
+      .post(`/api/v1/carga-masiva/productos/importaciones/${batchId}/reanudar`)
+      .set('Authorization', `Bearer ${token(ownerB)}`)
+      .send({})
+      .expect(404);
+    await request(gatewayOrigin)
+      .get(`/api/v1/carga-masiva/productos/importaciones/${batchId}/reporte`)
+      .set('Authorization', `Bearer ${token(ownerB)}`)
+      .expect(404);
+    expect(persistenceSnapshot()).toBe(before);
+  });
+
   it('devuelve 503 no-store cuando el proveedor real se detiene', async () => {
     await bulk?.close();
     bulk = undefined;
