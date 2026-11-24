@@ -18,8 +18,8 @@ $ErrorActionPreference = 'Stop'
 $deploymentTargets = Get-H5DeploymentTargets
 $destinationTarget = Resolve-H5DeploymentTarget -Destination $Destination
 if ($RunnerGroupId -ne $destinationTarget.RunnerGroupId) { throw 'RunnerGroupId override does not match the destination configuration.' }
-foreach ($override in @(@{Name='ResourceGroup';Value=$ResourceGroup;Expected=$destinationTarget.ResourceGroup},@{Name='EnvironmentName';Value=$EnvironmentName;Expected=$destinationTarget.AcaEnvironment},@{Name='Region';Value=$Region;Expected=$destinationTarget.Region},@{Name='JobName';Value=$JobName;Expected=$destinationTarget.JobName})) {
-    if ($override.Value -and $override.Value -cne $override.Expected) { throw "$($override.Name) override no coincide con el destino $Destination." }
+foreach ($override in @(@{Name='ResourceGroup';Value=$ResourceGroup;Expected=$destinationTarget.ResourceGroup},@{Name='EnvironmentName';Value=$EnvironmentName;Expected=$destinationTarget.AcaEnvironment},@{Name='Region';Value=$Region;Expected=$destinationTarget.Location},@{Name='JobName';Value=$JobName;Expected=$destinationTarget.JobName})) {
+    Assert-H5DestinationOverride -Name $override.Name -Value $override.Value -Expected $override.Expected
 }
 $ResourceGroup = $destinationTarget.ResourceGroup
 $EnvironmentName = $destinationTarget.AcaEnvironment
@@ -257,7 +257,15 @@ function Get-ApprovedSmokeMatrix {
         throw 'SMOKE_DEPLOYMENT_NOT_APPROVED: prepare and every deploy matrix job must have completed successfully.'
     }
     $plan = Get-SmokeMatrixPlan -Jobs $jobs.jobs
-    Assert-H5SmokeRunBinding -Run $run -Target $destinationTarget -MasterSha ([string]$master.sha)
+    $runNameMatch = [regex]::Match([string]$run.display_title, '^H5 CD (?:brazil-isolated|chile-shared) (?:azure-h5|azure-h5-chile|azure-h5-pilot-234) (?<service>[a-z0-9-]+) [0-9a-f]{40} pilot=(?:true|false)$')
+    if (-not $runNameMatch.Success) { throw 'SMOKE_RUN_NAME_INVALID: official run-name structure is not exact.' }
+    $runService = $runNameMatch.Groups['service'].Value
+    Assert-H5SmokeRunBinding -Run $run -Target $destinationTarget -MasterSha ([string]$master.sha) -Service $runService
+    if ($runService -eq 'all') {
+        if ($Destination -cne 'brazil-isolated' -or $destinationTarget.PilotSelfReview) { throw 'SMOKE_ALL_SERVICES_DESTINATION_REJECTED: all is limited to historical Brazil runs.' }
+    } elseif (@($plan.Services | Where-Object { $_ -cne $runService }).Count -gt 0 -or $plan.Services.Count -ne 1) {
+        throw 'SMOKE_RUN_SERVICE_MISMATCH: successful deploy jobs differ from the service in official run-name.'
+    }
     $deployments = Invoke-GhJson @('api',"repos/$Repository/deployments?ref=$($run.head_sha)&environment=$GitHubEnvironment&per_page=100")
     $runCreatedAt = [DateTimeOffset]::Parse([string]$run.created_at)
     $matching = @($deployments | Where-Object {
@@ -305,7 +313,7 @@ function Start-JitCycle {
     if (-not $script:jitRunnerId -or [string]::IsNullOrWhiteSpace($script:jitConfig)) { throw 'GitHub JIT response lacked runner ID/config.' }
     $actualLabels = @($jit.runner.labels | ForEach-Object name)
     if ($CycleMode -eq 'Diagnostic' -and ($actualLabels -notcontains $diagnosticLabel -or $actualLabels -contains 'azure-h5-smoke' -or $actualLabels -contains 'azure-h5-smoke-chile')) { throw 'JIT diagnostic labels are unsafe; registration will be removed.' }
-    if ($CycleMode -eq 'Smoke' -and ($actualLabels -notcontains 'linux' -or $actualLabels -notcontains $SmokeLabel)) { throw 'JIT smoke labels do not match the official workflow selector.' }
+    if ($CycleMode -eq 'Smoke') { Assert-H5SmokeLabels -Labels $actualLabels -SmokeLabel $SmokeLabel }
     $groupRunners = Invoke-GhJson @('api',"orgs/$Organization/actions/runner-groups/$RunnerGroupId/runners?per_page=100")
     if ($groupRunners.total_count -ne 1 -or @($groupRunners.runners | Where-Object { [int]$_.id -eq $script:jitRunnerId }).Count -ne 1) { throw 'RUNNER_GROUP_NOT_EXCLUSIVE: JIT creation did not produce exactly this one registered runner.' }
 
@@ -351,8 +359,12 @@ function Start-JitCycle {
         $runnerRecord = Invoke-GhJson @('api',"orgs/$Organization/actions/runners/$script:jitRunnerId")
         if ($runnerRecord.status -eq 'online') {
             $onlineLabels = @($runnerRecord.labels | ForEach-Object name)
-            if ($CycleMode -eq 'Smoke' -and ($runnerRecord.os -ne 'linux' -or $onlineLabels -notcontains 'self-hosted' -or $onlineLabels -notcontains 'linux' -or $onlineLabels -notcontains $SmokeLabel)) {
+            if ($CycleMode -eq 'Smoke' -and $runnerRecord.os -ne 'linux') {
                 throw "JIT_RUNNER_LABELS_INVALID: online runner lacks self-hosted/linux/$SmokeLabel or Linux OS."
+            }
+            if ($CycleMode -eq 'Smoke') {
+                Assert-H5SmokeLabels -Labels $onlineLabels -SmokeLabel $SmokeLabel
+                if ($onlineLabels -notcontains 'self-hosted') { throw 'JIT_RUNNER_LABELS_INVALID: online runner lacks self-hosted label.' }
             }
             if ($CycleMode -eq 'Diagnostic' -and ($onlineLabels -contains 'azure-h5-smoke' -or $onlineLabels -contains 'azure-h5-smoke-chile')) { throw 'JIT_DIAGNOSTIC_LABEL_LEAK: diagnostic runner unexpectedly has a smoke label.' }
             return [pscustomobject]@{Id=$script:jitRunnerId;ExecutionName=$script:jobExecutionName;Mode=$CycleMode}

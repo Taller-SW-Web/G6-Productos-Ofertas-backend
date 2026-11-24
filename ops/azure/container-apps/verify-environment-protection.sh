@@ -44,10 +44,4 @@ else
   [[ "$(jq -r '[.branch_policies[].name] | sort | join(",")' <<< "$branch_policies")" == master && "$(jq -r '[.branch_policies[].type] | join(",")' <<< "$branch_policies")" == branch ]] || fail 'el piloto histórico solo admite la rama master'
 fi
 
-if [[ "$environment_name" == azure-h5-chile && "$mode" == deploy ]]; then
-  variable="repos/${repository}/environments/${environment_name}/variables/AZURE_CHILE_DEPLOY_ENABLED"
-  enabled="$(gh api -H 'X-GitHub-Api-Version: 2022-11-28' "$variable" --jq '.value' 2>/dev/null)" || fail 'falta AZURE_CHILE_DEPLOY_ENABLED en azure-h5-chile'
-  [[ "$enabled" == true ]] || fail 'AZURE_CHILE_DEPLOY_ENABLED debe ser exactamente true para despliegues nuevos'
-fi
-
 printf 'PASS: %s protege destino %s, modo %s; rama master y aprobaciones validadas.\n' "$environment_name" "$destination" "$mode"

@@ -28,7 +28,10 @@ if [[ "${1:-}" == account && "${2:-}" == show ]]; then printf '%s\n' "$subscript
 if [[ "${1:-}" == containerapp ]]; then [[ "$*" == *"--resource-group ${MOCK_RESOURCE_GROUP:-rg-g6-aca-chile}"* ]] || { echo 'wrong resource group' >&2; exit 61; }; fi
 if [[ "${1:-}" == group && "${2:-}" == show ]]; then printf '{"id":"/subscriptions/%s/resourceGroups/%s"}\n' "$subscription" "$group"; exit 0; fi
 if [[ "${1:-}" == containerapp && "${2:-}" == env && "${3:-}" == show ]]; then [[ "${MOCK_BAD_ENVIRONMENT:-false}" != true ]] || env_id="$env_id-wrong"; printf '{"id":"%s","location":"%s"}\n' "$env_id" "$location"; exit 0; fi
-if [[ "${1:-}" == containerapp && "${2:-}" == show ]]; then jq --arg id "$app_id" --arg env "$env_id" '. + {id:$id} | .properties.managedEnvironmentId=$env' "$state"; exit 0; fi
+if [[ "${1:-}" == containerapp && "${2:-}" == show ]]; then
+  jq --arg id "$app_id" --arg env "$env_id" --arg traffic "${MOCK_TRAFFIC:-latest}" '. + {id:$id} | .properties.managedEnvironmentId=$env | .properties.configuration.ingress.fqdn="api-gateway.internal.chilecentral.azurecontainerapps.io" | .properties.configuration.ingress.allowInsecure=false | .properties.configuration.ingress.traffic=(if $traffic == "old" then [{revisionName:"rev-0",weight:100}] elif $traffic == "ambiguous" then [{latestRevision:true,weight:50},{revisionName:"rev-0",weight:50}] else [{latestRevision:true,weight:100}] end)' "$state"
+  exit 0
+fi
 if [[ "${1:-}" == containerapp && "${2:-}" == revision && "${3:-}" == show ]]; then
   jq -c --arg startup "${MOCK_STARTUP:-false}" '(.revisionPolls += 1) | if $startup == "true" and .revisionPolls == 1 then .revision.properties.runningState="Processing" elif $startup == "true" and .revisionPolls >= 2 then .revision.properties.runningState="Running" else . end | .revision' "$state"
   jq --arg startup "${MOCK_STARTUP:-false}" '(.revisionPolls += 1) | if $startup == "true" and .revisionPolls == 1 then .revision.properties.runningState="Processing" elif $startup == "true" and .revisionPolls >= 2 then .revision.properties.runningState="Running" else . end' "$state" > "$state.tmp"
@@ -61,6 +64,7 @@ MOCK
 chmod +x "$TEMP/bin/az"
 export PATH="$TEMP/bin:$PATH" MOCK_STATE="$TEMP/state.json" ACA_POLL_ATTEMPTS=2 ACA_POLL_INTERVAL_SECONDS=0
 export DEPLOY_RECEIPT="$TEMP/gateway.receipt"
+export GITHUB_RUN_ID=12345
 export MOCK_STARTUP=true
 export H5_DEPLOY_ENVIRONMENT=azure-h5-chile
 export H5_DEPLOY_DESTINATION=chile-shared H5_PILOT_SELF_REVIEW=false
@@ -70,6 +74,14 @@ if bash "$DEPLOY" bad-service "$TARGET" >/dev/null 2>&1; then fail 'servicio no 
 if bash "$DEPLOY" api-gateway "${TARGET%api-gateway@*}catalog-svc@${TARGET##*@}" >/dev/null 2>&1; then fail 'imagen de otro servicio'; fi
 if bash "$DEPLOY" api-gateway "${TARGET%@*}" >/dev/null 2>&1; then fail 'imagen sin digest'; fi
 printf 'PASS: rechaza servicio, paquete cruzado e imagen sin digest\n'
+updates_before_gate="$(jq -r .updates "$MOCK_STATE")"
+if env -u AZURE_CHILE_DEPLOY_ENABLED bash "$DEPLOY" api-gateway "$TARGET" >/dev/null 2>&1; then fail 'Chile deploy without operational gate'; fi
+for gate in false TRUE; do
+  if AZURE_CHILE_DEPLOY_ENABLED="$gate" bash "$DEPLOY" api-gateway "$TARGET" >/dev/null 2>&1; then fail "Chile deploy accepted gate '$gate'"; fi
+done
+[[ "$(jq -r .updates "$MOCK_STATE")" == "$updates_before_gate" ]] || fail 'Chile deploy gate failure modified ACA'
+export AZURE_CHILE_DEPLOY_ENABLED=true
+echo 'PASS: Chile deploy rejects missing/false/TRUE gate before any Azure mutation'
 MOCK_RESOURCE_GROUP=rg-g6-sb-h5-int-fork H5_DEPLOY_ENVIRONMENT=azure-h5 H5_DEPLOY_DESTINATION=brazil-isolated H5_PILOT_SELF_REVIEW=false \
   bash "$DEPLOY" --inspect api-gateway "$PREVIOUS" > "$TEMP/isolated.log" 2>&1 ||
   { cat "$TEMP/isolated.log"; fail 'azure-h5 no consultó su grupo aislado'; }
@@ -110,14 +122,18 @@ previous_from_receipt="$(jq -r '.previous' "$TEMP/first.receipt")"
 target_from_receipt="$(jq -r '.target' "$TEMP/first.receipt")"
 config_from_receipt="$(jq -r '.config_sha256' "$TEMP/first.receipt")"
 [[ "$previous_from_receipt" == "$PREVIOUS" && "$target_from_receipt" == "$TARGET" && "$config_from_receipt" =~ ^[0-9a-f]{64}$ ]] || fail 'recibo no conserva digests/configuración necesarios'
-jq -e '.destination=="chile-shared" and .github_environment=="azure-h5-chile" and .resource_group=="rg-g6-aca-chile" and .aca_environment=="env-g6-phase1-chile" and .location=="Chile Central" and .subscription_id=="fef42188-accd-4470-ae88-78f583eb4906" and (.app_resource_id|contains("/containerApps/api-gateway")) and .container=="api-gateway"' "$TEMP/first.receipt" >/dev/null || { cat "$TEMP/first.receipt"; fail 'recibo no queda vinculado al destino y recurso Chile'; }
+jq -e '.destination=="chile-shared" and .github_environment=="azure-h5-chile" and .workflow_run_id=="12345" and .resource_group=="rg-g6-aca-chile" and .aca_environment=="env-g6-phase1-chile" and .location=="Chile Central" and .subscription_id=="fef42188-accd-4470-ae88-78f583eb4906" and (.app_resource_id|contains("/containerApps/api-gateway")) and .container=="api-gateway" and .origin_https=="https://api-gateway.internal.chilecentral.azurecontainerapps.io" and .digest_candidate==.served_digest and .served_revision=="rev-1" and .traffic_weight==100' "$TEMP/first.receipt" >/dev/null || { cat "$TEMP/first.receipt"; fail 'recibo no queda vinculado a destino, recurso, FQDN y tráfico Chile'; }
+for traffic in old ambiguous; do
+  if MOCK_TRAFFIC="$traffic" bash "$DEPLOY" api-gateway "$TARGET" >/dev/null 2>&1; then fail "Chile accepted traffic mode $traffic"; fi
+done
+echo 'PASS: receipt confirms effective traffic revision/digest; old or ambiguous traffic is rejected without weight rewriting'
 jq '.properties.configuration.ingress.targetPort=3001' "$MOCK_STATE" > "$TEMP/state.tmp"
 mv "$TEMP/state.tmp" "$MOCK_STATE"
 if bash "$DEPLOY" --restore api-gateway "$PREVIOUS" "$TARGET" "$config_from_receipt" > "$TEMP/concurrent.log" 2>&1; then fail 'recuperación sobrescribió cambio concurrente de ingress'; fi
 grep -Fq 'RECUPERACIÓN OMITIDA' "$TEMP/concurrent.log" || fail 'cambio concurrente no diagnosticado'
 jq '.properties.configuration.ingress.targetPort=3000' "$MOCK_STATE" > "$TEMP/state.tmp"
 mv "$TEMP/state.tmp" "$MOCK_STATE"
-bash "$DEPLOY" --restore api-gateway "$PREVIOUS" "$TARGET" "$config_from_receipt" > "$TEMP/restore.log" 2>&1 || { cat "$TEMP/restore.log"; fail 'recuperación coordinada válida'; }
+AZURE_CHILE_DEPLOY_ENABLED=false bash "$DEPLOY" --restore api-gateway "$PREVIOUS" "$TARGET" "$config_from_receipt" > "$TEMP/restore.log" 2>&1 || { cat "$TEMP/restore.log"; fail 'recuperación coordinada con ventana cerrada'; }
 grep -Fq 'ROLLBACK COORDINADO VERIFICADO' "$TEMP/restore.log" || fail 'recuperación no quedó confirmada'
 DEPLOY_RECEIPT="$TEMP/redeploy.receipt" bash "$DEPLOY" api-gateway "$TARGET" >/dev/null 2>&1 || fail 'reaplicación de fixture'
 jq --arg previous "$PREVIOUS" '.properties.template.containers |= map(if .name == "api-gateway" then .image=$previous else . end)' "$MOCK_STATE" > "$TEMP/state.tmp"

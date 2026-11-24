@@ -100,16 +100,27 @@ try {
     $groupId = [string]$group.id
     $environment = Invoke-AzJson @('containerapp','env','show','--name',$EnvironmentName,'--resource-group',$ResourceGroup,'--output','json','--subscription',$subscriptionId)
     if ([string]$environment.location -ine [string]$target.location) { throw "Environment $EnvironmentName no está en la región esperada $($target.location)." }
+    $identityArguments = @('identity','show','--name',$IdentityName,'--resource-group',$ResourceGroup,'--output','json','--subscription',$subscriptionId)
+    $identityOutput = & az @identityArguments 2>&1
+    $identityExitCode = $LASTEXITCODE
+    $identityText = $identityOutput -join "`n"
     $identity = $null
-    try { $identity = Invoke-AzJson @('identity','show','--name',$IdentityName,'--resource-group',$ResourceGroup,'--output','json','--subscription',$subscriptionId) }
-    catch {
-        if ($Apply -or $Destination -cne 'chile-shared') { throw }
-        Write-Warning "La identidad futura $IdentityName aún no existe. El plan de Chile será informativo y no consultará ni aplicará asignaciones para un principal inexistente."
+    $identityState = Get-H5IdentityLookupState -ExitCode $identityExitCode -Output $identityText
+    if ($identityState -eq 'Existing') {
+        if ([string]::IsNullOrWhiteSpace($identityText)) { throw "RBAC_IDENTITY_QUERY_EMPTY: Azure no devolvió identidad '$IdentityName'." }
+        $identity = $identityText | ConvertFrom-Json -ErrorAction Stop
+        if (-not $identity.principalId) { throw "RBAC_IDENTITY_QUERY_INVALID: la identidad '$IdentityName' no contiene principalId." }
+    } elseif ($identityState -eq 'NotFound') {
+        if ($Apply -or $Destination -cne 'chile-shared') { throw "RBAC_IDENTITY_NOT_FOUND: no existe '$IdentityName'; no se puede continuar con Apply/Brasil." }
+        Write-Warning "La identidad futura $IdentityName fue acreditada como inexistente por Azure (ResourceNotFound). Plan Chile informativo, sin principal ni asignaciones."
+    } else {
+        throw "RBAC_IDENTITY_QUERY_DENIED: Azure no confirmó existencia o ausencia de '$IdentityName'; revisar permisos/consulta. $identityText"
     }
     $principalId = if ($identity) { [string]$identity.principalId } else { '' }
     if (-not $groupId -or -not $environment.id -or ($Apply -and -not $principalId)) { throw 'No se pudo resolver RG, Environment o principal requerido.' }
 
     $effectiveAssignments = if ($principalId) { Invoke-AzJson @('role','assignment','list','--assignee-object-id',$principalId,'--all','--include-inherited','--output','json','--subscription',$subscriptionId) } else { @() }
+    $effectiveAssignments = Normalize-H5RbacAssignments -Assignments $effectiveAssignments
     $apps = @()
     $missing = @()
     foreach ($appName in $requiredApps) {
@@ -127,15 +138,7 @@ try {
         $apps += $app
     }
 
-    foreach ($assignment in @($effectiveAssignments)) {
-        $scope = ([string]$assignment.scope).TrimEnd('/')
-        $roleName = [string]$assignment.roleDefinitionName
-        $allowedRoleScope = ($roleName -eq $envRoleName -and $scope -ieq $groupId.TrimEnd('/')) -or
-            ($roleName -eq $appRoleName -and @($apps | Where-Object { ([string]$_.id).TrimEnd('/') -ieq $scope }).Count -eq 1)
-        if (-not $allowedRoleScope) {
-            throw "RBAC bloqueado: asignación heredada o directa inesperada '$roleName' en scope '$scope'; el owner Azure debe revisarla antes del CD."
-        }
-    }
+    Assert-H5RbacAssignments -Assignments $effectiveAssignments -AppRoleName $appRoleName -EnvironmentRoleName $envRoleName -ResourceGroupId $groupId -Apps $apps
 
     if ($missing.Count -gt 0) {
         throw "Aplicación bloqueada: faltan ACA en $EnvironmentName ($($missing -join ', ')); se verificó RBAC heredado, no se crearon roles ni asignaciones."

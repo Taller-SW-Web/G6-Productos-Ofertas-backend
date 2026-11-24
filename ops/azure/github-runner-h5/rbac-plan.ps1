@@ -1,5 +1,36 @@
 Set-StrictMode -Version Latest
 
+function Normalize-H5RbacAssignments {
+    [CmdletBinding()]
+    param([AllowNull()][object[]]$Assignments)
+    return ,@($Assignments | Where-Object { $null -ne $_ })
+}
+
+function Get-H5IdentityLookupState {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][int]$ExitCode,[AllowEmptyString()][string]$Output)
+    if ($ExitCode -eq 0) {
+        if ([string]::IsNullOrWhiteSpace($Output)) { return 'Invalid' }
+        try { $identity = $Output | ConvertFrom-Json -ErrorAction Stop } catch { return 'Invalid' }
+        if ($identity.principalId) { return 'Existing' }
+        return 'Invalid'
+    }
+    if ($Output -match '(?i)\b(ResourceNotFound|IdentityNotFound)\b') { return 'NotFound' }
+    return 'Denied'
+}
+
+function Assert-H5RbacAssignments {
+    [CmdletBinding()]
+    param([AllowNull()][object[]]$Assignments,[Parameter(Mandatory)][string]$AppRoleName,[Parameter(Mandatory)][string]$EnvironmentRoleName,[Parameter(Mandatory)][string]$ResourceGroupId,[Parameter(Mandatory)][object[]]$Apps)
+    foreach ($assignment in (Normalize-H5RbacAssignments $Assignments)) {
+        $scope = ([string]$assignment.scope).TrimEnd('/')
+        $role = [string]$assignment.roleDefinitionName
+        $allowed = ($role -eq $EnvironmentRoleName -and $scope -ieq $ResourceGroupId.TrimEnd('/')) -or
+            ($role -eq $AppRoleName -and @($Apps | Where-Object { ([string]$_.id).TrimEnd('/') -ieq $scope }).Count -eq 1)
+        if (-not $allowed) { throw "RBAC_UNEXPECTED_ASSIGNMENT: '$role' en scope '$scope'." }
+    }
+}
+
 function New-H5RbacPlan {
     [CmdletBinding()]
     param(

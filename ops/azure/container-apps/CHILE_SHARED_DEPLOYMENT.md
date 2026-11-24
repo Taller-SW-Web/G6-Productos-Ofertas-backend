@@ -8,13 +8,14 @@ Las nueve aplicaciones se pueden seleccionar individualmente. `all` se rechaza p
 
 ## Ventana de despliegue
 
-Un owner autorizado administra manualmente la variable del GitHub Environment `azure-h5-chile`:
+Un owner autorizado administra manualmente la variable `AZURE_CHILE_DEPLOY_ENABLED` del GitHub Environment `azure-h5-chile`. El workflow la consume desde `vars` dentro del job `deploy`, después de la aprobación humana del Environment y antes de solicitar OIDC. `deploy.sh` vuelve a rechazar el despliegue Chile si el valor no es exactamente `true`; inspect y recuperación supervisada no están sujetos a esta variable.
 
 1. Antes de abrir la ventana, confirmar Marketplace protegido, aprobación humana requerida, autoaprobación deshabilitada, política `master` únicamente y bypass administrativo deshabilitado.
-2. Para abrirla, establecer `AZURE_CHILE_DEPLOY_ENABLED` con valor exacto `true` en `azure-h5-chile`.
-3. Ejecutar el workflow manual existente `CD Azure Container Apps H5`, elegir `chile-shared`, seleccionar un servicio individual y proporcionar el SHA completo vigente de `master` con CI exitosa. La aprobación humana del Environment sigue siendo obligatoria.
-4. Para cerrar la ventana, quitar la variable o asignarle un valor distinto de `true`. Los siguientes despliegues fallan antes de autenticarse en Azure. No iniciar un rollback al cerrar la ventana.
-5. Una recuperación solo puede partir del mismo run, su aprobación del Environment y sus recibos completos para el mismo destino y recurso. El paso de recuperación conserva la revisión humana; no se usa la variable de apertura como autorización de rollback.
+2. Verificar con permisos de lectura que el nombre `AZURE_CHILE_DEPLOY_ENABLED` no exista en variables de repositorio ni de organización; debe existir exclusivamente en el Environment `azure-h5-chile`. No puede haber homónimos en scopes superiores que actúen como fallback del contexto `vars`.
+3. Para abrir la ventana, establecer `AZURE_CHILE_DEPLOY_ENABLED` con valor exacto `true` en `azure-h5-chile`. La aprobación humana del Environment sigue siendo obligatoria. Preparación, auditoría de dependencias y publicación de imágenes pueden avanzar con la ventana cerrada porque no modifican las ACA.
+4. Ejecutar el workflow manual existente `CD Azure Container Apps H5`, elegir `chile-shared`, seleccionar un servicio individual y proporcionar el SHA completo vigente de `master` con CI exitosa.
+5. Para cerrar la ventana, quitar la variable o asignarle un valor distinto de `true`; esto bloquea nuevos despliegues antes de OIDC, pero no cancela ni invalida retroactivamente un job activo. Antes de comenzar Marketplace protegido, cerrar la ventana y comprobar en Actions que no existan ejecuciones CD activas o pendientes que puedan continuar.
+6. No utilizar el piloto histórico #234 durante ventanas protegidas de Marketplace. No iniciar un rollback al cerrar la ventana. Una recuperación solo puede partir del mismo run, su aprobación del Environment y sus recibos completos para el mismo destino y recurso. El paso de recuperación conserva la revisión humana y no usa la variable como autorización de rollback.
 
 No ejecutar la activación durante Marketplace protegido. Esta fase no crea ni modifica el Environment ni la variable.
 
@@ -39,3 +40,17 @@ Ejemplo futuro de planificación para los cinco servicios iniciales:
 ```
 
 Para una selección adicional se requiere declarar servicios y `-AuthorizeAdditionalServices`; el plan aún debe ser revisado por el owner. `-Apply` no forma parte de esta fase.
+
+### Verificación de exclusividad de la variable
+
+Antes de cada apertura, un actor con acceso de lectura autorizado lista variables de `Taller-SW-Web` en organización y repositorio y confirma que `AZURE_CHILE_DEPLOY_ENABLED` no aparece en ninguno; luego lista las variables del Environment y confirma que aparece únicamente en `azure-h5-chile`. El workflow no consulta el endpoint REST de variables y no requiere PAT, GitHub App adicional ni permisos amplios. Si los listados no se pueden leer o existe un homónimo superior, no abrir la ventana.
+
+Comandos de lectura para un operador ya autenticado y autorizado (solo muestran nombres coincidentes):
+
+```bash
+gh api --paginate orgs/Taller-SW-Web/actions/variables --jq '.variables[]? | select(.name == "AZURE_CHILE_DEPLOY_ENABLED") | .name'
+gh api --paginate repos/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/variables --jq '.variables[]? | select(.name == "AZURE_CHILE_DEPLOY_ENABLED") | .name'
+gh api --paginate repos/Taller-SW-Web/G6-Productos-Ofertas-backend/environments/azure-h5-chile/variables --jq '.variables[]? | select(.name == "AZURE_CHILE_DEPLOY_ENABLED") | .name'
+```
+
+Los dos primeros comandos deben producir salida vacía; el tercero exactamente una coincidencia. No operar si falta el permiso de lectura del scope correspondiente.

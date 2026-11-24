@@ -62,9 +62,15 @@ try { $diagnosticLabels = @($diagnosticDoc.RootElement.GetProperty('labels').Enu
 try { Resolve-H5DeploymentTarget -Destination chile-shared -GitHubEnvironment azure-h5 -Service catalog-svc | Out-Null; throw 'wrong environment accepted for Chile' } catch { if ($_.Exception.Message -eq 'wrong environment accepted for Chile') { throw } }
 $releaseSha = 'a'.PadRight(40,'a')
 $goodRun = [pscustomobject]@{display_title="H5 CD chile-shared azure-h5-chile catalog-svc $releaseSha pilot=false";head_branch='master';head_sha=$releaseSha}
-Assert-H5SmokeRunBinding -Run $goodRun -Target $chileTarget -MasterSha $releaseSha
-try { $foreignRun=[pscustomobject]@{display_title="H5 CD brazil-isolated azure-h5 catalog-svc $releaseSha pilot=false";head_branch='master';head_sha=$releaseSha}; Assert-H5SmokeRunBinding -Run $foreignRun -Target $chileTarget -MasterSha $releaseSha; throw 'foreign destination run accepted' } catch { if ($_.Exception.Message -eq 'foreign destination run accepted') { throw } }
-try { Assert-H5SmokeRunBinding -Run $goodRun -Target $chileTarget -MasterSha ('b'.PadRight(40,'b')); throw 'foreign release SHA accepted' } catch { if ($_.Exception.Message -eq 'foreign release SHA accepted') { throw } }
+Assert-H5SmokeRunBinding -Run $goodRun -Target $chileTarget -MasterSha $releaseSha -Service catalog-svc
+foreach ($badTitle in @("H5 CD chile-shared azure-h5 catalog-svc $releaseSha pilot=false","H5 CD brazil-isolated azure-h5 catalog-svc $releaseSha pilot=false","H5 CD chile-shared azure-h5-chile catalog-svc $releaseSha pilot=true","prefix H5 CD chile-shared azure-h5-chile catalog-svc $releaseSha pilot=false")) {
+    try { $badRun=[pscustomobject]@{display_title=$badTitle;head_branch='master';head_sha=$releaseSha}; Assert-H5SmokeRunBinding -Run $badRun -Target $chileTarget -MasterSha $releaseSha -Service catalog-svc; throw "invalid run title accepted: $badTitle" } catch { if ($_.Exception.Message -like 'invalid run title accepted:*') { throw } }
+}
+try { Assert-H5SmokeRunBinding -Run $goodRun -Target $chileTarget -MasterSha ('b'.PadRight(40,'b')) -Service catalog-svc; throw 'foreign release SHA accepted' } catch { if ($_.Exception.Message -eq 'foreign release SHA accepted') { throw } }
+$pilotTarget = Resolve-H5DeploymentTarget -Destination brazil-isolated -Service pricing-svc -PilotSelfReview
+$pilotRun = [pscustomobject]@{display_title="H5 CD brazil-isolated azure-h5-pilot-234 pricing-svc $releaseSha pilot=true";head_branch='master';head_sha=$releaseSha}
+try { Assert-H5SmokeRunBinding -Run $pilotRun -Target $brazilTarget -MasterSha $releaseSha -Service pricing-svc; throw 'pilot run accepted as normal Brazil smoke' } catch { if ($_.Exception.Message -eq 'pilot run accepted as normal Brazil smoke') { throw } }
+Assert-H5SmokeRunBinding -Run $pilotRun -Target $pilotTarget -MasterSha $releaseSha -Service pricing-svc
 $chileJobId="/subscriptions/$($chileTarget.SubscriptionId)/resourceGroups/$($chileTarget.ResourceGroup)/providers/Microsoft.App/jobs/$($chileTarget.JobName)"
 $chileEnvId="/subscriptions/$($chileTarget.SubscriptionId)/resourceGroups/$($chileTarget.ResourceGroup)/providers/Microsoft.App/managedEnvironments/$($chileTarget.AcaEnvironment)"
 $job=[pscustomobject]@{id=$chileJobId;location='Chile Central';properties=[pscustomobject]@{environmentId=$chileEnvId}}
@@ -72,6 +78,11 @@ $managed=[pscustomobject]@{id=$chileEnvId;location='Chile Central'}
 Assert-H5AcaJobBinding -Job $job -ManagedEnvironment $managed -Target $chileTarget
 foreach ($badJob in @([pscustomobject]@{id=$chileJobId;location='Brazil South';properties=[pscustomobject]@{environmentId=$chileEnvId}},[pscustomobject]@{id=$chileJobId;location='Chile Central';properties=[pscustomobject]@{environmentId="$chileEnvId/wrong"}})) {
     try { Assert-H5AcaJobBinding -Job $badJob -ManagedEnvironment $managed -Target $chileTarget; throw 'incorrect region/environment Job accepted' } catch { if ($_.Exception.Message -eq 'incorrect region/environment Job accepted') { throw } }
+Assert-H5DestinationOverride -Name Region -Value 'Chile Central' -Expected $chileTarget.Location
+try { Assert-H5DestinationOverride -Name Region -Value 'Brazil South' -Expected $chileTarget.Location; throw 'invalid regional override accepted' } catch { if ($_.Exception.Message -eq 'invalid regional override accepted') { throw } }
+Assert-H5SmokeLabels -Labels @('linux','azure-h5-smoke-chile') -SmokeLabel azure-h5-smoke-chile
+Assert-H5SmokeLabels -Labels @('linux','azure-h5-smoke') -SmokeLabel azure-h5-smoke
+try { Assert-H5SmokeLabels -Labels @('linux','azure-h5-smoke','azure-h5-smoke-chile') -SmokeLabel azure-h5-smoke-chile; throw 'simultaneous smoke labels accepted' } catch { if ($_.Exception.Message -eq 'simultaneous smoke labels accepted') { throw } }
 }
 
 $one = @(
@@ -146,4 +157,4 @@ try {
     throw 'cleanup failure was accepted'
 } catch { if ($_.Exception.Message -notmatch 'CLEANUP_INCOMPLETE') { throw } }
 
-Write-Output 'PASS JIT operations: request JSON types, diagnostic/smoke labels, 1/5-service matrix, actual runner assignment, Azure execution correlation, fail-stop and cleanup-incomplete.'
+Write-Output 'PASS JIT operations: exact run binding, pilot/destination rejection, destination-exclusive labels, region binding, request JSON, matrix, execution correlation, fail-stop and cleanup.'

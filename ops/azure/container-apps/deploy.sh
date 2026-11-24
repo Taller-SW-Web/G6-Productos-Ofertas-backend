@@ -26,7 +26,7 @@ else
 fi
 subscription="$(jq -r '.subscriptionId' "$TARGETS")"
 region="$(jq -r --arg key "$target_key" 'getpath($key | split(".")).location' "$TARGETS")"
-readonly RESOURCE_GROUP="$resource_group" ACA_ENVIRONMENT="$aca_environment" SUBSCRIPTION="$subscription" REGION="$region" DESTINATION="$destination" DEPLOYMENT_ENVIRONMENT="$environment" TARGET_KEY="$target_key"
+readonly RESOURCE_GROUP="$resource_group" ACA_ENVIRONMENT="$aca_environment" SUBSCRIPTION="$subscription" REGION="$region" DESTINATION="$destination" DEPLOYMENT_ENVIRONMENT="$environment"
 
 mode=deploy
 if [[ "${1:-}" == --restore ]]; then
@@ -38,6 +38,9 @@ elif [[ "${1:-}" == --inspect ]]; then
 else
   [[ $# == 2 ]] || fail 'uso: deploy.sh <servicio> <imagen-con-digest>'
   service="$1"; image="$2"
+fi
+if [[ "$destination" == chile-shared && "$mode" == deploy && "${AZURE_CHILE_DEPLOY_ENABLED:-}" != true ]]; then
+  fail 'AZURE_CHILE_DEPLOY_ENABLED debe ser exactamente true en el Environment azure-h5-chile; no se modifica Azure'
 fi
 case "$service" in api-gateway|bulk-svc|catalog-svc|combos-svc|inventory-svc|price-audit-svc|pricing-svc|promotions-svc|taxonomy-svc) ;; *) fail 'servicio fuera de la allowlist de nueve aplicaciones' ;; esac
 for candidate in "$image" "${previous_image:-$image}"; do
@@ -111,6 +114,35 @@ verify_revision() {
   return 1
 }
 
+get_chile_origin() {
+  local app_json ingress fqdn external expected_external
+  app_json="$(read_app)" || fail 'no se pudo validar el ingress ACA Chile'
+  ingress="$(jq -c '.properties.configuration.ingress // empty' <<< "$app_json")"
+  fqdn="$(jq -r '.fqdn // empty' <<< "$ingress")"
+  external="$(jq -r '.external // false' <<< "$ingress")"
+  expected_external=false
+  [[ "$service" != api-gateway ]] || expected_external=true
+  [[ -n "$fqdn" && "$external" == "$expected_external" && "$(jq -r '.allowInsecure' <<< "$ingress")" == false ]] || fail 'FQDN/ingress del servicio Chile no coincide con el ingress autorizado'
+  printf 'https://%s\n' "$fqdn"
+}
+
+verify_chile_served_revision() {
+  local expected="$1" app_json latest traffic served_revision served_weight revision_json="$work/served-revision.json" revision_image
+  app_json="$(read_app)" || return 1
+  latest="$(jq -r '.properties.latestRevisionName // empty' <<< "$app_json")"
+  traffic="$(jq -c '.properties.configuration.ingress.traffic // []' <<< "$app_json")"
+  [[ -n "$latest" ]] || return 1
+  [[ "$(jq 'type == "array" and length == 1' <<< "$traffic")" == true ]] || return 1
+  served_revision="$(jq -r --arg latest "$latest" 'if .[0].latestRevision == true then $latest else (.[0].revisionName // empty) end' <<< "$traffic")"
+  served_weight="$(jq -r '.[0].weight // 0' <<< "$traffic")"
+  [[ -n "$served_revision" && "$served_revision" == "$latest" && "$served_weight" == 100 ]] || return 1
+  revision_health "$served_revision" "$revision_json" || return 1
+  revision_image="$(container_image "$revision_json" 2>/dev/null || true)"
+  [[ "$revision_image" == "$expected" ]] || return 1
+  verified_served_revision="$served_revision"
+  verified_served_digest="${expected##*@}"
+}
+
 if [[ "$mode" == inspect ]]; then
   validate_target
   read_app > "$before" || { echo 'INSPECTION_UNKNOWN: no se pudo leer ACA.'; exit 2; }
@@ -159,19 +191,28 @@ previous_image="$(container_image "$before")" || fail 'no se encontró exactamen
 normalize_app "$before" > "$work/before-normalized.json"
 baseline_hash="$(sha256sum "$work/before-normalized.json" | awk '{print $1}')"
 if [[ -n "${DEPLOY_RECEIPT:-}" ]]; then
-  jq -n --arg service "$service" --arg destination "$DESTINATION" --arg environment "$DEPLOYMENT_ENVIRONMENT" --arg resource_group "$RESOURCE_GROUP" --arg aca_environment "$ACA_ENVIRONMENT" --arg location "$REGION" --arg subscription "$SUBSCRIPTION" --arg app_id "$(jq -r '.id' "$before")" --arg container "$container" --arg previous "$previous_image" --arg target "$image" --arg config "$baseline_hash" '{service:$service,destination:$destination,github_environment:$environment,resource_group:$resource_group,aca_environment:$aca_environment,location:$location,subscription_id:$subscription,app_resource_id:$app_id,container:$container,previous:$previous,target:$target,config_sha256:$config}' > "$DEPLOY_RECEIPT"
+  origin=''
+  if [[ "$destination" == chile-shared ]]; then origin="$(get_chile_origin)"; fi
+  jq -n --arg service "$service" --arg destination "$DESTINATION" --arg environment "$DEPLOYMENT_ENVIRONMENT" --arg run_id "${GITHUB_RUN_ID:-}" --arg resource_group "$RESOURCE_GROUP" --arg aca_environment "$ACA_ENVIRONMENT" --arg location "$REGION" --arg subscription "$SUBSCRIPTION" --arg app_id "$(jq -r '.id' "$before")" --arg container "$container" --arg previous "$previous_image" --arg target "$image" --arg config "$baseline_hash" --arg origin "$origin" '{service:$service,destination:$destination,github_environment:$environment,workflow_run_id:$run_id,resource_group:$resource_group,aca_environment:$aca_environment,location:$location,subscription_id:$subscription,app_resource_id:$app_id,container:$container,previous:$previous,target:$target,digest_candidate:($target | split("@")[1]),origin_https:(if $origin == "" then null else $origin end),config_sha256:$config}' > "$DEPLOY_RECEIPT"
 fi
 
 if [[ "$previous_image" == "$image" ]]; then
   printf 'Idempotencia: %s ya usa la imagen/digest solicitado; verificando revisión existente.\n' "$service"
   verify_revision "$image" || fail 'imagen ya presente, pero revisión activa no está Healthy'
+  if [[ "$destination" == chile-shared ]]; then
+    verify_chile_served_revision "$image" || fail 'tráfico efectivo Chile no apunta exclusivamente a la revisión latest con digest candidato'
+    [[ -n "${DEPLOY_RECEIPT:-}" ]] && jq --arg revision "$verified_served_revision" --arg digest "$verified_served_digest" '.served_revision=$revision | .served_digest=$digest | .traffic_weight=100' "$DEPLOY_RECEIPT" > "$DEPLOY_RECEIPT.tmp" && mv "$DEPLOY_RECEIPT.tmp" "$DEPLOY_RECEIPT"
+  fi
   printf 'REVISIÓN VERIFICADA: servicio=%s modo=%s réplicas=%s salud=%s.\n' "$service" "$verified_mode" "$verified_replicas" "$verified_health"
 else
   # Store only hashes and immutable image references; never serialize ACA secrets into artifacts.
   printf 'Actualizando solo %s/%s en %s; configuración ACA se comparará sin imprimirla.\n' "$app" "$container" "$RESOURCE_GROUP"
   if az containerapp update --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --container-name "$container" --image "$image" --output none && \
-     verify_revision "$image" && normalize_app "$after" > "$work/after-normalized.json" && \
+     verify_revision "$image" && { [[ "$destination" != chile-shared ]] || verify_chile_served_revision "$image"; } && normalize_app "$after" > "$work/after-normalized.json" && \
      cmp -s "$work/before-normalized.json" "$work/after-normalized.json"; then
+    if [[ "$destination" == chile-shared && -n "${DEPLOY_RECEIPT:-}" ]]; then
+      jq --arg revision "$verified_served_revision" --arg digest "$verified_served_digest" '.served_revision=$revision | .served_digest=$digest | .traffic_weight=100' "$DEPLOY_RECEIPT" > "$DEPLOY_RECEIPT.tmp" && mv "$DEPLOY_RECEIPT.tmp" "$DEPLOY_RECEIPT"
+    fi
     printf 'Despliegue verificado: servicio=%s revision=%s image=%s modo=%s réplicas=%s salud=%s.\n' "$service" "$(jq -r '.properties.latestRevisionName' "$after")" "$image" "$verified_mode" "$verified_replicas" "$verified_health"
     exit 0
   fi
