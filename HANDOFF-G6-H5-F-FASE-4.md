@@ -170,3 +170,7 @@ La cobertura local repetida pasa para backfill lifecycle, Promotions PG y el del
 Coordinación movió H04 (flujo integrado de cuatro servicios) y la emisión viva Catalog→Inventory a una fase posterior. #275 entrega ahora fixtures y persistencia/lifecycle reproducibles, sin declarar integración completa. La rama se sincronizó con `origin/master` `daf4882b7dc6895c6601a1f4af209ec92c8215b0` mediante merge limpio. Los commits nuevos son Bulk/Catalog retry integration; se inspeccionó que no invalidan los candidatos de base de datos en alcance.
 
 Tras sincronizar pasaron lifecycle PostgreSQL 17.11, Catalog async delta PostgreSQL 17.11 sin replay histórico, Promotions PG 12/12, Promotions unit 26/26 e Inventory evento 1/1. Los dos runners PostgreSQL confirmaron cleanup. JSON, YAML, parser PowerShell y `git diff --check` pasan; actionlint no está disponible. Este cierre no acredita H04, entrega viva Catalog→Inventory, homologación G5/G7 ni release real.
+
+### Ajustes de portabilidad/formato encontrados por CI
+
+El primer CI Ready reportó que el harness Inventory dependía de `$env:TEMP`, no definido en Ubuntu, y que un test PostgreSQL Promotions incumplía el formato. Se sustituyó la ruta temporal por `[System.IO.Path]::GetTempPath()` y se formateó únicamente el archivo afectado. Lifecycle, Catalog delta y Promotions PostgreSQL/unidades se repitieron localmente con éxito. Se requiere verificar CI otra vez sobre el HEAD corregido.

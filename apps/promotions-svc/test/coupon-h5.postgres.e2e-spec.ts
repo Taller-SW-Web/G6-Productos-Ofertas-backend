@@ -109,8 +109,7 @@ describe.skipIf(process.env.PROMOTIONS_H5_POSTGRES_TESTS !== '1')(
         setup.release(true);
       }
       runtime = new Pool({
-        connectionString:
-          process.env.PROMOTIONS_H5_RUNTIME_DATABASE_URL ?? '',
+        connectionString: process.env.PROMOTIONS_H5_RUNTIME_DATABASE_URL ?? '',
         max: 2,
         connectionTimeoutMillis: 2000,
       });

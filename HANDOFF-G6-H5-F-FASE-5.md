@@ -291,3 +291,7 @@ En esta versión el PR se mantiene Draft hasta que las correcciones estén publi
 | CI oficiales | PENDING_READY | Se ejecutarán al pasar #275 a Ready sobre el HEAD publicado |
 
 La tabla anterior es la clasificación vigente del alcance de #275 y reemplaza cualquier nota histórica que trataba H04 como bloqueo de aceptación. El criterio sigue pendiente para la fase de integración.
+
+### Corrección solicitada por CI sobre el primer HEAD Ready
+
+En `c2ba24ebc9bb1763f81190b30a05b81ad5701878`, CI detectó: (1) `format:check` marcó `apps/promotions-svc/test/coupon-h5.postgres.e2e-spec.ts`; (2) en Ubuntu el harness Inventory usaba `$env:TEMP`, vacío, y falló al enlazar el parámetro `Path`. Se corrigieron respectivamente el formato del archivo test y el directorio temporal mediante `[System.IO.Path]::GetTempPath()`. Sin alterar los verificadores, repetí en local lifecycle PG17.11 PASS/cleanup, Catalog delta PASS/cleanup, Promotions PG 12/12/cleanup y unitarias canal/snapshot 40/40. Se publicó la corrección como commit posterior; los workflows deben reevaluarse en su SHA nuevo. Los run IDs del primer HEAD fallido se conservan en la descripción y el registro GitHub: CI `45512807833`; validadores agregados fallaron por esos dos resultados no satisfactorios. Bulk `45512807700` y Pricing/Catalog `45512807822` fueron SUCCESS.

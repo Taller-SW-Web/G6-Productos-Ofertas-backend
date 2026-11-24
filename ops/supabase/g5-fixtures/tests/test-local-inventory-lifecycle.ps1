@@ -5,6 +5,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../../../')).Path
+$tempRoot = [System.IO.Path]::GetTempPath()
 $candidate = Join-Path $repoRoot 'ops/azure/h5-runtime-preflight/inventory-sku-lifecycle-backfill.candidate.sql'
 $applyTransaction = Join-Path $repoRoot 'ops/supabase/g5-fixtures/inventory-sku-lifecycle-apply.transaction.sql'
 $ensayoTransaction = Join-Path $repoRoot 'ops/supabase/g5-fixtures/inventory-sku-lifecycle-ensayo.transaction.sql'
@@ -113,7 +114,7 @@ GRANT SELECT ON catalog.sku_identity TO inventory_backfill_test;
 \i /tmp/synthetic-data.sql
 '@
 $setupSql = $setupSql.Replace('\\i /tmp/catalog-create.sql', "\\i /tmp/catalog-create.sql`nRESET ROLE;")
-$setupFile = Join-Path $env:TEMP 'g6-h5-fixtures-setup.sql'
+$setupFile = Join-Path $tempRoot 'g6-h5-fixtures-setup.sql'
 [System.IO.File]::WriteAllText($setupFile, $setupSql, [System.Text.UTF8Encoding]::new($false))
 & docker cp $setupFile "${Container}:/tmp/setup.sql"
 Assert-Command 'copy setup script'
@@ -138,12 +139,12 @@ SELECT jsonb_build_object(
 '@
 $protectedEffectsBefore = Invoke-ContainerSql $protectedStateSql
 $candidateText = Get-Content -Raw $candidate
-$candidateFile = Join-Path $env:TEMP 'g6-h5-lifecycle-backfill.sql'
+$candidateFile = Join-Path $tempRoot 'g6-h5-lifecycle-backfill.sql'
 [System.IO.File]::WriteAllText($candidateFile, (Get-Content -Raw $applyTransaction), [System.Text.UTF8Encoding]::new($false))
 & docker cp $candidateFile "${Container}:/tmp/lifecycle-backfill.sql"
 Assert-Command 'copy lifecycle transaction'
 $missingGateText = "BEGIN;`n$candidateText`nROLLBACK;`n"
-$missingGateFile = Join-Path $env:TEMP 'g6-h5-lifecycle-missing-gate.sql'
+$missingGateFile = Join-Path $tempRoot 'g6-h5-lifecycle-missing-gate.sql'
 [System.IO.File]::WriteAllText($missingGateFile, $missingGateText, [System.Text.UTF8Encoding]::new($false))
 & docker cp $missingGateFile "${Container}:/tmp/lifecycle-missing-gate.sql"
 Assert-Command 'copy lifecycle missing-gate transaction'
@@ -156,7 +157,7 @@ if ((Invoke-ContainerSql 'SELECT count(*) FROM inventory.sku_lifecycle').Output 
 }
 
 # Dry run executes identical preconditions, body, and postconditions, then rolls back.
-$dryRunFile = Join-Path $env:TEMP 'g6-h5-lifecycle-ensayo.sql'
+$dryRunFile = Join-Path $tempRoot 'g6-h5-lifecycle-ensayo.sql'
 $dryRunText = Get-Content -Raw $ensayoTransaction
 [System.IO.File]::WriteAllText($dryRunFile, $dryRunText, [System.Text.UTF8Encoding]::new($false))
 & docker cp $dryRunFile "${Container}:/tmp/lifecycle-ensayo.sql"
@@ -339,3 +340,4 @@ $runtimeCrossSchema = Invoke-ContainerSql 'SELECT count(*) FROM catalog.products
 if ($runtimeCrossSchema.ExitCode -eq 0) { throw 'Inventory runtime login unexpectedly has access to Catalog schema' }
 
 Write-Output 'PASS PostgreSQL 17 local lifecycle backfill: transaction-owned apply/ensayo, atomic fail-closed rejection, full protected-row hashes, mixed-batch no-write, SKU identities, idempotency, and runtime grants.'
+
