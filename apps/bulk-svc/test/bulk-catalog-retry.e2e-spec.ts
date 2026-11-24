@@ -724,9 +724,26 @@ integration(
           payload: contradictoryLateResult,
         });
         expect(lateResultOutcome).toMatchObject({
-          processed: false,
-          result: 'STALE',
+          processed: true,
+          result: 'RESULTS_APPLIED',
         });
+        const staleAttemptId = String(contradictoryRows[0]?.attempt_id);
+        const staleReceipt = await pool.query<{ result: string }>(
+          `SELECT result FROM bulk.inbox
+           WHERE message_id = $1 AND handler = $2`,
+          [
+            contradictoryLateResult.message_id,
+            `bulk.catalog-result-attempt:${staleAttemptId}`,
+          ],
+        );
+        expect(staleReceipt.rows[0]?.result).toBe('STALE');
+        const productCountAfterLateResult = await catalogDatabase.read((db) =>
+          db
+            .select()
+            .from(products)
+            .where(eq(products.sku_base, firstProductCount[0]!.sku_base)),
+        );
+        expect(productCountAfterLateResult).toEqual(firstProductCount);
         const catalogOutboxRows = await catalogDatabase.read((db) =>
           db.select({ eventName: catalogOutbox.eventName }).from(catalogOutbox),
         );
