@@ -745,7 +745,9 @@ integration(
         );
         expect(productCountAfterLateResult).toEqual(firstProductCount);
         const catalogOutboxRows = await catalogDatabase.read((db) =>
-          db.select({ eventName: catalogOutbox.eventName }).from(catalogOutbox),
+          db
+            .select({ eventName: catalogOutbox.event_name })
+            .from(catalogOutbox),
         );
         expect(
           catalogOutboxRows.every(
