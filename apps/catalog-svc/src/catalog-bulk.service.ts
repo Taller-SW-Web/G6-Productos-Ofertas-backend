@@ -921,9 +921,15 @@ export class CatalogBulkService {
             else {
               if (authorization === undefined && !temporaryIdentityFailure) {
                 try {
-                  authorization = await this.identity.authorizationForBulkRetry(
-                    AbortSignal.timeout(5000),
-                  );
+                  authorization =
+                    message.schema_version === 3 &&
+                    process.env.CATALOG_BULK_RESULT_V2_ENABLED === 'true'
+                      ? await this.identity.authorizationForBulkRetry(
+                          AbortSignal.timeout(5000),
+                        )
+                      : await this.identity.authorization(
+                          AbortSignal.timeout(5000),
+                        );
                 } catch (error) {
                   if (
                     error instanceof CatalogIdentityAcquisitionError &&
