@@ -181,8 +181,8 @@ $clientSecretAvailable = -not [string]::IsNullOrWhiteSpace($promotionsSecret)
 Add-Result 'g7-promotions-svc-client-secret' $(if ($clientSecretAvailable) { 'AVAILABLE' } else { 'EXTERNAL_DEPENDENCY' }) 'Client ID is promotions-svc; api-productos and api-ventas tokens are evaluated separately.'
 $requiredOperations = @(Get-H5PromotionsRequiredOperations)
 $contractOperationScopes = Get-H5ContractOperationScopes $openApiText
-$requiredScopes = @($requiredOperations | ForEach-Object scope | Sort-Object -Unique)
-$missingContractScopes = @($requiredScopes | Where-Object { $_ -notin $contractScopes })
+$requiredScopes = Get-H5DistinctOrdinalStrings @($requiredOperations | ForEach-Object scope)
+$missingContractScopes = @($requiredScopes | Where-Object { $_ -cnotin $contractScopes })
 $knownRouteScopesOk = $true
 foreach ($item in $requiredOperations | Where-Object { $_.contractOperationId }) {
   if ($contractOperationScopes[$item.contractOperationId] -cne $item.scope) { $knownRouteScopesOk = $false }
@@ -190,11 +190,13 @@ foreach ($item in $requiredOperations | Where-Object { $_.contractOperationId })
 Add-Result 'promotions-required-scopes-contract' $(if (-not $allowExternal -or -not $openApiText) { 'NOT_RUN' } elseif (-not $knownRouteScopesOk) { 'INVALID' } elseif ($missingContractScopes.Count) { 'MISSING' } else { 'PASS' }) $(if ($missingContractScopes.Count) { 'Contract is missing operation scopes: ' + ($missingContractScopes -join ', ') } else { 'Scopes are mapped from Promotions internalOperations to current OpenAPI operationId/x-required-scope.' })
 $scopeTokens = [System.Collections.Generic.List[object]]::new()
 if ($runG7Tokens -and $discoveryOk -and $g7ParserConfigOk -and $openApiText) {
-  foreach ($scopeGroup in @($requiredOperations | Group-Object audience,scope,credential)) {
-    $entry = $scopeGroup.Group[0]
+  $scopeCredentialKeys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+  foreach ($entry in $requiredOperations) {
+    $scopeCredentialKey = [string]::Join([char]0,@([string]$entry.audience,[string]$entry.scope,[string]$entry.credential))
+    if (-not $scopeCredentialKeys.Add($scopeCredentialKey)) { continue }
     $tokenSecret = Get-AppSecret $manifest 'promotions-svc' $entry.credential
     $tokenResult = [pscustomobject]@{ TokenStatus='NOT_RUN'; ScopeStatus='AUTHORIZATION_NOT_RUN'; Scopes=@(); Audience=$entry.audience; Scope=$entry.scope }
-    if ($entry.scope -in $contractScopes -and -not [string]::IsNullOrWhiteSpace($tokenSecret)) {
+    if ($entry.scope -cin $contractScopes -and -not [string]::IsNullOrWhiteSpace($tokenSecret)) {
       $tokenResponse = $null; $jwt = $null; $body = $null
       try {
         $body = @{ grant_type='client_credentials'; client_id='promotions-svc'; client_secret=$tokenSecret; scope=$entry.scope }
@@ -203,7 +205,7 @@ if ($runG7Tokens -and $discoveryOk -and $g7ParserConfigOk -and $openApiText) {
         $tokenCheck = Test-H5JwtAuthenticity $jwt $jwks $issuer 'promotions-svc' $entry.audience
         $tokenResult.TokenStatus = if ($tokenResponse.tokenType -ceq 'Bearer') { $tokenCheck.Status } else { 'TOKEN_INVALID' }
         $responseScopes = @($tokenResponse.scopes | Where-Object { $_ -is [string] })
-        $tokenResult.ScopeStatus = if ($responseScopes -contains $entry.scope -and $tokenCheck.Scopes -contains $entry.scope) { Test-H5JwtRequiredScopes $tokenResult.TokenStatus $tokenCheck.Scopes @($entry.scope) $contractScopes } else { 'REQUIRED_SCOPES_MISSING' }
+        $tokenResult.ScopeStatus = Test-H5IssuedScopeAuthorization $tokenResult.TokenStatus $tokenCheck.Scopes $responseScopes $entry.scope $contractScopes
         $tokenResult.Scopes = if ($tokenResult.ScopeStatus -eq 'REQUIRED_SCOPES_VERIFIED') { @($entry.scope) } else { @() }
       } catch { $tokenResult.TokenStatus='AUTHORIZATION_NOT_RUN'; $tokenResult.ScopeStatus='AUTHORIZATION_NOT_RUN' }
       finally { $tokenResponse=$null; $jwt=$null; if ($body) { $body.client_secret=$null }; $body=$null; $tokenSecret=$null }
@@ -211,10 +213,10 @@ if ($runG7Tokens -and $discoveryOk -and $g7ParserConfigOk -and $openApiText) {
     $scopeTokens.Add($tokenResult)
   }
 }
-$productRequiredScopes = @($requiredOperations | Where-Object audience -eq 'api-productos' | ForEach-Object scope | Sort-Object -Unique)
-$salesRequiredScopes = @($requiredOperations | Where-Object audience -eq 'api-ventas' | ForEach-Object scope | Sort-Object -Unique)
-$productTokenRows = @($scopeTokens | Where-Object Audience -eq 'api-productos')
-$salesTokenRows = @($scopeTokens | Where-Object Audience -eq 'api-ventas')
+$productRequiredScopes = Get-H5DistinctOrdinalStrings @($requiredOperations | Where-Object audience -ceq 'api-productos' | ForEach-Object scope)
+$salesRequiredScopes = Get-H5DistinctOrdinalStrings @($requiredOperations | Where-Object audience -ceq 'api-ventas' | ForEach-Object scope)
+$productTokenRows = @($scopeTokens | Where-Object Audience -ceq 'api-productos')
+$salesTokenRows = @($scopeTokens | Where-Object Audience -ceq 'api-ventas')
 $productTokenStatus = if ($productTokenRows.Count -gt 0 -and @($productTokenRows | Where-Object TokenStatus -ne 'TOKEN_VALID').Count -eq 0) { 'TOKEN_VALID' } elseif (@($productTokenRows | Where-Object TokenStatus -eq 'TOKEN_INVALID').Count -gt 0) { 'TOKEN_INVALID' } else { 'AUTHORIZATION_NOT_RUN' }
 $salesTokenStatus = if ($salesTokenRows.Count -gt 0 -and @($salesTokenRows | Where-Object TokenStatus -ne 'TOKEN_VALID').Count -eq 0) { 'TOKEN_VALID' } elseif (@($salesTokenRows | Where-Object TokenStatus -eq 'TOKEN_INVALID').Count -gt 0) { 'TOKEN_INVALID' } else { 'AUTHORIZATION_NOT_RUN' }
 $productAuth = if ($runG7Tokens) { Get-H5ScopeAuthorizationStatus $productTokenRows $productRequiredScopes $contractScopes } else { 'AUTHORIZATION_NOT_RUN' }
@@ -392,31 +394,53 @@ if ($runGhcr -and $ghcrComplete -and $registryUsername) {
           elseif ($manifestResponse.StatusCode -in @(401,403)) { $state='NO_VISIBILITY' }
           elseif ($manifestResponse.StatusCode -ne 200) { $state='UNAVAILABLE' }
           else {
-            $actualDigest = [string]$manifestResponse.Headers['docker-content-digest']
-            $imageManifest = $manifestResponse.Content | ConvertFrom-Json
-            $digestVerified = Test-H5OciDigest $digest $actualDigest
-            $selection = Get-H5OciPlatformSelection $imageManifest 'linux' 'amd64'
-            if ($selection.Status -ne 'SELECTED') {
+            $rootBytes = Get-H5RawResponseBytes $manifestResponse
+            $rootDigestCheck = Test-H5OciBytesDigest $rootBytes $digest ([string]$manifestResponse.Headers['docker-content-digest'])
+            $digestVerified = $rootDigestCheck.IsValid
+            if (-not $digestVerified) {
+              $state = 'MISSING_FOR_RELEASE_SHA'
+              $detail = "Root response bytes do not match requested digest (headerPresent=$($rootDigestCheck.HeaderPresent), headerMatches=$($rootDigestCheck.HeaderMatches))."
+            } else {
+              $imageManifest = [Text.Encoding]::UTF8.GetString($rootBytes) | ConvertFrom-Json
+              $selection = Get-H5OciPlatformSelection $imageManifest 'linux' 'amd64'
+              if ($selection.Status -ne 'SELECTED') {
               $state = 'MISSING_FOR_RELEASE_SHA'
               $detail = "Requested digest is not a unique linux/amd64 executable manifest ($($selection.Status)); attestations are excluded."
-            } else {
-              if ($selection.Kind -eq 'index') {
-                $childResponse = Invoke-WebRequest -Uri "https://ghcr.io/v2/${repository}/manifests/$($selection.Digest)" -Headers @{ Authorization="Bearer $registryToken"; Accept='application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' } -Method Get -TimeoutSec 20 -SkipHttpErrorCheck
-                $childDigest = [string]$childResponse.Headers['docker-content-digest']
-                $childManifest = $childResponse.Content | ConvertFrom-Json
-                $digestVerified = $digestVerified -and $childResponse.StatusCode -eq 200 -and (Test-H5OciDigest $selection.Digest $childDigest) -and $childManifest.mediaType -in @('application/vnd.oci.image.manifest.v1+json','application/vnd.docker.distribution.manifest.v2+json')
-                $imageManifest = $childManifest
+              } else {
+                if ($selection.Kind -eq 'index') {
+                  $childResponse = Invoke-WebRequest -Uri "https://ghcr.io/v2/${repository}/manifests/$($selection.Digest)" -Headers @{ Authorization="Bearer $registryToken"; Accept='application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' } -Method Get -TimeoutSec 20 -SkipHttpErrorCheck
+                  if ($childResponse.StatusCode -eq 200) {
+                    $childBytes = Get-H5RawResponseBytes $childResponse
+                    $childDigestCheck = Test-H5OciBytesDigest $childBytes $selection.Digest ([string]$childResponse.Headers['docker-content-digest'])
+                    $digestVerified = $childDigestCheck.IsValid
+                    if ($digestVerified) {
+                      $childManifest = [Text.Encoding]::UTF8.GetString($childBytes) | ConvertFrom-Json
+                      $digestVerified = $childManifest.mediaType -cin @('application/vnd.oci.image.manifest.v1+json','application/vnd.docker.distribution.manifest.v2+json')
+                      if ($digestVerified) { $imageManifest = $childManifest }
+                    }
+                    if (-not $digestVerified) { $detail = 'Selected child manifest bytes, optional digest header, or media type did not verify.' }
+                  } else { $digestVerified = $false; $state = if ($childResponse.StatusCode -in @(401,403)) {'NO_VISIBILITY'} elseif ($childResponse.StatusCode -eq 404) {'MISSING_FOR_RELEASE_SHA'} else {'UNAVAILABLE'} }
+                }
+                $configResponse = if ($digestVerified) { Invoke-WebRequest -Uri "https://ghcr.io/v2/${repository}/blobs/$($imageManifest.config.digest)" -Headers @{ Authorization="Bearer $registryToken" } -Method Get -TimeoutSec 20 -SkipHttpErrorCheck } else { $null }
+                $packageSha = ''
+                if ($digestVerified -and $configResponse.StatusCode -eq 200) {
+                  $configBytes = Get-H5RawResponseBytes $configResponse
+                  $configDigestCheck = Test-H5OciBytesDigest $configBytes ([string]$imageManifest.config.digest) ([string]$configResponse.Headers['docker-content-digest'])
+                  $digestVerified = $configDigestCheck.IsValid
+                  if (-not $digestVerified) { $state = 'MISSING_FOR_RELEASE_SHA'; $detail = 'Image config response bytes or optional digest header did not match its descriptor.' }
+                } elseif ($digestVerified) {
+                  $digestVerified = $false
+                  $state = if ($configResponse.StatusCode -in @(401,403)) {'NO_VISIBILITY'} elseif ($configResponse.StatusCode -eq 404) {'MISSING_FOR_RELEASE_SHA'} else {'UNAVAILABLE'}
+                }
+                if ($digestVerified) {
+                  $config = [Text.Encoding]::UTF8.GetString($configBytes) | ConvertFrom-Json
+                  $configStatus = Test-H5OciConfig $config $service $sourceSha 'linux' 'amd64'
+                  $packageSha = [string]$config.config.Labels.'org.opencontainers.image.revision'
+                  $digestVerified = $configStatus -ceq 'VERIFIED'
+                  if (-not $digestVerified) { $state = 'MISSING_FOR_RELEASE_SHA'; $detail = "Image config verification failed: $configStatus" }
+                }
+                if ($state -notin @('NO_VISIBILITY','UNAVAILABLE','MISSING_FOR_RELEASE_SHA')) { $state = Get-H5GhcrReleaseStatus 'VISIBLE' $sourceSha $packageSha $digestVerified }
               }
-              $configResponse = if ($digestVerified) { Invoke-WebRequest -Uri "https://ghcr.io/v2/${repository}/blobs/$($imageManifest.config.digest)" -Headers @{ Authorization="Bearer $registryToken" } -Method Get -TimeoutSec 20 -SkipHttpErrorCheck } else { $null }
-              $packageSha = ''
-              if ($digestVerified -and $configResponse.StatusCode -eq 200 -and (Test-H5OciDigest ([string]$imageManifest.config.digest) ([string]$configResponse.Headers['docker-content-digest']))) {
-                $config = $configResponse.Content | ConvertFrom-Json
-                $configStatus = Test-H5OciConfig $config $service $sourceSha 'linux' 'amd64'
-                $packageSha = [string]$config.config.Labels.'org.opencontainers.image.revision'
-                $digestVerified = $configStatus -ceq 'VERIFIED'
-                if (-not $digestVerified) { $detail = "Image config verification failed: $configStatus" }
-              } else { $digestVerified = $false; if ($configResponse -and $configResponse.StatusCode -eq 200) { $detail = 'Image config blob digest does not match its descriptor.' } }
-              $state = Get-H5GhcrReleaseStatus 'VISIBLE' $sourceSha $packageSha $digestVerified
             }
           }
         }
@@ -463,7 +487,8 @@ if (-not $allowExternal) {
         $resourceGroupScope = ($queue.id -split '/providers/')[0]
         $broaderScopes = @($subscriptionScope,$resourceGroupScope,[string]$namespace.id)
         $rbacAssessment = Get-H5ServiceBusRbacAssessment $assignmentRows ([string]$identity.principalId) ([string]$queue.id) @('Azure Service Bus Data Sender','Azure Service Bus Data Receiver') $broaderScopes
-        Add-Result 'promotions-servicebus-queue-rbac' $rbacAssessment.Status 'Direct versus inherited grants and excessive namespace/resource-group/subscription Service Bus data permissions checked read-only.'
+        $promotionsRbacStatus = Get-H5RbacAggregateStatus @($rbacAssessment.Status)
+        Add-Result 'promotions-servicebus-queue-rbac' $promotionsRbacStatus 'Direct versus inherited grants and excessive namespace/resource-group/subscription Service Bus data permissions checked read-only.'
       } else { Add-Result 'promotions-servicebus-queue-rbac' (Get-H5QueueRbacStatus 'UNAVAILABLE' @()) 'Queue-scope assignment query failed; no absence is inferred.' }
     } else {
       Add-Result 'promotions-managed-identity-and-servicebus-parameters' 'UNAVAILABLE' 'Read-only identity or queue lookup failed.'
@@ -525,7 +550,7 @@ if (-not $allowExternal) {
             } catch { $rbacStates.Add('UNAVAILABLE') }
           }
         }
-        $targetRbacStatus = if ($rbacStates -contains 'MISSING') { 'MISSING' } elseif ($rbacStates -contains 'UNAVAILABLE') { 'UNAVAILABLE' } elseif ($rbacStates.Count -gt 0 -and @($rbacStates | Where-Object { $_ -ne 'PASS' }).Count -eq 0) { 'PASS' } else { 'PENDING' }
+        $targetRbacStatus = Get-H5RbacAggregateStatus @($rbacStates)
       } else { $targetRbacStatus = 'NOT_RUN' }
       Add-Result 'h5-target-servicebus-rbac' $targetRbacStatus 'Each approved identity/queue/role tuple checked at the exact queue scope including inherited assignments.'
     }

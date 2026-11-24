@@ -41,6 +41,9 @@ try {
   Assert ((Get-H5QueueRbacStatus 'PASS' @('Azure Service Bus Data Sender')) -eq 'MISSING') 'queue RBAC reports a missing role'
   Assert ((Get-H5QueueRbacStatus 'UNAVAILABLE' @()) -eq 'UNAVAILABLE') 'denied/unavailable queue query is not reported as missing'
   Assert ((Get-H5QueueRbacStatus 'NOT_RUN' @()) -eq 'NOT_RUN') 'unrun queue query remains NOT_RUN'
+  Assert ((Get-H5RbacAggregateStatus @('INVALID')) -eq 'INVALID') 'RBAC aggregate preserves a single INVALID result'
+  Assert ((Get-H5RbacAggregateStatus @('UNAVAILABLE','INVALID')) -eq 'INVALID') 'RBAC INVALID takes precedence over UNAVAILABLE'
+  Assert ((Get-H5RbacAggregateStatus @('PASS','NOT_RUN')) -eq 'PENDING') 'RBAC aggregate passes only when every required result is PASS'
   Assert (-not (Test-H5PsqlAvailable 'g6-h5-preflight-no-such-psql-executable')) 'psql absent is detected without attempting a database connection'
 
   Assert ((Get-H5GhcrReleaseStatus 'UNKNOWN' '' '' $false) -eq 'NO_VISIBILITY') 'GHCR access without visibility is not treated as unpublished'
@@ -50,6 +53,19 @@ try {
   Assert ((Get-H5OciPlatformSelection $ociManifest).Status -eq 'SELECTED') 'GHCR single OCI manifest is selected'
   Assert (Test-H5OciDigest ('sha256:' + ('a'*64)) ('sha256:' + ('a'*64))) 'GHCR manifest digest matches requested digest exactly'
   Assert (-not (Test-H5OciDigest ('sha256:' + ('a'*64)) ('sha256:' + ('b'*64)))) 'GHCR mismatched index or child digest is rejected'
+  $ociRawBytes = [Text.Encoding]::UTF8.GetBytes('{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json"}')
+  $ociRawDigest = Get-H5Sha256Digest $ociRawBytes
+  $validNoHeader = Test-H5OciBytesDigest $ociRawBytes $ociRawDigest ''
+  Assert ($validNoHeader.IsValid -and -not $validNoHeader.HeaderPresent) 'GHCR raw response bytes verify when the optional digest header is absent'
+  $validWithHeader = Test-H5OciBytesDigest $ociRawBytes $ociRawDigest $ociRawDigest
+  Assert ($validWithHeader.IsValid -and $validWithHeader.HeaderMatches) 'GHCR raw response bytes verify with a matching digest header'
+  Assert (-not (Test-H5OciBytesDigest $ociRawBytes $ociRawDigest ('sha256:' + ('f'*64))).IsValid) 'GHCR incorrect optional digest header rejects otherwise matching content'
+  $alteredBytes = $ociRawBytes.Clone(); $alteredBytes[$alteredBytes.Length - 2] = [byte]([int]$alteredBytes[$alteredBytes.Length - 2] -bxor 1)
+  Assert (-not (Test-H5OciBytesDigest $alteredBytes $ociRawDigest '').IsValid) 'GHCR altered response content fails its expected digest'
+  Assert (-not (Test-H5OciBytesDigest $alteredBytes $ociRawDigest $ociRawDigest).IsValid) 'GHCR matching header cannot mask content bytes with a wrong digest'
+  $rawResponseStream = [IO.MemoryStream]::new($ociRawBytes)
+  try { $rawResponseBytes = Get-H5RawResponseBytes ([pscustomobject]@{RawContentStream=$rawResponseStream}); Assert ((Get-H5Sha256Digest $rawResponseBytes) -ceq $ociRawDigest) 'GHCR raw response extraction hashes original bytes without JSON reserialization' }
+  finally { $rawResponseStream.Dispose() }
   $ociIndex = @{mediaType='application/vnd.oci.image.index.v1+json';manifests=@(
     @{digest='sha256:' + ('b'*64);platform=@{os='unknown';architecture='unknown'};annotations=@{'vnd.docker.reference.type'='attestation-manifest'}},
     @{digest='sha256:' + ('c'*64);platform=@{os='linux';architecture='amd64'}},
@@ -128,6 +144,15 @@ exit /b 0
     $validToken = Test-H5JwtAuthenticity $jwt $jwks 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' 'api-productos'
     Assert ($validToken.Status -eq 'TOKEN_VALID') 'G7 authenticity verifier accepts a signed api-productos promotions-svc token'
     Assert ((Test-H5JwtRequiredScopes $validToken.Status $validToken.Scopes $apiProductsScopes @('promociones:leer')) -eq 'REQUIRED_SCOPES_VERIFIED') 'G7 authorization verifies inclusion of the required scope set'
+    Assert ((Test-H5JwtRequiredScopes 'TOKEN_VALID' @('catalogo:leer') @('catalogo:leer') @('catalogo:leer')) -ceq 'REQUIRED_SCOPES_VERIFIED') 'contract scope catalogo:leer matches the exact JWT scope'
+    Assert ((Test-H5JwtRequiredScopes 'TOKEN_VALID' @('CATALOGO:LEER') @('catalogo:leer') @('catalogo:leer')) -ceq 'REQUIRED_SCOPES_MISSING') 'uppercase JWT scope does not satisfy lowercase contractual scope'
+    Assert ((Test-H5IssuedScopeAuthorization 'TOKEN_VALID' @('catalogo:leer') @('CATALOGO:LEER') 'catalogo:leer' @('catalogo:leer')) -ceq 'REQUIRED_SCOPES_MISSING') 'correct JWT scope with differently cased issuance response does not authorize'
+    Assert ((Test-H5IssuedScopeAuthorization 'TOKEN_INVALID' @('catalogo:leer') @('catalogo:leer') 'catalogo:leer' @('catalogo:leer')) -ceq 'AUTHORIZATION_NOT_RUN') 'TOKEN_INVALID never satisfies required scopes'
+    Assert ((Test-H5JwtRequiredScopes 'TOKEN_VALID' @('catalogo:leer') @('catalogo:leer') @('CATALOGO:LEER')) -ceq 'AUTHORIZATION_NOT_RUN') 'contract scope matching is case sensitive'
+    $caseDistinctScopes = @(Get-H5ContractScopes "x-required-scope: catalogo:leer`nx-required-scope: CATALOGO:LEER")
+    Assert ($caseDistinctScopes.Count -eq 2) 'OpenAPI contract scopes preserve case-distinct values'
+    Assert ((Get-H5ScopeAuthorizationStatus @([pscustomobject]@{TokenStatus='TOKEN_VALID';ScopeStatus='REQUIRED_SCOPES_MISSING';Scopes=@()}) @('catalogo:leer') @('catalogo:leer')) -ceq 'REQUIRED_SCOPES_MISSING') 'JWT scope cannot override a missing scope in the issuance response'
+    Assert ((Get-H5ScopeAuthorizationStatus @([pscustomobject]@{TokenStatus='TOKEN_INVALID';ScopeStatus='REQUIRED_SCOPES_VERIFIED';Scopes=@('catalogo:leer')}) @('catalogo:leer') @('catalogo:leer')) -ceq 'AUTHORIZATION_NOT_RUN') 'scope aggregator refuses TOKEN_INVALID even if a row claims verification'
     Assert ((Test-H5JwtRequiredScopes $validToken.Status $validToken.Scopes @('promociones:leer','cupones:validar') @('promociones:leer','cupones:validar')) -eq 'REQUIRED_SCOPES_MISSING') 'correctly signed JWT missing one required scope does not authorize the integration'
     $jwtParts = $jwt.Split('.'); $tamperedSignature = if ($jwtParts[2][0] -eq 'A') { 'B' + $jwtParts[2].Substring(1) } else { 'A' + $jwtParts[2].Substring(1) }
     Assert ((Test-H5JwtAuthenticity ("$($jwtParts[0]).$($jwtParts[1]).$tamperedSignature") $jwks 'https://g7-auth-service.onrender.com/api/v1/auth' 'promotions-svc' 'api-productos').Status -eq 'TOKEN_INVALID') 'G7 verifier rejects a tampered token signature'
@@ -201,6 +226,8 @@ exit /b 0
   $h5PassResults = @($h5Required | ForEach-Object { [pscustomobject]@{Check=$_;Status=(Get-H5CheckSuccessStatus $_)} })
   $h5PreparationPass = Get-H5PreflightOutcome 'H5_INTEGRATION' $h5PassResults
   Assert ($h5PreparationPass.ExitCode -eq 0 -and -not $h5PreparationPass.DeploymentAuthorized) 'H5_INTEGRATION PASS represents dependency preparation only and never authorizes deployment'
+  $invalidRbacResults = @($h5PassResults | ForEach-Object { if ($_.Check -eq 'h5-target-servicebus-rbac' -or $_.Check -eq 'promotions-servicebus-queue-rbac') { [pscustomobject]@{Check=$_.Check;Status='INVALID'} } else { $_ } })
+  Assert ((Get-H5PreflightOutcome 'H5_INTEGRATION' $invalidRbacResults).ExitCode -eq 1) 'RBAC privilege violation INVALID fails the global H5 gate with code 1'
   $h5TargetPending = @($h5PassResults | ForEach-Object { if ($_.Check -eq 'h5-integration-target-configuration') { [pscustomobject]@{Check=$_.Check;Status='PENDING'} } else { $_ } })
   Assert ((Get-H5PreflightOutcome 'H5_INTEGRATION' $h5TargetPending).ExitCode -eq 2) 'H5_INTEGRATION requires an approved target and returns pending without it'
   $h5JwtMissing = @($h5PassResults | ForEach-Object { if ($_.Check -eq 'promotions-token-api-productos') { [pscustomobject]@{Check=$_.Check;Status='AUTHORIZATION_NOT_RUN'} } else { $_ } })
@@ -266,6 +293,14 @@ exit /b 0
   Assert ($rbacAssessment.Status -eq 'INVALID' -and $rbacAssessment.Direct.Count -eq 1 -and $rbacAssessment.Inherited.Count -eq 1) 'RBAC distinguishes direct and inherited grants and rejects broad inherited data access'
   $directOnly = @(@{principalId='p';scope=$directScope;roleDefinitionName='Azure Service Bus Data Sender'},@{principalId='p';scope=$directScope;roleDefinitionName='Azure Service Bus Data Receiver'})
   Assert ((Get-H5ServiceBusRbacAssessment $directOnly 'p' $directScope @('Azure Service Bus Data Sender','Azure Service Bus Data Receiver') @()).Status -eq 'PASS') 'RBAC accepts exact direct queue grants with least privilege'
+  $normalizedIds = @(@{principalId='p';scope=$directScope.ToUpperInvariant() + '/';roleDefinitionName='Azure Service Bus Data Sender'},@{principalId='p';scope=$directScope + '/';roleDefinitionName='Azure Service Bus Data Receiver'})
+  Assert ((Get-H5ServiceBusRbacAssessment $normalizedIds 'p' $directScope @('Azure Service Bus Data Sender','Azure Service Bus Data Receiver') @()).Status -eq 'PASS') 'Azure resource ID scope comparison ignores casing and trailing slash'
+  $unlistedInherited = @(@{principalId='p';scope='/subscriptions/s/resourceGroups/other/providers/Microsoft.ServiceBus/namespaces/other';roleDefinitionName='Azure Service Bus Data Sender'},@{principalId='p';scope=$directScope;roleDefinitionName='Azure Service Bus Data Receiver'})
+  Assert ((Get-H5ServiceBusRbacAssessment $unlistedInherited 'p' $directScope @('Azure Service Bus Data Receiver') @('/subscriptions/s/resourceGroups/r/providers/Microsoft.ServiceBus/namespaces/n')).Status -eq 'INVALID') 'any inherited Service Bus data role is excessive even outside enumerated parent scopes'
+  $unlistedCustom = @(@{principalId='p';scope='/subscriptions/s/providers/Custom.Scope/ancestors/a';roleDefinitionName='Custom Role'},@{principalId='p';scope=$directScope;roleDefinitionName='Azure Service Bus Data Receiver'})
+  Assert ((Get-H5ServiceBusRbacAssessment $unlistedCustom 'p' $directScope @('Azure Service Bus Data Receiver') @()).Status -eq 'UNAVAILABLE') 'unknown inherited role at an unlisted scope prevents an RBAC PASS'
+  $conditionalGrant = @(@{principalId='p';scope=$directScope;roleDefinitionName='Azure Service Bus Data Sender';condition="@Resource[Microsoft.ServiceBus/namespaces/queues:QueueName] StringEquals 'q'"})
+  Assert ((Get-H5ServiceBusRbacAssessment $conditionalGrant 'p' $directScope @('Azure Service Bus Data Sender') @()).Status -eq 'UNAVAILABLE') 'conditional queue role does not satisfy a required grant without proven effectiveness'
   $unknownRole = @(@{principalId='p';scope=$directScope;roleDefinitionName='Custom Data Role'})
   Assert ((Get-H5ServiceBusRbacAssessment $unknownRole 'p' $directScope @('Azure Service Bus Data Sender') @()).Status -eq 'UNAVAILABLE') 'RBAC does not PASS when a relevant custom role definition has not been examined'
   Assert ((Get-H5ServiceBusRbacAssessment @() 'p' $directScope @('Azure Service Bus Data Sender') @() 'UNAVAILABLE').Status -eq 'UNAVAILABLE') 'RBAC query without visibility is unavailable, never missing or pass'

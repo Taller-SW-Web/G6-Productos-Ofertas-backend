@@ -162,6 +162,20 @@ function Get-H5QueueRbacStatus([string]$QueryState, [string[]]$Roles) {
   return 'MISSING'
 }
 
+function Get-H5RbacAggregateStatus([string[]]$Statuses) {
+  if (-not $Statuses -or $Statuses.Count -eq 0) { return 'PENDING' }
+  if ('INVALID' -cin $Statuses) { return 'INVALID' }
+  if ('MISSING' -cin $Statuses) { return 'MISSING' }
+  if ('UNAVAILABLE' -cin $Statuses) { return 'UNAVAILABLE' }
+  if (@($Statuses | Where-Object { $_ -cne 'PASS' }).Count -eq 0) { return 'PASS' }
+  return 'PENDING'
+}
+
+function ConvertTo-H5AzureResourceId([string]$ResourceId) {
+  if ([string]::IsNullOrWhiteSpace($ResourceId)) { return '' }
+  return $ResourceId.Trim().TrimEnd('/').ToLowerInvariant()
+}
+
 function Test-H5PsqlAvailable([string]$CommandName) {
   return $null -ne (Get-Command $CommandName -ErrorAction SilentlyContinue)
 }
@@ -188,6 +202,31 @@ function Get-H5OciPlatformSelection($Manifest, [string]$TargetOS='linux', [strin
 
 function Test-H5OciDigest([string]$Expected, [string]$Actual) {
   return $Expected -cmatch '^sha256:[a-f0-9]{64}$' -and $Actual -ceq $Expected
+}
+
+function Get-H5Sha256Digest([byte[]]$Bytes) {
+  if ($null -eq $Bytes) { throw 'OCI_RESPONSE_BYTES_MISSING' }
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { return 'sha256:' + ([BitConverter]::ToString($sha.ComputeHash($Bytes)).Replace('-','').ToLowerInvariant()) }
+  finally { $sha.Dispose() }
+}
+
+function Test-H5OciBytesDigest([byte[]]$Bytes, [string]$ExpectedDigest, [string]$DockerContentDigest) {
+  if ($null -eq $Bytes -or -not (Test-H5OciDigest $ExpectedDigest $ExpectedDigest)) { return [pscustomobject]@{ IsValid=$false; CalculatedDigest=''; HeaderPresent=(-not [string]::IsNullOrWhiteSpace($DockerContentDigest)); HeaderMatches=$false } }
+  $calculated = Get-H5Sha256Digest $Bytes
+  $headerPresent = -not [string]::IsNullOrWhiteSpace($DockerContentDigest)
+  $headerMatches = -not $headerPresent -or [string]$DockerContentDigest -ceq $calculated
+  return [pscustomobject]@{ IsValid=($calculated -ceq $ExpectedDigest -and $headerMatches); CalculatedDigest=$calculated; HeaderPresent=$headerPresent; HeaderMatches=$headerMatches }
+}
+
+function Get-H5RawResponseBytes($Response) {
+  if ($null -eq $Response -or $null -eq $Response.RawContentStream) { throw 'OCI_RAW_RESPONSE_STREAM_UNAVAILABLE' }
+  $stream = $Response.RawContentStream
+  if ($stream -isnot [IO.Stream]) { throw 'OCI_RAW_RESPONSE_STREAM_INVALID' }
+  if ($stream.CanSeek) { $stream.Position = 0 }
+  $copy = [IO.MemoryStream]::new()
+  try { $stream.CopyTo($copy); return ,$copy.ToArray() }
+  finally { $copy.Dispose() }
 }
 
 function Test-H5OciConfig($Config, [string]$Service, [string]$SourceSha, [string]$ExpectedOS='linux', [string]$ExpectedArchitecture='amd64') {
@@ -267,15 +306,20 @@ function Test-H5TargetQueueGrants($Target, $ContractMatrix) {
 function Get-H5ServiceBusRbacAssessment($Assignments, [string]$PrincipalId, [string]$QueueScope, [string[]]$RequiredRoles, [string[]]$BroaderScopes, [string]$QueryStatus='PASS') {
   if ($QueryStatus -ne 'PASS') { return [pscustomobject]@{Status='UNAVAILABLE';Direct=@();Inherited=@();Excess=@();Unverified=@()} }
   $mine = @($Assignments | Where-Object { $_.principalId -ceq $PrincipalId })
-  $direct = @($mine | Where-Object { ([string]$_.scope).TrimEnd('/') -ceq $QueueScope.TrimEnd('/') })
-  $inherited = @($mine | Where-Object { ([string]$_.scope).TrimEnd('/') -cne $QueueScope.TrimEnd('/') })
+  $normalizedQueue = ConvertTo-H5AzureResourceId $QueueScope
+  $direct = @($mine | Where-Object { (ConvertTo-H5AzureResourceId ([string]$_.scope)) -ceq $normalizedQueue })
+  $inherited = @($mine | Where-Object { (ConvertTo-H5AzureResourceId ([string]$_.scope)) -cne $normalizedQueue })
   $effective = @($mine | Where-Object { $_.roleDefinitionName -in @('Azure Service Bus Data Sender','Azure Service Bus Data Receiver','Azure Service Bus Data Owner') })
-  $directNames = @($direct.roleDefinitionName | Sort-Object -Unique)
-  $missing = @($RequiredRoles | Where-Object { $_ -notin $directNames })
-  $excess = @($effective | Where-Object { $_.roleDefinitionName -eq 'Azure Service Bus Data Owner' -or (($_.scope.TrimEnd('/') -in $BroaderScopes) -and $_.roleDefinitionName -in @('Azure Service Bus Data Sender','Azure Service Bus Data Receiver')) -or (($_.scope.TrimEnd('/') -ceq $QueueScope.TrimEnd('/')) -and $_.roleDefinitionName -notin $RequiredRoles) })
+  $directUnconditional = @($direct | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.condition) })
+  $directNames = @($directUnconditional.roleDefinitionName | Sort-Object -Unique)
+  $missing = @($RequiredRoles | Where-Object { $_ -cnotin $directNames })
+  $excess = @($effective | Where-Object { $_.roleDefinitionName -ceq 'Azure Service Bus Data Owner' -or ((ConvertTo-H5AzureResourceId ([string]$_.scope)) -cne $normalizedQueue -and $_.roleDefinitionName -cin @('Azure Service Bus Data Sender','Azure Service Bus Data Receiver')) -or ((ConvertTo-H5AzureResourceId ([string]$_.scope)) -ceq $normalizedQueue -and $_.roleDefinitionName -cnotin $RequiredRoles) })
   $knownDataRoles = @('Azure Service Bus Data Owner','Azure Service Bus Data Sender','Azure Service Bus Data Receiver')
-  $checkedScopes = @($BroaderScopes + $QueueScope | ForEach-Object { ([string]$_).TrimEnd('/') })
-  $unverified = @($mine | Where-Object { ([string]$_.scope).TrimEnd('/') -in $checkedScopes -and $_.roleDefinitionName -notin $knownDataRoles })
+  # az role assignment list is scoped to this queue and includes every ancestor;
+  # an unknown role definition anywhere in that effective set cannot be cleared.
+  $unverified = @($mine | Where-Object { $_.roleDefinitionName -cnotin $knownDataRoles })
+  $conditionalRequired = @($direct | Where-Object { [string]$_.roleDefinitionName -cin $RequiredRoles -and -not [string]::IsNullOrWhiteSpace([string]$_.condition) -and [string]$_.roleDefinitionName -cnotin $directNames })
+  $unverified += $conditionalRequired
   $status = if ($excess.Count) {'INVALID'} elseif ($unverified.Count) {'UNAVAILABLE'} elseif ($missing.Count) {'MISSING'} else {'PASS'}
   return [pscustomobject]@{ Status=$status; Direct=@($direct); Inherited=@($inherited); Excess=@($excess); Unverified=@($unverified); Missing=@($missing) }
 }
@@ -346,7 +390,15 @@ function Get-H5CheckSuccessStatus([string]$Check) {
 }
 
 function Get-H5ContractScopes([string]$OpenApiText) {
-  return @([regex]::Matches($OpenApiText,'(?m)^\s*x-required-scope:\s*["'']?([A-Za-z0-9:_-]+)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+  $scopes = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+  foreach ($match in [regex]::Matches($OpenApiText,'(?m)^\s*x-required-scope:\s*["'']?([A-Za-z0-9:_-]+)')) { [void]$scopes.Add($match.Groups[1].Value) }
+  return @($scopes)
+}
+
+function Get-H5DistinctOrdinalStrings([string[]]$Values) {
+  $set = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+  foreach ($value in $Values) { if ($null -ne $value) { [void]$set.Add([string]$value) } }
+  return @($set)
 }
 
 function Get-H5ContractOperationScopes([string]$OpenApiText) {
@@ -376,17 +428,24 @@ function Get-H5PromotionsRequiredOperations {
 }
 
 function Test-H5JwtRequiredScopes([string]$TokenStatus, [string[]]$TokenScopes, [string[]]$RequiredScopes, [string[]]$ContractScopes) {
-  if ($TokenStatus -ne 'TOKEN_VALID') { return 'AUTHORIZATION_NOT_RUN' }
-  if (-not $RequiredScopes -or @($RequiredScopes | Where-Object { $_ -notin $ContractScopes }).Count -gt 0) { return 'AUTHORIZATION_NOT_RUN' }
-  if (@($RequiredScopes | Where-Object { $_ -notin $TokenScopes }).Count -gt 0) { return 'REQUIRED_SCOPES_MISSING' }
+  if ($TokenStatus -cne 'TOKEN_VALID') { return 'AUTHORIZATION_NOT_RUN' }
+  if (-not $RequiredScopes -or @($RequiredScopes | Where-Object { $_ -cnotin $ContractScopes }).Count -gt 0) { return 'AUTHORIZATION_NOT_RUN' }
+  if (@($RequiredScopes | Where-Object { $_ -cnotin $TokenScopes }).Count -gt 0) { return 'REQUIRED_SCOPES_MISSING' }
   return 'REQUIRED_SCOPES_VERIFIED'
 }
 
+function Test-H5IssuedScopeAuthorization([string]$TokenStatus, [string[]]$JwtScopes, [string[]]$ResponseScopes, [string]$RequiredScope, [string[]]$ContractScopes) {
+  if ($TokenStatus -cne 'TOKEN_VALID') { return 'AUTHORIZATION_NOT_RUN' }
+  if ([string]::IsNullOrWhiteSpace($RequiredScope) -or $RequiredScope -cnotin $ContractScopes) { return 'AUTHORIZATION_NOT_RUN' }
+  if ($RequiredScope -cnotin $ResponseScopes) { return 'REQUIRED_SCOPES_MISSING' }
+  return Test-H5JwtRequiredScopes $TokenStatus $JwtScopes @($RequiredScope) $ContractScopes
+}
+
 function Get-H5ScopeAuthorizationStatus([object[]]$TokenResults, [string[]]$RequiredScopes, [string[]]$ContractScopes) {
-  if (@($RequiredScopes | Where-Object { $_ -notin $ContractScopes }).Count -gt 0) { return 'AUTHORIZATION_NOT_RUN' }
-  if (-not $TokenResults -or @($TokenResults | Where-Object { $_.TokenStatus -ne 'TOKEN_VALID' }).Count -gt 0) { return 'AUTHORIZATION_NOT_RUN' }
-  $verified = @($TokenResults | Where-Object { $_.ScopeStatus -eq 'REQUIRED_SCOPES_VERIFIED' } | ForEach-Object { $_.Scopes })
-  if (@($RequiredScopes | Where-Object { $_ -notin $verified }).Count -gt 0) { return 'REQUIRED_SCOPES_MISSING' }
+  if (@($RequiredScopes | Where-Object { $_ -cnotin $ContractScopes }).Count -gt 0) { return 'AUTHORIZATION_NOT_RUN' }
+  if (-not $TokenResults -or @($TokenResults | Where-Object { $_.TokenStatus -cne 'TOKEN_VALID' }).Count -gt 0) { return 'AUTHORIZATION_NOT_RUN' }
+  $verified = @($TokenResults | Where-Object { $_.ScopeStatus -ceq 'REQUIRED_SCOPES_VERIFIED' } | ForEach-Object { $_.Scopes })
+  if (@($RequiredScopes | Where-Object { $_ -cnotin $verified }).Count -gt 0) { return 'REQUIRED_SCOPES_MISSING' }
   return 'REQUIRED_SCOPES_VERIFIED'
 }
 
@@ -500,4 +559,4 @@ function Get-H5PreflightOutcome([string]$Mode, [object[]]$Results) {
   return [pscustomobject]@{ Mode=$Mode; OverallStatus=$overall; ExitCode=$exitCode; DeploymentAuthorized=$false; RequiredChecks=@($required[$Mode]); MandatoryResults=@($mandatory) }
 }
 
-Export-ModuleMember -Function Get-H5ReservedEnvironment,Test-H5ManifestEnvironment,Test-H5ManifestCompleteness,Get-H5GuardedEnvironment,Test-H5GuardedEnvironment,Resolve-H5GuardedEnvironmentReferences,Get-H5ServiceBusContractMatrix,Test-H5TargetQueueGrants,Get-H5ServiceBusRbacAssessment,Test-H5IntegrationTarget,Get-H5CheckSuccessStatus,Get-H5QueueRbacStatus,Test-H5PsqlAvailable,Get-H5GhcrReleaseStatus,Get-H5OciPlatformSelection,Test-H5OciDigest,Test-H5OciConfig,Get-H5ContractScopes,Get-H5ContractOperationScopes,Get-H5PromotionsRequiredOperations,Test-H5JwtRequiredScopes,Get-H5ScopeAuthorizationStatus,Test-H5OptionalMessagingTable,Test-H5PemCertificate,New-H5ProtectedCaFile,Invoke-H5ReadOnlySql,Test-H5JwtAuthenticity,Get-H5PreflightOutcome
+Export-ModuleMember -Function Get-H5ReservedEnvironment,Test-H5ManifestEnvironment,Test-H5ManifestCompleteness,Get-H5GuardedEnvironment,Test-H5GuardedEnvironment,Resolve-H5GuardedEnvironmentReferences,Get-H5ServiceBusContractMatrix,Test-H5TargetQueueGrants,Get-H5ServiceBusRbacAssessment,Get-H5RbacAggregateStatus,ConvertTo-H5AzureResourceId,Test-H5IntegrationTarget,Get-H5CheckSuccessStatus,Get-H5QueueRbacStatus,Test-H5PsqlAvailable,Get-H5GhcrReleaseStatus,Get-H5OciPlatformSelection,Test-H5OciDigest,Get-H5Sha256Digest,Test-H5OciBytesDigest,Get-H5RawResponseBytes,Test-H5OciConfig,Get-H5ContractScopes,Get-H5DistinctOrdinalStrings,Get-H5ContractOperationScopes,Get-H5PromotionsRequiredOperations,Test-H5JwtRequiredScopes,Test-H5IssuedScopeAuthorization,Get-H5ScopeAuthorizationStatus,Test-H5OptionalMessagingTable,Test-H5PemCertificate,New-H5ProtectedCaFile,Invoke-H5ReadOnlySql,Test-H5JwtAuthenticity,Get-H5PreflightOutcome

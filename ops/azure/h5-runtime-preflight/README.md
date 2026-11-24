@@ -103,13 +103,16 @@ debe incluir exactamente sus tuplas; el preflight rechaza omisiones,
 duplicados, roles incompatibles, colas ajenas o permisos adicionales.
 
 Para los grants observables, el probe distingue asignaciones directas en el
-scope de la cola de las heredadas. Exige cada rol contractual directamente en
-esa cola y rechaza Data Sender/Receiver en namespace, resource group o
-suscripción, así como Data Owner. Asignaciones con roles desconocidos en los
-scopes relevantes quedan `UNAVAILABLE` hasta inspeccionar sus definiciones; si
+scope de la cola de las heredadas y normaliza los resource IDs de Azure sin
+distinguir mayúsculas ni barras finales. Exige cada rol contractual directamente
+en esa cola y rechaza Data Sender/Receiver heredados de cualquier ancestro, así
+como Data Owner. Asignaciones condicionales no satisfacen grants si su
+efectividad no se demuestra; roles desconocidos en el conjunto efectivo
+cola/ancestros quedan `UNAVAILABLE` hasta inspeccionar sus definiciones. Si
 Azure CLI no puede leer el scope o sus asignaciones, tampoco se presume
-ausencia ni se informa `PASS`. La misma política se usa en
-`promotions-servicebus-queue-rbac`.
+ausencia ni se informa `PASS`. El agregado prioriza `INVALID`, `MISSING`,
+`UNAVAILABLE`; solo pasa si hay resultados obligatorios y todos son `PASS`.
+La misma política se usa en `promotions-servicebus-queue-rbac`.
 No se crean, eliminan ni alteran asignaciones.
 
 ## Procedencia OCI GHCR
@@ -117,17 +120,20 @@ No se crean, eliminan ni alteran asignaciones.
 El workflow oficial `publish-only-images.yml` publica un tag inmutable por SHA,
 con `docker/build-push-action` (`load: true`) y `docker push`; la verificación
 del propio workflow exige labels `source`, `revision` y `title`. El preflight
-acepta manifests OCI/Docker individuales y también indexes/lists. Para estos
-últimos valida el digest del index solicitado, requiere un único descriptor
-ejecutable `linux/amd64`, busca el manifest hijo por digest y verifica su
-digest, el digest de configuración, plataforma y las tres labels exactas.
+acepta manifests OCI/Docker individuales y también indexes/lists. Calcula
+SHA-256 sobre bytes originales para la raíz, el manifiesto hijo y el blob
+config; contrasta el digest esperado y, si está presente, la cabecera
+`Docker-Content-Digest`. No procesa metadatos antes de que los bytes pasen la
+verificación. Para índices requiere un descriptor ejecutable único
+`linux/amd64`, y luego valida plataforma y las tres labels exactas.
 Los descriptors `unknown/unknown` de attestations no se tratan como imágenes;
 plataforma ausente o ambigua no puede producir `VERIFIED`.
 
 Los probes JWT admiten solo RS256 como el runtime G7 de la fase. Comparan
-issuer, audiencia y `sub` con igualdad sensible a mayúsculas; si está presente,
-`client_id` debe ser idéntico a `sub`, como en el guard efectivo de Inventory.
-Firma, `kid`, `exp` y `nbf` se validan antes de scopes. La autenticidad
+issuer, audiencia, `sub` y todos los scopes de forma sensible a mayúsculas; si
+está presente, `client_id` debe ser idéntico a `sub`, como en el guard efectivo
+de Inventory. Los scopes requeridos deben coincidir exactamente con OpenAPI,
+la respuesta de emisión y el claim firmado. Firma, `kid`, `exp` y `nbf` se validan antes de scopes. La autenticidad
 (`TOKEN_VALID`), la inclusión de scopes requeridos (`REQUIRED_SCOPES_VERIFIED`)
 y la integración HTTP real son resultados distintos.
 
@@ -188,7 +194,7 @@ Las pruebas PowerShell cubren outcomes fail-closed, psql ausente, modos,
 `INVALID`/`UNAVAILABLE`, scopes requeridos, valores `guardedEnv`, colisiones,
 X.509, cleanup TLS, estados RBAC/GHCR, cinco imágenes `VERIFIED`, estados JWT
 malformados estructurados y la separación del objetivo H5 respecto a
-`guardedEnv` cerrado. El test PowerShell ejecuta 77 assertions. El test de
+`guardedEnv` cerrado. El test PowerShell ejecuta 99 assertions. El test de
 PostgreSQL crea y elimina un contenedor PostgreSQL 17 desechable. Sus tablas y
 roles son sintéticos; las consultas de roles/grants corren como logins runtime
 no-superuser. Ese contenedor no configura PostgreSQL TLS: demuestra SQL y
