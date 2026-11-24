@@ -152,3 +152,21 @@ En esta sesión se verificó Docker Server `29.9.3` y se repitieron:
 - `INVENTORY_REAL_INTEGRATION=1; G6_DOCS_ROOT=...; npm test -- apps/inventory-svc/test/inventory.real.integration.spec.ts --reporter=verbose`: PASS 62/62 con PostgreSQL y RabbitMQ desechables.
 
 Esta repetición confirma harnesses aislados por bounded context, no una única fixture ejecutada a través de los servicios/repositorios de Catalog, Inventory, Pricing y Promotions con IDs compartidos. La fixture unificada solicitada permanece `PARTIAL`. El preflight de reconciliación `05-release-bootstrap-preflight.sql` es de solo lectura y no se ejecutó en Supabase; el handoff directo no contiene el detalle suficiente para generar deltas físicos exactos y seguros para las migraciones con `DDL_PRESENT_LEDGER_MISSING`/`PARTIALLY_APPLIED`. No se inventaron reconciliaciones, no se tocaron ledgers y no se ejecutó DDL/DML remoto.
+
+### Evidencia DDL focalizada posterior
+
+El handoff directo de DDL confirma equivalencia física de Inventory `sku_lifecycle`, `offline_sale_reconciliations`, `outbox_delivery`; Pricing outbox del piloto; y las dos tablas Promotions H5. El estado de sus ledgers y ACL permanece separado. Catalog `outbox_delivery` también coincide, pero no tiene todavía la función/trigger de fan-out y falta `delivery_transport`/sus triggers. Su delta canónico fue preparado y probado en PostgreSQL 17 con cero replay histórico; se reserva para Fase 6 porque el arranque HTTP no exige la ruta asíncrona mientras los flags estén apagados.
+
+No se aplicó DDL, grants, migraciones ni ledger en Supabase real. Para Inventory el ledger de lifecycle sigue ausente y para Promotions falta el grant a rol runtime; son gates independientes del DDL equivalente.
+
+### Cierre focalizado tras handoff DDL
+
+La evidencia directa confirma equivalencia física de los objetos Inventory, Pricing outbox y Promotions H5 enumerados en la fuente adjunta; la matriz mantiene separados ledger y grants y no genera DDL de tabla redundante. El delta asíncrono de Catalog se aplazó a Fase 6 y se validó en PG17.11 descartable sin replay de filas históricas. La prueba adicional de Inventory cubre el handler lifecycle ante un envelope contractual posterior, no el productor Catalog vivo.
+
+La cobertura local repetida pasa para backfill lifecycle, Promotions PG y el delta Catalog, con cleanup. La fixture integrada Catalog→Inventory→Pricing→Promotions solicitada en H04 continúa PARTIAL y no se declara cerrada. Por este criterio pendiente el PR #275 no se pasa a Ready y no se disparan CI oficiales.
+
+### Decisión de alcance y validación tras sincronización de master
+
+Coordinación movió H04 (flujo integrado de cuatro servicios) y la emisión viva Catalog→Inventory a una fase posterior. #275 entrega ahora fixtures y persistencia/lifecycle reproducibles, sin declarar integración completa. La rama se sincronizó con `origin/master` `daf4882b7dc6895c6601a1f4af209ec92c8215b0` mediante merge limpio. Los commits nuevos son Bulk/Catalog retry integration; se inspeccionó que no invalidan los candidatos de base de datos en alcance.
+
+Tras sincronizar pasaron lifecycle PostgreSQL 17.11, Catalog async delta PostgreSQL 17.11 sin replay histórico, Promotions PG 12/12, Promotions unit 26/26 e Inventory evento 1/1. Los dos runners PostgreSQL confirmaron cleanup. JSON, YAML, parser PowerShell y `git diff --check` pasan; actionlint no está disponible. Este cierre no acredita H04, entrega viva Catalog→Inventory, homologación G5/G7 ni release real.

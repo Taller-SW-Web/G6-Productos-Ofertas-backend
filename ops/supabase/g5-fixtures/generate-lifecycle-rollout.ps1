@@ -13,6 +13,9 @@ SELECT
   (SELECT md5(coalesce(string_agg(to_jsonb(t)::text, E'\n' ORDER BY id),'')) FROM inventory.kardex t) AS kardex,
   (SELECT md5(coalesce(string_agg(to_jsonb(t)::text, E'\n' ORDER BY id),'')) FROM inventory.outbox t) AS outbox,
   (SELECT md5(coalesce(string_agg(to_jsonb(t)::text, E'\n' ORDER BY client_id,offline_sale_id),'')) FROM inventory.offline_sale_reconciliations t) AS offline_sale_reconciliations;
+CREATE TEMP TABLE g6_rollout_lifecycle_before ON COMMIT DROP AS
+SELECT sku_id, product_id, sku_version, active, changed_at, updated_at
+FROM inventory.sku_lifecycle;
 '@
 $postcheck = @'
 DO $postcheck$
@@ -44,6 +47,19 @@ SELECT 'POSTCHECK_OK' AS status,
        (SELECT count(*) FROM g6_lifecycle_applied WHERE inserted)::integer AS inserted,
        (SELECT count(*) FROM g6_lifecycle_applied WHERE NOT inserted)::integer AS advanced,
        ((SELECT count(*) FROM g6_lifecycle_eligible) - (SELECT count(*) FROM g6_lifecycle_applied))::integer AS preserved;
+SELECT jsonb_build_object(
+  'manifest_version', 1,
+  'changes', COALESCE(jsonb_agg(jsonb_build_object(
+    'sku_id', e.sku,
+    'action', CASE WHEN a.inserted THEN 'INSERTED' ELSE 'ADVANCED' END,
+    'before', CASE WHEN b.sku_id IS NULL THEN NULL ELSE to_jsonb(b) END,
+    'after', to_jsonb(l)
+  ) ORDER BY e.sku), '[]'::jsonb)
+) AS lifecycle_change_manifest
+FROM g6_lifecycle_applied a
+JOIN g6_lifecycle_eligible e ON e.sku = a.sku
+JOIN inventory.sku_lifecycle l ON l.sku_id = e.sku
+LEFT JOIN g6_rollout_lifecycle_before b ON b.sku_id = e.sku;
 '@
 foreach ($mode in @('apply', 'ensayo')) {
   $finish = if ($mode -eq 'apply') { 'COMMIT;' } else { 'ROLLBACK;' }

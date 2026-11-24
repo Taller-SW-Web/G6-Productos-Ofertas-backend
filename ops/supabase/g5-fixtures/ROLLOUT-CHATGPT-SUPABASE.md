@@ -40,3 +40,41 @@ El harness `tests/run-local-inventory-lifecycle.ps1` comprueba los mismos archiv
 Postcondiciones: cada elegible tiene la misma identidad de producto; su lifecycle corresponde a la versión candidata o a una versión previa más nueva que se conserva; la igualdad de versión coincide en estado y `changed_at`; los seis hashes de contenido protegido se mantienen; y el resultado termina con `POSTCHECK_OK`.
 
 Antes del commit, un error o rechazo exige rollback completo. Después del commit, no hagas limpieza por prefijo: se requiere un manifiesto exacto de filas insertadas/avanzadas y sus valores previos. Solo revertir si cada fila todavía coincide exactamente con el resultado de esta ejecución y no hay eventos/cambios posteriores. No borrar tablas H5 ni alterar ledgers históricos. Grants runtime son una operación separada y no forman parte de estos SQL.
+
+## Bloques de bootstrap HTTP (no async)
+
+1. Ejecutar `05-release-bootstrap-preflight.sql` primero como consulta de solo lectura. Es un preflight focalizado y no reemplaza la revisión del ledger del microservicio.
+2. Las tablas Inventory lifecycle/offline y Promotions H5 ya existen físicamente según la evidencia focalizada. No ejecutar CREATE/ALTER de esas estructuras. Catalog outbox trigger, Catalog delivery_transport y outboxes Inventory/Pricing se excluyen del bootstrap y quedan en Fase 6.
+3. Grants Inventory solo después de confirmar que la ACA de release realmente usa `inventory_app`; el bloque versionado reutilizado está en `ops/azure/h5-runtime-preflight/inventory-runtime-grants.proposal.sql`:
+
+```sql
+GRANT USAGE ON SCHEMA inventory TO inventory_app;
+GRANT SELECT, INSERT, UPDATE
+  ON inventory.sku_lifecycle, inventory.offline_sale_reconciliations
+  TO inventory_app;
+```
+
+4. Para Promotions, únicamente después de confirmar el principal/rol de release y aprobar el migration runner, ejecutar el candidato `apps/promotions-svc/migrations-candidate/h5/0002_coupon_http_runtime_role.sql` con transacción oficial y `SET LOCAL g6.promotions_h5_runtime_role = '<rol runtime confirmado>'`. El candidato concede solo SELECT/INSERT/UPDATE en las dos tablas H5; no ejecutar sobre el rol de desarrollo por comodidad. No añade DDL ni toca `coupon_uses`.
+5. No hay bloque de reconciliación estructural para Inventory, Pricing o Promotions porque el handoff reporta equivalencia física. Su ledger pendiente no se “arregla” insertando versiones históricas; requiere migración nueva de verificación mediante el mecanismo oficial y revisión de DBA.
+6. Catalog async candidate `catalog-h5-async-delta.candidate.sql` no se ejecuta en este rollout HTTP. Se reserva para Fase 6 con freeze de productores y una aprobación aparte.
+
+**Postchecks de permisos** (ejecutar con lectura autorizada luego de un grant aprobado):
+
+```sql
+SELECT has_schema_privilege('inventory_app','inventory','USAGE') AS inventory_usage,
+       has_table_privilege('inventory_app','inventory.sku_lifecycle','SELECT') AS lifecycle_select,
+       has_table_privilege('inventory_app','inventory.sku_lifecycle','INSERT') AS lifecycle_insert,
+       has_table_privilege('inventory_app','inventory.sku_lifecycle','UPDATE') AS lifecycle_update,
+       has_table_privilege('inventory_app','inventory.offline_sale_reconciliations','SELECT') AS offline_select,
+       has_table_privilege('inventory_app','inventory.offline_sale_reconciliations','INSERT') AS offline_insert,
+       has_table_privilege('inventory_app','inventory.offline_sale_reconciliations','UPDATE') AS offline_update;
+
+SELECT has_table_privilege('po_promotions_runtime','promotions.h5_coupon_operations','SELECT') AS operations_select,
+       has_table_privilege('po_promotions_runtime','promotions.h5_coupon_operations','INSERT') AS operations_insert,
+       has_table_privilege('po_promotions_runtime','promotions.h5_coupon_operations','UPDATE') AS operations_update,
+       has_table_privilege('po_promotions_runtime','promotions.h5_coupon_outbox','SELECT') AS outbox_select,
+       has_table_privilege('po_promotions_runtime','promotions.h5_coupon_outbox','INSERT') AS outbox_insert,
+       has_table_privilege('po_promotions_runtime','promotions.h5_coupon_outbox','UPDATE') AS outbox_update;
+```
+
+Estos bloques son preparación/revisión; no se ejecutaron en Supabase compartido. No se ha identificado una diferencia estructural que justifique DDL en el bootstrap HTTP.

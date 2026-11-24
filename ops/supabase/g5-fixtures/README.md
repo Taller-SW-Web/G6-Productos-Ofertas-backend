@@ -54,3 +54,9 @@ La secuencia de revisión está en `ROLLOUT-CHATGPT-SUPABASE.md` y `rollout-real
 - No se considera que un prefijo QA aísle producción. Sin RLS que aísle filas, fixtures reales requieren branch/base aprobada y credenciales dedicadas con revisión completa.
 - Escenarios que comparten pedido, stock, reserva, cupón, expiración o identidad de mensaje son seriales/exclusivos. Solo lecturas sin mutación o fixtures con todas las claves/stock independientes se pueden paralelizar localmente.
 - Marketplace retest funcional permanece `NOT_VERIFIED`; sus objetos e imágenes no fueron tocados.
+
+## Evidencia focalizada DDL del conector
+
+No ejecutar `CREATE TABLE` para Inventory lifecycle/offline reconciliation/outbox_delivery, Pricing outbox, ni Promotions coupon operations/outbox: el handoff DDL directo confirmó equivalencia estructural. Su ledger, ACL y readiness continúan separados. Catalog ya tiene la tabla `outbox_delivery`; su delta canónico de función/trigger y `delivery_transport` está en `catalog-h5-async-delta.candidate.sql`, es solo Fase 6 y su prueba local confirma que no genera deliveries para outbox histórico. No aplicar ese delta para arrancar HTTP.
+
+El recorrido local de los cuatro servicios continúa `PARTIAL`: los runners de servicio usan sus propias bases desechables. No representan una sola fixture cross-service ni homologación G5/G7.

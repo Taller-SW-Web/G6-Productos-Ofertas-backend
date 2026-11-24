@@ -8,11 +8,27 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../../../')).Path
 $candidate = Join-Path $repoRoot 'ops/azure/h5-runtime-preflight/inventory-sku-lifecycle-backfill.candidate.sql'
 $applyTransaction = Join-Path $repoRoot 'ops/supabase/g5-fixtures/inventory-sku-lifecycle-apply.transaction.sql'
 $ensayoTransaction = Join-Path $repoRoot 'ops/supabase/g5-fixtures/inventory-sku-lifecycle-ensayo.transaction.sql'
+$generator = Join-Path $repoRoot 'ops/supabase/g5-fixtures/generate-lifecycle-rollout.ps1'
 $catalogDdl = Join-Path $repoRoot 'apps/catalog-svc/test/fixtures/0001_create_catalog.sql'
 $inventoryDdl = Join-Path $repoRoot 'apps/catalog-svc/test/fixtures/inventory-initial.sql'
 $inventoryLifecycleMigration = Join-Path $repoRoot 'apps/inventory-svc/migrations/20261104_0001_lifecycle_offline_reconciliation.sql'
 $runtimeGrantProposal = Join-Path $repoRoot 'ops/azure/h5-runtime-preflight/inventory-runtime-grants.proposal.sql'
 $syntheticData = Join-Path $PSScriptRoot 'local-inventory-lifecycle-fixtures.sql'
+
+& pwsh -NoProfile -File $generator
+if ($LASTEXITCODE -ne 0) { throw 'Lifecycle rollout SQL generation failed' }
+$candidateBody = (Get-Content -Raw $candidate).Trim()
+foreach ($generatedPath in @($applyTransaction, $ensayoTransaction)) {
+  if (-not (Test-Path $generatedPath) -or -not (Get-Content -Raw $generatedPath).Contains($candidateBody)) {
+    throw "Generated rollout does not contain the exact versioned candidate body: $generatedPath"
+  }
+}
+$applySql = Get-Content -Raw $applyTransaction
+$ensayoSql = Get-Content -Raw $ensayoTransaction
+if ($applySql -notmatch '(?s)^BEGIN;.*COMMIT;\s*$' -or $ensayoSql -notmatch '(?s)^BEGIN;.*ROLLBACK;\s*$' -or
+    $applySql -notmatch 'lifecycle_change_manifest' -or $ensayoSql -notmatch 'lifecycle_change_manifest') {
+  throw 'Generated apply/ensayo wrapper must end correctly and emit the reversible lifecycle manifest'
+}
 
 function Assert-Command {
   param([string]$Name)

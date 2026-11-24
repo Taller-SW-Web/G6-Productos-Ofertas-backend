@@ -211,3 +211,83 @@ No se modificaron Supabase compartido, Azure/ACA, Service Bus, Marketplace, trá
 ### Publicación en PR #275
 
 La corrección H01–H03, el runner lifecycle integrado en CI y los handoffs se publicaron en la misma rama/PR #275, conservándolo OPEN / Draft. Código publicado en este corte: `772c5807eb0a8d9dae684246396f4a8f0f24bf34`. GitHub PR HEAD verificado igual al commit publicado y `mergeable=true`. Los tres workflows oficiales creados para ese SHA aparecen `completed / skipped` (run IDs `45497989627`, `45497989621`, `45497989520`) porque el PR sigue Draft; no son evidencia de CI SUCCESS. No se solicitó Ready, y no se hizo merge.
+
+## Addendum — evidencia focalizada DDL, lifecycle y cierre del PR (2026-11-24)
+
+Fuente física: `HANDOFF-SUPABASE-G6-H5-DDL-FOCALIZADO.md` del conector Supabase; no se repitió auditoría ni se hicieron operaciones compartidas.
+
+- Inventory lifecycle, offline reconciliation y outbox delivery; Pricing outbox del piloto; Promotions H5 operations/outbox tienen DDL físicamente equivalente a sus candidatos según el handoff. No se generaron tablas duplicadas. El ledger de Inventory 20261104_0001 y los ledgers candidatos H5 siguen sin entrada; se requiere reconciliación versionada por el migrador oficial. Grants son independientes: `inventory_app` carece de INSERT/UPDATE lifecycle y de SELECT/INSERT/UPDATE offline; `po_promotions_runtime` carece SELECT/INSERT/UPDATE sobre las dos tablas H5. No se aplicaron grants.
+- Catalog outbox_delivery existe y es equivalente. El delta físico faltante son la función/trigger H5 0001 y `delivery_transport` más su función/trigger 0002. Se preparó `catalog-h5-async-delta.candidate.sql`, copiado de las funciones/triggers canónicos y sin CREATE TABLE, ledger update ni fan-out de filas previas. La prueba desechable dejó cuatro mensajes históricos con cero deliveries y marcó/enrutó solo un nuevo mensaje después de instalar los triggers. `DISPOSABLE_POSTGRES_CLEANUP_CONFIRMED`. Es un delta de Fase 6, no se observó requisito para bootstrap HTTP mientras las flags de mensajería están apagadas.
+- Las definiciones/versiones de migración, diferencias y tracks HTTP/Service Bus quedaron en `migrations-reconciliation.md`; `release-manifest.candidate.json` ahora distingue `httpBootstrap`, `asyncActivation` y `g5g7RealHomologation`. La migración Catalog no se volvió gate de HTTP sin prueba de arranque común.
+
+### Lifecycle y pruebas de Inventory
+
+El ensayo/apply se generan desde el cuerpo versionado y la suite compara que ambos archivos contengan exactamente ese cuerpo. La salida incluye un manifiesto JSON determinista de cada fila insertada/avanzada, con estado anterior y posterior, para conservarlo fuera de la transacción tras el apply aprobado. Ensayo termina en rollback, apply solo confirma tras postchecks. La suite local PostgreSQL 17.11 pasó después de estos cambios y confirmó limpieza.
+
+Se añadió prueba de Inventory que inicia con una fila lifecycle version 2, procesa el envelope `catalog.sku.deactivated` contractual version 3, confirma replay deduplicado y preserva stock/reservas. El envelope usa el fixture del contrato de Catalog ya basado en el productor de Catalog. No arranca el servicio Catalog ni captura un mensaje recién producido por `CatalogMutationService` en el mismo proceso/DB; por tanto la prueba de compatibilidad de extremo a extremo productor→handler queda `PARTIAL`, aunque el handler posterior al backfill pasa.
+
+### H06 — logins, roles y permisos (nombres solamente)
+
+| Servicio | Login actual en referencia ACA | Rol heredado/efectivo conocido | Login previsto según plantilla/runtime | Estado de permisos |
+|---|---|---|---|---|
+| Catalog | `catalog_dev_login` | `po_catalog_dev_runtime` | `catalog_app` (parámetro esperado `G6_EXPECTED_ROLE=catalog_app`) | Actual login es development; grants de release a validar por migration al arrancar. |
+| Inventory | `inventory_dev_login` | `po_inventory_dev_runtime` | `inventory_app` | DDL lifecycle/offline coincide; grants mínimos faltan según evidencia directa y la propuesta existente. |
+| Pricing | `pricing_dev_login` | `po_pricing_dev_runtime` | `pricing_app` (plantilla `DATABASE_URL`, no se imprime URI) | DDL HTTP separado de outbox; grants de release del servicio requieren validación de ACL. |
+| Promotions | `promotions_dev_login` | `po_promotions_dev_runtime` | `po_promotions_runtime` es el rol técnico previsto por la candidata 0002, pero el login release no está acreditado | Rol runtime actual carece SIU en operaciones/outbox; development tiene arw. Candidato 0002 limita H5 a SIU. |
+| Gateway | no utiliza PostgreSQL directamente | no aplica | no aplica | no se configuran credenciales de DB para Gateway. |
+
+Los usernames se extrajeron localmente de referencias ACA sin mostrar ni guardar contraseñas. Esta correlación de configuración no asocia sesiones históricas con ACA. Los logins dev actuales no se presentan como identidades aprobadas de release.
+
+### Tracks y estado final
+
+| Control | Estado | Evidencia |
+|---|---|---|
+| `FIXTURES_LOCAL_INTEGRATED` | PARTIAL | Lifecycle, Inventory y Promotions pasan cada uno en PG17 desechable; aún no existe recorrido común Catalog/Inventory/Pricing/Promotions con IDs compartidos y repositorios/handlers reales. |
+| `HTTP_BOOTSTRAP_SCHEMA_READY` | PARTIAL | DDL focalizado equivalente en objetos citados; Inventory ledger ausente, grants lifecycle/offline pendientes y no se completó arranque conjunto. Promotions HTTP H5 requiere sus tablas existentes y permiso runtime. |
+| `HTTP_BOOTSTRAP_RUNTIME_GRANTS` | BLOCKED | Falta incorporar/graduar los permisos mínimos de Inventory y Promotions en rollout autorizado; no se aplicó ninguno. |
+| `LIFECYCLE_SQL_READY` | PASS | Candidato, generator, manifest before/after, apply/ensayo y suite PG17 exact-body verificadas. |
+| `ASYNC_MIGRATIONS_READY` | PARTIAL | Catalog delta candidate local probado y diferido a Fase 6; outbox Inventory/Pricing/Promotions con ledger/flags/grants pendientes. |
+| `G5_G7_REAL_HOMOLOGATION` | NOT_RUN | Solo mocks contractuales locales. |
+| `CI_OFFICIAL` | NOT_RUN | PR sigue Draft, suites pesadas diferidas. |
+| `RELEASE_READY` | PARTIAL | Falta fixture integrada, permisos reales, smoke de Promotions, CI Ready, SHA/digests definitivos y validación operativa. |
+| `CHILE_DEPLOY_FREEZE` | PASS | `AZURE_CHILE_DEPLOY_ENABLED=false`; sin Azure/Supabase compartido. |
+
+La prueba integrada H04 permanece pendiente; por ello el PR no se pasó a Ready. No hubo cambios en Marketplace, Supabase compartido, Azure, ACA, Service Bus, escalas, tráfico, ingress, secretos, grants, migraciones ni datos comerciales. No se ejecutaron HTTP ni CD.
+
+### Cierre focalizado H05/H02 — sesión 2026-11-24
+
+Se utilizó el handoff directo `HANDOFF-SUPABASE-G6-H5-DDL-FOCALIZADO.md`; no se repitió la auditoría Supabase. La matriz `migrations-reconciliation.md` ahora separa estado físico, ledger y grants. Inventory lifecycle/offline/outbox, Pricing outbox y Promotions H5 son físicamente equivalentes según esa evidencia; no se agregan `CREATE TABLE`. El delta Catalog (trigger/función de fan-out y marcador `delivery_transport`) queda para Fase 6 y no reenvía los cuatro outbox históricos. El candidato delta se probó localmente en PostgreSQL 17.11 con tabla existente y cuatro mensajes históricos: no produjo deliveries retroactivas y los nuevos eventos sí obtuvieron delivery; cleanup confirmado.
+
+Se agregó una prueba de Inventory que parte de lifecycle inicializado, reserva unidades y procesa/reintenta un envelope contractual `catalog.sku.deactivated` posterior, verificando que cambia lifecycle sin alterar stock/reservas. Es una prueba del handler y replay de Inventory; no captura el evento desde una instancia viva de `CatalogMutationService`, así que la compatibilidad productor→handler sigue parcial.
+
+Validación repetida en esta sesión: lifecycle PostgreSQL 17.11 PASS con wrapper transaccional, rechazo atómico, hashes de todas las tablas protegidas y cleanup; Promotions PostgreSQL 12/12 PASS y cleanup; Promotions unitarias 26/26 PASS; prueba Inventory focalizada 1/1 PASS (62 omitidas por filtro); Catalog delta PostgreSQL PASS y cleanup. Parser PowerShell, JSON, YAML con PyYAML y `git diff --check` PASS. `actionlint` no está instalado. No se ejecutaron CI oficiales: PR continúa Draft.
+
+**H04 permanece pendiente para la siguiente fase de integración.** No se construyó el flujo común con IDs compartidos y repositorios/handlers reales; no se declara integración completa. Tras la redefinición de alcance del coordinador, no es criterio de Ready/CI para #275.
+
+## Cierre de alcance #275 — decisión de coordinación (2026-11-24)
+
+H04 (flujo comercial común Catalog→Inventory→Pricing→Promotions) y la emisión viva Catalog→Inventory se registran como tareas de la siguiente fase de integración, no como criterios de aceptación de este PR. La fixture local independiente y reproducible por bounded context es el alcance de #275. Esto no constituye una afirmación de integración u homologación completa.
+
+La rama incorporó `origin/master` `daf4882b7dc6895c6601a1f4af209ec92c8215b0` mediante merge normal, sin conflictos. Los 13 commits de master observados eran Bulk/Catalog retry integration y pruebas; no invalidaron las candidatas lifecycle, Promotions ni Catalog async. El manifiesto se actualizó a ese SHA como referencia de código; digests siguen pendientes.
+
+Validación repetida tras sincronizar: lifecycle PG17.11 PASS (ensayo rollback, apply simulado, idempotencia, rechazo atómico, hashes de tablas protegidas y runtime mínimo); Promotions unit 26/26; Promotions PG 12/12 con cleanup; Inventory evento contractual focalizado 1/1 (replay y preservación de saldos); Catalog delta futuro-only PASS con cleanup. La primera corrida Catalog coincidió con el shutdown de otro contenedor y falló; se repitió secuencialmente y pasó. JSON, YAML, parser PowerShell y `git diff --check` PASS. actionlint no está instalado. H04 y la emisión Catalog viva permanecen pendientes de fase posterior; G5/G7 real no ejecutado.
+
+En esta versión el PR se mantiene Draft hasta que las correcciones estén publicadas y las CI oficiales pasen; esta nota sustituye cualquier bloqueo histórico que trataba H04 como criterio de #275. No hubo escrituras Supabase real, grants, migraciones, publicación, CD, despliegues, Service Bus ni cambios Marketplace. El gate Chile sigue cerrado.
+
+### Matriz definitiva del alcance de #275
+
+| Criterio | Estado | Evidencia / frontera |
+|---|---|---|
+| Lifecycle transaccional, ensayo rollback, idempotencia, rechazo atómico, hashes protegidos | PASS | Runner local PostgreSQL 17.11 repetido tras merge de master |
+| Pruebas de Inventory lifecycle/evento contractual | PASS | Harness lifecycle y prueba focalizada Inventory 1/1; productor Catalog vivo queda en la siguiente fase |
+| Promotions y semántica del canal | PASS | Unitarias 40/40; PG 12/12; `source_client_id` técnico y `channel_id` comercial MARKETPLACE/CHATBOT/RETAIL |
+| Matriz DDL y candidatos sin escrituras reales | PASS | Evidencia directa adjunta; ledger y grants separados; no DDL de tablas equivalentes |
+| Catalog async delta | PASS local / PHASE 6 | PG17.11 sin replay histórico; no requisito de bootstrap HTTP con flags apagadas |
+| Fixtures locales independientes y cleanup | PASS | Inventory lifecycle, Promotions H5 y Catalog delta; todos los harnesses reportan cleanup |
+| H04 flujo comercial integrado de cuatro servicios | DEFERRED | Siguiente fase de integración; no aceptación de #275, sin afirmar integración completa |
+| Productor Catalog vivo→handler Inventory | DEFERRED | Integración asíncrona futura; no aceptación de #275 |
+| Homologación G5/G7 real | NOT_RUN | Fuera de alcance del PR |
+| Bootstrap HTTP real / grants reales / release | NOT_RUN | Requiere operación posterior aprobada; no se tocó Supabase compartido |
+| CI oficiales | PENDING_READY | Se ejecutarán al pasar #275 a Ready sobre el HEAD publicado |
+
+La tabla anterior es la clasificación vigente del alcance de #275 y reemplaza cualquier nota histórica que trataba H04 como bloqueo de aceptación. El criterio sigue pendiente para la fase de integración.

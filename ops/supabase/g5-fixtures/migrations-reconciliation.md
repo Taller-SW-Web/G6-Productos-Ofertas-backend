@@ -91,3 +91,38 @@ En la consulta de PR abiertos, Backend master era `49bab9e2…`. PRs relevantes:
 5. Bulk y Taxonomy se ordenan después de integrar PRs necesarios y verificar límites/payloads/consumidores.
 
 No existe un caso reportado que necesite estado `CHECKSUM_MISMATCH`: los checksums comparados del ledger histórico coinciden con sus fuentes o están explicitados como firma legacy Inventory 0001. La equivalencia DDL parcial se clasifica por separado.
+
+## Addendum focalizado de DDL y separación HTTP / Service Bus (2026-11-24)
+
+Fuente: `HANDOFF-SUPABASE-G6-H5-DDL-FOCALIZADO.md` adjunto por coordinación. Esta sección usa los metadatos físicos obtenidos directamente; no repite la auditoría general. Las estructuras físicas y los ledgers siguen siendo estados separados.
+
+### Bootstrap HTTP indispensable
+
+| Servicio / objeto | Fuente versionada y SHA-256 normalizado LF | Ledger particular | DDL físico en evidencia focalizada | Acción HTTP |
+|---|---|---|---|---|
+| Inventory `sku_lifecycle` | `apps/inventory-svc/migrations/20261104_0001_lifecycle_offline_reconciliation.sql`, `2f2e0241e35c884c9889cabe500188787cb9acd588d6956487b20d395bfbb1b2` | No registra esta migración | Estructura equivalente; índices informados y sin triggers | No recrear tabla. Ledger requiere reconciliación versionada oficial. Backfill de datos y grants son pasos separados. |
+| Inventory `offline_sale_reconciliations` | Mismo archivo y checksum anterior | No registra esta migración | Columnas, tipos, PK/unique/checks equivalentes; sin defaults/triggers | Sin delta DDL. No falsear ledger. Grants necesarios se informan aparte. |
+| Inventory `outbox_delivery` | `apps/inventory-svc/migrations-candidate/h5/0001_outbox_delivery.sql`, SHA-256 `8f2a4da2256dd1150cb6b96d8c135654df006c22cd965584d66a554f879ab3fe` | No registrada en ledger particular | Estructura equivalente al candidato | Fase 6; no prerrequisito HTTP cuando las flags async están apagadas. |
+| Pricing `outbox_delivery` | `apps/pricing-svc/migrations-candidate/h5/0001_outbox_delivery.sql`, SHA-256 `1a3c365c7953da0b70ed4977c8c237a5040522c4effd98bfe35bed0e1b5b58be` | No registrada en ledger Pricing; entrada piloto global no es ledger de servicio | Estructura equivalente al piloto, restricción limitada a Price Audit | Fase 6/piloto; no gate HTTP. No ampliar destinos. |
+| Promotions `h5_coupon_operations`, `h5_coupon_outbox` | H5 `0001_coupon_http_operations.sql`, SHA-256 `f940a655637a3c23d18c308a5bea5ace18a8803ee80d4f7022eafefe34c1d4f9` | No registradas en ledger particular | Estructuras equivalentes; ambas vacías | No recrear tablas. Son requisito de la operación HTTP H5 de cupones, pero runtime grants se evalúan aparte. |
+| Catalog `outbox_delivery` | H5 `0001_outbox_delivery.sql`, SHA-256 `c7404b364c8066250634aadf3bf88b15e186d52f39f4d35ba935706b0ab4d0ed` | Candidata no registrada | Tabla equivalente; faltan `enqueue_h5_outbox_deliveries()` y `tr_catalog_outbox_h5_delivery` | No recrear tabla. Diferencia asíncrona; no fan-out/backfill de los cuatro outbox históricos. |
+| Catalog `delivery_transport` | H5 `0002_taxonomy_reply_transport.sql`, SHA-256 `a8f1e20cfde665904b7dae7ca45bfdccd36de93514b048878c995651c2ff458b` | Candidata no registrada | Columna, función `mark_taxonomy_reply_transport()` y trigger `trg_catalog_taxonomy_reply_transport` inexistentes | Diferencia asíncrona; ejecutar solo al activar esa integración tras revisar el candidato. |
+
+**Conclusión del bootstrap:** la evidencia focalizada no muestra que Catalog outbox-delivery, Inventory outbox-delivery, Pricing outbox-delivery o Catalog `delivery_transport` sean necesarios para iniciar el camino HTTP apagando mensajería. Inventory lifecycle/offline reconciliation sí se requieren para la capacidad Inventory y sus grants/backfill se preparan separadamente. Las dos tablas H5 Promotions ya existen y no se deben recrear. La comprobación de arranque HTTP de los cuatro servicios sobre una única fixture común está pendiente; por ello la conclusión sobre Catalog es estática, no evidencia de un test integrado.
+
+### Ledger y permisos independientes
+
+| Servicio | Estado de ledger | Permisos físicos observados | Próxima acción segura |
+|---|---|---|---|
+| Inventory | `20261104_0001` ausente pese a DDL equivalente | `inventory_app` hereda `po_inventory_runtime`: SELECT lifecycle; sin INSERT/UPDATE lifecycle ni SELECT/INSERT/UPDATE offline reconciliation | Propuesta existente `inventory-runtime-grants.proposal.sql`. Nueva reconciliación versionada solo por el mecanismo oficial, sin insertar fila histórica sintética. |
+| Pricing | H5 outbox no está en ledger de servicio; global piloto no sustituye el ledger | Tabla piloto según evidencia; no ampliar ACL ni destinos | Bootstrap HTTP conserva permisos base; revisar piloto/ledger separado de fase asíncrona. |
+| Promotions | H5 0001/0002 no están en ledger de servicio | `po_promotions_runtime` carece SELECT/INSERT/UPDATE en tablas H5; development role posee arw | No aplicar grants dev automáticamente. Resolver rol de release y aplicar candidato 0002 solo en rollout aprobado. |
+| Catalog | H5 0001/0002 no están en ledger de servicio | ACL por columna y rol reportados; verificar UPDATE por columna para fase async | El delta futuro no toca las cuatro filas históricas ni altera ledger antiguo. |
+
+Los estados físicos no significan que el migration runner haya registrado las candidatas. No se modifica checksum ni ledger en esta rama.
+
+### Service Bus — fase posterior
+
+Catalog conserva las cuatro filas `catalog.outbox` no publicadas y cero entregas. Las candidatas canónicas H5 0001/0002 son fuente para el fan-out futuro y la marca de transporte. Si se prepara un delta, deberá verificar la tabla existente y no recrearla; instalar solo funciones/triggers/columna canónicos faltantes; no recorrer ni reenviar mensajes históricos ni crear entregas retroactivas; no modificar el ledger; y ejecutarse solo en Fase 6, tras congelar writer H4 y aprobar la activación.
+
+Inventory y Pricing outbox, y Promotions operations/outbox, no son prerrequisitos globales de bootstrap HTTP. Productores, consumidores, roles Sender/Receiver y activación quedan en la secuencia de Fase 6.
