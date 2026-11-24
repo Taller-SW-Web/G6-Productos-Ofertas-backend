@@ -4,8 +4,8 @@ Fecha: 2026-11-24 (America/Lima)
 Backend base sincronizada: `origin/master` `49bab9e2075819d922c63b06fcc6fc6ac16ce703` (PR #273 mergeado).
 Docs `origin/master` revisado: `c9e1e5c217616d28229fccf5315fb97a1ae061a9`.
 Rama de trabajo: `trabajo/castilla/h5-fixtures-integracion-g5`.
-Draft PR: [#275](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/275), abierto contra `master`.  
-HEAD publicado: `f3b3ebf1ca86d519d39d8907cc5a461cfe67c3e0`.  
+Draft PR: [#275](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/275), abierto contra `master`.
+HEAD inicial de implementación publicado: `f3b3ebf1ca86d519d39d8907cc5a461cfe67c3e0`.
 Freeze Chile: `AZURE_CHILE_DEPLOY_ENABLED=false`, según evidencia operativa previa; no se cambió.
 
 ## Resumen ejecutivo
