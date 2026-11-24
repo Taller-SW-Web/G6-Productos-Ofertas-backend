@@ -52,11 +52,12 @@ function New-GitHubJitRequestJson {
         [Parameter(Mandatory)][ValidateSet('Diagnostic','Smoke')][string]$Mode,
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][int]$RunnerGroupId,
-        [string]$DiagnosticLabel = 'h5-runner-preflight-only'
+        [string]$DiagnosticLabel = 'h5-runner-preflight-only',
+        [ValidateSet('azure-h5-smoke','azure-h5-smoke-chile')][string]$SmokeLabel = 'azure-h5-smoke'
     )
 
     [string[]]$jitLabels = if ($Mode -eq 'Smoke') {
-        @('linux', 'azure-h5-smoke')
+        @('linux', $SmokeLabel)
     } else {
         @($DiagnosticLabel)
     }
@@ -78,7 +79,7 @@ function New-GitHubJitRequestJson {
             $root.GetProperty('work_folder').ValueKind -ne [System.Text.Json.JsonValueKind]::String) {
             throw 'JIT_REQUEST_INVALID: JIT request field JSON types do not match the GitHub API contract.'
         }
-        if ($Mode -eq 'Diagnostic' -and $jitLabels -contains 'azure-h5-smoke') {
+        if ($Mode -eq 'Diagnostic' -and ($jitLabels -contains 'azure-h5-smoke' -or $jitLabels -contains 'azure-h5-smoke-chile')) {
             throw 'JIT_REQUEST_INVALID: diagnostic registration cannot carry the smoke label.'
         }
     } finally {

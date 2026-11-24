@@ -5,12 +5,28 @@ umask 077
 readonly REPOSITORY='ghcr.io/taller-sw-web/g6-productos-ofertas-backend'
 fail() { printf 'Despliegue Azure fallido: %s\n' "$1" >&2; exit 1; }
 
-case "${H5_DEPLOY_ENVIRONMENT:-}" in
-  azure-h5) resource_group='rg-g6-sb-h5-int-fork' ;;
-  azure-h5-pilot-234) resource_group='rg-g6-aca-chile' ;;
-  *) fail 'environment fuera de la allowlist de destinos H5' ;;
+TARGETS="$(dirname "$0")/deployment-targets.json"
+destination="${H5_DEPLOY_DESTINATION:-brazil-isolated}"
+environment="${H5_DEPLOY_ENVIRONMENT:-}"
+pilot="${H5_PILOT_SELF_REVIEW:-false}"
+case "$environment:$destination:$pilot" in
+  azure-h5:brazil-isolated:false) target_key=destinations.brazil-isolated ;;
+  azure-h5-pilot-234:brazil-isolated:true) target_key=pilot ;;
+  azure-h5-chile:chile-shared:false) target_key=destinations.chile-shared ;;
+  *) fail 'combinación de destino y GitHub Environment no autorizada' ;;
 esac
-readonly RESOURCE_GROUP="$resource_group"
+if [[ "$target_key" == pilot ]]; then
+  case "${1:-}" in --restore) service="${2:-}" ;; --inspect) service="${2:-}" ;; *) service="${1:-}" ;; esac
+  jq -e --arg service "$service" '.pilot.services | index($service) != null' "$TARGETS" >/dev/null || fail 'el piloto histórico solo admite Pricing y Price Audit'
+  resource_group="$(jq -r '.pilot.resourceGroup' "$TARGETS")"
+  aca_environment="$(jq -r '.pilot.acaEnvironment' "$TARGETS")"
+else
+  resource_group="$(jq -r --arg key "$target_key" 'getpath($key | split(".")).resourceGroup' "$TARGETS")"
+  aca_environment="$(jq -r --arg key "$target_key" 'getpath($key | split(".")).acaEnvironment' "$TARGETS")"
+fi
+subscription="$(jq -r '.subscriptionId' "$TARGETS")"
+region="$(jq -r --arg key "$target_key" 'getpath($key | split(".")).location' "$TARGETS")"
+readonly RESOURCE_GROUP="$resource_group" ACA_ENVIRONMENT="$aca_environment" SUBSCRIPTION="$subscription" REGION="$region" DESTINATION="$destination" DEPLOYMENT_ENVIRONMENT="$environment"
 
 mode=deploy
 if [[ "${1:-}" == --restore ]]; then
@@ -23,6 +39,9 @@ else
   [[ $# == 2 ]] || fail 'uso: deploy.sh <servicio> <imagen-con-digest>'
   service="$1"; image="$2"
 fi
+if [[ "$destination" == chile-shared && "$mode" == deploy && "${AZURE_CHILE_DEPLOY_ENABLED:-}" != true ]]; then
+  fail 'AZURE_CHILE_DEPLOY_ENABLED debe ser exactamente true en el Environment azure-h5-chile; no se modifica Azure'
+fi
 case "$service" in api-gateway|bulk-svc|catalog-svc|combos-svc|inventory-svc|price-audit-svc|pricing-svc|promotions-svc|taxonomy-svc) ;; *) fail 'servicio fuera de la allowlist de nueve aplicaciones' ;; esac
 for candidate in "$image" "${previous_image:-$image}"; do
   [[ "$candidate" == "$REPOSITORY/$service@sha256:"* && "${candidate##*@sha256:}" =~ ^[0-9a-f]{64}$ ]] || fail 'imagen fuera del paquete oficial o sin digest inmutable'
@@ -33,7 +52,23 @@ app="$service"; container="$service"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 before="$work/before.json"; after="$work/after.json"; revision="$work/revision.json"
-read_app() { az containerapp show --name "$app" --resource-group "$RESOURCE_GROUP" --output json; }
+read_app() { az containerapp show --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --output json; }
+validate_target() {
+  local account group env app_json expected_env expected_app
+  account="$(az account show --subscription "$SUBSCRIPTION" --query id -o tsv)" || fail 'no se pudo validar la suscripción seleccionada'
+  [[ "${account,,}" == "${SUBSCRIPTION,,}" ]] || fail 'suscripción Azure distinta de la autorizada'
+  group="$(az group show --subscription "$SUBSCRIPTION" --name "$RESOURCE_GROUP" -o json)" || fail 'no se pudo validar el Resource Group'
+  [[ "$(jq -r '.id | ascii_downcase' <<< "$group")" == "/subscriptions/${SUBSCRIPTION,,}/resourcegroups/${RESOURCE_GROUP,,}" ]] || fail 'Resource Group ID inesperado'
+  env="$(az containerapp env show --subscription "$SUBSCRIPTION" --name "$ACA_ENVIRONMENT" --resource-group "$RESOURCE_GROUP" -o json)" || fail 'Environment ACA inexistente o no legible; no se crean recursos'
+  expected_env="/subscriptions/${SUBSCRIPTION,,}/resourcegroups/${RESOURCE_GROUP,,}/providers/microsoft.app/managedenvironments/${ACA_ENVIRONMENT,,}"
+  actual_region="$(jq -r '.location | ascii_downcase | gsub("[[:space:]]"; "")' <<< "$env")"
+  expected_region="$(printf '%s' "$REGION" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  [[ "$(jq -r '.id | ascii_downcase' <<< "$env")" == "$expected_env" && "$actual_region" == "$expected_region" ]] || fail 'Resource ID o región del Environment ACA no coincide con el destino'
+  app_json="$(read_app)" || fail 'ACA solicitada no existe; el CD no crea aplicaciones'
+  expected_app="/subscriptions/${SUBSCRIPTION,,}/resourcegroups/${RESOURCE_GROUP,,}/providers/microsoft.app/containerapps/${app,,}"
+  [[ "$(jq -r '.id | ascii_downcase' <<< "$app_json")" == "$expected_app" ]] || fail 'Resource ID de ACA inesperado'
+  [[ "$(jq -r '.properties.managedEnvironmentId | ascii_downcase' <<< "$app_json")" == "$expected_env" ]] || fail 'ACA pertenece a otro Environment'
+}
 normalize_app() {
   jq -S -c --arg target "$container" '
     {
@@ -79,7 +114,37 @@ verify_revision() {
   return 1
 }
 
+get_chile_origin() {
+  local app_json ingress fqdn external expected_external
+  app_json="$(read_app)" || fail 'no se pudo validar el ingress ACA Chile'
+  ingress="$(jq -c '.properties.configuration.ingress // empty' <<< "$app_json")"
+  fqdn="$(jq -r '.fqdn // empty' <<< "$ingress")"
+  external="$(jq -r '.external // false' <<< "$ingress")"
+  expected_external=false
+  [[ "$service" != api-gateway ]] || expected_external=true
+  [[ -n "$fqdn" && "$external" == "$expected_external" && "$(jq -r '.allowInsecure' <<< "$ingress")" == false ]] || fail 'FQDN/ingress del servicio Chile no coincide con el ingress autorizado'
+  printf 'https://%s\n' "$fqdn"
+}
+
+verify_chile_served_revision() {
+  local expected="$1" app_json latest traffic served_revision served_weight revision_json="$work/served-revision.json" revision_image
+  app_json="$(read_app)" || return 1
+  latest="$(jq -r '.properties.latestRevisionName // empty' <<< "$app_json")"
+  traffic="$(jq -c '.properties.configuration.ingress.traffic // []' <<< "$app_json")"
+  [[ -n "$latest" ]] || return 1
+  [[ "$(jq 'type == "array" and length == 1' <<< "$traffic")" == true ]] || return 1
+  served_revision="$(jq -r --arg latest "$latest" 'if .[0].latestRevision == true then $latest else (.[0].revisionName // empty) end' <<< "$traffic")"
+  served_weight="$(jq -r '.[0].weight // 0' <<< "$traffic")"
+  [[ -n "$served_revision" && "$served_revision" == "$latest" && "$served_weight" == 100 ]] || return 1
+  revision_health "$served_revision" "$revision_json" || return 1
+  revision_image="$(container_image "$revision_json" 2>/dev/null || true)"
+  [[ "$revision_image" == "$expected" ]] || return 1
+  verified_served_revision="$served_revision"
+  verified_served_digest="${expected##*@}"
+}
+
 if [[ "$mode" == inspect ]]; then
+  validate_target
   read_app > "$before" || { echo 'INSPECTION_UNKNOWN: no se pudo leer ACA.'; exit 2; }
   current="$(container_image "$before" 2>/dev/null || true)"
   if [[ "$current" == "$image" ]]; then
@@ -94,8 +159,12 @@ if [[ "$mode" == inspect ]]; then
 fi
 
 if [[ "$mode" == restore ]]; then
+  validate_target
   read_app > "$before" || fail 'no se pudo inspeccionar ACA para recuperación'
   current="$(container_image "$before")" || fail 'no se pudo verificar imagen actual'
+  if [[ "$destination" == chile-shared && "$current" == "$previous_image" ]]; then
+    verify_chile_served_revision "$previous_image" || fail 'RECUPERACIÓN NO VERIFICADA: el digest anterior no recibe el 100% del tráfico Chile'
+  fi
   normalize_app "$before" > "$work/current-normalized.json"
   current_hash="$(sha256sum "$work/current-normalized.json" | awk '{print $1}')"
   if [[ "$current" == "$previous_image" && "$current_hash" == "$expected_config_hash" ]]; then
@@ -106,14 +175,18 @@ if [[ "$mode" == restore ]]; then
     printf 'RECUPERACIÓN OMITIDA: %s cambió concurrentemente (imagen/configuración); no se sobrescribe. Revisión manual requerida.\n' "$service" >&2
     exit 1
   }
-  az containerapp update --name "$app" --resource-group "$RESOURCE_GROUP" --container-name "$container" --image "$previous_image" --output none || fail 'Azure rechazó la recuperación'
+  az containerapp update --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --container-name "$container" --image "$previous_image" --output none || fail 'Azure rechazó la recuperación'
   verify_revision "$previous_image" || fail 'revisión de recuperación no Healthy'
+  if [[ "$destination" == chile-shared ]]; then
+    verify_chile_served_revision "$previous_image" || fail 'RECUPERACIÓN NO VERIFICADA: el digest anterior no recibe el 100% del tráfico Chile'
+  fi
   normalize_app "$after" > "$work/after-normalized.json"
   cmp -s "$work/current-normalized.json" "$work/after-normalized.json" || fail 'la configuración cambió durante la recuperación'
   printf 'ROLLBACK COORDINADO VERIFICADO: servicio=%s revision=%s image=%s.\n' "$service" "$(jq -r '.properties.latestRevisionName' "$after")" "$previous_image"
   exit 0
 fi
 
+validate_target
 read_app > "$before" || fail "no se pudo inspeccionar ACA ${app}"
 jq -e '.properties.template.containers | type == "array" and length > 0' "$before" >/dev/null || fail 'respuesta ACA sin lista de contenedores válida'
 if [[ "$service" == api-gateway ]]; then
@@ -121,22 +194,34 @@ if [[ "$service" == api-gateway ]]; then
 fi
 previous_image="$(container_image "$before")" || fail 'no se encontró exactamente un contenedor de destino'
 [[ "$previous_image" == "$REPOSITORY/$service@sha256:"* && "${previous_image##*@sha256:}" =~ ^[0-9a-f]{64}$ ]] || fail 'la imagen previa no es un digest oficial verificable; rollback seguro imposible'
+if [[ "$destination" == chile-shared ]]; then
+  verify_chile_served_revision "$previous_image" || fail 'tráfico Chile previo es ambiguo/incompatible con un despliegue individual; no se modifica Azure'
+fi
 normalize_app "$before" > "$work/before-normalized.json"
 baseline_hash="$(sha256sum "$work/before-normalized.json" | awk '{print $1}')"
 if [[ -n "${DEPLOY_RECEIPT:-}" ]]; then
-  printf 'service=%s\nprevious=%s\ntarget=%s\nconfig_sha256=%s\n' "$service" "$previous_image" "$image" "$baseline_hash" > "$DEPLOY_RECEIPT"
+  origin=''
+  if [[ "$destination" == chile-shared ]]; then origin="$(get_chile_origin)"; fi
+  jq -n --arg service "$service" --arg destination "$DESTINATION" --arg environment "$DEPLOYMENT_ENVIRONMENT" --arg run_id "${GITHUB_RUN_ID:-}" --arg resource_group "$RESOURCE_GROUP" --arg aca_environment "$ACA_ENVIRONMENT" --arg location "$REGION" --arg subscription "$SUBSCRIPTION" --arg app_id "$(jq -r '.id' "$before")" --arg container "$container" --arg previous "$previous_image" --arg target "$image" --arg config "$baseline_hash" --arg origin "$origin" '{service:$service,destination:$destination,github_environment:$environment,workflow_run_id:$run_id,resource_group:$resource_group,aca_environment:$aca_environment,location:$location,subscription_id:$subscription,app_resource_id:$app_id,container:$container,previous:$previous,target:$target,digest_candidate:($target | split("@")[1]),origin_https:(if $origin == "" then null else $origin end),config_sha256:$config}' > "$DEPLOY_RECEIPT"
 fi
 
 if [[ "$previous_image" == "$image" ]]; then
   printf 'Idempotencia: %s ya usa la imagen/digest solicitado; verificando revisión existente.\n' "$service"
   verify_revision "$image" || fail 'imagen ya presente, pero revisión activa no está Healthy'
+  if [[ "$destination" == chile-shared ]]; then
+    verify_chile_served_revision "$image" || fail 'tráfico efectivo Chile no apunta exclusivamente a la revisión latest con digest candidato'
+    [[ -n "${DEPLOY_RECEIPT:-}" ]] && jq --arg revision "$verified_served_revision" --arg digest "$verified_served_digest" '.served_revision=$revision | .served_digest=$digest | .traffic_weight=100' "$DEPLOY_RECEIPT" > "$DEPLOY_RECEIPT.tmp" && mv "$DEPLOY_RECEIPT.tmp" "$DEPLOY_RECEIPT"
+  fi
   printf 'REVISIÓN VERIFICADA: servicio=%s modo=%s réplicas=%s salud=%s.\n' "$service" "$verified_mode" "$verified_replicas" "$verified_health"
 else
   # Store only hashes and immutable image references; never serialize ACA secrets into artifacts.
   printf 'Actualizando solo %s/%s en %s; configuración ACA se comparará sin imprimirla.\n' "$app" "$container" "$RESOURCE_GROUP"
-  if az containerapp update --name "$app" --resource-group "$RESOURCE_GROUP" --container-name "$container" --image "$image" --output none && \
-     verify_revision "$image" && normalize_app "$after" > "$work/after-normalized.json" && \
+  if az containerapp update --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --container-name "$container" --image "$image" --output none && \
+     verify_revision "$image" && { [[ "$destination" != chile-shared ]] || verify_chile_served_revision "$image"; } && normalize_app "$after" > "$work/after-normalized.json" && \
      cmp -s "$work/before-normalized.json" "$work/after-normalized.json"; then
+    if [[ "$destination" == chile-shared && -n "${DEPLOY_RECEIPT:-}" ]]; then
+      jq --arg revision "$verified_served_revision" --arg digest "$verified_served_digest" '.served_revision=$revision | .served_digest=$digest | .traffic_weight=100' "$DEPLOY_RECEIPT" > "$DEPLOY_RECEIPT.tmp" && mv "$DEPLOY_RECEIPT.tmp" "$DEPLOY_RECEIPT"
+    fi
     printf 'Despliegue verificado: servicio=%s revision=%s image=%s modo=%s réplicas=%s salud=%s.\n' "$service" "$(jq -r '.properties.latestRevisionName' "$after")" "$image" "$verified_mode" "$verified_replicas" "$verified_health"
     exit 0
   fi
@@ -150,8 +235,8 @@ else
     printf 'ROLLBACK OMITIDO: %s cambió concurrentemente; imagen_actual=%s. Revisar ACA manualmente.\n' "$service" "${current:-desconocida}" >&2
     exit 1
   fi
-  if az containerapp update --name "$app" --resource-group "$RESOURCE_GROUP" --container-name "$container" --image "$previous_image" --output none && \
-     verify_revision "$previous_image" && normalize_app "$after" > "$work/rollback-normalized.json" && \
+  if az containerapp update --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --container-name "$container" --image "$previous_image" --output none && \
+     verify_revision "$previous_image" && { [[ "$destination" != chile-shared ]] || verify_chile_served_revision "$previous_image"; } && normalize_app "$after" > "$work/rollback-normalized.json" && \
      cmp -s "$work/before-normalized.json" "$work/rollback-normalized.json"; then
     printf 'ROLLBACK VERIFICADO: servicio=%s revision=%s image=%s modo=%s réplicas=%s salud=%s; configuración comparada.\n' "$service" "$(jq -r '.properties.latestRevisionName' "$after")" "$previous_image" "$verified_mode" "$verified_replicas" "$verified_health" >&2
   else

@@ -3,6 +3,7 @@ import { ReadinessController } from './readiness.controller.js';
 import type { Database } from './database.js';
 import type { PostgresCatalogRepository } from './postgres-catalog.repository.js';
 import type { CatalogAmqpRuntime } from './catalog-amqp.js';
+import type { CatalogServiceBusRuntime } from './catalog-service-bus.runtime.js';
 
 describe('Catalog technical readiness', () => {
   const database = { verifyIdentity: vi.fn() } as unknown as Database;
@@ -13,8 +14,12 @@ describe('Catalog technical readiness', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv('MESSAGING_PROVIDER', 'RABBITMQ');
     vi.mocked(database.verifyIdentity).mockResolvedValue(undefined);
     vi.mocked(repository.checkReadinessAccess).mockResolvedValue(undefined);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('checks database identity, required Catalog read permissions, and no commercial data', async () => {
@@ -58,5 +63,27 @@ describe('Catalog technical readiness', () => {
     await expect(
       new ReadinessController(database, repository, amqp).ready(),
     ).resolves.toMatchObject({ status: 'ready' });
+  });
+
+  it('does not require Azure receivers in H4 mode', async () => {
+    const serviceBus = {
+      required: false,
+      ready: true,
+    } as CatalogServiceBusRuntime;
+    await expect(
+      new ReadinessController(database, repository, amqp, serviceBus).ready(),
+    ).resolves.toMatchObject({ status: 'ready' });
+  });
+
+  it('fails closed when an H5 receiver is unavailable', async () => {
+    vi.stubEnv('MESSAGING_PROVIDER', 'AZURE_SERVICE_BUS');
+    const serviceBus = {
+      required: true,
+      ready: false,
+    } as CatalogServiceBusRuntime;
+    await expect(
+      new ReadinessController(database, repository, amqp, serviceBus).ready(),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(repository.checkReadinessAccess).not.toHaveBeenCalled();
   });
 });

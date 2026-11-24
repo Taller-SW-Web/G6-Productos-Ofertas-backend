@@ -28,6 +28,7 @@ import {
 } from './catalog-messages.js';
 import { object } from './catalog-mutation.input.js';
 import { CatalogTelemetry, type CatalogSignal } from './catalog-telemetry.js';
+import { readCatalogMessagingProvider } from './catalog-messaging.config.js';
 
 export interface CatalogAmqpConfig {
   url: string;
@@ -42,6 +43,11 @@ export function readCatalogAmqpConfig(
   env: Record<string, string | undefined> = process.env,
 ): CatalogAmqpConfig | undefined {
   const enabled = env.CATALOG_AMQP_ENABLED;
+  if (
+    readCatalogMessagingProvider(env) === 'AZURE_SERVICE_BUS' &&
+    enabled === 'true'
+  )
+    throw new Error('RabbitMQ y Azure Service Bus no pueden activarse juntos.');
   if (enabled === undefined || enabled === 'false') return undefined;
   if (enabled !== 'true')
     throw new Error('CATALOG_AMQP_ENABLED debe ser true o false.');

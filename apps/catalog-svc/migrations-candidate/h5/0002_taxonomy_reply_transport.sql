@@ -48,12 +48,18 @@ BEGIN
         RAISE EXCEPTION 'Catalog H5 outbox_delivery shape differs from 0001';
     END IF;
 
-    IF EXISTS (
+    IF NOT EXISTS (
         SELECT 1 FROM pg_trigger
         WHERE tgrelid = 'catalog.outbox'::regclass AND NOT tgisinternal
-          AND tgname IN ('tr_catalog_outbox_h5_delivery', 'trg_catalog_taxonomy_reply_transport')
-    ) OR to_regprocedure('catalog.enqueue_h5_outbox_deliveries()') IS NOT NULL THEN
-        RAISE EXCEPTION 'Catalog H5 has an existing or alternate writer; reconcile before applying';
+          AND tgname = 'tr_catalog_outbox_h5_delivery'
+          AND tgenabled IN ('O', 'A')
+    ) OR to_regprocedure('catalog.enqueue_h5_outbox_deliveries()') IS NULL
+      OR EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'catalog.outbox'::regclass AND NOT tgisinternal
+          AND tgname <> 'tr_catalog_outbox_h5_delivery'
+    ) THEN
+        RAISE EXCEPTION 'Catalog H5 requires the canonical 0001 delivery trigger and no alternate transport writer';
     END IF;
 
     IF EXISTS (SELECT 1 FROM catalog.outbox_delivery) THEN
@@ -70,7 +76,8 @@ ALTER TABLE catalog.outbox
 CREATE FUNCTION catalog.mark_taxonomy_reply_transport()
 RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog AS $$
 BEGIN
-    IF current_setting('g6.catalog_taxonomy_reply', true) = 'AZURE_SERVICE_BUS'
+    IF current_setting('catalog.messaging_provider', true) = 'AZURE_SERVICE_BUS'
+       OR current_setting('g6.catalog_taxonomy_reply', true) = 'AZURE_SERVICE_BUS'
     THEN
         NEW.delivery_transport := 'AZURE_SERVICE_BUS';
     END IF;
@@ -81,7 +88,7 @@ REVOKE ALL ON FUNCTION catalog.mark_taxonomy_reply_transport() FROM PUBLIC;
 
 CREATE TRIGGER trg_catalog_taxonomy_reply_transport
 BEFORE INSERT ON catalog.outbox
-FOR EACH ROW WHEN (NEW.event_name = 'catalog.master.deactivation.checked')
+FOR EACH ROW
 EXECUTE FUNCTION catalog.mark_taxonomy_reply_transport();
 
 COMMIT;

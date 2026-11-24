@@ -1,0 +1,15 @@
+{
+  "Name": "G6 H5 Chile Container Apps Environment Reader",
+  "IsCustom": true,
+  "Description": "Chile-only read access to the selected resource group and Managed Environment; no write permissions.",
+  "Actions": [
+    "Microsoft.App/managedEnvironments/read",
+    "Microsoft.Resources/subscriptions/resourceGroups/read"
+  ],
+  "NotActions": [],
+  "DataActions": [],
+  "NotDataActions": [],
+  "AssignableScopes": [
+    "__AZURE_INTEGRATION_RESOURCE_GROUP_ID__"
+  ]
+}

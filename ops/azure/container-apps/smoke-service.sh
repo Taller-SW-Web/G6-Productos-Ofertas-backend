@@ -22,6 +22,20 @@ if [[ -z "$base" ]]; then
 fi
 [[ "$base" =~ ^https://[^/]+/?$ ]] || { echo 'URL smoke debe ser HTTPS y no incluir una ruta.' >&2; exit 2; }
 base="${base%/}"
+if [[ "${H5_DEPLOY_DESTINATION:-}" == chile-shared ]]; then
+  receipt="${SMOKE_RECEIPT:-}"
+  [[ -n "$receipt" && -f "$receipt" ]] || { echo 'FALLO: falta recibo del servicio/run actual; no se ejecutó HTTP.' >&2; exit 1; }
+  targets="$(dirname "$0")/deployment-targets.json"
+  expected_id="$(jq -r --arg service "$service" --arg subscription "$(jq -r '.subscriptionId' "$targets")" --arg rg "$(jq -r '.destinations["chile-shared"].resourceGroup' "$targets")" '"/subscriptions/\($subscription)/resourceGroups/\($rg)/providers/Microsoft.App/containerApps/\($service)"' "$targets")"
+  jq -e --arg service "$service" --arg run "${GITHUB_RUN_ID:-}" --arg id "$expected_id" --arg env "${H5_DEPLOY_ENVIRONMENT:-}" --arg url "$base" '
+    .destination == "chile-shared" and .github_environment == "azure-h5-chile" and .aca_environment == "env-g6-phase1-chile" and
+    .service == $service and .workflow_run_id == $run and .app_resource_id == $id and .origin_https == $url and
+    (.target | test("^ghcr\\.io/taller-sw-web/g6-productos-ofertas-backend/" + $service + "@sha256:[0-9a-f]{64}$")) and
+    .digest_candidate == (.target | split("@")[1]) and .served_digest == .digest_candidate and
+    (.served_revision | type == "string" and length > 0) and .traffic_weight == 100
+  ' "$receipt" >/dev/null || { echo 'FALLO: recibo/destino/Environment/servicio/recurso/digest/origen/tráfico inconsistente; no se ejecutó HTTP.' >&2; exit 1; }
+  [[ -n "$expected_id" && "$H5_DEPLOY_ENVIRONMENT" == azure-h5-chile ]] || { echo 'FALLO: Environment Chile no corresponde al smoke.' >&2; exit 1; }
+fi
 [[ -n "${SMOKE_PROTECTED_PATH:-}" ]] || {
   printf 'BLOQUEADO: falta AZURE_SMOKE_PROTECTED_%s; no se probó el rechazo sin credenciales.\n' "$service_key" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}" >&2
   exit 1

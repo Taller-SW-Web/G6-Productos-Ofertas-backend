@@ -18,6 +18,10 @@ import { sql, type ExtractTablesWithRelations } from 'drizzle-orm';
 import type { PgTransactionConfig } from 'drizzle-orm/pg-core';
 import { catalogSchema } from './catalog.schema.js';
 import {
+  readCatalogH5Destinations,
+  readCatalogMessagingProvider,
+} from './catalog-messaging.config.js';
+import {
   CatalogPersistenceError,
   translatePostgresFailure,
 } from './database-errors.js';
@@ -198,6 +202,20 @@ export class Database implements OnModuleDestroy {
     let callbackFinished = false;
     try {
       return await this.connection().transaction(async (tx) => {
+        const provider = readCatalogMessagingProvider(process.env);
+        const destinations =
+          provider === 'AZURE_SERVICE_BUS'
+            ? readCatalogH5Destinations(process.env)
+            : [];
+        await tx.execute(sql`
+          SELECT
+            set_config('catalog.messaging_provider', ${provider}, true),
+            set_config(
+              'catalog.messaging_destinations',
+              ${provider === 'AZURE_SERVICE_BUS' ? destinations.join(',') : ''},
+              true
+            )
+        `);
         const result = await work(tx);
         callbackFinished = true;
         return result;
