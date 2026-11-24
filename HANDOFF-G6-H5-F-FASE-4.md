@@ -127,3 +127,7 @@ Este addendum reemplaza los bloqueos de preparación de fixtures cuando la evide
 - `ops/supabase/g5-fixtures/README.md` ahora documenta PostgreSQL 17.11 disposable y los harnesses de lifecycle/Promotions; `rollout-real-review-only.md` detalla secuencia/pre-post/rollback y está expresamente marcado no ejecutar. No hay rama Supabase ni fixture real creada.
 
 La suite Promotions unit enfocada pasa 40/40. El harness Promotions PostgreSQL había pasado 12/12 y confirmó cleanup en una ejecución aislada anterior. El intento actualizado de lifecycle no se pudo repetir ahora: Docker Desktop API devuelve `500 Internal Server Error` en el endpoint de lista de contenedores y no hay `psql`/PostgreSQL en PATH; nuevas aserciones de timestamp/overflow quedan pendientes. Evidencias y estados están en `HANDOFF-G6-H5-F-FASE-5.md`.
+
+### Addendum — repetición con Docker disponible
+
+En la continuación, la prueba lifecycle se ejecutó sobre PostgreSQL 17.11 desechable y pasó. La primera ejecución identificó un conteo esperado incorrecto para dos rechazos persistentes del mismo test (versión fuera de rango y stock huérfano); se precisó la aserción para comprobar ambas causas y se repitió exitosamente. El harness confirmó cleanup de su contenedor etiquetado. También se repitió `node apps/promotions-svc/test/run-h5-postgres.mjs`: 12/12 PASS y cleanup confirmado. El error anterior de Docker queda superado; no hubo cambios en Supabase compartido ni servicios reales.

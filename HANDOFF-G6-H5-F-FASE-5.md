@@ -12,7 +12,7 @@ Freeze Chile: `AZURE_CHILE_DEPLOY_ENABLED=false`, según evidencia operativa pre
 
 Se convirtió el plan de fixtures en un harness local PostgreSQL 17.11 para lifecycle de Inventory, se reforzaron pruebas de la frontera Promotions G5, se documentó reconciliación del ledger con checksums observados y se preparó una secuencia SQL real marcada review-only. Los cambios no hacen DDL/DML/GRANT contra Supabase compartido. No hubo cambios de Azure, ACA, Service Bus, Marketplace o migraciones reales.
 
-Pruebas de Promotions enfocadas pasan: 40 unitarias; el harness PostgreSQL H5 con login runtime no superusuario había pasado 12 pruebas y confirmó cleanup en una ejecución aislada previa a esta reanudación. El test de Inventory lifecycle extiende cobertura de base SKU, variante, idempotencia, rechazo atómico, versión posterior, timestamp a milisegundo y grants mínimos. En este intento no se pudo volver a ejecutar: Docker Desktop devuelve HTTP 500 en `containers/json`, y no hay PostgreSQL local alternativo instalado. La versión anterior del test lifecycle y la integración Inventory real de 62 pruebas se ejecutaron con éxito en el trabajo previo; las nuevas aserciones quedan pendientes de ejecución por la indisponibilidad del engine.
+Pruebas de Promotions enfocadas pasan: 40 unitarias y 12 PostgreSQL. El harness PostgreSQL usa un login runtime no superusuario y confirmó cleanup. La prueba lifecycle de Inventory ahora pasó completa en PostgreSQL 17.11: SKU base/variante, idempotencia, preservación de versión superior, rechazo atómico (incluye identidad huérfana y overflow), timestamp a milisegundo, invariantes de stock y grants runtime. La primera ejecución detectó una aserción de test que asumía un solo rechazo aunque seguía presente el SKU sintético fuera de rango; se corrigió para comprobar ambos motivos y se repitió con éxito. En ambas pruebas Docker se eliminó solo el contenedor etiquetado de la ejecución y se confirmó cleanup. La integración Inventory existente de 62 pruebas permanece como regresión local separada.
 
 ## Evidencia Supabase usada y límites
 
@@ -61,15 +61,17 @@ No hay `CHECKSUM_MISMATCH` confirmado. `migrations-reconciliation.md` incluye ch
 
 | Capacidad | Artefacto/evidencia | Resultado |
 |---|---|---|
-| Lifecycle, SKU base/variante y grants Inventory | Runner PostgreSQL 17.11; última iteración añade overflow y timestamp | PARTIAL: ejecución más antigua PASS; nuevas aserciones sin rerun por Docker 500 |
+| Lifecycle, SKU base/variante y grants Inventory | Runner PostgreSQL 17.11; overflow y timestamp | PASS: backfill y aserciones, cleanup confirmado |
 | Inventory comportamiento (62 casos) | `inventory.real.integration.spec.ts`, integración local | PASS en ejecución previa; no es G5/G7 bilateral |
 | Promotions G5 snapshot/channel | 2 archivos Vitest | PASS 40/40 |
-| Promotions local PG, rol runtime | `run-h5-postgres.mjs` | PASS 12/12 en ejecución previa; cleanup confirmado |
+| Promotions local PG, rol runtime | `run-h5-postgres.mjs` | PASS 12/12 en esta reanudación; cleanup confirmado |
 | Simulación G5/G7 | test local Promotions con snapshot/token dobles | PASS como simulación solamente |
-| PostgreSQL re-reconstructibilidad lifecycle | runner con contenedor/etiqueta únicos | No confirmada en este turno; Docker Desktop API 500 impidió repetición |
+| PostgreSQL reconstruible lifecycle | runner con contenedor/etiqueta únicos | PASS: dos ejecuciones desechables; en la segunda también confirmó rebuild y cleanup |
 | Supabase real, migraciones, grants, fixtures | prohibido en esta intervención | NOT_RUN |
 
 No se copiarán datos de clientes ni productos Marketplace. G5 fixture snapshots son sintéticos; IDs aleatorios en pruebas de operación reducen colisiones entre repeticiones. Escenarios con la misma orden/reserva/cupón/TTL/worker/MessageId son exclusivos; lecturas sin side effects y registros completamente disjuntos pueden concurrir en local.
+
+Cobertura aún no unificada: el runner Inventory prepara Catalog product/variant, ubicación, stock y lifecycle, mientras Promotions corre en su propio PostgreSQL desechable con promoción/cupón y snapshot contractual. No existe todavía un único seed ejecutable que incluya `pricing.prices`/`price_validities` y `inventory.commercial_fulfillment_routes` junto con todos esos contextos. Los tests funcionales por servicio pasan, pero la fixture comercial G5 completa y conectada queda como parte pendiente de preparación; no se afirma aislamiento ni integración cross-service completa por el manifest sintético.
 
 ## Release de cinco servicios (manifiesto candidato, sin publicar)
 
@@ -103,10 +105,10 @@ Service Bus Basic no tiene Topics/Subscriptions: outbox por destinatario, Inbox/
 ## Validaciones y limitaciones
 
 - `npx vitest run apps/promotions-svc/src/coupons/coupon-command.spec.ts apps/promotions-svc/src/coupons/g5-coupon-snapshot.spec.ts --maxWorkers=1`: PASS, 2 files / 40 tests.
-- `node apps/promotions-svc/test/run-h5-postgres.mjs`: PASS 12 tests y cleanup en ejecución anterior documentada en la continuidad; no repetible ahora por Docker Desktop API `500 Internal Server Error`.
+- `node apps/promotions-svc/test/run-h5-postgres.mjs`: PASS 12/12 y `DISPOSABLE_POSTGRES_CLEANUP_CONFIRMED` en esta reanudación.
 - Inventory integration `INVENTORY_REAL_INTEGRATION=1 ... inventory.real.integration.spec.ts`: PASS 62/62, ejecutado previamente en PostgreSQL/RabbitMQ local disposable, regresión H4 aislada.
 - PowerShell parser de los dos scripts lifecycle, lectura estática SQL y `git diff --check`: PASS.
-- Inventario local/expanded lifecycle: NO EJECUTADO en este intento por Docker API 500 (`/v1.56/containers/json`); no existe `psql`, `postgres`, `initdb` o `pg_ctl` en PATH. No reinicié Docker ni afecté otras sesiones.
+- `pwsh -NoProfile -File ops/supabase/g5-fixtures/tests/run-local-inventory-lifecycle.ps1`: PASS y cleanup confirmado en PostgreSQL 17.11. La primera iteración falló en la expectativa de conteo; tras corregirla para validar rechazo de orphan + overflow, la repetición pasó completa.
 - Node instalado `v24.3.0` no satisface el engine declarado `^22.22.3 || >=24.15.0`; tests focalizados ejecutados de todos modos. npm install no modificó manifests/lockfiles.
 - No se editaron CI oficiales ni se ejecutaron suites pesadas completas.
 
@@ -121,10 +123,10 @@ Service Bus Basic no tiene Topics/Subscriptions: outbox por destinatario, Inbox/
 | MIGRATION_LEDGER_RECONCILED | PARTIAL | Checksums históricos; DDL-present/no-ledger y Inventory legacy requieren reconciliación |
 | PROMOTIONS_CHANNEL_COMPATIBILITY | PASS | Contrato/tests separan canal original y `modulo-ventas` |
 | RUNTIME_GRANTS_VERIFIED_LOCAL | PASS | Logins locales no-superuser prueban permisos mínimos; principal real ACA requiere confirmación |
-| FIXTURES_PREPARED | PASS | SQL/test harness reproducibles, manifest/runbook incluidos |
-| FIXTURES_APPLIED_ISOLATED | PARTIAL | Promotions local PG y lifecycle previo PASS; nuevas assertions lifecycle pendientes Docker |
-| FIXTURES_FUNCTIONAL_TESTS | PASS | 40 Promotions unit; 12 Promotions PG; 62 Inventory Integration anterior. Repetición expanded test pendiente |
-| FIXTURES_CLEANUP | PARTIAL | Harnesses anteriores confirmaron cleanup; runner Inventory actualizado no se pudo ejecutar |
+| FIXTURES_PREPARED | PARTIAL | Harnesses y manifest reproducibles; falta seed integrado de Pricing price-validity y fulfillment route |
+| FIXTURES_APPLIED_ISOLATED | PARTIAL | Inventory y Promotions probados en PostgreSQL aislados separados; no hubo base cross-context unificada |
+| FIXTURES_FUNCTIONAL_TESTS | PASS | 40 Promotions unit; 12 Promotions PG; lifecycle focused PASS; 62 Inventory Integration anterior. No acredita flujo bilateral G5/G7 |
+| FIXTURES_CLEANUP | PASS | Ambos harnesses PostgreSQL imprimieron `DISPOSABLE_POSTGRES_CLEANUP_CONFIRMED` |
 | G5_SIMULATED_INTEGRATION | PASS | Snapshot contract double local, no bilateral |
 | G7_SIMULATED_AUTH | PASS | Tokens/identidades simulados solo en pruebas localizadas |
 | G5_G7_REAL_HOMOLOGATION | NOT_RUN | Requiere servicios/credenciales/evidencia externa autorizada |

@@ -203,7 +203,11 @@ $countBeforeReject = (Invoke-ContainerSql 'SELECT count(*) FROM inventory.sku_li
 $reject = & docker exec $Container psql -X -qAt -v ON_ERROR_STOP=1 -U inventory_backfill_test -d h5_fixtures -c "SET g6.inventory_sku_lifecycle_backfill = 'apply'" -f /tmp/lifecycle-backfill.sql 2>&1
 if ($LASTEXITCODE -ne 0) { throw "Fail-closed rejection scenario errored unexpectedly: $($reject -join [Environment]::NewLine)" }
 $rejectSummary = ($reject | Where-Object { $_ -match '^REJECTED_NO_WRITES\|' } | Select-Object -Last 1).Trim()
-if (-not $rejectSummary -or $rejectSummary.Split('|')[-1] -ne '1') { throw "Missing orphan rejection in summary: $rejectSummary" }
+if (-not $rejectSummary -or $rejectSummary.Split('|')[-1] -ne '2' -or
+    ($reject -join ' ') -notmatch 'identity_owner_or_catalog_target_missing|stock_identity_missing_or_not_versioned' -or
+    ($reject -join ' ') -notmatch 'catalog_version_exceeds_inventory_integer') {
+  throw "Expected both the orphan and out-of-range identities in rejection summary: $rejectSummary"
+}
 if ((Invoke-ContainerSql 'SELECT count(*) FROM inventory.sku_lifecycle').Output -ne $countBeforeReject) {
   throw 'Rejected run partially wrote lifecycle rows'
 }
