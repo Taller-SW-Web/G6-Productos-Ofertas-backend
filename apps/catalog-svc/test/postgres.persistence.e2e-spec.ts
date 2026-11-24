@@ -4017,6 +4017,18 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
           receiptMessageId: stored.message_id,
         },
       ]);
+      const replay = { ...message, message_id: randomUUID() };
+      await expect(service.consume(replay)).resolves.toBe('APPLIED');
+      const replayReply = await bulkReply(replay);
+      expect(replayReply.schema_version).toBe(2);
+      expect(replayReply.payload.results).toMatchObject([
+        {
+          attempt_id: initialBulkAttemptId(operation, row.row_operation_id),
+          attempt_number: 1,
+          effect_state: 'NONE',
+          retriable: true,
+        },
+      ]);
     });
     it('BULK_RETRY_V1: consumes one V4 family after a durable initial V3 retryable receipt and deduplicates redelivery', async () => {
       const previousResultFlag = process.env.CATALOG_BULK_RESULT_V2_ENABLED;
