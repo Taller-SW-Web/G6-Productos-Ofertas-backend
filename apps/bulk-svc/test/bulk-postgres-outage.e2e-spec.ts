@@ -1,4 +1,5 @@
 import {
+  createHash,
   createSign,
   generateKeyPairSync,
   randomBytes,
@@ -51,6 +52,23 @@ const testJwtClaims = encodeJwtPart({
 const testJwtSigner = createSign('RSA-SHA256');
 testJwtSigner.update(`${testJwtHeader}.${testJwtClaims}`);
 const testUserBearer = `${testJwtHeader}.${testJwtClaims}.${testJwtSigner.sign(testJwtKeys.privateKey, 'base64url')}`;
+function serviceBearer(scope = 'carga-masiva:contenidos:leer') {
+  const header = encodeJwtPart({ alg: 'RS256', typ: 'JWT' });
+  const claims = encodeJwtPart({
+    iss: testIssuer,
+    sub: 'catalog-svc',
+    client_id: 'catalog-svc',
+    tipo: 'servicio',
+    aud: 'api-productos',
+    scope,
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 600,
+    jti: randomUUID(),
+  });
+  const signer = createSign('RSA-SHA256');
+  signer.update(`${header}.${claims}`);
+  return `${header}.${claims}.${signer.sign(testJwtKeys.privateKey, 'base64url')}`;
+}
 const originalEnvironment = new Map<string, string | undefined>();
 const capturedLogs: string[] = [];
 const sensitiveData = new RegExp(
@@ -300,6 +318,10 @@ describe('Bulk recovery after a real PostgreSQL outage (disposable Docker only)'
       resolve('apps/bulk-svc/migrations/0003_export_claim_lease.sql'),
       'utf8',
     );
+    const claimCheckMigration = readFileSync(
+      resolve('apps/bulk-svc/migrations/0004_catalog_claim_check_content.sql'),
+      'utf8',
+    );
     const actorOwnershipMigration = readFileSync(
       resolve('apps/bulk-svc/migrations/0005_actor_ownership.sql'),
       'utf8',
@@ -332,6 +354,7 @@ SET ROLE po_bulk_owner;
 ${migration}
 ${exportSnapshotMigration}
 ${exportLeaseMigration}
+${claimCheckMigration}
 ${actorOwnershipMigration}
 ${ownerCorrelationMigration}
 ${retryMigration}
@@ -683,6 +706,97 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
     ).not.toContain(storageTestKey);
     expect(sensitiveData.test(capturedLogs.join('\n'))).toBe(false);
   }, 30_000);
+
+  it('serves immutable V3 content only to the authorized Catalog service', async () => {
+    const previousEnabled = process.env.BULK_CATALOG_V3_ENABLED;
+    const previousAuthorization =
+      process.env.BULK_CATALOG_V3_AUTHORIZATION_VERIFIED;
+    process.env.G6_SECURITY_MODE = 'G7_AUTHENTICATED';
+    process.env.BULK_CATALOG_V3_ENABLED = 'true';
+    process.env.BULK_CATALOG_V3_AUTHORIZATION_VERIFIED = 'true';
+    try {
+      const server = app!.getHttpServer();
+      const correlationId = randomUUID();
+      const batch = await authorizedPost(
+        server,
+        '/api/v1/carga-masiva/productos/importaciones',
+      )
+        .set('x-correlation-id', correlationId)
+        .field('template_version', '2')
+        .attach(
+          'archivo',
+          createValidBulkCsv(`SKU-V3-${randomUUID()}`),
+          'catalog-v3.csv',
+        )
+        .expect(202);
+      const batchId = batch.body.batch_id as string;
+      const delivery = await pool!.query<{
+        schema_version: number;
+        payload: { data: { content_ref: Record<string, unknown> } };
+      }>(
+        `SELECT schema_version,payload FROM bulk.outbox
+         WHERE payload->'data'->>'batch_id'=$1`,
+        [batchId],
+      );
+      expect(delivery.rows).toHaveLength(1);
+      expect(delivery.rows[0]?.schema_version).toBe(3);
+      const reference = delivery.rows[0]!.payload.data.content_ref;
+      expect(reference).toMatchObject({ content_type: 'application/json' });
+      expect(reference.content_id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
+      const content = await request(server)
+        .get(`/interno/carga-masiva/contenidos/${reference.content_id}`)
+        .expect(401);
+      expect(content.body.code).toBe('TOKEN_INVALIDO');
+      await request(server)
+        .get(`/interno/carga-masiva/contenidos/${reference.content_id}`)
+        .set('Authorization', `Bearer ${serviceBearer('catalogo:leer')}`)
+        .expect(403);
+      const served = await request(server)
+        .get(`/interno/carga-masiva/contenidos/${reference.content_id}`)
+        .set('Authorization', `Bearer ${serviceBearer()}`)
+        .expect(200);
+      expect(served.headers['content-type']).toContain('application/json');
+      expect(Number(served.headers['content-length'])).toBe(
+        reference.byte_length,
+      );
+      expect(served.headers['x-content-sha256']).toBe(reference.sha256);
+      expect(JSON.parse(served.text).rows).toHaveLength(1);
+      expect(served.text).not.toContain('supabase://');
+      await request(server)
+        .get(`/interno/carga-masiva/contenidos/${randomUUID()}`)
+        .set('Authorization', `Bearer ${serviceBearer()}`)
+        .expect(404);
+      const record = await pool!.query<{
+        content_ref: string;
+        sha256: string;
+        byte_length: number;
+      }>(
+        'SELECT content_ref,sha256,byte_length FROM bulk.content_documents WHERE content_id=$1',
+        [reference.content_id],
+      );
+      expect(record.rows).toHaveLength(1);
+      const objectName = record.rows[0]!.content_ref.replace(
+        `supabase://${storageTestBucket}/`,
+        '',
+      );
+      const stored = storedObjects.get(objectName)!;
+      expect(record.rows[0]!.byte_length).toBe(stored.length);
+      expect(record.rows[0]!.sha256).toBe(
+        createHash('sha256').update(stored).digest('hex'),
+      );
+    } finally {
+      if (previousEnabled === undefined)
+        delete process.env.BULK_CATALOG_V3_ENABLED;
+      else process.env.BULK_CATALOG_V3_ENABLED = previousEnabled;
+      if (previousAuthorization === undefined)
+        delete process.env.BULK_CATALOG_V3_AUTHORIZATION_VERIFIED;
+      else
+        process.env.BULK_CATALOG_V3_AUTHORIZATION_VERIFIED =
+          previousAuthorization;
+    }
+  }, 90_000);
 
   it('keeps liveness up, distinguishes DB outage from missing AMQP, and recovers durable writes', async () => {
     const server = app!.getHttpServer();

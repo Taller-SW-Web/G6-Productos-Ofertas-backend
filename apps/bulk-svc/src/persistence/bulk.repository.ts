@@ -6,6 +6,7 @@ import {
   batchResumeRequests,
   batchRows,
   domainAttempts,
+  contentDocuments,
   exportJobs,
   fileManifests,
   inbox,
@@ -48,6 +49,14 @@ export interface CreateImportBatchInput {
   rows: ImportRowInput[];
   admissionIntent?: Record<string, unknown>;
   catalogCommands?: OutboxInput[];
+  contentDocument?: {
+    contentId: string;
+    batchId: string;
+    batchOperationId: string;
+    contentRef: string;
+    sha256: string;
+    byteLength: number;
+  };
 }
 export interface CreateImportBatchResult {
   manifest: typeof fileManifests.$inferSelect;
@@ -349,6 +358,19 @@ export class BulkPersistenceRepository {
           row,
           steps: stepsByRow.get(row.id) ?? [],
         }));
+        if (input.contentDocument) {
+          if (
+            input.contentDocument.batchId !== input.batchId ||
+            !Number.isSafeInteger(input.contentDocument.byteLength) ||
+            input.contentDocument.byteLength < 1 ||
+            !/^[a-f0-9]{64}$/.test(input.contentDocument.sha256)
+          )
+            throw new BulkPersistenceError('CHECK_VIOLATION');
+          await tx.insert(contentDocuments).values({
+            ...input.contentDocument,
+            contentType: 'application/json',
+          });
+        }
         if (input.admissionIntent) {
           await tx.insert(inbox).values({
             messageId: input.batchId,
@@ -2969,6 +2991,27 @@ export class BulkPersistenceRepository {
         .where(eq(fileManifests.id, id))
         .limit(1);
       return manifest ?? null;
+    } catch (error) {
+      throw persistenceError(error);
+    }
+  }
+
+  async findContentDocument(contentId: string) {
+    try {
+      const [document] = await this.db
+        .select({
+          contentId: contentDocuments.contentId,
+          batchId: contentDocuments.batchId,
+          batchOperationId: contentDocuments.batchOperationId,
+          contentRef: contentDocuments.contentRef,
+          sha256: contentDocuments.sha256,
+          byteLength: contentDocuments.byteLength,
+          contentType: contentDocuments.contentType,
+        })
+        .from(contentDocuments)
+        .where(eq(contentDocuments.contentId, contentId))
+        .limit(1);
+      return document ?? null;
     } catch (error) {
       throw persistenceError(error);
     }

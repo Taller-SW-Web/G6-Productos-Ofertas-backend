@@ -5,6 +5,7 @@ import { BulkReadinessService } from './health/bulk-readiness.service.js';
 import { BulkImportService } from './bulk-import.service.js';
 import { BulkStorageService } from './storage/bulk-storage.service.js';
 import { BulkExportService } from './bulk-export.service.js';
+import { BulkContentService } from './bulk-content.service.js';
 
 describe('BulkSvcController', () => {
   let controller: BulkSvcController;
@@ -17,6 +18,7 @@ describe('BulkSvcController', () => {
         { provide: BulkImportService, useValue: {} },
         { provide: BulkStorageService, useValue: {} },
         { provide: BulkExportService, useValue: {} },
+        { provide: BulkContentService, useValue: {} },
         {
           provide: BulkReadinessService,
           useValue: {

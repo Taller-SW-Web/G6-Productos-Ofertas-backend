@@ -110,6 +110,12 @@ describe.skipIf(process.env.G6_PERFORMANCE_HTTP !== '1')(
         resolve('apps/bulk-svc/migrations/0002_export_source_snapshot.sql'),
         'utf8',
       );
+      const claimCheck = await readFile(
+        resolve(
+          'apps/bulk-svc/migrations/0004_catalog_claim_check_content.sql',
+        ),
+        'utf8',
+      );
       docker(
         [
           'exec',
@@ -129,6 +135,7 @@ CREATE SCHEMA bulk AUTHORIZATION po_bulk_owner;
 SET ROLE po_bulk_owner;
 ${migration}
 ${snapshot}
+${claimCheck}
 GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA bulk TO bulk_fixture_app;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
