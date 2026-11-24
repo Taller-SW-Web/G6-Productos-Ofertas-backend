@@ -274,7 +274,10 @@ function Wait-AcaOperation {
             'Canceled' { $script:AcaLastPatchOutcome='TerminalFailure'; Write-AcaPatchJournalEvent -EventType OperationTerminal -TerminalState 'Canceled' -HttpStatus $response.StatusCode; throw 'ARM_OPERATION_CANCELED: asynchronous Job patch was canceled.' }
             'Cancelled' { $script:AcaLastPatchOutcome='TerminalFailure'; Write-AcaPatchJournalEvent -EventType OperationTerminal -TerminalState 'Cancelled' -HttpStatus $response.StatusCode; throw 'ARM_OPERATION_CANCELED: asynchronous Job patch was canceled.' }
         }
-        if ([string]::IsNullOrWhiteSpace($stateValue) -and $response.StatusCode -eq 202) { throw 'ARM_OPERATION_STATE_UNAVAILABLE: 202 poll response had no status/provisioningState.' }
+        if ([string]::IsNullOrWhiteSpace($stateValue) -and $response.StatusCode -eq 202) {
+            & $Sleep
+            continue
+        }
         & $Sleep
     }
     throw 'ARM_OPERATION_TIMEOUT: asynchronous Job patch exceeded its timeout.'

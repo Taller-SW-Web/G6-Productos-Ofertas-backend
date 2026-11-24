@@ -43,6 +43,7 @@ Set-AcaArmRequestOverride {
     if ($Uri -like '*operation-test*') {
         $state = 'Succeeded'
         if ($script:operationReplies.Count -gt 0) { $state = $script:operationReplies.Dequeue() }
+        if ($state -eq 'NoState202') { return [pscustomobject]@{StatusCode=202;Headers=@{'x-ms-request-id'='poll-202-req'};Content='{}'} }
         if ($script:patchMode -eq 'provisioning-state') { return [pscustomobject]@{StatusCode=200;Headers=@{};Content=(@{properties=@{provisioningState=$state}}|ConvertTo-Json -Compress)} }
         if ($script:patchMode -eq 'no-state-200') { return [pscustomobject]@{StatusCode=200;Headers=@{};Content='{}'} }
         return [pscustomobject]@{StatusCode=200;Headers=@{};Content=(@{status=$state}|ConvertTo-Json -Compress)}
@@ -109,6 +110,12 @@ try {
     $script:patchMode='async'; $script:secretName=$null; $script:requestLog.Clear(); $script:operationReplies.Clear()
     Add-AcaJobSecret @common -SecretValue $script:testSecret -Sleep $noSleep | Out-Null
     if (@($script:requestLog | Where-Object Uri -like '*operation-test*').Count -ne 2) { throw '202 case did not poll to completion.' }
+    # Azure may return an empty-body HTTP 202 while the exact LRO is still pending.
+    $script:patchMode='async';$script:secretName=$null;$script:requestLog.Clear();$script:operationReplies.Clear()
+    $script:operationReplies.Enqueue('NoState202');$script:operationReplies.Enqueue('Succeeded')
+    Add-AcaJobSecret @common -SecretValue $script:testSecret -Sleep $noSleep | Out-Null
+    if ($script:AcaLastPatchOutcome -ne 'Completed' -or $script:secretName -ne 'h5jit' -or @($script:requestLog | Where-Object Uri -like '*operation-test*').Count -ne 2) { throw 'empty-body 202 LRO was not polled to terminal state and readback.' }
+    if (-not (Remove-AcaJobSecret @common -Sleep $noSleep)) { throw 'empty-body 202 case cleanup did not remove the secret.' }
     $script:patchMode='provisioning-state';$script:secretName=$null;$script:operationReplies.Clear()
     Add-AcaJobSecret @common -SecretValue $script:testSecret -Sleep $noSleep | Out-Null
     if (-not (Remove-AcaJobSecret @common -Sleep $noSleep)) { throw 'provisioningState response cleanup failed.' }
