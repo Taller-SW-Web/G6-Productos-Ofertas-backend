@@ -18,33 +18,51 @@
       </when>
     </choose>
     <set-variable name="expectedIdentityType" value="{{identity-type}}" />
-    <set-variable name="requiredRole" value="{{required-role}}" />
-    <set-variable name="requiredScope" value="{{required-scope}}" />
+    <set-variable name="requiredRolesCsv" value="{{required-roles}}" />
+    <set-variable name="requiredScopesCsv" value="{{required-scopes}}" />
     <set-variable name="allowedClientsCsv" value="{{allowed-clients}}" />
+    <set-variable name="m2mAudience" value="{{m2m-audience}}" />
     <choose>
       <when condition="@{
         var jwt = (Jwt)context.Variables["jwt"];
         var expectedType = (string)context.Variables["expectedIdentityType"];
         var tokenType = jwt.Claims.GetValueOrDefault("tipo", string.Empty);
-        if (expectedType == "human" &amp;&amp; tokenType != "acceso") return true;
-        if (expectedType == "m2m" &amp;&amp; tokenType != "servicio") return true;
-        var reqRole = (string)context.Variables["requiredRole"];
-        if (!string.IsNullOrEmpty(reqRole)) {
-          var roles = jwt.Claims.GetValueOrDefault("roles", string.Empty).Split(new[] {' ', ','}, StringSplitOptions.RemoveEmptyEntries);
-          if (!roles.Contains(reqRole)) return true;
+
+        bool allowHuman = expectedType == "human" || expectedType == "human_or_m2m";
+        bool allowM2m = expectedType == "m2m" || expectedType == "human_or_m2m";
+
+        if (tokenType == "acceso" &amp;&amp; allowHuman) {
+          var reqRolesCsv = (string)context.Variables["requiredRolesCsv"];
+          if (!string.IsNullOrEmpty(reqRolesCsv)) {
+            var requiredRoles = reqRolesCsv.Split(',', StringSplitOptions.RemoveEmptyEntries);
+            var tokenRoles = jwt.Claims.GetValueOrDefault("roles", string.Empty).Split(new[] {' ', ','}, StringSplitOptions.RemoveEmptyEntries);
+            if (!requiredRoles.Any(r => tokenRoles.Contains(r))) return true;
+          }
+          return false;
         }
-        var reqScope = (string)context.Variables["requiredScope"];
-        if (!string.IsNullOrEmpty(reqScope)) {
-          var scopes = (jwt.Claims.GetValueOrDefault("scope", string.Empty) + " " + jwt.Claims.GetValueOrDefault("scp", string.Empty)).Split(new[] {' ', ','}, StringSplitOptions.RemoveEmptyEntries);
-          if (!scopes.Contains(reqScope)) return true;
+
+        if (tokenType == "servicio" &amp;&amp; allowM2m) {
+          var expectedAud = (string)context.Variables["m2mAudience"];
+          if (!string.IsNullOrEmpty(expectedAud)) {
+            var audiences = jwt.Audiences ?? Enumerable.Empty&lt;string&gt;();
+            if (!audiences.Contains(expectedAud)) return true;
+          }
+          var reqScopesCsv = (string)context.Variables["requiredScopesCsv"];
+          if (!string.IsNullOrEmpty(reqScopesCsv)) {
+            var requiredScopes = reqScopesCsv.Split(',', StringSplitOptions.RemoveEmptyEntries);
+            var tokenScopes = (jwt.Claims.GetValueOrDefault("scope", string.Empty) + " " + jwt.Claims.GetValueOrDefault("scp", string.Empty)).Split(new[] {' ', ','}, StringSplitOptions.RemoveEmptyEntries);
+            if (!requiredScopes.Any(s => tokenScopes.Contains(s))) return true;
+          }
+          var clientsCsv = (string)context.Variables["allowedClientsCsv"];
+          if (!string.IsNullOrEmpty(clientsCsv)) {
+            var allowed = clientsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries);
+            var clientId = jwt.Claims.GetValueOrDefault("client_id", jwt.Claims.GetValueOrDefault("azp", jwt.Subject ?? string.Empty));
+            if (!allowed.Contains(clientId)) return true;
+          }
+          return false;
         }
-        var clientsCsv = (string)context.Variables["allowedClientsCsv"];
-        if (!string.IsNullOrEmpty(clientsCsv)) {
-          var allowed = clientsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries);
-          var clientId = jwt.Claims.GetValueOrDefault("client_id", jwt.Claims.GetValueOrDefault("azp", jwt.Subject ?? string.Empty));
-          if (!allowed.Contains(clientId)) return true;
-        }
-        return false;
+
+        return true;
       }">
         <return-response>
           <set-status code="403" reason="Forbidden" />
@@ -59,7 +77,7 @@
   </inbound>
   <backend>
     {{concurrency-limit-open}}
-    <forward-request buffer-request-body="false" />
+    <forward-request buffer-request-body="false" buffer-response="false" />
     {{concurrency-limit-close}}
   </backend>
   <outbound><base /></outbound>

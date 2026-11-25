@@ -6,7 +6,7 @@
     <quota-by-key calls="{{quota-calls}}" renewal-period="{{quota-window-seconds}}" counter-key="@((string)context.Variables[&quot;rateIdentity&quot;] + &quot;:{{operation-id}}&quot;)" />
   </inbound>
   <backend>
-    <forward-request buffer-request-body="false" />
+    <forward-request buffer-request-body="false" buffer-response="false" />
   </backend>
   <outbound><base /></outbound>
   <on-error><base /></on-error>

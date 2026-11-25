@@ -4,9 +4,15 @@ Este paquete prepara la importación, el manifiesto de seguridad enriquecido, pe
 
 ## Contrato filtrado y manifiesto enriquecido (`APIM-C01`, `APIM-C03`)
 
-`filter-openapi.py` separa el inventario contractual completo (`contractInventory`), el registro estático del Gateway (`gatewayStaticRegistry`) y las operaciones efectivamente publicables (`operations`). Excluye las cinco operaciones `x-internal`, mantiene fuera de importación contractual las dos operaciones legacy de Pricing y deja las cuatro rutas G5 fuera del artefacto predeterminado.
+`filter-openapi.py` separa explícitamente:
+1. `contractInventory` (154 operaciones de OpenAPI `0.7.0-rc.3`).
+2. `gatewayStaticRegistry` (registro base y overlay G5).
+3. `candidateCatalog` (`operations` candidatos APIM).
+4. `effectivePublication` (importación efectiva **fail-closed**: `environmentEnabled=false` por defecto hasta recibir `--enabled-providers`, `--security-profile`, allowlist pública autorizada y resolución de allowlists M2M).
 
-El uso de `--enable-g5` por sí solo no autoriza publicación operativa: requiere además `--g5-authorized` explícito. Si falta metadata contractual obligatoria (por ejemplo `x-service-audience`, `x-required-scope` o `x-allowed-client-ids` en una operación M2M), la generación falla cerrado.
+Excluye las cinco operaciones `x-internal`, mantiene fuera de importación contractual las dos operaciones legacy de Pricing y deja las cuatro rutas G5 fuera del artefacto predeterminado.
+
+El uso de `--enable-g5` por sí solo no autoriza publicación operativa: requiere además `--g5-authorized` explícito. Para operaciones M2M, la falta de `x-service-audience` o `x-required-scope` bloquea el catálogo; la falta de `x-allowed-client-ids` (ej. `consultarDisponibilidadCombo`) se registra como `clientAllowlistStatus: "PENDING_G7_ALLOWLIST"` sin inventar clientes y bloquea `effectivePublication` (`--effective-publish`). Operaciones con seguridad alternativa (`obtenerCombo`, `consultarDisponibilidadCombo`) conservan ambas modalidades en `securityAlternatives` (`identityType: "human_or_m2m"`).
 
 Cada entrada de `operations` incluye:
 - `operationId`, `apimOperationId`, `method`, `path`, `secured`
@@ -19,7 +25,7 @@ python ops/azure/apim/filter-openapi.py `
   --openapi ..\docs\contratos\http\openapi.yaml `
   --gateway-routes apps/api-gateway/src/routing/contract-routes.ts `
   --g5-routes apps/api-gateway/src/routing/g5-h5-routes.ts `
-  --docs-sha 490172c11cb4b83ddd1996f8d5834d0402184cf8 --gateway-sha 34058f0e5d25e89dcb4cb9d8c1ceb9db38cdfba4 `
+  --docs-sha 490172c11cb4b83ddd1996f8d5834d0402184cf8 --gateway-sha b0c41cb41e089cffb349da9c3938f8f62e793cd6 `
   --output ops/azure/apim/openapi/gateway-filtered.json `
   --manifest ops/azure/apim/openapi/operation-security.json
 ```

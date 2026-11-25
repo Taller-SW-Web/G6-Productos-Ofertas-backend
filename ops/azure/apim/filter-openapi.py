@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an APIM OpenAPI document and enriched security manifest from Gateway registries."""
+"""Build an APIM OpenAPI document and enriched fail-closed security manifest from Gateway registries."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head"}
 ROUTE_ENTRY = re.compile(
     r"\{\s*method:\s*['\"]([A-Z]+)['\"]\s*,\s*"
     r"path:\s*['\"]([^'\"]+)['\"]\s*,\s*"
-    r"operationId:\s*['\"]([A-Za-z0-9_.-]+)['\"]",
+    r"operationId:\s*['\"]([A-Za-z0-9_.-]+)['\"](?:.*?service:\s*['\"]([a-z0-9-]+)['\"])?",
     re.S,
 )
 LEGACY_UNCONTRACTED = {
@@ -36,8 +36,13 @@ KNOWN_RATE_PROFILES = {
 def read_registry(path: Path) -> list[dict[str, str]]:
     contents = path.read_text(encoding="utf-8")
     entries = [
-        {"method": method, "path": route_path, "operationId": operation_id}
-        for method, route_path, operation_id in ROUTE_ENTRY.findall(contents)
+        {
+            "method": method,
+            "path": route_path,
+            "operationId": operation_id,
+            **({"service": service} if service else {}),
+        }
+        for method, route_path, operation_id, service in ROUTE_ENTRY.findall(contents)
     ]
     operation_ids = [entry["operationId"] for entry in entries]
     if not entries:
@@ -106,7 +111,11 @@ def _derive_rate_profile(
         and isinstance(resp.get("content"), dict)
         and any(
             mt in resp["content"]
-            for mt in ("text/csv", "application/octet-stream", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            for mt in (
+                "text/csv",
+                "application/octet-stream",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
         )
         for resp in responses.values()
     )
@@ -132,6 +141,8 @@ def _derive_exposure_profile(
         return "public_read"
     if identity_type == "m2m":
         return "m2m_partner"
+    if identity_type == "human_or_m2m":
+        return "human_or_m2m_partner"
     if "/administracion" in path or "GESTOR_COMERCIAL" in roles:
         return "admin"
     return "commercial"
@@ -144,18 +155,26 @@ def extract_operation_security_metadata(
     operation: dict,
     source: dict,
     is_g5: bool,
+    *,
+    service_name: str | None = None,
+    enabled_providers: set[str] | None = None,
+    authorized_public_allowlist: set[str] | None = None,
 ) -> dict:
     auth_schemes = _extract_security_schemes(operation, source)
-    if not auth_schemes:
-        identity_type = "public"
-    elif "serviceBearer" in auth_schemes:
+    has_human = "userBearer" in auth_schemes
+    has_m2m = "serviceBearer" in auth_schemes
+    if has_human and has_m2m:
+        identity_type = "human_or_m2m"
+    elif has_m2m:
         identity_type = "m2m"
-    else:
+    elif has_human:
         identity_type = "human"
+    else:
+        identity_type = "public"
 
-    scopes = _as_string_list(operation.get("x-required-scope"))
-    roles = _as_string_list(operation.get("x-required-role"))
-    allowed_clients = _as_string_list(operation.get("x-allowed-client-ids"))
+    scopes = sorted(_as_string_list(operation.get("x-required-scope")))
+    roles = sorted(_as_string_list(operation.get("x-required-role")))
+    allowed_clients = sorted(_as_string_list(operation.get("x-allowed-client-ids")))
     audience = operation.get("x-service-audience")
     if audience is not None and not isinstance(audience, str):
         raise ValueError(f"x-service-audience inválido en {operation_id}")
@@ -166,35 +185,78 @@ def extract_operation_security_metadata(
         raise ValueError(f"x-auth-validation desconocido en {operation_id}: {introspection_mode!r}")
     introspection_required = introspection_mode == "introspection"
 
-    # APIM-C01: bloquear publicación si falta metadata contractual obligatoria para M2M.
-    if identity_type == "m2m":
+    # AUD-P0-01 & AUD-P0-03: validar metadata obligatoria para cada alternativa de seguridad.
+    security_alternatives: list[dict] = []
+    if has_human:
+        security_alternatives.append(
+            {
+                "scheme": "userBearer",
+                "identityType": "human",
+                "issuerRequired": True,
+                "audienceRequired": False,
+                "audience": None,
+                "scopes": [],
+                "roles": roles,
+                "allowedClients": [],
+                "introspectionRequired": introspection_required,
+            }
+        )
+    if has_m2m:
         if not audience:
             raise ValueError(f"Falta x-service-audience obligatorio para operación M2M: {operation_id}")
         if not scopes:
             raise ValueError(f"Falta x-required-scope obligatorio para operación M2M: {operation_id}")
+        security_alternatives.append(
+            {
+                "scheme": "serviceBearer",
+                "identityType": "m2m",
+                "issuerRequired": True,
+                "audienceRequired": True,
+                "audience": audience,
+                "scopes": scopes,
+                "roles": [],
+                "allowedClients": allowed_clients,
+                "clientAllowlistStatus": "CONTRACT_DEFINED" if allowed_clients else "PENDING_G7_ALLOWLIST",
+                "introspectionRequired": introspection_required,
+            }
+        )
 
-    audience_required = identity_type == "m2m" or audience is not None
+    client_allowlist_status = (
+        "CONTRACT_DEFINED"
+        if allowed_clients
+        else ("PENDING_G7_ALLOWLIST" if has_m2m else "NOT_APPLICABLE")
+    )
+    audience_required = identity_type == "m2m"
     rate_profile = _derive_rate_profile(operation_id, method, path, operation, roles, is_g5)
     exposure_profile = _derive_exposure_profile(identity_type, path, roles, is_g5)
+
+    # AUD-P0-02: fail-closed por defecto; environmentEnabled es False salvo autorización explícita.
+    if identity_type == "public":
+        env_enabled = bool(authorized_public_allowlist and operation_id in authorized_public_allowlist)
+    else:
+        env_enabled = bool(enabled_providers and service_name and service_name in enabled_providers)
 
     return {
         "operationId": operation_id,
         "apimOperationId": normalize_apim_operation_id(operation_id),
         "method": method.upper(),
         "path": path,
+        "service": service_name,
         "secured": bool(auth_schemes),
         "authSchemes": auth_schemes,
         "identityType": identity_type,
+        "securityAlternatives": security_alternatives,
         "issuerRequired": bool(auth_schemes),
         "audienceRequired": audience_required,
         "audience": audience,
-        "scopes": sorted(scopes),
-        "roles": sorted(roles),
-        "allowedClients": sorted(allowed_clients),
+        "scopes": scopes,
+        "roles": roles,
+        "allowedClients": allowed_clients,
+        "clientAllowlistStatus": client_allowlist_status,
         "introspectionRequired": introspection_required,
         "exposureProfile": exposure_profile,
         "rateProfile": rate_profile,
-        "environmentEnabled": True,
+        "environmentEnabled": env_enabled,
         "g5OptIn": is_g5,
     }
 
@@ -251,8 +313,10 @@ def validate_artifact_pair(filtered: dict, manifest: dict) -> None:
             raise ValueError(f"apimOperationId no corresponde a {operation['operationId']}")
         if operation.get("rateProfile") not in KNOWN_RATE_PROFILES:
             raise ValueError(f"rateProfile inválido en {operation['operationId']}")
-        if operation.get("identityType") not in {"public", "human", "m2m"}:
+        if operation.get("identityType") not in {"public", "human", "m2m", "human_or_m2m"}:
             raise ValueError(f"identityType inválido en {operation['operationId']}")
+        if operation.get("secured") and not operation.get("securityAlternatives"):
+            raise ValueError(f"Faltan securityAlternatives en {operation['operationId']}")
 
 
 def filter_spec(
@@ -264,10 +328,11 @@ def filter_spec(
     gateway_sha: str,
     *,
     g5_authorized: bool = False,
-    security_profile: str = "G7_AUTHENTICATED",
+    security_profile: str = "UNSPECIFIED",
     enabled_providers: list[str] | None = None,
     authorized_public_allowlist: list[str] | None = None,
     exposure_config: dict | None = None,
+    effective_publish: bool = False,
 ) -> tuple[dict, dict]:
     if enable_g5 and not g5_authorized:
         raise ValueError(
@@ -326,6 +391,9 @@ def filter_spec(
                 f"{route['method']} {route['path']} != {method.upper()} {expected_route}"
             )
 
+    provider_set = set(enabled_providers or [])
+    public_allowlist_set = set(authorized_public_allowlist or [])
+
     selected_paths: dict[str, dict] = {}
     operations: list[dict] = []
     for operation_id in sorted(enabled_ids):
@@ -344,7 +412,31 @@ def filter_spec(
                 operation,
                 source,
                 operation_id in g5_ids,
+                service_name=route_index[operation_id].get("service"),
+                enabled_providers=provider_set,
+                authorized_public_allowlist=public_allowlist_set,
             )
+        )
+
+    blocked_reasons: list[str] = []
+    if not provider_set:
+        blocked_reasons.append("NO_ENABLED_PROVIDERS")
+    if security_profile == "UNSPECIFIED":
+        blocked_reasons.append("NO_SECURITY_PROFILE")
+    pending_g7_allowlist_ids = sorted(
+        op["operationId"]
+        for op in operations
+        if op["clientAllowlistStatus"] == "PENDING_G7_ALLOWLIST"
+    )
+    if pending_g7_allowlist_ids:
+        blocked_reasons.append("PENDING_G7_CLIENT_ALLOWLIST")
+    published_ids = [op["operationId"] for op in operations if op["environmentEnabled"]]
+    if not published_ids:
+        blocked_reasons.append("NO_ENVIRONMENT_ENABLED_OPERATIONS")
+
+    if effective_publish and blocked_reasons:
+        raise ValueError(
+            f"Publicación efectiva bloqueada (fail-closed): {', '.join(blocked_reasons)}"
         )
 
     filtered = dict(source)
@@ -362,11 +454,12 @@ def filter_spec(
         "docsSha": docs_sha,
         "gatewaySha": gateway_sha,
         "securityProfile": security_profile,
-        "enabledProviders": sorted(enabled_providers) if enabled_providers else [],
-        "authorizedPublicAllowlist": sorted(authorized_public_allowlist) if authorized_public_allowlist else [],
+        "enabledProviders": sorted(provider_set),
+        "authorizedPublicAllowlist": sorted(public_allowlist_set),
         "g5Flag": bool(enable_g5),
+        "g5Authorized": bool(g5_authorized),
         "g5EnabledByDefault": False,
-        "exposureConfig": exposure_config or {"mode": "private-gateway-behind-apim"},
+        "exposureConfig": exposure_config or {"mode": "private-gateway-behind-apim", "approved": False},
         "contractInventory": {
             "totalOperations": len(operation_index),
             "internalExcludedIds": sorted(private_ids),
@@ -376,6 +469,16 @@ def filter_spec(
         "gatewayStaticRegistry": {
             "baseOperationCount": len(gateway_ids),
             "g5OverlayCount": len(g5_ids),
+        },
+        "candidateCatalog": {
+            "operationCount": len(operations),
+            "pendingG7AllowlistIds": pending_g7_allowlist_ids,
+        },
+        "effectivePublication": {
+            "authorized": not blocked_reasons,
+            "status": "AUTHORIZED" if not blocked_reasons else "BLOCKED_MISSING_ENV_CONFIG",
+            "blockedReasons": blocked_reasons,
+            "publishedOperationIds": published_ids,
         },
         "privateOperationIds": sorted(private_ids),
         "excludedUncontractedLegacyOperationIds": sorted(uncontracted),
@@ -396,7 +499,10 @@ def main() -> None:
     parser.add_argument("--gateway-sha", required=True)
     parser.add_argument("--enable-g5", action="store_true", help="Opt-in explícito, desactivado por defecto")
     parser.add_argument("--g5-authorized", action="store_true", help="Autorización operativa explícita para G5")
-    parser.add_argument("--security-profile", default="G7_AUTHENTICATED")
+    parser.add_argument("--security-profile", default="UNSPECIFIED")
+    parser.add_argument("--enabled-providers", nargs="*", default=[])
+    parser.add_argument("--authorized-public-allowlist", nargs="*", default=[])
+    parser.add_argument("--effective-publish", action="store_true", help="Exige publicación efectiva fail-closed")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     args = parser.parse_args()
@@ -411,6 +517,9 @@ def main() -> None:
         args.gateway_sha,
         g5_authorized=args.g5_authorized,
         security_profile=args.security_profile,
+        enabled_providers=args.enabled_providers,
+        authorized_public_allowlist=args.authorized_public_allowlist,
+        effective_publish=args.effective_publish,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.parent.mkdir(parents=True, exist_ok=True)

@@ -22,7 +22,7 @@
       <when condition="@(context.Request.Headers.ContainsKey(&quot;x-correlation-id&quot;))">
         <set-variable name="incomingCorrelationId" value="@(context.Request.Headers.GetValueOrDefault(&quot;x-correlation-id&quot;, string.Empty).Trim())" />
         <choose>
-          <when condition="@(!Guid.TryParse((string)context.Variables[&quot;incomingCorrelationId&quot;], out _))">
+          <when condition="@(!System.Text.RegularExpressions.Regex.IsMatch((string)context.Variables[&quot;incomingCorrelationId&quot;], &quot;^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$&quot;))">
             <set-variable name="correlationId" value="@(Guid.NewGuid().ToString())" />
             <return-response>
               <set-status code="400" reason="Bad Request" />
@@ -68,7 +68,7 @@
     </cors>
   </inbound>
   <backend>
-    <forward-request buffer-request-body="false" />
+    <forward-request buffer-request-body="false" buffer-response="false" />
   </backend>
   <outbound>
     <base />

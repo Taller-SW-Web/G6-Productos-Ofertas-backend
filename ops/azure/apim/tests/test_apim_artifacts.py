@@ -10,7 +10,7 @@ from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_DOCS_SHA = "490172c11cb4b83ddd1996f8d5834d0402184cf8"
-EXPECTED_GATEWAY_SHA = "34058f0e5d25e89dcb4cb9d8c1ceb9db38cdfba4"
+EXPECTED_GATEWAY_SHA = "b0c41cb41e089cffb349da9c3938f8f62e793cd6"
 SPEC = importlib.util.spec_from_file_location("filter_openapi", ROOT / "filter-openapi.py")
 FILTER = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -488,55 +488,94 @@ class CompiledArmTests(unittest.TestCase):
 
 
 class ApimClosureRequirementsTests(unittest.TestCase):
-    def test_enriched_manifest_and_g5_authorization_guard(self):
+    def test_enriched_manifest_and_fail_closed_effective_publication(self):
         manifest = json.loads((ROOT / "openapi/operation-security.json").read_text(encoding="utf-8"))
         self.assertIn("contractInventory", manifest)
         self.assertIn("gatewayStaticRegistry", manifest)
-        self.assertIn("securityProfile", manifest)
+        self.assertIn("candidateCatalog", manifest)
+        self.assertIn("effectivePublication", manifest)
+        self.assertFalse(manifest["effectivePublication"]["authorized"])
         self.assertFalse(manifest["g5EnabledByDefault"])
+
+        by_id = {op["operationId"]: op for op in manifest["operations"]}
+        for dual_id in ("obtenerCombo", "consultarDisponibilidadCombo"):
+            self.assertEqual(by_id[dual_id]["identityType"], "human_or_m2m")
+            schemes = {alt["scheme"]: alt for alt in by_id[dual_id]["securityAlternatives"]}
+            self.assertEqual(set(schemes.keys()), {"userBearer", "serviceBearer"})
+            self.assertFalse(schemes["userBearer"]["audienceRequired"])
+            self.assertTrue(schemes["serviceBearer"]["audienceRequired"])
+
         for op in manifest["operations"]:
+            self.assertFalse(op["environmentEnabled"])
             for key in (
                 "authSchemes",
                 "identityType",
+                "securityAlternatives",
                 "issuerRequired",
                 "audienceRequired",
                 "scopes",
                 "roles",
                 "allowedClients",
+                "clientAllowlistStatus",
                 "introspectionRequired",
                 "exposureProfile",
                 "rateProfile",
                 "environmentEnabled",
             ):
                 self.assertIn(key, op)
-            if op["identityType"] == "human" and op["audience"] is None:
-                self.assertFalse(op["audienceRequired"])
-            if op["identityType"] == "m2m":
-                self.assertTrue(op["audienceRequired"])
-                self.assertTrue(op["audience"])
-                self.assertTrue(op["scopes"])
 
-    def test_policies_and_bicep_enforce_correlation_cors_and_profiles(self):
+    def test_effective_publish_blocks_without_providers_or_pending_allowlist(self):
+        private = {
+            f"interna{i}": {"get": {"operationId": f"interna{i}", "x-internal": True}}
+            for i in range(1, 6)
+        }
+        spec = {
+            "openapi": "3.0.3",
+            "info": {"title": "t", "version": "1"},
+            "paths": {
+                **{f"/{p}": item for p, item in private.items()},
+                "/combo": {
+                    "get": {
+                        "operationId": "obtenerCombo",
+                        "security": [{"userBearer": []}, {"serviceBearer": []}],
+                        "x-service-audience": "api-productos",
+                        "x-required-scope": "combos:leer",
+                    }
+                },
+            },
+            "servers": [{"url": "/api/v1"}],
+        }
+        routes = [{"method": "GET", "path": "/api/v1/combo", "operationId": "obtenerCombo", "service": "combos-svc"}]
+        with self.assertRaisesRegex(ValueError, "Publicación efectiva bloqueada"):
+            FILTER.filter_spec(spec, routes, [], False, "d", "g", effective_publish=True)
+
+    def test_policies_and_bicep_enforce_canonical_uuid_dual_auth_and_profiles(self):
         api_xml = (ROOT / "policies/api.xml").read_text(encoding="utf-8")
-        self.assertIn("Guid.TryParse", api_xml)
+        self.assertIn("System.Text.RegularExpressions.Regex.IsMatch", api_xml)
+        self.assertNotIn("Guid.TryParse", api_xml)
         self.assertIn("<header>Content-Disposition</header>", api_xml)
         self.assertIn("<header>Location</header>", api_xml)
         self.assertIn('buffer-request-body="false"', api_xml)
+        self.assertIn('buffer-response="false"', api_xml)
         self.assertIn("<on-error>", api_xml)
 
         secured_xml = (ROOT / "policies/operation-secured.xml").read_text(encoding="utf-8")
         self.assertIn("{{audience-check-element}}", secured_xml)
+        self.assertIn("human_or_m2m", secured_xml)
         self.assertIn("SCOPE_INSUFICIENTE", secured_xml)
         self.assertIn("{{concurrency-limit-open}}", secured_xml)
+        self.assertIn('buffer-response="false"', secured_xml)
 
         public_xml = (ROOT / "policies/operation-public.xml").read_text(encoding="utf-8")
         self.assertIn("context.Request.IpAddress", public_xml)
+        self.assertIn('buffer-response="false"', public_xml)
         self.assertNotIn("X-Forwarded-For", public_xml)
         self.assertNotIn("X-Real-IP", public_xml)
 
         bicep_text = (ROOT / "main.bicep").read_text(encoding="utf-8")
         self.assertIn("param reuseExistingApim bool", bicep_text)
-        self.assertIn("param rateProfiles object", bicep_text)
+        self.assertIn("param environmentTier string", bicep_text)
+        self.assertIn("param rateProfiles object\n", bicep_text)
         self.assertIn("bytes: 0", bicep_text)
 
 

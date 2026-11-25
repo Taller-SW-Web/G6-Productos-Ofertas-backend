@@ -36,51 +36,14 @@ param quotaCalls int
 @description('Ventana de cuota en segundos.')
 @minValue(300)
 param quotaWindowSeconds int
-@description('Perfiles de protección parametrizados (commercial_read, admin_read, business_write, multipart_import, expensive_export, g5_protected).')
-param rateProfiles object = {
-  commercial_read: {
-    burstCalls: 20
-    burstWindowSeconds: 10
-    quotaCalls: 600
-    quotaWindowSeconds: 300
-    maxConcurrency: 0
-  }
-  admin_read: {
-    burstCalls: 10
-    burstWindowSeconds: 10
-    quotaCalls: 300
-    quotaWindowSeconds: 300
-    maxConcurrency: 0
-  }
-  business_write: {
-    burstCalls: 10
-    burstWindowSeconds: 10
-    quotaCalls: 180
-    quotaWindowSeconds: 300
-    maxConcurrency: 0
-  }
-  multipart_import: {
-    burstCalls: 3
-    burstWindowSeconds: 10
-    quotaCalls: 30
-    quotaWindowSeconds: 300
-    maxConcurrency: 2
-  }
-  expensive_export: {
-    burstCalls: 3
-    burstWindowSeconds: 10
-    quotaCalls: 30
-    quotaWindowSeconds: 300
-    maxConcurrency: 2
-  }
-  g5_protected: {
-    burstCalls: 10
-    burstWindowSeconds: 10
-    quotaCalls: 300
-    quotaWindowSeconds: 300
-    maxConcurrency: 4
-  }
-}
+@description('Nivel de ambiente aprobado (lab o production).')
+@allowed([
+  'lab'
+  'production'
+])
+param environmentTier string
+@description('Perfiles de protección parametrizados obligatorios (commercial_read, admin_read, business_write, multipart_import, expensive_export, g5_protected).')
+param rateProfiles object
 @description('Resource ID del recurso Application Insights autorizado.')
 param applicationInsightsResourceId string
 @secure()
@@ -212,21 +175,25 @@ resource operationPolicies 'Microsoft.ApiManagement/service/apis/operations/poli
                       replace(
                         replace(
                           replace(
-                            operation.secured ? securedOperationPolicyTemplate : publicOperationPolicyTemplate,
-                            '{{audience-check-element}}',
-                            operation.audienceRequired ? '<audiences><audience>${xmlEscape(empty(operation.audience) ? g7Audience : operation.audience)}</audience></audiences>' : ''
+                            replace(
+                              operation.secured ? securedOperationPolicyTemplate : publicOperationPolicyTemplate,
+                              '{{audience-check-element}}',
+                              operation.audienceRequired ? '<audiences><audience>${xmlEscape(empty(operation.audience) ? g7Audience : operation.audience)}</audience></audiences>' : ''
+                            ),
+                            '{{identity-type}}',
+                            xmlEscape(operation.identityType)
                           ),
-                          '{{identity-type}}',
-                          xmlEscape(operation.identityType)
+                          '{{required-roles}}',
+                          xmlEscape(join(operation.roles, ','))
                         ),
-                        '{{required-role}}',
-                        xmlEscape(empty(operation.roles) ? '' : operation.roles[0])
+                        '{{required-scopes}}',
+                        xmlEscape(join(operation.scopes, ','))
                       ),
-                      '{{required-scope}}',
-                      xmlEscape(empty(operation.scopes) ? '' : operation.scopes[0])
+                      '{{allowed-clients}}',
+                      xmlEscape(join(operation.allowedClients, ','))
                     ),
-                    '{{allowed-clients}}',
-                    xmlEscape(join(operation.allowedClients, ','))
+                    '{{m2m-audience}}',
+                    xmlEscape(empty(operation.audience) ? '' : operation.audience)
                   ),
                   '{{burst-calls}}',
                   string(contains(rateProfiles, operation.rateProfile) ? rateProfiles[operation.rateProfile].burstCalls : burstCalls)

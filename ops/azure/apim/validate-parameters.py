@@ -60,8 +60,10 @@ def gateway_path_for_public_request(gateway_backend_url: str, public_path: str) 
 
 def validate(parameters: dict, filtered_openapi: dict, manifest: dict) -> None:
     for key in (
+        "environmentTier",
         "apimSubnetResourceId",
         "gatewayBackendUrl",
+        "privateNetworkProof",
         "g7Issuer",
         "g7OpenIdConfigurationUrl",
         "g7Audience",
@@ -70,12 +72,28 @@ def validate(parameters: dict, filtered_openapi: dict, manifest: dict) -> None:
         "burstWindowSeconds",
         "quotaCalls",
         "quotaWindowSeconds",
+        "rateProfiles",
         "applicationInsightsResourceId",
         "applicationInsightsConnectionString",
         "filteredOpenApi",
     ):
         if key not in parameters:
             raise ValueError(f"Falta parámetro obligatorio: {key}")
+
+    tier = parameters["environmentTier"]
+    if tier not in {"lab", "production"}:
+        raise ValueError("environmentTier debe ser 'lab' o 'production'")
+
+    net_proof = parameters["privateNetworkProof"]
+    if not isinstance(net_proof, dict):
+        raise ValueError("privateNetworkProof debe ser un objeto verificable")
+    if tier == "production":
+        if net_proof.get("verified") is not True or net_proof.get("antiBypassVerified") is not True:
+            raise ValueError(
+                "Deployment bloqueado: gatewayBackendUrl requiere evidencia verificada de red privada y anti-bypass"
+            )
+        if not isinstance(parameters.get("approvedBy"), str) or not parameters["approvedBy"].strip():
+            raise ValueError("Deployment productivo requiere approvedBy explícito")
 
     if not APPLICATION_INSIGHTS_RESOURCE_ID.fullmatch(
         parameters["applicationInsightsResourceId"]

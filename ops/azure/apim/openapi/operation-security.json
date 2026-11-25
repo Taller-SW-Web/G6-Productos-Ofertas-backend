@@ -1,13 +1,15 @@
 {
   "docsSha": "490172c11cb4b83ddd1996f8d5834d0402184cf8",
-  "gatewaySha": "34058f0e5d25e89dcb4cb9d8c1ceb9db38cdfba4",
-  "securityProfile": "G7_AUTHENTICATED",
+  "gatewaySha": "b0c41cb41e089cffb349da9c3938f8f62e793cd6",
+  "securityProfile": "UNSPECIFIED",
   "enabledProviders": [],
   "authorizedPublicAllowlist": [],
   "g5Flag": false,
+  "g5Authorized": false,
   "g5EnabledByDefault": false,
   "exposureConfig": {
-    "mode": "private-gateway-behind-apim"
+    "mode": "private-gateway-behind-apim",
+    "approved": false
   },
   "contractInventory": {
     "totalOperations": 154,
@@ -33,6 +35,24 @@
     "baseOperationCount": 147,
     "g5OverlayCount": 4
   },
+  "candidateCatalog": {
+    "operationCount": 145,
+    "pendingG7AllowlistIds": [
+      "consultarDisponibilidadCombo",
+      "obtenerCombo"
+    ]
+  },
+  "effectivePublication": {
+    "authorized": false,
+    "status": "BLOCKED_MISSING_ENV_CONFIG",
+    "blockedReasons": [
+      "NO_ENABLED_PROVIDERS",
+      "NO_SECURITY_PROFILE",
+      "PENDING_G7_CLIENT_ALLOWLIST",
+      "NO_ENVIRONMENT_ENABLED_OPERATIONS"
+    ],
+    "publishedOperationIds": []
+  },
   "privateOperationIds": [
     "filtrarSkusVendiblesInterno",
     "obtenerContenidoCargaMasivaInternoH5",
@@ -50,21 +70,36 @@
       "apimOperationId": "activarcupon",
       "method": "POST",
       "path": "/cupones/{cuponId}/activar",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -72,21 +107,36 @@
       "apimOperationId": "activarproducto",
       "method": "POST",
       "path": "/productos/{productoId}/activar",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -94,21 +144,36 @@
       "apimOperationId": "activarpromocion",
       "method": "POST",
       "path": "/promociones/{promocionId}/activar",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -116,21 +181,36 @@
       "apimOperationId": "activarreglarecomendacion",
       "method": "POST",
       "path": "/recomendaciones/reglas/{reglaId}/activar",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -138,21 +218,36 @@
       "apimOperationId": "activarvariante",
       "method": "POST",
       "path": "/productos/{productoId}/variantes/{variantId}/activar",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -160,21 +255,36 @@
       "apimOperationId": "actualizarasociaciontipocaracteristica",
       "method": "PATCH",
       "path": "/tipos-producto/{tipoProductoId}/caracteristicas/{caracteristicaId}",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -182,21 +292,36 @@
       "apimOperationId": "actualizarcaracteristica",
       "method": "PATCH",
       "path": "/caracteristicas/{caracteristicaId}",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -204,21 +329,36 @@
       "apimOperationId": "actualizarcategoria",
       "method": "PATCH",
       "path": "/categorias/{categoriaId}",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -226,21 +366,36 @@
       "apimOperationId": "actualizarcombo",
       "method": "PATCH",
       "path": "/combos/{comboId}",
+      "service": "combos-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -248,21 +403,36 @@
       "apimOperationId": "actualizarcupon",
       "method": "PATCH",
       "path": "/cupones/{cuponId}",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -270,21 +440,36 @@
       "apimOperationId": "actualizarmarca",
       "method": "PATCH",
       "path": "/marcas/{marcaId}",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "multipart_import",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -292,11 +477,27 @@
       "apimOperationId": "actualizarpreciobaseproducto",
       "method": "PATCH",
       "path": "/precios/productos/{productoId}",
+      "service": "pricing-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": true
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
@@ -305,10 +506,11 @@
         "GESTOR_COMERCIAL"
       ],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": true,
       "exposureProfile": "admin",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -316,11 +518,27 @@
       "apimOperationId": "actualizarpreciosku",
       "method": "PATCH",
       "path": "/precios/skus/{sku}",
+      "service": "pricing-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": true
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
@@ -329,10 +547,11 @@
         "GESTOR_COMERCIAL"
       ],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": true,
       "exposureProfile": "admin",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -340,21 +559,36 @@
       "apimOperationId": "actualizarproducto",
       "method": "PATCH",
       "path": "/productos/{productoId}",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -362,21 +596,36 @@
       "apimOperationId": "actualizarpromocion",
       "method": "PATCH",
       "path": "/promociones/{promocionId}",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -384,21 +633,36 @@
       "apimOperationId": "actualizarreglarecomendacion",
       "method": "PATCH",
       "path": "/recomendaciones/reglas/{reglaId}",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -406,21 +670,36 @@
       "apimOperationId": "actualizarseocategoria",
       "method": "PATCH",
       "path": "/categorias/{categoriaId}/seo",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -428,21 +707,36 @@
       "apimOperationId": "actualizarumbralglobal",
       "method": "PUT",
       "path": "/inventario/umbrales/global",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -450,21 +744,36 @@
       "apimOperationId": "actualizarvalorcaracteristica",
       "method": "PATCH",
       "path": "/caracteristicas/{caracteristicaId}/valores/{valorId}",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -472,21 +781,36 @@
       "apimOperationId": "actualizarvariante",
       "method": "PATCH",
       "path": "/productos/{productoId}/variantes/{variantId}",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -494,21 +818,36 @@
       "apimOperationId": "asociarcaracteristicatipoproducto",
       "method": "POST",
       "path": "/tipos-producto/{tipoProductoId}/caracteristicas",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -516,21 +855,36 @@
       "apimOperationId": "conciliarimportaciongeneralporcorrelacion",
       "method": "GET",
       "path": "/carga-masiva/productos/importaciones/por-correlacion/{correlationId}",
+      "service": "bulk-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -538,11 +892,30 @@
       "apimOperationId": "conciliarventaoffline",
       "method": "POST",
       "path": "/inventario/conciliaciones-offline",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer"
       ],
       "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "inventario:conciliar-offline"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-ventas"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": true,
       "audience": "api-productos",
@@ -553,10 +926,11 @@
       "allowedClients": [
         "modulo-ventas"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
       "exposureProfile": "m2m_partner",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -564,11 +938,30 @@
       "apimOperationId": "confirmarreserva",
       "method": "POST",
       "path": "/inventario/reservas/{reservaId}/confirmar",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer"
       ],
       "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "inventario:consumir"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-ventas"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": true,
       "audience": "api-productos",
@@ -579,10 +972,11 @@
       "allowedClients": [
         "modulo-ventas"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
       "exposureProfile": "m2m_partner",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -590,11 +984,30 @@
       "apimOperationId": "consultardatosfisicos",
       "method": "POST",
       "path": "/productos/datos-fisicos/consulta",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer"
       ],
       "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "productos:fisicos:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-despacho"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": true,
       "audience": "api-productos",
@@ -605,10 +1018,11 @@
       "allowedClients": [
         "modulo-despacho"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
       "exposureProfile": "m2m_partner",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -616,14 +1030,45 @@
       "apimOperationId": "consultardisponibilidad",
       "method": "GET",
       "path": "/inventario/disponibilidad",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer",
         "userBearer"
       ],
-      "identityType": "m2m",
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "inventario:disponibilidad:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-postventa",
+            "modulo-ventas"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
-      "audienceRequired": true,
+      "audienceRequired": false,
       "audience": "api-productos",
       "scopes": [
         "inventario:disponibilidad:leer"
@@ -633,10 +1078,11 @@
         "modulo-postventa",
         "modulo-ventas"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
-      "exposureProfile": "m2m_partner",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -644,24 +1090,53 @@
       "apimOperationId": "consultardisponibilidadcombo",
       "method": "GET",
       "path": "/combos/{comboId}/disponibilidad",
+      "service": "combos-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer",
         "userBearer"
       ],
-      "identityType": "m2m",
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "combos:leer"
+          ],
+          "roles": [],
+          "allowedClients": [],
+          "clientAllowlistStatus": "PENDING_G7_ALLOWLIST",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
-      "audienceRequired": true,
+      "audienceRequired": false,
       "audience": "api-productos",
       "scopes": [
         "combos:leer"
       ],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "PENDING_G7_ALLOWLIST",
       "introspectionRequired": false,
-      "exposureProfile": "m2m_partner",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -669,11 +1144,33 @@
       "apimOperationId": "consultardisponibilidadcomercial",
       "method": "GET",
       "path": "/inventario/disponibilidad/comercial",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer"
       ],
       "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "inventario:disponibilidad:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-productos",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": true,
       "audience": "api-productos",
@@ -687,10 +1184,11 @@
         "modulo-productos",
         "modulo-retail"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
       "exposureProfile": "m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -698,11 +1196,30 @@
       "apimOperationId": "consultaroperacioninventario",
       "method": "GET",
       "path": "/inventario/operaciones/{operationId}",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer"
       ],
       "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "inventario:operaciones:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-ventas"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": true,
       "audience": "api-productos",
@@ -713,10 +1230,11 @@
       "allowedClients": [
         "modulo-ventas"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
       "exposureProfile": "m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -724,14 +1242,47 @@
       "apimOperationId": "consultarprecios",
       "method": "GET",
       "path": "/precios",
+      "service": "pricing-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer",
         "userBearer"
       ],
-      "identityType": "m2m",
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "precios:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-productos",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
-      "audienceRequired": true,
+      "audienceRequired": false,
       "audience": "api-productos",
       "scopes": [
         "precios:leer"
@@ -743,10 +1294,11 @@
         "modulo-productos",
         "modulo-retail"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
-      "exposureProfile": "m2m_partner",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -754,21 +1306,36 @@
       "apimOperationId": "crearcaracteristica",
       "method": "POST",
       "path": "/caracteristicas",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -776,21 +1343,36 @@
       "apimOperationId": "crearcategoria",
       "method": "POST",
       "path": "/categorias",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -798,21 +1380,36 @@
       "apimOperationId": "crearcombo",
       "method": "POST",
       "path": "/combos",
+      "service": "combos-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -820,11 +1417,27 @@
       "apimOperationId": "crearcomboadministracion",
       "method": "POST",
       "path": "/combos/administracion",
+      "service": "combos-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
@@ -833,10 +1446,11 @@
         "GESTOR_COMERCIAL"
       ],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "admin",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -844,21 +1458,36 @@
       "apimOperationId": "crearcupon",
       "method": "POST",
       "path": "/cupones",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -866,21 +1495,36 @@
       "apimOperationId": "crearexportacionauditoriaprecios",
       "method": "POST",
       "path": "/auditoria-precios/exportaciones",
+      "service": "price-audit-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -888,21 +1532,36 @@
       "apimOperationId": "crearexportaciongeneralproductos",
       "method": "POST",
       "path": "/carga-masiva/productos/exportaciones",
+      "service": "bulk-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -910,21 +1569,36 @@
       "apimOperationId": "crearimportaciongeneralproductos",
       "method": "POST",
       "path": "/carga-masiva/productos/importaciones",
+      "service": "bulk-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "multipart_import",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -932,11 +1606,27 @@
       "apimOperationId": "crearimportacionprecios",
       "method": "POST",
       "path": "/precios/importaciones",
+      "service": "pricing-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": true
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
@@ -945,10 +1635,11 @@
         "GESTOR_COMERCIAL"
       ],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": true,
       "exposureProfile": "admin",
       "rateProfile": "multipart_import",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -956,21 +1647,36 @@
       "apimOperationId": "crearmarca",
       "method": "POST",
       "path": "/marcas",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "multipart_import",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -978,21 +1684,36 @@
       "apimOperationId": "crearproducto",
       "method": "POST",
       "path": "/productos",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1000,21 +1721,36 @@
       "apimOperationId": "crearpromocion",
       "method": "POST",
       "path": "/promociones",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1022,21 +1758,36 @@
       "apimOperationId": "crearreglarecomendacion",
       "method": "POST",
       "path": "/recomendaciones/reglas",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1044,21 +1795,36 @@
       "apimOperationId": "creartipoproducto",
       "method": "POST",
       "path": "/tipos-producto",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1066,21 +1832,36 @@
       "apimOperationId": "crearvalorcaracteristica",
       "method": "POST",
       "path": "/caracteristicas/{caracteristicaId}/valores",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1088,21 +1869,36 @@
       "apimOperationId": "crearvariante",
       "method": "POST",
       "path": "/productos/{productoId}/variantes",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1110,21 +1906,36 @@
       "apimOperationId": "desactivarcaracteristica",
       "method": "POST",
       "path": "/caracteristicas/{caracteristicaId}/desactivar",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1132,21 +1943,36 @@
       "apimOperationId": "desactivarcombo",
       "method": "POST",
       "path": "/combos/{comboId}/desactivar",
+      "service": "combos-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1154,21 +1980,36 @@
       "apimOperationId": "desactivarcupon",
       "method": "POST",
       "path": "/cupones/{cuponId}/desactivar",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1176,21 +2017,36 @@
       "apimOperationId": "desactivarproducto",
       "method": "POST",
       "path": "/productos/{productoId}/desactivar",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1198,21 +2054,36 @@
       "apimOperationId": "desactivarpromocion",
       "method": "POST",
       "path": "/promociones/{promocionId}/desactivar",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1220,21 +2091,36 @@
       "apimOperationId": "desactivarreglarecomendacion",
       "method": "POST",
       "path": "/recomendaciones/reglas/{reglaId}/desactivar",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1242,21 +2128,36 @@
       "apimOperationId": "desactivarvariante",
       "method": "POST",
       "path": "/productos/{productoId}/variantes/{variantId}/desactivar",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1264,21 +2165,36 @@
       "apimOperationId": "descargarexportacionauditoriaprecios",
       "method": "GET",
       "path": "/auditoria-precios/exportaciones/{exportId}/archivo",
+      "service": "price-audit-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "expensive_export",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1286,21 +2202,36 @@
       "apimOperationId": "descargarexportaciongeneralproductos",
       "method": "GET",
       "path": "/carga-masiva/productos/exportaciones/{exportId}/archivo",
+      "service": "bulk-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "expensive_export",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1308,21 +2239,36 @@
       "apimOperationId": "descargarplantillaproductos",
       "method": "GET",
       "path": "/carga-masiva/productos/plantilla",
+      "service": "bulk-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "expensive_export",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1330,21 +2276,36 @@
       "apimOperationId": "descargarreporteimportaciongeneral",
       "method": "GET",
       "path": "/carga-masiva/productos/importaciones/{batchId}/reporte",
+      "service": "bulk-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "expensive_export",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1352,21 +2313,36 @@
       "apimOperationId": "descargarreporteimportacionprecios",
       "method": "GET",
       "path": "/precios/importaciones/{batchId}/reporte",
+      "service": "pricing-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "expensive_export",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1374,21 +2350,36 @@
       "apimOperationId": "eliminarumbralsku",
       "method": "DELETE",
       "path": "/inventario/umbrales/skus/{sku}",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1396,21 +2387,36 @@
       "apimOperationId": "establecerumbralsku",
       "method": "PUT",
       "path": "/inventario/umbrales/skus/{sku}",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1418,11 +2424,32 @@
       "apimOperationId": "evaluarpromociones",
       "method": "POST",
       "path": "/promociones/evaluar",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer"
       ],
       "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "promociones:evaluar"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": true,
       "audience": "api-productos",
@@ -1435,10 +2462,11 @@
         "modulo-marketplace",
         "modulo-retail"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
       "exposureProfile": "m2m_partner",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1446,11 +2474,30 @@
       "apimOperationId": "liberarreserva",
       "method": "POST",
       "path": "/inventario/reservas/{reservaId}/liberar",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer"
       ],
       "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "inventario:liberar"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-ventas"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": true,
       "audience": "api-productos",
@@ -1461,10 +2508,11 @@
       "allowedClients": [
         "modulo-ventas"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
       "exposureProfile": "m2m_partner",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1472,11 +2520,27 @@
       "apimOperationId": "listaralertasoperativasinventario",
       "method": "GET",
       "path": "/inventario/alertas",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
@@ -1485,10 +2549,11 @@
         "GESTOR_COMERCIAL"
       ],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "admin",
       "rateProfile": "admin_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1496,21 +2561,36 @@
       "apimOperationId": "listarauditoriaprecios",
       "method": "GET",
       "path": "/auditoria-precios",
+      "service": "price-audit-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1518,11 +2598,27 @@
       "apimOperationId": "listarauditoriapreciosadministracion",
       "method": "GET",
       "path": "/auditoria-precios/administracion",
+      "service": "price-audit-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
@@ -1531,10 +2627,11 @@
         "GESTOR_COMERCIAL"
       ],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "admin",
       "rateProfile": "admin_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1542,21 +2639,36 @@
       "apimOperationId": "listarcaracteristicas",
       "method": "GET",
       "path": "/caracteristicas",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1564,11 +2676,32 @@
       "apimOperationId": "listarcategorias",
       "method": "GET",
       "path": "/categorias",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer"
       ],
       "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": true,
       "audience": "api-productos",
@@ -1581,10 +2714,11 @@
         "modulo-marketplace",
         "modulo-retail"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
       "exposureProfile": "m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1592,14 +2726,44 @@
       "apimOperationId": "listarcategoriasadmin",
       "method": "GET",
       "path": "/categorias/administracion",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer",
         "userBearer"
       ],
-      "identityType": "m2m",
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-productos"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
-      "audienceRequired": true,
+      "audienceRequired": false,
       "audience": "api-productos",
       "scopes": [
         "catalogo:leer"
@@ -1608,10 +2772,11 @@
       "allowedClients": [
         "modulo-productos"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
-      "exposureProfile": "m2m_partner",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "admin_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1619,21 +2784,36 @@
       "apimOperationId": "listarcombosadmin",
       "method": "GET",
       "path": "/combos",
+      "service": "combos-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1641,21 +2821,36 @@
       "apimOperationId": "listarcupones",
       "method": "GET",
       "path": "/cupones",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1663,21 +2858,36 @@
       "apimOperationId": "listarhistorialslugcategoria",
       "method": "GET",
       "path": "/categorias/{categoriaId}/seo/historial",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1685,11 +2895,32 @@
       "apimOperationId": "listarmarcas",
       "method": "GET",
       "path": "/marcas",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer"
       ],
       "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": true,
       "audience": "api-productos",
@@ -1702,10 +2933,11 @@
         "modulo-marketplace",
         "modulo-retail"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
       "exposureProfile": "m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1713,14 +2945,44 @@
       "apimOperationId": "listarmarcasadmin",
       "method": "GET",
       "path": "/marcas/administracion",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer",
         "userBearer"
       ],
-      "identityType": "m2m",
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-productos"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
-      "audienceRequired": true,
+      "audienceRequired": false,
       "audience": "api-productos",
       "scopes": [
         "catalogo:leer"
@@ -1729,10 +2991,11 @@
       "allowedClients": [
         "modulo-productos"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
-      "exposureProfile": "m2m_partner",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "admin_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1740,14 +3003,46 @@
       "apimOperationId": "listarproductos",
       "method": "GET",
       "path": "/productos",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer",
         "userBearer"
       ],
-      "identityType": "m2m",
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
-      "audienceRequired": true,
+      "audienceRequired": false,
       "audience": "api-productos",
       "scopes": [
         "catalogo:leer"
@@ -1758,10 +3053,11 @@
         "modulo-marketplace",
         "modulo-retail"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
-      "exposureProfile": "m2m_partner",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1769,11 +3065,27 @@
       "apimOperationId": "listarproductosadministracion",
       "method": "GET",
       "path": "/productos/administracion",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
@@ -1782,10 +3094,11 @@
         "GESTOR_COMERCIAL"
       ],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "admin",
       "rateProfile": "admin_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1793,21 +3106,36 @@
       "apimOperationId": "listarprogramacionesprecioproducto",
       "method": "GET",
       "path": "/precios/productos/{productoId}/programaciones",
+      "service": "pricing-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1815,21 +3143,36 @@
       "apimOperationId": "listarprogramacionespreciosku",
       "method": "GET",
       "path": "/precios/skus/{sku}/programaciones",
+      "service": "pricing-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1837,14 +3180,46 @@
       "apimOperationId": "listarpromociones",
       "method": "GET",
       "path": "/promociones",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer",
         "userBearer"
       ],
-      "identityType": "m2m",
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "promociones:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
-      "audienceRequired": true,
+      "audienceRequired": false,
       "audience": "api-productos",
       "scopes": [
         "promociones:leer"
@@ -1855,10 +3230,11 @@
         "modulo-marketplace",
         "modulo-retail"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
-      "exposureProfile": "m2m_partner",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1866,21 +3242,36 @@
       "apimOperationId": "listarpromocionesadmin",
       "method": "GET",
       "path": "/promociones/administracion",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "admin",
       "rateProfile": "admin_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1888,21 +3279,36 @@
       "apimOperationId": "listarreglasrecomendacion",
       "method": "GET",
       "path": "/recomendaciones/reglas",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1910,11 +3316,27 @@
       "apimOperationId": "listarsaldosfisicosadministracion",
       "method": "GET",
       "path": "/inventario/administracion/saldos",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
@@ -1923,10 +3345,11 @@
         "GESTOR_COMERCIAL"
       ],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "admin",
       "rateProfile": "admin_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1934,14 +3357,44 @@
       "apimOperationId": "listartiposproducto",
       "method": "GET",
       "path": "/tipos-producto",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer",
         "userBearer"
       ],
-      "identityType": "m2m",
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-productos"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
-      "audienceRequired": true,
+      "audienceRequired": false,
       "audience": "api-productos",
       "scopes": [
         "catalogo:leer"
@@ -1950,10 +3403,11 @@
       "allowedClients": [
         "modulo-productos"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
-      "exposureProfile": "m2m_partner",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1961,21 +3415,36 @@
       "apimOperationId": "listartrasladosinventario",
       "method": "GET",
       "path": "/inventario/traslados",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -1983,11 +3452,27 @@
       "apimOperationId": "listarubicacionesinventario",
       "method": "GET",
       "path": "/inventario/ubicaciones",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
@@ -1996,10 +3481,11 @@
         "GESTOR_COMERCIAL"
       ],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "admin",
       "rateProfile": "admin_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2007,21 +3493,36 @@
       "apimOperationId": "listarvalorescaracteristica",
       "method": "GET",
       "path": "/caracteristicas/{caracteristicaId}/valores",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2029,21 +3530,36 @@
       "apimOperationId": "listarvariantesproducto",
       "method": "GET",
       "path": "/productos/{productoId}/variantes",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2051,14 +3567,44 @@
       "apimOperationId": "obtenerarbolcategoriasadmin",
       "method": "GET",
       "path": "/categorias/arbol",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer",
         "userBearer"
       ],
-      "identityType": "m2m",
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-productos"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
-      "audienceRequired": true,
+      "audienceRequired": false,
       "audience": "api-productos",
       "scopes": [
         "catalogo:leer"
@@ -2067,10 +3613,11 @@
       "allowedClients": [
         "modulo-productos"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
-      "exposureProfile": "m2m_partner",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2078,21 +3625,36 @@
       "apimOperationId": "obtenerauditoriaprecio",
       "method": "GET",
       "path": "/auditoria-precios/{auditId}",
+      "service": "price-audit-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2100,11 +3662,27 @@
       "apimOperationId": "obtenerauditoriaprecioadministracion",
       "method": "GET",
       "path": "/auditoria-precios/administracion/{auditId}",
+      "service": "price-audit-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
@@ -2113,10 +3691,11 @@
         "GESTOR_COMERCIAL"
       ],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "admin",
       "rateProfile": "admin_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2124,21 +3703,36 @@
       "apimOperationId": "obtenercaracteristica",
       "method": "GET",
       "path": "/caracteristicas/{caracteristicaId}",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2146,14 +3740,44 @@
       "apimOperationId": "obtenercategoriaadmin",
       "method": "GET",
       "path": "/categorias/{categoriaId}",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer",
         "userBearer"
       ],
-      "identityType": "m2m",
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-productos"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
-      "audienceRequired": true,
+      "audienceRequired": false,
       "audience": "api-productos",
       "scopes": [
         "catalogo:leer"
@@ -2162,10 +3786,11 @@
       "allowedClients": [
         "modulo-productos"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
-      "exposureProfile": "m2m_partner",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2173,24 +3798,53 @@
       "apimOperationId": "obtenercombo",
       "method": "GET",
       "path": "/combos/{comboId}",
+      "service": "combos-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer",
         "userBearer"
       ],
-      "identityType": "m2m",
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "combos:leer"
+          ],
+          "roles": [],
+          "allowedClients": [],
+          "clientAllowlistStatus": "PENDING_G7_ALLOWLIST",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
-      "audienceRequired": true,
+      "audienceRequired": false,
       "audience": "api-productos",
       "scopes": [
         "combos:leer"
       ],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "PENDING_G7_ALLOWLIST",
       "introspectionRequired": false,
-      "exposureProfile": "m2m_partner",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2198,21 +3852,36 @@
       "apimOperationId": "obtenercuponadmin",
       "method": "GET",
       "path": "/cupones/{cuponId}",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2220,21 +3889,36 @@
       "apimOperationId": "obtenerdashboardinventario",
       "method": "GET",
       "path": "/inventario/dashboard",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2242,14 +3926,44 @@
       "apimOperationId": "obteneresquematipoproducto",
       "method": "GET",
       "path": "/tipos-producto/{tipoProductoId}/caracteristicas",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer",
         "userBearer"
       ],
-      "identityType": "m2m",
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-productos"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
-      "audienceRequired": true,
+      "audienceRequired": false,
       "audience": "api-productos",
       "scopes": [
         "catalogo:leer"
@@ -2258,10 +3972,11 @@
       "allowedClients": [
         "modulo-productos"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
-      "exposureProfile": "m2m_partner",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2269,21 +3984,36 @@
       "apimOperationId": "obtenerexportacionauditoriaprecios",
       "method": "GET",
       "path": "/auditoria-precios/exportaciones/{exportId}",
+      "service": "price-audit-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2291,21 +4021,36 @@
       "apimOperationId": "obtenerexportaciongeneralproductos",
       "method": "GET",
       "path": "/carga-masiva/productos/exportaciones/{exportId}",
+      "service": "bulk-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2313,21 +4058,36 @@
       "apimOperationId": "obtenerimportaciongeneralproductos",
       "method": "GET",
       "path": "/carga-masiva/productos/importaciones/{batchId}",
+      "service": "bulk-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2335,21 +4095,36 @@
       "apimOperationId": "obtenerimportacionprecios",
       "method": "GET",
       "path": "/precios/importaciones/{batchId}",
+      "service": "pricing-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2357,14 +4132,44 @@
       "apimOperationId": "obtenermarcaadmin",
       "method": "GET",
       "path": "/marcas/{marcaId}",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer",
         "userBearer"
       ],
-      "identityType": "m2m",
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-productos"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
-      "audienceRequired": true,
+      "audienceRequired": false,
       "audience": "api-productos",
       "scopes": [
         "catalogo:leer"
@@ -2373,10 +4178,11 @@
       "allowedClients": [
         "modulo-productos"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
-      "exposureProfile": "m2m_partner",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2384,21 +4190,36 @@
       "apimOperationId": "obteneroperacionmaestra",
       "method": "GET",
       "path": "/taxonomia/operaciones/{operationId}",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2406,21 +4227,36 @@
       "apimOperationId": "obtenerpreciobaseproducto",
       "method": "GET",
       "path": "/precios/productos/{productoId}",
+      "service": "pricing-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2428,14 +4264,47 @@
       "apimOperationId": "obtenerpreciosku",
       "method": "GET",
       "path": "/precios/skus/{sku}",
+      "service": "pricing-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer",
         "userBearer"
       ],
-      "identityType": "m2m",
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "precios:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-productos",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
-      "audienceRequired": true,
+      "audienceRequired": false,
       "audience": "api-productos",
       "scopes": [
         "precios:leer"
@@ -2447,10 +4316,11 @@
         "modulo-productos",
         "modulo-retail"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
-      "exposureProfile": "m2m_partner",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2458,21 +4328,36 @@
       "apimOperationId": "obtenerpreparacionproducto",
       "method": "GET",
       "path": "/productos/{productoId}/preparacion",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2480,14 +4365,47 @@
       "apimOperationId": "obtenerproducto",
       "method": "GET",
       "path": "/productos/{productoId}",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer",
         "userBearer"
       ],
-      "identityType": "m2m",
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-productos",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
-      "audienceRequired": true,
+      "audienceRequired": false,
       "audience": "api-productos",
       "scopes": [
         "catalogo:leer"
@@ -2499,10 +4417,11 @@
         "modulo-productos",
         "modulo-retail"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
-      "exposureProfile": "m2m_partner",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2510,11 +4429,27 @@
       "apimOperationId": "obtenerproductoadministracion",
       "method": "GET",
       "path": "/productos/administracion/{productoId}",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
@@ -2523,10 +4458,11 @@
         "GESTOR_COMERCIAL"
       ],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "admin",
       "rateProfile": "admin_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2534,14 +4470,46 @@
       "apimOperationId": "obtenerproductoporslug",
       "method": "GET",
       "path": "/productos/por-slug/{slug}",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer",
         "userBearer"
       ],
-      "identityType": "m2m",
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
-      "audienceRequired": true,
+      "audienceRequired": false,
       "audience": "api-productos",
       "scopes": [
         "catalogo:leer"
@@ -2552,10 +4520,11 @@
         "modulo-marketplace",
         "modulo-retail"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
-      "exposureProfile": "m2m_partner",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2563,21 +4532,36 @@
       "apimOperationId": "obtenerpromocionadmin",
       "method": "GET",
       "path": "/promociones/{promocionId}",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2585,11 +4569,32 @@
       "apimOperationId": "obtenerrecomendaciones",
       "method": "GET",
       "path": "/recomendaciones",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer"
       ],
       "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "recomendaciones:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": true,
       "audience": "api-productos",
@@ -2602,10 +4607,11 @@
         "modulo-marketplace",
         "modulo-retail"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
       "exposureProfile": "m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2613,21 +4619,36 @@
       "apimOperationId": "obtenerreglarecomendacion",
       "method": "GET",
       "path": "/recomendaciones/reglas/{reglaId}",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2635,21 +4656,36 @@
       "apimOperationId": "obtenerseocategoriaadmin",
       "method": "GET",
       "path": "/categorias/{categoriaId}/seo",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2657,19 +4693,22 @@
       "apimOperationId": "obtenerseoporslug",
       "method": "GET",
       "path": "/seo/{slug}",
+      "service": "taxonomy-svc",
       "secured": false,
       "authSchemes": [],
       "identityType": "public",
+      "securityAlternatives": [],
       "issuerRequired": false,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "public_read",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2677,14 +4716,44 @@
       "apimOperationId": "obtenertipoproducto",
       "method": "GET",
       "path": "/tipos-producto/{tipoProductoId}",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer",
         "userBearer"
       ],
-      "identityType": "m2m",
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-productos"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
-      "audienceRequired": true,
+      "audienceRequired": false,
       "audience": "api-productos",
       "scopes": [
         "catalogo:leer"
@@ -2693,10 +4762,11 @@
       "allowedClients": [
         "modulo-productos"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
-      "exposureProfile": "m2m_partner",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2704,21 +4774,36 @@
       "apimOperationId": "obtenertrasladoinventario",
       "method": "GET",
       "path": "/inventario/traslados/{trasladoId}",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2726,21 +4811,36 @@
       "apimOperationId": "obtenerumbralesinventario",
       "method": "GET",
       "path": "/inventario/umbrales",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2748,21 +4848,36 @@
       "apimOperationId": "obtenervariante",
       "method": "GET",
       "path": "/productos/{productoId}/variantes/{variantId}",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2770,21 +4885,36 @@
       "apimOperationId": "prevalidarimportacionprecios",
       "method": "POST",
       "path": "/precios/importaciones/prevalidar",
+      "service": "pricing-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "multipart_import",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2792,11 +4922,27 @@
       "apimOperationId": "programarpreciobaseproducto",
       "method": "POST",
       "path": "/precios/productos/{productoId}/programaciones",
+      "service": "pricing-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": true
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
@@ -2805,10 +4951,11 @@
         "GESTOR_COMERCIAL"
       ],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": true,
       "exposureProfile": "admin",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2816,11 +4963,27 @@
       "apimOperationId": "programarpreciosku",
       "method": "POST",
       "path": "/precios/skus/{sku}/programaciones",
+      "service": "pricing-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": true
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
@@ -2829,10 +4992,11 @@
         "GESTOR_COMERCIAL"
       ],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": true,
       "exposureProfile": "admin",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2840,21 +5004,36 @@
       "apimOperationId": "reactivarcaracteristica",
       "method": "POST",
       "path": "/caracteristicas/{caracteristicaId}/reactivar",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2862,21 +5041,36 @@
       "apimOperationId": "reactivarcategoria",
       "method": "POST",
       "path": "/categorias/{categoriaId}/reactivar",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2884,21 +5078,36 @@
       "apimOperationId": "reactivarmarca",
       "method": "POST",
       "path": "/marcas/{marcaId}/reactivar",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2906,21 +5115,36 @@
       "apimOperationId": "reactivarproducto",
       "method": "POST",
       "path": "/productos/{productoId}/reactivar",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2928,21 +5152,36 @@
       "apimOperationId": "reactivartipoproducto",
       "method": "POST",
       "path": "/tipos-producto/{tipoProductoId}/reactivar",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2950,21 +5189,36 @@
       "apimOperationId": "reactivarvalorcaracteristica",
       "method": "POST",
       "path": "/caracteristicas/{caracteristicaId}/valores/{valorId}/reactivar",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2972,21 +5226,36 @@
       "apimOperationId": "reactivarvariante",
       "method": "POST",
       "path": "/productos/{productoId}/variantes/{variantId}/reactivar",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -2994,21 +5263,36 @@
       "apimOperationId": "reanudarimportaciongeneral",
       "method": "POST",
       "path": "/carga-masiva/productos/importaciones/{batchId}/reanudar",
+      "service": "bulk-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3016,21 +5300,36 @@
       "apimOperationId": "registrarrecepciontrasladoinventario",
       "method": "POST",
       "path": "/inventario/traslados/{trasladoId}/recepciones",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3038,11 +5337,31 @@
       "apimOperationId": "reintegrarinventario",
       "method": "POST",
       "path": "/inventario/reintegros",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer"
       ],
       "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "inventario:reintegrar"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-postventa",
+            "modulo-ventas"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": true,
       "audience": "api-productos",
@@ -3054,10 +5373,11 @@
         "modulo-postventa",
         "modulo-ventas"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
       "exposureProfile": "m2m_partner",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3065,21 +5385,36 @@
       "apimOperationId": "reintentarpreparacionproducto",
       "method": "POST",
       "path": "/productos/{productoId}/preparacion/reintentar",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3087,21 +5422,36 @@
       "apimOperationId": "reintentarpreparacionvariante",
       "method": "POST",
       "path": "/productos/{productoId}/variantes/{variantId}/preparacion/reintentar",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3109,11 +5459,30 @@
       "apimOperationId": "reportarincidenciainventario",
       "method": "POST",
       "path": "/inventario/incidencias",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer"
       ],
       "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "inventario:incidencias:reportar"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": true,
       "audience": "api-productos",
@@ -3124,10 +5493,11 @@
       "allowedClients": [
         "modulo-retail"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
       "exposureProfile": "m2m_partner",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3135,11 +5505,30 @@
       "apimOperationId": "resolvercodigobarras",
       "method": "POST",
       "path": "/productos/codigos-barras/resolver",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer"
       ],
       "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": true,
       "audience": "api-productos",
@@ -3150,10 +5539,11 @@
       "allowedClients": [
         "modulo-retail"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
       "exposureProfile": "m2m_partner",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3161,11 +5551,30 @@
       "apimOperationId": "resolverincidenciainventario",
       "method": "POST",
       "path": "/inventario/incidencias/{incidenciaId}/resolver",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer"
       ],
       "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "inventario:incidencias:resolver"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": true,
       "audience": "api-productos",
@@ -3176,10 +5585,11 @@
       "allowedClients": [
         "modulo-retail"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
       "exposureProfile": "m2m_partner",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3187,11 +5597,27 @@
       "apimOperationId": "resolverskusadministracion",
       "method": "POST",
       "path": "/productos/administracion/skus/resolver",
+      "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
@@ -3200,10 +5626,11 @@
         "GESTOR_COMERCIAL"
       ],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "admin",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3211,19 +5638,22 @@
       "apimOperationId": "resolversluganterior",
       "method": "GET",
       "path": "/seo/resoluciones/{slugAnterior}",
+      "service": "taxonomy-svc",
       "secured": false,
       "authSchemes": [],
       "identityType": "public",
+      "securityAlternatives": [],
       "issuerRequired": false,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "public_read",
       "rateProfile": "commercial_read",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3231,21 +5661,36 @@
       "apimOperationId": "resolverslugcategoriacreacion",
       "method": "POST",
       "path": "/seo/categorias/slug/resolver",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3253,21 +5698,36 @@
       "apimOperationId": "solicitardesactivacioncategoria",
       "method": "POST",
       "path": "/categorias/{categoriaId}/desactivar",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3275,21 +5735,36 @@
       "apimOperationId": "solicitardesactivacionmarca",
       "method": "POST",
       "path": "/marcas/{marcaId}/desactivar",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3297,21 +5772,36 @@
       "apimOperationId": "solicitardesactivaciontipoproducto",
       "method": "POST",
       "path": "/tipos-producto/{tipoProductoId}/desactivar",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3319,21 +5809,36 @@
       "apimOperationId": "solicitardesactivacionvalorcaracteristica",
       "method": "POST",
       "path": "/caracteristicas/{caracteristicaId}/valores/{valorId}/desactivar",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3341,21 +5846,36 @@
       "apimOperationId": "solicitardesasociaciontipocaracteristica",
       "method": "POST",
       "path": "/tipos-producto/{tipoProductoId}/caracteristicas/{caracteristicaId}/desasociar",
+      "service": "taxonomy-svc",
       "secured": true,
       "authSchemes": [
         "userBearer"
       ],
       "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
       "roles": [],
       "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
       "introspectionRequired": false,
       "exposureProfile": "commercial",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3363,11 +5883,30 @@
       "apimOperationId": "solicitarreserva",
       "method": "POST",
       "path": "/inventario/reservas",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer"
       ],
       "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "inventario:reservar"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-ventas"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": true,
       "audience": "api-productos",
@@ -3378,10 +5917,11 @@
       "allowedClients": [
         "modulo-ventas"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
       "exposureProfile": "m2m_partner",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3389,11 +5929,32 @@
       "apimOperationId": "validarcupon",
       "method": "POST",
       "path": "/cupones/validar",
+      "service": "promotions-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer"
       ],
       "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "cupones:validar"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": true,
       "audience": "api-productos",
@@ -3406,10 +5967,11 @@
         "modulo-marketplace",
         "modulo-retail"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
       "exposureProfile": "m2m_partner",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     },
     {
@@ -3417,11 +5979,32 @@
       "apimOperationId": "verificarcantidadcomercial",
       "method": "POST",
       "path": "/inventario/disponibilidad/comercial/verificar",
+      "service": "inventory-svc",
       "secured": true,
       "authSchemes": [
         "serviceBearer"
       ],
       "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "inventario:disponibilidad:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
       "issuerRequired": true,
       "audienceRequired": true,
       "audience": "api-productos",
@@ -3434,13 +6017,14 @@
         "modulo-marketplace",
         "modulo-retail"
       ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "introspectionRequired": false,
       "exposureProfile": "m2m_partner",
       "rateProfile": "business_write",
-      "environmentEnabled": true,
+      "environmentEnabled": false,
       "g5OptIn": false
     }
   ],
   "operationSetSha256": "040544e1666747ff00c9eb77c6509b6831c83368dcba7b0ef29f3668ac7365fb",
-  "filteredOpenApiCanonicalSha256": "ced88c4e8a9d5ebf389382bb98d58f68abecd0d3aa5f5691713fe31c3dd01a61"
+  "filteredOpenApiCanonicalSha256": "b15cf916664a5f7008029dc33c50eeafd38127b32b3c54db0a50d32178124247"
 }
