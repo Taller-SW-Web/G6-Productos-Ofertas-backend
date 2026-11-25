@@ -283,8 +283,12 @@ describe.skipIf(!enabled)(
       vi.spyOn(transientIdentity, 'authorization').mockRejectedValue(
         new CatalogIdentityAcquisitionError('TRANSIENT'),
       );
+      vi.spyOn(transientIdentity, 'authorizationForBulkRetry').mockRejectedValue(
+        new CatalogIdentityAcquisitionError('TRANSIENT'),
+      );
       const healthyIdentity = new CatalogBulkIdentity(undefined, new CatalogTokenVerifier(undefined));
       vi.spyOn(healthyIdentity, 'authorization').mockResolvedValue('Bearer isolated-master-fixture');
+      vi.spyOn(healthyIdentity, 'authorizationForBulkRetry').mockResolvedValue('Bearer isolated-master-fixture');
 
       const catalogMutations = new CatalogMutationService(
         transactions,

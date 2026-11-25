@@ -292,6 +292,11 @@ describe.skipIf(!enabled)('P1 Bulk Performance Suite (PostgreSQL 17 + Storage lo
       .limit(1);
     const opId = admittedOutbox!.operationId;
     const causId = admittedOutbox!.messageId;
+    const contentId = (admittedOutbox!.payload as { data: { content_ref: { content_id: string } } }).data.content_ref.content_id;
+    const contentDoc = await bulkRepo.findContentDocument(contentId);
+    const contentBytes = await mod.get(BulkStorageService).get(contentDoc!.contentRef);
+    const parsedDoc = JSON.parse(contentBytes.toString('utf8')) as { rows: Array<{ row_operation_id: string }> };
+    const rowOpId = parsedDoc.rows[0]!.row_operation_id;
     await bulkRepo.recordCatalogBulkResult({
       messageId: msgId,
       operationId: opId,
@@ -313,7 +318,7 @@ describe.skipIf(!enabled)('P1 Bulk Performance Suite (PostgreSQL 17 + Storage lo
           batch_operation_id: opId,
           operation_id: opId,
           command_attempt_id: null,
-          results: [{ row_id: rowId, status: 'REJECTED', effect_state: 'NONE', retriable: true, code: 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE' }],
+          results: [{ row_id: rowId, row_operation_id: rowOpId, status: 'REJECTED', effect_state: 'NONE', retriable: true, code: 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE' }],
         },
       },
     });
