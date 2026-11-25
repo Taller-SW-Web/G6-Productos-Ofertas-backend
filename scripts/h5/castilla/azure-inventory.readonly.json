@@ -1,0 +1,19 @@
+{
+  "schema": "h5-azure-inventory-sanitized/v1",
+  "started_at_utc": "2026-11-25T03:29:02Z",
+  "finished_at_utc": "2026-11-25T03:29:24Z",
+  "local_timezone": "America/Lima",
+  "account_session": "ACCESSIBLE",
+  "queries": {
+    "az account show --query {name,state,isDefault}": "ACCESSIBLE; identifiers omitted",
+    "az apim list": {"status":"ACCESSIBLE","count":0},
+    "az containerapp list": {"status":"ACCESSIBLE","count":9,"external_ingress":{"enabled":1,"disabled":8,"unknown":0}},
+    "az resource list --resource-type Microsoft.ServiceBus/namespaces": {"status":"ACCESSIBLE","count":2,"sku_counts":{"Basic":2}},
+    "az resource list --resource-type Microsoft.Network/virtualNetworks": {"status":"ACCESSIBLE","count":1},
+    "az resource list --resource-type Microsoft.Network/privateDnsZones": {"status":"ACCESSIBLE","count":0},
+    "az role assignment list --all": {"status":"ACCESSIBLE","count":53,"relevant_role_name_counts":{"Azure Service Bus Data Receiver":20,"Azure Service Bus Data Sender":20,"G6 Backend CD H4 Container Apps Updater":1,"G6 H5 Chile Container Apps Environment Reader":1,"G6 H5 Chile Existing Container Apps Operator":5}}
+  },
+  "commands": ["az account show", "az apim list", "az containerapp list", "az resource list --resource-type Microsoft.ServiceBus/namespaces", "az resource list --resource-type Microsoft.Network/virtualNetworks", "az resource list --resource-type Microsoft.Network/privateDnsZones", "az role assignment list --all"],
+  "interpretation": "Read-only inventory only. No APIM resource was visible in the active account context; listed Service Bus/Container Apps do not prove this release's wiring, grants, endpoint, SKU suitability, policy revision, deployment SHA, or homologation.",
+  "redaction": "No subscription/tenant/resource/object IDs, names, hostnames, private endpoints, IPs, tokens, or user data stored."
+}

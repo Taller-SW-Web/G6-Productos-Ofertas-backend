@@ -1,0 +1,10 @@
+{
+  "schema": "h5-apim-id-reconciliation-fixture/v1",
+  "synthetic": true,
+  "internal_harness_ids": {
+    "docs_APIM_T05": "APIM-CASE-RATE-LIMIT-INTEGRAL",
+    "backend_README_APIM_T05": "APIM-CASE-CORS",
+    "mapping_rule": "Never combine rows by APIM-T label alone; preserve source and title."
+  },
+  "expected": "RECONCILIATION_REQUIRED"
+}

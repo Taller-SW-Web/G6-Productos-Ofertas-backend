@@ -1,0 +1,24 @@
+{
+  "schema": "h5-claim-check-fixtures/v1",
+  "synthetic": true,
+  "files": [
+    {
+      "bytes": 261120,
+      "filename": "claim-check-255kib.json",
+      "sha256": "b7be56a6e33bc51eba734a8516dcb10957789eb2de8f456e1518543dfd5f77b6",
+      "purpose": "near-limit content reference fixture"
+    },
+    {
+      "bytes": 263168,
+      "filename": "claim-check-257kib.json",
+      "sha256": "eabd8fb6a9f017bfc8200eea9e59e5af6108d91383775672816e472656e97df1",
+      "purpose": "claim-check required; never embed file in Service Bus message"
+    }
+  ],
+  "envelope_serialized_bytes_including_declared_properties": 791,
+  "service_bus_max_total_bytes": 262144,
+  "envelope_fits_preflight_only": true,
+  "actual_service_bus_wire_size_verified": false,
+  "content_reference_only": true,
+  "metadata_sha256": "749c075267ec83ebf59cf5361ede1db6499598688e0161ed310cb648437523f8"
+}
