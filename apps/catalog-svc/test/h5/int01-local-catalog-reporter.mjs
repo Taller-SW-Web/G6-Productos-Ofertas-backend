@@ -20,6 +20,7 @@ export default class Int01LocalCatalogReporter {
         providers_participating: status === 'NOT_RUN' ? [] : ['catalog-svc'],
         simulated_providers: simulatedByCase.has(id) ? ['taxonomy-http-fixture'] : [],
         identity_authorization: status === 'NOT_RUN' ? 'NOT_RUN' : id === 'INT01-CATALOG-AUTH-SUBCASE' ? 'synthetic JWT: missing identity, denied role and authorized read' : id.startsWith('INT08-') ? 'synthetic loopback JWT: absent identity, denied role, authorized read and absent resource' : 'synthetic loopback JWT with Catalog role',
+        ...(id === 'INT08-L1-INDEPENDENT-BROWSER' ? { source_sha: process.env.CATALOG_REAL_FRONTEND_SHA ?? null } : {}),
       };
     });
     const passed = cases.filter(item => item.status === 'PASS').length;

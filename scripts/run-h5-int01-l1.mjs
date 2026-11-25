@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { assertSafeEvidenceText } from '../apps/catalog-svc/test/h5/evidence-security.mjs';
+import { adjudicateInt01L1Run } from './int01-l1-adjudication.mjs';
 
 const reportPath = resolve('test-results/h5/int01-l1-summary.json');
 const innerPath = resolve('test-results/h5/int01-l1-local-inner.json');
@@ -23,6 +24,9 @@ try { await unlink(innerPath); } catch (error) { if (error?.code !== 'ENOENT') t
 
 let inner = null;
 let runnerExit = null;
+let runnerSignal = null;
+let runnerTimedOut = false;
+let runnerSpawnError = false;
 let capturedBytes = 0;
 let blocker = null;
 if (process.env.G6_H5_INT01_CATALOG_L1 !== '1') {
@@ -38,45 +42,46 @@ if (process.env.G6_H5_INT01_CATALOG_L1 !== '1') {
   });
   child.stdout.on('data', chunk => { capturedBytes += chunk.length; });
   child.stderr.on('data', chunk => { capturedBytes += chunk.length; });
-  runnerExit = await new Promise((resolvePromise, reject) => {
-    child.once('error', reject);
-    child.once('close', resolvePromise);
+  let timer;
+  const runnerResult = await new Promise(resolvePromise => {
+    child.once('error', () => { runnerSpawnError = true; clearTimeout(timer); resolvePromise({ code: null, signal: null }); });
+    child.once('close', (code, signal) => { clearTimeout(timer); resolvePromise({ code, signal }); });
+    timer = setTimeout(() => {
+      runnerTimedOut = true;
+      if (process.platform === 'win32' && child.pid) spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      try { child.kill('SIGTERM'); } catch { /* Vitest may already have exited. */ }
+    }, 480_000);
   });
+  runnerExit = runnerResult.code;
+  runnerSignal = runnerResult.signal;
   try {
     const bytes = await readFile(innerPath);
     const text = bytes.toString('utf8');
     assertSafeEvidenceText(text);
     inner = JSON.parse(text);
-  } catch { blocker = runnerExit === 0 ? 'LOCAL_L1_REPORT_MISSING' : 'LOCAL_L1_HARNESS_INITIALIZATION_FAILED'; }
+  } catch { /* The runner started; missing/unsafe reporter output is a rejected execution, not a dependency skip. */ }
 }
 
+const expectedScenarioIds = [...scenarioIds, ...(process.env.CATALOG_REAL_FRONTEND_ROOT ? ['INT08-L1-INDEPENDENT-BROWSER'] : [])];
+const adjudication = blocker ? null : adjudicateInt01L1Run({ runnerExit, runnerSignal, runnerTimedOut, runnerSpawnError, summary: inner, expectedScenarioIds });
+const adjudicatedCases = adjudication?.cases ?? expectedScenarioIds.map(scenario_id => ({
+  scenario_id, status: 'BLOCKED_DEPENDENCY', observed_status: 'NOT_RUN', execution: 'NOT_EXECUTED',
+  accepted_by_global_runner: false, evidence_level: 'L1', providers_started: [], providers_queried: [],
+  providers_participating: [], simulated_providers: [], identity_authorization: 'NOT_RUN',
+}));
+const cases = adjudicatedCases.filter(item => scenarioIds.includes(item.scenario_id)).map(item => ({
+  ...item,
+  blockers: item.status === 'BLOCKED_DEPENDENCY' || item.status === 'NOT_ADJUDICATED' ? [blocker ?? (adjudication?.errors.join(',') || 'LOCAL_SETUP_FAILED_OR_CASE_SKIPPED')] : [],
+  owner: item.scenario_id.includes('CATEGORIA') || item.scenario_id.includes('MARCA') ? ['Poma/Catalog', 'López/Taxonomy fixture'] : ['Poma/Catalog'],
+  command: '$env:G6_H5_INT01_CATALOG_L1="1"; npm run test:e2e -- apps/catalog-svc/test/h5/int01-local-catalog.e2e-spec.ts --maxWorkers=1',
+}));
 const actual = new Map((inner?.cases ?? []).map(item => [item.scenario_id, item]));
-const cases = scenarioIds.map(id => {
-  const result = actual.get(id);
-  const status = result?.status === 'PASS' ? 'PASS'
-    : result?.status === 'FAIL' ? 'FAIL'
-      : 'BLOCKED_DEPENDENCY';
-  return {
-    scenario_id: id,
-    status,
-    execution: result?.execution ?? 'NOT_EXECUTED',
-    evidence_level: result?.evidence_level ?? 'L1',
-    providers_started: result?.providers_started ?? [],
-    providers_queried: result?.providers_queried ?? [],
-    providers_participating: result?.providers_participating ?? [],
-    simulated_providers: result?.simulated_providers ?? [],
-    identity_authorization: result?.identity_authorization ?? 'NOT_RUN',
-    blockers: status === 'BLOCKED_DEPENDENCY' ? [blocker ?? (inner ? 'LOCAL_SETUP_FAILED_OR_CASE_SKIPPED' : 'SCENARIO_CASE_NOT_EXECUTED')] : [],
-    owner: id.includes('CATEGORIA') || id.includes('MARCA') ? ['Poma/Catalog', 'López/Taxonomy fixture'] : ['Poma/Catalog'],
-    command: '$env:G6_H5_INT01_CATALOG_L1="1"; npm run test:e2e -- apps/catalog-svc/test/h5/int01-local-catalog.e2e-spec.ts --maxWorkers=1',
-  };
-});
 const relatedFrontendCase = process.env.CATALOG_REAL_FRONTEND_ROOT
   ? actual.get('INT08-L1-INDEPENDENT-BROWSER') ?? null
   : null;
-const relatedFrontendStatus = !process.env.CATALOG_REAL_FRONTEND_ROOT ? null
-  : relatedFrontendCase?.status === 'PASS' ? 'PASS'
-    : relatedFrontendCase?.status === 'FAIL' ? 'FAIL' : 'BLOCKED_DEPENDENCY';
+const relatedFrontendAdjudication = adjudicatedCases.find(item => item.scenario_id === 'INT08-L1-INDEPENDENT-BROWSER') ?? null;
+const relatedFrontendObservedStatus = relatedFrontendAdjudication?.observed_status ?? null;
+const relatedFrontendStatus = relatedFrontendAdjudication?.status ?? null;
 let relatedFrontendArtifact = null;
 if (process.env.CATALOG_REAL_FRONTEND_ROOT) {
   try {
@@ -101,10 +106,11 @@ try {
   };
 } catch { /* L0 remains explicitly NOT_RUN */ }
 
-const passed = cases.filter(item => item.status === 'PASS').length;
+const passed = cases.filter(item => item.status === 'PASS').length + (relatedFrontendStatus === 'PASS' ? 1 : 0);
+const observedPassed = cases.filter(item => item.observed_status === 'PASS').length + (relatedFrontendObservedStatus === 'PASS' ? 1 : 0);
 const failed = cases.filter(item => item.status === 'FAIL').length + (relatedFrontendStatus === 'FAIL' ? 1 : 0);
-const blocked = cases.filter(item => item.status === 'BLOCKED_DEPENDENCY').length + (relatedFrontendStatus === 'BLOCKED_DEPENDENCY' ? 1 : 0);
-const status = failed > 0 ? 'FAIL' : blocked > 0 ? passed > 0 ? 'PARTIAL_B' : 'BLOCKED_DEPENDENCY' : 'DONE_B';
+const blocked = cases.filter(item => item.status === 'BLOCKED_DEPENDENCY' || item.status === 'NOT_ADJUDICATED').length + (relatedFrontendStatus === 'BLOCKED_DEPENDENCY' || relatedFrontendStatus === 'NOT_ADJUDICATED' ? 1 : 0);
+const status = failed > 0 || (adjudication && !adjudication.globallyValid) ? 'FAIL' : blocked > 0 ? passed > 0 ? 'PARTIAL_B' : 'BLOCKED_DEPENDENCY' : 'PARTIAL_B';
 const report = {
   schema_version: 1,
   case_id: 'INT-01-L1-CATALOG-SUBCASES',
@@ -121,27 +127,34 @@ const report = {
   suite: 'INT01_LOCAL_CATALOG_L1',
   status,
   discovered: expectedTests,
-  executed: cases.filter(item => item.execution === 'EXECUTED').length + (relatedFrontendCase?.status === 'PASS' || relatedFrontendCase?.status === 'FAIL' ? 1 : 0),
+  executed: cases.filter(item => item.execution === 'EXECUTED' || item.execution === 'EXECUTED_FAILED').length + (relatedFrontendAdjudication?.execution === 'EXECUTED' || relatedFrontendAdjudication?.execution === 'EXECUTED_FAILED' ? 1 : 0),
   passed,
+  observed_passed: observedPassed,
   failed,
   blocked,
-  skipped: cases.filter(item => item.execution === 'NOT_EXECUTED').length,
+  skipped: cases.filter(item => item.execution === 'NOT_EXECUTED').length + (relatedFrontendAdjudication?.execution === 'NOT_EXECUTED' ? 1 : 0),
   l0,
   cases,
-  related_frontend_case: relatedFrontendCase ? {
+  suite_integrity: blocker ? { status: 'NOT_RUN', errors: [blocker], reporter: null } : { status: adjudication.globallyValid ? 'PASS' : 'FAIL', errors: adjudication.errors, reporter: adjudication.reporter, timed_out: runnerTimedOut, spawn_error: runnerSpawnError },
+  related_frontend_case: process.env.CATALOG_REAL_FRONTEND_ROOT ? {
     scenario_id: 'INT08-L1-INDEPENDENT-BROWSER',
     status: relatedFrontendStatus,
-    execution: relatedFrontendCase.execution,
+    observed_status: relatedFrontendObservedStatus,
+    execution: relatedFrontendAdjudication?.execution ?? 'NOT_EXECUTED',
+    accepted_by_global_runner: relatedFrontendAdjudication?.accepted_by_global_runner ?? false,
+    source_sha: relatedFrontendCase?.source_sha ?? null,
     evidence_level: 'L1_BROWSER_GATEWAY_CATALOG_POSTGRES',
-    providers_started: relatedFrontendCase.providers_started,
-    providers_queried: relatedFrontendCase.providers_queried,
-    providers_participating: relatedFrontendCase.providers_participating,
-    simulated_providers: relatedFrontendCase.simulated_providers,
+    providers_started: relatedFrontendCase?.providers_started ?? [],
+    providers_queried: relatedFrontendCase?.providers_queried ?? [],
+    providers_participating: relatedFrontendCase?.providers_participating ?? [],
+    simulated_providers: relatedFrontendCase?.simulated_providers ?? [],
     blockers: relatedFrontendStatus === 'BLOCKED_DEPENDENCY' ? ['FRONTEND_L1_RESULT_MISSING_OR_NOT_EXECUTED'] : [],
     artifact: relatedFrontendArtifact,
   } : null,
   integration_mode: inner?.integration_mode ?? 'not started; local capability probes only; no external calls',
   runner_exit_code: runnerExit,
+  runner_signal: runnerSignal,
+  runner_timed_out: runnerTimedOut,
   captured_subprocess_bytes: capturedBytes,
   no_shared_services: true,
   artifact: 'test-results/h5/int01-l1-local-inner.json',
@@ -160,5 +173,5 @@ const preflight = spawnSync(process.execPath, ['scripts/run-h5-int01-preflight.m
 if (preflight.status === 0) process.stdout.write(preflight.stdout.trim() + '\n');
 else process.stdout.write('INT01 preflight generation failed; raw child diagnostics were suppressed.\n');
 process.stdout.write(`INT01 L1 local ${status}: discovered=${report.discovered}; executed=${report.executed}; passed=${passed}; failed=${failed}; blocked=${blocked}; frontend_l1=${relatedFrontendStatus ?? 'NOT_REQUESTED'}; evidence_sha256=${reportSha}.\n`);
-if (failed > 0 || preflight.status !== 0) process.exit(1);
+if (failed > 0 || (adjudication && !adjudication.globallyValid) || preflight.status !== 0) process.exit(1);
 if (blocked > 0) process.exit(2);

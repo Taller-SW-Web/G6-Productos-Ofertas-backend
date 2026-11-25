@@ -2,14 +2,17 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import {
+  existsSync,
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   readFileSync,
   rmSync,
+  statSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
 import { CatalogGatewayHarness } from '../support/catalog-gateway-harness.js';
@@ -19,15 +22,78 @@ import {
 } from '../../src/database.js';
 
 const enabled = process.env.G6_H5_INT01_CATALOG_L1 === '1';
-const frontendRoot = process.env.CATALOG_REAL_FRONTEND_ROOT
-  ? resolve(process.env.CATALOG_REAL_FRONTEND_ROOT)
-  : '';
-const expectedFrontendRoot = resolve(
-  '..',
-  'G6-Productos-Ofertas-frontend-poma-h5-quality',
-);
-if (frontendRoot && frontendRoot !== expectedFrontendRoot)
-  throw new Error('H5_INT08_FRONTEND_CHECKOUT_PATH_NOT_ALLOWED');
+const configuredFrontendRoot = process.env.CATALOG_REAL_FRONTEND_ROOT ?? '';
+let frontendRoot = '';
+let frontendSourceSha = '';
+if (configuredFrontendRoot) {
+  let canonicalFrontendRoot: string;
+  try {
+    canonicalFrontendRoot = realpathSync(resolve(configuredFrontendRoot));
+    if (!statSync(canonicalFrontendRoot).isDirectory()) throw new Error();
+  } catch {
+    throw new Error('H5_INT08_FRONTEND_CHECKOUT_PATH_INVALID');
+  }
+  const backendRoot = realpathSync(process.cwd());
+  const contains = (parent: string, child: string) => {
+    const path = relative(parent, child);
+    return (
+      path === '' ||
+      (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path))
+    );
+  };
+  if (
+    contains(backendRoot, canonicalFrontendRoot) ||
+    contains(canonicalFrontendRoot, backendRoot)
+  )
+    throw new Error('H5_INT08_FRONTEND_CHECKOUT_PATH_OVERLAPS_BACKEND');
+  if (process.platform === 'win32' && canonicalFrontendRoot.startsWith('\\\\'))
+    throw new Error('H5_INT08_FRONTEND_CHECKOUT_NETWORK_PATH_FORBIDDEN');
+  const gitValue = (args: string[]) => {
+    const result = spawnSync('git', args, {
+      cwd: canonicalFrontendRoot,
+      encoding: 'utf8',
+      timeout: 5000,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    if (result.error || result.status !== 0)
+      throw new Error('H5_INT08_FRONTEND_CHECKOUT_GIT_VALIDATION_FAILED');
+    return result.stdout.trim();
+  };
+  let gitRoot: string;
+  let remote: string;
+  try {
+    gitRoot = realpathSync(gitValue(['rev-parse', '--show-toplevel']));
+    remote = gitValue(['remote', 'get-url', 'origin']);
+    frontendSourceSha = gitValue(['rev-parse', 'HEAD']);
+  } catch {
+    throw new Error('H5_INT08_FRONTEND_CHECKOUT_GIT_VALIDATION_FAILED');
+  }
+  const officialRemote =
+    /^(?:https:\/\/github\.com\/|http:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)Taller-SW-Web\/G6-Productos-Ofertas-frontend(?:\.git)?$/i.test(
+      remote,
+    );
+  if (
+    gitRoot !== canonicalFrontendRoot ||
+    !officialRemote ||
+    !/^[a-f0-9]{40}$/i.test(frontendSourceSha)
+  )
+    throw new Error('H5_INT08_FRONTEND_REPOSITORY_OR_SHA_INVALID');
+  const requestedSha = process.env.CATALOG_REAL_FRONTEND_SHA;
+  if (
+    requestedSha &&
+    (!/^[a-f0-9]{40}$/i.test(requestedSha) ||
+      requestedSha.toLowerCase() !== frontendSourceSha.toLowerCase())
+  )
+    throw new Error('H5_INT08_FRONTEND_SHA_PIN_MISMATCH');
+  if (
+    !existsSync(join(canonicalFrontendRoot, 'package.json')) ||
+    !existsSync(join(canonicalFrontendRoot, 'scripts', 'run-h5-int08-l1.mjs'))
+  )
+    throw new Error('H5_INT08_FRONTEND_REQUIRED_FILES_MISSING');
+  frontendRoot = canonicalFrontendRoot;
+  process.env.CATALOG_REAL_FRONTEND_SHA = frontendSourceSha;
+}
 const dockerAvailable =
   spawnSync('docker', ['info', '--format', '{{.ServerVersion}}'], {
     encoding: 'utf8',
@@ -433,6 +499,15 @@ describe.skipIf(!enabled || !dockerAvailable)(
 
     if (frontendRoot) {
       it('INT08-L1-INDEPENDENT-BROWSER: Playwright valida autenticación real contra el Gateway local aislado', async () => {
+        const currentFrontendSha = spawnSync('git', ['rev-parse', 'HEAD'], {
+          cwd: frontendRoot,
+          encoding: 'utf8',
+          timeout: 5000,
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'ignore'],
+        });
+        expect(currentFrontendSha.status).toBe(0);
+        expect(currentFrontendSha.stdout.trim()).toBe(frontendSourceSha);
         const port = await availableLoopbackPort();
         const origin = `http://127.0.0.1:${port}`;
         const summaryPath = join(
@@ -466,6 +541,7 @@ describe.skipIf(!enabled || !dockerAvailable)(
           CATALOG_REAL_CORRELATION_ID: gateway!.correlation,
           G6_H5_INT08_ISOLATED_HARNESS: '1',
           G6_H5_EVIDENCE_SUMMARY_PATH: 'test-results/h5/int08-l1-summary.json',
+          CATALOG_REAL_FRONTEND_SHA: frontendSourceSha,
         });
         const child = spawn(process.execPath, ['scripts/run-h5-int08-l1.mjs'], {
           cwd: frontendRoot,
