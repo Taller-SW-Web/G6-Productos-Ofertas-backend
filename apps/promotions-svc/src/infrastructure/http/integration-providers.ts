@@ -26,11 +26,8 @@ function options(
   return {
     origin: config.settings.upstreams.catalog!,
     origins: config.settings.upstreams,
-    mode:
-      config.settings.securityMode === 'PUBLIC_READ_ONLY' &&
-      config.settings.publicOperations.length > 0
-        ? 'PUBLIC_READ_ONLY'
-        : 'AUTHENTICATED',
+    // Public inbound reads do not make bounded-context calls anonymous.
+    mode: 'AUTHENTICATED',
     getServiceAccessToken: tokens,
   };
 }
