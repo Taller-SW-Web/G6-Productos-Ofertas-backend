@@ -128,7 +128,7 @@ export function readGatewaySettings(
     const g5H5Enabled = env.GATEWAY_G5_H5_ENABLED ?? 'false';
     if (
       !['true', 'false'].includes(g5H5Enabled) ||
-      (g5H5Enabled === 'true' && securityMode !== 'G7_AUTHENTICATED')
+      (g5H5Enabled === 'true' && securityMode === 'SIMULATED_AUTH')
     )
       throw new Error();
     const simulated = securityMode === 'SIMULATED_AUTH';
