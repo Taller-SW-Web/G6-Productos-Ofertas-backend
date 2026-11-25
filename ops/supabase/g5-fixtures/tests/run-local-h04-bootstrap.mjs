@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -12,15 +12,26 @@ const runId = randomUUID().replaceAll('-', '').slice(0, 12);
 const container = `g6-h04-bootstrap-${runId}`;
 const label = 'g6.h5.h04-bootstrap';
 const dbName = `g6_h04_${runId}`;
+const adminPassword = randomBytes(32).toString('base64url');
+const runtimePasswords = Object.fromEntries(
+  ['catalog_app', 'inventory_app', 'pricing_app', 'promotions_app'].map(
+    (role) => [role, randomBytes(32).toString('base64url')],
+  ),
+);
 let created = false;
 let pool;
+let port;
 
 function docker(args, options = {}) {
-  return execFileSync('docker', args, {
-    encoding: 'utf8',
-    stdio: 'pipe',
-    ...options,
-  }).trim();
+  try {
+    return execFileSync('docker', args, {
+      encoding: 'utf8',
+      stdio: 'pipe',
+      ...options,
+    }).trim();
+  } catch {
+    throw new Error(`DOCKER_${args[0]?.toUpperCase() ?? 'COMMAND'}_FAILED`);
+  }
 }
 
 function assert(condition, message) {
@@ -33,35 +44,74 @@ async function sqlFile(path) {
 
 async function asRole(role, sql) {
   const client = await pool.connect();
+  let operationError;
+  let restorationError;
+  let originalContext;
   try {
+    originalContext = (
+      await client.query(
+        'SELECT current_user AS current_user, session_user AS session_user',
+      )
+    ).rows[0];
     await client.query(`SET ROLE ${role}`);
+    const effective = await client.query(
+      'SELECT current_user AS current_user, session_user AS session_user',
+    );
+    assert(
+      effective.rows[0].current_user === role,
+      `SET_ROLE_IDENTITY_MISMATCH:${role}`,
+    );
     await client.query(sql);
-  } finally {
-    await client.query('RESET ROLE').catch(() => {});
+  } catch (error) {
+    operationError = error;
+  }
+  try {
+    await client.query('ROLLBACK');
+    await client.query('RESET ROLE');
+    const restored = await client.query(
+      'SELECT current_user AS current_user, session_user AS session_user',
+    );
+    assert(
+      restored.rows[0].current_user === originalContext.current_user &&
+        restored.rows[0].session_user === originalContext.session_user,
+      'ROLE_CONTEXT_RESTORE_FAILED',
+    );
+  } catch (error) {
+    restorationError = error;
+  }
+  if (restorationError) {
+    client.release(restorationError);
+    if (operationError instanceof Error)
+      Object.defineProperty(operationError, 'roleRestorationError', {
+        value: restorationError,
+      });
+  } else {
     client.release();
   }
+  if (operationError) throw operationError;
+  if (restorationError) throw restorationError;
 }
 
-async function expectDenied(user, sql) {
-  const client = new Pool({
+function runtimePool(user) {
+  return new Pool({
     host: '127.0.0.1',
     port,
     user,
+    password: runtimePasswords[user],
     database: dbName,
     max: 1,
   });
-  try {
-    await client.query(sql);
-    throw new Error(`${user} unexpectedly executed a prohibited query`);
-  } catch (error) {
-    if (error.message.includes('unexpectedly executed')) throw error;
-    if (!['42501', '3F000'].includes(error.code)) throw error;
-  } finally {
-    await client.end();
-  }
 }
 
-let port;
+async function expectDenied(client, sql, expectedCode = '42501') {
+  try {
+    await client.query(sql);
+    throw new Error('PROHIBITED_SQL_UNEXPECTEDLY_SUCCEEDED');
+  } catch (error) {
+    if (error.message === 'PROHIBITED_SQL_UNEXPECTEDLY_SUCCEEDED') throw error;
+    assert(error.code === expectedCode, `UNEXPECTED_DENIAL_CODE:${error.code}`);
+  }
+}
 try {
   docker([
     'run',
@@ -74,10 +124,15 @@ try {
     '--publish',
     '127.0.0.1::5432',
     '--env',
-    'POSTGRES_HOST_AUTH_METHOD=trust',
+    `POSTGRES_PASSWORD=${adminPassword}`,
+    '--env',
+    'POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256 --auth-local=scram-sha-256',
     '--env',
     `POSTGRES_DB=${dbName}`,
     'postgres:17.11',
+    'postgres',
+    '-c',
+    'password_encryption=scram-sha-256',
   ]);
   created = true;
   const published = docker(['port', container, '5432/tcp']);
@@ -88,8 +143,9 @@ try {
     host: '127.0.0.1',
     port,
     user: 'postgres',
+    password: adminPassword,
     database: dbName,
-    max: 6,
+    max: 1,
   });
   for (let attempt = 0; attempt < 60; attempt++) {
     try {
@@ -108,18 +164,27 @@ try {
     `Expected PostgreSQL 17, got ${version}`,
   );
 
+  const runtimeRoleSql = Object.entries(runtimePasswords)
+    .map(
+      ([role, password]) =>
+        `CREATE ROLE ${role} LOGIN INHERIT PASSWORD '${password}';`,
+    )
+    .join('\n');
+  assert(
+    [adminPassword, ...Object.values(runtimePasswords)].every((password) =>
+      /^[A-Za-z0-9_-]+$/.test(password),
+    ),
+    'GENERATED_CREDENTIAL_FORMAT_UNEXPECTED',
+  );
   await admin.query(`
     CREATE ROLE po_catalog_owner NOLOGIN;
-    CREATE ROLE catalog_app LOGIN;
     CREATE ROLE po_inventory_owner NOLOGIN;
     CREATE ROLE po_inventory_runtime NOLOGIN;
-    CREATE ROLE inventory_app LOGIN INHERIT;
-    GRANT po_inventory_runtime TO inventory_app;
     CREATE ROLE po_pricing_owner NOLOGIN;
-    CREATE ROLE pricing_app LOGIN;
     CREATE ROLE po_promotions_owner NOLOGIN;
     CREATE ROLE po_promotions_runtime NOLOGIN;
-    CREATE ROLE promotions_app LOGIN INHERIT;
+    ${runtimeRoleSql}
+    GRANT po_inventory_runtime TO inventory_app;
     GRANT po_promotions_runtime TO promotions_app;
     CREATE SCHEMA catalog AUTHORIZATION po_catalog_owner;
     CREATE SCHEMA pricing AUTHORIZATION po_pricing_owner;
@@ -129,6 +194,17 @@ try {
     GRANT USAGE ON SCHEMA extensions TO po_pricing_owner;
     REVOKE CREATE ON SCHEMA public FROM PUBLIC;
   `);
+  const scramCheck = await admin.query(
+    `SELECT
+    current_setting('password_encryption') = 'scram-sha-256' AS configured,
+    bool_and(rolpassword LIKE 'SCRAM-SHA-256$%') AS credentials_are_scram
+    FROM pg_authid WHERE rolname = ANY($1::text[])`,
+    [['postgres', ...Object.keys(runtimePasswords)]],
+  );
+  assert(
+    scramCheck.rows[0].configured && scramCheck.rows[0].credentials_are_scram,
+    'SCRAM_AUTHENTICATION_NOT_ACTIVE',
+  );
   pool = admin;
 
   await asRole(
@@ -172,12 +248,6 @@ try {
   const promoMigrations = await officialMigrations();
   for (const migration of promoMigrations)
     await asRole('po_promotions_owner', migration);
-  await admin.query(
-    'ALTER DEFAULT PRIVILEGES FOR ROLE po_promotions_owner IN SCHEMA promotions GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO po_promotions_runtime',
-  );
-  await admin.query(
-    "SELECT set_config('g6.promotions_h5_runtime_role','po_promotions_runtime',false)",
-  );
   await asRole(
     'po_promotions_owner',
     await sqlFile(
@@ -188,8 +258,9 @@ try {
     'po_promotions_owner',
     `SELECT set_config('g6.promotions_h5_runtime_role','po_promotions_runtime',true);\n${await sqlFile('apps/promotions-svc/migrations-candidate/h5/0002_coupon_http_runtime_role.sql')}`,
   );
-  await admin.query(
-    'GRANT USAGE ON SCHEMA promotions TO po_promotions_runtime',
+  await asRole(
+    'po_promotions_owner',
+    'CREATE TABLE promotions.h04_future_privilege_probe(id integer)',
   );
 
   // Only synthetic seed writes use the bootstrap owner connection. Commercial operations are not simulated here.
@@ -280,13 +351,7 @@ try {
     ],
   ];
   for (const [user, sql] of probes) {
-    const runtime = new Pool({
-      host: '127.0.0.1',
-      port,
-      user,
-      database: dbName,
-      max: 1,
-    });
+    const runtime = runtimePool(user);
     try {
       assert(
         (await runtime.query(sql)).rowCount === 1,
@@ -296,16 +361,113 @@ try {
       await runtime.end();
     }
   }
+  const promotionsRuntime = runtimePool('promotions_app');
+  try {
+    const h5Privileges = await promotionsRuntime.query(`SELECT
+      bool_and(has_table_privilege(current_user, table_name, 'SELECT')) AS can_select,
+      bool_and(has_table_privilege(current_user, table_name, 'INSERT')) AS can_insert,
+      bool_and(has_table_privilege(current_user, table_name, 'UPDATE')) AS can_update,
+      bool_and(NOT has_table_privilege(current_user, table_name, 'DELETE')) AS no_delete,
+      bool_and(NOT has_table_privilege(current_user, table_name, 'TRUNCATE')) AS no_truncate,
+      bool_and(NOT has_table_privilege(current_user, table_name, 'REFERENCES')) AS no_references,
+      bool_and(NOT has_table_privilege(current_user, table_name, 'TRIGGER')) AS no_trigger,
+      bool_and(NOT has_table_privilege(current_user, table_name, 'MAINTAIN')) AS no_maintain
+      FROM unnest(ARRAY['promotions.h5_coupon_operations','promotions.h5_coupon_outbox']) AS tables(table_name)`);
+    assert(
+      Object.values(h5Privileges.rows[0]).every(Boolean),
+      'H5_PROMOTIONS_RUNTIME_PRIVILEGES_MISMATCH',
+    );
+    const schemaPrivileges = await promotionsRuntime.query(`SELECT
+      has_schema_privilege(current_user,'promotions','USAGE') AS usage,
+      has_schema_privilege(current_user,'promotions','CREATE') AS create_schema,
+      has_table_privilege(current_user,'promotions.h04_future_privilege_probe','SELECT') AS future_select,
+      has_table_privilege(current_user,'promotions.h04_future_privilege_probe','INSERT') AS future_insert,
+      has_table_privilege(current_user,'promotions.h04_future_privilege_probe','UPDATE') AS future_update,
+      has_table_privilege(current_user,'promotions.h04_future_privilege_probe','DELETE') AS future_delete,
+      has_table_privilege(current_user,'promotions.coupons','DELETE') AS historical_coupon_delete`);
+    assert(
+      schemaPrivileges.rows[0].usage &&
+        !schemaPrivileges.rows[0].create_schema &&
+        !schemaPrivileges.rows[0].future_select &&
+        !schemaPrivileges.rows[0].future_insert &&
+        !schemaPrivileges.rows[0].future_update &&
+        !schemaPrivileges.rows[0].future_delete &&
+        schemaPrivileges.rows[0].historical_coupon_delete,
+      'PROMOTIONS_BASELINE_OR_FUTURE_PRIVILEGES_CHANGED',
+    );
+
+    const operationId = randomUUID();
+    const messageId = randomUUID();
+    await promotionsRuntime.query('BEGIN');
+    await promotionsRuntime.query(
+      `INSERT INTO promotions.h5_coupon_operations
+        (operation_id,message_id,source_client_id,order_id,operation_type,request_fingerprint,command)
+       VALUES ($1,$2,'modulo-ventas','PED-H04-ACL','CONSUMIR_CUPON',$3,'{}'::jsonb)`,
+      [operationId, messageId, 'a'.repeat(64)],
+    );
+    await promotionsRuntime.query(
+      `UPDATE promotions.h5_coupon_operations
+       SET status='COMPLETED', completed_at=clock_timestamp(), result_payload='{}'::jsonb
+       WHERE operation_id=$1`,
+      [operationId],
+    );
+    await promotionsRuntime.query(
+      `INSERT INTO promotions.h5_coupon_outbox(message_id,operation_id,destination)
+       VALUES ($1,$2,'g6.promotions.commands')`,
+      [messageId, operationId],
+    );
+    await promotionsRuntime.query(
+      'UPDATE promotions.h5_coupon_outbox SET attempts=1 WHERE operation_id=$1',
+      [operationId],
+    );
+    assert(
+      (
+        await promotionsRuntime.query(
+          'SELECT status FROM promotions.h5_coupon_operations WHERE operation_id=$1',
+          [operationId],
+        )
+      ).rows[0].status === 'COMPLETED' &&
+        (
+          await promotionsRuntime.query(
+            'SELECT attempts FROM promotions.h5_coupon_outbox WHERE operation_id=$1',
+            [operationId],
+          )
+        ).rows[0].attempts === 1,
+      'PROMOTIONS_H5_RUNTIME_SELECT_INSERT_UPDATE_FAILED',
+    );
+    await promotionsRuntime.query('ROLLBACK');
+
+    await expectDenied(
+      promotionsRuntime,
+      'DELETE FROM promotions.h5_coupon_operations WHERE false',
+    );
+    await expectDenied(
+      promotionsRuntime,
+      'TRUNCATE promotions.h5_coupon_operations',
+    );
+    await expectDenied(
+      promotionsRuntime,
+      'CREATE TABLE promotions.h04_runtime_forbidden(id integer)',
+    );
+  } finally {
+    await promotionsRuntime.end();
+  }
   for (const [user, schema] of [
     ['catalog_app', 'inventory'],
     ['inventory_app', 'pricing'],
     ['pricing_app', 'promotions'],
     ['promotions_app', 'catalog'],
-  ])
-    await expectDenied(
-      user,
-      `SELECT * FROM ${schema}.${schema === 'catalog' ? 'sku_identity' : schema === 'inventory' ? 'stock_balance' : schema === 'pricing' ? 'prices' : 'coupons'} LIMIT 0`,
-    );
+  ]) {
+    const runtime = runtimePool(user);
+    try {
+      await expectDenied(
+        runtime,
+        `SELECT * FROM ${schema}.${schema === 'catalog' ? 'sku_identity' : schema === 'inventory' ? 'stock_balance' : schema === 'pricing' ? 'prices' : 'coupons'} LIMIT 0`,
+      );
+    } finally {
+      await runtime.end();
+    }
+  }
   const ddlRoleCheck = await admin.query(
     `SELECT bool_and(NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls) AS safe FROM pg_roles WHERE rolname IN ('catalog_app','inventory_app','pricing_app','promotions_app')`,
   );
@@ -313,6 +475,29 @@ try {
     ddlRoleCheck.rows[0].safe,
     'A runtime role has administrative PostgreSQL flags',
   );
+  await admin.query('DROP TABLE promotions.h04_future_privilege_probe');
+
+  let scopedFailure;
+  try {
+    await asRole('po_promotions_owner', 'SELECT 1 / 0');
+  } catch (error) {
+    scopedFailure = error;
+  }
+  assert(
+    scopedFailure?.code === '22012',
+    'SET_ROLE_NEGATIVE_PROBE_DID_NOT_FAIL',
+  );
+  const afterFailure = await pool.query(
+    'SELECT current_user AS current_user, session_user AS session_user',
+  );
+  assert(
+    afterFailure.rows[0].current_user === 'postgres' &&
+      afterFailure.rows[0].session_user === 'postgres',
+    'FAILED_SET_ROLE_BLOCK_LEAKED_PRIVILEGES_TO_NEXT_OPERATION',
+  );
+
+  if (process.env.G6_H04_INJECT_FAILURE === 'after-seed')
+    throw new Error('INJECTED_H04_CLEANUP_FAILURE_PROBE');
 
   console.log(
     JSON.stringify(
@@ -325,6 +510,10 @@ try {
         coherentSyntheticFixture: true,
         allowedReads: 4,
         crossSchemaDenials: 4,
+        promotionsH5SelectInsertUpdate: true,
+        promotionsH5ForbiddenPrivileges: true,
+        promotionsFutureTableUnprivileged: true,
+        setRoleFailureDidNotLeak: true,
         runtimeAdminFlags: false,
         sharedSupabaseUsed: false,
         marketplaceDataCopied: false,
@@ -335,10 +524,23 @@ try {
     ),
   );
 } catch (error) {
-  console.error(error instanceof Error ? error.stack : String(error));
+  const errorText = error instanceof Error ? error.stack : String(error);
+  console.error(
+    [adminPassword, ...Object.values(runtimePasswords)].reduce(
+      (safe, password) => safe.replaceAll(password, '[redacted]'),
+      errorText,
+    ),
+  );
   process.exitCode = 1;
 } finally {
-  await pool?.end().catch(() => {});
+  if (pool) {
+    try {
+      await pool.end();
+    } catch {
+      console.error('DATABASE_POOL_CLEANUP_FAILED');
+      process.exitCode = 1;
+    }
+  }
   if (created) {
     try {
       const owned = docker([

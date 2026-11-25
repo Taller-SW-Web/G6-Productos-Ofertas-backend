@@ -11,6 +11,15 @@ Promotions test DDL, and checks a single synthetic identity across all four
 schemas. Each service uses a separate non-superuser runtime principal. The
 runner checks each intended read, rejects cross-schema access, and removes only
 the container carrying its matching ownership label, including on failure.
+The container uses host SCRAM-SHA-256 authentication. It generates ephemeral
+random passwords for the bootstrap and runtime logins; they are passed only to
+the local process/container and are never emitted. Promotions receives only the
+table grants defined by its versioned migrations: the two H5 tables allow
+SELECT/INSERT/UPDATE, while DELETE/TRUNCATE/REFERENCES/TRIGGER/MAINTAIN and
+schema CREATE are denied. A future-table probe ensures no broad default grant
+leaks to other Promotions tables. The `asRole` helper verifies the effective
+identity and restoration; a negative failure probe proves the next operation
+does not inherit the temporary role.
 G5/G7, shared Supabase, Azure, and Service Bus are not contacted. This first
 increment proves common-schema bootstrap and isolation; it does not claim the
 four-service commercial flow or complete H04.
@@ -20,6 +29,11 @@ Run from the repository root with the supported Node/npm engines installed:
 ```powershell
 node ops/supabase/g5-fixtures/tests/run-local-h04-bootstrap.mjs
 ```
+
+CI runs the same command in the existing Inventory disposable-PostgreSQL job.
+The cleanup failure path can also be verified locally with
+`$env:G6_H04_INJECT_FAILURE='after-seed'` before running the command: it must
+exit nonzero and still print `DISPOSABLE_POSTGRES_CLEANUP_CONFIRMED`.
 
 The bootstrap seeds Catalog and Inventory from the existing deterministic
 fixture, adds matching Pricing validity and Promotions coupon rows, and checks
