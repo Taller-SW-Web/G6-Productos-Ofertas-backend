@@ -126,6 +126,27 @@ def validate(parameters: dict, filtered_openapi: dict, manifest: dict) -> None:
         raise ValueError("burstWindowSeconds no puede exceder 300 segundos")
     if parameters["quotaWindowSeconds"] < 300:
         raise ValueError("quotaWindowSeconds debe ser de al menos 300 segundos")
+    if "rateProfiles" in parameters:
+        profiles = parameters["rateProfiles"]
+        if not isinstance(profiles, dict):
+            raise ValueError("rateProfiles debe ser un objeto")
+        missing_profiles = FILTER.KNOWN_RATE_PROFILES - profiles.keys()
+        if missing_profiles:
+            raise ValueError(f"Faltan perfiles de límites obligatorios: {sorted(missing_profiles)}")
+        for profile_name, profile in profiles.items():
+            if not isinstance(profile, dict):
+                raise ValueError(f"Perfil inválido: {profile_name}")
+            for metric in ("burstCalls", "burstWindowSeconds", "quotaCalls", "quotaWindowSeconds"):
+                val = profile.get(metric)
+                if not isinstance(val, int) or isinstance(val, bool) or val < 1:
+                    raise ValueError(f"Valor inválido {metric} en perfil {profile_name}")
+            if profile["burstWindowSeconds"] > 300:
+                raise ValueError(f"burstWindowSeconds > 300 en perfil {profile_name}")
+            if profile["quotaWindowSeconds"] < 300:
+                raise ValueError(f"quotaWindowSeconds < 300 en perfil {profile_name}")
+            concurrency = profile.get("maxConcurrency", 0)
+            if not isinstance(concurrency, int) or isinstance(concurrency, bool) or concurrency < 0:
+                raise ValueError(f"maxConcurrency inválido en perfil {profile_name}")
     if not isinstance(parameters["filteredOpenApi"], str) or not parameters["filteredOpenApi"].strip():
         raise ValueError("filteredOpenApi debe contener el contrato JSON filtrado")
     try:

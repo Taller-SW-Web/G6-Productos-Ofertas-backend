@@ -1,7 +1,9 @@
 targetScope = 'resourceGroup'
 
-@description('Nombre del servicio APIM clásico en laboratorio.')
+@description('Nombre del servicio APIM.')
 param apimName string
+@description('Si es true, reutiliza una instancia APIM existente compatible en el resource group sin aprovisionar una nueva.')
+param reuseExistingApim bool = false
 @description('Región aprobada para el laboratorio.')
 param location string
 @description('Nombre del publicador responsable del servicio APIM.')
@@ -16,12 +18,12 @@ param gatewayBackendUrl string
 param g7Issuer string
 @description('URL OpenID/JWKS de G7, sin credenciales.')
 param g7OpenIdConfigurationUrl string
-@description('Audience autorizada por G7.')
+@description('Audience técnica autorizada por G7 para operaciones M2M.')
 param g7Audience string
 @description('Lista explícita de orígenes CORS aprobados; no admite wildcard.')
 @minLength(1)
 param corsAllowedOrigins array
-@description('Límite de ráfaga por identidad y operación.')
+@description('Límite de ráfaga por defecto cuando un perfil no sobreescribe.')
 @minValue(1)
 param burstCalls int
 @description('Ventana de ráfaga en segundos.')
@@ -34,6 +36,51 @@ param quotaCalls int
 @description('Ventana de cuota en segundos.')
 @minValue(300)
 param quotaWindowSeconds int
+@description('Perfiles de protección parametrizados (commercial_read, admin_read, business_write, multipart_import, expensive_export, g5_protected).')
+param rateProfiles object = {
+  commercial_read: {
+    burstCalls: 20
+    burstWindowSeconds: 10
+    quotaCalls: 600
+    quotaWindowSeconds: 300
+    maxConcurrency: 0
+  }
+  admin_read: {
+    burstCalls: 10
+    burstWindowSeconds: 10
+    quotaCalls: 300
+    quotaWindowSeconds: 300
+    maxConcurrency: 0
+  }
+  business_write: {
+    burstCalls: 10
+    burstWindowSeconds: 10
+    quotaCalls: 180
+    quotaWindowSeconds: 300
+    maxConcurrency: 0
+  }
+  multipart_import: {
+    burstCalls: 3
+    burstWindowSeconds: 10
+    quotaCalls: 30
+    quotaWindowSeconds: 300
+    maxConcurrency: 2
+  }
+  expensive_export: {
+    burstCalls: 3
+    burstWindowSeconds: 10
+    quotaCalls: 30
+    quotaWindowSeconds: 300
+    maxConcurrency: 2
+  }
+  g5_protected: {
+    burstCalls: 10
+    burstWindowSeconds: 10
+    quotaCalls: 300
+    quotaWindowSeconds: 300
+    maxConcurrency: 4
+  }
+}
 @description('Resource ID del recurso Application Insights autorizado.')
 param applicationInsightsResourceId string
 @secure()
@@ -41,7 +88,6 @@ param applicationInsightsResourceId string
 param applicationInsightsConnectionString string
 @description('OpenAPI JSON generado por filter-openapi.py; se suministra al deployment autorizado.')
 param filteredOpenApi string
-
 
 var apiName = 'g6-productos-ofertas'
 var operationsManifest = loadJsonContent('./openapi/operation-security.json')
@@ -52,7 +98,7 @@ var publicOperationPolicyTemplate = loadTextContent('./policies/operation-public
 
 func xmlEscape(value string) string => replace(replace(replace(value, '&', '&amp;'), '<', '&lt;'), '>', '&gt;')
 
-resource apim 'Microsoft.ApiManagement/service@2022-08-01' = {
+resource apim 'Microsoft.ApiManagement/service@2022-08-01' = if (!reuseExistingApim) {
   name: apimName
   location: location
   sku: {
@@ -73,9 +119,16 @@ resource apim 'Microsoft.ApiManagement/service@2022-08-01' = {
   }
 }
 
+resource existingApim 'Microsoft.ApiManagement/service@2022-08-01' existing = if (reuseExistingApim) {
+  name: apimName
+}
+
 resource api 'Microsoft.ApiManagement/service/apis@2022-08-01' = {
-  parent: apim
-  name: apiName
+  name: '${apimName}/${apiName}'
+  dependsOn: [
+    apim
+    existingApim
+  ]
   properties: {
     displayName: 'G6 Productos y Ofertas'
     path: 'api/v1'
@@ -90,8 +143,11 @@ resource api 'Microsoft.ApiManagement/service/apis@2022-08-01' = {
 }
 
 resource openIdNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-01' = {
-  parent: apim
-  name: 'g7-openid-config-url'
+  name: '${apimName}/g7-openid-config-url'
+  dependsOn: [
+    apim
+    existingApim
+  ]
   properties: {
     displayName: 'g7-openid-config-url'
     value: g7OpenIdConfigurationUrl
@@ -100,8 +156,11 @@ resource openIdNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-0
 }
 
 resource issuerNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-01' = {
-  parent: apim
-  name: 'g7-issuer'
+  name: '${apimName}/g7-issuer'
+  dependsOn: [
+    apim
+    existingApim
+  ]
   properties: {
     displayName: 'g7-issuer'
     value: g7Issuer
@@ -110,8 +169,11 @@ resource issuerNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-0
 }
 
 resource audienceNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-01' = {
-  parent: apim
-  name: 'g7-audience'
+  name: '${apimName}/g7-audience'
+  dependsOn: [
+    apim
+    existingApim
+  ]
   properties: {
     displayName: 'g7-audience'
     value: g7Audience
@@ -143,18 +205,46 @@ resource operationPolicies 'Microsoft.ApiManagement/service/apis/operations/poli
         replace(
           replace(
             replace(
-              operation.secured ? securedOperationPolicyTemplate : publicOperationPolicyTemplate,
-              '{{burst-calls}}',
-              string(burstCalls)
+              replace(
+                replace(
+                  replace(
+                    replace(
+                      replace(
+                        replace(
+                          replace(
+                            operation.secured ? securedOperationPolicyTemplate : publicOperationPolicyTemplate,
+                            '{{audience-check-element}}',
+                            operation.audienceRequired ? '<audiences><audience>${xmlEscape(empty(operation.audience) ? g7Audience : operation.audience)}</audience></audiences>' : ''
+                          ),
+                          '{{identity-type}}',
+                          xmlEscape(operation.identityType)
+                        ),
+                        '{{required-role}}',
+                        xmlEscape(empty(operation.roles) ? '' : operation.roles[0])
+                      ),
+                      '{{required-scope}}',
+                      xmlEscape(empty(operation.scopes) ? '' : operation.scopes[0])
+                    ),
+                    '{{allowed-clients}}',
+                    xmlEscape(join(operation.allowedClients, ','))
+                  ),
+                  '{{burst-calls}}',
+                  string(contains(rateProfiles, operation.rateProfile) ? rateProfiles[operation.rateProfile].burstCalls : burstCalls)
+                ),
+                '{{burst-window-seconds}}',
+                string(contains(rateProfiles, operation.rateProfile) ? rateProfiles[operation.rateProfile].burstWindowSeconds : burstWindowSeconds)
+              ),
+              '{{quota-calls}}',
+              string(contains(rateProfiles, operation.rateProfile) ? rateProfiles[operation.rateProfile].quotaCalls : quotaCalls)
             ),
-            '{{burst-window-seconds}}',
-            string(burstWindowSeconds)
+            '{{quota-window-seconds}}',
+            string(contains(rateProfiles, operation.rateProfile) ? rateProfiles[operation.rateProfile].quotaWindowSeconds : quotaWindowSeconds)
           ),
-          '{{quota-calls}}',
-          string(quotaCalls)
+          '{{concurrency-limit-open}}',
+          (contains(rateProfiles, operation.rateProfile) && rateProfiles[operation.rateProfile].maxConcurrency > 0) ? '<limit-concurrency key="@((string)context.Variables[&quot;rateIdentity&quot;] + &quot;:${operation.operationId}&quot;)" max-count="${string(rateProfiles[operation.rateProfile].maxConcurrency)}">' : ''
         ),
-        '{{quota-window-seconds}}',
-        string(quotaWindowSeconds)
+        '{{concurrency-limit-close}}',
+        (contains(rateProfiles, operation.rateProfile) && rateProfiles[operation.rateProfile].maxConcurrency > 0) ? '</limit-concurrency>' : ''
       ),
       '{{operation-id}}',
       operation.operationId
@@ -163,8 +253,11 @@ resource operationPolicies 'Microsoft.ApiManagement/service/apis/operations/poli
 }]
 
 resource applicationInsightsLogger 'Microsoft.ApiManagement/service/loggers@2022-08-01' = {
-  parent: apim
-  name: 'applicationinsights'
+  name: '${apimName}/applicationinsights'
+  dependsOn: [
+    apim
+    existingApim
+  ]
   properties: {
     loggerType: 'applicationInsights'
     description: 'Logger APIM para Application Insights con identidad administrada del sistema'

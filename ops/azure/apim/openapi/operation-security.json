@@ -1,6 +1,38 @@
 {
   "docsSha": "490172c11cb4b83ddd1996f8d5834d0402184cf8",
-  "gatewaySha": "05f6b929f8aebfd745acd2e70959e36967c96d09",
+  "gatewaySha": "34058f0e5d25e89dcb4cb9d8c1ceb9db38cdfba4",
+  "securityProfile": "G7_AUTHENTICATED",
+  "enabledProviders": [],
+  "authorizedPublicAllowlist": [],
+  "g5Flag": false,
+  "g5EnabledByDefault": false,
+  "exposureConfig": {
+    "mode": "private-gateway-behind-apim"
+  },
+  "contractInventory": {
+    "totalOperations": 154,
+    "internalExcludedIds": [
+      "filtrarSkusVendiblesInterno",
+      "obtenerContenidoCargaMasivaInternoH5",
+      "obtenerContextoSku",
+      "obtenerContextosSkuLote",
+      "obtenerEvidenciaReservaCuponInterno"
+    ],
+    "g5CandidateIds": [
+      "admitirConsumoCuponH5",
+      "admitirRestauracionCuponH5",
+      "obtenerEstadoReservaH5",
+      "obtenerOperacionCuponH5"
+    ],
+    "legacyPricingExcludedIds": [
+      "obtenerDefinicionPrecioProductoAdministracion",
+      "obtenerDefinicionPrecioSkuAdministracion"
+    ]
+  },
+  "gatewayStaticRegistry": {
+    "baseOperationCount": 147,
+    "g5OverlayCount": 4
+  },
   "privateOperationIds": [
     "filtrarSkusVendiblesInterno",
     "obtenerContenidoCargaMasivaInternoH5",
@@ -12,7 +44,6 @@
     "obtenerDefinicionPrecioProductoAdministracion",
     "obtenerDefinicionPrecioSkuAdministracion"
   ],
-  "g5EnabledByDefault": false,
   "operations": [
     {
       "operationId": "activarCupon",
@@ -20,6 +51,20 @@
       "method": "POST",
       "path": "/cupones/{cuponId}/activar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -28,6 +73,20 @@
       "method": "POST",
       "path": "/productos/{productoId}/activar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -36,6 +95,20 @@
       "method": "POST",
       "path": "/promociones/{promocionId}/activar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -44,6 +117,20 @@
       "method": "POST",
       "path": "/recomendaciones/reglas/{reglaId}/activar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -52,6 +139,20 @@
       "method": "POST",
       "path": "/productos/{productoId}/variantes/{variantId}/activar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -60,6 +161,20 @@
       "method": "PATCH",
       "path": "/tipos-producto/{tipoProductoId}/caracteristicas/{caracteristicaId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -68,6 +183,20 @@
       "method": "PATCH",
       "path": "/caracteristicas/{caracteristicaId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -76,6 +205,20 @@
       "method": "PATCH",
       "path": "/categorias/{categoriaId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -84,6 +227,20 @@
       "method": "PATCH",
       "path": "/combos/{comboId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -92,6 +249,20 @@
       "method": "PATCH",
       "path": "/cupones/{cuponId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -100,6 +271,20 @@
       "method": "PATCH",
       "path": "/marcas/{marcaId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "multipart_import",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -108,6 +293,22 @@
       "method": "PATCH",
       "path": "/precios/productos/{productoId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [],
+      "introspectionRequired": true,
+      "exposureProfile": "admin",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -116,6 +317,22 @@
       "method": "PATCH",
       "path": "/precios/skus/{sku}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [],
+      "introspectionRequired": true,
+      "exposureProfile": "admin",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -124,6 +341,20 @@
       "method": "PATCH",
       "path": "/productos/{productoId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -132,6 +363,20 @@
       "method": "PATCH",
       "path": "/promociones/{promocionId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -140,6 +385,20 @@
       "method": "PATCH",
       "path": "/recomendaciones/reglas/{reglaId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -148,6 +407,20 @@
       "method": "PATCH",
       "path": "/categorias/{categoriaId}/seo",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -156,6 +429,20 @@
       "method": "PUT",
       "path": "/inventario/umbrales/global",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -164,6 +451,20 @@
       "method": "PATCH",
       "path": "/caracteristicas/{caracteristicaId}/valores/{valorId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -172,6 +473,20 @@
       "method": "PATCH",
       "path": "/productos/{productoId}/variantes/{variantId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -180,6 +495,20 @@
       "method": "POST",
       "path": "/tipos-producto/{tipoProductoId}/caracteristicas",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -188,6 +517,20 @@
       "method": "GET",
       "path": "/carga-masiva/productos/importaciones/por-correlacion/{correlationId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -196,6 +539,24 @@
       "method": "POST",
       "path": "/inventario/conciliaciones-offline",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "inventario:conciliar-offline"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-ventas"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -204,6 +565,24 @@
       "method": "POST",
       "path": "/inventario/reservas/{reservaId}/confirmar",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "inventario:consumir"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-ventas"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -212,6 +591,24 @@
       "method": "POST",
       "path": "/productos/datos-fisicos/consulta",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "productos:fisicos:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-despacho"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -220,6 +617,26 @@
       "method": "GET",
       "path": "/inventario/disponibilidad",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "inventario:disponibilidad:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-postventa",
+        "modulo-ventas"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -228,6 +645,23 @@
       "method": "GET",
       "path": "/combos/{comboId}/disponibilidad",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "combos:leer"
+      ],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -236,6 +670,27 @@
       "method": "GET",
       "path": "/inventario/disponibilidad/comercial",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "inventario:disponibilidad:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-productos",
+        "modulo-retail"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -244,6 +699,24 @@
       "method": "GET",
       "path": "/inventario/operaciones/{operationId}",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "inventario:operaciones:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-ventas"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -252,6 +725,28 @@
       "method": "GET",
       "path": "/precios",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "precios:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-productos",
+        "modulo-retail"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -260,6 +755,20 @@
       "method": "POST",
       "path": "/caracteristicas",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -268,6 +777,20 @@
       "method": "POST",
       "path": "/categorias",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -276,6 +799,20 @@
       "method": "POST",
       "path": "/combos",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -284,6 +821,22 @@
       "method": "POST",
       "path": "/combos/administracion",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "admin",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -292,6 +845,20 @@
       "method": "POST",
       "path": "/cupones",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -300,6 +867,20 @@
       "method": "POST",
       "path": "/auditoria-precios/exportaciones",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -308,6 +889,20 @@
       "method": "POST",
       "path": "/carga-masiva/productos/exportaciones",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -316,6 +911,20 @@
       "method": "POST",
       "path": "/carga-masiva/productos/importaciones",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "multipart_import",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -324,6 +933,22 @@
       "method": "POST",
       "path": "/precios/importaciones",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [],
+      "introspectionRequired": true,
+      "exposureProfile": "admin",
+      "rateProfile": "multipart_import",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -332,6 +957,20 @@
       "method": "POST",
       "path": "/marcas",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "multipart_import",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -340,6 +979,20 @@
       "method": "POST",
       "path": "/productos",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -348,6 +1001,20 @@
       "method": "POST",
       "path": "/promociones",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -356,6 +1023,20 @@
       "method": "POST",
       "path": "/recomendaciones/reglas",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -364,6 +1045,20 @@
       "method": "POST",
       "path": "/tipos-producto",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -372,6 +1067,20 @@
       "method": "POST",
       "path": "/caracteristicas/{caracteristicaId}/valores",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -380,6 +1089,20 @@
       "method": "POST",
       "path": "/productos/{productoId}/variantes",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -388,6 +1111,20 @@
       "method": "POST",
       "path": "/caracteristicas/{caracteristicaId}/desactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -396,6 +1133,20 @@
       "method": "POST",
       "path": "/combos/{comboId}/desactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -404,6 +1155,20 @@
       "method": "POST",
       "path": "/cupones/{cuponId}/desactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -412,6 +1177,20 @@
       "method": "POST",
       "path": "/productos/{productoId}/desactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -420,6 +1199,20 @@
       "method": "POST",
       "path": "/promociones/{promocionId}/desactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -428,6 +1221,20 @@
       "method": "POST",
       "path": "/recomendaciones/reglas/{reglaId}/desactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -436,6 +1243,20 @@
       "method": "POST",
       "path": "/productos/{productoId}/variantes/{variantId}/desactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -444,6 +1265,20 @@
       "method": "GET",
       "path": "/auditoria-precios/exportaciones/{exportId}/archivo",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "expensive_export",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -452,6 +1287,20 @@
       "method": "GET",
       "path": "/carga-masiva/productos/exportaciones/{exportId}/archivo",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "expensive_export",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -460,6 +1309,20 @@
       "method": "GET",
       "path": "/carga-masiva/productos/plantilla",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "expensive_export",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -468,6 +1331,20 @@
       "method": "GET",
       "path": "/carga-masiva/productos/importaciones/{batchId}/reporte",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "expensive_export",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -476,6 +1353,20 @@
       "method": "GET",
       "path": "/precios/importaciones/{batchId}/reporte",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "expensive_export",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -484,6 +1375,20 @@
       "method": "DELETE",
       "path": "/inventario/umbrales/skus/{sku}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -492,6 +1397,20 @@
       "method": "PUT",
       "path": "/inventario/umbrales/skus/{sku}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -500,6 +1419,26 @@
       "method": "POST",
       "path": "/promociones/evaluar",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "promociones:evaluar"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-retail"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -508,6 +1447,24 @@
       "method": "POST",
       "path": "/inventario/reservas/{reservaId}/liberar",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "inventario:liberar"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-ventas"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -516,6 +1473,22 @@
       "method": "GET",
       "path": "/inventario/alertas",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "admin",
+      "rateProfile": "admin_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -524,6 +1497,20 @@
       "method": "GET",
       "path": "/auditoria-precios",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -532,6 +1519,22 @@
       "method": "GET",
       "path": "/auditoria-precios/administracion",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "admin",
+      "rateProfile": "admin_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -540,6 +1543,20 @@
       "method": "GET",
       "path": "/caracteristicas",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -548,6 +1565,26 @@
       "method": "GET",
       "path": "/categorias",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-retail"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -556,6 +1593,25 @@
       "method": "GET",
       "path": "/categorias/administracion",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-productos"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "admin_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -564,6 +1620,20 @@
       "method": "GET",
       "path": "/combos",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -572,6 +1642,20 @@
       "method": "GET",
       "path": "/cupones",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -580,6 +1664,20 @@
       "method": "GET",
       "path": "/categorias/{categoriaId}/seo/historial",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -588,6 +1686,26 @@
       "method": "GET",
       "path": "/marcas",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-retail"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -596,6 +1714,25 @@
       "method": "GET",
       "path": "/marcas/administracion",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-productos"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "admin_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -604,6 +1741,27 @@
       "method": "GET",
       "path": "/productos",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-retail"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -612,6 +1770,22 @@
       "method": "GET",
       "path": "/productos/administracion",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "admin",
+      "rateProfile": "admin_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -620,6 +1794,20 @@
       "method": "GET",
       "path": "/precios/productos/{productoId}/programaciones",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -628,6 +1816,20 @@
       "method": "GET",
       "path": "/precios/skus/{sku}/programaciones",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -636,6 +1838,27 @@
       "method": "GET",
       "path": "/promociones",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "promociones:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-retail"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -644,6 +1867,20 @@
       "method": "GET",
       "path": "/promociones/administracion",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "admin",
+      "rateProfile": "admin_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -652,6 +1889,20 @@
       "method": "GET",
       "path": "/recomendaciones/reglas",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -660,6 +1911,22 @@
       "method": "GET",
       "path": "/inventario/administracion/saldos",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "admin",
+      "rateProfile": "admin_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -668,6 +1935,25 @@
       "method": "GET",
       "path": "/tipos-producto",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-productos"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -676,6 +1962,20 @@
       "method": "GET",
       "path": "/inventario/traslados",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -684,6 +1984,22 @@
       "method": "GET",
       "path": "/inventario/ubicaciones",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "admin",
+      "rateProfile": "admin_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -692,6 +2008,20 @@
       "method": "GET",
       "path": "/caracteristicas/{caracteristicaId}/valores",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -700,6 +2030,20 @@
       "method": "GET",
       "path": "/productos/{productoId}/variantes",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -708,6 +2052,25 @@
       "method": "GET",
       "path": "/categorias/arbol",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-productos"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -716,6 +2079,20 @@
       "method": "GET",
       "path": "/auditoria-precios/{auditId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -724,6 +2101,22 @@
       "method": "GET",
       "path": "/auditoria-precios/administracion/{auditId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "admin",
+      "rateProfile": "admin_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -732,6 +2125,20 @@
       "method": "GET",
       "path": "/caracteristicas/{caracteristicaId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -740,6 +2147,25 @@
       "method": "GET",
       "path": "/categorias/{categoriaId}",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-productos"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -748,6 +2174,23 @@
       "method": "GET",
       "path": "/combos/{comboId}",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "combos:leer"
+      ],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -756,6 +2199,20 @@
       "method": "GET",
       "path": "/cupones/{cuponId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -764,6 +2221,20 @@
       "method": "GET",
       "path": "/inventario/dashboard",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -772,6 +2243,25 @@
       "method": "GET",
       "path": "/tipos-producto/{tipoProductoId}/caracteristicas",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-productos"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -780,6 +2270,20 @@
       "method": "GET",
       "path": "/auditoria-precios/exportaciones/{exportId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -788,6 +2292,20 @@
       "method": "GET",
       "path": "/carga-masiva/productos/exportaciones/{exportId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -796,6 +2314,20 @@
       "method": "GET",
       "path": "/carga-masiva/productos/importaciones/{batchId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -804,6 +2336,20 @@
       "method": "GET",
       "path": "/precios/importaciones/{batchId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -812,6 +2358,25 @@
       "method": "GET",
       "path": "/marcas/{marcaId}",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-productos"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -820,6 +2385,20 @@
       "method": "GET",
       "path": "/taxonomia/operaciones/{operationId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -828,6 +2407,20 @@
       "method": "GET",
       "path": "/precios/productos/{productoId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -836,6 +2429,28 @@
       "method": "GET",
       "path": "/precios/skus/{sku}",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "precios:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-productos",
+        "modulo-retail"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -844,6 +2459,20 @@
       "method": "GET",
       "path": "/productos/{productoId}/preparacion",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -852,6 +2481,28 @@
       "method": "GET",
       "path": "/productos/{productoId}",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-productos",
+        "modulo-retail"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -860,6 +2511,22 @@
       "method": "GET",
       "path": "/productos/administracion/{productoId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "admin",
+      "rateProfile": "admin_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -868,6 +2535,27 @@
       "method": "GET",
       "path": "/productos/por-slug/{slug}",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-retail"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -876,6 +2564,20 @@
       "method": "GET",
       "path": "/promociones/{promocionId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -884,6 +2586,26 @@
       "method": "GET",
       "path": "/recomendaciones",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "recomendaciones:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-retail"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -892,6 +2614,20 @@
       "method": "GET",
       "path": "/recomendaciones/reglas/{reglaId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -900,6 +2636,20 @@
       "method": "GET",
       "path": "/categorias/{categoriaId}/seo",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -908,6 +2658,18 @@
       "method": "GET",
       "path": "/seo/{slug}",
       "secured": false,
+      "authSchemes": [],
+      "identityType": "public",
+      "issuerRequired": false,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "public_read",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -916,6 +2678,25 @@
       "method": "GET",
       "path": "/tipos-producto/{tipoProductoId}",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-productos"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -924,6 +2705,20 @@
       "method": "GET",
       "path": "/inventario/traslados/{trasladoId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -932,6 +2727,20 @@
       "method": "GET",
       "path": "/inventario/umbrales",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -940,6 +2749,20 @@
       "method": "GET",
       "path": "/productos/{productoId}/variantes/{variantId}",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -948,6 +2771,20 @@
       "method": "POST",
       "path": "/precios/importaciones/prevalidar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "multipart_import",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -956,6 +2793,22 @@
       "method": "POST",
       "path": "/precios/productos/{productoId}/programaciones",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [],
+      "introspectionRequired": true,
+      "exposureProfile": "admin",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -964,6 +2817,22 @@
       "method": "POST",
       "path": "/precios/skus/{sku}/programaciones",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [],
+      "introspectionRequired": true,
+      "exposureProfile": "admin",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -972,6 +2841,20 @@
       "method": "POST",
       "path": "/caracteristicas/{caracteristicaId}/reactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -980,6 +2863,20 @@
       "method": "POST",
       "path": "/categorias/{categoriaId}/reactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -988,6 +2885,20 @@
       "method": "POST",
       "path": "/marcas/{marcaId}/reactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -996,6 +2907,20 @@
       "method": "POST",
       "path": "/productos/{productoId}/reactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1004,6 +2929,20 @@
       "method": "POST",
       "path": "/tipos-producto/{tipoProductoId}/reactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1012,6 +2951,20 @@
       "method": "POST",
       "path": "/caracteristicas/{caracteristicaId}/valores/{valorId}/reactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1020,6 +2973,20 @@
       "method": "POST",
       "path": "/productos/{productoId}/variantes/{variantId}/reactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1028,6 +2995,20 @@
       "method": "POST",
       "path": "/carga-masiva/productos/importaciones/{batchId}/reanudar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1036,6 +3017,20 @@
       "method": "POST",
       "path": "/inventario/traslados/{trasladoId}/recepciones",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1044,6 +3039,25 @@
       "method": "POST",
       "path": "/inventario/reintegros",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "inventario:reintegrar"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-postventa",
+        "modulo-ventas"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1052,6 +3066,20 @@
       "method": "POST",
       "path": "/productos/{productoId}/preparacion/reintentar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1060,6 +3088,20 @@
       "method": "POST",
       "path": "/productos/{productoId}/variantes/{variantId}/preparacion/reintentar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1068,6 +3110,24 @@
       "method": "POST",
       "path": "/inventario/incidencias",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "inventario:incidencias:reportar"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-retail"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1076,6 +3136,24 @@
       "method": "POST",
       "path": "/productos/codigos-barras/resolver",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-retail"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1084,6 +3162,24 @@
       "method": "POST",
       "path": "/inventario/incidencias/{incidenciaId}/resolver",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "inventario:incidencias:resolver"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-retail"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1092,6 +3188,22 @@
       "method": "POST",
       "path": "/productos/administracion/skus/resolver",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "admin",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1100,6 +3212,18 @@
       "method": "GET",
       "path": "/seo/resoluciones/{slugAnterior}",
       "secured": false,
+      "authSchemes": [],
+      "identityType": "public",
+      "issuerRequired": false,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "public_read",
+      "rateProfile": "commercial_read",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1108,6 +3232,20 @@
       "method": "POST",
       "path": "/seo/categorias/slug/resolver",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1116,6 +3254,20 @@
       "method": "POST",
       "path": "/categorias/{categoriaId}/desactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1124,6 +3276,20 @@
       "method": "POST",
       "path": "/marcas/{marcaId}/desactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1132,6 +3298,20 @@
       "method": "POST",
       "path": "/tipos-producto/{tipoProductoId}/desactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1140,6 +3320,20 @@
       "method": "POST",
       "path": "/caracteristicas/{caracteristicaId}/valores/{valorId}/desactivar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1148,6 +3342,20 @@
       "method": "POST",
       "path": "/tipos-producto/{tipoProductoId}/caracteristicas/{caracteristicaId}/desasociar",
       "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [],
+      "allowedClients": [],
+      "introspectionRequired": false,
+      "exposureProfile": "commercial",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1156,6 +3364,24 @@
       "method": "POST",
       "path": "/inventario/reservas",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "inventario:reservar"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-ventas"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1164,6 +3390,26 @@
       "method": "POST",
       "path": "/cupones/validar",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "cupones:validar"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-retail"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     },
     {
@@ -1172,9 +3418,29 @@
       "method": "POST",
       "path": "/inventario/disponibilidad/comercial/verificar",
       "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "inventario:disponibilidad:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-retail"
+      ],
+      "introspectionRequired": false,
+      "exposureProfile": "m2m_partner",
+      "rateProfile": "business_write",
+      "environmentEnabled": true,
       "g5OptIn": false
     }
   ],
   "operationSetSha256": "040544e1666747ff00c9eb77c6509b6831c83368dcba7b0ef29f3668ac7365fb",
-  "filteredOpenApiCanonicalSha256": "537e67b96aa521198bb8923661f27590eb0d39e4c3ed65076d999beadb23b742"
+  "filteredOpenApiCanonicalSha256": "ced88c4e8a9d5ebf389382bb98d58f68abecd0d3aa5f5691713fe31c3dd01a61"
 }

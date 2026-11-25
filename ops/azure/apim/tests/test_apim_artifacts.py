@@ -10,7 +10,7 @@ from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_DOCS_SHA = "490172c11cb4b83ddd1996f8d5834d0402184cf8"
-EXPECTED_GATEWAY_SHA = "05f6b929f8aebfd745acd2e70959e36967c96d09"
+EXPECTED_GATEWAY_SHA = "34058f0e5d25e89dcb4cb9d8c1ceb9db38cdfba4"
 SPEC = importlib.util.spec_from_file_location("filter_openapi", ROOT / "filter-openapi.py")
 FILTER = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -36,7 +36,7 @@ class FilterOpenApiTests(unittest.TestCase):
         self.source = {
             "openapi": "3.0.3",
             "info": {"title": "test", "version": "1"},
-            "security": [{"bearerAuth": []}],
+            "security": [{"userBearer": []}],
             "paths": {
                 **{f"/{path}": item for path, item in self.private.items()},
                 "/publica": {
@@ -77,6 +77,7 @@ class FilterOpenApiTests(unittest.TestCase):
             True,
             "docs-sha",
             "gateway-sha",
+            g5_authorized=True,
         )
         by_id = {operation["operationId"]: operation for operation in manifest["operations"]}
         self.assertTrue(by_id["g5-operacion"]["g5OptIn"])
@@ -484,6 +485,59 @@ class CompiledArmTests(unittest.TestCase):
                     EXPECTED_DOCS_SHA,
                     EXPECTED_GATEWAY_SHA,
                 )
+
+
+class ApimClosureRequirementsTests(unittest.TestCase):
+    def test_enriched_manifest_and_g5_authorization_guard(self):
+        manifest = json.loads((ROOT / "openapi/operation-security.json").read_text(encoding="utf-8"))
+        self.assertIn("contractInventory", manifest)
+        self.assertIn("gatewayStaticRegistry", manifest)
+        self.assertIn("securityProfile", manifest)
+        self.assertFalse(manifest["g5EnabledByDefault"])
+        for op in manifest["operations"]:
+            for key in (
+                "authSchemes",
+                "identityType",
+                "issuerRequired",
+                "audienceRequired",
+                "scopes",
+                "roles",
+                "allowedClients",
+                "introspectionRequired",
+                "exposureProfile",
+                "rateProfile",
+                "environmentEnabled",
+            ):
+                self.assertIn(key, op)
+            if op["identityType"] == "human" and op["audience"] is None:
+                self.assertFalse(op["audienceRequired"])
+            if op["identityType"] == "m2m":
+                self.assertTrue(op["audienceRequired"])
+                self.assertTrue(op["audience"])
+                self.assertTrue(op["scopes"])
+
+    def test_policies_and_bicep_enforce_correlation_cors_and_profiles(self):
+        api_xml = (ROOT / "policies/api.xml").read_text(encoding="utf-8")
+        self.assertIn("Guid.TryParse", api_xml)
+        self.assertIn("<header>Content-Disposition</header>", api_xml)
+        self.assertIn("<header>Location</header>", api_xml)
+        self.assertIn('buffer-request-body="false"', api_xml)
+        self.assertIn("<on-error>", api_xml)
+
+        secured_xml = (ROOT / "policies/operation-secured.xml").read_text(encoding="utf-8")
+        self.assertIn("{{audience-check-element}}", secured_xml)
+        self.assertIn("SCOPE_INSUFICIENTE", secured_xml)
+        self.assertIn("{{concurrency-limit-open}}", secured_xml)
+
+        public_xml = (ROOT / "policies/operation-public.xml").read_text(encoding="utf-8")
+        self.assertIn("context.Request.IpAddress", public_xml)
+        self.assertNotIn("X-Forwarded-For", public_xml)
+        self.assertNotIn("X-Real-IP", public_xml)
+
+        bicep_text = (ROOT / "main.bicep").read_text(encoding="utf-8")
+        self.assertIn("param reuseExistingApim bool", bicep_text)
+        self.assertIn("param rateProfiles object", bicep_text)
+        self.assertIn("bytes: 0", bicep_text)
 
 
 if __name__ == "__main__":

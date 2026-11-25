@@ -4,7 +4,7 @@
     <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized" require-scheme="Bearer" output-token-variable-name="jwt">
       <openid-config url="{{g7-openid-config-url}}" />
       <issuers><issuer>{{g7-issuer}}</issuer></issuers>
-      <audiences><audience>{{g7-audience}}</audience></audiences>
+      {{audience-check-element}}
     </validate-jwt>
     <set-variable name="rateIdentity" value="@(((Jwt)context.Variables[&quot;jwt&quot;]).Subject ?? string.Empty)" />
     <choose>
@@ -12,14 +12,56 @@
         <return-response>
           <set-status code="401" reason="Unauthorized" />
           <set-header name="Content-Type" exists-action="override"><value>application/problem+json</value></set-header>
+          <set-header name="x-correlation-id" exists-action="override"><value>@((string)context.Variables[&quot;correlationId&quot;])</value></set-header>
           <set-body>{"type":"about:blank","title":"No autorizado","status":401,"code":"TOKEN_INVALIDO"}</set-body>
+        </return-response>
+      </when>
+    </choose>
+    <set-variable name="expectedIdentityType" value="{{identity-type}}" />
+    <set-variable name="requiredRole" value="{{required-role}}" />
+    <set-variable name="requiredScope" value="{{required-scope}}" />
+    <set-variable name="allowedClientsCsv" value="{{allowed-clients}}" />
+    <choose>
+      <when condition="@{
+        var jwt = (Jwt)context.Variables["jwt"];
+        var expectedType = (string)context.Variables["expectedIdentityType"];
+        var tokenType = jwt.Claims.GetValueOrDefault("tipo", string.Empty);
+        if (expectedType == "human" &amp;&amp; tokenType != "acceso") return true;
+        if (expectedType == "m2m" &amp;&amp; tokenType != "servicio") return true;
+        var reqRole = (string)context.Variables["requiredRole"];
+        if (!string.IsNullOrEmpty(reqRole)) {
+          var roles = jwt.Claims.GetValueOrDefault("roles", string.Empty).Split(new[] {' ', ','}, StringSplitOptions.RemoveEmptyEntries);
+          if (!roles.Contains(reqRole)) return true;
+        }
+        var reqScope = (string)context.Variables["requiredScope"];
+        if (!string.IsNullOrEmpty(reqScope)) {
+          var scopes = (jwt.Claims.GetValueOrDefault("scope", string.Empty) + " " + jwt.Claims.GetValueOrDefault("scp", string.Empty)).Split(new[] {' ', ','}, StringSplitOptions.RemoveEmptyEntries);
+          if (!scopes.Contains(reqScope)) return true;
+        }
+        var clientsCsv = (string)context.Variables["allowedClientsCsv"];
+        if (!string.IsNullOrEmpty(clientsCsv)) {
+          var allowed = clientsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries);
+          var clientId = jwt.Claims.GetValueOrDefault("client_id", jwt.Claims.GetValueOrDefault("azp", jwt.Subject ?? string.Empty));
+          if (!allowed.Contains(clientId)) return true;
+        }
+        return false;
+      }">
+        <return-response>
+          <set-status code="403" reason="Forbidden" />
+          <set-header name="Content-Type" exists-action="override"><value>application/problem+json</value></set-header>
+          <set-header name="x-correlation-id" exists-action="override"><value>@((string)context.Variables[&quot;correlationId&quot;])</value></set-header>
+          <set-body>{"type":"about:blank","title":"Permisos insuficientes","status":403,"code":"SCOPE_INSUFICIENTE"}</set-body>
         </return-response>
       </when>
     </choose>
     <rate-limit-by-key calls="{{burst-calls}}" renewal-period="{{burst-window-seconds}}" counter-key="@((string)context.Variables[&quot;rateIdentity&quot;] + &quot;:{{operation-id}}&quot;)" />
     <quota-by-key calls="{{quota-calls}}" renewal-period="{{quota-window-seconds}}" counter-key="@((string)context.Variables[&quot;rateIdentity&quot;] + &quot;:{{operation-id}}&quot;)" />
   </inbound>
-  <backend><base /></backend>
+  <backend>
+    {{concurrency-limit-open}}
+    <forward-request buffer-request-body="false" />
+    {{concurrency-limit-close}}
+  </backend>
   <outbound><base /></outbound>
   <on-error><base /></on-error>
 </policies>
