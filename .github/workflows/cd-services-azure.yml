@@ -35,6 +35,14 @@ run-name: H5 CD ${{ inputs.destination }} ${{ inputs.pilot_self_review && 'azure
         required: true
         type: boolean
         default: false
+      gateway_route_profile:
+        description: Ruta normal o etiqueta privada G5 para api-gateway en Chile
+        required: true
+        type: choice
+        options:
+          - standard
+          - g5-labelled
+        default: standard
 
 permissions: {}
 env:
@@ -59,6 +67,7 @@ jobs:
       environment: ${{ steps.target.outputs.github_environment }}
       runner_label: ${{ steps.target.outputs.runner_label }}
       pilot_self_review: ${{ steps.target.outputs.pilot_self_review }}
+      gateway_route_profile: ${{ steps.target.outputs.gateway_route_profile }}
     steps:
       - name: Obtener validadores oficiales de master
         uses: actions/checkout@v4
@@ -84,13 +93,21 @@ jobs:
           DESTINATION: ${{ inputs.destination }}
           PILOT_SELF_REVIEW: ${{ inputs.pilot_self_review }}
           DISPATCH_SERVICE: ${{ inputs.service }}
+          GATEWAY_ROUTE_PROFILE: ${{ inputs.gateway_route_profile }}
         run: |
           set -Eeuo pipefail
+          if [[ "$GATEWAY_ROUTE_PROFILE" == g5-labelled ]]; then
+            [[ "$DESTINATION" == chile-shared && "$DISPATCH_SERVICE" == api-gateway && "$PILOT_SELF_REVIEW" == false ]] || {
+              echo 'G5_LABELLED_ROUTE_SCOPE_REJECTED: solo chile-shared/api-gateway sin modo piloto.' >&2
+              exit 1
+            }
+          fi
           target="$(bash ops/azure/container-apps/resolve-deployment-target.sh "$DESTINATION" "$PILOT_SELF_REVIEW" "$DISPATCH_SERVICE")"
           printf 'destination=%s\n' "$(jq -r '.destination' <<< "$target")" >> "$GITHUB_OUTPUT"
           printf 'github_environment=%s\n' "$(jq -r '.githubEnvironment' <<< "$target")" >> "$GITHUB_OUTPUT"
           printf 'runner_label=%s\n' "$(jq -r '.smokeLabel' <<< "$target")" >> "$GITHUB_OUTPUT"
           printf 'pilot_self_review=%s\n' "$(jq -r '.pilotSelfReview' <<< "$target")" >> "$GITHUB_OUTPUT"
+          printf 'gateway_route_profile=%s\n' "$GATEWAY_ROUTE_PROFILE" >> "$GITHUB_OUTPUT"
 
       - name: Validar CI exitosa, HEAD vigente de master y allowlist de servicios
         id: source
@@ -431,6 +448,7 @@ jobs:
           IMAGE: ${{ steps.image.outputs.value }}
           DEPLOY_RECEIPT: ${{ matrix.service }}.receipt
           GITHUB_RUN_ID: ${{ github.run_id }}
+          H5_GATEWAY_ROUTE_PROFILE: ${{ matrix.service == 'api-gateway' && needs.prepare.outputs.gateway_route_profile == 'g5-labelled' && 'g5-labelled' || 'standard' }}
         run: bash ops/azure/container-apps/deploy.sh "$SERVICE" "$IMAGE"
       - name: Guardar recibo de recuperación coordinada
         if: always()
@@ -445,12 +463,13 @@ jobs:
     name: Smoke HTTPS posterior al despliegue
     needs: [prepare, deploy]
     if: needs.prepare.outputs.sha != '' && needs.prepare.outputs.services != ''
-    runs-on: [self-hosted, linux, "${{ needs.prepare.outputs.runner_label }}"]
+    runs-on: [self-hosted, linux, '${{ needs.prepare.outputs.runner_label }}']
     environment: ${{ needs.prepare.outputs.environment }}
     env:
       H5_DEPLOY_DESTINATION: ${{ needs.prepare.outputs.destination }}
       H5_DEPLOY_ENVIRONMENT: ${{ needs.prepare.outputs.environment }}
       H5_PILOT_SELF_REVIEW: ${{ needs.prepare.outputs.pilot_self_review }}
+      H5_GATEWAY_ROUTE_PROFILE: ${{ needs.prepare.outputs.gateway_route_profile }}
     permissions:
       contents: read
     strategy:
@@ -475,6 +494,7 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           H5_DEPLOY_DESTINATION: ${{ needs.prepare.outputs.destination }}
           H5_DEPLOY_ENVIRONMENT: ${{ needs.prepare.outputs.environment }}
+          H5_GATEWAY_ROUTE_PROFILE: ${{ matrix.service == 'api-gateway' && needs.prepare.outputs.gateway_route_profile == 'g5-labelled' && 'g5-labelled' || 'standard' }}
           SMOKE_URL_API_GATEWAY: ${{ vars.AZURE_SMOKE_URL_API_GATEWAY }}
           SMOKE_URL_BULK_SVC: ${{ vars.AZURE_SMOKE_URL_BULK_SVC }}
           SMOKE_URL_CATALOG_SVC: ${{ vars.AZURE_SMOKE_URL_CATALOG_SVC }}
@@ -502,6 +522,9 @@ jobs:
           protected_var="SMOKE_PROTECTED_${service_key}"
           method_var="SMOKE_PROTECTED_METHOD_${service_key}"
           url="${!url_var:-}"
+          if [[ "$SERVICE" == api-gateway && "$H5_GATEWAY_ROUTE_PROFILE" == g5-labelled ]]; then
+            url="$(jq -er '.g5_label_url' "$SMOKE_RECEIPT")"
+          fi
           protected="${!protected_var:-}"
           protected_method="${!method_var:-GET}"
           export SMOKE_URL="$url" SMOKE_PROTECTED_PATH="$protected" SMOKE_PROTECTED_METHOD="$protected_method"
