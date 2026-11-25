@@ -1,0 +1,80 @@
+{
+  "manifestVersion": 1,
+  "status": "PREPARATION_ONLY",
+  "repository": "Taller-SW-Web/G6-Productos-Ofertas-backend",
+  "backendMasterAtAudit": "daf4882b7dc6895c6601a1f4af209ec92c8215b0",
+  "imagesPublished": false,
+  "deploymentsPerformed": false,
+  "gate": "AZURE_CHILE_DEPLOY_ENABLED=false",
+  "services": [
+    {
+      "service": "catalog-svc",
+      "codeCandidateSha": "daf4882b7dc6895c6601a1f4af209ec92c8215b0",
+      "imageDigest": null,
+      "digestStatus": "PENDING_NEW_BUILD",
+      "openPullRequests": [268],
+      "releaseGate": "HTTP uses existing Catalog schema; no async candidate required while messaging flags are off. Phase 6 must install only missing canonical outbox trigger/function and delivery_transport marker; never recreate outbox_delivery or fan out historical outbox rows."
+    },
+    {
+      "service": "inventory-svc",
+      "codeCandidateSha": "daf4882b7dc6895c6601a1f4af209ec92c8215b0",
+      "imageDigest": null,
+      "digestStatus": "PENDING_NEW_BUILD",
+      "openPullRequests": [],
+      "releaseGate": "Lifecycle/offline DDL physically equivalent but service ledger entry absent; lifecycle backfill and minimum runtime grants required for inventory functionality. Async outbox is a separate Phase 6 gate."
+    },
+    {
+      "service": "pricing-svc",
+      "codeCandidateSha": "daf4882b7dc6895c6601a1f4af209ec92c8215b0",
+      "imageDigest": null,
+      "digestStatus": "PENDING_NEW_BUILD",
+      "openPullRequests": [255, 256],
+      "releaseGate": "HTTP price definition and validity must be compatible and ready. Outbox physical shape matches Price Audit pilot; its service ledger and async path are separate from HTTP bootstrap."
+    },
+    {
+      "service": "promotions-svc",
+      "codeCandidateSha": "daf4882b7dc6895c6601a1f4af209ec92c8215b0",
+      "imageDigest": null,
+      "digestStatus": "PENDING_NEW_BUILD",
+      "openPullRequests": [],
+      "releaseGate": "H5 operations/outbox tables physically match candidate and must not be recreated. Determine release runtime login/role and apply minimum H5 grants separately; verify protected smoke/config."
+    },
+    {
+      "service": "api-gateway",
+      "codeCandidateSha": "daf4882b7dc6895c6601a1f4af209ec92c8215b0",
+      "imageDigest": null,
+      "digestStatus": "PENDING_NEW_BUILD",
+      "openPullRequests": [],
+      "releaseGate": "Cross-service route compatibility and final protected-smoke path verification"
+    }
+  ],
+  "proposedOrder": [
+    "catalog-svc",
+    "inventory-svc",
+    "pricing-svc",
+    "promotions-svc",
+    "api-gateway"
+  ],
+  "compatibilityNote": "Order is conditional on compatible reviewed SHAs and schema readiness. Do not publish/release this manifest as operational approval.",
+  "rollback": "Use per-service immutable digest receipt and supervised same-resource rollback; database changes require separately approved reconciliation and are not rolled back by image rollback.",
+  "otherExistingServicesUntouched": [
+    "bulk-svc",
+    "combos-svc",
+    "price-audit-svc",
+    "taxonomy-svc"
+  ],
+  "tracks": {
+    "httpBootstrap": {
+      "status": "PREPARATION_ONLY",
+      "gate": "Resolved per-service HTTP DDL, runtime identity/grants, readiness and protected smoke on compatible reviewed SHAs. Do not gate on async-only candidates."
+    },
+    "asyncActivation": {
+      "status": "PHASE_6_NOT_READY",
+      "gate": "Catalog missing H5 delivery function/trigger and delivery_transport marker; Inventory/Pricing/Promotions async structures exist but ledgers, handlers, flags and resource-scoped permissions must be reconciled before activation."
+    },
+    "g5g7RealHomologation": {
+      "status": "NOT_RUN",
+      "gate": "Requires authorized G5/G7 services, credentials, snapshots, and bilateral evidence."
+    }
+  }
+}

@@ -62,7 +62,7 @@ describe.skipIf(process.env.PROMOTIONS_H5_POSTGRES_TESTS !== '1')(
       if (existing.rows[0].schema !== null)
         throw new Error('EMPTY_DATABASE_REQUIRED');
       await pool.query(
-        'CREATE ROLE po_promotions_owner NOLOGIN; CREATE ROLE po_promotions_runtime NOLOGIN; CREATE SCHEMA promotions AUTHORIZATION po_promotions_owner',
+        'CREATE ROLE po_promotions_owner NOLOGIN; CREATE ROLE po_promotions_runtime NOLOGIN; CREATE ROLE promotions_h5_runtime_test LOGIN; GRANT po_promotions_runtime TO promotions_h5_runtime_test; CREATE SCHEMA promotions AUTHORIZATION po_promotions_owner',
       );
       const migrations = await officialMigrations();
       const setup = await pool.connect();
@@ -109,8 +109,7 @@ describe.skipIf(process.env.PROMOTIONS_H5_POSTGRES_TESTS !== '1')(
         setup.release(true);
       }
       runtime = new Pool({
-        connectionString: url.href,
-        options: '-c role=po_promotions_runtime',
+        connectionString: process.env.PROMOTIONS_H5_RUNTIME_DATABASE_URL ?? '',
         max: 2,
         connectionTimeoutMillis: 2000,
       });
@@ -713,11 +712,16 @@ describe.skipIf(process.env.PROMOTIONS_H5_POSTGRES_TESTS !== '1')(
 
     it('grants a dedicated runtime role only the privileges needed for H5 operations', async () => {
       const permissions = await runtime.query(`SELECT
+          current_user AS runtime_login,
+          rolsuper AS superuser,
           has_table_privilege(current_user,'promotions.h5_coupon_operations','INSERT') AS admit,
           has_table_privilege(current_user,'promotions.h5_coupon_outbox','UPDATE') AS deliver,
           has_table_privilege(current_user,'promotions.h5_coupon_outbox','DELETE') AS purge,
-          has_schema_privilege(current_user,'promotions','CREATE') AS ddl`);
+          has_schema_privilege(current_user,'promotions','CREATE') AS ddl
+        FROM pg_roles WHERE rolname = current_user`);
       expect(permissions.rows[0]).toEqual({
+        runtime_login: 'promotions_h5_runtime_test',
+        superuser: false,
         admit: true,
         deliver: true,
         purge: false,

@@ -1917,6 +1917,57 @@ GRANT inventory_app TO inventory_test;`,
       });
     }, 20_000);
 
+    it('procesa evento Catalog posterior a lifecycle inicializado sin perder stock ni reservas', async () => {
+      const sku = await seedStock('catalog-backfill-event-' + randomUUID(), 12);
+      const productId = randomUUID();
+      const initialChangedAt = new Date('2026-11-20T12:00:00.000Z');
+      await database.query(
+        'INSERT INTO inventory.sku_lifecycle (sku_id,product_id,sku_version,active,changed_at) VALUES($1,$2,2,true,$3)',
+        [sku, productId, initialChangedAt],
+      );
+      const reservation = await reserve(sku, 2);
+      expect(reservation.reservationId).toBeTruthy();
+      const before = await database.query(
+        'SELECT on_hand,reserved,blocked,available FROM inventory.stock_balance WHERE sku_id=$1 AND location_id=$2',
+        [sku, locationId],
+      );
+      expect(before.rows[0]).toMatchObject({ on_hand: 12, reserved: 2 });
+      const changedAt = '2026-11-21T13:14:15.123Z';
+      const event = catalogPr185SkuDeactivatedEvent({
+        sku,
+        productId,
+        skuVersion: 3,
+        changedAt,
+      });
+      const previousGate =
+        process.env.INVENTORY_CATALOG_SKU_DEACTIVATION_ENABLED;
+      process.env.INVENTORY_CATALOG_SKU_DEACTIVATION_ENABLED = 'true';
+      try {
+        const command = realCommandService();
+        expect(await command.process(event)).toEqual({ duplicate: false });
+        expect(await command.process(event)).toEqual({ duplicate: true });
+        const lifecycle = await database.query(
+          'SELECT sku_version,active,changed_at FROM inventory.sku_lifecycle WHERE sku_id=$1',
+          [sku],
+        );
+        expect(lifecycle.rows[0]).toMatchObject({
+          sku_version: 3,
+          active: false,
+          changed_at: new Date(changedAt),
+        });
+        const after = await database.query(
+          'SELECT on_hand,reserved,blocked,available FROM inventory.stock_balance WHERE sku_id=$1 AND location_id=$2',
+          [sku, locationId],
+        );
+        expect(after.rows[0]).toEqual(before.rows[0]);
+      } finally {
+        if (previousGate === undefined)
+          delete process.env.INVENTORY_CATALOG_SKU_DEACTIVATION_ENABLED;
+        else
+          process.env.INVENTORY_CATALOG_SKU_DEACTIVATION_ENABLED = previousGate;
+      }
+    }, 20_000);
+
     it('ajuste absoluto revierte stock, operación, Kardex y Outbox ante fallo', async () => {
       const sku = await seedStock(`sku-absolute-rollback-${randomUUID()}`, 8);
       const failOutbox = Object.create(outboxService) as OutboxService;
