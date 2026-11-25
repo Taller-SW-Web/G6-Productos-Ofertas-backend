@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { summarizeServiceBus } from './summarize-observations.mjs';
+
+const cliPath = fileURLToPath(
+  new URL('./summarize-observations.mjs', import.meta.url),
+);
 
 const utc = (seconds) =>
   new Date(Date.UTC(2026, 10, 24, 12, 0, seconds)).toISOString();
@@ -37,6 +46,7 @@ const input = () => {
     run_id: 'sample-1',
     source_sha: sha,
     environment: 'synthetic',
+    complete_capture: true,
     start_utc: utc(0),
     end_utc: utc(10),
     outbox: [first, fanout, poison],
@@ -76,8 +86,17 @@ const input = () => {
   };
 };
 
-test('correlates fan-out, out-of-order deliveries, pre/post-commit loss and DLQ by destination', () => {
-  const result = summarizeServiceBus(input()).destinations;
+test('complete capture fixture correlates fan-out, out-of-order deliveries, pre/post-commit loss and DLQ by destination', () => {
+  const summary = summarizeServiceBus(input());
+  assert.equal(summary.status, 'COMPLETE');
+  assert.equal(summary.capture_complete, true);
+  assert.equal(summary.certification_eligible, true);
+  assert.deepEqual(summary.incomplete_reasons, []);
+
+  const result = summary.destinations;
+  assert.equal(result[audit].status, 'COMPLETE');
+  assert.equal(result[audit].certification_eligible, true);
+  assert.deepEqual(result[audit].incomplete_sequences, []);
   assert.equal(result[audit].redeliveries, 2);
   assert.equal(result[audit].completed, 1);
   assert.equal(result[audit].deadlettered, 1);
@@ -92,6 +111,163 @@ test('correlates fan-out, out-of-order deliveries, pre/post-commit loss and DLQ 
   assert.equal(result[audit].drain_ms, 10000);
   assert.equal(result[promotions].completed, 1);
   assert.equal(result[promotions].completions_per_second, 0.1);
+});
+
+test('truncated capture fixture marks run and affected metrics inconclusive', () => {
+  const truncated = input();
+  truncated.complete_capture = false;
+  const summary = summarizeServiceBus(truncated);
+
+  assert.equal(summary.status, 'INCONCLUSIVE');
+  assert.equal(summary.capture_complete, false);
+  assert.equal(summary.certification_eligible, false);
+  assert.deepEqual(summary.incomplete_reasons, ['TRUNCATED_CAPTURE']);
+
+  for (const destination of [audit, promotions]) {
+    const metrics = summary.destinations[destination];
+    assert.equal(metrics.status, 'INCONCLUSIVE');
+    assert.equal(metrics.certification_eligible, false);
+    assert.deepEqual(metrics.incomplete_reasons, ['TRUNCATED_CAPTURE']);
+    assert.equal(metrics.completed, null);
+    assert.equal(metrics.redeliveries, null);
+    assert.equal(metrics.abandoned, null);
+    assert.equal(metrics.deadlettered, null);
+    assert.equal(metrics.drain_ms, null);
+    assert.equal(metrics.completions_per_second, null);
+    assert.equal(metrics.enqueue_to_commit_ms.status, 'INCONCLUSIVE');
+    assert.equal(metrics.enqueue_to_commit_ms.p95, null);
+    assert.equal(metrics.enqueue_to_settlement_ms.status, 'INCONCLUSIVE');
+    assert.equal(metrics.enqueue_to_settlement_ms.p95, null);
+  }
+});
+
+test('delivery_count gap fixture detects missing intermediate attempt even with out-of-order observations', () => {
+  const gapped = input();
+  // Remove attempt delivery_count=2 (keep out-of-order [3, 1]) and provide commit on attempt 3.
+  gapped.attempts = gapped.attempts.filter(
+    (entry) =>
+      !(entry.message_id === 'message-1' && entry.delivery_count === 2),
+  );
+  gapped.attempts[0].committed_utc = utc(6);
+
+  const summary = summarizeServiceBus(gapped);
+  assert.equal(summary.status, 'INCONCLUSIVE');
+  assert.equal(summary.capture_complete, false);
+  assert.equal(summary.certification_eligible, false);
+  assert.deepEqual(summary.incomplete_reasons, ['DELIVERY_COUNT_GAP']);
+
+  const auditMetrics = summary.destinations[audit];
+  assert.equal(auditMetrics.status, 'INCONCLUSIVE');
+  assert.equal(auditMetrics.certification_eligible, false);
+  assert.deepEqual(auditMetrics.incomplete_reasons, ['DELIVERY_COUNT_GAP']);
+  assert.equal(auditMetrics.missing_attempts_count, 1);
+  assert.deepEqual(auditMetrics.incomplete_sequences, [
+    {
+      destination: audit,
+      message_id: 'message-1',
+      observed_counts: [1, 3],
+      missing_counts: [2],
+      reasons: ['DELIVERY_COUNT_GAP'],
+    },
+  ]);
+  assert.equal(auditMetrics.redeliveries, null);
+  assert.equal(auditMetrics.abandoned, null);
+  assert.equal(auditMetrics.completions_per_second, null);
+  assert.equal(auditMetrics.enqueue_to_commit_ms.status, 'INCONCLUSIVE');
+  assert.equal(auditMetrics.enqueue_to_commit_ms.p95, null);
+  assert.equal(auditMetrics.enqueue_to_settlement_ms.status, 'INCONCLUSIVE');
+  assert.equal(auditMetrics.enqueue_to_settlement_ms.p95, null);
+
+  // Unaffected destination retains its complete metrics.
+  assert.equal(summary.destinations[promotions].status, 'COMPLETE');
+  assert.equal(summary.destinations[promotions].completed, 1);
+});
+
+test('marks sequence incomplete when first observed delivery_count starts above 1', () => {
+  const lateStart = input();
+  lateStart.attempts = lateStart.attempts.filter(
+    (entry) =>
+      !(
+        entry.message_id === 'message-1' &&
+        entry.destination === audit &&
+        entry.delivery_count === 1
+      ),
+  );
+
+  const summary = summarizeServiceBus(lateStart);
+  assert.equal(summary.status, 'INCONCLUSIVE');
+  assert.equal(summary.certification_eligible, false);
+  assert.deepEqual(summary.incomplete_reasons, [
+    'MISSING_INITIAL_DELIVERY_ATTEMPT',
+  ]);
+  assert.deepEqual(summary.destinations[audit].incomplete_sequences, [
+    {
+      destination: audit,
+      message_id: 'message-1',
+      observed_counts: [2, 3],
+      missing_counts: [1],
+      reasons: ['MISSING_INITIAL_DELIVERY_ATTEMPT'],
+    },
+  ]);
+  assert.equal(summary.destinations[audit].redeliveries, null);
+  assert.equal(
+    summary.destinations[audit].enqueue_to_commit_ms.status,
+    'INCONCLUSIVE',
+  );
+});
+
+test('marks capture inconclusive when complete_capture attestation is omitted or enqueued delivery has zero observations', () => {
+  const unattested = input();
+  delete unattested.complete_capture;
+  const unattestedResult = summarizeServiceBus(unattested);
+  assert.equal(unattestedResult.status, 'INCONCLUSIVE');
+  assert.deepEqual(unattestedResult.incomplete_reasons, [
+    'UNCONFIRMED_CAPTURE_COMPLETENESS',
+  ]);
+
+  const missingDelivery = input();
+  missingDelivery.attempts = missingDelivery.attempts.filter(
+    (entry) => entry.destination !== promotions,
+  );
+  const missingResult = summarizeServiceBus(missingDelivery);
+  assert.equal(missingResult.status, 'INCONCLUSIVE');
+  assert.deepEqual(missingResult.incomplete_reasons, [
+    'MISSING_DELIVERY_OBSERVATIONS',
+  ]);
+  assert.equal(missingResult.destinations[promotions].completed, null);
+  assert.equal(missingResult.destinations[promotions].drain_ms, null);
+});
+
+test('CLI exits 0 for complete capture and 2 for incomplete/inconclusive capture', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'g6-perf05-cli-'));
+  try {
+    const completeFile = join(dir, 'complete.json');
+    const truncatedFile = join(dir, 'truncated.json');
+    await writeFile(completeFile, JSON.stringify(input()), 'utf8');
+    const truncated = input();
+    truncated.complete_capture = false;
+    await writeFile(truncatedFile, JSON.stringify(truncated), 'utf8');
+
+    const okOut = execFileSync(process.execPath, [cliPath, completeFile], {
+      encoding: 'utf8',
+    });
+    assert.equal(JSON.parse(okOut).status, 'COMPLETE');
+
+    let exitStatus = 0;
+    let incOut = '';
+    try {
+      execFileSync(process.execPath, [cliPath, truncatedFile], {
+        encoding: 'utf8',
+      });
+    } catch (error) {
+      exitStatus = error.status;
+      incOut = error.stdout;
+    }
+    assert.equal(exitStatus, 2);
+    assert.equal(JSON.parse(incOut).status, 'INCONCLUSIVE');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('rejects uncorrelated deliveries and duplicate Outbox intents', () => {

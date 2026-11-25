@@ -1,3 +1,19 @@
+// PERF-04 k6 scenario for POST /api/v1/cupones/consumos.
+// Loopback fixture mode (PERF04_PROFILE=fixture with PERF04_SYNTHETIC_FIXTURE=1)
+// validates ONLY the HTTP contract flow (admission 202, idempotent replay 200,
+// idempotency conflict 409, and terminal status polling) against a local double.
+// It is NOT release throughput, NOT release p95 latency, and NOT performance certification.
+//
+// Certification requires measurements against an authorized environment and a
+// controlled pre-seeded dataset with PostgreSQL/Outbox reconciliation and N01 scope.
+//
+// Common runner & thresholds coordination (owner: Vera):
+// - Current backend status: SIN_UMBRAL_APROBADO (scripts/performance/summarize-selection.mjs).
+// - Integration point for Vera's common k6 runner:
+//   env vars PERF04_ORIGIN, PERF04_TEST_TOKEN, PERF04_SYNTHETIC_DATASET,
+//   PERF04_PROFILE, PERF04_SUMMARY_PATH; options.thresholds (release p95/RPS
+//   thresholds remain deferred to Vera's approval); and handleSummary JSON output.
+
 import { check, fail, sleep } from 'k6';
 import { SharedArray } from 'k6/data';
 import execution from 'k6/execution';
@@ -7,6 +23,9 @@ import { Counter, Rate, Trend } from 'k6/metrics';
 const profiles = { smoke: [1, '60s'], small: [5, '3m'], medium: [20, '5m'] };
 const syntheticFixture =
   __ENV.PERF04_PROFILE === 'fixture' && __ENV.PERF04_SYNTHETIC_FIXTURE === '1';
+const activeProfile = syntheticFixture
+  ? 'fixture'
+  : __ENV.PERF04_PROFILE || 'smoke';
 const profile = profiles[__ENV.PERF04_PROFILE || 'smoke'];
 const base = __ENV.PERF04_ORIGIN;
 const token = __ENV.PERF04_TEST_TOKEN;
@@ -48,6 +67,8 @@ const intents = new SharedArray('synthetic coupon intents', () => {
   return records;
 });
 
+// Only contract/integrity gates are defined here. Release latency/throughput
+// thresholds remain under Vera's coordination (SIN_UMBRAL_APROBADO).
 export const options = {
   scenarios: {
     perf04: syntheticFixture
@@ -190,4 +211,73 @@ export default function () {
   check(ok, {
     'admission, replay, conflict and terminal match contract': (value) => value,
   });
+}
+
+function trendValues(metric) {
+  const values = metric?.values ?? {};
+  return {
+    count: values.count ?? 0,
+    avg: values.avg ?? null,
+    p50: values['p(50)'] ?? null,
+    p95: values['p(95)'] ?? null,
+    p99: values['p(99)'] ?? null,
+  };
+}
+
+export function handleSummary(data) {
+  const metrics = data?.metrics ?? {};
+  const report = {
+    schema_version: 1,
+    case_id: 'PERF-04',
+    profile: activeProfile,
+    execution_kind: syntheticFixture
+      ? 'SYNTHETIC_LOOPBACK_CONTRACT_CHECK'
+      : 'UNADJUDICATED_LOOPBACK_RUN',
+    evidence_level: syntheticFixture
+      ? 'L0_SYNTHETIC_LOOPBACK_FIXTURE'
+      : 'PENDING_COMMON_RUNNER_ADJUDICATION',
+    certification_status: 'NOT_CERTIFIED',
+    is_release_measurement: false,
+    validates: [
+      'admission_202',
+      'idempotent_replay_200',
+      'idempotency_conflict_409',
+      'terminal_status_polling',
+    ],
+    does_not_certify: [
+      'release_throughput',
+      'release_p95_latency',
+      'performance_certification',
+    ],
+    certification_requirements:
+      'Authorized environment, controlled pre-seeded dataset, baseline/candidate repetitions, PostgreSQL/Outbox reconciliation, N01 release scope, and Vera common runner + approved thresholds.',
+    thresholds_coordination: {
+      owner: 'Vera',
+      status: 'SIN_UMBRAL_APROBADO',
+      integration_point:
+        'apps/promotions-svc/test/performance/coupon-admission.k6.js (env contract, options.thresholds, handleSummary)',
+    },
+    contract_counters: {
+      perf04_intents: metrics.perf04_intents?.values?.count ?? 0,
+      perf04_admitted: metrics.perf04_admitted?.values?.count ?? 0,
+      perf04_replays: metrics.perf04_replays?.values?.count ?? 0,
+      perf04_expected_conflicts:
+        metrics.perf04_expected_conflicts?.values?.count ?? 0,
+      perf04_server_errors: metrics.perf04_server_errors?.values?.count ?? 0,
+      perf04_terminal: metrics.perf04_terminal?.values?.count ?? 0,
+      perf04_unexpected_rate: metrics.perf04_unexpected?.values?.rate ?? 0,
+    },
+    synthetic_timings_ms: {
+      scope: 'synthetic_loopback_only_not_release_p95_or_throughput',
+      perf04_admission_202_ms: trendValues(metrics.perf04_admission_202_ms),
+      perf04_time_to_completed_ms: trendValues(
+        metrics.perf04_time_to_completed_ms,
+      ),
+    },
+  };
+  const serialized = `${JSON.stringify(report, null, 2)}\n`;
+  const outputPath = __ENV.PERF04_SUMMARY_PATH;
+  return outputPath
+    ? { [outputPath]: serialized, stdout: serialized }
+    : { stdout: serialized };
 }

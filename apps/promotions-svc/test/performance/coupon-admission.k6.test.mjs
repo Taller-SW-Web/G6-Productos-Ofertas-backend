@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 
 const execute = promisify(execFile);
 
-test('PERF-04 checks the contract against a synthetic loopback provider', async () => {
+test('PERF-04 loopback fixture validates admission, replay, conflict and polling without claiming certification', async () => {
   const testToken = 'synthetic-perf04-only';
   const directory = await mkdtemp(join(tmpdir(), 'g6-perf04-'));
   const operation = {
@@ -98,7 +98,7 @@ test('PERF-04 checks the contract against a synthetic loopback provider', async 
     );
     await execute(
       process.env.G6_K6_BIN || 'k6',
-      ['run', '--quiet', '--summary-export', summary, scenarioFile],
+      ['run', '--quiet', scenarioFile],
       {
         env: {
           ...process.env,
@@ -107,12 +107,33 @@ test('PERF-04 checks the contract against a synthetic loopback provider', async 
           PERF04_ORIGIN: 'http://127.0.0.1:' + server.address().port,
           PERF04_TEST_TOKEN: testToken,
           PERF04_SYNTHETIC_DATASET: dataset,
+          PERF04_SUMMARY_PATH: summary,
         },
         timeout: 60_000,
       },
     );
     assert.deepEqual(calls, ['admit', 'replay', 'conflict', 'poll']);
-    const { metrics } = JSON.parse(await readFile(summary, 'utf8'));
+    const report = JSON.parse(await readFile(summary, 'utf8'));
+    assert.equal(report.case_id, 'PERF-04');
+    assert.equal(report.profile, 'fixture');
+    assert.equal(report.execution_kind, 'SYNTHETIC_LOOPBACK_CONTRACT_CHECK');
+    assert.equal(report.evidence_level, 'L0_SYNTHETIC_LOOPBACK_FIXTURE');
+    assert.equal(report.certification_status, 'NOT_CERTIFIED');
+    assert.equal(report.is_release_measurement, false);
+    assert.deepEqual(report.validates, [
+      'admission_202',
+      'idempotent_replay_200',
+      'idempotency_conflict_409',
+      'terminal_status_polling',
+    ]);
+    assert.deepEqual(report.does_not_certify, [
+      'release_throughput',
+      'release_p95_latency',
+      'performance_certification',
+    ]);
+    assert.equal(report.thresholds_coordination.owner, 'Vera');
+    assert.equal(report.thresholds_coordination.status, 'SIN_UMBRAL_APROBADO');
+
     for (const name of [
       'intents',
       'admitted',
@@ -120,13 +141,23 @@ test('PERF-04 checks the contract against a synthetic loopback provider', async 
       'expected_conflicts',
       'terminal',
     ]) {
-      assert.equal(metrics['perf04_' + name].count, 1);
+      assert.equal(report.contract_counters['perf04_' + name], 1);
     }
+    assert.equal(report.contract_counters.perf04_server_errors, 0);
+    assert.equal(report.contract_counters.perf04_unexpected_rate, 0);
+
+    assert.equal(
+      report.synthetic_timings_ms.scope,
+      'synthetic_loopback_only_not_release_p95_or_throughput',
+    );
     for (const name of ['admission_202_ms', 'time_to_completed_ms']) {
-      assert.equal(metrics['perf04_' + name].count, 1);
-      assert.ok(Number.isFinite(metrics['perf04_' + name]['p(95)']));
+      const timing = report.synthetic_timings_ms['perf04_' + name];
+      assert.equal(timing.count, 1);
+      assert.ok(Number.isFinite(timing.p95));
     }
-    assert.ok(metrics.perf04_time_to_completed_ms['p(95)'] >= 2000);
+    assert.ok(
+      report.synthetic_timings_ms.perf04_time_to_completed_ms.p95 >= 2000,
+    );
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await rm(directory, { recursive: true, force: true });

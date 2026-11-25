@@ -1,15 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { evaluateCdEvidence } from './verify-release-evidence.mjs';
+import {
+  CHILE_POLICY,
+  evaluateCdEvidence,
+} from './verify-release-evidence.mjs';
 
-function evidence() {
+function castillaReviewer() {
+  return {
+    type: 'User',
+    id: 143348512,
+    login: 'mrcastilla8',
+  };
+}
+
+function evidence({ selfApproved = false } = {}) {
   const sha = 'a'.repeat(40);
   const digest = 'sha256:' + 'b'.repeat(64);
   const service = 'catalog-svc';
-  const origin = 'https://catalog.test.invalid';
+  const origin =
+    'https://catalog-svc.internal.chilecentral.azurecontainerapps.io';
   const prefix =
     'ghcr.io/taller-sw-web/g6-productos-ofertas-backend/' + service + '@';
+  const reviewer = castillaReviewer();
   return {
+    destination: 'chile-shared',
     repo: 'Taller-SW-Web/G6-Productos-Ofertas-backend',
     ref: 'refs/heads/master',
     source_sha: sha,
@@ -19,6 +33,12 @@ function evidence() {
     run_id: '12345',
     image: { source_sha: sha, reference: prefix + digest },
     receipt: {
+      destination: 'chile-shared',
+      github_environment: 'azure-h5-chile',
+      aca_environment: 'env-g6-phase1-chile',
+      app_resource_id:
+        '/subscriptions/fef42188-accd-4470-ae88-78f583eb4906/resourceGroups/rg-g6-aca-chile/providers/Microsoft.App/containerApps/' +
+        service,
       run_id: '12345',
       source_sha: sha,
       service,
@@ -31,19 +51,28 @@ function evidence() {
       previous_revision: 'catalog-svc--previous',
     },
     environment: {
-      name: 'azure-h5',
+      destination: 'chile-shared',
+      name: 'azure-h5-chile',
       approval_verified: true,
       approval_run_id: '12345',
-      reviewers: 2,
-      prevent_self_review: true,
+      reviewers: [reviewer],
+      approved_by: reviewer,
+      triggered_by: selfApproved
+        ? reviewer
+        : { type: 'User', id: 999999, login: 'AXL031' },
+      self_approved: selfApproved,
+      prevent_self_review: false,
       admin_bypass: false,
+      custom_branch_policies: true,
+      protected_branches: false,
+      branch_policy_type: 'branch',
       allowed_branches: ['master'],
     },
     oidc: {
       method: 'oidc',
       run_id: '12345',
       persistent_credentials: false,
-      federated_environment: 'azure-h5',
+      federated_environment: 'azure-h5-chile',
     },
     audit: {
       source_sha: sha,
@@ -73,8 +102,53 @@ function checkFailure(caseId, mutate) {
   );
 }
 
-test('accepts a complete synthetic same-run receipt', () => {
-  assert.equal(evaluateCdEvidence(evidence()).execution_result, 'PASS');
+test('loads official Chile policy from deployment-targets.json and verify-environment-protection.sh', () => {
+  assert.equal(CHILE_POLICY.destination, 'chile-shared');
+  assert.equal(CHILE_POLICY.github_environment, 'azure-h5-chile');
+  assert.equal(CHILE_POLICY.aca_environment, 'env-g6-phase1-chile');
+  assert.equal(CHILE_POLICY.resource_group, 'rg-g6-aca-chile');
+  assert.deepEqual(CHILE_POLICY.reviewer, {
+    type: 'User',
+    id: 143348512,
+    login: 'mrcastilla8',
+  });
+  assert.equal(CHILE_POLICY.prevent_self_review, false);
+  assert.equal(CHILE_POLICY.admin_bypass, false);
+  assert.equal(CHILE_POLICY.allowed_branch, 'master');
+});
+
+test('accepts a complete synthetic same-run Chile receipt approved by Castilla', () => {
+  const result = evaluateCdEvidence(evidence({ selfApproved: false }));
+  assert.equal(result.execution_result, 'PASS');
+  assert.equal(result.destination, 'chile-shared');
+  assert.equal(result.environment, 'azure-h5-chile');
+});
+
+test('accepts a valid self-approval by Castilla under Chile policy', () => {
+  const result = evaluateCdEvidence(evidence({ selfApproved: true }));
+  assert.equal(result.execution_result, 'PASS');
+  assert.equal(
+    result.checks.find((entry) => entry.case_id === 'CD-04').execution_result,
+    'PASS',
+  );
+});
+
+test('rejects Brazil destination, Brazil environment and historical pilot environment', () => {
+  checkFailure('CD-04', (record) => {
+    record.destination = 'brazil-isolated';
+    record.environment.destination = 'brazil-isolated';
+    record.environment.name = 'azure-h5';
+    record.oidc.federated_environment = 'azure-h5';
+  });
+  checkFailure('CD-03', (record) => {
+    record.receipt.destination = 'brazil-isolated';
+    record.receipt.github_environment = 'azure-h5';
+    record.receipt.aca_environment = 'env-g6-h5-int';
+  });
+  checkFailure('CD-04', (record) => {
+    record.environment.name = 'azure-h5-pilot-234';
+    record.oidc.federated_environment = 'azure-h5-pilot-234';
+  });
 });
 
 test('CD-01 rejects a different SHA', () =>
@@ -82,7 +156,7 @@ test('CD-01 rejects a different SHA', () =>
     record.master_sha = 'c'.repeat(40);
   }));
 
-test('CD-02 rejects malformed, unverified and wrong repository SHA', () => {
+test('CD-02 rejects malformed, unverified, non-master and wrong repository SHA', () => {
   checkFailure('CD-02', (record) => {
     record.source_sha = 'abc';
   });
@@ -92,9 +166,12 @@ test('CD-02 rejects malformed, unverified and wrong repository SHA', () => {
   checkFailure('CD-02', (record) => {
     record.repo = 'example/other';
   });
+  checkFailure('CD-02', (record) => {
+    record.ref = 'refs/heads/trabajo/cueva/h5-evidencia-local';
+  });
 });
 
-test('CD-03 rejects wrong image, commit or served digest', () => {
+test('CD-03 rejects wrong image, commit, ACA resource or served digest', () => {
   checkFailure('CD-03', (record) => {
     record.receipt.served_digest = 'sha256:' + 'c'.repeat(64);
   });
@@ -107,11 +184,35 @@ test('CD-03 rejects wrong image, commit or served digest', () => {
       'pricing-svc',
     );
   });
+  checkFailure('CD-03', (record) => {
+    record.receipt.app_resource_id = record.receipt.app_resource_id.replace(
+      'rg-g6-aca-chile',
+      'rg-g6-sb-h5-int-fork',
+    );
+  });
 });
 
-test('CD-04 rejects missing reviewers or wrong run', () => {
+test('CD-04 rejects missing reviewer, different reviewer, extra reviewer, wrong approver, admin bypass or disallowed branch', () => {
   checkFailure('CD-04', (record) => {
-    record.environment.reviewers = 0;
+    record.environment.reviewers = [];
+  });
+  checkFailure('CD-04', (record) => {
+    record.environment.reviewers = [
+      { type: 'User', id: 129343979, login: 'other-user' },
+    ];
+  });
+  checkFailure('CD-04', (record) => {
+    record.environment.reviewers = [
+      castillaReviewer(),
+      { type: 'User', id: 2, login: 'second-reviewer' },
+    ];
+  });
+  checkFailure('CD-04', (record) => {
+    record.environment.approved_by = {
+      type: 'User',
+      id: 999999,
+      login: 'AXL031',
+    };
   });
   checkFailure('CD-04', (record) => {
     record.environment.approval_run_id = '5678';
@@ -119,14 +220,29 @@ test('CD-04 rejects missing reviewers or wrong run', () => {
   checkFailure('CD-04', (record) => {
     record.environment.admin_bypass = true;
   });
+  checkFailure('CD-04', (record) => {
+    record.environment.prevent_self_review = true;
+  });
+  checkFailure('CD-04', (record) => {
+    record.environment.allowed_branches = ['master', 'release'];
+  });
+  checkFailure('CD-04', (record) => {
+    record.environment.allowed_branches = ['develop'];
+  });
+  checkFailure('CD-04', (record) => {
+    record.environment.branch_policy_type = 'tag';
+  });
 });
 
-test('CD-05 rejects missing OIDC or persistent credentials', () => {
+test('CD-05 rejects missing OIDC, wrong federated environment or persistent credentials', () => {
   checkFailure('CD-05', (record) => {
     delete record.oidc;
   });
   checkFailure('CD-05', (record) => {
     record.oidc.persistent_credentials = true;
+  });
+  checkFailure('CD-05', (record) => {
+    record.oidc.federated_environment = 'azure-h5';
   });
 });
 
@@ -145,6 +261,12 @@ test('CD-06 rejects missing, blocking and failed scan reports', () => {
 test('CD-07 rejects false positive 200 and never promotes after rollback', () => {
   checkFailure('CD-07', (record) => {
     record.smoke.liveness.body = { status: 'ok' };
+  });
+  checkFailure('CD-07', (record) => {
+    record.smoke.readiness.body = {
+      service: record.service,
+      status: 'not_ready',
+    };
   });
   checkFailure('CD-07', (record) => {
     record.smoke.readiness.http_status = 503;

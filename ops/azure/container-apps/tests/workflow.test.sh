@@ -58,5 +58,13 @@ grep -Fq 'azure_cd_h5:' "$CI_WORKFLOW" || fail 'pruebas de ejecutor H5 no conect
 for test_file in validate-source.test.sh deployment-targets.test.sh verify-environment-protection.test.sh deploy.test.sh smoke.test.sh reconcile-recovery.test.sh workflow.test.sh; do
   grep -Fq "ops/azure/container-apps/tests/$test_file" "$CI_WORKFLOW" || fail "CI no ejecuta $test_file"
 done
+for h5_test in \
+  ops/azure/tests/h5-cd/check-workflow-evidence.sh \
+  ops/azure/tests/h5-cd/verify-release-evidence.test.mjs \
+  ops/azure/tests/h5-cd/preflight.test.mjs \
+  ops/azure/service-bus/summarize-observations.test.mjs \
+  ops/azure/tests/h5-rl/verify-rate-limit.test.mjs; do
+  grep -Fq "$h5_test" "$CI_WORKFLOW" || fail "CI obligatorio no ejecuta $h5_test"
+done
 grep -Fq 'ops/shared/tests/ensure-ghcr-sha-image.test.sh' "$CI_WORKFLOW" || fail 'CI no prueba el helper neutral de GHCR'
 printf 'PASS: CD Azure H5 es manual, aplica gates explícitos, no depende de Oracle y cubre nueve servicios\n'

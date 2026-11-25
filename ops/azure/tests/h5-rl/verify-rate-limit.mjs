@@ -2,13 +2,44 @@ import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
 const requestId = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
+const runIdPattern = /^[a-zA-Z0-9_-]{1,128}$/;
 
-function indexRecords(rows, allowedValues, field) {
+function parseUtcTimestamp(value) {
+  const time = Date.parse(value);
+  if (
+    typeof value !== 'string' ||
+    !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(value) ||
+    !Number.isFinite(time) ||
+    new Date(time).toISOString() !==
+      value.replace(/(?<=\d\d:\d\d:\d\d)Z$/, '.000Z')
+  ) {
+    throw new Error('INVALID_UTC_TIMESTAMP');
+  }
+  return time;
+}
+
+function indexRecords(
+  rows,
+  { runId, windowStart, windowEnd, allowedValues, field },
+) {
   if (!Array.isArray(rows)) throw new Error('INVALID_TRACE_INPUT');
   const indexed = new Map();
   for (const row of rows) {
+    if (typeof row !== 'object' || row === null) {
+      throw new Error('INVALID_TRACE_METADATA');
+    }
+    if (typeof row.run_id !== 'string' || !runIdPattern.test(row.run_id)) {
+      throw new Error('INVALID_TRACE_METADATA');
+    }
+    if (row.run_id !== runId) {
+      throw new Error('RUN_ID_MISMATCH');
+    }
+    const observedAt = parseUtcTimestamp(row.observed_utc);
+    if (observedAt < windowStart || observedAt > windowEnd) {
+      throw new Error('TIMESTAMP_OUTSIDE_WINDOW');
+    }
     if (
-      typeof row?.request_id !== 'string' ||
+      typeof row.request_id !== 'string' ||
       !requestId.test(row.request_id) ||
       indexed.has(row.request_id) ||
       (field && !allowedValues.includes(row[field]))
@@ -21,8 +52,21 @@ function indexRecords(rows, allowedValues, field) {
 }
 
 export function verifyRateLimit(input) {
-  const { source_sha, environment, policy_hash, complete_capture } = input;
+  if (typeof input !== 'object' || input === null) {
+    throw new Error('INVALID_RUN_METADATA');
+  }
+  const {
+    run_id,
+    start_utc,
+    end_utc,
+    source_sha,
+    environment,
+    policy_hash,
+    complete_capture,
+  } = input;
   if (
+    typeof run_id !== 'string' ||
+    !runIdPattern.test(run_id) ||
     !/^[0-9a-f]{40}$/.test(source_sha ?? '') ||
     !['synthetic', 'isolated', 'azure'].includes(environment) ||
     !(
@@ -33,15 +77,26 @@ export function verifyRateLimit(input) {
     throw new Error('INVALID_RUN_METADATA');
   }
 
-  const offered = indexRecords(input.offered);
-  const apim = indexRecords(
-    input.apim,
-    ['accepted', 'rate_limited'],
-    'decision',
-  );
-  const gateway = indexRecords(input.gateway);
-  const provider = indexRecords(input.provider);
-  const direct = indexRecords(input.direct, ['denied', 'allowed'], 'result');
+  const windowStart = parseUtcTimestamp(start_utc);
+  const windowEnd = parseUtcTimestamp(end_utc);
+  if (windowEnd <= windowStart) {
+    throw new Error('INVALID_OBSERVATION_WINDOW');
+  }
+
+  const scope = { runId: run_id, windowStart, windowEnd };
+  const offered = indexRecords(input.offered, scope);
+  const apim = indexRecords(input.apim, {
+    ...scope,
+    allowedValues: ['accepted', 'rate_limited'],
+    field: 'decision',
+  });
+  const gateway = indexRecords(input.gateway, scope);
+  const provider = indexRecords(input.provider, scope);
+  const direct = indexRecords(input.direct, {
+    ...scope,
+    allowedValues: ['denied', 'allowed'],
+    field: 'result',
+  });
   const accepted = [...apim.values()].filter(
     (row) => row.decision === 'accepted',
   );
@@ -90,6 +145,10 @@ export function verifyRateLimit(input) {
 
   return {
     case_id: 'RL-05',
+    run_id,
+    start_utc,
+    end_utc,
+    window_ms: windowEnd - windowStart,
     source_sha,
     environment,
     policy_hash,
@@ -121,8 +180,13 @@ if (
     process.exitCode = { PASS: 0, FAIL: 1, INCONCLUSIVE: 2 }[
       result.execution_result
     ];
-  } catch {
-    console.error('RL-05: INVALID_INPUT');
+  } catch (error) {
+    console.error(
+      'RL-05: ' +
+        (error instanceof Error && /^[A-Z_]+$/.test(error.message)
+          ? error.message
+          : 'INVALID_INPUT'),
+    );
     process.exitCode = 1;
   }
 }

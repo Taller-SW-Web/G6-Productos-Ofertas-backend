@@ -37,6 +37,16 @@ function distribution(values) {
   return result;
 }
 
+function inconclusiveDistribution(observedCount) {
+  return {
+    count: observedCount,
+    p50: null,
+    p95: null,
+    p99: null,
+    status: 'INCONCLUSIVE',
+  };
+}
+
 function deliveryKey(record) {
   requireValue(
     idPattern.test(record.message_id ?? '') &&
@@ -46,6 +56,14 @@ function deliveryKey(record) {
   return record.destination + '/' + record.message_id;
 }
 
+function range(fromInclusive, toExclusive) {
+  const values = [];
+  for (let current = fromInclusive; current < toExclusive; current++) {
+    values.push(current);
+  }
+  return values;
+}
+
 // Input is a sanitized export of observations for one bounded run. No broker or database calls.
 export function summarizeServiceBus({
   run_id,
@@ -53,6 +71,7 @@ export function summarizeServiceBus({
   source_sha,
   start_utc,
   end_utc,
+  complete_capture,
   outbox,
   attempts,
   samples,
@@ -61,7 +80,8 @@ export function summarizeServiceBus({
     typeof run_id === 'string' &&
       idPattern.test(run_id) &&
       ['synthetic', 'isolated', 'azure'].includes(environment) &&
-      shaPattern.test(source_sha ?? ''),
+      shaPattern.test(source_sha ?? '') &&
+      (complete_capture === undefined || typeof complete_capture === 'boolean'),
     'INVALID_RUN_METADATA',
   );
   const start = timestamp(start_utc);
@@ -79,6 +99,13 @@ export function summarizeServiceBus({
       Array.isArray(samples),
     'INVALID_OBSERVATION_WINDOW',
   );
+
+  const runIncompleteReasons = [];
+  if (complete_capture === false) {
+    runIncompleteReasons.push('TRUNCATED_CAPTURE');
+  } else if (complete_capture === undefined) {
+    runIncompleteReasons.push('UNCONFIRMED_CAPTURE_COMPLETENESS');
+  }
 
   const deliveries = new Map();
   const intents = new Set();
@@ -164,99 +191,166 @@ export function summarizeServiceBus({
     });
   }
 
+  const allReasons = new Set(runIncompleteReasons);
+  const destinationEntries = [...queues].map(([destination, queue]) => {
+    const timeline = queue.samples.sort((a, b) => a.at - b.at);
+    requireValue(
+      timeline.length >= 2 &&
+        timeline[0].at === start &&
+        timeline.at(-1).at === end &&
+        timeline.every(
+          (sample, index) => index === 0 || timeline[index - 1].at < sample.at,
+        ),
+      'INCOMPLETE_BACKLOG_SAMPLING',
+    );
+    const finalSample = timeline.at(-1);
+
+    const commits = [];
+    const settlements = [];
+    let reDeliveries = 0;
+    let abandoned = 0;
+    let deadlettered = 0;
+    let incomplete = 0;
+    let missingAttemptsCount = 0;
+    const destinationReasons = new Set(runIncompleteReasons);
+    const incompleteSequences = [];
+
+    for (const delivery of queue.deliveries) {
+      delivery.attempts.sort((a, b) => a.count - b.count);
+      let terminal = false;
+      let firstCommit = null;
+      let previous = null;
+      const missingCounts = [];
+      const sequenceReasons = new Set();
+
+      if (delivery.attempts.length > 0 && delivery.attempts[0].count > 1) {
+        missingCounts.push(...range(1, delivery.attempts[0].count));
+        sequenceReasons.add('MISSING_INITIAL_DELIVERY_ATTEMPT');
+      }
+
+      for (const attempt of delivery.attempts) {
+        requireValue(!terminal, 'ATTEMPT_AFTER_TERMINAL_SETTLEMENT');
+        requireValue(
+          !previous ||
+            (attempt.count > previous.count &&
+              attempt.received >=
+                (previous.settled ?? previous.committed ?? previous.received)),
+          'INCONSISTENT_ATTEMPT_ORDER',
+        );
+        if (previous && attempt.count > previous.count + 1) {
+          missingCounts.push(...range(previous.count + 1, attempt.count));
+          sequenceReasons.add('DELIVERY_COUNT_GAP');
+        }
+        if (attempt.count > 1) reDeliveries++;
+        if (attempt.outcome === 'abandon') abandoned++;
+        firstCommit ??= attempt.committed;
+        terminal = ['complete', 'deadletter'].includes(attempt.outcome);
+        if (attempt.outcome === 'complete') {
+          requireValue(
+            firstCommit !== null,
+            'COMPLETION_WITHOUT_DURABLE_COMMIT',
+          );
+          settlements.push(attempt.settled - delivery.enqueued);
+          commits.push(firstCommit - delivery.enqueued);
+        }
+        if (attempt.outcome === 'deadletter') deadlettered++;
+        previous = attempt;
+      }
+
+      if (
+        delivery.attempts.length === 0 &&
+        delivery.enqueued !== null &&
+        finalSample.backlog === 0 &&
+        finalSample.pending === 0 &&
+        finalSample.dlq === 0
+      ) {
+        missingCounts.push(1);
+        sequenceReasons.add('MISSING_DELIVERY_OBSERVATIONS');
+      }
+
+      if (sequenceReasons.size > 0) {
+        const sortedMissing = [...new Set(missingCounts)].sort((a, b) => a - b);
+        missingAttemptsCount += sortedMissing.length;
+        for (const reason of sequenceReasons) {
+          destinationReasons.add(reason);
+          allReasons.add(reason);
+        }
+        incompleteSequences.push({
+          destination,
+          message_id: delivery.row.message_id,
+          observed_counts: delivery.attempts.map((item) => item.count),
+          missing_counts: sortedMissing,
+          reasons: [...sequenceReasons],
+        });
+      }
+
+      if (!terminal) incomplete++;
+    }
+
+    let busySince = null;
+    let drainMs = null;
+    for (const sample of timeline) {
+      if (sample.backlog + sample.pending > 0) {
+        busySince ??= sample.at;
+        drainMs = null;
+      } else if (busySince !== null) {
+        drainMs = sample.at - busySince;
+        busySince = null;
+      }
+    }
+
+    const reasonsList = [...destinationReasons];
+    const captureComplete = reasonsList.length === 0;
+    const captureTruncatedOrUnobserved =
+      complete_capture !== true ||
+      destinationReasons.has('MISSING_DELIVERY_OBSERVATIONS');
+
+    return [
+      destination,
+      {
+        capture_complete: captureComplete,
+        certification_eligible: captureComplete,
+        status: captureComplete ? 'COMPLETE' : 'INCONCLUSIVE',
+        incomplete_reasons: reasonsList,
+        incomplete_sequences: incompleteSequences,
+        missing_attempts_count: missingAttemptsCount,
+        outbox_deliveries: queue.deliveries.length,
+        completed: captureTruncatedOrUnobserved ? null : settlements.length,
+        incomplete,
+        redeliveries: captureComplete ? reDeliveries : null,
+        abandoned: captureComplete ? abandoned : null,
+        deadlettered: captureTruncatedOrUnobserved ? null : deadlettered,
+        dlq_count: finalSample.dlq,
+        final_backlog: finalSample.backlog,
+        outbox_pending: finalSample.pending,
+        peak_lease_age_ms: Math.max(...timeline.map((sample) => sample.lease)),
+        drain_ms: captureTruncatedOrUnobserved ? null : drainMs,
+        completions_per_second: captureComplete
+          ? (settlements.length * 1_000) / (end - start)
+          : null,
+        enqueue_to_commit_ms: captureComplete
+          ? distribution(commits)
+          : inconclusiveDistribution(commits.length),
+        enqueue_to_settlement_ms: captureComplete
+          ? distribution(settlements)
+          : inconclusiveDistribution(settlements.length),
+      },
+    ];
+  });
+
+  const overallReasons = [...allReasons];
+  const overallComplete = overallReasons.length === 0;
+
   return {
     run_id,
     environment,
     source_sha,
     window_ms: end - start,
-    destinations: Object.fromEntries(
-      [...queues].map(([destination, queue]) => {
-        const commits = [];
-        const settlements = [];
-        let reDeliveries = 0;
-        let abandoned = 0;
-        let deadlettered = 0;
-        let incomplete = 0;
-        for (const delivery of queue.deliveries) {
-          delivery.attempts.sort((a, b) => a.count - b.count);
-          let terminal = false;
-          let firstCommit = null;
-          let previous = null;
-          for (const attempt of delivery.attempts) {
-            requireValue(!terminal, 'ATTEMPT_AFTER_TERMINAL_SETTLEMENT');
-            requireValue(
-              !previous ||
-                (attempt.count > previous.count &&
-                  attempt.received >=
-                    (previous.settled ??
-                      previous.committed ??
-                      previous.received)),
-              'INCONSISTENT_ATTEMPT_ORDER',
-            );
-            if (attempt.count > 1) reDeliveries++;
-            if (attempt.outcome === 'abandon') abandoned++;
-            firstCommit ??= attempt.committed;
-            terminal = ['complete', 'deadletter'].includes(attempt.outcome);
-            if (attempt.outcome === 'complete') {
-              requireValue(
-                firstCommit !== null,
-                'COMPLETION_WITHOUT_DURABLE_COMMIT',
-              );
-              settlements.push(attempt.settled - delivery.enqueued);
-              commits.push(firstCommit - delivery.enqueued);
-            }
-            if (attempt.outcome === 'deadletter') deadlettered++;
-            previous = attempt;
-          }
-          if (!terminal) incomplete++;
-        }
-
-        const timeline = queue.samples.sort((a, b) => a.at - b.at);
-        requireValue(
-          timeline.length >= 2 &&
-            timeline[0].at === start &&
-            timeline.at(-1).at === end &&
-            timeline.every(
-              (sample, index) =>
-                index === 0 || timeline[index - 1].at < sample.at,
-            ),
-          'INCOMPLETE_BACKLOG_SAMPLING',
-        );
-        let busySince = null;
-        let drainMs = null;
-        for (const sample of timeline) {
-          if (sample.backlog + sample.pending > 0) {
-            busySince ??= sample.at;
-            drainMs = null;
-          } else if (busySince !== null) {
-            drainMs = sample.at - busySince;
-            busySince = null;
-          }
-        }
-        return [
-          destination,
-          {
-            outbox_deliveries: queue.deliveries.length,
-            completed: settlements.length,
-            incomplete,
-            redeliveries: reDeliveries,
-            abandoned,
-            deadlettered,
-            dlq_count: timeline.at(-1).dlq,
-            final_backlog: timeline.at(-1).backlog,
-            outbox_pending: timeline.at(-1).pending,
-            peak_lease_age_ms: Math.max(
-              ...timeline.map((sample) => sample.lease),
-            ),
-            drain_ms: drainMs,
-            completions_per_second:
-              (settlements.length * 1_000) / (end - start),
-            enqueue_to_commit_ms: distribution(commits),
-            enqueue_to_settlement_ms: distribution(settlements),
-          },
-        ];
-      }),
-    ),
+    capture_complete: overallComplete,
+    certification_eligible: overallComplete,
+    status: overallComplete ? 'COMPLETE' : 'INCONCLUSIVE',
+    incomplete_reasons: overallReasons,
+    destinations: Object.fromEntries(destinationEntries),
   };
 }
 
@@ -266,7 +360,9 @@ if (
 ) {
   try {
     const input = JSON.parse(await readFile(process.argv[2], 'utf8'));
-    console.log(JSON.stringify(summarizeServiceBus(input), null, 2));
+    const summary = summarizeServiceBus(input);
+    console.log(JSON.stringify(summary, null, 2));
+    process.exitCode = summary.status === 'COMPLETE' ? 0 : 2;
   } catch (error) {
     console.error(
       'PERF-05: ' +
