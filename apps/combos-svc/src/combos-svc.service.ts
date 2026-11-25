@@ -100,10 +100,8 @@ export class CombosSvcService {
   }
   async readiness(
     brokerInput:
-      | 'disabled'
-      | 'ready'
-      | 'not_ready'
-      | CombosConsumerReadiness = process.env.COMBOS_AMQP_ENABLED === 'true' ||
+      'disabled' | 'ready' | 'not_ready' | CombosConsumerReadiness = process.env
+      .COMBOS_AMQP_ENABLED === 'true' ||
     process.env.COMBOS_SERVICE_BUS_EVENTS_ENABLED === 'true'
       ? 'not_ready'
       : 'disabled',
@@ -151,7 +149,9 @@ export class CombosSvcService {
               postgres_permissions: dbStatus.permissionsOk ? 'ok' : 'error',
             }
           : {}),
-        ...(brokerRequired ? { [brokerKey]: brokerReady ? 'ok' : 'error' } : {}),
+        ...(brokerRequired
+          ? { [brokerKey]: brokerReady ? 'ok' : 'error' }
+          : {}),
       },
       ...(isAzure && consumer.queues
         ? {

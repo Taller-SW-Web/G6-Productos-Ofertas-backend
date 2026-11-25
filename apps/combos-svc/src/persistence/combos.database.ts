@@ -68,7 +68,10 @@ export class CombosDatabase implements OnModuleDestroy {
       client.release();
     }
   }
-  async readyDetailed(): Promise<{ available: boolean; permissionsOk: boolean }> {
+  async readyDetailed(): Promise<{
+    available: boolean;
+    permissionsOk: boolean;
+  }> {
     try {
       return await this.query(async (c) => {
         await c.query('BEGIN READ ONLY');

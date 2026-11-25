@@ -18,8 +18,7 @@ const realAzureEnabled = process.env.G6_H5_COMBOS_REAL_AZURE === '1';
 
 const LAB_NAMESPACE_REGEX =
   /^g6-sb-h5-int-[a-z0-9]{13}\.servicebus\.windows\.net$/;
-const NON_ZERO_UUID_REGEX =
-  /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+const NON_ZERO_UUID_REGEX = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const ZERO_UUID_REGEX = /^0{8}-0{4}-0{4}-0{4}-0{12}$/;
 const RESERVATION_REGEX = /^[A-Za-z0-9._:-]{4,64}$/;
 
@@ -48,11 +47,11 @@ function assertIsolatedLabEnvironment() {
     );
   }
   const catalogQueue =
-    (process.env.G6_H5_LAB_CATALOG_QUEUE?.trim() as CombosEventQueue | undefined) ??
-    'g6.combos.from.catalog';
+    (process.env.G6_H5_LAB_CATALOG_QUEUE?.trim() as
+      CombosEventQueue | undefined) ?? 'g6.combos.from.catalog';
   const inventoryQueue =
-    (process.env.G6_H5_LAB_INVENTORY_QUEUE?.trim() as CombosEventQueue | undefined) ??
-    'g6.combos.from.inventory';
+    (process.env.G6_H5_LAB_INVENTORY_QUEUE?.trim() as
+      CombosEventQueue | undefined) ?? 'g6.combos.from.inventory';
   if (
     catalogQueue !== 'g6.combos.from.catalog' ||
     inventoryQueue !== 'g6.combos.from.inventory'
@@ -158,7 +157,13 @@ async function seedComboAtomically(
     );
     await client.query(
       'INSERT INTO combos.combo_items(id, combo_id, sku, quantity) VALUES ($1, $2, $3, 1), ($4, $2, $5, 1)',
-      [input.itemId, input.comboId, input.sku, input.itemSecondId, input.skuSecond],
+      [
+        input.itemId,
+        input.comboId,
+        input.sku,
+        input.itemSecondId,
+        input.skuSecond,
+      ],
     );
     await client.query(
       "INSERT INTO combos.component_projection(combo_item_id, catalog_deactivated, projected_available, inventory_observed_at) VALUES ($1, false, 4, '2026-01-01T00:00:00Z')",
@@ -426,9 +431,10 @@ describe.skipIf(!realAzureEnabled)(
         );
       } finally {
         await pool
-          .query('DELETE FROM combos.inbox WHERE message_id = ANY($1::text[])', [
-            [r05MessageId, r12MessageId],
-          ])
+          .query(
+            'DELETE FROM combos.inbox WHERE message_id = ANY($1::text[])',
+            [[r05MessageId, r12MessageId]],
+          )
           .catch(() => undefined);
         await pool
           .query('DELETE FROM combos.combos WHERE id = $1', [comboId])
@@ -601,9 +607,10 @@ describe.skipIf(!realAzureEnabled)(
       } finally {
         await bus.close().catch(() => undefined);
         await pool
-          .query('DELETE FROM combos.inbox WHERE message_id = ANY($1::text[])', [
-            [r05MessageId, r12MessageId],
-          ])
+          .query(
+            'DELETE FROM combos.inbox WHERE message_id = ANY($1::text[])',
+            [[r05MessageId, r12MessageId]],
+          )
           .catch(() => undefined);
         await pool
           .query('DELETE FROM combos.combos WHERE id = $1', [comboId])

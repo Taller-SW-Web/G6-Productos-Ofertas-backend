@@ -107,9 +107,7 @@ describe.skipIf(!isolatedHarnessEnabled)(
             ? 'modulo-productos'
             : '00000000-0000-4000-8000-000000000010',
         tipo: kind,
-        ...(kind === 'acceso'
-          ? { roles: ['GESTOR_COMERCIAL'] }
-          : { scope }),
+        ...(kind === 'acceso' ? { roles: ['GESTOR_COMERCIAL'] } : { scope }),
         iat: now,
         exp: now + 600,
         jti: randomUUID(),
@@ -148,25 +146,22 @@ describe.skipIf(!isolatedHarnessEnabled)(
             .end(JSON.stringify({ code: 'SKU_NO_ENCONTRADO' }));
           return;
         }
-        res
-          .writeHead(200, { 'content-type': 'application/json' })
-          .end(
-            JSON.stringify({
-              sku,
-              productId: skuProductMap.get(sku) ?? '00000000-0000-4000-8000-000000000099',
-              isVariant: false,
-              active: true,
-              eligible: true,
-            }),
-          );
+        res.writeHead(200, { 'content-type': 'application/json' }).end(
+          JSON.stringify({
+            sku,
+            productId:
+              skuProductMap.get(sku) ?? '00000000-0000-4000-8000-000000000099',
+            isVariant: false,
+            active: true,
+            eligible: true,
+          }),
+        );
       });
       pricing = createServer((req, res) => {
         const parsed = new URL(req.url ?? '/', 'http://127.0.0.1');
         const skus = parsed.pathname.includes('/skus/')
           ? [decodeURIComponent(parsed.pathname.split('/').at(-1)!)]
-          : (parsed.searchParams.get('skus') ?? '')
-              .split(',')
-              .filter(Boolean);
+          : (parsed.searchParams.get('skus') ?? '').split(',').filter(Boolean);
         const item = (sku: string) => ({
           sku,
           precio_regular: 25.0,
@@ -179,11 +174,13 @@ describe.skipIf(!isolatedHarnessEnabled)(
           vigencia_id: `validity-${sku}`,
           origen: 'PRODUCTO',
         });
-        res.writeHead(200, { 'content-type': 'application/json' }).end(
-          parsed.pathname.includes('/skus/')
-            ? JSON.stringify(item(skus[0]!))
-            : JSON.stringify({ items: skus.map(item) }),
-        );
+        res
+          .writeHead(200, { 'content-type': 'application/json' })
+          .end(
+            parsed.pathname.includes('/skus/')
+              ? JSON.stringify(item(skus[0]!))
+              : JSON.stringify({ items: skus.map(item) }),
+          );
       });
       identity = createServer((req, res) => {
         if (req.url === '/.well-known/openid-configuration') {
@@ -198,22 +195,30 @@ describe.skipIf(!isolatedHarnessEnabled)(
         }
         if (req.url === '/jwks') {
           const jwk = keyPair.publicKey.export({ format: 'jwk' });
-          res.writeHead(200, { 'content-type': 'application/json' }).end(
-            JSON.stringify({ keys: [{ ...jwk, kid, use: 'sig', alg: 'RS256' }] }),
-          );
+          res
+            .writeHead(200, { 'content-type': 'application/json' })
+            .end(
+              JSON.stringify({
+                keys: [{ ...jwk, kid, use: 'sig', alg: 'RS256' }],
+              }),
+            );
           return;
         }
         if (req.url === '/oauth/token' && req.method === 'POST') {
           const chunks: Buffer[] = [];
           req.on('data', (c) => chunks.push(c));
           req.on('end', () => {
-            const form = new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
+            const form = new URLSearchParams(
+              Buffer.concat(chunks).toString('utf8'),
+            );
             if (
               form.get('grant_type') !== 'client_credentials' ||
               form.get('client_id') !== 'modulo-productos' ||
               form.get('client_secret') !== 'test-secret'
             ) {
-              res.writeHead(401, { 'content-type': 'application/json' }).end('{}');
+              res
+                .writeHead(401, { 'content-type': 'application/json' })
+                .end('{}');
               return;
             }
             const scope = form.get('scope') ?? 'catalogo:leer';
@@ -501,8 +506,12 @@ describe.skipIf(!isolatedHarnessEnabled)(
         prodMsg,
       );
       expect(receiver.completeMessage).toHaveBeenCalledTimes(1);
-      expect((await service.evaluateEligibility(comboId)).commercialEligibility).toBe('INELEGIBLE');
-      expect((await service.evaluateEligibility(combo2Id)).commercialEligibility).toBe('INELEGIBLE');
+      expect(
+        (await service.evaluateEligibility(comboId)).commercialEligibility,
+      ).toBe('INELEGIBLE');
+      expect(
+        (await service.evaluateEligibility(combo2Id)).commercialEligibility,
+      ).toBe('INELEGIBLE');
     });
 
     it('T04 + T06 + T07: handles multi-location out-of-order R12, Inbox duplicates/conflicts, and ACK loss after commit', async () => {
@@ -565,7 +574,9 @@ describe.skipIf(!isolatedHarnessEnabled)(
       const projections = await service.componentProjections(comboId);
       const itemProj = projections.find((p) => p.sku === sku)!;
       expect(itemProj.projectedAvailable).toBeNull();
-      expect(itemProj.inventoryObservedAt?.toISOString()).toBe('2026-11-25T11:00:00.000Z');
+      expect(itemProj.inventoryObservedAt?.toISOString()).toBe(
+        '2026-11-25T11:00:00.000Z',
+      );
 
       // T07: ACK lost after commit -> redelivery hits DUPLICATE and completes
       const ackLostMsgId = `r12-ack-${randomUUID()}`;

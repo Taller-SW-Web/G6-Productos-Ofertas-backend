@@ -408,7 +408,9 @@ export class CombosEventConsumer implements OnModuleInit, OnModuleDestroy {
   readinessStatus(): 'disabled' | 'ready' | 'not_ready' {
     if (this.transport === 'AZURE_SERVICE_BUS') {
       if (!this.serviceBusEnabled) return 'disabled';
-      return this.serviceBus?.available && !this.stopping ? 'ready' : 'not_ready';
+      return this.serviceBus?.available && !this.stopping
+        ? 'ready'
+        : 'not_ready';
     }
     if (!this.enabled) return 'disabled';
     return this.connection &&
@@ -426,7 +428,9 @@ export class CombosEventConsumer implements OnModuleInit, OnModuleDestroy {
       return {
         transport: 'AZURE_SERVICE_BUS',
         status,
-        ...(this.serviceBus ? { queues: this.serviceBus.getQueueStates() } : {}),
+        ...(this.serviceBus
+          ? { queues: this.serviceBus.getQueueStates() }
+          : {}),
         catalogAuthBlocked: this.catalogAuthBlocked,
         lastCatalogErrorReason: this.lastCatalogErrorReason,
       };
@@ -630,7 +634,9 @@ export class CombosEventConsumer implements OnModuleInit, OnModuleDestroy {
         validationReason = 'INVALID_MESSAGE_BODY';
         throw new Error('INVALID_SERVICE_BUS_EVENT');
       }
-      if (estimateServiceBusMessageBytes(message) > SERVICE_BUS_MAX_MESSAGE_BYTES) {
+      if (
+        estimateServiceBusMessageBytes(message) > SERVICE_BUS_MAX_MESSAGE_BYTES
+      ) {
         validationReason = 'MESSAGE_TOO_LARGE';
         throw new Error('INVALID_SERVICE_BUS_EVENT');
       }

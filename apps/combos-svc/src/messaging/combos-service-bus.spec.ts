@@ -159,14 +159,19 @@ describe('readCombosServiceBus (COR-06 / T08)', () => {
 
 describe('CombosServiceBus runtime (COM-SB-01 / COR-05 / T08 / T11)', () => {
   it('starts two independent peekLock receivers, tracks per-queue readiness, and closes idempotently', async () => {
-    const receivers = new Map<CombosEventQueue, ReturnType<typeof makeFakeReceiver>>([
+    const receivers = new Map<
+      CombosEventQueue,
+      ReturnType<typeof makeFakeReceiver>
+    >([
       ['g6.combos.from.catalog', makeFakeReceiver()],
       ['g6.combos.from.inventory', makeFakeReceiver()],
     ]);
     const client: ServiceBusClientLike = {
       createReceiver: vi.fn(
         (queue: string) =>
-          receivers.get(queue as CombosEventQueue) as unknown as ServiceBusReceiver,
+          receivers.get(
+            queue as CombosEventQueue,
+          ) as unknown as ServiceBusReceiver,
       ),
       close: vi.fn(async () => undefined),
     };
@@ -202,7 +207,11 @@ describe('CombosServiceBus runtime (COM-SB-01 / COR-05 / T08 / T11)', () => {
     // Error on one queue marks overall readiness not_ready without false READY
     await receivers
       .get('g6.combos.from.inventory')!
-      .emitError(Object.assign(new Error('UnauthorizedAccess'), { code: 'UnauthorizedAccess' }));
+      .emitError(
+        Object.assign(new Error('UnauthorizedAccess'), {
+          code: 'UnauthorizedAccess',
+        }),
+      );
     expect(bus.available).toBe(false);
     expect(bus.getQueueStates()['g6.combos.from.catalog'].ready).toBe(true);
     expect(bus.getQueueStates()['g6.combos.from.inventory']).toMatchObject({
@@ -307,8 +316,12 @@ describe('CombosServiceBus runtime (COM-SB-01 / COR-05 / T08 / T11)', () => {
 
     await bus.close();
     expect(bus.available).toBe(false);
-    expect(bus.getQueueStates()['g6.combos.from.catalog'].phase).toBe('STOPPED');
-    expect(bus.getQueueStates()['g6.combos.from.inventory'].phase).toBe('STOPPED');
+    expect(bus.getQueueStates()['g6.combos.from.catalog'].phase).toBe(
+      'STOPPED',
+    );
+    expect(bus.getQueueStates()['g6.combos.from.inventory'].phase).toBe(
+      'STOPPED',
+    );
     expect(client.close).toHaveBeenCalledTimes(1);
   });
 
@@ -451,7 +464,9 @@ describe('CombosEventConsumer Service Bus delivery & settlement (T03 / T06 / T07
     );
     expect(receiver.deadLetterMessage).toHaveBeenLastCalledWith(
       wrongQueueMsg,
-      expect.objectContaining({ deadLetterReason: 'EVENT_NOT_ALLOWED_FOR_QUEUE' }),
+      expect.objectContaining({
+        deadLetterReason: 'EVENT_NOT_ALLOWED_FOR_QUEUE',
+      }),
     );
 
     // 2. Oversized > 256 KB
@@ -586,7 +601,9 @@ describe('CombosEventConsumer Service Bus delivery & settlement (T03 / T06 / T07
       .mockResolvedValueOnce(new Response(null, { status: 403 }));
 
     const processEvent = vi.fn(
-      async (input: { resolveProductSkus?: (skus: string[]) => Promise<string[]> }) => {
+      async (input: {
+        resolveProductSkus?: (skus: string[]) => Promise<string[]>;
+      }) => {
         if (input.resolveProductSkus) {
           await input.resolveProductSkus(['SKU-1']);
         }
@@ -628,10 +645,12 @@ describe('CombosEventConsumer Service Bus delivery & settlement (T03 / T06 / T07
       msg,
     );
     expect(receiver.abandonMessage).toHaveBeenCalledTimes(2);
-    expect(consumer.getObservabilitySnapshot().catalogResolution).toMatchObject({
-      authBlocked: true,
-      lastErrorReason: 'SERVICE_AUTHORIZATION_FAILED',
-    });
+    expect(consumer.getObservabilitySnapshot().catalogResolution).toMatchObject(
+      {
+        authBlocked: true,
+        lastErrorReason: 'SERVICE_AUTHORIZATION_FAILED',
+      },
+    );
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
@@ -681,10 +700,7 @@ describe('CombosSvcService.readiness (COR-05 / COM-AUD-07)', () => {
       })),
       ready: vi.fn(async () => true),
     } as unknown as CombosDatabase;
-    const service = new CombosSvcService(
-      db,
-      {} as CombosRepository,
-    );
+    const service = new CombosSvcService(db, {} as CombosRepository);
 
     const notReady = await service.readiness({
       transport: 'AZURE_SERVICE_BUS',
@@ -773,10 +789,19 @@ describe('CombosSvcService.readiness (COR-05 / COM-AUD-07)', () => {
       permissionsOk: false,
     });
     await expect(db.ready()).resolves.toBe(false);
-    const privQuery = queries.find((q) => q.includes('has_table_privilege')) ?? '';
-    expect(privQuery).toContain("has_schema_privilege(current_user, 'combos', 'USAGE')");
-    expect(privQuery).toContain("has_table_privilege(current_user, 'combos.component_projection', 'INSERT')");
-    expect(privQuery).toContain("has_table_privilege(current_user, 'combos.component_projection', 'UPDATE')");
-    expect(privQuery).toContain("has_table_privilege(current_user, 'combos.inbox', 'INSERT')");
+    const privQuery =
+      queries.find((q) => q.includes('has_table_privilege')) ?? '';
+    expect(privQuery).toContain(
+      "has_schema_privilege(current_user, 'combos', 'USAGE')",
+    );
+    expect(privQuery).toContain(
+      "has_table_privilege(current_user, 'combos.component_projection', 'INSERT')",
+    );
+    expect(privQuery).toContain(
+      "has_table_privilege(current_user, 'combos.component_projection', 'UPDATE')",
+    );
+    expect(privQuery).toContain(
+      "has_table_privilege(current_user, 'combos.inbox', 'INSERT')",
+    );
   });
 });

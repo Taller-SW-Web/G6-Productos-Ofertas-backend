@@ -34,8 +34,7 @@ export type CombosServiceBusConfig =
 
 const NAMESPACE_REGEX =
   /^[a-z][a-z0-9-]{4,48}[a-z0-9]\.servicebus\.windows\.net$/;
-const UUID_REGEX =
-  /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+const UUID_REGEX = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const ZERO_UUID_REGEX = /^0{8}-0{4}-0{4}-0{4}-0{12}$/;
 
 export function readCombosServiceBus(
@@ -146,7 +145,9 @@ export interface CombosServiceBusHooks {
     level: 'log' | 'warn' | 'error',
     payload: Record<string, unknown>,
   ) => void;
-  clientFactory?: (config: CombosServiceBusEnabledConfig) => ServiceBusClientLike;
+  clientFactory?: (
+    config: CombosServiceBusEnabledConfig,
+  ) => ServiceBusClientLike;
   probeIntervalMs?: number;
   maxBackoffMs?: number;
 }
@@ -271,7 +272,10 @@ export class CombosServiceBus {
   private recordQueueFailure(queue: CombosEventQueue): void {
     const failures = (this.consecutiveFailures.get(queue) ?? 0) + 1;
     this.consecutiveFailures.set(queue, failures);
-    this.nextRecoveryAt.set(queue, Date.now() + this.computeBackoffMs(failures));
+    this.nextRecoveryAt.set(
+      queue,
+      Date.now() + this.computeBackoffMs(failures),
+    );
   }
 
   private clearQueueFailure(queue: CombosEventQueue): void {
