@@ -483,15 +483,8 @@ try {
 
     $stage = "$GitHubEnvironment protection check"
     $environment = Invoke-GhJson @('api',"repos/$Repository/environments/$GitHubEnvironment")
-    $hasReviewer = @($environment.protection_rules | Where-Object { $_.type -eq 'required_reviewers' -and $_.prevent_self_review -eq $true -and @($_.reviewers).Count -gt 0 }).Count -gt 0
-    $hasMasterOnly = $environment.deployment_branch_policy.custom_branch_policies -eq $true -and $environment.deployment_branch_policy.protected_branches -eq $false
-    if ($environment.can_admins_bypass -ne $false -or -not $hasReviewer -or -not $hasMasterOnly) {
-        throw "$GitHubEnvironment protections failed verification; JIT registration was not requested."
-    }
     $branchPolicies = Invoke-GhJson @('api',"repos/$Repository/environments/$GitHubEnvironment/deployment-branch-policies?per_page=100")
-    if ($branchPolicies.total_count -ne 1 -or @($branchPolicies.branch_policies | Where-Object { $_.type -eq 'branch' -and $_.name -ceq 'master' }).Count -ne 1) {
-        throw "$GitHubEnvironment deployment branch policies are not exactly branch master; JIT registration was not requested."
-    }
+    Assert-H5EnvironmentApprovalPolicy -Environment $environment -BranchPolicies $branchPolicies -Destination $Destination -ExpectedEnvironment $GitHubEnvironment
 
     $stage = 'Container Apps Job template check'
     $job = Invoke-AzJson @('containerapp','job','show','--name',$JobName,'--resource-group',$ResourceGroup,'--output','json')
