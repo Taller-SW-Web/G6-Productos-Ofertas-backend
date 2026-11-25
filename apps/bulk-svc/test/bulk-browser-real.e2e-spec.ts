@@ -311,6 +311,13 @@ describe.skipIf(!enabled)(
               if (!injectedTransientFailure && event.schemaVersion === 3) {
                 const contentRef = envelope.data?.content_ref as { content_id: string; sha256: string; byte_length: number; content_type: string } | undefined;
                 if (contentRef) {
+                  const probe = await fetch(`${bulkOrigin}/interno/carga-masiva/contenidos/${encodeURIComponent(contentRef.content_id)}`, {
+                    headers: { authorization: `Bearer ${serviceToken}`, accept: 'application/json' },
+                  });
+                  if (!probe.ok) {
+                    const bodyText = await probe.text().catch(() => '');
+                    console.warn(`[bulk-browser-real probe] status=${probe.status} body=${bodyText}`);
+                  }
                   const doc = await contentClient.getDocument(contentRef);
                   if (JSON.stringify(doc).includes(retrySkuBase)) {
                     useTransientFailure = true;

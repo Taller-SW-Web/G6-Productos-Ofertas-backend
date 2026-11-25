@@ -311,6 +311,16 @@ integration('P1 Bulk Recovery, Files/Exports & Migrations (PostgreSQL 17 + Stora
       .expect(202);
 
     // Export CSV with formula injection protection + XLSX + owner isolation + 404
+    const storage2 = mod.get(BulkStorageService);
+    const origPut = storage2.put.bind(storage2);
+    vi.spyOn(storage2, 'put').mockImplementation(async (...args) => {
+      try {
+        return await origPut(...args);
+      } catch (err) {
+        console.error('[export-test storage.put error]', err);
+        throw err;
+      }
+    });
     const expCsv = await request(server)
       .post('/api/v1/carga-masiva/productos/exportaciones')
       .set('Authorization', `Bearer ${tokenA}`)
