@@ -134,24 +134,44 @@ export class GatewayProxy {
   ) {}
 
   async forward(req: Request, res: Response): Promise<void> {
+    const startedAt = Date.now();
     const path = req.originalUrl.split('?')[0];
     const route = matchContractRoute(
       req.method,
       path,
       this.settings.g5H5Enabled === true,
     );
-    if (!route) {
-      res.status(404).end();
-      return;
-    }
-    if (route.operationId === 'conciliarImportacionGeneralPorCorrelacion')
-      res.setHeader('Cache-Control', 'no-store');
     const incomingCorrelation = req.header('x-correlation-id');
     const correlationId =
       incomingCorrelation && uuid.test(incomingCorrelation)
         ? incomingCorrelation
         : randomUUID();
     res.setHeader('X-Correlation-Id', correlationId);
+    let finalStatus = 500;
+    let resultOrigin: 'gateway' | 'provider' = 'gateway';
+    let preUpstreamOutcome: string | null = null;
+    if (!route) {
+      finalStatus = 404;
+      preUpstreamOutcome = 'route_not_found';
+      res.status(404).end();
+      process.stdout.write(
+        JSON.stringify({
+          service: 'api-gateway',
+          event: 'gateway_request',
+          operationId: null,
+          method: req.method,
+          owner: null,
+          status: finalStatus,
+          durationMs: Math.max(0, Date.now() - startedAt),
+          correlationId,
+          resultOrigin,
+          preUpstreamOutcome,
+        }) + '\n',
+      );
+      return;
+    }
+    if (route.operationId === 'conciliarImportacionGeneralPorCorrelacion')
+      res.setHeader('Cache-Control', 'no-store');
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.settings.timeoutMs);
     const disconnected = () => {
@@ -161,8 +181,10 @@ export class GatewayProxy {
     let upload: ReturnType<typeof streamedRequest> | undefined;
     try {
       const bypass = isDemoBypassRoute(route, this.settings);
-      if (bypass && !isRestrictedDemoPeer(req.socket.remoteAddress))
+      if (bypass && !isRestrictedDemoPeer(req.socket.remoteAddress)) {
+        preUpstreamOutcome = 'forbidden';
         throw new GatewayFailure(403, 'SCOPE_INSUFICIENTE');
+      }
       const uniqueHeaders = new Set([
         ...(!bypass ? ['authorization'] : []),
         'x-correlation-id',
@@ -173,14 +195,36 @@ export class GatewayProxy {
         let count = 0;
         for (let i = 0; i < req.rawHeaders.length; i += 2)
           if (req.rawHeaders[i].toLowerCase() === name) count++;
-        if (count > 1) throw new GatewayFailure(400, 'VALIDACION');
+        if (count > 1) {
+          preUpstreamOutcome = 'validation_failed';
+          throw new GatewayFailure(400, 'VALIDACION');
+        }
       }
-      if (incomingCorrelation && !uuid.test(incomingCorrelation))
+      if (incomingCorrelation && !uuid.test(incomingCorrelation)) {
+        preUpstreamOutcome = 'validation_failed';
         throw new GatewayFailure(400, 'VALIDACION');
+      }
       const authorization = bypass ? undefined : req.header('authorization');
-      await this.identity.authorize(route, authorization);
+      try {
+        await this.identity.authorize(route, authorization);
+      } catch (authError: unknown) {
+        if (authError instanceof GatewayFailure) {
+          preUpstreamOutcome =
+            authError.status === 401
+              ? 'auth_failed'
+              : authError.status === 403
+                ? 'forbidden'
+                : 'auth_unavailable';
+        } else {
+          preUpstreamOutcome = 'auth_unavailable';
+        }
+        throw authError;
+      }
       const base = this.settings.upstreams[route.service];
-      if (!base) throw new GatewayFailure(503, 'SERVICIO_NO_DISPONIBLE');
+      if (!base) {
+        preUpstreamOutcome = 'upstream_not_configured';
+        throw new GatewayFailure(503, 'SERVICIO_NO_DISPONIBLE');
+      }
       const headers: Record<string, string> = {
         accept: req.header('accept') ?? 'application/json',
       };
@@ -197,8 +241,10 @@ export class GatewayProxy {
               value.length < header.minLength) ||
               (header.maxLength !== undefined &&
                 value.length > header.maxLength)))
-        )
+        ) {
+          preUpstreamOutcome = 'validation_failed';
           throw new GatewayFailure(400, 'VALIDACION');
+        }
         if (value) headers[header.name] = value;
       }
       const contentType = req.header('content-type');
@@ -207,8 +253,10 @@ export class GatewayProxy {
           !route.requestTypes.includes(
             contentType.split(';')[0].trim().toLowerCase(),
           )
-        )
+        ) {
+          preUpstreamOutcome = 'validation_failed';
           throw new GatewayFailure(400, 'VALIDACION');
+        }
         headers['content-type'] = contentType;
       }
       // File owners enforce their contractual limits (including brand logos).
@@ -226,8 +274,10 @@ export class GatewayProxy {
           this.settings.maxBytes,
           controller.signal,
         );
-        if (buffered.length > this.settings.maxBytes)
+        if (buffered.length > this.settings.maxBytes) {
+          preUpstreamOutcome = 'validation_failed';
           throw new GatewayFailure(400, 'VALIDACION');
+        }
         if (buffered.length && !['GET', 'HEAD'].includes(route.method))
           body = new Uint8Array(buffered).buffer;
       }
@@ -281,14 +331,15 @@ export class GatewayProxy {
         } catch {
           /* Never forward raw upstream failures. */
         }
-        sendGatewayProblem(
+        resultOrigin = 'provider';
+        finalStatus = sendGatewayProblem(
           res,
           route,
           response.status,
           code,
           correlationId,
           'provider',
-        );
+        ).status;
         return;
       }
       const responseType = response.headers
@@ -304,6 +355,8 @@ export class GatewayProxy {
       if (responseType)
         res.setHeader('Content-Type', response.headers.get('content-type')!);
       if (responseType && responseType !== 'application/json') {
+        resultOrigin = 'provider';
+        finalStatus = response.status;
         res.status(response.status);
         await streamFileResponse(response, res, controller.signal);
         return;
@@ -312,27 +365,46 @@ export class GatewayProxy {
         response,
         this.settings.maxBytes,
       );
+      resultOrigin = 'provider';
+      finalStatus = response.status;
       res.status(response.status).send(payload);
     } catch (error: unknown) {
       const failure =
         error instanceof GatewayFailure
           ? error
           : new GatewayFailure(503, 'SERVICIO_NO_DISPONIBLE');
+      resultOrigin = 'gateway';
       if (!res.destroyed && !res.headersSent) {
         if (controller.signal.aborted) res.setHeader('Connection', 'close');
-        sendGatewayProblem(
+        finalStatus = sendGatewayProblem(
           res,
           route,
           failure.status,
           failure.code,
           correlationId,
           'gateway',
-        );
+        ).status;
+      } else {
+        finalStatus = failure.status;
       }
     } finally {
       clearTimeout(timer);
       res.off('close', disconnected);
       upload?.close();
+      process.stdout.write(
+        JSON.stringify({
+          service: 'api-gateway',
+          event: 'gateway_request',
+          operationId: route.operationId,
+          method: route.method,
+          owner: route.service,
+          status: finalStatus,
+          durationMs: Math.max(0, Date.now() - startedAt),
+          correlationId,
+          resultOrigin,
+          preUpstreamOutcome,
+        }) + '\n',
+      );
     }
   }
 }

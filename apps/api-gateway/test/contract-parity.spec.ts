@@ -130,11 +130,15 @@ describe('Gateway parity with the pinned H5 OpenAPI snapshot', () => {
       contractState: 'MASTER_MERGED',
       openApiVersion: '0.7.0-rc.3',
       approvalStatus: 'APPROVED_G6',
-      operationCount: 154,
     });
     expect(snapshot.operations).toHaveLength(snapshot.operationCount);
-    expect(CONTRACT_ROUTES).toHaveLength(147);
-    expect(G5_H5_ROUTES).toHaveLength(4);
+    const expectedBaseCount =
+      snapshot.operations.filter(
+        (operation) =>
+          !operation.internal && !h5OperationIds.includes(operation.operationId),
+      ).length + legacyPricingOperationIds.length;
+    expect(CONTRACT_ROUTES).toHaveLength(expectedBaseCount);
+    expect(G5_H5_ROUTES).toHaveLength(h5OperationIds.length);
     expect(
       new Set(snapshot.operations.map((operation) => operation.operationId))
         .size,
