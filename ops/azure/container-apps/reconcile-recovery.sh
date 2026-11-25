@@ -66,7 +66,7 @@ while IFS= read -r service; do
       continue
     fi
     printf 'ACTUALIZADO CON RECIBO: %s target=%s\n' "$service" "$target" | tee -a "$summary_file"
-    if recovery_output="$(H5_DEPLOY_DESTINATION="$destination" H5_DEPLOY_ENVIRONMENT="$environment" H5_PILOT_SELF_REVIEW="$([[ "$environment" == azure-h5-pilot-234 ]] && echo true || echo false)" "$deploy_script" --restore "$service" "$previous" "$target" "$config_hash" 2>&1)"; then
+    if recovery_output="$(H5_DEPLOY_DESTINATION="$destination" H5_DEPLOY_ENVIRONMENT="$environment" H5_PILOT_SELF_REVIEW="$([[ "$environment" == azure-h5-pilot-234 ]] && echo true || echo false)" bash "$deploy_script" --restore "$service" "$previous" "$target" "$config_hash" 2>&1)"; then
       printf '%s\n' "$recovery_output"
       printf 'RECUPERADO: %s digest=%s; estado y configuración verificados.\n' "$service" "$previous" | tee -a "$summary_file"
     else
@@ -87,7 +87,7 @@ while IFS= read -r service; do
     continue
   fi
   target="$(cat "$image_file")"
-  if inspection_output="$(H5_DEPLOY_DESTINATION="$destination" H5_DEPLOY_ENVIRONMENT="$environment" H5_PILOT_SELF_REVIEW="$([[ "$environment" == azure-h5-pilot-234 ]] && echo true || echo false)" "$deploy_script" --inspect "$service" "$target" 2>&1)"; then
+  if inspection_output="$(H5_DEPLOY_DESTINATION="$destination" H5_DEPLOY_ENVIRONMENT="$environment" H5_PILOT_SELF_REVIEW="$([[ "$environment" == azure-h5-pilot-234 ]] && echo true || echo false)" bash "$deploy_script" --inspect "$service" "$target" 2>&1)"; then
     if [[ "$inspection_output" == TARGET_ACTIVE:* ]]; then
       printf 'ACTUALIZADO SIN RECIBO: %s tiene activo el digest candidato %s. No se restaura sin el digest/configuración previos del recibo.\n' "$service" "$target" | tee -a "$summary_file"
     else
