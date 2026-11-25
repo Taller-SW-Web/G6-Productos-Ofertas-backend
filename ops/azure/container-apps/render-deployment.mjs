@@ -364,7 +364,12 @@ export function makeDeployment({
           containers,
           volumes,
           scale: {
-            minReplicas: managedIdentities?.[service] ? 1 : 0,
+            minReplicas:
+              service === 'api-gateway' || service === 'promotions-svc'
+                ? 1
+                : managedIdentities?.[service]
+                  ? 1
+                  : 0,
             maxReplicas: 1,
             rules: [
               { name: 'http', http: { metadata: { concurrentRequests: '5' } } },
