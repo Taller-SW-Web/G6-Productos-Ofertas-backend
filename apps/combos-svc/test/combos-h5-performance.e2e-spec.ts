@@ -205,9 +205,22 @@ describe.skipIf(!isolatedPerformanceEnabled)(
     it('mide CRUD administrativo, paginado, PATCH con versión y recuperación idempotente sin RabbitMQ', async () => {
       const actorSub = randomUUID();
       const bearer = makeHumanToken(actorSub);
-      const samplesPerLevel = Number(
-        process.env.G6_PERFORMANCE_SAMPLES ?? '40',
-      );
+      const rawSamples = process.env.G6_PERFORMANCE_SAMPLES ?? '40';
+      if (!/^[1-9]\d*$/.test(rawSamples)) {
+        throw new Error(
+          `G6_PERFORMANCE_SAMPLES inválido (${rawSamples}); debe ser entero positivo entre 1 y 1000.`,
+        );
+      }
+      const samplesPerLevel = Number(rawSamples);
+      if (
+        !Number.isSafeInteger(samplesPerLevel) ||
+        samplesPerLevel < 1 ||
+        samplesPerLevel > 1000
+      ) {
+        throw new Error(
+          `G6_PERFORMANCE_SAMPLES fuera de rango (${rawSamples}); máximo permitido: 1000.`,
+        );
+      }
       const warmupRequests = 5;
       const concurrencies = [1, 8] as const;
       const outputDir = resolve(
@@ -225,6 +238,20 @@ describe.skipIf(!isolatedPerformanceEnabled)(
         payload: Record<string, unknown>;
       }> = [];
 
+      const isUsableComboDto = (
+        value: unknown,
+      ): value is { combo_id: string; version: number } => {
+        if (!value || typeof value !== 'object') return false;
+        const candidate = value as Record<string, unknown>;
+        return (
+          typeof candidate.combo_id === 'string' &&
+          candidate.combo_id.trim().length > 0 &&
+          typeof candidate.version === 'number' &&
+          Number.isInteger(candidate.version) &&
+          candidate.version >= 0
+        );
+      };
+
       const createPayload = (label: string) => ({
         nombre: `Combo H5 Perf ${label}`,
         descripcion: 'Escenario benchmark PostgreSQL sin RabbitMQ',
@@ -239,10 +266,19 @@ describe.skipIf(!isolatedPerformanceEnabled)(
         operation: string,
         method: string,
         pathTemplate: string,
+        expectedStatus: number,
         concurrency: number,
         samples: number,
-        execute: (index: number) => Promise<Response>,
+        execute: (index: number) => Promise<{
+          res: Response;
+          valid?: boolean;
+        }>,
       ) => {
+        if (!Number.isSafeInteger(samples) || samples < 1) {
+          throw new Error(
+            `Cantidad de muestras inválida para ${operation}: ${samples}`,
+          );
+        }
         const latencies: number[] = [];
         let errors = 0;
         const started = performance.now();
@@ -252,32 +288,55 @@ describe.skipIf(!isolatedPerformanceEnabled)(
             Array.from({ length: batchSize }, async (_, slot) => {
               const reqStart = performance.now();
               try {
-                const res = await execute(offset + slot);
-                await res.arrayBuffer();
-                if (!res.ok) errors += 1;
+                const { res, valid = true } = await execute(offset + slot);
+                if (res.status !== expectedStatus || !valid) {
+                  errors += 1;
+                  return;
+                }
                 latencies.push(performance.now() - reqStart);
               } catch {
                 errors += 1;
-                latencies.push(performance.now() - reqStart);
               }
             }),
           );
         }
         const elapsedMs = performance.now() - started;
-        return {
+        if (latencies.length === 0 || !Number.isFinite(elapsedMs) || elapsedMs <= 0) {
+          throw new Error(
+            `Sin muestras válidas para ${operation} (errors=${errors}, samples=${samples})`,
+          );
+        }
+        const row = {
           operation,
           method,
           path: pathTemplate,
+          expectedStatus,
           concurrency,
           samples,
+          successfulSamples: latencies.length,
           errors,
           p50_ms: Number(percentile(latencies, 0.5).toFixed(3)),
           p95_ms: Number(percentile(latencies, 0.95).toFixed(3)),
           p99_ms: Number(percentile(latencies, 0.99).toFixed(3)),
           min_ms: Number(Math.min(...latencies).toFixed(3)),
           max_ms: Number(Math.max(...latencies).toFixed(3)),
-          throughput_rps: Number(((samples * 1000) / elapsedMs).toFixed(2)),
+          throughput_rps: Number(
+            ((latencies.length * 1000) / elapsedMs).toFixed(2),
+          ),
         };
+        for (const metric of [
+          row.p50_ms,
+          row.p95_ms,
+          row.p99_ms,
+          row.min_ms,
+          row.max_ms,
+          row.throughput_rps,
+        ]) {
+          if (!Number.isFinite(metric)) {
+            throw new Error(`Métrica no finita en ${operation}`);
+          }
+        }
+        return row;
       };
 
       for (let w = 0; w < warmupRequests; w += 1) {
@@ -293,10 +352,11 @@ describe.skipIf(!isolatedPerformanceEnabled)(
           body: JSON.stringify(payload),
         });
         expect(res.status).toBe(201);
-        const created = (await res.json()) as {
-          combo_id: string;
-          version: number;
-        };
+        const created: unknown = await res.json();
+        expect(isUsableComboDto(created)).toBe(true);
+        if (!isUsableComboDto(created)) {
+          throw new Error('DTO de creación inválido en warmup');
+        }
         createdCombos.push({
           comboId: created.combo_id,
           version: created.version,
@@ -313,6 +373,7 @@ describe.skipIf(!isolatedPerformanceEnabled)(
             'crear_combo_administracion',
             'POST',
             '/api/v1/combos/administracion',
+            201,
             concurrency,
             samplesPerLevel,
             async () => {
@@ -330,19 +391,22 @@ describe.skipIf(!isolatedPerformanceEnabled)(
                   body: JSON.stringify(payload),
                 },
               );
-              if (res.ok) {
-                const body = (await res.clone().json()) as {
-                  combo_id: string;
-                  version: number;
-                };
-                createdCombos.push({
-                  comboId: body.combo_id,
-                  version: body.version,
-                  idempotencyKey: key,
-                  payload,
-                });
+              const rawBody = await res.text();
+              if (res.status !== 201) return { res, valid: false };
+              let parsed: unknown;
+              try {
+                parsed = JSON.parse(rawBody);
+              } catch {
+                return { res, valid: false };
               }
-              return res;
+              if (!isUsableComboDto(parsed)) return { res, valid: false };
+              createdCombos.push({
+                comboId: parsed.combo_id,
+                version: parsed.version,
+                idempotencyKey: key,
+                payload,
+              });
+              return { res, valid: true };
             },
           ),
         );
@@ -352,13 +416,19 @@ describe.skipIf(!isolatedPerformanceEnabled)(
             'obtener_combo_detalle',
             'GET',
             '/api/v1/combos/{comboId}',
+            200,
             concurrency,
             samplesPerLevel,
             async (index) => {
               const target = createdCombos[index % createdCombos.length]!;
-              return fetch(`${baseUrl}/api/v1/combos/${target.comboId}`, {
-                headers: { authorization: `Bearer ${bearer}` },
-              });
+              const res = await fetch(
+                `${baseUrl}/api/v1/combos/${target.comboId}`,
+                {
+                  headers: { authorization: `Bearer ${bearer}` },
+                },
+              );
+              await res.arrayBuffer();
+              return { res };
             },
           ),
         );
@@ -368,12 +438,19 @@ describe.skipIf(!isolatedPerformanceEnabled)(
             'listar_combos_paginado',
             'GET',
             '/api/v1/combos?pagina=1&tamanio=20',
+            200,
             concurrency,
             samplesPerLevel,
-            async () =>
-              fetch(`${baseUrl}/api/v1/combos?pagina=1&tamanio=20`, {
-                headers: { authorization: `Bearer ${bearer}` },
-              }),
+            async () => {
+              const res = await fetch(
+                `${baseUrl}/api/v1/combos?pagina=1&tamanio=20`,
+                {
+                  headers: { authorization: `Bearer ${bearer}` },
+                },
+              );
+              await res.arrayBuffer();
+              return { res };
+            },
           ),
         );
 
@@ -383,21 +460,27 @@ describe.skipIf(!isolatedPerformanceEnabled)(
             'actualizar_combo_patch_version',
             'PATCH',
             '/api/v1/combos/{comboId}',
+            200,
             concurrency,
             patchPool.length,
             async (index) => {
               const target = patchPool[index]!;
-              return fetch(`${baseUrl}/api/v1/combos/${target.comboId}`, {
-                method: 'PATCH',
-                headers: {
-                  authorization: `Bearer ${bearer}`,
-                  'content-type': 'application/json',
+              const res = await fetch(
+                `${baseUrl}/api/v1/combos/${target.comboId}`,
+                {
+                  method: 'PATCH',
+                  headers: {
+                    authorization: `Bearer ${bearer}`,
+                    'content-type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    descripcion: `Actualizado v${target.version} c${concurrency}`,
+                    version: target.version,
+                  }),
                 },
-                body: JSON.stringify({
-                  descripcion: `Actualizado v${target.version} c${concurrency}`,
-                  version: target.version,
-                }),
-              });
+              );
+              await res.arrayBuffer();
+              return { res };
             },
           ),
         );
@@ -407,19 +490,37 @@ describe.skipIf(!isolatedPerformanceEnabled)(
             'recuperacion_idempotente_receipt',
             'POST',
             '/api/v1/combos/administracion',
+            201,
             concurrency,
             samplesPerLevel,
             async (index) => {
               const target = createdCombos[index % createdCombos.length]!;
-              return fetch(`${baseUrl}/api/v1/combos/administracion`, {
-                method: 'POST',
-                headers: {
-                  authorization: `Bearer ${bearer}`,
-                  'content-type': 'application/json',
-                  'idempotency-key': target.idempotencyKey,
+              const res = await fetch(
+                `${baseUrl}/api/v1/combos/administracion`,
+                {
+                  method: 'POST',
+                  headers: {
+                    authorization: `Bearer ${bearer}`,
+                    'content-type': 'application/json',
+                    'idempotency-key': target.idempotencyKey,
+                  },
+                  body: JSON.stringify(target.payload),
                 },
-                body: JSON.stringify(target.payload),
-              });
+              );
+              const rawBody = await res.text();
+              if (res.status !== 201) return { res, valid: false };
+              let parsed: unknown;
+              try {
+                parsed = JSON.parse(rawBody);
+              } catch {
+                return { res, valid: false };
+              }
+              return {
+                res,
+                valid:
+                  isUsableComboDto(parsed) &&
+                  parsed.combo_id === target.comboId,
+              };
             },
           ),
         );

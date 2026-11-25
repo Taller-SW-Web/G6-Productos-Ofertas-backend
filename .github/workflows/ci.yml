@@ -23,6 +23,11 @@ name: Integración continua (CI)
         description: SHA completo de master u otra revisión base aprobada
         required: false
         type: string
+      include_legacy_combos:
+        description: Ejecuta además el benchmark histórico H4 de Combos con RabbitMQ
+        required: false
+        type: boolean
+        default: false
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.mode || 'ci' }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark' }}
@@ -918,3 +923,4 @@ jobs:
       component: ${{ inputs.component }}
       baseline_sha: ${{ inputs.baseline_sha }}
       parallelism: '1'
+      include_legacy_combos: ${{ inputs.include_legacy_combos }}

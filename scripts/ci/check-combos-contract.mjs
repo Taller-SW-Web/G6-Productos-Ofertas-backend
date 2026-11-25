@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * Compara las operaciones de Combos del OpenAPI oficial (0.7.0-rc.3) con las rutas
- * declaradas en api-gateway, los decoradores y seguridad de NestJS en combos-svc,
- * los DTOs/respuestas del servicio (incluida la disponibilidad conservadora) y las pruebas.
+ * Compara estáticamente las operaciones de Combos del OpenAPI oficial (0.7.0-rc.3)
+ * con las rutas y respuestas declaradas en api-gateway, los decoradores y seguridad
+ * de NestJS en combos-svc, los DTOs/respuestas del servicio (incluida la disponibilidad
+ * conservadora) y las aserciones en pruebas. No ejecuta validación de runtime.
  * Uso: node scripts/ci/check-combos-contract.mjs <openapi.yaml>
  */
 import { readFileSync, readdirSync } from 'node:fs';
@@ -23,26 +24,55 @@ if (contractVersion !== '0.7.0-rc.3') {
   );
 }
 
+const lines = contractText.split(/\r?\n/);
+
+// Recolectar anclas YAML de listas de códigos (p. ej. enum: &id102\n - TOKEN_INVALIDO)
+const yamlListAnchors = new Map();
+for (let i = 0; i < lines.length; i += 1) {
+  const anchorMatch = /^(\s*)(?:[A-Za-z0-9_'".-]+:\s*)?&([A-Za-z0-9_]+)\s*$/.exec(
+    lines[i],
+  );
+  if (!anchorMatch) continue;
+  const baseIndent = anchorMatch[1].length;
+  const anchorName = anchorMatch[2];
+  const items = [];
+  for (let j = i + 1; j < lines.length; j += 1) {
+    const next = lines[j];
+    if (!next.trim() || next.trim().startsWith('#')) continue;
+    const itemMatch = /^(\s*)-\s+([^\s#]+)\s*$/.exec(next);
+    if (itemMatch && itemMatch[1].length >= baseIndent) {
+      items.push(itemMatch[2].replace(/^['"]|['"]$/g, ''));
+      continue;
+    }
+    break;
+  }
+  if (items.length > 0) {
+    yamlListAnchors.set(anchorName, items);
+  }
+}
+
 const combosPath = (path) => /^\/combos(?:\/|$)/.test(path);
 const operations = [];
 let currentPath;
 let current;
 let inPaths = false;
-let inSecurity = false;
-let inResponses = false;
-for (const line of contractText.split(/\r?\n/)) {
+let section = '';
+let currentErrorStatus = '';
+
+for (const line of lines) {
   if (/^paths:\s*$/.test(line)) {
     inPaths = true;
     continue;
   }
   if (!inPaths) continue;
   if (/^components:\s*$/.test(line)) break;
+
   const pathMatch = /^  (\/[^:]+):\s*$/.exec(line);
   if (pathMatch) {
     currentPath = pathMatch[1];
     current = undefined;
-    inSecurity = false;
-    inResponses = false;
+    section = '';
+    currentErrorStatus = '';
     continue;
   }
   const methodMatch = /^    (get|post|put|patch|delete|head|options):\s*$/.exec(
@@ -53,18 +83,27 @@ for (const line of contractText.split(/\r?\n/)) {
       method: methodMatch[1].toUpperCase(),
       path: `/api/v1${currentPath}`,
       security: [],
-      responses: [],
+      responses: new Set(),
+      errorCodes: new Map(),
     };
     operations.push(current);
-    inSecurity = false;
-    inResponses = false;
+    section = '';
+    currentErrorStatus = '';
     continue;
   }
   if (!current) continue;
+
   if (/^      [A-Za-z0-9_-]+:/.test(line)) {
-    inSecurity = /^      security:\s*$/.test(line);
-    inResponses = /^      responses:\s*$/.test(line);
+    section = /^      security:\s*$/.test(line)
+      ? 'security'
+      : /^      responses:\s*$/.test(line)
+        ? 'responses'
+        : /^      x-error-codes:\s*$/.test(line)
+          ? 'x-error-codes'
+          : '';
+    currentErrorStatus = '';
   }
+
   const idMatch = /^      operationId:\s*([A-Za-z0-9_]+)\s*$/.exec(line);
   if (idMatch) current.operationId = idMatch[1];
   const roleMatch = /^      x-required-role:\s*([A-Za-z0-9_]+)\s*$/.exec(line);
@@ -76,13 +115,51 @@ for (const line of contractText.split(/\r?\n/)) {
   const audienceMatch =
     /^      x-service-audience:\s*([A-Za-z0-9_.-]+)\s*$/.exec(line);
   if (audienceMatch) current.serviceAudience = audienceMatch[1];
-  if (inSecurity) {
+
+  if (section === 'security') {
     const secMatch = /^      - ([A-Za-z0-9_]+):\s*\[\]\s*$/.exec(line);
     if (secMatch) current.security.push(secMatch[1]);
-  }
-  if (inResponses) {
-    const resMatch = /^        '(\d{3})':\s*$/.exec(line);
-    if (resMatch) current.responses.push(resMatch[1]);
+  } else if (section === 'responses') {
+    const resMatch =
+      /^        ['"]?(\d{3})['"]?:\s*(?:[*&][A-Za-z0-9_]+|\{.*\}|\S.*)?\s*$/.exec(
+        line,
+      );
+    if (resMatch) {
+      current.responses.add(resMatch[1]);
+    }
+  } else if (section === 'x-error-codes') {
+    const errStatusMatch =
+      /^        ['"]?(\d{3})['"]?:\s*(.*)$/.exec(line);
+    if (errStatusMatch) {
+      const status = errStatusMatch[1];
+      const rhs = errStatusMatch[2].trim();
+      currentErrorStatus = status;
+      if (rhs.startsWith('*')) {
+        const aliasName = rhs.slice(1).trim();
+        current.errorCodes.set(
+          status,
+          [...(yamlListAnchors.get(aliasName) ?? [])],
+        );
+      } else if (rhs.startsWith('[') && rhs.endsWith(']')) {
+        const inlineItems = rhs
+          .slice(1, -1)
+          .split(',')
+          .map((item) => item.trim().replace(/^['"]|['"]$/g, ''))
+          .filter(Boolean);
+        current.errorCodes.set(status, inlineItems);
+      } else {
+        current.errorCodes.set(status, []);
+      }
+      continue;
+    }
+    if (currentErrorStatus) {
+      const errItemMatch = /^        - ([^\s#]+)\s*$/.exec(line);
+      if (errItemMatch) {
+        current.errorCodes
+          .get(currentErrorStatus)
+          ?.push(errItemMatch[1].replace(/^['"]|['"]$/g, ''));
+      }
+    }
   }
 }
 
@@ -179,6 +256,26 @@ function visitGateway(node) {
         }
       }
     }
+    const responses = new Map();
+    const responsesProp = propertyAssignment(node, 'responses');
+    if (
+      responsesProp &&
+      ts.isObjectLiteralExpression(responsesProp.initializer)
+    ) {
+      for (const prop of responsesProp.initializer.properties) {
+        if (!ts.isPropertyAssignment(prop)) continue;
+        const status = ts.isStringLiteral(prop.name)
+          ? prop.name.text
+          : ts.isIdentifier(prop.name)
+            ? prop.name.text
+            : '';
+        if (!status || !ts.isObjectLiteralExpression(prop.initializer)) continue;
+        responses.set(status, {
+          types: stringArrayProperty(prop.initializer, 'types') ?? [],
+          codes: stringArrayProperty(prop.initializer, 'codes') ?? [],
+        });
+      }
+    }
     if (method && path && operationId) {
       gateway.push({
         method,
@@ -189,6 +286,7 @@ function visitGateway(node) {
         scope,
         audience,
         requiredHeaders,
+        responses,
       });
     }
   }
@@ -341,6 +439,44 @@ for (const op of operations) {
         `Gateway: crearComboAdministracion debe exigir cabecera idempotency-key`,
       );
     }
+
+    for (const status of op.responses) {
+      const gwResp = gw.responses.get(status);
+      if (!gwResp) {
+        failures.push(
+          `Gateway: falta respuesta HTTP ${status} en ${op.operationId} (${opKey})`,
+        );
+        continue;
+      }
+      if (status.startsWith('2')) {
+        if (!gwResp.types.includes('application/json')) {
+          failures.push(
+            `Gateway: respuesta ${status} de ${op.operationId} debe declarar application/json`,
+          );
+        }
+      } else {
+        if (!gwResp.types.includes('application/problem+json')) {
+          failures.push(
+            `Gateway: respuesta ${status} de ${op.operationId} debe declarar application/problem+json`,
+          );
+        }
+        const expectedCodes = op.errorCodes.get(status) ?? [];
+        for (const code of expectedCodes) {
+          if (!gwResp.codes.includes(code)) {
+            failures.push(
+              `Gateway: falta código Problem ${code} en HTTP ${status} de ${op.operationId}`,
+            );
+          }
+        }
+      }
+    }
+    for (const gwStatus of gw.responses.keys()) {
+      if (!op.responses.has(gwStatus)) {
+        failures.push(
+          `Gateway: respuesta HTTP ${gwStatus} en ${op.operationId} no declarada en OpenAPI`,
+        );
+      }
+    }
   }
 
   const rt = runtime.find((r) => key(r.method, r.path) === opKey);
@@ -378,6 +514,7 @@ for (const op of operations) {
   }
 }
 
+// Validación AST estructural de DTOs y respuestas del servicio (sin búsqueda textual global)
 const interfaceProps = new Map();
 function collectDto(node) {
   if (ts.isInterfaceDeclaration(node)) {
@@ -411,41 +548,148 @@ for (const prop of ['sku', 'cantidad']) {
   }
 }
 
-for (const field of [
-  'combo_id',
-  'status',
-  'price',
-  'components',
-  'informative_availability',
-  'calculated_at',
-  'freshness',
-  'name',
-  'description',
-  'version',
-]) {
-  if (!new RegExp(`\\b${field}\\s*:`).test(serviceText)) {
-    failures.push(`DTO Combo (wire): falta campo contractual ${field}`);
+function getReturnedObjectLiteral(body) {
+  if (!body) return undefined;
+  for (const stmt of body.statements) {
+    if (ts.isReturnStatement(stmt) && stmt.expression) {
+      if (ts.isObjectLiteralExpression(stmt.expression)) {
+        return stmt.expression;
+      }
+    }
+  }
+  return undefined;
+}
+
+function getObjectPropMap(obj) {
+  const map = new Map();
+  for (const prop of obj.properties) {
+    if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) {
+      map.set(prop.name.text, prop.initializer);
+    } else if (ts.isShorthandPropertyAssignment(prop)) {
+      map.set(prop.name.text, prop.name);
+    }
+  }
+  return map;
+}
+
+let wireFn;
+let listMethod;
+let availabilityMethod;
+for (const stmt of serviceSource.statements) {
+  if (ts.isFunctionDeclaration(stmt) && stmt.name?.text === 'wire') {
+    wireFn = stmt;
+  } else if (
+    ts.isClassDeclaration(stmt) &&
+    stmt.name?.text === 'CombosSvcService'
+  ) {
+    for (const member of stmt.members) {
+      if (ts.isMethodDeclaration(member) && ts.isIdentifier(member.name)) {
+        if (member.name.text === 'list') listMethod = member;
+        if (member.name.text === 'availability') availabilityMethod = member;
+      }
+    }
   }
 }
 
-const availMatch =
-  /async\s+availability\s*\([^)]*\)\s*\{([\s\S]*?)^\s{2}\}/m.exec(serviceText);
-if (!availMatch) {
-  failures.push('Service: falta método availability');
+const wireReturn = getReturnedObjectLiteral(wireFn?.body);
+if (!wireReturn) {
+  failures.push('DTO Combo (wire): no se encontró objeto de retorno en wire()');
 } else {
-  const body = availMatch[1];
-  for (const invariant of [
-    /verificable\s*:\s*false/,
-    /cantidadInformativa\s*:\s*null/,
-    /estadoActualizacion\s*:\s*'INCOMPLETA'/,
-    /calculated_at\s*:/,
-    /comboId\s*:/,
+  const wireProps = getObjectPropMap(wireReturn);
+  for (const field of [
+    'combo_id',
+    'status',
+    'price',
+    'components',
+    'informative_availability',
+    'calculated_at',
+    'freshness',
+    'name',
+    'description',
+    'version',
   ]) {
-    if (!invariant.test(body)) {
+    if (!wireProps.has(field)) {
+      failures.push(`DTO Combo (wire): falta campo contractual ${field}`);
+    }
+  }
+  const componentsExpr = wireProps.get('components');
+  let componentKeys = new Set();
+  if (componentsExpr && ts.isCallExpression(componentsExpr)) {
+    const cb = componentsExpr.arguments[0];
+    if (cb && ts.isArrowFunction(cb)) {
+      let itemObj;
+      if (ts.isParenthesizedExpression(cb.body)) {
+        if (ts.isObjectLiteralExpression(cb.body.expression)) {
+          itemObj = cb.body.expression;
+        }
+      } else if (ts.isObjectLiteralExpression(cb.body)) {
+        itemObj = cb.body;
+      }
+      if (itemObj) {
+        componentKeys = new Set(getObjectPropMap(itemObj).keys());
+      }
+    }
+  }
+  for (const compField of ['sku', 'quantity']) {
+    if (!componentKeys.has(compField)) {
       failures.push(
-        `Disponibilidad conservadora: falta invariante ${invariant.source}`,
+        `DTO ComponenteCombo (wire): falta campo contractual ${compField}`,
       );
     }
+  }
+}
+
+const listReturn = getReturnedObjectLiteral(listMethod?.body);
+if (!listReturn) {
+  failures.push(
+    'DTO PaginaCombos (list): no se encontró objeto de retorno en list()',
+  );
+} else {
+  const listProps = getObjectPropMap(listReturn);
+  for (const field of ['items', 'meta']) {
+    if (!listProps.has(field)) {
+      failures.push(`DTO PaginaCombos (list): falta campo contractual ${field}`);
+    }
+  }
+}
+
+const availReturn = getReturnedObjectLiteral(availabilityMethod?.body);
+if (!availReturn) {
+  failures.push(
+    'Disponibilidad conservadora: no se encontró objeto de retorno en availability()',
+  );
+} else {
+  const availProps = getObjectPropMap(availReturn);
+  for (const field of [
+    'comboId',
+    'verificable',
+    'cantidadInformativa',
+    'calculated_at',
+    'estadoActualizacion',
+  ]) {
+    if (!availProps.has(field)) {
+      failures.push(`Disponibilidad conservadora: falta campo ${field}`);
+    }
+  }
+  if (availProps.get('verificable')?.kind !== ts.SyntaxKind.FalseKeyword) {
+    failures.push('Disponibilidad conservadora: verificable debe ser false');
+  }
+  if (
+    availProps.get('cantidadInformativa')?.kind !== ts.SyntaxKind.NullKeyword
+  ) {
+    failures.push(
+      'Disponibilidad conservadora: cantidadInformativa debe ser null',
+    );
+  }
+  const estadoInit = availProps.get('estadoActualizacion');
+  if (
+    !estadoInit ||
+    !ts.isStringLiteral(estadoInit) ||
+    estadoInit.text !== 'INCOMPLETA'
+  ) {
+    failures.push(
+      "Disponibilidad conservadora: estadoActualizacion debe ser 'INCOMPLETA'",
+    );
   }
 }
 
@@ -483,6 +727,6 @@ if (failures.length) {
   process.exitCode = 1;
 } else {
   console.log(
-    `PASS ${operations.length}/${operations.length} operaciones Combos (${contractVersion}): OpenAPI <-> Gateway <-> NestJS <-> DTO/disponibilidad <-> pruebas (${contractPath})`,
+    `PASS (inspección estática, no runtime) ${operations.length}/${operations.length} operaciones Combos (${contractVersion}): rutas, operationId, seguridad, respuestas HTTP, códigos Problem x-error-codes, DTOs AST y disponibilidad conservadora (${contractPath})`,
   );
 }
