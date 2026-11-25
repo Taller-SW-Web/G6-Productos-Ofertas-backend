@@ -217,7 +217,7 @@ integration('P1 Bulk Recovery, Files/Exports & Migrations (PostgreSQL 17 + Stora
       vi.spyOn(contentIdentity, 'authorization').mockResolvedValue('Bearer invalid-unused');
       const localContentClient = {
         getDocument: async (ref: { content_id: string }) => {
-          const res = await bulkRepo.getContentDocument(ref.content_id);
+          const res = await bulkRepo.findContentDocument(ref.content_id);
           const bytes = await storage.get(res!.contentRef);
           return JSON.parse(bytes.toString('utf8'));
         },
@@ -267,7 +267,7 @@ integration('P1 Bulk Recovery, Files/Exports & Migrations (PostgreSQL 17 + Stora
       .overrideProvider(BulkReadinessService)
       .useValue({ probe: async () => ({ ready: true }) })
       .compile();
-    const app = mod.createNestApplication({ logger: false });
+    const app = mod.createNestApplication();
     app.useGlobalFilters(new BulkProblemFilter());
     await app.init();
     const server = app.getHttpServer();

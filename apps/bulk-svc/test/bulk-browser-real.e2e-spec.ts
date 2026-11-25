@@ -380,7 +380,7 @@ describe.skipIf(!enabled)(
       const retryValues = [
         'ACTUALIZACION', retrySeed.product_id, JSON.stringify({ producto: Number(retrySeed.catalog_version), variante: null }),
         retrySkuBase, '', 'Browser Retry Seed', 'Actualizado tras retry V4',
-        'category-fixture', 'brand-fixture', 'type-fixture', 'false', '', '[]', '', '', '25.00',
+        'category-fixture', 'brand-fixture', 'type-fixture', 'false', '', '[]', '', '', '0',
       ];
       const retryCsvPath = join(directory, 'bulk-ambiguous-retry.csv');
       writeFileSync(

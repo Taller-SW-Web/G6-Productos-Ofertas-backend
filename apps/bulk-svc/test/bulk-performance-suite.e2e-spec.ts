@@ -275,16 +275,28 @@ describe.skipIf(!enabled)('P1 Bulk Performance Suite (PostgreSQL 17 + Storage lo
       .where(eq(batchRows.batchJobId, batchState!.id))
       .limit(1);
     const rowId = firstRow!.rowId;
+    const msgId = randomUUID();
+    const opId = randomUUID();
+    const corrId = String(retryAdmit.body.correlation_id);
     await bulkRepo.recordCatalogBulkResult({
-      messageId: randomUUID(),
-      operationId: randomUUID(),
+      messageId: msgId,
+      operationId: opId,
       causationId: randomUUID(),
       eventName: 'catalog.bulk.upsert.completed',
-      correlationId: retryAdmit.body.correlation_id,
+      correlationId: corrId,
       payload: {
+        message_id: msgId,
         schema_version: 2,
+        occurred_at: new Date().toISOString(),
+        correlation_id: corrId,
+        causation_id: randomUUID(),
+        operation_id: opId,
+        producer: 'catalog-svc',
+        kind: 'event',
+        name: 'catalog.bulk.upsert.completed',
         data: {
           batch_id: retryBatchId,
+          operation_id: opId,
           results: [{ row_id: rowId, status: 'REJECTED', effect_state: 'NONE', retriable: true, code: 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE' }],
         },
       },
