@@ -1,4 +1,4 @@
-export const DOCS_SHA = '40524e96c6973f84d74160076781702fe2a3da19';
+export const DOCS_SHA = 'c9e1e5c217616d28229fccf5315fb97a1ae061a9';
 export const CONTRACT_VERSION = '0.7.0-rc.3';
 
 export const CONTRACT_OPERATIONS = Object.freeze([

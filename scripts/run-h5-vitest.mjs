@@ -56,15 +56,27 @@ const artifacts = await Promise.all(artifactPaths.map(async path => {
 }));
 const manifestBytes = await readFile('apps/catalog-svc/test/fixtures/h5/manifest.json');
 const datasetSha256 = createHash('sha256').update(manifestBytes).digest('hex');
+const summaryArtifact = artifacts.find(item => item.path.endsWith(`/${process.argv[2]}.json`));
+const npmVersionResult = process.platform === 'win32'
+  ? spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'npm --version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
+  : spawnSync('npm', ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+const npmVersion = npmVersionResult.status === 0 ? (npmVersionResult.stdout ?? '').trim() || 'UNAVAILABLE' : 'UNAVAILABLE';
+const vitestVersion = JSON.parse(await readFile('node_modules/vitest/package.json', 'utf8')).version;
 const manifest = {
   schema_version: 1,
   case_id: process.argv[2] === 'int01' ? 'INT-01' : 'PERF-01',
-  h5_criterion: process.argv[2] === 'int01' ? 'POM-A02' : 'POM-A04',
+  task_id: process.argv[2] === 'int01' ? 'POM-A01' : 'POM-A03',
+  h5_criterion: process.argv[2] === 'int01' ? 'H5-02' : 'H5-03',
   repository: 'Taller-SW-Web/G6-Productos-Ofertas-backend',
+  repo: 'Taller-SW-Web/G6-Productos-Ofertas-backend',
   owner: 'Poma',
   source_sha: sourceSha,
-  docs_sha: '40524e96c6973f84d74160076781702fe2a3da19',
+  docs_sha: 'c9e1e5c217616d28229fccf5315fb97a1ae061a9',
   timestamp_utc: new Date().toISOString(),
+  environment: { platform: process.platform, architecture: process.arch, node: process.version, ci: process.env.CI === 'true' },
+  config_version: 'h5-vitest-evidence-v2',
+  dataset_seed: 20261123,
+  dataset_checksum: datasetSha256,
   configuration: {
     suite: selected.suite,
     dataset_seed: 20261123,
@@ -74,13 +86,18 @@ const manifest = {
     providers_participating: [],
     simulated_providers: process.argv[2] === 'int01' ? ['synthetic contract replay only'] : [],
   },
-  versions: { node: process.version },
+  tool_versions: { node: process.version, npm: npmVersion, vitest: vitestVersion },
+  versions: { node: process.version, npm: npmVersion, vitest: vitestVersion },
+  test_command: `node scripts/run-h5-vitest.mjs ${process.argv[2]}`,
   command: `node scripts/run-h5-vitest.mjs ${process.argv[2]}`,
+  artifact_uri: summaryArtifact?.path ?? null,
+  sha256_artifact: summarySha256,
   evidence_level: 'L0',
   status: summary.status,
   expected: { assertions: selected.expected, l1_provider_execution: 'NOT_RUN' },
   observed: { assertions: summary.total, passed: summary.passed, failed: summary.failed, skipped: summary.skipped, pending: summary.pending },
   individual_cases: summary.cases,
+  negative_tests: summary.cases.filter(item => /401|403|404|409|503|NEGATIVE|ABSENT|MISSING|INVALID|DENIED|FAILED/.test(item.scenario_id)).map(item => ({ scenario_id: item.scenario_id, status: item.status })),
   limitations: process.argv[2] === 'int01'
     ? ['L0 responses are synthetic and do not prove participation of Catalog, Pricing or Inventory.', 'Real L1 remains independently blocked by its listed integration prerequisites.']
     : ['k6 module inspection and HTTP measurement were not executed by this Vitest oracle suite.', 'No Azure, APIM, shared Supabase or operational services were contacted.'],
@@ -99,6 +116,8 @@ const evidenceIndex = {
   source_sha: sourceSha,
   docs_sha: manifest.docs_sha,
   case_id: manifest.case_id,
+  task_id: manifest.task_id,
+  h5_criterion: manifest.h5_criterion,
   evidence_level: 'L0',
   status: manifest.status,
 };

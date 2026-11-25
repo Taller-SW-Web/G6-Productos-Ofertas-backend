@@ -43,13 +43,20 @@ describe('manifest canónico Poma H5', () => {
     expect(manifest.expected.product_ids).toHaveLength(25);
     expect(manifest.expected.sku_bases).toHaveLength(25);
     for (const channel of ['MARKETPLACE', 'CHATBOT', 'RETAIL', 'VENTAS']) {
-      expect(manifest.expected.commercial_product_ids_by_channel[channel]).toEqual(
+      expect(
+        manifest.expected.commercial_product_ids_by_channel[channel],
+      ).toEqual(
         manifest.expected.commercial_product_ids_by_channel.MARKETPLACE,
       );
     }
-    expect(manifest.products
-      .filter(({ eligible_channels }) => eligible_channels.includes('MARKETPLACE'))
-      .map(({ product_id }) => product_id).sort()).toEqual(manifest.expected.commercial_product_ids_by_channel.MARKETPLACE);
+    expect(
+      manifest.products
+        .filter(({ eligible_channels }) =>
+          eligible_channels.includes('MARKETPLACE'),
+        )
+        .map(({ product_id }) => product_id)
+        .sort(),
+    ).toEqual(manifest.expected.commercial_product_ids_by_channel.MARKETPLACE);
     expect(manifest.pagination).toEqual({
       page_size: 10,
       stable_sort: 'nombre:asc,product_id:asc',
@@ -103,8 +110,12 @@ describe('manifest canónico Poma H5', () => {
       'MANIFEST_EXPECTED_IDENTITIES_MISMATCH',
     );
     const channelMismatch = structuredClone(buildManifest());
-    channelMismatch.products.find(({ eligible_channels }) => eligible_channels.includes('MARKETPLACE'))!.eligible_channels = [];
-    expect(() => validateManifest(channelMismatch)).toThrow('MANIFEST_EXPECTED_IDENTITIES_MISMATCH');
+    channelMismatch.products.find(({ eligible_channels }) =>
+      eligible_channels.includes('MARKETPLACE'),
+    )!.eligible_channels = [];
+    expect(() => validateManifest(channelMismatch)).toThrow(
+      'MANIFEST_EXPECTED_IDENTITIES_MISMATCH',
+    );
   });
 
   it('mantiene dry-run sin escrituras y bloquea apply sin harnesses de dominio registrados', async () => {
