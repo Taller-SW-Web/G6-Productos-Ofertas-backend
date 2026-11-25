@@ -47,7 +47,9 @@ PATH="$TEMP:$PATH" SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH='/pr
 grep -Fq 'PASS /health HTTP 200' "$TEMP/pass.log"
 grep -Fq 'PASS /health/ready HTTP 200' "$TEMP/pass.log"
 grep -Fq 'PASS ruta protegida sin credenciales: HTTP 401' "$TEMP/pass.log"
-! grep -q -- '--request POST' "$CURL_ARGS_LOG"
+if grep -q -- '--request POST' "$CURL_ARGS_LOG"; then
+  echo 'FAIL: servicio existente dejó de utilizar el GET predeterminado' >&2; exit 1
+fi
 echo 'PASS: liveness, readiness y rechazo 401 sin token'
 
 # Existing services keep GET by default; Promotions uses a bodyless-auth-free POST guard probe.
@@ -56,7 +58,9 @@ PATH="$TEMP:$PATH" SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH='/ap
   SMOKE_PROTECTED_METHOD=POST SMOKE_MAX_ATTEMPTS=1 bash "$ROOT/ops/azure/container-apps/smoke-service.sh" promotions-svc > "$TEMP/post-pass.log"
 grep -Fq 'PASS ruta protegida sin credenciales: HTTP 401' "$TEMP/post-pass.log"
 grep -Fq -- '--request POST --header Content-Type: application/json --data {}' "$CURL_ARGS_LOG"
-! grep -qi 'authorization' "$CURL_ARGS_LOG"
+if grep -qi 'authorization' "$CURL_ARGS_LOG"; then
+  echo 'FAIL: el smoke POST anónimo envió Authorization' >&2; exit 1
+fi
 echo 'PASS: Promotions POST anónimo envía solo JSON mínimo y exige HTTP 401'
 
 for response in 200 400 403; do
