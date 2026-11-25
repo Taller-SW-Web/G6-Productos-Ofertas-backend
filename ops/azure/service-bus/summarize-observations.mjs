@@ -68,6 +68,7 @@ function range(fromInclusive, toExclusive) {
 export function summarizeServiceBus({
   run_id,
   environment,
+  destination: runDestination,
   source_sha,
   start_utc,
   end_utc,
@@ -101,6 +102,8 @@ export function summarizeServiceBus({
   );
 
   const runIncompleteReasons = [];
+  const operationalCapture =
+    environment === 'azure' && runDestination === 'chile-shared';
   if (complete_capture === false) {
     runIncompleteReasons.push('TRUNCATED_CAPTURE');
   } else if (complete_capture === undefined) {
@@ -309,7 +312,7 @@ export function summarizeServiceBus({
       destination,
       {
         capture_complete: captureComplete,
-        certification_eligible: captureComplete,
+        certification_eligible: operationalCapture && captureComplete,
         status: captureComplete ? 'COMPLETE' : 'INCONCLUSIVE',
         incomplete_reasons: reasonsList,
         incomplete_sequences: incompleteSequences,
@@ -344,10 +347,11 @@ export function summarizeServiceBus({
   return {
     run_id,
     environment,
+    destination: runDestination ?? null,
     source_sha,
     window_ms: end - start,
     capture_complete: overallComplete,
-    certification_eligible: overallComplete,
+    certification_eligible: operationalCapture && overallComplete,
     status: overallComplete ? 'COMPLETE' : 'INCONCLUSIVE',
     incomplete_reasons: overallReasons,
     destinations: Object.fromEntries(destinationEntries),

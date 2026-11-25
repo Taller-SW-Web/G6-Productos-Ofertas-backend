@@ -79,6 +79,44 @@ function imageForService(reference, service) {
   );
 }
 
+function normalizeReceipt(receipt, sourceSha, service) {
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt))
+    return null;
+
+  if (!Object.hasOwn(receipt, 'workflow_run_id'))
+    return receipt.source_sha === sourceSha ? receipt : null;
+
+  // deploy.sh emits a run ID and digest. The evidence envelope separately
+  // attests the source SHA of the image bound to that digest.
+  if (
+    receipt.resource_group !== CHILE_POLICY.resource_group ||
+    receipt.subscription_id !== CHILE_POLICY.subscription_id ||
+    receipt.location !== chileTarget.location ||
+    receipt.container !== service ||
+    !imageForService(receipt.target, service) ||
+    receipt.digest_candidate !== receipt.target.split('@')[1] ||
+    !hash.test(receipt.config_sha256 ?? '') ||
+    !imageForService(receipt.previous, service) ||
+    (Object.hasOwn(receipt, 'run_id') &&
+      receipt.run_id !== receipt.workflow_run_id) ||
+    (Object.hasOwn(receipt, 'origin') &&
+      receipt.origin !== receipt.origin_https) ||
+    (Object.hasOwn(receipt, 'previous_image') &&
+      receipt.previous_image !== receipt.previous) ||
+    (Object.hasOwn(receipt, 'source_sha') && receipt.source_sha !== sourceSha)
+  )
+    return null;
+
+  return {
+    ...receipt,
+    run_id: receipt.workflow_run_id,
+    origin: receipt.origin_https,
+    previous_image: receipt.previous,
+    // The raw receipt does not attest a previous revision.
+    previous_revision: undefined,
+  };
+}
+
 function healthMatches(response, service, status) {
   return (
     response?.http_status === 200 &&
@@ -147,13 +185,14 @@ export function evaluateCdEvidence(input) {
     service,
     image,
     run_id,
-    receipt,
+    receipt: providedReceipt,
     environment,
     oidc,
     audit,
     smoke,
     recovery,
   } = input;
+  const receipt = normalizeReceipt(providedReceipt, source_sha, service);
   const vulnerabilities = audit?.report?.metadata?.vulnerabilities;
   const validAudit =
     audit?.source_sha === source_sha &&
@@ -180,7 +219,6 @@ export function evaluateCdEvidence(input) {
     receipt?.app_resource_id === expectedAppResourceId(service) &&
     receipt?.target === image?.reference &&
     receipt?.run_id === run_id &&
-    receipt?.source_sha === source_sha &&
     receipt?.service === service &&
     receipt?.served_digest === image?.reference?.split('@')[1] &&
     typeof receipt?.served_revision === 'string' &&

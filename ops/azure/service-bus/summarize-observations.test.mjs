@@ -90,12 +90,12 @@ test('complete capture fixture correlates fan-out, out-of-order deliveries, pre/
   const summary = summarizeServiceBus(input());
   assert.equal(summary.status, 'COMPLETE');
   assert.equal(summary.capture_complete, true);
-  assert.equal(summary.certification_eligible, true);
+  assert.equal(summary.certification_eligible, false);
   assert.deepEqual(summary.incomplete_reasons, []);
 
   const result = summary.destinations;
   assert.equal(result[audit].status, 'COMPLETE');
-  assert.equal(result[audit].certification_eligible, true);
+  assert.equal(result[audit].certification_eligible, false);
   assert.deepEqual(result[audit].incomplete_sequences, []);
   assert.equal(result[audit].redeliveries, 2);
   assert.equal(result[audit].completed, 1);
@@ -111,6 +111,39 @@ test('complete capture fixture correlates fan-out, out-of-order deliveries, pre/
   assert.equal(result[audit].drain_ms, 10000);
   assert.equal(result[promotions].completed, 1);
   assert.equal(result[promotions].completions_per_second, 0.1);
+});
+
+test('H09 requires both a complete capture and Azure Chile provenance for eligibility', () => {
+  for (const environment of ['synthetic', 'isolated', 'azure']) {
+    const capture = input();
+    capture.environment = environment;
+    capture.destination = 'chile-shared';
+    const summary = summarizeServiceBus(capture);
+
+    assert.equal(summary.capture_complete, true);
+    assert.equal(summary.certification_eligible, environment === 'azure');
+    assert.equal(
+      summary.destinations[audit].certification_eligible,
+      environment === 'azure',
+    );
+  }
+
+  const noDestination = summarizeServiceBus({
+    ...input(),
+    environment: 'azure',
+  });
+  assert.equal(noDestination.capture_complete, true);
+  assert.equal(noDestination.certification_eligible, false);
+
+  const incomplete = summarizeServiceBus({
+    ...input(),
+    environment: 'azure',
+    destination: 'chile-shared',
+    complete_capture: false,
+  });
+  assert.equal(incomplete.capture_complete, false);
+  assert.equal(incomplete.certification_eligible, false);
+  assert.equal(incomplete.destinations[audit].certification_eligible, false);
 });
 
 test('truncated capture fixture marks run and affected metrics inconclusive', () => {

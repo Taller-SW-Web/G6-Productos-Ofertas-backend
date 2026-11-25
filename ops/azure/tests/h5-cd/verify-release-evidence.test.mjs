@@ -102,6 +102,30 @@ function checkFailure(caseId, mutate) {
   );
 }
 
+// Matches the JSON written by deploy.sh after verifying 100% of Chile traffic.
+function officialReceipt(record) {
+  return {
+    service: record.service,
+    destination: 'chile-shared',
+    github_environment: 'azure-h5-chile',
+    workflow_run_id: record.run_id,
+    resource_group: 'rg-g6-aca-chile',
+    aca_environment: 'env-g6-phase1-chile',
+    location: 'Chile Central',
+    subscription_id: CHILE_POLICY.subscription_id,
+    app_resource_id: record.receipt.app_resource_id,
+    container: record.service,
+    previous: record.receipt.previous_image,
+    target: record.image.reference,
+    digest_candidate: record.image.reference.split('@')[1],
+    origin_https: record.smoke.origin,
+    config_sha256: 'd'.repeat(64),
+    served_revision: record.receipt.served_revision,
+    served_digest: record.receipt.served_digest,
+    traffic_weight: 100,
+  };
+}
+
 test('loads official Chile policy from deployment-targets.json and verify-environment-protection.sh', () => {
   assert.equal(CHILE_POLICY.destination, 'chile-shared');
   assert.equal(CHILE_POLICY.github_environment, 'azure-h5-chile');
@@ -122,6 +146,47 @@ test('accepts a complete synthetic same-run Chile receipt approved by Castilla',
   assert.equal(result.execution_result, 'PASS');
   assert.equal(result.destination, 'chile-shared');
   assert.equal(result.environment, 'azure-h5-chile');
+});
+
+test('H08 accepts the Chile deploy.sh receipt without extra provenance or recovery fields', () => {
+  const record = evidence();
+  record.receipt = officialReceipt(record);
+
+  assert.equal(evaluateCdEvidence(record).execution_result, 'PASS');
+});
+
+test('H08 validates the raw receipt against the run, smoke origin and digest', () => {
+  checkFailure('CD-03', (record) => {
+    record.receipt = { ...officialReceipt(record), workflow_run_id: '5678' };
+  });
+  checkFailure('CD-07', (record) => {
+    record.receipt = {
+      ...officialReceipt(record),
+      origin_https: 'https://other.example',
+    };
+  });
+  checkFailure('CD-03', (record) => {
+    record.receipt = {
+      ...officialReceipt(record),
+      digest_candidate: 'sha256:' + 'e'.repeat(64),
+    };
+  });
+  checkFailure('CD-03', (record) => {
+    record.receipt = { ...officialReceipt(record), run_id: '5678' };
+  });
+});
+
+test('H08 does not certify recovery using only the official receipt', () => {
+  const record = evidence();
+  record.receipt = officialReceipt(record);
+  delete record.smoke;
+  const result = evaluateCdEvidence(record);
+
+  assert.equal(result.execution_result, 'FAIL');
+  assert.equal(
+    result.checks.find((entry) => entry.case_id === 'CD-08').execution_result,
+    'FAIL',
+  );
 });
 
 test('accepts a valid self-approval by Castilla under Chile policy', () => {
