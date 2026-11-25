@@ -1,10 +1,19 @@
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const repo = 'Taller-SW-Web/G6-Productos-Ofertas-backend';
-const group = 'rg-g6-sb-h5-int-fork';
+const deploymentTargets = JSON.parse(
+  readFileSync(
+    new URL(
+      '../../../ops/azure/container-apps/deployment-targets.json',
+      import.meta.url,
+    ),
+    'utf8',
+  ),
+);
 const services = [
   'api-gateway',
   'promotions-svc',
@@ -22,13 +31,24 @@ const exec = (command, args) =>
   });
 
 export async function verificarDespliegue(plan, execute = exec) {
+  const destination = deploymentTargets.destinations?.[plan.g6_destination];
   if (
     plan.environment !== 'integration' ||
     !/^[a-f0-9]{40}$/.test(plan.g6_sha) ||
-    new Set(services.map((service) => String(plan.g6_cd_runs?.[service]))).size !== services.length ||
+    !destination ||
+    !['brazil-isolated', 'chile-shared'].includes(plan.g6_destination) ||
+    (plan.g6_service_shas !== undefined &&
+      (typeof plan.g6_service_shas !== 'object' ||
+        services.some(
+          (service) =>
+            !/^[a-f0-9]{40}$/.test(plan.g6_service_shas?.[service] ?? ''),
+        ))) ||
+    new Set(services.map((service) => String(plan.g6_cd_runs?.[service])))
+      .size !== services.length ||
     services.some(
       (service) =>
-        !/^[1-9][0-9]{0,15}$/.test(String(plan.g6_cd_runs?.[service])),
+        !/^[1-9][0-9]{0,15}$/.test(String(plan.g6_cd_runs?.[service])) ||
+        !/^[a-f0-9]{40}$/.test(plan.g6_service_shas?.[service] ?? plan.g6_sha),
     )
   )
     throw unavailable();
@@ -39,16 +59,23 @@ export async function verificarDespliegue(plan, execute = exec) {
       'api',
       'repos/' +
         repo +
-        '/environments/azure-h5/variables/AZURE_SUBSCRIPTION_ID',
+        '/environments/' +
+        destination.githubEnvironment +
+        '/variables/AZURE_SUBSCRIPTION_ID',
     ]).value;
-    if (!uuid.test(subscription)) throw unavailable();
+    if (
+      !uuid.test(subscription) ||
+      subscription !== deploymentTargets.subscriptionId
+    )
+      throw unavailable();
     const runs = new Map();
     const verified = [];
     for (const service of services) {
       const runId = String(plan.g6_cd_runs[service]);
-      let run = runs.get(runId);
-      if (!run) {
-        run = json('gh', [
+      const sourceSha = plan.g6_service_shas?.[service] ?? plan.g6_sha;
+      let runEvidence = runs.get(runId);
+      if (!runEvidence) {
+        const run = json('gh', [
           'run',
           'view',
           runId,
@@ -68,15 +95,17 @@ export async function verificarDespliegue(plan, execute = exec) {
           workflow.head_repository?.full_name?.toLowerCase() !==
             repo.toLowerCase() ||
           String(run.databaseId) !== runId ||
-          run.headSha !== plan.g6_sha ||
+          run.headSha !== sourceSha ||
           run.headBranch !== 'master' ||
           run.event !== 'workflow_dispatch' ||
-          run.conclusion !== 'success' ||
+          typeof run.conclusion !== 'string' ||
           run.url !== 'https://github.com/' + repo + '/actions/runs/' + runId
         )
           throw unavailable();
-        runs.set(runId, run);
+        runEvidence = { run, workflow };
+        runs.set(runId, runEvidence);
       }
+      const { run, workflow } = runEvidence;
       const deploy = run.jobs.find(
         (job) => job.name === 'Desplegar ' + service + ' en Azure',
       );
@@ -105,7 +134,7 @@ export async function verificarDespliegue(plan, execute = exec) {
 
       const scope = [
         '--resource-group',
-        group,
+        destination.resourceGroup,
         '--subscription',
         subscription,
         '--output',
@@ -124,13 +153,15 @@ export async function verificarDespliegue(plan, execute = exec) {
         '/subscriptions/' +
         subscription +
         '/resourceGroups/' +
-        group +
+        destination.resourceGroup +
         '/providers/Microsoft.App/';
+      const appResourceId = resource + 'containerApps/' + service;
+      const environmentResourceId =
+        resource + 'managedEnvironments/' + destination.acaEnvironment;
       if (
-        app.id?.toLowerCase() !==
-          (resource + 'containerApps/' + service).toLowerCase() ||
+        app.id?.toLowerCase() !== appResourceId.toLowerCase() ||
         app.environment?.toLowerCase() !==
-          (resource + 'managedEnvironments/env-g6-h5-int').toLowerCase() ||
+          environmentResourceId.toLowerCase() ||
         (service === 'api-gateway' &&
           new URL(plan.gateway).origin !== 'https://' + app.host)
       )
@@ -145,24 +176,54 @@ export async function verificarDespliegue(plan, execute = exec) {
         '--query',
         '[?properties.active].{name:name,health:properties.healthState,traffic:properties.trafficWeight,containers:properties.template.containers[].{name:name,image:image}}',
       ]);
+      const serving = active.filter((revision) => revision.traffic > 0);
       if (
-        active.length !== 1 ||
+        serving.length !== 1 ||
+        serving[0].traffic !== 100 ||
         !app.latest ||
-        active[0].name !== app.latest ||
-        active[0].health !== 'Healthy' ||
-        (service === 'api-gateway' && active[0].traffic !== 100) ||
-        active[0].containers.filter(
+        serving[0].name !== app.latest ||
+        serving[0].health !== 'Healthy' ||
+        serving[0].containers.filter(
           (c) => c.name === service && c.image === image,
         ).length !== 1
       )
         throw unavailable();
       verified.push({
         service,
+        destination: plan.g6_destination,
+        github_environment: destination.githubEnvironment,
+        resource_group: destination.resourceGroup,
+        aca_environment: destination.acaEnvironment,
+        subscription_id: subscription,
+        resource_id: app.id,
         run_id: runId,
         run_url: run.url,
+        cd_run_conclusion: run.conclusion,
+        deploy_job_conclusion: deploy.conclusion,
+        deployment_status: 'VERIFIED_SERVING',
+        certification_status:
+          run.conclusion === 'success'
+            ? 'SUCCESS'
+            : 'BLOCKED_CD_RUN_' + run.conclusion.toUpperCase(),
+        source_repository: repo,
+        source_branch: run.headBranch,
+        source_sha: run.headSha,
+        source_workflow: workflow.path,
+        origin_approved:
+          run.headBranch === 'master' &&
+          workflow.head_repository?.full_name?.toLowerCase() ===
+            repo.toLowerCase(),
         deployed_at: deploy.completedAt,
-        revision: app.latest,
+        revision: serving[0].name,
+        effective_traffic_percent: serving[0].traffic,
         image,
+        oci_digest: image.slice(prefix.length),
+        ...(service === 'api-gateway'
+          ? {
+              gateway_origin: new URL(plan.gateway).origin,
+              gateway_origin_approved: true,
+            }
+          : {}),
       });
     }
     return verified;

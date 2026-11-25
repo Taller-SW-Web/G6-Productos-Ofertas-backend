@@ -198,10 +198,24 @@ export function validatePromotionsConfiguration(
       invalid.add('PROMOTIONS_SERVICE_CLIENT_SECRET');
     }
   }
+  const enabled = (name: ConfigurationVariable): boolean => {
+    const value = environment[name] ?? 'false';
+    if (!['true', 'false'].includes(value)) invalid.add(name);
+    return value === 'true';
+  };
+  const dependencyProbesEnabled = enabled(
+    'PROMOTIONS_DEPENDENCY_PROBES_ENABLED',
+  );
+  const couponRuntimeEnabled = enabled('PROMOTIONS_COUPON_RUNTIME_ENABLED');
+  const serviceBus = readPromotionsServiceBus(environment);
   const h5Secret = environment.PROMOTIONS_H5_SERVICE_CLIENT_SECRET;
   if (h5Secret !== undefined) {
     if (
-      securityMode !== 'G7_AUTHENTICATED' ||
+      (securityMode !== 'G7_AUTHENTICATED' &&
+        !(
+          securityMode === 'PUBLIC_READ_ONLY' &&
+          serviceBus?.couponCommandsEnabled === true
+        )) ||
       !serviceCredentials ||
       !h5Secret.trim() ||
       /[\r\n\0]/.test(h5Secret) ||
@@ -214,16 +228,6 @@ export function validatePromotionsConfiguration(
         clientSecret: h5Secret,
       });
   }
-  const enabled = (name: ConfigurationVariable): boolean => {
-    const value = environment[name] ?? 'false';
-    if (!['true', 'false'].includes(value)) invalid.add(name);
-    return value === 'true';
-  };
-  const dependencyProbesEnabled = enabled(
-    'PROMOTIONS_DEPENDENCY_PROBES_ENABLED',
-  );
-  const couponRuntimeEnabled = enabled('PROMOTIONS_COUPON_RUNTIME_ENABLED');
-  const serviceBus = readPromotionsServiceBus(environment);
   const localDemoEnabled = enabled('GATEWAY_DEMO_NO_AUTH_ENABLED');
   if (localDemoEnabled) invalid.add('GATEWAY_DEMO_NO_AUTH_ENABLED');
   const upstreams: Partial<Record<Upstream, string>> = {};

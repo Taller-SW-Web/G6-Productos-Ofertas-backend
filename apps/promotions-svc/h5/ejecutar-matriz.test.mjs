@@ -28,7 +28,10 @@ test('clasifica homologación técnica y bilateral', async (t) => {
     follow_type: 'cupones',
     follow_operation_id: randomUUID(),
     operations: { reserve: randomUUID(), coupon: randomUUID() },
-    auth: { existing_coupon_operation_id: randomUUID(), foreign_order_id: 'PEDIDO-AJENO' },
+    auth: {
+      existing_coupon_operation_id: randomUUID(),
+      foreign_order_id: 'PEDIDO-AJENO',
+    },
   };
   const planPath = join(dir, 'plan.json');
   const keyPath = join(dir, 'public.pem');
@@ -47,7 +50,11 @@ test('clasifica homologación técnica y bilateral', async (t) => {
   );
   process.env[variable] = keyPath;
   const coupon = 'G5-H5-05';
-  const fixture = { plan: planPath, execute: true, mutation_authorization: planPath };
+  const fixture = {
+    plan: planPath,
+    execute: true,
+    mutation_authorization: planPath,
+  };
   const admission = {
     method: 'POST',
     status: 202,
@@ -96,7 +103,12 @@ test('clasifica homologación técnica y bilateral', async (t) => {
     };
   };
   const deployment = async () => [
-    { deployed_at: '2026-01-01T00:00:00Z', revision: 'fixture' },
+    {
+      deployed_at: '2026-01-01T00:00:00Z',
+      revision: 'fixture',
+      certification_status: 'SUCCESS',
+      cd_run_conclusion: 'success',
+    },
   ];
   const scenario = async (id, record, result, verify = deployment) => {
     const report = await ejecutarMatriz(
@@ -312,27 +324,57 @@ test('clasifica homologación técnica y bilateral', async (t) => {
     assert.equal(row.status, 'BLOCKED');
     assert.equal(row.reason, 'FALTA_CONSTANCIA_BILATERAL');
   });
-  await t.test('G5-H5-09 requiere follow técnico y constancia bilateral', async () => {
-    const followPlan = { ...plan, order_id: 'PEDIDO-G5-09', follow_operation_id: randomUUID(), case_id: 'G5-H5-09' };
-    const followFile = join(dir, 'follow-09-plan.json');
-    await writeFile(followFile, JSON.stringify(followPlan));
-    const record = { plan: followFile, execute: true, mutation_authorization: followFile };
-    const terminal = { status: 0, stdout: JSON.stringify({
-      environment: followPlan.environment, g5_sha: followPlan.g5_sha, g6_sha: followPlan.g6_sha,
-      order_id: followPlan.order_id, event: 'terminal', operation_id: followPlan.follow_operation_id, status: 'COMPLETED',
-    }) };
-    const noProof = await scenario('G5-H5-09', record, terminal);
-    assert.equal(noProof.technical_status, 'PASS', noProof.reason);
-    assert.equal(noProof.status, 'BLOCKED');
-    assert.equal(noProof.reason, 'FALTA_CONSTANCIA_BILATERAL');
-    const noExecution = await scenario('G5-H5-09', { ...record, execute: false, attestation: signed({
-      case_id: 'G5-H5-09', actor: 'G5', operation_or_reservation_id: followPlan.follow_operation_id,
-      observed: 'M1_RECUPERA_AL_REINICIAR',
-    }) }, terminal);
-    assert.equal(noExecution.technical_status, 'NOT_RUN');
-    assert.equal(noExecution.status, 'BLOCKED');
-    assert.equal(noExecution.reason, 'FALTA_EJECUCION_TECNICA');
-  });
+  await t.test(
+    'G5-H5-09 requiere follow técnico y constancia bilateral',
+    async () => {
+      const followPlan = {
+        ...plan,
+        order_id: 'PEDIDO-G5-09',
+        follow_operation_id: randomUUID(),
+        case_id: 'G5-H5-09',
+      };
+      const followFile = join(dir, 'follow-09-plan.json');
+      await writeFile(followFile, JSON.stringify(followPlan));
+      const record = {
+        plan: followFile,
+        execute: true,
+        mutation_authorization: followFile,
+      };
+      const terminal = {
+        status: 0,
+        stdout: JSON.stringify({
+          environment: followPlan.environment,
+          g5_sha: followPlan.g5_sha,
+          g6_sha: followPlan.g6_sha,
+          order_id: followPlan.order_id,
+          event: 'terminal',
+          operation_id: followPlan.follow_operation_id,
+          status: 'COMPLETED',
+        }),
+      };
+      const noProof = await scenario('G5-H5-09', record, terminal);
+      assert.equal(noProof.technical_status, 'PASS', noProof.reason);
+      assert.equal(noProof.status, 'BLOCKED');
+      assert.equal(noProof.reason, 'FALTA_CONSTANCIA_BILATERAL');
+      const noExecution = await scenario(
+        'G5-H5-09',
+        {
+          ...record,
+          execute: false,
+          attestation: signed({
+            case_id: 'G5-H5-09',
+            actor: 'G5',
+            operation_or_reservation_id: followPlan.follow_operation_id,
+            observed: 'M1_RECUPERA_AL_REINICIAR',
+          }),
+        },
+        terminal,
+      );
+      assert.equal(noExecution.technical_status, 'NOT_RUN');
+      assert.equal(noExecution.status, 'BLOCKED');
+      assert.equal(noExecution.reason, 'FALTA_EJECUCION_TECNICA');
+    },
+  );
   await t.test('G5-H5-05 con ambas evidencias pasa', async () => {
     assert.equal(
       (await scenario(coupon, { ...fixture, attestation: signed() }, validRun))
@@ -340,6 +382,26 @@ test('clasifica homologación técnica y bilateral', async (t) => {
       'PASS',
     );
   });
+  await t.test(
+    'CD fallido conserva evidencia del digest servido y bloquea certificación',
+    async () => {
+      const row = await scenario(coupon, fixture, validRun, async () => [
+        {
+          deployed_at: '2026-01-01T00:00:00Z',
+          revision: 'fixture',
+          oci_digest: 'sha256:' + 'f'.repeat(64),
+          cd_run_conclusion: 'failure',
+          deploy_job_conclusion: 'success',
+          deployment_status: 'VERIFIED_SERVING',
+          certification_status: 'BLOCKED_CD_RUN_FAILURE',
+        },
+      ]);
+      assert.equal(row.status, 'BLOCKED');
+      assert.equal(row.reason, 'CD_RUN_NOT_SUCCESS_CERTIFICATION_BLOCKED');
+      assert.equal(row.technical_status, 'NOT_RUN');
+      assert.equal(row.deployment[0].oci_digest, 'sha256:' + 'f'.repeat(64));
+    },
+  );
   await t.test(
     'sin CD verificable o con cambio de revisión no hay homologación',
     async () => {
@@ -355,7 +417,7 @@ test('clasifica homologación técnica y bilateral', async (t) => {
         async () => {
           throw new Error();
         },
-      async () => undefined,
+        async () => undefined,
       );
       assert.equal(ran, false);
       assert.equal(
@@ -364,7 +426,12 @@ test('clasifica homologación técnica y bilateral', async (t) => {
       );
       let checks = 0;
       const row = await scenario(coupon, signedFixture, validRun, async () => [
-        { deployed_at: '2026-01-01T00:00:00Z', revision: String(++checks) },
+        {
+          deployed_at: '2026-01-01T00:00:00Z',
+          revision: String(++checks),
+          certification_status: 'SUCCESS',
+          cd_run_conclusion: 'success',
+        },
       ]);
       assert.equal(row.status, 'BLOCKED');
       assert.equal(row.reason, 'DESPLIEGUE_OFICIAL_CAMBIO_O_NO_VERIFICADO');
@@ -421,25 +488,34 @@ test('clasifica homologación técnica y bilateral', async (t) => {
       );
     },
   );
-  await t.test('no inicia etapas sin evidencia revisada del SHA desplegado de G5', async () => {
-    const badPlan = join(dir, 'unverified-g5-plan.json');
-    await writeFile(
-      badPlan,
-      JSON.stringify({ ...plan, g5_deployment: { ...plan.g5_deployment, commit_sha: '9'.repeat(40) } }),
-    );
-    let executed = false;
-    const report = await ejecutarMatriz(
-      { [coupon]: { ...fixture, plan: badPlan } },
-      [coupon],
-      () => { executed = true; return validRun; },
-      deployment,
-    );
-    const row = report.results.find((item) => item.id === coupon);
-    assert.equal(executed, false);
-    assert.equal(row.status, 'BLOCKED');
-    assert.equal(row.technical_status, 'NOT_RUN');
-    assert.equal(row.reason, 'SHA_G5_SIN_EVIDENCIA_VERIFICADA');
-  });
+  await t.test(
+    'no inicia etapas sin evidencia revisada del SHA desplegado de G5',
+    async () => {
+      const badPlan = join(dir, 'unverified-g5-plan.json');
+      await writeFile(
+        badPlan,
+        JSON.stringify({
+          ...plan,
+          g5_deployment: { ...plan.g5_deployment, commit_sha: '9'.repeat(40) },
+        }),
+      );
+      let executed = false;
+      const report = await ejecutarMatriz(
+        { [coupon]: { ...fixture, plan: badPlan } },
+        [coupon],
+        () => {
+          executed = true;
+          return validRun;
+        },
+        deployment,
+      );
+      const row = report.results.find((item) => item.id === coupon);
+      assert.equal(executed, false);
+      assert.equal(row.status, 'BLOCKED');
+      assert.equal(row.technical_status, 'NOT_RUN');
+      assert.equal(row.reason, 'SHA_G5_SIN_EVIDENCIA_VERIFICADA');
+    },
+  );
   await t.test(
     'exige constancia en un caso G7 y permite PASS automático para G6',
     async () => {
@@ -525,10 +601,15 @@ test('clasifica homologación técnica y bilateral', async (t) => {
 });
 
 test('runner usa escenarios.json como fuente única de ID, actor, etapa y expectativa', async () => {
-  const catalog = JSON.parse(await readFile(new URL('./escenarios.json', import.meta.url), 'utf8'));
+  const catalog = JSON.parse(
+    await readFile(new URL('./escenarios.json', import.meta.url), 'utf8'),
+  );
   const report = await ejecutarMatriz({});
   assert.equal(report.results.length, 20);
-  assert.deepEqual(report.results.map(({ id }) => id), catalog.map(({ id }) => id));
+  assert.deepEqual(
+    report.results.map(({ id }) => id),
+    catalog.map(({ id }) => id),
+  );
   for (const scenario of catalog) {
     const row = report.results.find((entry) => entry.id === scenario.id);
     assert.equal(row.actor, scenario.actor, scenario.id);
@@ -542,20 +623,43 @@ test('ejecutar-matriz directo bloquea reserve si falta autorización firmada', a
   const dir = await mkdtemp(join(tmpdir(), 'g6-h5-direct-matrix-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const planPath = join(dir, 'plan.json');
-  await writeFile(planPath, JSON.stringify({
-    case_id: 'G5-H5-01', environment: 'integration', gateway: 'https://gateway.example.invalid',
-    g5_sha: '1'.repeat(40), g6_sha: '2'.repeat(40), order_id: 'SYNTHETIC-ORDER',
-    correlation_id: randomUUID(), reservation_id: randomUUID(),
-    operations: { reserve: randomUUID() },
-    g5_deployment: { verification_status: 'VERIFIED', commit_sha: '1'.repeat(40),
-      image_digest: 'sha256:' + 'a'.repeat(64), revision: 'test-revision',
-      evidence_url: 'https://evidence.example.invalid/deployment', verified_by: 'test', verified_at: '2026-01-01T00:00:00Z' },
-  }));
+  await writeFile(
+    planPath,
+    JSON.stringify({
+      case_id: 'G5-H5-01',
+      environment: 'integration',
+      gateway: 'https://gateway.example.invalid',
+      g5_sha: '1'.repeat(40),
+      g6_sha: '2'.repeat(40),
+      order_id: 'SYNTHETIC-ORDER',
+      correlation_id: randomUUID(),
+      reservation_id: randomUUID(),
+      operations: { reserve: randomUUID() },
+      g5_deployment: {
+        verification_status: 'VERIFIED',
+        commit_sha: '1'.repeat(40),
+        image_digest: 'sha256:' + 'a'.repeat(64),
+        revision: 'test-revision',
+        evidence_url: 'https://evidence.example.invalid/deployment',
+        verified_by: 'test',
+        verified_at: '2026-01-01T00:00:00Z',
+      },
+    }),
+  );
   let stageRan = false;
   let deploymentRead = false;
-  const report = await ejecutarMatriz({ 'G5-H5-01': { plan: planPath, execute: true } }, ['G5-H5-01'], () => {
-    stageRan = true; return { status: 0, stdout: '' };
-  }, async () => { deploymentRead = true; return []; });
+  const report = await ejecutarMatriz(
+    { 'G5-H5-01': { plan: planPath, execute: true } },
+    ['G5-H5-01'],
+    () => {
+      stageRan = true;
+      return { status: 0, stdout: '' };
+    },
+    async () => {
+      deploymentRead = true;
+      return [];
+    },
+  );
   const row = report.results.find((entry) => entry.id === 'G5-H5-01');
   assert.equal(row.status, 'BLOCKED');
   assert.equal(row.reason, 'MUTATION_AUTHORIZATION_FILE_REQUIRED');

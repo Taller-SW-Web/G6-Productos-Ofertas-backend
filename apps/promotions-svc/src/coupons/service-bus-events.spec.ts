@@ -173,10 +173,13 @@ describe('Promotions H5 configuration', () => {
     expect(c.couponRuntimeEnabled).toBe(false);
     expect(c.serviceBus?.couponCommandsEnabled).toBeUndefined();
   });
-  it('requires explicit G7 mode for the H5 command queue', () => {
+  it('requires real G7 trust for H5 commands in either protected mode', () => {
     const requested = {
       ...h5(),
       PROMOTIONS_H5_COUPON_COMMANDS_ENABLED: 'true',
+      AZURE_CLIENT_ID: '11111111-1111-4111-8111-111111111111',
+      AUTH_ISSUER: 'https://g7.example.test/issuer',
+      AUTH_JWKS_URL: 'https://g7.example.test/jwks',
     };
     expect(() => readPromotionsServiceBus(requested)).toThrow(
       'PROMOTIONS_SERVICE_BUS_CONFIGURATION_INVALID',
@@ -185,6 +188,12 @@ describe('Promotions H5 configuration', () => {
       readPromotionsServiceBus({
         ...requested,
         G6_SECURITY_MODE: 'G7_AUTHENTICATED',
+      })?.couponCommandsEnabled,
+    ).toBe(true);
+    expect(
+      readPromotionsServiceBus({
+        ...requested,
+        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
       })?.couponCommandsEnabled,
     ).toBe(true);
   });
@@ -206,12 +215,38 @@ describe('Promotions H5 configuration', () => {
     const c = readPromotionsServiceBus({
       ...h5(),
       NODE_ENV: 'production',
-      G6_SECURITY_MODE: 'G7_AUTHENTICATED',
+      G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
       G6_SERVICE_BUS_PRODUCTION_ENABLED: 'true',
       AZURE_CLIENT_ID: '11111111-1111-4111-8111-111111111111',
+      AUTH_ISSUER: 'https://g7.example.test/issuer',
+      AUTH_JWKS_URL: 'https://g7.example.test/jwks',
+      PROMOTIONS_H5_COUPON_COMMANDS_ENABLED: 'true',
     });
     expect(c?.managedIdentityClientId).toBe(
       '11111111-1111-4111-8111-111111111111',
     );
+  });
+
+  it.each([
+    { G6_SECURITY_MODE: 'SIMULATED_AUTH' },
+    { G6_SECURITY_MODE: 'PUBLIC_READ_ONLY', AUTH_ISSUER: undefined },
+    {
+      G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+      AUTH_JWKS_URL: 'http://g7.test/jwks',
+    },
+    { G6_SECURITY_MODE: 'PUBLIC_READ_ONLY', AZURE_CLIENT_ID: undefined },
+    { NODE_ENV: 'production', G6_SERVICE_BUS_PRODUCTION_ENABLED: 'false' },
+  ])('fails closed for insecure H5 coupon configuration %j', (change) => {
+    const secureBase = {
+      ...h5(),
+      G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+      AUTH_ISSUER: 'https://g7.example.test/issuer',
+      AUTH_JWKS_URL: 'https://g7.example.test/jwks',
+      AZURE_CLIENT_ID: '11111111-1111-4111-8111-111111111111',
+      PROMOTIONS_H5_COUPON_COMMANDS_ENABLED: 'true',
+    };
+    expect(() =>
+      readPromotionsServiceBus({ ...secureBase, ...change }),
+    ).toThrow('PROMOTIONS_SERVICE_BUS_CONFIGURATION_INVALID');
   });
 });

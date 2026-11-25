@@ -98,6 +98,42 @@ describe('Promotions configuration', () => {
       ).toThrow(PromotionsConfigurationError);
     }
   });
+
+  it('accepts a separate H5 technical credential in PUBLIC_READ_ONLY only with the secured Service Bus command path', () => {
+    const settings = validatePromotionsConfiguration({
+      ...fixture.environment,
+      G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+      PROMOTIONS_PUBLIC_OPERATION_IDS: 'listarPromociones',
+      AUTH_ISSUER: 'https://g7.test/api/v1/auth',
+      AUTH_JWKS_URL: 'https://g7.test/api/v1/auth/.well-known/jwks.json',
+      PROMOTIONS_SERVICE_TOKEN_URL: 'https://g7.test/api/v1/auth/token',
+      PROMOTIONS_SERVICE_CLIENT_SECRET: 'catalog-pricing-technical-secret',
+      PROMOTIONS_H5_SERVICE_CLIENT_SECRET: 'inventory-h5-technical-secret',
+      MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
+      SERVICE_BUS_NAMESPACE_FQDN: 'g6-test-events.servicebus.windows.net',
+      RABBITMQ_URL: undefined,
+      AZURE_CLIENT_ID: '11111111-1111-4111-8111-111111111111',
+      PROMOTIONS_H5_COUPON_COMMANDS_ENABLED: 'true',
+    });
+    expect(settings.serviceBus?.couponCommandsEnabled).toBe(true);
+    expect(settings.h5ServiceCredentials?.clientSecret).toBe(
+      'inventory-h5-technical-secret',
+    );
+    expect(settings.h5ServiceCredentials?.clientSecret).not.toBe(
+      settings.serviceCredentials?.clientSecret,
+    );
+    expect(JSON.stringify(new PromotionsConfigService(settings))).not.toContain(
+      'inventory-h5-technical-secret',
+    );
+    expect(() =>
+      validatePromotionsConfiguration({
+        ...fixture.environment,
+        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+        PROMOTIONS_PUBLIC_OPERATION_IDS: 'listarPromociones',
+        PROMOTIONS_H5_SERVICE_CLIENT_SECRET: 'inventory-h5-technical-secret',
+      }),
+    ).toThrow(PromotionsConfigurationError);
+  });
   it('requires a paired HTTPS issuer/JWKS configuration and does not serialize it', () => {
     for (const auth of [
       { AUTH_ISSUER: 'https://issuer.test' },
