@@ -102,8 +102,45 @@ function fixture(currentPlan = plan, change = (type, result) => result) {
         id: root + 'containerApps/' + service,
         environment: root + 'managedEnvironments/' + target.acaEnvironment,
         latest: service + '--r1',
-        host: new URL(currentPlan.gateway).host,
+        host:
+          currentPlan.gateway_route_profile === 'g5-labelled'
+            ? new URL(currentPlan.gateway).host.replace('---g5-h5', '')
+            : new URL(currentPlan.gateway).host,
+        mode:
+          currentPlan.gateway_route_profile === 'g5-labelled'
+            ? 'Multiple'
+            : 'Single',
+        traffic:
+          service === 'api-gateway' &&
+          currentPlan.gateway_route_profile === 'g5-labelled'
+            ? [
+                {
+                  label: '',
+                  revisionName: 'api-gateway--marketplace',
+                  weight: 100,
+                },
+                { label: 'g5-h5', revisionName: 'api-gateway--r1', weight: 0 },
+              ]
+            : undefined,
       });
+    if (
+      service === 'api-gateway' &&
+      currentPlan.gateway_route_profile === 'g5-labelled'
+    )
+      return output('revision', [
+        {
+          name: 'api-gateway--r1',
+          health: 'Healthy',
+          traffic: 0,
+          containers: [{ name: service, image: image(service) }],
+        },
+        {
+          name: 'api-gateway--marketplace',
+          health: 'Healthy',
+          traffic: 100,
+          containers: [{ name: service, image: image(service) }],
+        },
+      ]);
     return output('revision', [
       {
         name: service + '--r1',
@@ -155,6 +192,73 @@ test('reserva y rechazo de stock insuficiente requieren solo Gateway e Inventory
     assert.deepEqual(
       evidence.map((entry) => entry.service),
       ['api-gateway', 'inventory-svc'],
+    );
+  }
+});
+
+test('perfil Chile etiqueta G5 certifica Gateway e Inventory con Marketplace al 100%', async () => {
+  const gateway =
+    'https://api-gateway---g5-h5.env-g6-phase1-chile.chilecentral.azurecontainerapps.io';
+  const currentPlan = {
+    ...plan,
+    case_id: 'G5-H5-01',
+    g6_destination: 'chile-shared',
+    gateway,
+    gateway_route_profile: 'g5-labelled',
+    g6_cd_runs: { 'api-gateway': 501, 'inventory-svc': 503 },
+  };
+  const evidence = await verificarDespliegue(
+    currentPlan,
+    'reserve',
+    fixture(currentPlan),
+  );
+  assert.deepEqual(
+    evidence.map(({ service }) => service),
+    ['api-gateway', 'inventory-svc'],
+  );
+  const gatewayEvidence = evidence[0];
+  assert.equal(gatewayEvidence.route_mode, 'revision_label');
+  assert.equal(gatewayEvidence.traffic_scope, 'label_url');
+  assert.equal(
+    gatewayEvidence.marketplace_revision,
+    'api-gateway--marketplace',
+  );
+  assert.equal(gatewayEvidence.marketplace_traffic_percent, 100);
+  assert.equal(gatewayEvidence.revision, 'api-gateway--r1');
+  assert.equal(gatewayEvidence.certification_status, 'SUCCESS');
+});
+
+test('perfil Chile etiquetado rechaza label ausente o tráfico Marketplace alterado', async () => {
+  const currentPlan = {
+    ...plan,
+    case_id: 'G5-H5-01',
+    g6_destination: 'chile-shared',
+    gateway:
+      'https://api-gateway---g5-h5.env-g6-phase1-chile.chilecentral.azurecontainerapps.io',
+    gateway_route_profile: 'g5-labelled',
+    g6_cd_runs: { 'api-gateway': 501, 'inventory-svc': 503 },
+  };
+  for (const alter of [
+    (app) => ({
+      ...app,
+      traffic: app.traffic.filter((route) => route.label !== 'g5-h5'),
+    }),
+    (app) => ({
+      ...app,
+      traffic: app.traffic.map((route) =>
+        route.label ? route : { ...route, weight: 50 },
+      ),
+    }),
+  ]) {
+    await assert.rejects(
+      verificarDespliegue(
+        currentPlan,
+        'reserve',
+        fixture(currentPlan, (type, record) =>
+          type === 'app' ? alter(record) : record,
+        ),
+      ),
+      /DESPLIEGUE_OFICIAL_NO_VERIFICADO/,
     );
   }
 });

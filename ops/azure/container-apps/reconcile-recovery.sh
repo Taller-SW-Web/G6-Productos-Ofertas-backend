@@ -49,6 +49,8 @@ while IFS= read -r service; do
     receipt_environment="$(jq -r '.github_environment // empty' "$receipt_file" 2>/dev/null || true)"
     previous="$(jq -r '.previous // empty' "$receipt_file" 2>/dev/null || true)"
     target="$(jq -r '.target // empty' "$receipt_file" 2>/dev/null || true)"
+    route_profile="$(jq -r '.route_profile // "standard"' "$receipt_file" 2>/dev/null || true)"
+    marketplace_revision="$(jq -r '.marketplace_revision // empty' "$receipt_file" 2>/dev/null || true)"
     config_hash="$(jq -r '.config_sha256 // empty' "$receipt_file" 2>/dev/null || true)"
     receipt_rg="$(jq -r '.resource_group // empty' "$receipt_file" 2>/dev/null || true)"
     receipt_aca_environment="$(jq -r '.aca_environment // empty' "$receipt_file" 2>/dev/null || true)"
@@ -60,13 +62,14 @@ while IFS= read -r service; do
     if [[ "$service_in_receipt" != "$service" || "$receipt_destination" != "$destination" || "$receipt_environment" != "$environment" ||
           "$receipt_rg" != "$target_resource_group" || "$receipt_aca_environment" != "$target_environment" || "$receipt_location" != "$target_location" ||
           "${receipt_subscription,,}" != "${target_subscription,,}" || "${receipt_app_id,,}" != "$expected_app_id" || "$receipt_container" != "$service" ||
+          ("$route_profile" != standard && ! ("$route_profile" == g5-labelled && "$destination" == chile-shared && "$environment" == azure-h5-chile && "$service" == api-gateway && "$marketplace_revision" =~ ^api-gateway--[a-zA-Z0-9-]+$)) ||
           ! -f "$image_file" || "$(cat "$image_file")" != "$target" ]]; then
       printf 'ESTADO DESCONOCIDO: %s tiene recibo incompleto o no coincide con la imagen publicada; no se modifica ACA.\n' "$service" | tee -a "$summary_file"
       failed=1
       continue
     fi
     printf 'ACTUALIZADO CON RECIBO: %s target=%s\n' "$service" "$target" | tee -a "$summary_file"
-    if recovery_output="$(H5_DEPLOY_DESTINATION="$destination" H5_DEPLOY_ENVIRONMENT="$environment" H5_PILOT_SELF_REVIEW="$([[ "$environment" == azure-h5-pilot-234 ]] && echo true || echo false)" bash "$deploy_script" --restore "$service" "$previous" "$target" "$config_hash" 2>&1)"; then
+    if recovery_output="$(H5_DEPLOY_DESTINATION="$destination" H5_DEPLOY_ENVIRONMENT="$environment" H5_PILOT_SELF_REVIEW="$([[ "$environment" == azure-h5-pilot-234 ]] && echo true || echo false)" H5_GATEWAY_ROUTE_PROFILE="$route_profile" H5_G5_MARKETPLACE_REVISION="$marketplace_revision" bash "$deploy_script" --restore "$service" "$previous" "$target" "$config_hash" 2>&1)"; then
       printf '%s\n' "$recovery_output"
       printf 'RECUPERADO: %s digest=%s; estado y configuración verificados.\n' "$service" "$previous" | tee -a "$summary_file"
     else

@@ -12,6 +12,7 @@ mkdir "$TEMP/bin"
 cat > "$TEMP/state.json" <<EOF
 {"properties":{"configuration":{"activeRevisionsMode":"Multiple","secrets":[{"name":"ACA_PRIVATE_SENTINEL","value":"must-not-be-printed"}],"ingress":{"external":true,"targetPort":3000}},"template":{"revisionSuffix":"initial","containers":[{"name":"api-gateway","image":"$PREVIOUS","env":[{"name":"PRIVATE_SETTING","value":"must-not-be-printed"}]},{"name":"caddy","image":"ghcr.io/taller-sw-web/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],"scale":{"minReplicas":0,"maxReplicas":1}},"latestRevisionName":"rev-0","latestReadyRevisionName":"rev-0"},"revision":{"properties":{"healthState":"Healthy","active":true,"runningState":"Running","template":{"containers":[{"name":"api-gateway","image":"$PREVIOUS","env":[{"name":"PRIVATE_SETTING","value":"must-not-be-printed"}]},{"name":"caddy","image":"ghcr.io/taller-sw-web/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],"scale":{"minReplicas":0,"maxReplicas":1}}}},"updates":0}
 EOF
+cp "$TEMP/state.json" "$TEMP/initial.json"
 cat > "$TEMP/bin/az" <<'MOCK'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -29,7 +30,7 @@ if [[ "${1:-}" == containerapp ]]; then [[ "$*" == *"--resource-group ${MOCK_RES
 if [[ "${1:-}" == group && "${2:-}" == show ]]; then printf '{"id":"/subscriptions/%s/resourceGroups/%s"}\n' "$subscription" "$group"; exit 0; fi
 if [[ "${1:-}" == containerapp && "${2:-}" == env && "${3:-}" == show ]]; then [[ "${MOCK_BAD_ENVIRONMENT:-false}" != true ]] || env_id="$env_id-wrong"; printf '{"id":"%s","location":"%s"}\n' "$env_id" "$location"; exit 0; fi
 if [[ "${1:-}" == containerapp && "${2:-}" == show ]]; then
-  jq --arg id "$app_id" --arg env "$env_id" --arg traffic "${MOCK_TRAFFIC:-latest}" '. + {id:$id} | .properties.managedEnvironmentId=$env | .properties.configuration.ingress.fqdn="api-gateway.internal.chilecentral.azurecontainerapps.io" | .properties.configuration.ingress.allowInsecure=false | .properties.configuration.ingress.traffic=(if $traffic == "old" then [{revisionName:"rev-0",weight:100}] elif $traffic == "ambiguous" then [{latestRevision:true,weight:50},{revisionName:"rev-0",weight:50}] elif $traffic == "old-after-rollback" and .updates >= 2 then [{revisionName:"rev-0",weight:100}] else [{latestRevision:true,weight:100}] end)' "$state"
+  jq --arg id "$app_id" --arg env "$env_id" --arg traffic "${MOCK_TRAFFIC:-latest}" '. + {id:$id} | .properties.managedEnvironmentId=$env | .properties.configuration.ingress.fqdn="api-gateway.internal.chilecentral.azurecontainerapps.io" | .properties.configuration.ingress.allowInsecure=false | .properties.configuration.ingress.traffic=(if .g5_label == true then [{revisionName:.marketplace_revision,weight:100},{label:"g5-h5",revisionName:.properties.latestRevisionName,weight:0}] elif $traffic == "old" then [{revisionName:(.marketplace_revision // "rev-0"),weight:100}] elif $traffic == "ambiguous" then [{latestRevision:true,weight:50},{revisionName:(.marketplace_revision // "rev-0"),weight:50}] elif $traffic == "old-after-rollback" and .updates >= 2 then [{revisionName:(.marketplace_revision // "rev-0"),weight:100}] else [{latestRevision:true,weight:100}] end)' "$state"
   exit 0
 fi
 if [[ "${1:-}" == containerapp && "${2:-}" == revision && "${3:-}" == show ]]; then
@@ -40,12 +41,20 @@ if [[ "${1:-}" == containerapp && "${2:-}" == revision && "${3:-}" == show ]]; t
 fi
 if [[ "${1:-}" == containerapp && "${2:-}" == update ]]; then
   [[ "$*" == *'--container-name api-gateway'* ]] || { echo 'container name missing' >&2; exit 62; }
-  image=''
-  while (($#)); do [[ "$1" != --image ]] || { shift; image="$1"; }; shift || true; done
+  image=''; set_flag=''; remove_flag=''
+  while (($#)); do
+    case "$1" in
+      --image) shift; image="$1" ;;
+      --set-env-vars) shift; set_flag="$1" ;;
+      --remove-env-vars) shift; remove_flag="$1" ;;
+    esac
+    shift || true
+  done
   [[ -n "$image" ]] || exit 63
-  jq --arg image "$image" --arg unhealthy_target "${MOCK_UNHEALTHY_TARGET:-}" --arg unhealthy_rollback "${MOCK_UNHEALTHY_ROLLBACK:-false}" --arg scale_zero "${MOCK_SCALE_ZERO:-false}" '
+  jq --arg image "$image" --arg set_flag "$set_flag" --arg remove_flag "$remove_flag" --arg unhealthy_target "${MOCK_UNHEALTHY_TARGET:-}" --arg unhealthy_rollback "${MOCK_UNHEALTHY_ROLLBACK:-false}" --arg scale_zero "${MOCK_SCALE_ZERO:-false}" '
     .updates += 1 |
-    .properties.template.containers |= map(if .name == "api-gateway" then .image=$image else . end) |
+    .marketplace_revision = (if $set_flag != "" then (.marketplace_revision // .properties.latestRevisionName) else .marketplace_revision end) |
+    .properties.template.containers |= map(if .name == "api-gateway" then .image=$image | if $set_flag != "" then .env=((.env // [] | map(select(.name != "GATEWAY_G5_H5_ENABLED"))) + [{name:"GATEWAY_G5_H5_ENABLED",value:"true"}]) elif $remove_flag != "" then .env=((.env // []) | map(select(.name != "GATEWAY_G5_H5_ENABLED"))) else . end else . end) |
     .properties.latestRevisionName = ("rev-" + (.updates|tostring)) |
     .properties.latestReadyRevisionName = .properties.latestRevisionName |
     .properties.template.revisionSuffix = ("revision-" + (.updates|tostring)) |
@@ -56,6 +65,16 @@ if [[ "${1:-}" == containerapp && "${2:-}" == update ]]; then
     .revision.properties.healthState = (if $image == $unhealthy_target or ($unhealthy_rollback == "true" and ($image | contains("@sha256:aaaaaaaa"))) then "Unhealthy" elif $scale_zero == "true" then "None" else "Healthy" end) |
     .revision.properties.runningState = (if $image == $unhealthy_target or ($unhealthy_rollback == "true" and ($image | contains("@sha256:aaaaaaaa"))) then "Failed" elif $scale_zero == "true" then "ScaledToZero" else "Running" end)
   ' "$state" > "$state.tmp"
+  mv "$state.tmp" "$state"
+  exit 0
+fi
+if [[ "${1:-}" == containerapp && "${2:-}" == revision && "${3:-}" == label && "${4:-}" == add ]]; then
+  jq '.g5_label=true | .properties.configuration.ingress.traffic=[{revisionName:.marketplace_revision,weight:100},{label:"g5-h5",revisionName:.properties.latestRevisionName,weight:0}]' "$state" > "$state.tmp"
+  mv "$state.tmp" "$state"
+  exit 0
+fi
+if [[ "${1:-}" == containerapp && "${2:-}" == revision && "${3:-}" == label && "${4:-}" == remove ]]; then
+  jq '.g5_label=false | .properties.configuration.ingress.traffic=[{revisionName:.marketplace_revision,weight:100}]' "$state" > "$state.tmp"
   mv "$state.tmp" "$state"
   exit 0
 fi
@@ -176,3 +195,20 @@ if MOCK_TRAFFIC=old-after-rollback bash "$DEPLOY" api-gateway "$TARGET" > "$TEMP
 grep -Fq 'ROLLBACK NO VERIFICADO' "$TEMP/rollback-wrong-traffic.log" || { cat "$TEMP/rollback-wrong-traffic.log"; fail 'local rollback with wrong traffic was not rejected'; }
 if grep -Fq 'ROLLBACK VERIFICADO:' "$TEMP/rollback-wrong-traffic.log"; then fail 'local rollback incorrectly declared traffic recovery successful'; fi
 echo 'PASS: healthy previous revision is not reported recovered unless it serves 100% of Chile traffic'
+
+cp "$TEMP/initial.json" "$MOCK_STATE"
+jq '.properties.latestRevisionName="api-gateway--marketplace" | .properties.latestReadyRevisionName="api-gateway--marketplace" | .revision.properties.revisionName="api-gateway--marketplace" | .marketplace_revision="api-gateway--marketplace"' "$MOCK_STATE" > "$TEMP/state.tmp"
+mv "$TEMP/state.tmp" "$MOCK_STATE"
+unset MOCK_UNHEALTHY_TARGET MOCK_UNHEALTHY_ROLLBACK
+export MOCK_TRAFFIC=old H5_GATEWAY_ROUTE_PROFILE=g5-labelled DEPLOY_RECEIPT="$TEMP/g5-labelled.receipt"
+bash "$DEPLOY" api-gateway "$TARGET" > "$TEMP/g5-labelled.log" 2>&1 || { cat "$TEMP/g5-labelled.log"; fail 'despliegue Gateway con label G5 esperado'; }
+jq -e '.route_profile=="g5-labelled" and .route_mode=="revision_label" and .g5_label=="g5-h5" and .g5_label_url=="https://api-gateway---g5-h5.internal.chilecentral.azurecontainerapps.io" and .marketplace_revision=="api-gateway--marketplace" and .marketplace_traffic_weight==100 and .served_revision=="rev-1" and .served_digest==.digest_candidate' "$DEPLOY_RECEIPT" >/dev/null || { cat "$DEPLOY_RECEIPT"; fail 'recibo G5 no distingue URL etiquetada, digest y tráfico Marketplace'; }
+jq -e '.properties.configuration.ingress.traffic | any(.[]; .revisionName=="api-gateway--marketplace" and .weight==100) and any(.[]; .label=="g5-h5" and .revisionName=="rev-1")' "$MOCK_STATE" >/dev/null || { cat "$MOCK_STATE"; fail 'la ruta Marketplace dejó de recibir 100% o el label no apunta al target'; }
+jq -e '.properties.template.containers[] | select(.name=="api-gateway") | any(.env[]; .name=="GATEWAY_G5_H5_ENABLED" and .value=="true")' "$MOCK_STATE" >/dev/null || fail 'el flag no se aplicó a la revisión etiquetada'
+echo 'PASS: G5 label targets the new revision while the Marketplace default route stays pinned at 100%'
+g5_config_hash="$(jq -r '.config_sha256' "$DEPLOY_RECEIPT")"
+H5_G5_MARKETPLACE_REVISION=api-gateway--marketplace bash "$DEPLOY" --restore api-gateway "$PREVIOUS" "$TARGET" "$g5_config_hash" > "$TEMP/g5-restore.log" 2>&1 || { cat "$TEMP/g5-restore.log"; fail 'rollback coordinado del Gateway etiquetado'; }
+jq -e '.properties.configuration.ingress.traffic | length==1 and .[0].revisionName=="api-gateway--marketplace" and .[0].weight==100' "$MOCK_STATE" >/dev/null || fail 'rollback alteró la ruta Marketplace'
+jq -e '[.properties.configuration.ingress.traffic[]? | select(.label=="g5-h5")] | length==0' "$MOCK_STATE" >/dev/null || fail 'rollback dejó label G5'
+jq -e '[.properties.template.containers[] | select(.name=="api-gateway") | .env[]? | select(.name=="GATEWAY_G5_H5_ENABLED")] | length==0' "$MOCK_STATE" >/dev/null || fail 'rollback dejó flag G5 en la configuración actual'
+echo 'PASS: G5 label rollback removes only the isolated flag/label and preserves Marketplace routing'
