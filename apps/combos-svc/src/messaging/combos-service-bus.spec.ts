@@ -205,13 +205,11 @@ describe('CombosServiceBus runtime (COM-SB-01 / COR-05 / T08 / T11)', () => {
     });
 
     // Error on one queue marks overall readiness not_ready without false READY
-    await receivers
-      .get('g6.combos.from.inventory')!
-      .emitError(
-        Object.assign(new Error('UnauthorizedAccess'), {
-          code: 'UnauthorizedAccess',
-        }),
-      );
+    await receivers.get('g6.combos.from.inventory')!.emitError(
+      Object.assign(new Error('UnauthorizedAccess'), {
+        code: 'UnauthorizedAccess',
+      }),
+    );
     expect(bus.available).toBe(false);
     expect(bus.getQueueStates()['g6.combos.from.catalog'].ready).toBe(true);
     expect(bus.getQueueStates()['g6.combos.from.inventory']).toMatchObject({

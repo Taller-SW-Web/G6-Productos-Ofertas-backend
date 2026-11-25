@@ -195,13 +195,11 @@ describe.skipIf(!isolatedHarnessEnabled)(
         }
         if (req.url === '/jwks') {
           const jwk = keyPair.publicKey.export({ format: 'jwk' });
-          res
-            .writeHead(200, { 'content-type': 'application/json' })
-            .end(
-              JSON.stringify({
-                keys: [{ ...jwk, kid, use: 'sig', alg: 'RS256' }],
-              }),
-            );
+          res.writeHead(200, { 'content-type': 'application/json' }).end(
+            JSON.stringify({
+              keys: [{ ...jwk, kid, use: 'sig', alg: 'RS256' }],
+            }),
+          );
           return;
         }
         if (req.url === '/oauth/token' && req.method === 'POST') {
