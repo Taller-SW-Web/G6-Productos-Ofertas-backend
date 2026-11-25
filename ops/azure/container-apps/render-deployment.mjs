@@ -110,7 +110,21 @@ export function makeDeployment({
   enablePublicReads = false,
   serviceBusPilot,
   serviceBusG5H5,
+  deploymentMode = 'bootstrap',
+  existingGateway = false,
+  authorizedGatewayRevision,
 }) {
+  if (!['bootstrap', 'update'].includes(deploymentMode))
+    fail('INVALID_DEPLOYMENT_MODE');
+  const isUpdate = existingGateway === true || deploymentMode === 'update';
+  if (isUpdate && !authorizedGatewayRevision)
+    fail('UNSAFE_GATEWAY_REAPPLY_REQUIRES_CD_OR_AUTHORIZED_REVISION');
+  if (
+    authorizedGatewayRevision !== undefined &&
+    (typeof authorizedGatewayRevision !== 'string' ||
+      !/^[a-z0-9][a-z0-9-]{1,63}$/.test(authorizedGatewayRevision))
+  )
+    fail('INVALID_AUTHORIZED_GATEWAY_REVISION');
   if (!registryUser || !registryPassword)
     fail('REGISTRY_READ_CREDENTIALS_REQUIRED');
   if (!/^caddy:2\.11\.6-alpine@sha256:[a-f0-9]{64}$/.test(caddyImage ?? ''))
@@ -342,13 +356,16 @@ export function makeDeployment({
         managedEnvironmentId: environmentId,
         workloadProfileName: 'Consumption',
         configuration: {
-          activeRevisionsMode: 'Single',
+          activeRevisionsMode: service === 'api-gateway' ? 'Multiple' : 'Single',
           ingress: {
             external: index === 0,
             targetPort: index === 0 ? 8080 : ports[index],
             allowInsecure: false,
             transport: 'auto',
-            traffic: [{ latestRevision: true, weight: 100 }],
+            traffic:
+              service === 'api-gateway' && authorizedGatewayRevision
+                ? [{ revisionName: authorizedGatewayRevision, weight: 100 }]
+                : [{ latestRevision: true, weight: 100 }],
           },
           registries: [
             {
@@ -364,7 +381,12 @@ export function makeDeployment({
           containers,
           volumes,
           scale: {
-            minReplicas: managedIdentities?.[service] ? 1 : 0,
+            minReplicas:
+              service === 'api-gateway' || service === 'promotions-svc'
+                ? 1
+                : managedIdentities?.[service]
+                  ? 1
+                  : 0,
             maxReplicas: 1,
             rules: [
               { name: 'http', http: { metadata: { concurrentRequests: '5' } } },
@@ -396,6 +418,10 @@ export function makeDeployment({
           value: `[concat('https://',reference(resourceId('Microsoft.App/containerApps','api-gateway'),'${apiVersion}').configuration.ingress.fqdn)]`,
         },
         applicationSha: { type: 'string', value: sourceSha },
+        gatewayDeploymentMode: {
+          type: 'string',
+          value: isUpdate ? 'pinned-authorized-revision' : 'bootstrap-only',
+        },
       },
     },
     parameters: {
@@ -463,6 +489,11 @@ if (
           }
         : {}),
       enablePublicReads: args.includes('--enable-public-reads'),
+      deploymentMode: option('--mode') ?? 'bootstrap',
+      existingGateway: args.includes('--existing-gateway'),
+      ...(option('--authorized-gateway-revision')
+        ? { authorizedGatewayRevision: option('--authorized-gateway-revision') }
+        : {}),
       ...(option('--service-bus-pilot')
         ? {
             serviceBusPilot: JSON.parse(

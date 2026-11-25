@@ -87,6 +87,20 @@ normalize_app() {
 container_image() { jq -er --arg name "$container" '[.properties.template.containers[] | select(.name == $name) | .image] | if length == 1 then .[0] else error("container target ausente o duplicado") end' "$1"; }
 revision_health() { az containerapp revision show --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --revision "$1" --output json > "$2"; }
 revision_verify_detail='no se obtuvo estado de revisión'
+chile_hot_service() { [[ "$destination" == chile-shared && ( "$service" == api-gateway || "$service" == promotions-svc ) ]]; }
+verify_chile_scale() {
+  local json="$1" min max
+  chile_hot_service || return 0
+  min="$(jq -r '.properties.template.scale.minReplicas // 0' "$json")"
+  max="$(jq -r '.properties.template.scale.maxReplicas // 0' "$json")"
+  [[ "$min" == 1 && "$max" == 1 ]] || fail "Chile requiere minReplicas=1 y maxReplicas=1 para $service (actual: min=$min max=$max); no se modificó el escalado"
+}
+traffic_snapshot() { jq -S -c '.properties.configuration.ingress.traffic // []' "$1"; }
+traffic_is_revision() { jq -e --arg revision "$2" '.properties.configuration.ingress.traffic | type == "array" and length == 1 and .[0].revisionName == $revision and .[0].weight == 100 and .[0].latestRevision != true' "$1" >/dev/null; }
+set_traffic_revision() {
+  local revision="$1"
+  az containerapp ingress traffic set --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --revision-weight "$revision=100" --output none
+}
 verify_revision() {
   local expected="$1" deadline_attempts="${ACA_POLL_ATTEMPTS:-30}" delay="${ACA_POLL_INTERVAL_SECONDS:-10}" attempt current latest ready revision_image health active running replicas min_replicas provisioning
   revision_verify_detail='no se pudo leer el estado ACA'
@@ -105,11 +119,16 @@ verify_revision() {
       min_replicas="$(jq -r '.properties.template.scale.minReplicas // -1' "$revision")"
       provisioning="$(jq -r '.properties.provisioningState // empty' "$revision")"
       revision_verify_detail="revision=$latest image=${revision_image:-desconocida} active=$active health=${health:-desconocida} running=${running:-desconocido} replicas=$replicas minReplicas=$min_replicas provisioning=${provisioning:-desconocido}"
-      if [[ "$revision_image" == "$expected" && "$active" == true && "$running" == Running && "$replicas" =~ ^[1-9][0-9]*$ && "$health" == Healthy && "$provisioning" == Provisioned ]]; then
+      local revision_min revision_max
+      revision_min="$(jq -r '.properties.template.scale.minReplicas // 0' "$revision")"
+      revision_max="$(jq -r '.properties.template.scale.maxReplicas // 0' "$revision")"
+      if chile_hot_service && [[ "$revision_min" != 1 || "$revision_max" != 1 ]]; then
+        revision_verify_detail+=" expected_scale=1/1"
+      elif [[ "$revision_image" == "$expected" && "$active" == true && "$running" == Running && "$replicas" =~ ^[1-9][0-9]*$ && "$health" == Healthy && "$provisioning" == Provisioned ]]; then
         verified_mode=running; verified_replicas="$replicas"; verified_health="$health"
         return 0
       fi
-      if [[ "$revision_image" == "$expected" && "$active" == true && ( "$running" == Stopped || "$running" == ScaledToZero ) && "$replicas" == 0 && "$min_replicas" == 0 && "$provisioning" == Provisioned && ( "$health" == None || "$health" == Healthy ) ]]; then
+      if ! chile_hot_service && [[ "$revision_image" == "$expected" && "$active" == true && ( "$running" == Stopped || "$running" == ScaledToZero ) && "$replicas" == 0 && "$min_replicas" == 0 && "$provisioning" == Provisioned && ( "$health" == None || "$health" == Healthy ) ]]; then
         verified_mode=scale-to-zero; verified_replicas=0; verified_health="$health"
         return 0
       fi
@@ -152,6 +171,49 @@ verify_chile_served_revision() {
   [[ "$revision_image" == "$expected" ]] || return 1
   verified_served_revision="$served_revision"
   verified_served_digest="${expected##*@}"
+}
+
+verify_chile_gateway_current_traffic() {
+  local expected="$1" app_json traffic served_revision weight revision_json="$work/current-traffic-revision.json" revision_image active health running replicas provisioning min max
+  app_json="$(read_app)" || return 1
+  [[ "$(jq -r '.properties.configuration.activeRevisionsMode // empty' <<< "$app_json")" == Multiple ]] || return 1
+  traffic="$(jq -c '.properties.configuration.ingress.traffic // []' <<< "$app_json")"
+  [[ "$(jq 'type == "array" and length == 1' <<< "$traffic")" == true ]] || return 1
+  served_revision="$(jq -r --arg latest "$(jq -r '.properties.latestRevisionName // empty' <<< "$app_json")" 'if .[0].latestRevision == true then $latest else (.[0].revisionName // empty) end' <<< "$traffic")"
+  weight="$(jq -r '.[0].weight // 0' <<< "$traffic")"
+  [[ -n "$served_revision" && "$weight" == 100 ]] || return 1
+  revision_health "$served_revision" "$revision_json" || return 1
+  revision_image="$(container_image "$revision_json" 2>/dev/null || true)"
+  active="$(jq -r '.properties.active // false' "$revision_json")"
+  health="$(jq -r '.properties.healthState // empty' "$revision_json")"
+  running="$(jq -r '.properties.runningState // empty' "$revision_json")"
+  replicas="$(jq -r '.properties.replicas // 0' "$revision_json")"
+  provisioning="$(jq -r '.properties.provisioningState // empty' "$revision_json")"
+  min="$(jq -r '.properties.template.scale.minReplicas // 0' "$revision_json")"
+  max="$(jq -r '.properties.template.scale.maxReplicas // 0' "$revision_json")"
+  [[ "$revision_image" == "$expected" && "$active" == true && "$health" == Healthy && "$running" == Running && "$replicas" =~ ^[1-9][0-9]*$ && "$provisioning" == Provisioned && "$min" == 1 && "$max" == 1 ]] || { printf 'Gateway traffic check: revision=%s image=%s active=%s health=%s running=%s replicas=%s provisioning=%s scale=%s/%s expected=%s\n' "$served_revision" "$revision_image" "$active" "$health" "$running" "$replicas" "$provisioning" "$min" "$max" "$expected" >&2; return 1; }
+  verified_served_revision="$served_revision"
+  verified_served_digest="${expected##*@}"
+}
+
+recover_chile_gateway_template() {
+  local current_image
+  verify_chile_gateway_current_traffic "$previous_image" || fail 'RECUPERACIÓN OMITIDA: revisión anterior no sigue saludable, servida y escalada 1/1'
+  read_app > "$after" || fail 'RECUPERACIÓN OMITIDA: no se pudo releer Gateway antes de restaurar la plantilla'
+  normalize_app "$after" > "$work/pre-template-recovery-normalized.json"
+  cmp -s "$work/before-normalized.json" "$work/pre-template-recovery-normalized.json" || fail 'RECUPERACIÓN OMITIDA: configuración cambió antes de restaurar la plantilla'
+  current_image="$(container_image "$after")"
+  [[ "$current_image" == "$image" ]] || fail 'RECUPERACIÓN OMITIDA: digest de plantilla cambió concurrentemente'
+  traffic_is_revision "$after" "$previous_served_revision" || fail 'RECUPERACIÓN OMITIDA: tráfico cambió antes de restaurar la plantilla'
+  az containerapp update --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --container-name "$container" --image "$previous_image" --output none || fail 'RECUPERACIÓN INCOMPLETA: Azure rechazó restaurar el digest anterior en la plantilla; ruta anterior permanece servida'
+  verify_revision "$previous_image" || fail "RECUPERACIÓN INCOMPLETA: plantilla anterior aplicada pero revisión latest no Healthy: $revision_verify_detail"
+  read_app > "$after" || fail 'RECUPERACIÓN INCOMPLETA: no se pudo verificar la plantilla restaurada'
+  normalize_app "$after" > "$work/post-template-recovery-normalized.json"
+  cmp -s "$work/before-normalized.json" "$work/post-template-recovery-normalized.json" || fail 'RECUPERACIÓN INCOMPLETA: configuración cambió durante la restauración de plantilla'
+  [[ "$(container_image "$after")" == "$previous_image" ]] || fail 'RECUPERACIÓN INCOMPLETA: plantilla no conserva el digest anterior'
+  traffic_is_revision "$after" "$previous_served_revision" || fail 'RECUPERACIÓN INCOMPLETA: tráfico cambió durante la restauración de plantilla'
+  verify_chile_gateway_current_traffic "$previous_image" || fail 'RECUPERACIÓN INCOMPLETA: la ruta anterior perdió salud o escala 1/1'
+  printf 'PLANTILLA RECUPERADA: Gateway sirve revisión anterior %s; siguiente despliegue puede reintentarse.\n' "$previous_served_revision" >&2
 }
 
 verify_chile_transition_traffic() {
@@ -200,13 +262,22 @@ fi
 if [[ "$mode" == restore ]]; then
   validate_target
   read_app > "$before" || fail 'no se pudo inspeccionar ACA para recuperación'
+  verify_chile_scale "$before"
   current="$(container_image "$before")" || fail 'no se pudo verificar imagen actual'
-  if [[ "$destination" == chile-shared && "$current" == "$previous_image" ]]; then
+  if [[ "$destination" == chile-shared && "$current" == "$previous_image" && "$service" != api-gateway ]]; then
     verify_chile_served_revision "$previous_image" || fail 'RECUPERACIÓN NO VERIFICADA: el digest anterior no recibe el 100% del tráfico Chile'
+  fi
+  if [[ "$destination" == chile-shared && "$service" == api-gateway && "$current" != "$previous_image" ]]; then
+    verify_chile_served_revision "$current" || fail 'RECUPERACIÓN OMITIDA: Gateway no sirve de forma exclusiva la revisión aplicada'
+    restore_served_revision="$verified_served_revision"
+    restore_traffic="$(traffic_snapshot "$before")"
   fi
   normalize_app "$before" > "$work/current-normalized.json"
   current_hash="$(sha256sum "$work/current-normalized.json" | awk '{print $1}')"
   if [[ "$current" == "$previous_image" && "$current_hash" == "$expected_config_hash" ]]; then
+    if [[ "$destination" == chile-shared && "$service" == api-gateway ]]; then
+      verify_chile_gateway_current_traffic "$previous_image" || fail 'RECUPERACIÓN NO VERIFICADA: Gateway no sirve al 100% una revisión saludable con el digest anterior y escala 1/1'
+    fi
     printf 'RECUPERACIÓN YA PRESENTE: servicio=%s conserva digest anterior y configuración.\n' "$service"
     exit 0
   fi
@@ -214,9 +285,28 @@ if [[ "$mode" == restore ]]; then
     printf 'RECUPERACIÓN OMITIDA: %s cambió concurrentemente (imagen/configuración); no se sobrescribe. Revisión manual requerida.\n' "$service" >&2
     exit 1
   }
+  if [[ "$destination" == chile-shared && "$service" == api-gateway ]]; then
+    read_app > "$after" || fail 'no se pudo releer Gateway antes de recuperación'
+    normalize_app "$after" > "$work/restore-pre-pin-normalized.json"
+    cmp -s "$work/current-normalized.json" "$work/restore-pre-pin-normalized.json" || fail 'RECUPERACIÓN OMITIDA: configuración cambió antes de fijar tráfico'
+    [[ "$(traffic_snapshot "$after")" == "$restore_traffic" ]] || fail 'RECUPERACIÓN OMITIDA: tráfico cambió concurrentemente antes del pinning'
+    set_traffic_revision "$restore_served_revision" || fail 'no se pudo fijar revisión actual antes de la recuperación Gateway'
+    read_app > "$after" || fail 'no se pudo releer Gateway tras fijar tráfico de recuperación'
+    traffic_is_revision "$after" "$restore_served_revision" || fail 'RECUPERACIÓN OMITIDA: el tráfico cambió durante el pinning'
+    normalize_app "$after" > "$work/restore-pinned-normalized.json"
+    cmp -s "$work/current-normalized.json" "$work/restore-pinned-normalized.json" || fail 'RECUPERACIÓN OMITIDA: configuración cambió durante el pinning'
+  fi
   az containerapp update --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --container-name "$container" --image "$previous_image" --output none || fail 'Azure rechazó la recuperación'
   verify_revision "$previous_image" || fail 'revisión de recuperación no Healthy'
   if [[ "$destination" == chile-shared ]]; then
+    if [[ "$service" == api-gateway ]]; then
+      read_app > "$after" || fail 'no se pudo comprobar el tráfico durante recuperación Gateway'
+      normalize_app "$after" > "$work/restore-normalized.json"
+      cmp -s "$work/current-normalized.json" "$work/restore-normalized.json" || fail 'RECUPERACIÓN OMITIDA: configuración cambió concurrentemente'
+      traffic_is_revision "$after" "$restore_served_revision" || fail 'RECUPERACIÓN OMITIDA: tráfico cambió concurrentemente'
+      restore_candidate_revision="$(jq -r '.properties.latestRevisionName' "$after")"
+      set_traffic_revision "$restore_candidate_revision" || fail 'Azure rechazó recuperar el tráfico de Gateway'
+    fi
     verify_chile_served_revision "$previous_image" || fail 'RECUPERACIÓN NO VERIFICADA: el digest anterior no recibe el 100% del tráfico Chile'
   fi
   normalize_app "$after" > "$work/after-normalized.json"
@@ -227,6 +317,7 @@ fi
 
 validate_target
 read_app > "$before" || fail "no se pudo inspeccionar ACA ${app}"
+verify_chile_scale "$before"
 jq -e '.properties.template.containers | type == "array" and length > 0' "$before" >/dev/null || fail 'respuesta ACA sin lista de contenedores válida'
 if [[ "$service" == api-gateway ]]; then
   jq -e '[.properties.template.containers[] | select(.name == "caddy")] | length == 1' "$before" >/dev/null || fail 'Gateway no contiene exactamente un sidecar caddy; actualización cancelada'
@@ -234,8 +325,13 @@ fi
 previous_image="$(container_image "$before")" || fail 'no se encontró exactamente un contenedor de destino'
 [[ "$previous_image" == "$REPOSITORY/$service@sha256:"* && "${previous_image##*@sha256:}" =~ ^[0-9a-f]{64}$ ]] || fail 'la imagen previa no es un digest oficial verificable; rollback seguro imposible'
 if [[ "$destination" == chile-shared ]]; then
-  verify_chile_served_revision "$previous_image" || fail 'tráfico Chile previo es ambiguo/incompatible con un despliegue individual; no se modifica Azure'
+  if [[ "$service" == api-gateway ]]; then
+    verify_chile_gateway_current_traffic "$previous_image" || fail 'tráfico Chile previo de Gateway no es una revisión única, sana y verificable; no se modifica Azure'
+  else
+    verify_chile_served_revision "$previous_image" || fail 'tráfico Chile previo es ambiguo/incompatible con un despliegue individual; no se modifica Azure'
+  fi
   previous_served_revision="$verified_served_revision"
+  previous_traffic="$(traffic_snapshot "$before")"
 fi
 normalize_app "$before" > "$work/before-normalized.json"
 baseline_hash="$(sha256sum "$work/before-normalized.json" | awk '{print $1}')"
@@ -257,16 +353,44 @@ else
   # Store only hashes and immutable image references; never serialize ACA secrets into artifacts.
   printf 'Actualizando solo %s/%s en %s; configuración ACA se comparará sin imprimirla.\n' "$app" "$container" "$RESOURCE_GROUP"
   failure_stage=''
+  if [[ "$destination" == chile-shared && "$service" == api-gateway ]]; then
+    # Freeze Multiple-mode traffic on the known-good revision before ACA creates a candidate.
+    read_app > "$after" || fail 'no se pudo releer Gateway antes del pinning preventivo'
+    normalize_app "$after" > "$work/pre-pin-normalized.json"
+    cmp -s "$work/before-normalized.json" "$work/pre-pin-normalized.json" || fail 'cambió configuración de Gateway antes del pinning; actualización cancelada'
+    [[ "$(traffic_snapshot "$after")" == "$previous_traffic" ]] || fail 'cambió concurrentemente el tráfico previo de Gateway; actualización cancelada'
+    if ! set_traffic_revision "$previous_served_revision"; then
+      fail 'no se pudo fijar el tráfico previo de Gateway; actualización cancelada'
+    fi
+    read_app > "$after" || fail 'no se pudo releer Gateway tras fijar tráfico previo'
+    normalize_app "$after" > "$work/pinned-normalized.json"
+    cmp -s "$work/before-normalized.json" "$work/pinned-normalized.json" || fail 'cambió configuración durante el pinning preventivo de Gateway'
+    traffic_is_revision "$after" "$previous_served_revision" || fail 'cambió concurrentemente el tráfico previo de Gateway; actualización cancelada'
+  fi
   if ! az containerapp update --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --container-name "$container" --image "$image" --output none; then
     failure_stage='az containerapp update rechazó el cambio de imagen'
   elif ! verify_revision "$image"; then
     failure_stage="verificación latest/ready/health/running: $revision_verify_detail"
-  elif [[ "$destination" == chile-shared ]] && ! verify_chile_served_revision "$image"; then
+  elif [[ "$destination" == chile-shared && "$service" != api-gateway ]] && ! verify_chile_served_revision "$image"; then
     failure_stage='revisión sana pero el modo ACA/traffic no asigna 100% a latestRevision'
   elif ! normalize_app "$after" > "$work/after-normalized.json"; then
     failure_stage='no se pudo normalizar la configuración ACA posterior al cambio'
   elif ! cmp -s "$work/before-normalized.json" "$work/after-normalized.json"; then
     failure_stage='drift de configuración persistente entre baseline y readback'
+  elif [[ "$destination" == chile-shared && "$service" == api-gateway ]] && ! verify_revision "$image"; then
+    failure_stage='la revisión candidata de Gateway perdió salud antes del corte'
+  elif [[ "$destination" == chile-shared && "$service" == api-gateway ]] && { ! read_app > "$after" || ! traffic_is_revision "$after" "$previous_served_revision" || ! normalize_app "$after" > "$work/pre-cutover-normalized.json" || ! cmp -s "$work/before-normalized.json" "$work/pre-cutover-normalized.json"; }; then
+    failure_stage='cambio concurrente o tráfico inesperado antes del corte de Gateway'
+  elif [[ "$destination" == chile-shared && "$service" == api-gateway ]] && ! set_traffic_revision "$(jq -r '.properties.latestRevisionName' "$after")"; then
+    failure_stage='Azure rechazó el corte controlado de tráfico de Gateway'
+  elif [[ "$destination" == chile-shared ]] && ! verify_chile_served_revision "$image"; then
+    failure_stage='tráfico efectivo Chile no apunta exclusivamente a la revisión sana con digest candidato'
+  elif [[ "$destination" == chile-shared && "$service" == api-gateway ]] && ! verify_revision "$image"; then
+    failure_stage="revisión servida de Gateway perdió salud tras el corte: $revision_verify_detail"
+  elif [[ "$destination" == chile-shared && "$service" == api-gateway ]] && { ! read_app > "$after" || ! normalize_app "$after" > "$work/after-cutover-normalized.json"; }; then
+    failure_stage='no se pudo verificar configuración posterior al corte de Gateway'
+  elif [[ "$destination" == chile-shared && "$service" == api-gateway ]] && ! cmp -s "$work/before-normalized.json" "$work/after-cutover-normalized.json"; then
+    failure_stage='cambió configuración durante el corte de tráfico de Gateway'
   elif [[ "$destination" == chile-shared ]] && ! verify_chile_served_revision "$image"; then
     failure_stage='el tráfico Chile cambió durante la verificación final'
   fi
@@ -280,6 +404,32 @@ else
 
   printf 'Fallo tras actualización de %s; etapa=%s.\n' "$service" "$failure_stage" >&2
   read_app > "$after" || fail 'ROLLBACK NO VERIFICADO: no se pudo releer ACA; revisar manualmente'
+  if [[ "$destination" == chile-shared && "$service" == api-gateway ]]; then
+    normalize_app "$after" > "$work/failure-normalized.json" || fail 'RECUPERACIÓN NO VERIFICADA: no se pudo comparar configuración'
+    cmp -s "$work/before-normalized.json" "$work/failure-normalized.json" || fail 'RECUPERACIÓN OMITIDA: configuración cambió concurrentemente'
+    current="$(container_image "$after" 2>/dev/null || true)"
+    if [[ "$current" == "$previous_image" ]]; then
+      traffic_is_revision "$after" "$previous_served_revision" || fail 'RECUPERACIÓN OMITIDA: tráfico cambió concurrentemente; no se sobrescribe'
+      verify_chile_gateway_current_traffic "$previous_image" || fail 'RECUPERACIÓN NO VERIFICADA: revisión anterior perdió salud o escala 1/1'
+      printf 'ACTUALIZACIÓN NO APLICADA: Gateway conserva digest, configuración y ruta previos.\n' >&2
+      exit 1
+    fi
+    [[ "$current" == "$image" ]] || fail 'RECUPERACIÓN OMITIDA: digest de plantilla cambió concurrentemente'
+    candidate_revision="$(jq -r '.properties.latestRevisionName' "$after")"
+    if traffic_is_revision "$after" "$candidate_revision"; then
+      set_traffic_revision "$previous_served_revision" || fail 'RECUPERACIÓN NO VERIFICADA: no se pudo restaurar el tráfico a la revisión anterior'
+      read_app > "$after" || fail 'RECUPERACIÓN NO VERIFICADA: no se pudo releer el tráfico restaurado'
+      traffic_is_revision "$after" "$previous_served_revision" || fail 'RECUPERACIÓN NO VERIFICADA: tráfico posterior no coincide con la revisión anterior'
+      normalize_app "$after" > "$work/recovered-normalized.json"
+      cmp -s "$work/before-normalized.json" "$work/recovered-normalized.json" || fail 'RECUPERACIÓN NO VERIFICADA: configuración cambió durante recuperación'
+      recover_chile_gateway_template
+      exit 1
+    fi
+    traffic_is_revision "$after" "$previous_served_revision" || fail 'RECUPERACIÓN OMITIDA: tráfico cambió concurrentemente; no se sobrescribe'
+    printf 'TRÁFICO PREVIO CONSERVADO: Gateway mantiene revisión %s.\n' "$previous_served_revision" >&2
+    recover_chile_gateway_template
+    exit 1
+  fi
   current="$(container_image "$after" 2>/dev/null || true)"
   normalize_app "$after" > "$work/failure-normalized.json" || fail 'ROLLBACK NO VERIFICADO: no se pudo comparar la configuración persistente'
   failure_hash="$(sha256sum "$work/failure-normalized.json" | awk '{print $1}')"
