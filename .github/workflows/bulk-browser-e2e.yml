@@ -12,10 +12,10 @@ on:
   workflow_dispatch:
     inputs:
       frontend_ref:
-        description: Rama o SHA de G6-Productos-Ofertas-frontend
+        description: SHA completo (40 hex) de G6-Productos-Ofertas-frontend
         required: false
         type: string
-        default: trabajo/castilla/bulk-h5-integracion-real
+        default: f26864bb2b20c5abd693fb415f392ed6110e317b
 
 permissions:
   contents: read
@@ -46,12 +46,47 @@ jobs:
       - name: Checkout Backend
         uses: actions/checkout@v4
 
+      - name: Validar formato SHA de Frontend
+        env:
+          FRONTEND_REF_INPUT: ${{ inputs.frontend_ref || 'f26864bb2b20c5abd693fb415f392ed6110e317b' }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$FRONTEND_REF_INPUT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "ERROR: frontend_ref debe ser un SHA completo de 40 caracteres hexadecimales (recibido: '$FRONTEND_REF_INPUT')" >&2
+            exit 1
+          fi
+          echo "EXPECTED_FRONTEND_SHA=$FRONTEND_REF_INPUT" >> "$GITHUB_ENV"
+
       - name: Checkout Frontend (sin despliegue)
         uses: actions/checkout@v4
         with:
           repository: Taller-SW-Web/G6-Productos-Ofertas-frontend
-          ref: ${{ inputs.frontend_ref || 'trabajo/castilla/bulk-h5-integracion-real' }}
+          ref: ${{ env.EXPECTED_FRONTEND_SHA }}
           path: _frontend
+
+      - name: Verificar SHA exacto de Frontend y registrar metadatos
+        run: |
+          set -euo pipefail
+          actual_frontend_sha="$(git -C _frontend rev-parse HEAD)"
+          if [[ "$actual_frontend_sha" != "$EXPECTED_FRONTEND_SHA" ]]; then
+            echo "ERROR: HEAD de _frontend ($actual_frontend_sha) no coincide con $EXPECTED_FRONTEND_SHA" >&2
+            exit 1
+          fi
+          mkdir -p .ci/evidence
+          cat > .ci/evidence/run-metadata.json <<EOF
+          {
+            "backend_sha": "${GITHUB_SHA}",
+            "frontend_sha": "${actual_frontend_sha}",
+            "workflow": "${GITHUB_WORKFLOW}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "event": "${GITHUB_EVENT_NAME}"
+          }
+          EOF
+          {
+            echo "### Trazabilidad de SHAs certificados (MK-001 Bulk E2E)"
+            echo "- **Backend SHA:** \`${GITHUB_SHA}\`"
+            echo "- **Frontend SHA:** \`${actual_frontend_sha}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/setup-node@v4
         with:
