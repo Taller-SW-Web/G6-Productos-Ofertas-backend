@@ -109,14 +109,11 @@ function Get-H5LegacyJournalOperations {
     if (-not (Test-Path -LiteralPath $Path)) { return @() }
     $known=@(Get-H5JitKnownResourceIds | ForEach-Object ResourceId)
     $latest=@{}
-    foreach($line in [System.IO.File]::ReadAllLines($Path)) {
-        if ([string]::IsNullOrWhiteSpace($line)) { continue }
-        try { $event=$line|ConvertFrom-Json -ErrorAction Stop } catch { throw 'LEGACY_PATCH_JOURNAL_AMBIGUOUS: corrupt JSONL; preserve it and block both destinations.' }
-        $attemptId=if($event.PSObject.Properties.Name -contains 'attemptId') {[string]$event.attemptId} else {''}
-        $resourceId=if($event.PSObject.Properties.Name -contains 'resourceId') {[string]$event.resourceId} else {''}
-        if ([string]::IsNullOrWhiteSpace($attemptId) -or [string]::IsNullOrWhiteSpace($resourceId) -or @($known|Where-Object{[string]::Equals($_,$resourceId,[System.StringComparison]::OrdinalIgnoreCase)}).Count -ne 1) {
-            throw 'LEGACY_PATCH_JOURNAL_AMBIGUOUS: missing attemptId or unrecognized full Resource ID; preserve it and block both destinations.'
-        }
+    try { $events=@(Get-AcaPatchJournalEvents -Path $Path -AllowedResourceIds $known) } catch { throw "LEGACY_PATCH_JOURNAL_AMBIGUOUS: $($_.Exception.Message); preserve it and block both destinations." }
+    foreach($event in $events) {
+        if ([string]$event.event -in @('LegacyReconciliation','LegacyResolutionObserved')) { throw 'LEGACY_PATCH_JOURNAL_AMBIGUOUS: a legacy journal contains a non-source reconciliation event; preserve it and block both destinations.' }
+        $attemptId=[string]$event.attemptId
+        $resourceId=[string]$event.resourceId
         if ($latest.ContainsKey($attemptId) -and -not [string]::Equals([string]$latest[$attemptId].resourceId,$resourceId,[System.StringComparison]::OrdinalIgnoreCase)) {
             throw 'LEGACY_PATCH_JOURNAL_AMBIGUOUS: one attemptId references multiple Resource IDs; preserve it and block both destinations.'
         }
@@ -125,13 +122,34 @@ function Get-H5LegacyJournalOperations {
     return @($latest.Values)
 }
 
+function Get-H5LegacyJournalResolutions {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$ResourceId)
+    $events=@(Get-AcaPatchJournalEvents -Path $Path -AllowedResourceIds @($ResourceId))
+    return @($events | Where-Object { [string]$_.event -ceq 'LegacyReconciliation' })
+}
+
 function Test-H5PatchOperationPending {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Operation)
-    $terminalState=if($Operation.PSObject.Properties.Name -contains 'terminalState') {[string]$Operation.terminalState} else {$null}
-    $readback=if($Operation.PSObject.Properties.Name -contains 'readbackResult') {[string]$Operation.readbackResult} else {$null}
-    return ($terminalState -notin @('Succeeded','Failed','Canceled','Cancelled','Rejected') -or
-        ($terminalState -in @('Succeeded','Failed','Canceled','Cancelled') -and $readback -notin @('VerifiedPresent','VerifiedAbsent')))
+    return -not (Test-AcaPatchOperationResolved -Record $Operation)
+}
+
+function Test-H5LegacyOperationReconciled {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Operation,[Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Resolutions)
+    try { $expectedReadback=Get-AcaPatchExpectedReadback -Operation ([string]$Operation.operation) } catch { return $false }
+    $expectedSecretName=Get-AcaPatchExpectedJitSecretName -Operation ([string]$Operation.operation) -RecordedName ([string]$Operation.expectedSecretName)
+    $matches=@($Resolutions | Where-Object {
+        [string]$_.sourceAttemptId -ceq [string]$Operation.attemptId -and
+        [string]::Equals([string]$_.resourceId,[string]$Operation.resourceId,[System.StringComparison]::OrdinalIgnoreCase) -and
+        [string]$_.operation -ceq [string]$Operation.operation -and
+        [string]$_.lroReference -ceq [string]$Operation.lroReference -and
+        [string]$_.expectedSecretName -ceq $expectedSecretName -and
+        [string]$_.readbackResult -ceq $expectedReadback -and
+        [string]$_.terminalState -in @('Succeeded','Failed','Canceled','Cancelled')
+    })
+    return $matches.Count -eq 1
 }
 
 function Assert-H5LegacyJitStateSafe {
@@ -145,8 +163,12 @@ function Assert-H5LegacyJitStateSafe {
             throw "LEGACY_JIT_STATE_BLOCKED: $($entry.Type) belongs to the selected Resource ID; preserve and reconcile it."
         }
     }
-    foreach($operation in @(Get-H5LegacyJournalOperations -Path $StatePaths.LegacyPatchJournal)) {
-        if ([string]::Equals([string]$operation.resourceId,$targetId,[System.StringComparison]::OrdinalIgnoreCase) -and (Test-H5PatchOperationPending -Operation $operation)) {
+    $legacyOperations=@(Get-H5LegacyJournalOperations -Path $StatePaths.LegacyPatchJournal)
+    $resolutions=@(Get-H5LegacyJournalResolutions -Path $StatePaths.PatchJournal -ResourceId $targetId)
+    foreach($operation in $legacyOperations) {
+        $isTarget=[string]::Equals([string]$operation.resourceId,$targetId,[System.StringComparison]::OrdinalIgnoreCase)
+        $resolved=if($isTarget) { Test-H5LegacyOperationReconciled -Operation $operation -Resolutions $resolutions } else { $false }
+        if ($isTarget -and (Test-H5PatchOperationPending -Operation $operation) -and -not $resolved) {
             throw "LEGACY_PATCH_JOURNAL_BLOCKED: unresolved attempt $($operation.attemptId) belongs to the selected Resource ID; use the destination-scoped resolver."
         }
     }

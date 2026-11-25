@@ -6,9 +6,10 @@ $ErrorActionPreference='Stop'
 
 function Assert-True([bool]$Condition,[string]$Message) { if(-not $Condition) { throw $Message } }
 function Assert-Throws([scriptblock]$Action,[string]$Pattern,[string]$Message) {
-    try { & $Action; throw "TEST_EXPECTED_REJECTION: $Message" } catch {
-        if($_.Exception.Message -notmatch $Pattern) { throw }
-    }
+    $caught=$null
+    try { & $Action } catch { $caught=$_.Exception.Message }
+    if($null -eq $caught) { throw "TEST_EXPECTED_REJECTION: $Message" }
+    if($caught -notmatch $Pattern) { throw "TEST_WRONG_REJECTION: $Message; actual=$caught" }
 }
 function Reset-TestState([string]$Root) {
     $base=Join-Path $Root 'G6\azure-h5-smoke'
@@ -19,6 +20,15 @@ function Write-LegacyJournal([string]$Path,[object[]]$Events) {
     $dir=Split-Path -Parent $Path
     $null=New-Item -ItemType Directory -Path $dir -Force
     [System.IO.File]::WriteAllLines($Path,@($Events|ForEach-Object{$_|ConvertTo-Json -Compress -Depth 8}),[System.Text.UTF8Encoding]::new($false))
+}
+function New-PendingLegacyEvents([string]$AttemptId,[string]$ResourceId,[string]$Lro) {
+    $base=@{attemptId=$AttemptId;resourceId=$ResourceId;operation='PATCH add Job secret';expectedSecretName='h5jit';httpStatus=202;requestId='req';correlationId='corr';lroReference=$Lro;terminalState=$null;readbackResult=$null}
+    $started=$base.Clone();$started.event='AttemptStarted';$started.httpStatus=$null;$started.requestId=$null;$started.correlationId=$null;$started.lroReference=$null
+    $response=$base.Clone();$response.event='PatchResponse'
+    return @($started,$response)
+}
+function New-LegacyResolution([string]$SourceAttemptId,[string]$ResourceId,[string]$Operation,[string]$Lro,[string]$Readback='VerifiedPresent',[string]$Terminal='Failed') {
+    return @{attemptId=[guid]::NewGuid().ToString('D');timestampUtc=[DateTimeOffset]::UtcNow.ToString('o');event='LegacyReconciliation';resourceId=$ResourceId;operation=$Operation;httpStatus=$null;requestId=$null;correlationId=$null;lroReference=$Lro;terminalState=$Terminal;readbackResult=$Readback;expectedSecretName='h5jit';sourceAttemptId=$SourceAttemptId;armRequestId='synthetic-arm-request';armCorrelationId='synthetic-arm-correlation';armHttpStatus=200;readbackRequestId='synthetic-job-readback';readbackHttpStatus=200}
 }
 
 $testRoot=Join-Path $env:TEMP ('g6-jit-state-test-'+[guid]::NewGuid().ToString('N'))
@@ -56,29 +66,52 @@ try {
 
     # A failed/pending Brazil LRO is scoped to Brazil by full Resource ID and cannot be polled against Chile.
     $base=Reset-TestState $testRoot
-    $legacyEvent=@{attemptId='brazil-pending';resourceId=$brazilId;event='PatchResponse';terminalState=$null;readbackResult=$null;lroReference='https://management.azure.com/exact-brazil-lro'}
-    Write-LegacyJournal $chilePaths.LegacyPatchJournal @($legacyEvent)
+    Write-LegacyJournal $chilePaths.LegacyPatchJournal (New-PendingLegacyEvents 'brazil-pending' $brazilId 'https://management.azure.com/exact-brazil-lro')
     Assert-H5LegacyJitStateSafe -Target $chile -StatePaths $chilePaths
     Assert-Throws { Assert-H5LegacyJitStateSafe -Target $brazil -StatePaths $brazilPaths } 'LEGACY_PATCH_JOURNAL_BLOCKED' 'Brazil pending LRO was not blocked for Brazil'
 
     # Chile's own unresolved attempt blocks Chile.
     $base=Reset-TestState $testRoot
-    Write-LegacyJournal $chilePaths.LegacyPatchJournal @(@{attemptId='chile-pending';resourceId=$chileId;event='PatchResponse';terminalState=$null;readbackResult=$null;lroReference='https://management.azure.com/exact-chile-lro'})
+    Write-LegacyJournal $chilePaths.LegacyPatchJournal (New-PendingLegacyEvents 'chile-pending' $chileId 'https://management.azure.com/exact-chile-lro')
     Assert-Throws { Assert-H5LegacyJitStateSafe -Target $chile -StatePaths $chilePaths } 'LEGACY_PATCH_JOURNAL_BLOCKED' 'Chile unresolved LRO did not block Chile'
+
+    # A matching isolated reconciliation unblocks only its exact legacy Chile attempt; Brazil stays blocked.
+    $base=Reset-TestState $testRoot
+    $legacyChile=New-PendingLegacyEvents 'chile-resolved' $chileId 'https://management.azure.com/exact-chile-lro'
+    Write-LegacyJournal $chilePaths.LegacyPatchJournal $legacyChile
+    Write-LegacyJournal $chilePaths.PatchJournal @((New-LegacyResolution 'chile-resolved' $chileId 'PATCH add Job secret' 'https://management.azure.com/exact-chile-lro'))
+    Assert-H5LegacyJitStateSafe -Target $chile -StatePaths $chilePaths
+    Assert-Throws { Assert-H5LegacyJitStateSafe -Target $brazil -StatePaths $brazilPaths } 'HISTORICAL_LRO_UNVERIFIABLE' 'resolving a Chile attempt cleared the Brazil historical block'
+
+    # Wrong operation readback and foreign Resource ID reconciliation cannot resolve the source attempt.
+    $base=Reset-TestState $testRoot
+    Write-LegacyJournal $chilePaths.LegacyPatchJournal (New-PendingLegacyEvents 'chile-wrong-readback' $chileId 'https://management.azure.com/exact-chile-lro')
+    Write-LegacyJournal $chilePaths.PatchJournal @((New-LegacyResolution 'chile-wrong-readback' $chileId 'PATCH add Job secret' 'https://management.azure.com/exact-chile-lro' 'VerifiedAbsent' 'Succeeded'))
+    Assert-Throws { Assert-H5LegacyJitStateSafe -Target $chile -StatePaths $chilePaths } 'PATCH_JOURNAL_SEQUENCE_INVALID|LEGACY_PATCH_JOURNAL_BLOCKED' 'opposite readback resolved a secret add'
+    $base=Reset-TestState $testRoot
+    Write-LegacyJournal $chilePaths.LegacyPatchJournal (New-PendingLegacyEvents 'chile-foreign-resolution' $chileId 'https://management.azure.com/exact-chile-lro')
+    Write-LegacyJournal $chilePaths.PatchJournal @((New-LegacyResolution 'chile-foreign-resolution' $brazilId 'PATCH add Job secret' 'https://management.azure.com/exact-chile-lro'))
+    Assert-Throws { Assert-H5LegacyJitStateSafe -Target $chile -StatePaths $chilePaths } 'LEGACY_PATCH_JOURNAL_AMBIGUOUS|PATCH_JOURNAL_RESOURCE_MISMATCH' 'foreign Resource ID reconciliation was accepted'
+    $base=Reset-TestState $testRoot
+    Write-LegacyJournal $chilePaths.LegacyPatchJournal (New-PendingLegacyEvents 'chile-manual-claim' $chileId 'https://management.azure.com/exact-chile-lro')
+    $manualClaim=New-LegacyResolution 'chile-manual-claim' $chileId 'PATCH add Job secret' 'https://management.azure.com/exact-chile-lro'
+    $manualClaim.Remove('armRequestId');$manualClaim.Remove('armHttpStatus');$manualClaim.Remove('readbackRequestId');$manualClaim.Remove('readbackHttpStatus')
+    Write-LegacyJournal $chilePaths.PatchJournal @($manualClaim)
+    Assert-Throws { Assert-H5LegacyJitStateSafe -Target $chile -StatePaths $chilePaths } 'PATCH_JOURNAL_SEQUENCE_INVALID' 'manual claim without ARM/readback request evidence was accepted'
 
     # Unknown RG, reused attempt IDs across Resource IDs, corrupt JSONL and missing IDs fail closed.
     foreach($badEvents in @(
-        @(@{attemptId='wrong-rg';resourceId='/subscriptions/fef42188-accd-4470-ae88-78f583eb4906/resourceGroups/other/providers/Microsoft.App/jobs/azure-h5-smoke';event='PatchResponse'}),
-        @(@{attemptId='same';resourceId=$brazilId;event='AttemptStarted'},@{attemptId='same';resourceId=$chileId;event='Readback'}),
+        @(@{attemptId='wrong-rg';resourceId='/subscriptions/fef42188-accd-4470-ae88-78f583eb4906/resourceGroups/other/providers/Microsoft.App/jobs/azure-h5-smoke';operation='PATCH add Job secret';event='PatchResponse'}),
+        @(@{attemptId='same';resourceId=$brazilId;operation='PATCH add Job secret';event='AttemptStarted'},@{attemptId='same';resourceId=$chileId;operation='PATCH add Job secret';event='PatchResponse'}),
         @(@{resourceId=$chileId;event='PatchResponse'}))) {
         $base=Reset-TestState $testRoot
         Write-LegacyJournal $chilePaths.LegacyPatchJournal $badEvents
-        Assert-Throws { Assert-H5LegacyJitStateSafe -Target $chile -StatePaths $chilePaths } 'LEGACY_PATCH_JOURNAL_AMBIGUOUS' 'untrusted legacy provenance was accepted'
+        Assert-Throws { Assert-H5LegacyJitStateSafe -Target $chile -StatePaths $chilePaths } 'LEGACY_PATCH_JOURNAL_AMBIGUOUS|PATCH_JOURNAL_CORRUPT' 'untrusted legacy provenance was accepted'
     }
     $base=Reset-TestState $testRoot
     $null=New-Item -ItemType Directory -Path (Split-Path -Parent $chilePaths.LegacyPatchJournal) -Force
     [System.IO.File]::WriteAllText($chilePaths.LegacyPatchJournal,'{bad json',[System.Text.UTF8Encoding]::new($false))
-    Assert-Throws { Assert-H5LegacyJitStateSafe -Target $chile -StatePaths $chilePaths } 'LEGACY_PATCH_JOURNAL_AMBIGUOUS' 'corrupt legacy journal was accepted'
+    Assert-Throws { Assert-H5LegacyJitStateSafe -Target $chile -StatePaths $chilePaths } 'LEGACY_PATCH_JOURNAL_AMBIGUOUS|PATCH_JOURNAL_CORRUPT' 'corrupt legacy journal was accepted'
 
     # No Chile operation is present, while a Chile-specific attempt/marker blocks only the matching state.
     $base=Reset-TestState $testRoot
@@ -95,15 +128,30 @@ try {
     # A destination journal rejects any Resource ID from another RG before another PATCH.
     $base=Reset-TestState $testRoot
     $null=New-Item -ItemType Directory -Path (Split-Path -Parent $chilePaths.PatchJournal) -Force
-    [System.IO.File]::WriteAllText($chilePaths.PatchJournal,(@{attemptId='foreign';resourceId=$brazilId;event='PatchResponse'}|ConvertTo-Json -Compress),[System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllLines($chilePaths.PatchJournal,@((New-PendingLegacyEvents 'foreign' $brazilId 'https://management.azure.com/exact-brazil-lro')|ForEach-Object{$_|ConvertTo-Json -Compress}),[System.Text.UTF8Encoding]::new($false))
     Set-AcaPatchJournalPathOverride $chilePaths.PatchJournal
     Assert-Throws { Assert-AcaPatchJournalReady -ResourceId $chileId } 'PATCH_JOURNAL_RESOURCE_MISMATCH' 'destination journal accepted another Job Resource ID'
+    Set-AcaPatchJournalPathOverride $null
+
+    # A later Chile entry cannot hide an older Brazil entry in the same isolated journal.
+    $base=Reset-TestState $testRoot
+    $mixed=@();$mixed+=New-PendingLegacyEvents 'old-brazil-entry' $brazilId 'https://management.azure.com/brazil-lro';$mixed+=New-PendingLegacyEvents 'new-chile-entry' $chileId 'https://management.azure.com/chile-lro'
+    Write-LegacyJournal $chilePaths.PatchJournal $mixed
+    Set-AcaPatchJournalPathOverride $chilePaths.PatchJournal
+    Assert-Throws { Assert-AcaPatchJournalReady -ResourceId $chileId } 'PATCH_JOURNAL_RESOURCE_MISMATCH' 'a later valid Chile record hid an earlier Brazil Resource ID'
+    Set-AcaPatchJournalPathOverride $null
+
+    # A sequence cannot jump from AttemptStarted directly to Readback.
+    $base=Reset-TestState $testRoot
+    Write-LegacyJournal $chilePaths.PatchJournal @(@{attemptId='bad-sequence';resourceId=$chileId;operation='PATCH add Job secret';expectedSecretName='h5jit';event='AttemptStarted'},@{attemptId='bad-sequence';resourceId=$chileId;operation='PATCH add Job secret';expectedSecretName='h5jit';event='Readback';readbackResult='VerifiedPresent'})
+    Set-AcaPatchJournalPathOverride $chilePaths.PatchJournal
+    Assert-Throws { Assert-AcaPatchJournalReady -ResourceId $chileId } 'PATCH_JOURNAL_SEQUENCE_INVALID' 'incompatible event sequence was accepted'
     Set-AcaPatchJournalPathOverride $null
 
     # An unresolved attempt for the same destination prevents a second secret PATCH.
     $base=Reset-TestState $testRoot
     $null=New-Item -ItemType Directory -Path (Split-Path -Parent $chilePaths.PatchJournal) -Force
-    [System.IO.File]::WriteAllText($chilePaths.PatchJournal,(@{attemptId='chile-second-patch-block';resourceId=$chileId;event='PatchResponse'}|ConvertTo-Json -Compress),[System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllLines($chilePaths.PatchJournal,@((New-PendingLegacyEvents 'chile-second-patch-block' $chileId 'https://management.azure.com/exact-chile-lro')|ForEach-Object{$_|ConvertTo-Json -Compress}),[System.Text.UTF8Encoding]::new($false))
     Set-AcaPatchJournalPathOverride $chilePaths.PatchJournal
     Assert-Throws { Assert-AcaPatchJournalReady -ResourceId $chileId } 'ARM_PATCH_JOURNAL_BLOCKED' 'second PATCH was not blocked for unresolved Chile operation'
     Set-AcaPatchJournalPathOverride $null

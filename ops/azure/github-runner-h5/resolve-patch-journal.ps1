@@ -39,8 +39,8 @@ $legacyOperations=@(Get-H5LegacyJournalOperations -Path $statePaths.LegacyPatchJ
 $legacyPending=@($legacyOperations|Where-Object{[string]::Equals([string]$_.resourceId,$targetResourceId,[System.StringComparison]::OrdinalIgnoreCase) -and (Test-H5PatchOperationPending -Operation $_)})
 $scopedPending=@(Get-AcaPatchJournalPendingOperations -ResourceId $targetResourceId -Path $statePaths.PatchJournal)
 $work=@()
-if($legacyPending.Count -gt 0) { $work+=@([pscustomobject]@{Path=$statePaths.LegacyPatchJournal;AllowOtherResourceIds=$true}) }
-if($scopedPending.Count -gt 0) { $work+=@([pscustomobject]@{Path=$statePaths.PatchJournal;AllowOtherResourceIds=$false}) }
+if($legacyPending.Count -gt 0) { $work+=@([pscustomobject]@{Operations=$legacyPending;LegacySource=$true}) }
+if($scopedPending.Count -gt 0) { $work+=@([pscustomobject]@{Operations=$scopedPending;LegacySource=$false}) }
 if($work.Count -eq 0) {
     [pscustomobject]@{destination=$Destination;resourceId=$targetResourceId;state='NO_PENDING_LOCAL_PATCH_OPERATIONS'}
     return
@@ -51,8 +51,8 @@ if($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$tokenResponse.a
 $uri="https://management.azure.com${targetResourceId}?api-version=2025-07-01"
 try {
     foreach($journal in $work) {
-        Set-AcaPatchJournalPathOverride $journal.Path
-        $results=@(Resolve-AcaPatchJournalOperations -Token ([string]$tokenResponse.accessToken) -Uri $uri -JobName $target.JobName -ResourceGroup $target.ResourceGroup -EnvironmentId ([string]$resource.properties.environmentId) -ExpectedImage $image -ResourceId $targetResourceId -AllowOtherResourceIds:$journal.AllowOtherResourceIds)
+        $sourcePath=if($journal.LegacySource){$statePaths.LegacyPatchJournal}else{$statePaths.PatchJournal}
+        $results=@(Resolve-AcaPatchJournalOperations -Token ([string]$tokenResponse.accessToken) -Uri $uri -JobName $target.JobName -ResourceGroup $target.ResourceGroup -EnvironmentId ([string]$resource.properties.environmentId) -ExpectedImage $image -ResourceId $targetResourceId -EvidenceJournalPath $statePaths.PatchJournal -SourceJournalPath $sourcePath -Operations @($journal.Operations) -LegacySource:$journal.LegacySource)
         foreach($result in $results) { [pscustomobject]@{destination=$Destination;resourceId=$targetResourceId;attemptId=$result.AttemptId;state=$result.State;readback=$result.Readback;error=$result.Error} }
     }
 } finally {

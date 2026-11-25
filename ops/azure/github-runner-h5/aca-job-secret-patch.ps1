@@ -3,6 +3,9 @@ Set-StrictMode -Version Latest
 $script:AcaArmRequestOverride = $null
 $script:AcaLastPatchOutcome = 'NotStarted'
 $script:AcaLastObservedLroState = $null
+$script:AcaLastObservedLroRequestId = $null
+$script:AcaLastObservedLroCorrelationId = $null
+$script:AcaLastObservedLroHttpStatus = $null
 $script:AcaPatchJournalPathOverride = $null
 $script:AcaCurrentPatchAttempt = $null
 
@@ -15,6 +18,14 @@ function Get-AcaPatchJournalPath {
     if (-not [string]::IsNullOrWhiteSpace($script:AcaPatchJournalPathOverride)) { return $script:AcaPatchJournalPathOverride }
     if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { throw 'PATCH_JOURNAL_LOCAL_STORAGE_UNAVAILABLE: LOCALAPPDATA is not set.' }
     return Join-Path (Join-Path $env:LOCALAPPDATA 'G6\azure-h5-smoke\patch-lro-tracking') 'operations.jsonl'
+}
+
+function Assert-AcaManagementLroReference {
+    param([Parameter(Mandatory)][string]$Uri)
+    $parsed=$null
+    if (-not [System.Uri]::TryCreate($Uri,[System.UriKind]::Absolute,[ref]$parsed) -or $parsed.Scheme -cne 'https' -or $parsed.Host -cne 'management.azure.com' -or $parsed.Port -ne 443 -or -not [string]::IsNullOrEmpty($parsed.UserInfo) -or -not [string]::IsNullOrEmpty($parsed.Fragment)) {
+        throw 'PATCH_JOURNAL_LRO_URI_REJECTED: LRO reference must be an HTTPS Azure Resource Manager URI.'
+    }
 }
 
 function Protect-AcaPatchJournalPath {
@@ -40,45 +51,129 @@ function Initialize-AcaPatchJournal {
     return $path
 }
 
-function Get-AcaPatchJournalLatestOperations {
-    param([string]$Path)
+function Get-AcaPatchJournalEvents {
+    param([AllowEmptyString()][string]$Path,[Parameter(Mandatory)][string[]]$AllowedResourceIds)
     $path = if ([string]::IsNullOrWhiteSpace($Path)) { Get-AcaPatchJournalPath } else { $Path }
     if (-not (Test-Path -LiteralPath $path)) { return @() }
-    Protect-AcaPatchJournalPath -Path (Split-Path -Parent $path) -Directory $true
-    Protect-AcaPatchJournalPath -Path $path -Directory $false
     $latest = @{}
+    $events = [System.Collections.Generic.List[object]]::new()
+    $resolvedSourceAttempts = @{}
+    $reconciliationAttemptIds = @{}
     foreach ($line in [System.IO.File]::ReadAllLines($path)) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
         try { $event = $line | ConvertFrom-Json -ErrorAction Stop } catch { throw 'PATCH_JOURNAL_CORRUPT: refusing PATCH because local operation history is not parseable.' }
-        if (-not $event.attemptId) { throw 'PATCH_JOURNAL_CORRUPT: operation history entry lacks an attempt identifier.' }
-        $latest[[string]$event.attemptId] = $event
+        $propertyNames=@($event.PSObject.Properties | ForEach-Object Name)
+        $attemptId=if($propertyNames -contains 'attemptId'){[string]$event.attemptId}else{''}
+        $resourceId=if($propertyNames -contains 'resourceId'){[string]$event.resourceId}else{''}
+        $operation=if($propertyNames -contains 'operation'){[string]$event.operation}else{''}
+        if ([string]::IsNullOrWhiteSpace($attemptId) -or [string]::IsNullOrWhiteSpace($resourceId) -or [string]::IsNullOrWhiteSpace($operation)) { throw 'PATCH_JOURNAL_CORRUPT: operation history entry lacks attemptId, Resource ID or operation.' }
+        if (@($AllowedResourceIds | Where-Object { [string]::Equals($_,$resourceId,[System.StringComparison]::OrdinalIgnoreCase) }).Count -ne 1) { throw 'PATCH_JOURNAL_RESOURCE_MISMATCH: journal contains an unauthorized or unknown Resource ID.' }
+        $eventType=if($propertyNames -contains 'event'){[string]$event.event}else{''}
+        if ($eventType -notin @('AttemptStarted','PatchResponse','LroPoll','OperationTerminal','Readback','LegacyReconciliation','LegacyResolutionObserved')) { throw 'PATCH_JOURNAL_SEQUENCE_INVALID: journal contains an unknown event type.' }
+        if ($eventType -eq 'OperationTerminal' -and [string]$event.terminalState -notin @('Succeeded','Failed','Canceled','Cancelled','Rejected')) { throw 'PATCH_JOURNAL_SEQUENCE_INVALID: terminal event has an unknown state.' }
+        if ($eventType -eq 'Readback' -and [string]$event.readbackResult -notin @('VerifiedPresent','VerifiedAbsent','Unverified','NotRequired')) { throw 'PATCH_JOURNAL_SEQUENCE_INVALID: readback event has an unknown result.' }
+        if ($eventType -in @('LegacyReconciliation','LegacyResolutionObserved')) {
+            $requiredEvidenceProperties=@('sourceAttemptId','lroReference','expectedSecretName','terminalState','readbackResult','armRequestId','armHttpStatus','readbackRequestId','readbackHttpStatus')
+            if (@($requiredEvidenceProperties | Where-Object { $propertyNames -notcontains $_ }).Count -gt 0) { throw 'PATCH_JOURNAL_SEQUENCE_INVALID: legacy reconciliation evidence lacks required ARM/readback fields.' }
+            if ([string]::IsNullOrWhiteSpace([string]$event.sourceAttemptId) -or [string]::IsNullOrWhiteSpace([string]$event.lroReference) -or [string]::IsNullOrWhiteSpace([string]$event.expectedSecretName) -or [string]$event.terminalState -notin @('Succeeded','Failed','Canceled','Cancelled') -or [string]$event.readbackResult -notin @('VerifiedPresent','VerifiedAbsent')) { throw 'PATCH_JOURNAL_SEQUENCE_INVALID: legacy reconciliation evidence is incomplete or unverified.' }
+            if ([string]::IsNullOrWhiteSpace([string]$event.armRequestId) -or [int]$event.armHttpStatus -ne 200 -or [string]::IsNullOrWhiteSpace([string]$event.readbackRequestId) -or [int]$event.readbackHttpStatus -ne 200) { throw 'PATCH_JOURNAL_SEQUENCE_INVALID: reconciliation lacks successful ARM LRO and Job readback evidence.' }
+            $null=Get-AcaPatchExpectedReadback -Operation ([string]$event.operation)
+            if ($eventType -eq 'LegacyReconciliation' -and [string]$event.readbackResult -cne (Get-AcaPatchExpectedReadback -Operation ([string]$event.operation))) { throw 'PATCH_JOURNAL_SEQUENCE_INVALID: reconciliation readback contradicts its operation.' }
+            if ($latest.ContainsKey($attemptId) -or $reconciliationAttemptIds.ContainsKey($attemptId) -or [string]$event.sourceAttemptId -ceq $attemptId) { throw 'PATCH_JOURNAL_SEQUENCE_INVALID: reconciliation record reuses its own or another attemptId.' }
+            if ($eventType -eq 'LegacyReconciliation' -and $resolvedSourceAttempts.ContainsKey([string]$event.sourceAttemptId)) { throw 'PATCH_JOURNAL_SEQUENCE_INVALID: a source attempt has multiple reconciliation records.' }
+            if ($eventType -eq 'LegacyReconciliation') { $resolvedSourceAttempts[[string]$event.sourceAttemptId]=$event }
+            $reconciliationAttemptIds[$attemptId]=$event
+            Assert-AcaManagementLroReference -Uri ([string]$event.lroReference)
+            $events.Add($event)
+            continue
+        }
+        if ($reconciliationAttemptIds.ContainsKey($attemptId)) { throw 'PATCH_JOURNAL_SEQUENCE_INVALID: a PATCH attempt reuses a reconciliation record identifier.' }
+        if ($latest.ContainsKey($attemptId)) {
+            $previous=$latest[$attemptId]
+            if (-not [string]::Equals([string]$previous.resourceId,$resourceId,[System.StringComparison]::OrdinalIgnoreCase) -or [string]$previous.operation -cne $operation) { throw 'PATCH_JOURNAL_SEQUENCE_INVALID: one attemptId was reused for different resources or operations.' }
+            $previousSecretName=if($previous.PSObject.Properties.Name -contains 'expectedSecretName'){[string]$previous.expectedSecretName}else{''}
+            $eventSecretName=if($propertyNames -contains 'expectedSecretName'){[string]$event.expectedSecretName}else{''}
+            if ($previousSecretName -cne $eventSecretName) { throw 'PATCH_JOURNAL_SEQUENCE_INVALID: expected secret name changed within one attempt.' }
+            $allowedNext = switch ([string]$previous.event) {
+                'AttemptStarted' { @('PatchResponse') }
+                'PatchResponse' { @('LroPoll','OperationTerminal') }
+                'LroPoll' { @('LroPoll','OperationTerminal','Readback') }
+                'OperationTerminal' { @('Readback') }
+                # A prior readback can be recorded while an LRO is still pending; later polling/reconciliation may append terminal evidence.
+                'Readback' { @('LroPoll','OperationTerminal','Readback') }
+                default { @() }
+            }
+            if ($eventType -notin $allowedNext) { throw "PATCH_JOURNAL_SEQUENCE_INVALID: $($previous.event) cannot be followed by $eventType for one attempt." }
+            $previousLro=if($previous.PSObject.Properties.Name -contains 'lroReference'){[string]$previous.lroReference}else{''}
+            $eventLro=if($propertyNames -contains 'lroReference'){[string]$event.lroReference}else{''}
+            if ($previousLro -and $eventLro -and $previousLro -cne $eventLro) { throw 'PATCH_JOURNAL_SEQUENCE_INVALID: LRO reference changed within one attempt.' }
+        } elseif ($eventType -cne 'AttemptStarted') {
+            throw 'PATCH_JOURNAL_SEQUENCE_INVALID: attempt history does not begin with AttemptStarted.'
+        }
+        if ($propertyNames -contains 'lroReference' -and -not [string]::IsNullOrWhiteSpace([string]$event.lroReference)) { Assert-AcaManagementLroReference -Uri ([string]$event.lroReference) }
+        $latest[$attemptId]=$event
+        $events.Add($event)
     }
+    return $events.ToArray()
+}
+
+function Get-AcaPatchJournalLatestOperations {
+    param([string]$Path,[Parameter(Mandatory)][string[]]$AllowedResourceIds)
+    $events=@(Get-AcaPatchJournalEvents -Path $Path -AllowedResourceIds $AllowedResourceIds)
+    $latest=@{}
+    foreach($event in $events) { $latest[[string]$event.attemptId]=$event }
     return @($latest.Values)
 }
 
 function Get-AcaPatchJournalPendingOperations {
-    param([string]$ResourceId,[string]$Path,[switch]$AllowOtherResourceIds)
-    $latest = @(Get-AcaPatchJournalLatestOperations -Path $Path)
-    if (-not [string]::IsNullOrWhiteSpace($ResourceId)) {
-        foreach ($operation in $latest) {
-            if ([string]::IsNullOrWhiteSpace([string]$operation.resourceId) -or (-not $AllowOtherResourceIds -and -not [string]::Equals([string]$operation.resourceId,$ResourceId,[System.StringComparison]::OrdinalIgnoreCase))) {
-                throw 'PATCH_JOURNAL_RESOURCE_MISMATCH: destination-scoped journal contains an operation for another or unknown Resource ID.'
-            }
-        }
-    }
-    $pending = @($latest | Where-Object {
-        $belongsToTarget = [string]::IsNullOrWhiteSpace($ResourceId) -or [string]::Equals([string]$_.resourceId,$ResourceId,[System.StringComparison]::OrdinalIgnoreCase)
-        $terminalState=if($_.PSObject.Properties.Name -contains 'terminalState') {[string]$_.terminalState} else {$null}
-        $readback=if($_.PSObject.Properties.Name -contains 'readbackResult') {[string]$_.readbackResult} else {$null}
-        $notTerminal = $terminalState -notin @('Succeeded','Failed','Canceled','Cancelled','Rejected') -or
-            ($terminalState -in @('Succeeded','Failed','Canceled','Cancelled') -and $readback -notin @('VerifiedPresent','VerifiedAbsent'))
-        $belongsToTarget -and $notTerminal
-    })
+    param([Parameter(Mandatory)][string]$ResourceId,[string]$Path)
+    $latest = @(Get-AcaPatchJournalLatestOperations -Path $Path -AllowedResourceIds @($ResourceId))
+    $pending = @($latest | Where-Object { -not (Test-AcaPatchOperationResolved -Record $_) })
     return $pending
 }
 
+function Get-AcaPatchExpectedReadback {
+    param([Parameter(Mandatory)][string]$Operation)
+    switch ($Operation) {
+        'PATCH add Job secret' { return 'VerifiedPresent' }
+        'PATCH remove Job secret' { return 'VerifiedAbsent' }
+        default { throw 'PATCH_OPERATION_UNKNOWN: refusing to reconcile an operation whose intended secret state is unknown.' }
+    }
+}
+
+function Test-AcaLegacyReconciliationVerified {
+    param([Parameter(Mandatory)]$Record)
+    try { $expected=Get-AcaPatchExpectedReadback -Operation ([string]$Record.operation) } catch { return $false }
+    return ([string]$Record.event -ceq 'LegacyReconciliation' -and
+        -not [string]::IsNullOrWhiteSpace([string]$Record.sourceAttemptId) -and
+        -not [string]::IsNullOrWhiteSpace([string]$Record.resourceId) -and
+        -not [string]::IsNullOrWhiteSpace([string]$Record.lroReference) -and
+        -not [string]::IsNullOrWhiteSpace([string]$Record.expectedSecretName) -and
+        [string]$Record.terminalState -in @('Succeeded','Failed','Canceled','Cancelled') -and
+        [string]$Record.readbackResult -ceq $expected)
+}
+
+function Test-AcaPatchOperationResolved {
+    param([Parameter(Mandatory)]$Record)
+    if ([string]$Record.event -ceq 'LegacyReconciliation') { return Test-AcaLegacyReconciliationVerified -Record $Record }
+    if ([string]$Record.event -ceq 'LegacyResolutionObserved') { return $true }
+    if ([string]$Record.terminalState -ceq 'Rejected') { return ([int]$Record.httpStatus -ge 400 -and [int]$Record.httpStatus -lt 500 -and [string]$Record.readbackResult -ceq 'NotRequired') }
+    try { $expected=Get-AcaPatchExpectedReadback -Operation ([string]$Record.operation) } catch { return $false }
+    return ([string]$Record.event -ceq 'Readback' -and
+        [string]$Record.terminalState -in @('Succeeded','Failed','Canceled','Cancelled') -and
+        [string]$Record.readbackResult -ceq $expected)
+}
+
+function Get-AcaPatchExpectedJitSecretName {
+    param([Parameter(Mandatory)][string]$Operation,[string]$RecordedName)
+    $null=Get-AcaPatchExpectedReadback -Operation $Operation
+    if ([string]::IsNullOrWhiteSpace($RecordedName)) { return 'h5jit' }
+    if ($RecordedName -cne 'h5jit') { throw 'PATCH_SECRET_NAME_MISMATCH: JIT journal operation references an unexpected secret name.' }
+    return $RecordedName
+}
+
 function Assert-AcaPatchJournalReady {
-    param([string]$ResourceId)
+    param([Parameter(Mandatory)][string]$ResourceId)
     $pending = @(Get-AcaPatchJournalPendingOperations -ResourceId $ResourceId)
     if ($pending.Count -gt 0) {
         $ids = @($pending | ForEach-Object { [string]$_.attemptId }) -join ','
@@ -88,7 +183,7 @@ function Assert-AcaPatchJournalReady {
 
 function Write-AcaPatchJournalEvent {
     param(
-        [Parameter(Mandatory)][ValidateSet('AttemptStarted','PatchResponse','LroPoll','OperationTerminal','Readback')][string]$EventType,
+        [Parameter(Mandatory)][ValidateSet('AttemptStarted','PatchResponse','LroPoll','OperationTerminal','Readback','LegacyReconciliation','LegacyResolutionObserved')][string]$EventType,
         [string]$ResourceId,
         [string]$Operation,
         [Nullable[int]]$HttpStatus,
@@ -96,13 +191,22 @@ function Write-AcaPatchJournalEvent {
         [string]$CorrelationId,
         [string]$LroReference,
         [string]$TerminalState,
-        [string]$ReadbackResult
+        [string]$ReadbackResult,
+        [string]$SourceAttemptId,
+        [string]$ExpectedSecretName,
+        [string]$ArmRequestId,
+        [string]$ArmCorrelationId,
+        [Nullable[int]]$ArmHttpStatus,
+        [string]$ReadbackRequestId,
+        [Nullable[int]]$ReadbackHttpStatus
     )
     if ($EventType -eq 'AttemptStarted') {
         $script:AcaCurrentPatchAttempt = [pscustomobject]@{
             attemptId=[guid]::NewGuid().ToString('D'); startedAtUtc=[DateTimeOffset]::UtcNow.ToString('o')
             resourceId=$ResourceId; operation=$Operation; httpStatus=$null; requestId=$null
             correlationId=$null; lroReference=$null; terminalState=$null; readbackResult=$null
+            sourceAttemptId=$null; expectedSecretName=$null
+            armRequestId=$null; armCorrelationId=$null; armHttpStatus=$null; readbackRequestId=$null; readbackHttpStatus=$null
         }
     }
     if (-not $script:AcaCurrentPatchAttempt) { throw 'PATCH_JOURNAL_STATE_INVALID: no current attempt exists for an operation event.' }
@@ -113,11 +217,21 @@ function Write-AcaPatchJournalEvent {
     if ($PSBoundParameters.ContainsKey('LroReference')) { $current.lroReference=$LroReference }
     if ($PSBoundParameters.ContainsKey('TerminalState')) { $current.terminalState=$TerminalState }
     if ($PSBoundParameters.ContainsKey('ReadbackResult')) { $current.readbackResult=$ReadbackResult }
+    if ($PSBoundParameters.ContainsKey('SourceAttemptId')) { $current.sourceAttemptId=$SourceAttemptId }
+    if ($PSBoundParameters.ContainsKey('ExpectedSecretName')) { $current.expectedSecretName=$ExpectedSecretName }
+    if ($PSBoundParameters.ContainsKey('ArmRequestId')) { $current.armRequestId=$ArmRequestId }
+    if ($PSBoundParameters.ContainsKey('ArmCorrelationId')) { $current.armCorrelationId=$ArmCorrelationId }
+    if ($PSBoundParameters.ContainsKey('ArmHttpStatus')) { $current.armHttpStatus=[int]$ArmHttpStatus }
+    if ($PSBoundParameters.ContainsKey('ReadbackRequestId')) { $current.readbackRequestId=$ReadbackRequestId }
+    if ($PSBoundParameters.ContainsKey('ReadbackHttpStatus')) { $current.readbackHttpStatus=[int]$ReadbackHttpStatus }
     $record = @{
         attemptId=$current.attemptId; timestampUtc=[DateTimeOffset]::UtcNow.ToString('o'); event=$EventType
         resourceId=$current.resourceId; operation=$current.operation; httpStatus=$current.httpStatus
         requestId=$current.requestId; correlationId=$current.correlationId; lroReference=$current.lroReference
         terminalState=$current.terminalState; readbackResult=$current.readbackResult
+        sourceAttemptId=$current.sourceAttemptId; expectedSecretName=$current.expectedSecretName
+        armRequestId=$current.armRequestId; armCorrelationId=$current.armCorrelationId; armHttpStatus=$current.armHttpStatus
+        readbackRequestId=$current.readbackRequestId; readbackHttpStatus=$current.readbackHttpStatus
     } | ConvertTo-Json -Compress -Depth 5
     $path=Initialize-AcaPatchJournal
     $bytes=[System.Text.UTF8Encoding]::new($false).GetBytes($record + "`n")
@@ -254,7 +368,7 @@ function Get-AcaJobSnapshot {
     $etag = Get-AcaHeaderValue $response.Headers 'ETag'
     if ([string]::IsNullOrWhiteSpace($etag) -and $resource.PSObject.Properties.Name -contains 'etag') { $etag = [string]$resource.etag }
     if ([string]::IsNullOrWhiteSpace($etag)) { $etag = $null }
-    return [pscustomobject]@{ Resource=$resource; ETag=$etag }
+    return [pscustomobject]@{ Resource=$resource; ETag=$etag; RequestId=(Get-AcaHeaderValue $response.Headers 'x-ms-request-id'); HttpStatus=[int]$response.StatusCode }
 }
 
 function Wait-AcaOperation {
@@ -263,11 +377,19 @@ function Wait-AcaOperation {
         [Parameter(Mandatory)][string]$Token,
         [Parameter(Mandatory)][int]$TimeoutSeconds,
         [scriptblock]$Sleep = { Start-Sleep -Seconds 3 },
-        [string[]]$RedactValues = @()
+        [string[]]$RedactValues = @(),
+        [switch]$NoJournal
     )
+    Assert-AcaManagementLroReference -Uri $OperationUri
+    $script:AcaLastObservedLroRequestId=$null
+    $script:AcaLastObservedLroCorrelationId=$null
+    $script:AcaLastObservedLroHttpStatus=$null
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
     while ([DateTimeOffset]::UtcNow -lt $deadline) {
         $response = Invoke-AcaArmRequest -Method GET -Uri $OperationUri -Token $Token
+        $script:AcaLastObservedLroRequestId=Get-AcaHeaderValue $response.Headers 'x-ms-request-id'
+        $script:AcaLastObservedLroCorrelationId=Get-AcaHeaderValue $response.Headers 'x-ms-correlation-request-id'
+        $script:AcaLastObservedLroHttpStatus=[int]$response.StatusCode
         if ($response.StatusCode -notin @(200, 202)) { Throw-AcaResponseError -Response $response -Operation 'ARM async operation' -RedactValues $RedactValues }
         $state = ConvertFrom-AcaResponseContent ([string]$response.Content)
         $stateValue = $null
@@ -278,16 +400,16 @@ function Wait-AcaOperation {
         elseif ($state -and $statePropertyNames -contains 'properties' -and @($state.properties.PSObject.Properties | ForEach-Object { $_.Name }) -contains 'provisioningState') { $stateValue = [string]$state.properties.provisioningState }
         elseif ($response.StatusCode -eq 200) {
             $script:AcaLastObservedLroState='Succeeded'
-            Write-AcaPatchJournalEvent -EventType OperationTerminal -TerminalState 'Succeeded' -HttpStatus 200 -RequestId (Get-AcaHeaderValue $response.Headers 'x-ms-request-id') -CorrelationId (Get-AcaHeaderValue $response.Headers 'x-ms-correlation-request-id')
+            if (-not $NoJournal) { Write-AcaPatchJournalEvent -EventType OperationTerminal -TerminalState 'Succeeded' -HttpStatus 200 -RequestId (Get-AcaHeaderValue $response.Headers 'x-ms-request-id') -CorrelationId (Get-AcaHeaderValue $response.Headers 'x-ms-correlation-request-id') }
             return 'Succeeded'
         }
         $script:AcaLastObservedLroState=$stateValue
-        Write-AcaPatchJournalEvent -EventType LroPoll -HttpStatus $response.StatusCode -RequestId (Get-AcaHeaderValue $response.Headers 'x-ms-request-id') -CorrelationId (Get-AcaHeaderValue $response.Headers 'x-ms-correlation-request-id')
+        if (-not $NoJournal) { Write-AcaPatchJournalEvent -EventType LroPoll -HttpStatus $response.StatusCode -RequestId (Get-AcaHeaderValue $response.Headers 'x-ms-request-id') -CorrelationId (Get-AcaHeaderValue $response.Headers 'x-ms-correlation-request-id') }
         switch ($stateValue) {
-            'Succeeded' { Write-AcaPatchJournalEvent -EventType OperationTerminal -TerminalState 'Succeeded' -HttpStatus $response.StatusCode; return 'Succeeded' }
-            'Failed' { $script:AcaLastPatchOutcome='TerminalFailure'; Write-AcaPatchJournalEvent -EventType OperationTerminal -TerminalState 'Failed' -HttpStatus $response.StatusCode; Throw-AcaResponseError -Response $response -Operation 'ARM async operation' -RedactValues $RedactValues }
-            'Canceled' { $script:AcaLastPatchOutcome='TerminalFailure'; Write-AcaPatchJournalEvent -EventType OperationTerminal -TerminalState 'Canceled' -HttpStatus $response.StatusCode; throw 'ARM_OPERATION_CANCELED: asynchronous Job patch was canceled.' }
-            'Cancelled' { $script:AcaLastPatchOutcome='TerminalFailure'; Write-AcaPatchJournalEvent -EventType OperationTerminal -TerminalState 'Cancelled' -HttpStatus $response.StatusCode; throw 'ARM_OPERATION_CANCELED: asynchronous Job patch was canceled.' }
+            'Succeeded' { if (-not $NoJournal) { Write-AcaPatchJournalEvent -EventType OperationTerminal -TerminalState 'Succeeded' -HttpStatus $response.StatusCode }; return 'Succeeded' }
+            'Failed' { $script:AcaLastPatchOutcome='TerminalFailure'; if (-not $NoJournal) { Write-AcaPatchJournalEvent -EventType OperationTerminal -TerminalState 'Failed' -HttpStatus $response.StatusCode }; Throw-AcaResponseError -Response $response -Operation 'ARM async operation' -RedactValues $RedactValues }
+            'Canceled' { $script:AcaLastPatchOutcome='TerminalFailure'; if (-not $NoJournal) { Write-AcaPatchJournalEvent -EventType OperationTerminal -TerminalState 'Canceled' -HttpStatus $response.StatusCode }; throw 'ARM_OPERATION_CANCELED: asynchronous Job patch was canceled.' }
+            'Cancelled' { $script:AcaLastPatchOutcome='TerminalFailure'; if (-not $NoJournal) { Write-AcaPatchJournalEvent -EventType OperationTerminal -TerminalState 'Cancelled' -HttpStatus $response.StatusCode }; throw 'ARM_OPERATION_CANCELED: asynchronous Job patch was canceled.' }
         }
         if ([string]::IsNullOrWhiteSpace($stateValue) -and $response.StatusCode -eq 202) {
             & $Sleep
@@ -305,14 +427,16 @@ function Invoke-AcaJobSecretPatch {
         [AllowEmptyString()][string]$ETag,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Secrets,
         [Parameter(Mandatory)][string]$Operation,
+        [Parameter(Mandatory)][string]$SecretName,
         [int]$TimeoutSeconds = 120,
         [scriptblock]$Sleep = { Start-Sleep -Seconds 3 },
         [string[]]$RedactValues = @()
     )
-    Assert-AcaPatchJournalReady
+    $resourceId=[System.Uri]::new($Uri).AbsolutePath
+    Assert-AcaPatchJournalReady -ResourceId $resourceId
     $script:AcaLastPatchOutcome = 'Ambiguous'
     $script:AcaLastObservedLroState = $null
-    Write-AcaPatchJournalEvent -EventType AttemptStarted -ResourceId ([System.Uri]::new($Uri).AbsolutePath) -Operation $Operation
+    Write-AcaPatchJournalEvent -EventType AttemptStarted -ResourceId $resourceId -Operation $Operation -ExpectedSecretName $SecretName
     $responseRecorded=$false
     try {
         $body = @{properties=@{configuration=@{secrets=@($Secrets)}}}
@@ -375,7 +499,7 @@ function Add-AcaJobSecret {
         throw 'JOB_HAS_OTHER_SECRETS: refusing to replace an existing secret collection with an array PATCH.'
     }
     $newSecret = @{name=$SecretName;value=$SecretValue}
-    Invoke-AcaJobSecretPatch -Uri $Uri -Token $Token -ETag $snapshot.ETag -Secrets @($newSecret) -Operation 'PATCH add Job secret' -TimeoutSeconds $TimeoutSeconds -Sleep $Sleep -RedactValues @($SecretValue,$Token)
+    Invoke-AcaJobSecretPatch -Uri $Uri -Token $Token -ETag $snapshot.ETag -Secrets @($newSecret) -Operation 'PATCH add Job secret' -SecretName $SecretName -TimeoutSeconds $TimeoutSeconds -Sleep $Sleep -RedactValues @($SecretValue,$Token)
 
     try {
         $verified = Get-AcaJobSnapshot -Uri $Uri -Token $Token -JobName $JobName -ResourceGroup $ResourceGroup -EnvironmentId $EnvironmentId -ExpectedImage $ExpectedImage
@@ -406,7 +530,7 @@ function Remove-AcaJobSecret {
     $temporary = @($existing | Where-Object { $_.name -eq $SecretName })
     if ($temporary.Count -eq 0) { return $false }
     if ($existing.Count -ne 1) { throw 'JOB_HAS_OTHER_SECRETS: refusing to remove/replace a mixed secret collection.' }
-    Invoke-AcaJobSecretPatch -Uri $Uri -Token $Token -ETag $snapshot.ETag -Secrets @() -Operation 'PATCH remove Job secret' -TimeoutSeconds $TimeoutSeconds -Sleep $Sleep -RedactValues @($Token)
+    Invoke-AcaJobSecretPatch -Uri $Uri -Token $Token -ETag $snapshot.ETag -Secrets @() -Operation 'PATCH remove Job secret' -SecretName $SecretName -TimeoutSeconds $TimeoutSeconds -Sleep $Sleep -RedactValues @($Token)
 
     try {
         $verified = Get-AcaJobSnapshot -Uri $Uri -Token $Token -JobName $JobName -ResourceGroup $ResourceGroup -EnvironmentId $EnvironmentId -ExpectedImage $ExpectedImage
@@ -430,7 +554,10 @@ function Resolve-AcaPatchJournalOperations {
         [Parameter(Mandatory)][string]$EnvironmentId,
         [Parameter(Mandatory)][string]$ExpectedImage,
         [string]$ResourceId,
-        [switch]$AllowOtherResourceIds,
+        [string]$EvidenceJournalPath,
+        [string]$SourceJournalPath,
+        [object[]]$Operations,
+        [switch]$LegacySource,
         [int]$TimeoutSeconds = 120,
         [scriptblock]$Sleep = { Start-Sleep -Seconds 3 }
     )
@@ -438,32 +565,68 @@ function Resolve-AcaPatchJournalOperations {
     $expectedResourceId = "/subscriptions/$((([uri]$Uri).AbsolutePath -split '/')[2])/resourceGroups/$ResourceGroup/providers/Microsoft.App/jobs/$JobName"
     if ([string]::IsNullOrWhiteSpace($ResourceId)) { $ResourceId=$expectedResourceId }
     if (-not [string]::Equals($ResourceId,$expectedResourceId,[System.StringComparison]::OrdinalIgnoreCase)) { throw 'PATCH_JOURNAL_TARGET_MISMATCH: requested Resource ID does not match the supplied ARM Job URI.' }
-    foreach($operation in @(Get-AcaPatchJournalPendingOperations -ResourceId $ResourceId -AllowOtherResourceIds:$AllowOtherResourceIds)) {
-        if ([string]::IsNullOrWhiteSpace([string]$operation.lroReference)) {
-            $results.Add([pscustomobject]@{AttemptId=$operation.attemptId;State='HISTORICAL_LRO_UNVERIFIABLE';Readback='NotAttempted'})
-            continue
-        }
-        $script:AcaCurrentPatchAttempt=[pscustomobject]@{
-            attemptId=[string]$operation.attemptId;startedAtUtc=[string]$operation.timestampUtc
-            resourceId=[string]$operation.resourceId;operation=[string]$operation.operation
-            httpStatus=$operation.httpStatus;requestId=$operation.requestId;correlationId=$operation.correlationId
-            lroReference=[string]$operation.lroReference;terminalState=$null;readbackResult=$null
-        }
-        $script:AcaLastObservedLroState=$null
-        $terminalError=$null
-        try {
-            $null=Wait-AcaOperation -OperationUri ([string]$operation.lroReference) -Token $Token -TimeoutSeconds $TimeoutSeconds -Sleep $Sleep
-        } catch {
-            if ($script:AcaLastObservedLroState -notin @('Succeeded','Failed','Canceled','Cancelled')) { throw }
-            $terminalError=$_.Exception.Message
-        }
-        $snapshot=Get-AcaJobSnapshot -Uri $Uri -Token $Token -JobName $JobName -ResourceGroup $ResourceGroup -EnvironmentId $EnvironmentId -ExpectedImage $ExpectedImage
-        $names=@($snapshot.Resource.properties.configuration.secrets|Where-Object{$_ -and $_.name}|ForEach-Object{[string]$_.name})
-        $readback=if($names -contains 'h5jit'){'VerifiedPresent'}else{'VerifiedAbsent'}
-        Write-AcaPatchJournalEvent -EventType Readback -ReadbackResult $readback
-        $results.Add([pscustomobject]@{AttemptId=$operation.attemptId;State=[string]$script:AcaLastObservedLroState;Readback=$readback;Error=if($terminalError){'TerminalFailure'}else{$null}})
+    if ($LegacySource) {
+        if ([string]::IsNullOrWhiteSpace($SourceJournalPath) -or [string]::IsNullOrWhiteSpace($EvidenceJournalPath)) { throw 'LEGACY_JOURNAL_PATH_REQUIRED: legacy resolution requires explicit source and isolated evidence paths.' }
+        if ([string]::Equals([System.IO.Path]::GetFullPath($SourceJournalPath),[System.IO.Path]::GetFullPath($EvidenceJournalPath),[System.StringComparison]::OrdinalIgnoreCase)) { throw 'LEGACY_JOURNAL_WRITE_REJECTED: evidence journal must be distinct from the immutable legacy source.' }
+        if (-not [string]::IsNullOrWhiteSpace($script:AcaPatchJournalPathOverride) -and [string]::Equals([System.IO.Path]::GetFullPath($script:AcaPatchJournalPathOverride),[System.IO.Path]::GetFullPath($SourceJournalPath),[System.StringComparison]::OrdinalIgnoreCase)) { throw 'LEGACY_JOURNAL_WRITER_OVERRIDE_REJECTED: the active writer cannot point to the immutable legacy source.' }
     }
-    return $results.ToArray()
+    $operationsToResolve=if($null -ne $Operations) {@($Operations)} else {@(Get-AcaPatchJournalPendingOperations -ResourceId $ResourceId)}
+    $originalJournalPath=$script:AcaPatchJournalPathOverride
+    if (-not [string]::IsNullOrWhiteSpace($EvidenceJournalPath)) { Set-AcaPatchJournalPathOverride $EvidenceJournalPath }
+    try {
+        $null=Initialize-AcaPatchJournal
+        foreach($operation in $operationsToResolve) {
+            if (-not [string]::Equals([string]$operation.resourceId,$ResourceId,[System.StringComparison]::OrdinalIgnoreCase)) { throw 'PATCH_JOURNAL_RESOURCE_MISMATCH: selected operation does not match the exact authorized Job Resource ID.' }
+            $expectedReadback=Get-AcaPatchExpectedReadback -Operation ([string]$operation.operation)
+            $expectedSecretName=Get-AcaPatchExpectedJitSecretName -Operation ([string]$operation.operation) -RecordedName ([string]$operation.expectedSecretName)
+            if ([string]::IsNullOrWhiteSpace([string]$operation.lroReference)) {
+                $results.Add([pscustomobject]@{AttemptId=$operation.attemptId;State='HISTORICAL_LRO_UNVERIFIABLE';Readback='NotAttempted';Resolved=$false})
+                continue
+            }
+            $script:AcaCurrentPatchAttempt=[pscustomobject]@{
+                attemptId=[string]$operation.attemptId;startedAtUtc=[string]$operation.timestampUtc
+                resourceId=[string]$operation.resourceId;operation=[string]$operation.operation
+                httpStatus=$operation.httpStatus;requestId=$operation.requestId;correlationId=$operation.correlationId
+                lroReference=[string]$operation.lroReference;terminalState=$null;readbackResult=$null
+                sourceAttemptId=$null;expectedSecretName=$expectedSecretName
+                armRequestId=$null;armCorrelationId=$null;armHttpStatus=$null;readbackRequestId=$null;readbackHttpStatus=$null
+            }
+            $script:AcaLastObservedLroState=$null
+            $terminalError=$null
+            try {
+                $null=Wait-AcaOperation -OperationUri ([string]$operation.lroReference) -Token $Token -TimeoutSeconds $TimeoutSeconds -Sleep $Sleep -NoJournal:$LegacySource
+            } catch {
+                if ($script:AcaLastObservedLroState -notin @('Succeeded','Failed','Canceled','Cancelled')) { throw }
+                $terminalError=$_.Exception.Message
+            }
+            if ($script:AcaLastObservedLroState -notin @('Succeeded','Failed','Canceled','Cancelled')) { throw 'PATCH_JOURNAL_TERMINAL_STATE_UNVERIFIED: ARM did not return a recognized terminal state.' }
+            $snapshot=Get-AcaJobSnapshot -Uri $Uri -Token $Token -JobName $JobName -ResourceGroup $ResourceGroup -EnvironmentId $EnvironmentId -ExpectedImage $ExpectedImage
+            $names=@($snapshot.Resource.properties.configuration.secrets|Where-Object{$_ -and $_.name}|ForEach-Object{[string]$_.name})
+            $present=$names -contains $expectedSecretName
+            $readback=if($present){'VerifiedPresent'}else{'VerifiedAbsent'}
+            $resolved=$readback -ceq $expectedReadback
+            if ($LegacySource) {
+                $script:AcaCurrentPatchAttempt=[pscustomobject]@{
+                    attemptId=[guid]::NewGuid().ToString('D');startedAtUtc=[DateTimeOffset]::UtcNow.ToString('o')
+                    resourceId=[string]$operation.resourceId;operation=[string]$operation.operation;httpStatus=$null
+                    requestId=$null;correlationId=$null;lroReference=[string]$operation.lroReference
+                    terminalState=[string]$script:AcaLastObservedLroState;readbackResult=$readback
+                    sourceAttemptId=[string]$operation.attemptId;expectedSecretName=$expectedSecretName
+                    armRequestId=[string]$script:AcaLastObservedLroRequestId;armCorrelationId=[string]$script:AcaLastObservedLroCorrelationId;armHttpStatus=[int]$script:AcaLastObservedLroHttpStatus
+                    readbackRequestId=[string]$snapshot.RequestId;readbackHttpStatus=[int]$snapshot.HttpStatus
+                }
+                if ([string]::IsNullOrWhiteSpace([string]$script:AcaLastObservedLroRequestId) -or [int]$script:AcaLastObservedLroHttpStatus -ne 200 -or [string]::IsNullOrWhiteSpace([string]$snapshot.RequestId) -or [int]$snapshot.HttpStatus -ne 200) { throw 'PATCH_RECONCILIATION_EVIDENCE_INCOMPLETE: ARM terminal/readback request IDs are required to record an observed result.' }
+                $evidenceType=if($resolved){'LegacyReconciliation'}else{'LegacyResolutionObserved'}
+                Write-AcaPatchJournalEvent -EventType $evidenceType -ResourceId ([string]$operation.resourceId) -Operation ([string]$operation.operation) -LroReference ([string]$operation.lroReference) -TerminalState ([string]$script:AcaLastObservedLroState) -ReadbackResult $readback -SourceAttemptId ([string]$operation.attemptId) -ExpectedSecretName $expectedSecretName -ArmRequestId ([string]$script:AcaLastObservedLroRequestId) -ArmCorrelationId ([string]$script:AcaLastObservedLroCorrelationId) -ArmHttpStatus ([int]$script:AcaLastObservedLroHttpStatus) -ReadbackRequestId ([string]$snapshot.RequestId) -ReadbackHttpStatus ([int]$snapshot.HttpStatus)
+            } else {
+                Write-AcaPatchJournalEvent -EventType Readback -ReadbackResult $readback
+            }
+            $results.Add([pscustomobject]@{AttemptId=$operation.attemptId;State=[string]$script:AcaLastObservedLroState;Readback=$readback;Resolved=$resolved;Error=if($terminalError){'TerminalFailure'}else{$null}})
+        }
+        return $results.ToArray()
+    } finally {
+        Set-AcaPatchJournalPathOverride $originalJournalPath
+    }
 }
 
 function Invoke-AcaJitStartWithCleanup {
