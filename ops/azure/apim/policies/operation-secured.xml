@@ -24,39 +24,39 @@
     <set-variable name="m2mAudience" value="{{m2m-audience}}" />
     <choose>
       <when condition="@{
-        var jwt = (Jwt)context.Variables["jwt"];
-        var expectedType = (string)context.Variables["expectedIdentityType"];
-        var tokenType = jwt.Claims.GetValueOrDefault("tipo", string.Empty);
+        var jwt = (Jwt)context.Variables[&quot;jwt&quot;];
+        var expectedType = (string)context.Variables[&quot;expectedIdentityType&quot;];
+        var tokenType = jwt.Claims.GetValueOrDefault(&quot;tipo&quot;, string.Empty);
 
-        bool allowHuman = expectedType == "human" || expectedType == "human_or_m2m";
-        bool allowM2m = expectedType == "m2m" || expectedType == "human_or_m2m";
+        bool allowHuman = expectedType == &quot;human&quot; || expectedType == &quot;human_or_m2m&quot;;
+        bool allowM2m = expectedType == &quot;m2m&quot; || expectedType == &quot;human_or_m2m&quot;;
 
-        if (tokenType == "acceso" &amp;&amp; allowHuman) {
-          var reqRolesCsv = (string)context.Variables["requiredRolesCsv"];
+        if (tokenType == &quot;acceso&quot; &amp;&amp; allowHuman) {
+          var reqRolesCsv = (string)context.Variables[&quot;requiredRolesCsv&quot;];
           if (!string.IsNullOrEmpty(reqRolesCsv)) {
             var requiredRoles = reqRolesCsv.Split(',', StringSplitOptions.RemoveEmptyEntries);
-            var tokenRoles = jwt.Claims.GetValueOrDefault("roles", string.Empty).Split(new[] {' ', ','}, StringSplitOptions.RemoveEmptyEntries);
+            var tokenRoles = jwt.Claims.GetValueOrDefault(&quot;roles&quot;, string.Empty).Split(new[] {' ', ','}, StringSplitOptions.RemoveEmptyEntries);
             if (!requiredRoles.Any(r => tokenRoles.Contains(r))) return true;
           }
           return false;
         }
 
-        if (tokenType == "servicio" &amp;&amp; allowM2m) {
-          var expectedAud = (string)context.Variables["m2mAudience"];
+        if (tokenType == &quot;servicio&quot; &amp;&amp; allowM2m) {
+          var expectedAud = (string)context.Variables[&quot;m2mAudience&quot;];
           if (!string.IsNullOrEmpty(expectedAud)) {
             var audiences = jwt.Audiences ?? Enumerable.Empty&lt;string&gt;();
             if (!audiences.Contains(expectedAud)) return true;
           }
-          var reqScopesCsv = (string)context.Variables["requiredScopesCsv"];
+          var reqScopesCsv = (string)context.Variables[&quot;requiredScopesCsv&quot;];
           if (!string.IsNullOrEmpty(reqScopesCsv)) {
             var requiredScopes = reqScopesCsv.Split(',', StringSplitOptions.RemoveEmptyEntries);
-            var tokenScopes = (jwt.Claims.GetValueOrDefault("scope", string.Empty) + " " + jwt.Claims.GetValueOrDefault("scp", string.Empty)).Split(new[] {' ', ','}, StringSplitOptions.RemoveEmptyEntries);
+            var tokenScopes = (jwt.Claims.GetValueOrDefault(&quot;scope&quot;, string.Empty) + &quot; &quot; + jwt.Claims.GetValueOrDefault(&quot;scp&quot;, string.Empty)).Split(new[] {' ', ','}, StringSplitOptions.RemoveEmptyEntries);
             if (!requiredScopes.Any(s => tokenScopes.Contains(s))) return true;
           }
-          var clientsCsv = (string)context.Variables["allowedClientsCsv"];
+          var clientsCsv = (string)context.Variables[&quot;allowedClientsCsv&quot;];
           if (!string.IsNullOrEmpty(clientsCsv)) {
             var allowed = clientsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries);
-            var clientId = jwt.Claims.GetValueOrDefault("client_id", jwt.Claims.GetValueOrDefault("azp", jwt.Subject ?? string.Empty));
+            var clientId = jwt.Claims.GetValueOrDefault(&quot;client_id&quot;, jwt.Claims.GetValueOrDefault(&quot;azp&quot;, jwt.Subject ?? string.Empty));
             if (!allowed.Contains(clientId)) return true;
           }
           return false;

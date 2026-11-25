@@ -162,9 +162,90 @@ class FilterOpenApiTests(unittest.TestCase):
 
 class ApimPolicyTests(unittest.TestCase):
     def setUp(self):
+        from datetime import datetime, timezone
+
+        self.temp_dir = tempfile.TemporaryDirectory(prefix="apim-preflight-")
+        self.cli_evidence_path = Path(self.temp_dir.name) / "az-cli-evidence.json"
+        self.cli_evidence_path.write_text(
+            json.dumps(
+                {
+                    "subscriptionId": "sub-test",
+                    "resourceGroup": "rg-lab",
+                    "environment": "lab",
+                    "capturedAtUtc": datetime.now(timezone.utc).isoformat(),
+                    "sourceCommand": "az containerapp show -n api-gateway -g rg-lab",
+                    "acaEnvironment": {"vnetConfiguration": {"infrastructureSubnetId": "/subscriptions/sub-test/resourceGroups/rg-lab/providers/Microsoft.Network/virtualNetworks/vnet/subnets/aca"}},
+                    "gatewayApp": {
+                        "resourceId": "/subscriptions/sub-test/resourceGroups/rg-lab/providers/Microsoft.App/containerApps/api-gateway",
+                        "external": False,
+                        "directRoutesBlocked": True,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.filtered = {
+            "openapi": "3.0.3",
+            "info": {"title": "t", "version": "0.7.0-rc.3"},
+            "servers": [{"url": "/api/v1"}],
+            "paths": {
+                "/productos": {
+                    "get": {
+                        "operationId": "listarProductos",
+                        "security": [{"userBearer": []}],
+                    }
+                }
+            },
+        }
+        records = FILTER.operation_records(self.filtered)
+        operation_set_hash = FILTER.canonical_sha256(records)
+        self.filtered["x-apim-filter"] = {"operationSetSha256": operation_set_hash}
+        filtered_hash = FILTER.canonical_sha256(self.filtered)
+        self.manifest = {
+            "docsSha": EXPECTED_DOCS_SHA,
+            "gatewaySha": EXPECTED_GATEWAY_SHA,
+            "publicationMode": "effective",
+            "effectivePublication": {
+                "authorized": True,
+                "status": "AUTHORIZED",
+                "publishedOperationIds": ["listarProductos"],
+                "excludedOperations": [],
+            },
+            "operations": [
+                {
+                    "operationId": "listarProductos",
+                    "apimOperationId": FILTER.normalize_apim_operation_id("listarProductos"),
+                    "method": "GET",
+                    "path": "/productos",
+                    "secured": True,
+                    "authSchemes": ["userBearer"],
+                    "identityType": "human",
+                    "securityAlternatives": [{"scheme": "userBearer", "identityType": "human", "roles": ["GESTOR_COMERCIAL"]}],
+                    "rateProfile": "commercial_read",
+                    "environmentEnabled": True,
+                }
+            ],
+            "operationSetSha256": operation_set_hash,
+            "filteredOpenApiCanonicalSha256": filtered_hash,
+        }
+        rate_profile = {
+            "burstCalls": 20,
+            "burstWindowSeconds": 30,
+            "quotaCalls": 1000,
+            "quotaWindowSeconds": 86400,
+            "maxConcurrency": 0,
+        }
         self.parameters = {
-            "apimSubnetResourceId": "/subscriptions/test/resourceGroups/lab/providers/Microsoft.Network/virtualNetworks/vnet/subnets/apim",
+            "environmentTier": "lab",
+            "expectedSubscriptionId": "sub-test",
+            "expectedResourceGroup": "rg-lab",
+            "expectedEnvironment": "lab",
+            "expectedGatewayResourceId": "/subscriptions/sub-test/resourceGroups/rg-lab/providers/Microsoft.App/containerApps/api-gateway",
+            "expectedApimOriginCidrs": ["20.10.20.30/32"],
+            "apimSubnetResourceId": "/subscriptions/sub-test/resourceGroups/rg-lab/providers/Microsoft.Network/virtualNetworks/vnet/subnets/apim",
             "gatewayBackendUrl": "https://gateway.internal.test/api/v1",
+            "azureCliEvidencePath": str(self.cli_evidence_path),
+            "operationalApprovalRef": "CASTILLA-TEST-001",
             "g7Issuer": "https://g7.test/issuer",
             "g7OpenIdConfigurationUrl": "https://g7.test/.well-known/openid-configuration",
             "g7Audience": "g6-gateway",
@@ -173,22 +254,55 @@ class ApimPolicyTests(unittest.TestCase):
             "burstWindowSeconds": 30,
             "quotaCalls": 1000,
             "quotaWindowSeconds": 86400,
-            "applicationInsightsResourceId": "/subscriptions/test/resourceGroups/lab/providers/Microsoft.Insights/components/g6-h5-test",
+            "rateProfiles": {name: dict(rate_profile) for name in FILTER.KNOWN_RATE_PROFILES},
+            "applicationInsightsResourceId": "/subscriptions/sub-test/resourceGroups/rg-lab/providers/Microsoft.Insights/components/g6-h5-test",
             "applicationInsightsConnectionString": "test-placeholder-not-a-real-secret",
-            "filteredOpenApi": "{}",
+            "expectedOperationSetSha256": operation_set_hash,
+            "expectedFilteredOpenApiSha256": filtered_hash,
         }
-        self.filtered = {"paths": {}}
-        operation_set_hash = FILTER.canonical_sha256([])
-        self.filtered["x-apim-filter"] = {"operationSetSha256": operation_set_hash}
-        self.manifest = {
-            "operations": [],
-            "operationSetSha256": operation_set_hash,
-            "filteredOpenApiCanonicalSha256": FILTER.canonical_sha256(self.filtered),
-        }
-        self.parameters["filteredOpenApi"] = json.dumps(self.filtered)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
 
     def test_parameter_preflight_requires_https_explicit_origins_and_valid_windows(self):
-        PARAMS.validate(self.parameters, self.filtered, self.manifest)
+        PARAMS.validate(
+            self.parameters,
+            self.filtered,
+            self.manifest,
+            expected_docs_sha=EXPECTED_DOCS_SHA,
+            expected_gateway_sha=EXPECTED_GATEWAY_SHA,
+        )
+        # Integración completa de preflight con Modalidad B (external=true Allow-only, vnetConfiguration=None)
+        from datetime import datetime, timezone
+
+        mode_b_evidence = Path(self.temp_dir.name) / "az-mode-b.json"
+        mode_b_evidence.write_text(
+            json.dumps(
+                {
+                    "subscriptionId": "sub-test",
+                    "resourceGroup": "rg-lab",
+                    "environment": "lab",
+                    "capturedAtUtc": datetime.now(timezone.utc).isoformat(),
+                    "sourceCommand": "az containerapp show -n api-gateway -g rg-lab",
+                    "acaEnvironment": {"vnetConfiguration": None},
+                    "gatewayApp": {
+                        "resourceId": "/subscriptions/sub-test/resourceGroups/rg-lab/providers/Microsoft.App/containerApps/api-gateway",
+                        "external": True,
+                        "ipSecurityRestrictions": [{"action": "Allow", "ipAddressRange": "20.10.20.30/32"}],
+                        "directRoutesBlocked": True,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        PARAMS.validate(
+            self.parameters | {"azureCliEvidencePath": str(mode_b_evidence)},
+            self.filtered,
+            self.manifest,
+            expected_docs_sha=EXPECTED_DOCS_SHA,
+            expected_gateway_sha=EXPECTED_GATEWAY_SHA,
+        )
+
         for change in (
             {"corsAllowedOrigins": ["*"]},
             {"corsAllowedOrigins": ["https://*.example.test"]},
@@ -202,12 +316,20 @@ class ApimPolicyTests(unittest.TestCase):
             {"applicationInsightsResourceId": "/subscriptions/test/resourceGroups/lab/providers/Microsoft.ApiManagement/service/apim/loggers/logger"},
         ):
             with self.subTest(change=change), self.assertRaises(ValueError):
-                PARAMS.validate(self.parameters | change, self.filtered, self.manifest)
+                PARAMS.validate(
+                    self.parameters | change,
+                    self.filtered,
+                    self.manifest,
+                    expected_docs_sha=EXPECTED_DOCS_SHA,
+                    expected_gateway_sha=EXPECTED_GATEWAY_SHA,
+                )
         with self.assertRaisesRegex(ValueError, "no coincide"):
             PARAMS.validate(
-                self.parameters | {"filteredOpenApi": '{"paths":{"/sustituido":{}}}'},
+                self.parameters | {"expectedFilteredOpenApiSha256": "0" * 64},
                 self.filtered,
                 self.manifest,
+                expected_docs_sha=EXPECTED_DOCS_SHA,
+                expected_gateway_sha=EXPECTED_GATEWAY_SHA,
             )
 
     def test_policies_are_valid_xml_and_keep_security_and_retry_controls(self):
@@ -236,7 +358,10 @@ class ApimPolicyTests(unittest.TestCase):
     def test_application_insights_logger_uses_secure_connection_and_system_identity(self):
         bicep = (ROOT / "main.bicep").read_text(encoding="utf-8")
         self.assertIn("Microsoft.ApiManagement/service/loggers@2022-08-01", bicep)
-        self.assertIn("parent: apim", bicep)
+        logger_block = bicep.split("resource applicationInsightsLogger", 1)[1].split("resource apiDiagnostics", 1)[0]
+        self.assertIn("name: '${apimName}/applicationinsights'", logger_block)
+        self.assertIn("apim", logger_block)
+        self.assertIn("existingApim", logger_block)
         self.assertIn("loggerType: 'applicationInsights'", bicep)
         self.assertIn("resourceId: applicationInsightsResourceId", bicep)
         self.assertIn("connectionString: applicationInsightsConnectionString", bicep)
@@ -607,8 +732,10 @@ class ApimClosureRequirementsTests(unittest.TestCase):
         # APIM-R4-01 negativo: OpenAPI que anuncia serviceBearer cuando manifiesto permite solo userBearer
         tampered = copy.deepcopy(filtered)
         tampered["paths"]["/combo"]["get"]["security"] = [{"userBearer": []}, {"serviceBearer": []}]
+        tampered_manifest = copy.deepcopy(manifest)
+        tampered_manifest["filteredOpenApiCanonicalSha256"] = FILTER.canonical_sha256(tampered)
         with self.assertRaisesRegex(ValueError, "Inconsistencia entre security"):
-            FILTER.validate_artifact_pair(tampered, manifest)
+            FILTER.validate_artifact_pair(tampered, tampered_manifest)
 
     def test_human_role_parity_default_explicit_and_mismatch(self):
         private = {
@@ -692,7 +819,14 @@ class ApimClosureRequirementsTests(unittest.TestCase):
             gw = d / "contract-routes.ts"
             g5 = d / "g5-h5-routes.ts"
             src.write_text(json.dumps(spec), encoding="utf-8")
-            gw.write_text("[{ method: 'GET', path: '/api/v1/productos', operationId: 'listarProductos', service: 'catalog-svc' }]", encoding="utf-8")
+            gw.write_text(
+                "[\n"
+                "{ method: 'GET', path: '/api/v1/productos', operationId: 'listarProductos', service: 'catalog-svc' },\n"
+                "{ method: 'GET', path: '/api/v1/legacy-a', operationId: 'obtenerDefinicionPrecioProductoAdministracion', service: 'pricing-svc' },\n"
+                "{ method: 'GET', path: '/api/v1/legacy-b', operationId: 'obtenerDefinicionPrecioSkuAdministracion', service: 'pricing-svc' }\n"
+                "]",
+                encoding="utf-8",
+            )
             g5.write_text("[\n" + ",\n".join(f"{{ method: 'POST', path: '/api/v1/g5/{i}', operationId: 'operacionG5{i}', service: 'promotions-svc' }}" for i in range(1, 5)) + "\n]", encoding="utf-8")
             filtered, manifest = FILTER.filter_spec(
                 spec,

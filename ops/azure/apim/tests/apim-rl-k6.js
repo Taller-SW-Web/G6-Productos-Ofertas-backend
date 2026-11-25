@@ -21,6 +21,7 @@ if (__ENV.APIM_RL_AUTHORIZED !== '1' || !__ENV.APIM_BASE_URL) {
 }
 for (const envName of [
   'APIM_EFFECTIVE_MANIFEST_PATH',
+  'APIM_EFFECTIVE_PARAMETERS_PATH',
   'APIM_OPERATION_SET_SHA256',
   'APIM_FILTERED_OPENAPI_SHA256',
   'APIM_POLICY_HASH',
@@ -61,8 +62,9 @@ if (labConcurrencyMax + 1 >= labExpensiveBurstCalls) {
   );
 }
 
-// R7-03: exigir manifiesto efectivo autorizado y vinculado por SHA al deployment real
+// R7-03 & R9 Corrección 5: exigir manifiesto efectivo y parámetros reales del deployment
 const manifest = JSON.parse(open(__ENV.APIM_EFFECTIVE_MANIFEST_PATH));
+const effectiveParameters = JSON.parse(open(__ENV.APIM_EFFECTIVE_PARAMETERS_PATH));
 if (manifest.publicationMode !== 'effective' || manifest.effectivePublication?.authorized !== true) {
   throw new Error(
     'Manifiesto rechazado: k6 requiere publicationMode="effective" y effectivePublication.authorized=true',
@@ -73,6 +75,12 @@ if (manifest.operationSetSha256 !== __ENV.APIM_OPERATION_SET_SHA256) {
 }
 if (manifest.filteredOpenApiCanonicalSha256 !== __ENV.APIM_FILTERED_OPENAPI_SHA256) {
   throw new Error('filteredOpenApiCanonicalSha256 del manifiesto efectivo no coincide con APIM_FILTERED_OPENAPI_SHA256');
+}
+if (
+  effectiveParameters.expectedOperationSetSha256 !== manifest.operationSetSha256 ||
+  effectiveParameters.expectedFilteredOpenApiSha256 !== manifest.filteredOpenApiCanonicalSha256
+) {
+  throw new Error('Parámetros efectivos del deployment no coinciden con los SHA del manifiesto efectivo');
 }
 
 const CONCURRENCY_PROFILES = {
@@ -116,9 +124,18 @@ if (!publishedSet.has(matchedExpensiveOp.operationId) || matchedExpensiveOp.envi
 if (excludedSet.has(matchedExpensiveOp.operationId)) {
   throw new Error(`RL-05 operación ${matchedExpensiveOp.operationId} pertenece a rutas excluidas`);
 }
-if (!CONCURRENCY_PROFILES[matchedExpensiveOp.rateProfile]) {
+const effectiveRateProfile = effectiveParameters.rateProfiles?.[matchedExpensiveOp.rateProfile];
+if (!effectiveRateProfile || !(effectiveRateProfile.maxConcurrency > 0)) {
   throw new Error(
-    `RL-05 operación ${matchedExpensiveOp.operationId} tiene rateProfile=${matchedExpensiveOp.rateProfile} sin maxConcurrency > 0`,
+    `RL-05 perfil efectivo ${matchedExpensiveOp.rateProfile} ausente o sin maxConcurrency > 0 en APIM_EFFECTIVE_PARAMETERS_PATH`,
+  );
+}
+if (
+  effectiveRateProfile.maxConcurrency !== labConcurrencyMax ||
+  effectiveRateProfile.burstCalls !== labExpensiveBurstCalls
+) {
+  throw new Error(
+    `RL-05 valores k6 no coinciden con perfil efectivo (${matchedExpensiveOp.rateProfile}) del deployment`,
   );
 }
 

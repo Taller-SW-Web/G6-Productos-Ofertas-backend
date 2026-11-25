@@ -146,7 +146,18 @@ test('R7-02 rollback evidence verifies real policyXml SHA256 and az rest --metho
     },
   };
 
-  validateRollbackEvidence(validRollback, baseExpected);
+  const evalPrepared = validateRollbackEvidence(validRollback, baseExpected);
+  assert.equal(evalPrepared.status, 'EVIDENCE_PREPARED');
+  assert.equal(evalPrepared.verified, false);
+
+  const acquiredRollback = {
+    ...validRollback,
+    azAcquisitionVerified: true,
+    independentQueryDigest: 'a'.repeat(64),
+  };
+  const evalPass = validateRollbackEvidence(acquiredRollback, baseExpected);
+  assert.equal(evalPass.status, 'PASS');
+  assert.equal(evalPass.verified, true);
 
   const tampered = structuredClone(validRollback);
   tampered.azSnapshots.after.policyXml = xmlDuring;

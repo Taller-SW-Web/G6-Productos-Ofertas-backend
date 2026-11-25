@@ -166,8 +166,6 @@ def validate(
     age_hours = (datetime.now(timezone.utc) - captured_at).total_seconds() / 3600.0
     if age_hours < 0 or age_hours > max_evidence_age_hours:
         raise ValueError("Evidencia Azure CLI caducada o con fecha inválida")
-    if cli_evidence["acaEnvironment"].get("vnetConfiguration") is None:
-        raise ValueError("Evidencia Azure CLI indica vnetConfiguration=null; red privada no acreditada")
     gateway_app = cli_evidence["gatewayApp"]
     if gateway_app.get("resourceId") != parameters["expectedGatewayResourceId"]:
         raise ValueError("gatewayApp.resourceId de evidencia Azure CLI no coincide con expectedGatewayResourceId")

@@ -129,6 +129,16 @@ export function validateRollbackEvidence(rollback, expected) {
       Date.parse(snaps.during.capturedAtUtc) < Date.parse(snaps.after.capturedAtUtc),
     'APIM-T08 secuencia temporal before < during < after inválida',
   );
+
+  // R9 Corrección 4: separar integridad de evidencia local (EVIDENCE_PREPARED) de adquisición real verificada en Azure (PASS)
+  const hasIndependentAcquisition =
+    rollback.azAcquisitionVerified === true &&
+    typeof rollback.independentQueryDigest === 'string' &&
+    rollback.independentQueryDigest.length >= 16;
+  return {
+    status: hasIndependentAcquisition ? 'PASS' : 'EVIDENCE_PREPARED',
+    verified: hasIndependentAcquisition,
+  };
 }
 
 function requireEnv(name) {
@@ -373,12 +383,16 @@ export async function main() {
 
     // APIM-T08
     const rollback = readJsonStrict(rollbackEvidencePath, 'APIM_ROLLBACK_EVIDENCE_PATH');
-    validateRollbackEvidence(rollback, {
+    const rollbackEval = validateRollbackEvidence(rollback, {
       apimResourceId: expectedApimResourceId,
       subscriptionId: expectedSubscriptionId,
       resourceGroup: expectedResourceGroup,
       environment: expectedEnvironment,
     });
+    if (!rollbackEval.verified) {
+      statusByCase['APIM-T08'] = 'NOT_VERIFIED';
+      throw new Error('APIM-T08 evidencia local válida (EVIDENCE_PREPARED), pero falta adquisición real verificada en Azure');
+    }
     statusByCase['APIM-T08'] = 'PASS';
 
     assert.ok(CASE_IDS.every((id) => statusByCase[id] === 'PASS'));
