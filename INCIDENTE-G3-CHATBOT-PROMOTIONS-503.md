@@ -97,7 +97,7 @@ La configuración de URLs y credencial es suficiente; no requiere cambio. El col
 
 **Dependencias externas:** ninguna para la corrección outbound. G7 ya concede los scopes usados y se validaron live. La autenticación inbound externa G3/Gateway permanece como discrepancia separada para un rollout autenticado posterior; no bloquea esta corrección.
 
-No se creó PR: aún no hay corrección demostrada que justifique código. No se modificaron ACA, escalas, revisiones, tráfico, ingress, secretos, Service Bus, Supabase, datos QA, RBAC ni el gate `AZURE_CHILE_DEPLOY_ENABLED`.
+Se creó el Draft PR [#277](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/277), HEAD probado `feb1acc88d4e5fe058bbae6f570bf5a232a1e860`. No se mergeó ni desplegó. No se modificaron ACA, escalas, revisiones, tráfico, ingress, secretos, Service Bus, Supabase, datos QA, RBAC ni el gate `AZURE_CHILE_DEPLOY_ENABLED`.
 
 ## Payload y mensaje técnico para Sonny
 
@@ -128,5 +128,6 @@ No incluir `customer_ref` en el primer control (es opcional); mantener el SKU co
 - DTO live vs `commercial-http.ts`: **PASS**; contexto activo/elegible, variante SKU, precio/currency/vigencia correctos.
 - Pruebas focalizadas: **89 PASS** en 4 archivos (`integration-providers`, `internal-http`, `commercial-http`, `service-tokens`). `npm run typecheck -- --pretty false`: **PASS**. `npx oxlint` en los dos archivos modificados: **PASS**.
 - `npm ci`: **PASS**, 0 vulnerabilidades; avisos de engine porque el host usa Node 24.3.0 y el repo pide Node `^22.22.3 || >=24.15.0`. No cambió package-lock.
+- Pruebas focalizadas, typecheck y lint reejecutados sobre el HEAD `feb1acc88d4e5fe058bbae6f570bf5a232a1e860`, sincronizado con `origin/master` actualizado: **PASS**.
 - `LIVE_HTTP_200`: las tres dependencias internas sí dieron 200 autenticadas; la evaluación promocional final aún no se ejecutó con Chatbot ni contra el código corregido desplegado.
 - Worktree: creado desde `origin/master` SHA `daf4882b7dc6895c6601a1f4af209ec92c8215b0` y sincronizado de forma segura con el `origin/master` actualizado; no se modificaron otros worktrees ni el PR #275.
