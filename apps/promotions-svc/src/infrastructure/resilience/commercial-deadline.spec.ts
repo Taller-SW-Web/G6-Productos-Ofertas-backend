@@ -125,6 +125,75 @@ describe('Bounded commercial integration boundary', () => {
     expect(source.basket).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
   });
+  it('records timeout stage, exhausted budget and the unchanged 2500 ms deadline', async () => {
+    vi.useFakeTimers();
+    const events: Array<Record<string, unknown>> = [];
+    const source = {
+      ...blockedCommercialContext,
+      basket: vi.fn((_request, _at, _signal, context) => {
+        context.stage = 'service_token';
+        return new Promise<{ lines: [] }>(() => {});
+      }),
+    };
+    const trace = {
+      correlationId: '55555555-5555-4555-8555-555555555555',
+      at: '2026-11-25T00:00:00Z',
+      observe: (event: Record<string, unknown>) => events.push(event),
+    };
+    const pending = new BoundedCommercialContext(source).basket(
+      basket,
+      trace.at,
+      undefined,
+      trace,
+    );
+    const rejected = expect(pending).rejects.toMatchObject({
+      message: 'COMMERCIAL_CONTEXT_UNAVAILABLE',
+      unblock: 'deadline de 2500 ms agotado en service_token',
+    });
+    await vi.advanceTimersByTimeAsync(2500);
+    await rejected;
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        operation: 'evaluarPromociones/validarCupon',
+        stage: 'commercial_context',
+        outcome: 'timeout',
+        deadlineMs: 2500,
+        exhaustedStage: 'service_token',
+        budgetRemainingMs: 0,
+      }),
+    );
+  });
+  it('classifies caller cancellation separately from deadline exhaustion', async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const controller = new AbortController();
+    const source = {
+      ...blockedCommercialContext,
+      basket: async (_request, _at, signal?: AbortSignal) => {
+        signal?.throwIfAborted();
+        return { lines: [] };
+      },
+    };
+    const trace = {
+      correlationId: '66666666-6666-4666-8666-666666666666',
+      at: '2026-11-25T00:00:00Z',
+      observe: (event: Record<string, unknown>) => events.push(event),
+    };
+    controller.abort();
+    await expect(
+      new BoundedCommercialContext(source).basket(
+        basket,
+        trace.at,
+        controller.signal,
+        trace,
+      ),
+    ).rejects.toBeInstanceOf(CommercialDependencyError);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        outcome: 'cancelled',
+        errorCode: 'DEPENDENCY_CANCELLED',
+      }),
+    );
+  });
   it('does not expose a transport exception or replace an outage with empty recommendations', async () => {
     const source = {
       ...blockedCommercialContext,

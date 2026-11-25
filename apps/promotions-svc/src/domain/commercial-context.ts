@@ -24,6 +24,23 @@ export interface ResolvedBasket {
 export interface CommercialReadContext {
   correlationId: string;
   at: string;
+  /** Monotonic deadline shared by the evaluation and all commercial reads. */
+  deadlineAt?: number;
+  deadlineMs?: number;
+  stage?: string;
+  observe?: (event: {
+    operation: string;
+    upstream?: string;
+    stage: string;
+    durationMs: number;
+    outcome:
+      'success' | 'http_error' | 'internal_error' | 'timeout' | 'cancelled';
+    status?: number;
+    errorCode?: string;
+    deadlineMs?: number;
+    budgetRemainingMs?: number;
+    exhaustedStage?: string;
+  }) => void;
 }
 export interface CommercialContext {
   basket(

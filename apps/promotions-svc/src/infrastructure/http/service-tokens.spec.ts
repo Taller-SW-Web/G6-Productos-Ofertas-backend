@@ -118,6 +118,24 @@ describe('Promotions own G7 client_credentials (explicit contract fixture)', () 
     expect(options.headers).not.toHaveProperty('Authorization');
   });
 
+  it('propagates only the validated correlation ID to the token endpoint', async () => {
+    const correlationId = '77777777-7777-4777-8777-777777777777';
+    const fetcher = vi.fn(async () => response());
+    vi.stubGlobal('fetch', fetcher);
+    await source()(request, signal(), correlationId);
+    const [, options] = fetcher.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(options.headers).toMatchObject({
+      'X-Correlation-Id': correlationId,
+    });
+    expect(JSON.stringify(options.headers)).not.toContain('Bearer');
+    expect(JSON.stringify(options.headers)).not.toContain(
+      'synthetic-own-secret',
+    );
+  });
+
   it('keeps the price and catalogue grants separate', async () => {
     const fetcher = vi.fn(async (_url: string, options: RequestInit) => {
       const scope = new URLSearchParams(String(options.body)).get('scope')!;

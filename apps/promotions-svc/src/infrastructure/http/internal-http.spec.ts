@@ -95,6 +95,107 @@ describe('Internal HTTP credential boundary (PR143)', () => {
       },
     );
   });
+  it('records sanitized token and upstream stages with the same correlation', async () => {
+    const trace = '33333333-3333-4333-8333-333333333333';
+    const events: Array<{
+      stage: string;
+      outcome: string;
+      upstream?: string;
+      status?: number;
+      errorCode?: string;
+      durationMs: number;
+    }> = [];
+    await fixture(
+      (request, response) => {
+        expect(request.headers['x-correlation-id']).toBe(trace);
+        response
+          .writeHead(200, { 'content-type': 'application/json' })
+          .end('{}');
+      },
+      async (origin) => {
+        const reader = new InternalHttpReader({
+          origin,
+          getServiceAccessToken: async (
+            _request,
+            _signal,
+            tokenCorrelation,
+          ) => {
+            expect(tokenCorrelation).toBe(trace);
+            return 'never-log-this-jwt';
+          },
+        });
+        await reader.read(
+          'obtenerProducto',
+          '/productos/sku-private?at=private-instant',
+          new AbortController().signal,
+          false,
+          trace,
+          {
+            correlationId: trace,
+            at: '2026-11-25T00:00:00Z',
+            deadlineAt: performance.now() + 2500,
+            observe: (event) => events.push(event),
+          },
+        );
+      },
+    );
+    expect(events.map((event) => event.stage)).toEqual([
+      'service_token',
+      'upstream_request',
+    ]);
+    expect(JSON.stringify(events)).not.toContain('never-log-this-jwt');
+    expect(JSON.stringify(events)).not.toContain('sku-private');
+    expect(JSON.stringify(events)).not.toContain('private-instant');
+    expect(events[0]).toMatchObject({
+      outcome: 'success',
+      upstream: 'catalog',
+    });
+    expect(events[1]).toMatchObject({ outcome: 'success', status: 200 });
+  });
+  it('classifies an exhausted token stage as a deadline without exposing its cause', async () => {
+    const trace = '44444444-4444-4444-8444-444444444444';
+    const events: Array<{
+      stage: string;
+      outcome: string;
+      errorCode?: string;
+      durationMs: number;
+    }> = [];
+    const controller = new AbortController();
+    const reader = new InternalHttpReader({
+      origin: 'https://catalog.invalid',
+      getServiceAccessToken: async (_request, signal) =>
+        new Promise((_resolve, reject) =>
+          signal.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          }),
+        ),
+    });
+    const context = {
+      correlationId: trace,
+      at: '2026-11-25T00:00:00Z',
+      deadlineAt: performance.now() + 10,
+      observe: (event) => events.push(event),
+    };
+    const timeout = setTimeout(() => controller.abort(), 20);
+    await expect(
+      reader.read(
+        'obtenerProducto',
+        '/productos/private',
+        controller.signal,
+        false,
+        trace,
+        context,
+      ),
+    ).rejects.toThrow('PROMOTIONS_DEPENDENCY_TIMEOUT');
+    clearTimeout(timeout);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        stage: 'service_token',
+        outcome: 'timeout',
+        errorCode: 'COMMERCIAL_DEADLINE_EXCEEDED',
+      }),
+    );
+  });
   it.each([
     'http://example.org',
     'http://10.0.0.7:3001',
@@ -165,6 +266,7 @@ describe('Internal HTTP credential boundary (PR143)', () => {
             scope: 'catalogo:leer',
           },
           expect.any(AbortSignal),
+          undefined,
         );
       },
     );
