@@ -102,7 +102,11 @@ describe('Promotions H5 HTTP contract in isolation', () => {
     { ...keys.publicKey.export({ format: 'jwk' }), kid },
   ];
 
-  function token(scope: string, sub = 'modulo-ventas') {
+  function token(
+    scope: string,
+    sub = 'modulo-ventas',
+    overrides: Record<string, unknown> = {},
+  ) {
     const iat = Math.floor(Date.now() / 1000);
     const parts = [
       { alg: 'RS256', kid, typ: 'JWT' },
@@ -115,6 +119,7 @@ describe('Promotions H5 HTTP contract in isolation', () => {
         jti: randomUUID(),
         aud: 'api-productos',
         tipo: 'servicio',
+        ...overrides,
       },
     ].map((value) => Buffer.from(JSON.stringify(value)).toString('base64url'));
     const claims = parts.join('.');
@@ -195,6 +200,31 @@ describe('Promotions H5 HTTP contract in isolation', () => {
       .expect(({ body }) => expect(body.code).toBe('IDEMPOTENCY_CONFLICT'));
   });
 
+  it('rejects invalid, expired, wrong-audience and human credentials before admission', async () => {
+    const post = (credential: string) =>
+      request(app.getHttpServer())
+        .post(consumePath)
+        .set('Authorization', credential)
+        .set('Idempotency-Key', operationId)
+        .send(body);
+    await post('Bearer invalid.fixture.token').expect(401);
+    await post(token('cupones:consumir', 'modulo-ventas', { exp: 1 })).expect(
+      401,
+    );
+    await post(
+      token('cupones:consumir', 'modulo-ventas', {
+        aud: 'api-fixture-incorrecta',
+      }),
+    ).expect(401);
+    await post(
+      token('cupones:consumir', randomUUID(), {
+        tipo: 'acceso',
+        roles: ['GESTOR_COMERCIAL'],
+      }),
+    ).expect(403);
+    expect(operations.admit).not.toHaveBeenCalled();
+  });
+
   it('separates malformed keys, conflicting UUIDs and authorization failures', async () => {
     const post = () =>
       request(app.getHttpServer()).post(consumePath).send(body);
@@ -273,6 +303,14 @@ describe('Promotions H5 HTTP contract in isolation', () => {
       `/api/v1/cupones/operaciones/${randomUUID()}`,
       orderId,
     ).expect(404);
+    const missingOrder = await request(app.getHttpServer())
+      .get(statusPath)
+      .set('Authorization', token('cupones:operaciones:leer'))
+      .set('X-Correlation-Id', correlationId)
+      .expect(400);
+    const emptyOrder = await get(statusPath, '').expect(400);
+    expect(missingOrder.body.code).toBe('VALIDACION');
+    expect(emptyOrder.body.code).toBe('VALIDACION');
     expect(other.body).toEqual(missing.body);
     expect(other.body.code).toBe('OPERACION_CUPON_NO_ENCONTRADA');
   });

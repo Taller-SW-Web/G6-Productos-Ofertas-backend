@@ -61,7 +61,8 @@ request_2xx() {
   for ((attempt=1; attempt<=max_attempts; attempt++)); do
     body="$(mktemp)"
     status="$(curl --silent --show-error --max-time "$request_timeout" --output "$body" --write-out '%{http_code}' "${base}${path}" 2>/dev/null || true)"
-    if [[ "$status" =~ ^2[0-9][0-9]$ ]] && jq -e 'type == "object" or type == "array"' "$body" >/dev/null 2>&1; then
+    if [[ "$status" =~ ^2[0-9][0-9]$ ]] &&
+       jq -es --arg service "$service" 'length == 1 and (.[0] | type == "object" and .service == $service)' "$body" >/dev/null 2>&1; then
       printf 'PASS %s HTTP %s intento %s/%s\n' "$path" "$status" "$attempt" "$max_attempts"
       rm -f "$body"
       return 0
