@@ -5,6 +5,7 @@
  * Separa PASS, FAIL, NOT_RUN y BLOCKED por caso; nunca declara PASS global si falta un caso.
  */
 
+import { execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
@@ -54,6 +55,8 @@ if (!baseUrl.startsWith('https://')) {
 
 const protectedPath = process.env.APIM_TEST_PROTECTED_PATH?.trim() || '/productos';
 const expectedOwner = requireEnv('APIM_EXPECTED_OWNER');
+const expectedOperationId = requireEnv('APIM_EXPECTED_OPERATION_ID');
+const expectedEnvironment = requireEnv('APIM_EXPECTED_ENVIRONMENT');
 const validM2mJwt = requireEnv('APIM_TEST_M2M_JWT');
 const validHumanJwt = requireEnv('APIM_TEST_HUMAN_JWT');
 const expiredJwt = requireEnv('APIM_TEST_EXPIRED_JWT');
@@ -67,6 +70,8 @@ const directGatewayUrl = requireEnv('APIM_TEST_DIRECT_GATEWAY_URL');
 const ingressEvidencePath = requireEnv('APIM_INGRESS_EVIDENCE_PATH');
 const k6SummaryPath = requireEnv('APIM_K6_SUMMARY_PATH');
 const correlationTracePath = requireEnv('APIM_CORRELATION_TRACE_PATH');
+const traceQueryCmd = process.env.APIM_TRACE_QUERY_CMD?.trim() || '';
+const tracePropagationMs = Number(process.env.APIM_TRACE_PROPAGATION_MS || '2500');
 const rollbackEvidencePath = requireEnv('APIM_ROLLBACK_EVIDENCE_PATH');
 
 const INTERNAL_PATHS = [
@@ -77,14 +82,23 @@ const INTERNAL_PATHS = [
   `/interno/carga-masiva/contenidos/${randomUUID()}`,
 ];
 
-async function run() {
-  const statusByCase = Object.fromEntries(CASE_IDS.map((id) => [id, 'NOT_RUN']));
+async function queryTracesAfterRequest(startIso) {
+  await new Promise((r) => setTimeout(r, tracePropagationMs));
+  if (traceQueryCmd) {
+    execSync(traceQueryCmd, { stdio: 'inherit', timeout: 30_000 });
+  }
   const traces = readJsonStrict(correlationTracePath, 'APIM_CORRELATION_TRACE_PATH');
   assert.ok(Array.isArray(traces), 'APIM_CORRELATION_TRACE_PATH debe ser un arreglo de trazas');
+  return traces.filter((tr) => tr.timestamp && Date.parse(tr.timestamp) >= Date.parse(startIso));
+}
+
+async function run() {
+  const statusByCase = Object.fromEntries(CASE_IDS.map((id) => [id, 'NOT_RUN']));
 
   try {
-    // APIM-T01: HTTPS hacia operación autorizada + confirmación de owner esperado
+    // APIM-T01: HTTPS hacia operación autorizada + consulta posterior de telemetría
     const t01Corr = randomUUID();
+    const t01Start = new Date().toISOString();
     const t01 = await fetch(`${baseUrl}${protectedPath}`, {
       headers: {
         Authorization: `Bearer ${validM2mJwt}`,
@@ -93,9 +107,12 @@ async function run() {
     });
     assert.equal(t01.status, 200, `APIM-T01 esperado 200, recibido ${t01.status}`);
     assert.equal(t01.headers.get('x-correlation-id'), t01Corr);
-    const t01Trace = traces.find((tr) => tr.correlationId === t01Corr);
-    assert.ok(t01Trace, 'APIM-T01 falta traza de correlación hacia owner');
+    const t01WindowTraces = await queryTracesAfterRequest(t01Start);
+    const t01Trace = t01WindowTraces.find((tr) => tr.correlationId === t01Corr);
+    assert.ok(t01Trace, 'NO_TELEMETRY_ARRIVED: APIM-T01 sin traza posterior para correlationId');
+    assert.equal(t01Trace.operationId, expectedOperationId, 'APIM-T01 operationId no coincide');
     assert.equal(t01Trace.owner, expectedOwner, 'APIM-T01 owner alcanzado no coincide');
+    assert.equal(t01Trace.environment, expectedEnvironment, 'APIM-T01 ambiente no coincide');
     statusByCase['APIM-T01'] = 'PASS';
 
     // APIM-T02: JWT válido, ausente, malformado, expirado, issuer incorrecto, audience incorrecta
@@ -117,7 +134,8 @@ async function run() {
     assert.equal(t02Human.status, 200, `APIM-T02 humano válido debe responder 200`);
     statusByCase['APIM-T02'] = 'PASS';
 
-    // APIM-T03: scope, rol y cliente incorrectos -> 403 sin alcanzar upstream
+    // APIM-T03: scope, rol y cliente incorrectos -> 403 con traza de rechazo y 0 hits en provider
+    const t03Start = new Date().toISOString();
     const t03Corrs = [randomUUID(), randomUUID(), randomUUID()];
     for (const [idx, [urlPath, jwt]] of [
       [protectedPath, badScopeJwt],
@@ -131,10 +149,17 @@ async function run() {
         },
       });
       assert.equal(res.status, 403, `APIM-T03 caso ${idx} debe responder 403`);
-      const upstreamHit = traces.find(
-        (tr) => tr.correlationId === t03Corrs[idx] && tr.providerReached === true,
+    }
+    const t03WindowTraces = await queryTracesAfterRequest(t03Start);
+    for (const corr of t03Corrs) {
+      const edgeReject = t03WindowTraces.find(
+        (tr) => tr.correlationId === corr && tr.status === 403 && tr.apimSeen === true,
       );
-      assert.equal(upstreamHit, undefined, 'APIM-T03 rechazo 403 no debe llegar al provider');
+      assert.ok(edgeReject, `APIM-T03 falta traza explícita de rechazo 403 en APIM para ${corr}`);
+      const providerHit = t03WindowTraces.find(
+        (tr) => tr.correlationId === corr && tr.providerReached === true,
+      );
+      assert.equal(providerHit, undefined, `APIM-T03 rechazo 403 alcanzó el provider (${corr})`);
     }
     statusByCase['APIM-T03'] = 'PASS';
 
@@ -151,48 +176,52 @@ async function run() {
     assert.equal(t04Deny.headers.get('access-control-allow-origin'), null);
     statusByCase['APIM-T04'] = 'PASS';
 
-    // APIM-T05: evidencia k6 (RL-01..RL-06) + evidencia de ingress/origen + anti-bypass real
+    // APIM-T05: evidencia CLI Azure vigente + resultados k6 + prueba directa negativa multi-ruta
     const ingressEvidence = readJsonStrict(ingressEvidencePath, 'APIM_INGRESS_EVIDENCE_PATH');
-    const hasOriginRestriction =
-      ingressEvidence.gatewayExternal === false ||
-      (Array.isArray(ingressEvidence.gatewayIpSecurityRestrictions) &&
-        ingressEvidence.gatewayIpSecurityRestrictions.length > 0);
-    assert.ok(
-      hasOriginRestriction,
-      'APIM-T05 evidencia de ingress debe acreditar external=false o ipSecurityRestrictions hacia APIM',
-    );
+    for (const reqField of ['subscriptionId', 'resourceGroup', 'environment', 'capturedAtUtc', 'sourceCommand', 'gatewayApp']) {
+      assert.ok(ingressEvidence[reqField], `APIM-T05 evidencia CLI incompleta: falta ${reqField}`);
+    }
+    assert.ok(String(ingressEvidence.sourceCommand).startsWith('az '), 'APIM-T05 evidencia debe provenir de Azure CLI');
+    const ageHours = (Date.now() - Date.parse(ingressEvidence.capturedAtUtc)) / 3600000;
+    assert.ok(ageHours >= 0 && ageHours <= 24, 'APIM-T05 evidencia Azure CLI caducada (>24h)');
+    assert.equal(ingressEvidence.environment, expectedEnvironment, 'APIM-T05 evidencia de otro ambiente');
+    const gwApp = ingressEvidence.gatewayApp;
+    const restrictions = gwApp.ipSecurityRestrictions || [];
+    const hasApimOriginRule =
+      gwApp.external === false ||
+      (restrictions.some((r) => r.action === 'Allow' && r.ipAddressRange) &&
+        restrictions.some((r) => r.action === 'Deny' && ['0.0.0.0/0', '*'].includes(r.ipAddressRange)));
+    assert.ok(hasApimOriginRule, 'APIM-T05 falta restricción de origen APIM + denegación por defecto');
+    assert.equal(gwApp.directRoutesBlocked, true, 'APIM-T05 rutas directas alternativas no acreditadas como bloqueadas');
+
     const k6Summary = readJsonStrict(k6SummaryPath, 'APIM_K6_SUMMARY_PATH');
     assert.ok((k6Summary.metrics?.burst429?.count ?? 0) > 0, 'APIM-T05 falta evidencia k6 de 429 burst');
     assert.ok((k6Summary.metrics?.quota403?.count ?? 0) > 0, 'APIM-T05 falta evidencia k6 de cuota 403');
     assert.ok((k6Summary.metrics?.concurrency429?.count ?? 0) > 0, 'APIM-T05 falta evidencia k6 de concurrencia 429');
+    assert.equal(k6Summary.metrics?.authzFalsePositive?.count ?? 1, 0, 'APIM-T05 k6 tuvo falsos positivos de autorización');
     assert.equal(k6Summary.metrics?.clientBFailed?.rate ?? 1, 0, 'APIM-T05 cliente B aislado tuvo fallos');
 
-    let directHttpStatus = null;
-    let directNetworkOutcome = 'NONE';
-    try {
-      const directRes = await fetch(`${directGatewayUrl}/api/v1${protectedPath}`, {
-        headers: { Authorization: `Bearer ${validM2mJwt}` },
-        signal: AbortSignal.timeout(4000),
-      });
-      directHttpStatus = directRes.status;
-    } catch (err) {
-      directNetworkOutcome = err?.name === 'TimeoutError' ? 'TIMEOUT' : 'NETWORK_REJECTED';
-    }
-    if (directHttpStatus !== null) {
-      assert.notEqual(
-        directHttpStatus,
-        200,
-        'APIM-T05 FALLO ANTI-BYPASS: el Gateway directo respondió 200 con JWT autorizado',
-      );
-      assert.ok(
-        directHttpStatus === 403 && ingressEvidence.originAccessPolicyApplied === true,
-        `APIM-T05 status directo ${directHttpStatus} no acredita bloqueo de origen (401/403 JWT o 404 de ruta no bastan)`,
-      );
-    } else {
-      assert.ok(
-        directNetworkOutcome === 'NETWORK_REJECTED' || directNetworkOutcome === 'TIMEOUT',
-        'APIM-T05 resultado de red no determinado',
-      );
+    for (const directPath of [`/api/v1${protectedPath}`, '/health']) {
+      let directHttpStatus = null;
+      let directNetworkOutcome = 'NONE';
+      try {
+        const directRes = await fetch(`${directGatewayUrl}${directPath}`, {
+          headers: { Authorization: `Bearer ${validM2mJwt}` },
+          signal: AbortSignal.timeout(4000),
+        });
+        directHttpStatus = directRes.status;
+      } catch (err) {
+        directNetworkOutcome = err?.name === 'TimeoutError' ? 'TIMEOUT' : 'NETWORK_REJECTED';
+      }
+      if (directHttpStatus !== null) {
+        assert.notEqual(directHttpStatus, 200, `APIM-T05 FALLO ANTI-BYPASS en ${directPath}: respondió 200`);
+        assert.ok(
+          directHttpStatus === 403 && gwApp.originAccessPolicyApplied === true,
+          `APIM-T05 status ${directHttpStatus} en ${directPath} sin política de origen acreditada`,
+        );
+      } else {
+        assert.ok(['NETWORK_REJECTED', 'TIMEOUT'].includes(directNetworkOutcome));
+      }
     }
     statusByCase['APIM-T05'] = 'PASS';
 
@@ -244,6 +273,7 @@ async function run() {
     ]) {
       assert.ok(rollback[field] !== undefined && rollback[field] !== '', `APIM-T08 falta campo obligatorio: ${field}`);
     }
+    assert.equal(rollback.environment, expectedEnvironment, 'APIM-T08 ambiente de rollback no coincide');
     assert.equal(rollback.rollbackPolicyHash, rollback.previousPolicyHash, 'APIM-T08 hash post-rollback no coincide con hash previo');
     assert.notEqual(rollback.appliedPolicyHash, rollback.previousPolicyHash, 'APIM-T08 no hubo estado alternativo real');
     assert.equal(rollback.restorationResult, 'RESTORED', 'APIM-T08 restorationResult debe ser RESTORED');
@@ -251,8 +281,7 @@ async function run() {
     assert.equal(rollback.postRollbackSmokeResult, 'PASS', 'APIM-T08 smoke post-rollback debe ser PASS');
     statusByCase['APIM-T08'] = 'PASS';
 
-    const allPassed = CASE_IDS.every((id) => statusByCase[id] === 'PASS');
-    assert.ok(allPassed, 'No todos los casos APIM-T01..T08 alcanzaron PASS');
+    assert.ok(CASE_IDS.every((id) => statusByCase[id] === 'PASS'));
     console.log(JSON.stringify({ overall: 'PASS', cases: statusByCase }));
   } catch (err) {
     console.error(

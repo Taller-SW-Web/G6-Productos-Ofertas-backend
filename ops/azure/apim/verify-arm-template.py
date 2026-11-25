@@ -75,24 +75,40 @@ def validate_source_artifacts(
     manifest,
     expected_docs_sha,
     expected_gateway_sha,
+    *,
+    mode="effective",
+    security_profile="UNSPECIFIED",
+    enabled_providers=None,
+    authorized_public_allowlist=None,
+    public_provider_exceptions=None,
+    enable_g5=False,
+    g5_authorized=False,
 ):
     source = FILTER.yaml.safe_load(source_openapi.read_text(encoding="utf-8"))
     g5_routes = FILTER.read_registry(g5_routes_path)
     if len(g5_routes) != 4:
         raise ValueError("El registro integrado debe contener exactamente las cuatro rutas G5")
+    effective_publish = mode == "effective"
     generated_filtered, generated_manifest = FILTER.filter_spec(
         source,
         FILTER.read_registry(gateway_routes_path),
         g5_routes,
-        False,
+        enable_g5,
         expected_docs_sha,
         expected_gateway_sha,
+        g5_authorized=g5_authorized,
+        security_profile=security_profile,
+        enabled_providers=enabled_providers or [],
+        authorized_public_allowlist=authorized_public_allowlist or [],
+        public_provider_exceptions=public_provider_exceptions or [],
+        effective_publish=effective_publish,
     )
     if generated_filtered != filtered or generated_manifest != manifest:
         raise ValueError("Los artefactos APIM no se regeneran exactamente desde Docs y Gateway aprobados")
-    if {route["operationId"] for route in g5_routes} & {
-        operation["operationId"] for operation in manifest["operations"]
-    }:
+    if not enable_g5 and (
+        {route["operationId"] for route in g5_routes}
+        & {operation["operationId"] for operation in manifest["operations"]}
+    ):
         raise ValueError("Una ruta G5 aparece en el manifiesto APIM sin opt-in")
 
 
@@ -104,6 +120,13 @@ def main():
     parser.add_argument("--g5-routes", type=Path, required=True)
     parser.add_argument("--expected-docs-sha", required=True)
     parser.add_argument("--expected-gateway-sha", required=True)
+    parser.add_argument("--mode", choices=("effective", "candidate"), default="effective")
+    parser.add_argument("--security-profile", default="UNSPECIFIED")
+    parser.add_argument("--enabled-providers", nargs="*", default=[])
+    parser.add_argument("--authorized-public-allowlist", nargs="*", default=[])
+    parser.add_argument("--public-provider-exceptions", nargs="*", default=[])
+    parser.add_argument("--enable-g5", action="store_true")
+    parser.add_argument("--g5-authorized", action="store_true")
     parser.add_argument("--filtered-openapi", type=Path, default=ROOT / "openapi/gateway-filtered.json")
     parser.add_argument("--manifest", type=Path, default=ROOT / "openapi/operation-security.json")
     args = parser.parse_args()
@@ -117,6 +140,13 @@ def main():
         manifest,
         args.expected_docs_sha,
         args.expected_gateway_sha,
+        mode=args.mode,
+        security_profile=args.security_profile,
+        enabled_providers=args.enabled_providers,
+        authorized_public_allowlist=args.authorized_public_allowlist,
+        public_provider_exceptions=args.public_provider_exceptions,
+        enable_g5=args.enable_g5,
+        g5_authorized=args.g5_authorized,
     )
     count = validate(
         load_json(args.template), filtered, manifest, args.expected_docs_sha, args.expected_gateway_sha

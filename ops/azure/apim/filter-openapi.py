@@ -23,6 +23,7 @@ LEGACY_UNCONTRACTED = {
     "obtenerDefinicionPrecioSkuAdministracion",
 }
 KNOWN_SECURITY_SCHEMES = {"userBearer", "serviceBearer"}
+KNOWN_SECURITY_PROFILES = {"UNSPECIFIED", "G7_AUTHENTICATED", "PUBLIC_READ_ONLY"}
 KNOWN_RATE_PROFILES = {
     "commercial_read",
     "admin_read",
@@ -159,8 +160,10 @@ def extract_operation_security_metadata(
     service_name: str | None = None,
     enabled_providers: set[str] | None = None,
     authorized_public_allowlist: set[str] | None = None,
+    public_provider_exceptions: set[str] | None = None,
     security_profile: str = "UNSPECIFIED",
     g5_authorized: bool = False,
+    allow_human_only_when_m2m_pending: bool = False,
 ) -> tuple[dict, str | None]:
     auth_schemes = _extract_security_schemes(operation, source)
     has_human = "userBearer" in auth_schemes
@@ -231,20 +234,39 @@ def extract_operation_security_metadata(
     rate_profile = _derive_rate_profile(operation_id, method, path, operation, roles, is_g5)
     exposure_profile = _derive_exposure_profile(identity_type, path, roles, is_g5)
 
-    # APIM-R2-02: evaluación fail-closed por operación individual
+    # APIM-R3-01 & APIM-R3-07: evaluación fail-closed por operación individual
+    effective_identity_type = identity_type
+    effective_auth_schemes = list(auth_schemes)
+    effective_alternatives = list(security_alternatives)
+    effective_audience_required = audience_required
+    m2m_alternative_excluded_reason: str | None = None
+
     exclusion_reason: str | None = None
     if is_g5 and not g5_authorized:
         exclusion_reason = "G5_NOT_AUTHORIZED"
     elif identity_type == "public":
         if not authorized_public_allowlist or operation_id not in authorized_public_allowlist:
             exclusion_reason = "PUBLIC_NOT_IN_ALLOWLIST"
+        elif (
+            (not enabled_providers or not service_name or service_name not in enabled_providers)
+            and (not public_provider_exceptions or operation_id not in public_provider_exceptions)
+        ):
+            exclusion_reason = "PROVIDER_NOT_ENABLED"
     else:
         if security_profile == "UNSPECIFIED":
             exclusion_reason = "NO_SECURITY_PROFILE"
         elif not enabled_providers or not service_name or service_name not in enabled_providers:
             exclusion_reason = "PROVIDER_NOT_ENABLED"
-        elif identity_type == "m2m" and client_allowlist_status == "PENDING_G7_ALLOWLIST":
-            exclusion_reason = "PENDING_G7_ALLOWLIST"
+        elif has_m2m and client_allowlist_status == "PENDING_G7_ALLOWLIST":
+            if identity_type == "human_or_m2m" and allow_human_only_when_m2m_pending:
+                # Excluir explícitamente la alternativa M2M pendiente sin ampliar seguridad
+                effective_identity_type = "human"
+                effective_auth_schemes = ["userBearer"]
+                effective_alternatives = [alt for alt in security_alternatives if alt["scheme"] == "userBearer"]
+                effective_audience_required = False
+                m2m_alternative_excluded_reason = "PENDING_G7_ALLOWLIST"
+            else:
+                exclusion_reason = "PENDING_G7_ALLOWLIST"
 
     env_enabled = exclusion_reason is None
 
@@ -254,17 +276,18 @@ def extract_operation_security_metadata(
         "method": method.upper(),
         "path": path,
         "service": service_name,
-        "secured": bool(auth_schemes),
-        "authSchemes": auth_schemes,
-        "identityType": identity_type,
-        "securityAlternatives": security_alternatives,
-        "issuerRequired": bool(auth_schemes),
-        "audienceRequired": audience_required,
-        "audience": audience,
-        "scopes": scopes,
+        "secured": bool(effective_auth_schemes),
+        "authSchemes": effective_auth_schemes,
+        "identityType": effective_identity_type,
+        "securityAlternatives": effective_alternatives,
+        "issuerRequired": bool(effective_auth_schemes),
+        "audienceRequired": effective_audience_required,
+        "audience": audience if "serviceBearer" in effective_auth_schemes else None,
+        "scopes": scopes if "serviceBearer" in effective_auth_schemes else [],
         "roles": roles,
-        "allowedClients": allowed_clients,
+        "allowedClients": allowed_clients if "serviceBearer" in effective_auth_schemes else [],
         "clientAllowlistStatus": client_allowlist_status,
+        "m2mAlternativeExcludedReason": m2m_alternative_excluded_reason,
         "introspectionRequired": introspection_required,
         "exposureProfile": exposure_profile,
         "rateProfile": rate_profile,
@@ -343,9 +366,13 @@ def filter_spec(
     security_profile: str = "UNSPECIFIED",
     enabled_providers: list[str] | None = None,
     authorized_public_allowlist: list[str] | None = None,
+    public_provider_exceptions: list[str] | None = None,
     exposure_config: dict | None = None,
     effective_publish: bool = False,
+    allow_human_only_when_m2m_pending: bool = False,
 ) -> tuple[dict, dict]:
+    if security_profile not in KNOWN_SECURITY_PROFILES:
+        raise ValueError(f"securityProfile no reconocido: {security_profile!r}")
     if enable_g5 and not g5_authorized:
         raise ValueError(
             "El flag --enable-g5 por sí solo no autoriza publicación operativa; se requiere --g5-authorized explícito"
@@ -404,6 +431,7 @@ def filter_spec(
 
     provider_set = set(enabled_providers or [])
     public_allowlist_set = set(authorized_public_allowlist or [])
+    public_exception_set = set(public_provider_exceptions or [])
 
     candidate_operations: list[dict] = []
     excluded_operations: list[dict[str, str]] = [
@@ -424,8 +452,10 @@ def filter_spec(
             service_name=route_index[operation_id].get("service"),
             enabled_providers=provider_set,
             authorized_public_allowlist=public_allowlist_set,
+            public_provider_exceptions=public_exception_set,
             security_profile=security_profile,
             g5_authorized=g5_authorized,
+            allow_human_only_when_m2m_pending=allow_human_only_when_m2m_pending,
         )
         candidate_operations.append(meta)
         if exclusion_reason:
@@ -530,6 +560,8 @@ def main() -> None:
     parser.add_argument("--security-profile", default="UNSPECIFIED")
     parser.add_argument("--enabled-providers", nargs="*", default=[])
     parser.add_argument("--authorized-public-allowlist", nargs="*", default=[])
+    parser.add_argument("--public-provider-exceptions", nargs="*", default=[])
+    parser.add_argument("--allow-human-only-when-m2m-pending", action="store_true")
     parser.add_argument("--effective-publish", action="store_true", help="Exige publicación efectiva fail-closed")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
@@ -547,7 +579,9 @@ def main() -> None:
         security_profile=args.security_profile,
         enabled_providers=args.enabled_providers,
         authorized_public_allowlist=args.authorized_public_allowlist,
+        public_provider_exceptions=args.public_provider_exceptions,
         effective_publish=args.effective_publish,
+        allow_human_only_when_m2m_pending=args.allow_human_only_when_m2m_pending,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.parent.mkdir(parents=True, exist_ok=True)

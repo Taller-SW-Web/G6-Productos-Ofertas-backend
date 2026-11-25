@@ -55,12 +55,10 @@ param filteredOpenApi string
 param expectedOperationSetSha256 string
 @description('SHA-256 esperado del OpenAPI filtrado efectivo autorizado.')
 param expectedFilteredOpenApiSha256 string
-@description('Confirmación explícita de autorización efectiva de publicación (debe coincidir con effectivePublication.authorized).')
-param requireEffectivePublication bool = true
 
 var apiName = 'g6-productos-ofertas'
 var operationsManifest = loadJsonContent('./openapi/operation-security.json')
-var publicationGatePassed = !requireEffectivePublication || (operationsManifest.effectivePublication.authorized == true && operationsManifest.operationSetSha256 == expectedOperationSetSha256 && operationsManifest.filteredOpenApiCanonicalSha256 == expectedFilteredOpenApiSha256)
+var publicationGatePassed = operationsManifest.publicationMode == 'effective' && operationsManifest.effectivePublication.authorized == true && operationsManifest.operationSetSha256 == expectedOperationSetSha256 && operationsManifest.filteredOpenApiCanonicalSha256 == expectedFilteredOpenApiSha256
 var authorizedOperations = publicationGatePassed ? filter(operationsManifest.operations, op => op.environmentEnabled == true) : []
 var corsOriginNodes = join(map(corsAllowedOrigins, origin => '<origin>${xmlEscape(origin)}</origin>'), '')
 var apiPolicyTemplate = loadTextContent('./policies/api.xml')
@@ -69,7 +67,7 @@ var publicOperationPolicyTemplate = loadTextContent('./policies/operation-public
 
 func xmlEscape(value string) string => replace(replace(replace(value, '&', '&amp;'), '<', '&lt;'), '>', '&gt;')
 
-resource apim 'Microsoft.ApiManagement/service@2022-08-01' = if (!reuseExistingApim) {
+resource apim 'Microsoft.ApiManagement/service@2022-08-01' = if (!reuseExistingApim && publicationGatePassed && !empty(authorizedOperations)) {
   name: apimName
   location: location
   sku: {
@@ -113,7 +111,7 @@ resource api 'Microsoft.ApiManagement/service/apis@2022-08-01' = if (publication
   }
 }
 
-resource openIdNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-01' = {
+resource openIdNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-01' = if (publicationGatePassed && !empty(authorizedOperations)) {
   name: '${apimName}/g7-openid-config-url'
   dependsOn: [
     apim
@@ -126,7 +124,7 @@ resource openIdNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-0
   }
 }
 
-resource issuerNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-01' = {
+resource issuerNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-01' = if (publicationGatePassed && !empty(authorizedOperations)) {
   name: '${apimName}/g7-issuer'
   dependsOn: [
     apim
@@ -139,7 +137,7 @@ resource issuerNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-0
   }
 }
 
-resource audienceNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-01' = {
+resource audienceNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-01' = if (publicationGatePassed && !empty(authorizedOperations)) {
   name: '${apimName}/g7-audience'
   dependsOn: [
     apim
@@ -227,7 +225,7 @@ resource operationPolicies 'Microsoft.ApiManagement/service/apis/operations/poli
   }
 }]
 
-resource applicationInsightsLogger 'Microsoft.ApiManagement/service/loggers@2022-08-01' = {
+resource applicationInsightsLogger 'Microsoft.ApiManagement/service/loggers@2022-08-01' = if (publicationGatePassed && !empty(authorizedOperations)) {
   name: '${apimName}/applicationinsights'
   dependsOn: [
     apim

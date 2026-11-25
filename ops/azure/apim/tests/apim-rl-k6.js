@@ -1,7 +1,8 @@
 // Script k6 parametrizado para RL-01..RL-06 y APIM-T05 (sin ejecución automática).
 // Uso autorizado:
 // k6 run -e APIM_RL_AUTHORIZED=1 -e APIM_BASE_URL=https://<host>/api/v1 \
-//   -e APIM_JWT_CLIENT_A=<jwtA> -e APIM_JWT_CLIENT_B=<jwtB> \
+//   -e APIM_JWT_M2M_A=<jwtM2mA> -e APIM_JWT_M2M_B=<jwtM2mB> \
+//   -e APIM_JWT_HUMAN_QUOTA=<jwtHuman> -e APIM_JWT_HUMAN_CONCURRENCY=<jwtHumanConc> \
 //   -e APIM_LAB_BURST_CALLS=5 -e APIM_LAB_BURST_WINDOW_SEC=10 \
 //   -e APIM_LAB_QUOTA_CALLS=60 -e APIM_LAB_CONCURRENCY_MAX=2 \
 //   -e APIM_REGION=chilecentral -e APIM_SKU=Developer -e APIM_REVISION=1 -e APIM_POLICY_HASH=<sha> \
@@ -13,8 +14,15 @@ import { Counter, Rate } from 'k6/metrics';
 if (__ENV.APIM_RL_AUTHORIZED !== '1' || !__ENV.APIM_BASE_URL) {
   throw new Error('APIM_RL_AUTHORIZED=1 y APIM_BASE_URL son obligatorios');
 }
-if (!__ENV.APIM_JWT_CLIENT_A || !__ENV.APIM_JWT_CLIENT_B) {
-  throw new Error('APIM_JWT_CLIENT_A y APIM_JWT_CLIENT_B autenticados son obligatorios');
+for (const envName of [
+  'APIM_JWT_M2M_A',
+  'APIM_JWT_M2M_B',
+  'APIM_JWT_HUMAN_QUOTA',
+  'APIM_JWT_HUMAN_CONCURRENCY',
+]) {
+  if (!__ENV[envName]) {
+    throw new Error(`${envName} es obligatorio para separar identidades por escenario`);
+  }
 }
 
 const labBurstCalls = Number(__ENV.APIM_LAB_BURST_CALLS || '0');
@@ -39,6 +47,7 @@ const concurrency429 = new Counter('apim_rl_concurrency_429');
 const recovery200 = new Counter('apim_rl_recovery_200');
 const clientB200 = new Counter('apim_rl_client_b_200');
 const clientBFailed = new Rate('apim_rl_client_b_failed');
+const authzFalsePositive = new Counter('apim_rl_authz_false_positive');
 
 export const options = {
   scenarios: {
@@ -59,10 +68,10 @@ export const options = {
     },
     rl04_quota_exhaustion: {
       executor: 'shared-iterations',
-      vus: 4,
+      vus: 2,
       iterations: quotaIterations,
       startTime: `${recoveryStartSec + 6}s`,
-      exec: 'quotaClientA',
+      exec: 'quotaHumanClient',
     },
     rl05_concurrency_expensive: {
       executor: 'shared-iterations',
@@ -88,20 +97,33 @@ export const options = {
     apim_rl_concurrency_429: ['count>0'],
     apim_rl_client_b_200: ['count>0'],
     apim_rl_client_b_failed: ['rate==0'],
+    apim_rl_authz_false_positive: ['count==0'],
   },
 };
 
 const baseUrl = __ENV.APIM_BASE_URL;
-const tokenA = __ENV.APIM_JWT_CLIENT_A;
-const tokenB = __ENV.APIM_JWT_CLIENT_B;
-const burstPath = __ENV.APIM_RL_PATH || '/productos';
+const tokenM2mA = __ENV.APIM_JWT_M2M_A;
+const tokenM2mB = __ENV.APIM_JWT_M2M_B;
+const tokenHumanQuota = __ENV.APIM_JWT_HUMAN_QUOTA;
+const tokenHumanConcurrency = __ENV.APIM_JWT_HUMAN_CONCURRENCY;
+const burstPath = __ENV.APIM_RL_M2M_PATH || '/productos';
 const quotaPath = __ENV.APIM_RL_QUOTA_PATH || '/productos/administracion';
 const expensivePath = __ENV.APIM_RL_EXPENSIVE_PATH || '/auditoria-precios/exportar';
 
+function isAuthzRejection(res) {
+  const body = String(res.body || '');
+  return (
+    res.status === 401 ||
+    (res.status === 403 &&
+      (body.includes('SCOPE_INSUFICIENTE') || body.includes('TOKEN_INVALIDO')))
+  );
+}
+
 export function burstClientA() {
   const res = http.get(`${baseUrl}${burstPath}`, {
-    headers: { Authorization: `Bearer ${tokenA}` },
+    headers: { Authorization: `Bearer ${tokenM2mA}` },
   });
+  if (isAuthzRejection(res)) authzFalsePositive.add(1);
   if (res.status === 429) {
     burst429.add(1);
     if (res.headers['Retry-After']) burstRetryAfter.add(1);
@@ -114,39 +136,51 @@ export function burstClientA() {
 
 export function recoveryClientA() {
   const res = http.get(`${baseUrl}${burstPath}`, {
-    headers: { Authorization: `Bearer ${tokenA}` },
+    headers: { Authorization: `Bearer ${tokenM2mA}` },
   });
+  if (isAuthzRejection(res)) authzFalsePositive.add(1);
   if (res.status === 200) recovery200.add(1);
   check(res, {
-    'RL-03 recovery after window returns 200': (r) => r.status === 200,
+    'RL-03 recovery same identity/op after window returns 200': (r) => r.status === 200,
   });
   sleep(1);
 }
 
-export function quotaClientA() {
+export function quotaHumanClient() {
   const res = http.get(`${baseUrl}${quotaPath}`, {
-    headers: { Authorization: `Bearer ${tokenA}` },
+    headers: { Authorization: `Bearer ${tokenHumanQuota}` },
   });
-  if (res.status === 403) quota403.add(1);
+  if (isAuthzRejection(res)) {
+    authzFalsePositive.add(1);
+  } else if (res.status === 403) {
+    const body = String(res.body || '').toLowerCase();
+    if (res.headers['Retry-After'] || body.includes('quota')) {
+      quota403.add(1);
+    }
+  }
   check(res, {
-    'RL-04 quota returns 200 or quota-exhausted 403': (r) =>
-      r.status === 200 || r.status === 403,
+    'RL-04 quota returns 200 or quota-exhausted 403 (never authz 403)': (r) =>
+      !isAuthzRejection(r) && (r.status === 200 || r.status === 403),
   });
 }
 
 export function concurrencyExpensive() {
   const res = http.get(`${baseUrl}${expensivePath}`, {
-    headers: { Authorization: `Bearer ${tokenA}` },
+    headers: { Authorization: `Bearer ${tokenHumanConcurrency}` },
   });
-  if (res.status === 429) concurrency429.add(1);
+  if (isAuthzRejection(res)) authzFalsePositive.add(1);
+  if (res.status === 429) {
+    concurrency429.add(1);
+  }
   check(res, {
-    'RL-05 concurrency returns 200 or 429': (r) => r.status === 200 || r.status === 429,
+    'RL-05 concurrency returns 200 or limit-concurrency 429': (r) =>
+      r.status === 200 || r.status === 429,
   });
 }
 
 export function isolatedClientB() {
   const res = http.get(`${baseUrl}${burstPath}`, {
-    headers: { Authorization: `Bearer ${tokenB}` },
+    headers: { Authorization: `Bearer ${tokenM2mB}` },
   });
   const ok = res.status === 200;
   if (ok) clientB200.add(1);
@@ -184,6 +218,7 @@ export function handleSummary(data) {
           concurrency429: data.metrics?.apim_rl_concurrency_429?.values || {},
           clientB200: data.metrics?.apim_rl_client_b_200?.values || {},
           clientBFailed: data.metrics?.apim_rl_client_b_failed?.values || {},
+          authzFalsePositive: data.metrics?.apim_rl_authz_false_positive?.values || {},
         },
       },
       null,

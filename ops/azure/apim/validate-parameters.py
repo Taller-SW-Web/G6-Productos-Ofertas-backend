@@ -2,6 +2,7 @@
 """Preflight for an explicitly reviewed APIM parameter document."""
 
 import argparse
+from datetime import datetime, timezone
 import importlib.util
 import json
 import re
@@ -63,12 +64,15 @@ def validate(
     filtered_openapi: dict,
     manifest: dict,
     *,
-    expected_docs_sha: str | None = None,
-    expected_gateway_sha: str | None = None,
+    expected_docs_sha: str,
+    expected_gateway_sha: str,
+    max_evidence_age_hours: int = 24,
 ) -> None:
-    if manifest.get("effectivePublication", {}).get("authorized") is not True:
+    if not expected_docs_sha or not expected_gateway_sha:
+        raise ValueError("expected_docs_sha y expected_gateway_sha son obligatorios")
+    if manifest.get("publicationMode") != "effective" or manifest.get("effectivePublication", {}).get("authorized") is not True:
         raise ValueError(
-            "Publicación efectiva bloqueada: effectivePublication.authorized es false "
+            "Publicación efectiva bloqueada: se requiere publicationMode='effective' y effectivePublication.authorized=true "
             f"({manifest.get('effectivePublication', {}).get('blockedReasons', [])})"
         )
 
@@ -109,14 +113,31 @@ def validate(
             "Deployment bloqueado: falta evidencia verificable de Azure CLI en azureCliEvidencePath"
         )
     cli_evidence = json.loads(cli_evidence_path.read_text(encoding="utf-8"))
-    if cli_evidence.get("vnetConfiguration") is None:
+    for req_field in ("subscriptionId", "resourceGroup", "environment", "capturedAtUtc", "sourceCommand", "acaEnvironment", "gatewayApp"):
+        if not cli_evidence.get(req_field):
+            raise ValueError(f"Evidencia Azure CLI incompleta: falta {req_field}")
+    if not str(cli_evidence["sourceCommand"]).strip().startswith("az "):
+        raise ValueError("Evidencia Azure CLI debe registrar comando az de solo lectura")
+    captured_at = datetime.fromisoformat(str(cli_evidence["capturedAtUtc"]).replace("Z", "+00:00"))
+    age_hours = (datetime.now(timezone.utc) - captured_at).total_seconds() / 3600.0
+    if age_hours < 0 or age_hours > max_evidence_age_hours:
+        raise ValueError("Evidencia Azure CLI caducada o con fecha inválida")
+    if cli_evidence["acaEnvironment"].get("vnetConfiguration") is None:
         raise ValueError("Evidencia Azure CLI indica vnetConfiguration=null; red privada no acreditada")
-    if cli_evidence.get("gatewayExternal") is True and not cli_evidence.get("gatewayIpSecurityRestrictions"):
-        raise ValueError("Evidencia Azure CLI indica Gateway público sin ipSecurityRestrictions (anti-bypass no acreditado)")
+    gateway_app = cli_evidence["gatewayApp"]
+    restrictions = gateway_app.get("ipSecurityRestrictions") or []
+    has_apim_allow = any(r.get("action") == "Allow" and r.get("ipAddressRange") for r in restrictions)
+    has_default_deny = gateway_app.get("external") is False or any(
+        r.get("action") == "Deny" and r.get("ipAddressRange") in {"0.0.0.0/0", "*"} for r in restrictions
+    )
+    if not (gateway_app.get("external") is False or (has_apim_allow and has_default_deny)):
+        raise ValueError("Evidencia Azure CLI no acredita restricción de origen APIM ni denegación por defecto")
+    if gateway_app.get("directRoutesBlocked") is not True:
+        raise ValueError("Evidencia Azure CLI no acredita bloqueo de rutas directas alternativas")
 
-    if expected_docs_sha and manifest.get("docsSha") != expected_docs_sha:
+    if manifest.get("docsSha") != expected_docs_sha:
         raise ValueError("docsSha del manifiesto no coincide con el SHA aprobado")
-    if expected_gateway_sha and manifest.get("gatewaySha") != expected_gateway_sha:
+    if manifest.get("gatewaySha") != expected_gateway_sha:
         raise ValueError("gatewaySha del manifiesto no coincide con el SHA aprobado")
 
     if parameters["expectedOperationSetSha256"] != manifest.get("operationSetSha256"):
@@ -210,11 +231,15 @@ def main() -> None:
     parser.add_argument("parameters", type=Path, help="JSON local entregado para revisión")
     parser.add_argument("--openapi", type=Path, required=True, help="OpenAPI JSON filtrado")
     parser.add_argument("--manifest", type=Path, required=True, help="Manifiesto generado junto al OpenAPI")
+    parser.add_argument("--expected-docs-sha", required=True, help="SHA aprobado de Docs")
+    parser.add_argument("--expected-gateway-sha", required=True, help="SHA aprobado de Backend Gateway")
     args = parser.parse_args()
     validate(
         json.loads(args.parameters.read_text(encoding="utf-8")),
         json.loads(args.openapi.read_text(encoding="utf-8")),
         json.loads(args.manifest.read_text(encoding="utf-8")),
+        expected_docs_sha=args.expected_docs_sha,
+        expected_gateway_sha=args.expected_gateway_sha,
     )
     print("Parámetros APIM: PASS (validación local, sin acceso a Azure)")
 

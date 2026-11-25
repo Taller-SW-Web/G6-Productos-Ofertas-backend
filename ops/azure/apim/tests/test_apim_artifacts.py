@@ -10,7 +10,7 @@ from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_DOCS_SHA = "490172c11cb4b83ddd1996f8d5834d0402184cf8"
-EXPECTED_GATEWAY_SHA = "b0c41cb41e089cffb349da9c3938f8f62e793cd6"
+EXPECTED_GATEWAY_SHA = "1b90543dc39a8919fd94f0e059d10e1002b3b2a9"
 SPEC = importlib.util.spec_from_file_location("filter_openapi", ROOT / "filter-openapi.py")
 FILTER = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -560,6 +560,21 @@ class ApimClosureRequirementsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Publicación efectiva bloqueada"):
             FILTER.filter_spec(spec, routes, [], False, "d", "g", effective_publish=True)
 
+        # APIM-R3-01: human_or_m2m con M2M pendiente se bloquea por defecto (sin allow_human_only_when_m2m_pending)
+        with self.assertRaisesRegex(ValueError, "Publicación efectiva bloqueada"):
+            FILTER.filter_spec(
+                spec,
+                routes,
+                [],
+                False,
+                "d",
+                "g",
+                security_profile="G7_AUTHENTICATED",
+                enabled_providers=["combos-svc"],
+                effective_publish=True,
+            )
+
+        # APIM-R3-01: con allow_human_only_when_m2m_pending=True publica solo alternativa humana explícita
         filtered, manifest = FILTER.filter_spec(
             spec,
             routes,
@@ -570,14 +585,47 @@ class ApimClosureRequirementsTests(unittest.TestCase):
             security_profile="G7_AUTHENTICATED",
             enabled_providers=["combos-svc"],
             effective_publish=True,
+            allow_human_only_when_m2m_pending=True,
         )
         self.assertTrue(manifest["effectivePublication"]["authorized"])
         self.assertEqual(manifest["effectivePublication"]["publishedOperationIds"], ["obtenerCombo"])
+        self.assertEqual(manifest["operations"][0]["identityType"], "human")
+        self.assertEqual(manifest["operations"][0]["m2mAlternativeExcludedReason"], "PENDING_G7_ALLOWLIST")
         self.assertEqual(set(filtered["paths"].keys()), {"/combo"})
         self.assertIn(
             {"operationId": "consultarDisponibilidadCombo", "reason": "PENDING_G7_ALLOWLIST"},
             manifest["effectivePublication"]["excludedOperations"],
         )
+
+    def test_rejects_unknown_security_profile_and_public_without_enabled_provider(self):
+        private = {
+            f"interna{i}": {"get": {"operationId": f"interna{i}", "x-internal": True}}
+            for i in range(1, 6)
+        }
+        spec = {
+            "openapi": "3.0.3",
+            "info": {"title": "t", "version": "1"},
+            "paths": {
+                **{f"/{p}": item for p, item in private.items()},
+                "/seo": {"get": {"operationId": "seoPublico", "security": []}},
+            },
+            "servers": [{"url": "/api/v1"}],
+        }
+        routes = [{"method": "GET", "path": "/api/v1/seo", "operationId": "seoPublico", "service": "taxonomy-svc"}]
+        with self.assertRaisesRegex(ValueError, "securityProfile no reconocido"):
+            FILTER.filter_spec(spec, routes, [], False, "d", "g", security_profile="INVENTADO")
+        with self.assertRaisesRegex(ValueError, "Publicación efectiva bloqueada"):
+            FILTER.filter_spec(
+                spec,
+                routes,
+                [],
+                False,
+                "d",
+                "g",
+                security_profile="PUBLIC_READ_ONLY",
+                authorized_public_allowlist=["seoPublico"],
+                effective_publish=True,
+            )
 
     def test_policies_and_bicep_enforce_canonical_uuid_dual_auth_and_profiles(self):
         api_xml = (ROOT / "policies/api.xml").read_text(encoding="utf-8")
@@ -608,6 +656,7 @@ class ApimClosureRequirementsTests(unittest.TestCase):
         self.assertIn("param rateProfiles object\n", bicep_text)
         self.assertIn("var publicationGatePassed", bicep_text)
         self.assertIn("var authorizedOperations", bicep_text)
+        self.assertNotIn("requireEffectivePublication", bicep_text)
         self.assertIn("bytes: 0", bicep_text)
 
 
