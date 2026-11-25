@@ -133,7 +133,7 @@ integration('P1 Bulk Recovery, Files/Exports & Migrations (PostgreSQL 17 + Stora
     const correlationId = randomUUID();
     const sku = `BULK-RESTART-${randomUUID().slice(0, 8)}`;
     const csv = Buffer.from(
-      `${BULK_TEMPLATE_HEADERS.join(',')}\r\n"CREACION","","","${sku}","","Producto Restart","Desc","category-fixture","brand-fixture","type-fixture","false","","[]","","","10"\r\n`,
+      `${BULK_TEMPLATE_HEADERS.join(',')}\r\n"ALTA","","","${sku}","","Producto Restart","Desc","category-fixture","brand-fixture","type-fixture","false","10.50","[]","","","0"\r\n`,
       'utf8',
     );
     const admitRes = await request(app1.getHttpServer())
@@ -294,7 +294,7 @@ integration('P1 Bulk Recovery, Files/Exports & Migrations (PostgreSQL 17 + Stora
       .expect(400);
 
     // Roundtrip: use downloaded CSV template + 1 valid row -> import 202
-    const roundtripRow = `"CREACION","","","RT-${randomUUID().slice(0, 8)}","","Roundtrip","Desc","cat","brand","type","false","","[]","","","15"`;
+    const roundtripRow = `"ALTA","","","RT-${randomUUID().slice(0, 8)}","","Roundtrip","Desc","cat","brand","type","false","15.00","[]","","","0"`;
     const roundtripCsv = Buffer.from(`${csvTpl.text.trimEnd()}\r\n${roundtripRow}\r\n`, 'utf8');
     await request(server)
       .post('/api/v1/carga-masiva/productos/importaciones')

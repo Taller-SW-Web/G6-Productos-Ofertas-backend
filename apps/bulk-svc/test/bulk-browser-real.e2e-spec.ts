@@ -363,8 +363,8 @@ describe.skipIf(!enabled)(
       // Prepare CSVs
       const createSku = `BULK-BROWSER-${randomUUID().slice(0, 8)}`;
       const createValues = [
-        'CREACION', '', '', createSku, '', 'Producto Navegador Real', 'Creado desde Chromium E2E',
-        'category-fixture', 'brand-fixture', 'type-fixture', 'false', '', '[]', '', '', '19.90',
+        'ALTA', '', '', createSku, '', 'Producto Navegador Real', 'Creado desde Chromium E2E',
+        'category-fixture', 'brand-fixture', 'type-fixture', 'false', '19.90', '[]', '', '', '0',
       ];
       const csvPath = join(directory, 'bulk-browser-real.csv');
       writeFileSync(
@@ -402,8 +402,7 @@ describe.skipIf(!enabled)(
           (incoming) => {
             if (injectAmbiguous504) {
               incoming.resume();
-              res.writeHead(504, { 'content-type': 'application/json' });
-              res.end(JSON.stringify({ status: 504, detail: 'Simulated post-commit gateway timeout' }));
+              res.destroy();
               return;
             }
             res.writeHead(incoming.statusCode ?? 502, incoming.statusMessage, incoming.headers);

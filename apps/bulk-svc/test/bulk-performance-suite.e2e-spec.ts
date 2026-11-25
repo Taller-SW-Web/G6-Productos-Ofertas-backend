@@ -8,7 +8,8 @@ import { BulkSvcModule } from '../src/bulk-svc.module.js';
 import { BulkProblemFilter } from '../src/http/bulk-problem.filter.js';
 import { BulkReadinessService } from '../src/health/bulk-readiness.service.js';
 import { BULK_EXPORT_SOURCE, type BulkExportSource } from '../src/export/bulk-export-source.js';
-import { BULK_TEMPLATE_HEADERS, createBulkTemplateWorkbook } from '../src/domain/bulk-template-v2.js';
+import { BULK_TEMPLATE_HEADERS } from '../src/domain/bulk-template-v2.js';
+import { createValidBulkXlsx } from './support/bulk-template-fixtures.js';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { bulkSchema } from '../src/persistence/bulk.schema.js';
@@ -163,11 +164,11 @@ describe.skipIf(!enabled)('P1 Bulk Performance Suite (PostgreSQL 17 + Storage lo
     const server = app.getHttpServer();
 
     const csvRow = (sku: string) =>
-      `"CREACION","","","${sku}","","Perf Product","Desc","cat","brand","type","false","","[]","","","10"`;
+      `"ALTA","","","${sku}","","Perf Product","Desc","cat","brand","type","false","10.50","[]","","","0"`;
     const smallCsv = Buffer.from(`${BULK_TEMPLATE_HEADERS.join(',')}\r\n${csvRow('PERF-1')}\r\n`, 'utf8');
     const largeRows = Array.from({ length: 500 }, (_, i) => csvRow(`PERF-LARGE-${i}`)).join('\r\n');
     const largeCsv = Buffer.from(`${BULK_TEMPLATE_HEADERS.join(',')}\r\n${largeRows}\r\n`, 'utf8');
-    const xlsxBuf = createBulkTemplateWorkbook();
+    const xlsxBuf = createValidBulkXlsx('PERF-XLSX-1');
 
     // Warmup
     const warmupRes = await request(server)
