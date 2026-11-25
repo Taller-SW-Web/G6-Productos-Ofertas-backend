@@ -446,7 +446,8 @@ export async function verifyHttpReadQueries(resources, baseConfig, adminPool) {
       assert.equal(response.status, expected, `${id}: ${JSON.stringify(data)}`);
       assert.equal(response.headers.get('x-correlation-id'), trace);
       const matching = observations.filter(
-        (entry) => entry.correlation_id === trace,
+        (entry) =>
+          entry.correlation_id === trace && entry.event !== 'commercial_stage',
       );
       assert.equal(
         matching.length,

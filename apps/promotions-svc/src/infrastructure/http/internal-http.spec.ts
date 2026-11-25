@@ -266,7 +266,6 @@ describe('Internal HTTP credential boundary (PR143)', () => {
             scope: 'catalogo:leer',
           },
           expect.any(AbortSignal),
-          undefined,
         );
       },
     );

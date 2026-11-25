@@ -192,15 +192,18 @@ export class InternalHttpReader {
       if (trace) trace.stage = 'service_token';
       let token: string | null | undefined;
       try {
-        token = await this.options.getServiceAccessToken?.(
-          {
-            operationId: operation,
-            audience: spec.audience ?? 'api-productos',
-            scope: spec.scope,
-          },
-          signal,
-          correlationId,
-        );
+        const tokenRequest = {
+          operationId: operation,
+          audience: spec.audience ?? 'api-productos',
+          scope: spec.scope,
+        };
+        token = trace?.correlationId
+          ? await this.options.getServiceAccessToken?.(
+              tokenRequest,
+              signal,
+              trace.correlationId,
+            )
+          : await this.options.getServiceAccessToken?.(tokenRequest, signal);
         if (!token || /\s/.test(token))
           throw new Error('COMMERCIAL_SESSION_UNAVAILABLE');
         emit('service_token', tokenStarted, 'success');
