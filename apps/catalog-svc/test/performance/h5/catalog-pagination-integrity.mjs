@@ -4,6 +4,18 @@ function sorted(values) {
 
 export const COMMERCIAL_CHANNELS = Object.freeze(['MARKETPLACE', 'CHATBOT', 'RETAIL', 'VENTAS']);
 
+export function classifyPerf01Status(status) {
+  if (!Number.isInteger(status) || status < 100 || status > 599) return 'INVALID_HTTP_STATUS';
+  if (status === 200) return 'HTTP_200_SUCCESS';
+  if (status === 503) return 'HTTP_503_SERVICE_UNAVAILABLE';
+  if (status === 401) return 'HTTP_401_UNAUTHORIZED';
+  if (status === 403) return 'HTTP_403_FORBIDDEN';
+  if (status === 429) return 'HTTP_429_RATE_LIMITED';
+  if (status >= 500) return 'HTTP_OTHER_5XX';
+  if (status >= 400) return 'HTTP_OTHER_4XX';
+  return 'HTTP_OTHER_STATUS';
+}
+
 export function expectedCommercialProducts(manifest, channel) {
   if (!COMMERCIAL_CHANNELS.includes(channel)) throw new Error('PERF01_CHANNEL_INVALID');
   return manifest.products

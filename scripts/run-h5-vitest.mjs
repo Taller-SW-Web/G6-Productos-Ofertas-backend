@@ -5,8 +5,8 @@ import { dirname, relative, resolve } from 'node:path';
 import { assertSafeEvidenceText } from '../apps/catalog-svc/test/h5/evidence-security.mjs';
 
 const suites = {
-  int01: { config: 'vitest.h5-int01.config.ts', suite: 'INT01_CONTRACT', expected: 16 },
-  perf01: { config: 'vitest.h5-perf01.config.ts', suite: 'PERF01_ORACLE', expected: 21 },
+  int01: { config: 'vitest.h5-int01.config.ts', suite: 'INT01_CONTRACT', expected: 35 },
+  perf01: { config: 'vitest.h5-perf01.config.ts', suite: 'PERF01_ORACLE', expected: 22 },
 };
 const selected = suites[process.argv[2]];
 if (!selected) throw new Error('H5_VITEST_SUITE_INVALID: use int01 or perf01');

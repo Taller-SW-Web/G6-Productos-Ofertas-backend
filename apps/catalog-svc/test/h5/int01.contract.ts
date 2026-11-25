@@ -66,6 +66,22 @@ describe('INT-01 L0 contractual scenario registry', () => {
     }
   });
 
+  it.each(scenarios)(
+    '$id tiene un oráculo L0 individual sin fingir ejecución L1',
+    (scenario) => {
+      expect(scenario.input).not.toEqual({});
+      expect(scenario.required_providers.length).toBeGreaterThan(0);
+      expect(scenario.oracles).not.toEqual({});
+      expect(scenario.expected_result).not.toEqual({});
+      expect(scenario.observed_result).toBeNull();
+      expect(scenario.providers_started).toEqual([]);
+      expect(scenario.providers_queried).toEqual([]);
+      expect(scenario.providers_participating).toEqual([]);
+      expect(scenario.simulated_providers).toEqual([]);
+      expect(scenario.identity_authorization.verification).toBe('NOT_RUN');
+    },
+  );
+
   it('exige un recorrido positivo común que incluya los tres proveedores reales', () => {
     const positive = scenarios.filter(({ id }) =>
       ['INT01-SIMPLE-COMPLETO', 'INT01-VARIANTES-CANAL-GLOBAL'].includes(id),

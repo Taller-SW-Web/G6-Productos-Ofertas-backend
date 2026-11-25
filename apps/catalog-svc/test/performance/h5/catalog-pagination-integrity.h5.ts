@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { buildManifest } from '../../fixtures/h5/catalog-h5-fixture.mjs';
 import {
   expectedCommercialProducts,
+  classifyPerf01Status,
   validateCatalogSnapshot,
   validateCommercialCatalogSnapshot,
 } from './catalog-pagination-integrity.mjs';
@@ -89,6 +90,15 @@ function validCommercialSnapshot(channel = 'MARKETPLACE') {
 }
 
 describe('PERF-01 manifest data-integrity oracle', () => {
+  it('clasifica HTTP 503 por separado de otros errores de respuesta', () => {
+    expect(classifyPerf01Status(503)).toBe('HTTP_503_SERVICE_UNAVAILABLE');
+    expect(classifyPerf01Status(502)).toBe('HTTP_OTHER_5XX');
+    expect(classifyPerf01Status(401)).toBe('HTTP_401_UNAUTHORIZED');
+    expect(classifyPerf01Status(403)).toBe('HTTP_403_FORBIDDEN');
+    expect(classifyPerf01Status(429)).toBe('HTTP_429_RATE_LIMITED');
+    expect(classifyPerf01Status(200)).toBe('HTTP_200_SUCCESS');
+    expect(classifyPerf01Status(99)).toBe('INVALID_HTTP_STATUS');
+  });
   it('covers every eligible product and sellable SKU across stable pages', () => {
     const result = validateCatalogSnapshot(validSnapshot());
     expect(result).toMatchObject({

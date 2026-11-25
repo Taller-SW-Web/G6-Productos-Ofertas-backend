@@ -3,7 +3,7 @@ import { check, fail } from 'k6';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import { sha256 } from 'k6/crypto';
 import execution from 'k6/execution';
-import { COMMERCIAL_CHANNELS, expectedCommercialProducts, validateCommercialCatalogSnapshot } from './catalog-pagination-integrity.mjs';
+import { COMMERCIAL_CHANNELS, classifyPerf01Status, expectedCommercialProducts, validateCommercialCatalogSnapshot } from './catalog-pagination-integrity.mjs';
 
 const BASE_URL = (__ENV.BASE_URL ?? '').replace(/\/$/, '');
 const JWT = __ENV.SYNTHETIC_JWT ?? '';
@@ -25,6 +25,8 @@ const responses2xx = new Counter('h5_perf01_2xx_responses');
 const responses401 = new Counter('h5_perf01_401_responses');
 const responses403 = new Counter('h5_perf01_403_responses');
 const responses429 = new Counter('h5_perf01_429_responses');
+const responses503 = new Counter('h5_perf01_503_responses');
+const responsesOtherErrors = new Counter('h5_perf01_other_http_errors');
 const responseBytes = new Counter('h5_perf01_response_bytes');
 const measuredLatency = new Trend('h5_perf01_catalog_list_duration_ms', true);
 
@@ -123,6 +125,9 @@ export default function (setupData) {
   if (response.status === 401) responses401.add(1, tags);
   if (response.status === 403) responses403.add(1, tags);
   if (response.status === 429) responses429.add(1, tags);
+  const classification = classifyPerf01Status(response.status);
+  if (classification === 'HTTP_503_SERVICE_UNAVAILABLE') responses503.add(1, tags);
+  else if (classification !== 'HTTP_200_SUCCESS') responsesOtherErrors.add(1, { ...tags, classification });
   const unexpected = response.status !== 200;
   unexpectedErrors.add(unexpected, tags);
   measuredLatency.add(response.timings.duration, tags);
@@ -158,6 +163,8 @@ export function handleSummary(data) {
     responses_401: data.metrics.h5_perf01_401_responses?.values?.count ?? 0,
     responses_403: data.metrics.h5_perf01_403_responses?.values?.count ?? 0,
     responses_429: data.metrics.h5_perf01_429_responses?.values?.count ?? 0,
+    responses_503: data.metrics.h5_perf01_503_responses?.values?.count ?? 0,
+    responses_other_http_errors: data.metrics.h5_perf01_other_http_errors?.values?.count ?? 0,
     p50_ms: latency.med ?? null,
     p95_ms: latency['p(95)'] ?? null,
     p99_ms: latency['p(99)'] ?? null,
