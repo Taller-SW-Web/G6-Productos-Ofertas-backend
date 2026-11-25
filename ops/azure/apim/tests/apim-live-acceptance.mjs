@@ -5,10 +5,48 @@
  * Separa EVIDENCE_PREPARED, NOT_RUN, BLOCKED_INFRA, NOT_VERIFIED, FAIL y PASS.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
+
+const APIM_API_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/;
+const APIM_REVISION_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,31}$/;
+const APIM_RESOURCE_ID_RE =
+  /^\/subscriptions\/[a-zA-Z0-9-]+\/resourceGroups\/[a-zA-Z0-9._()-]+\/providers\/Microsoft\.ApiManagement\/service\/[a-zA-Z0-9-]+$/;
+
+export function assertSafeApimApiId(apiName) {
+  assert.ok(
+    typeof apiName === 'string' && APIM_API_ID_RE.test(apiName),
+    `APIM-T08 apiName inválido o peligroso: ${String(apiName)}`,
+  );
+  return apiName;
+}
+
+export function assertSafeApimRevision(revision, label = 'revision') {
+  assert.ok(
+    typeof revision === 'string' && APIM_REVISION_RE.test(revision),
+    `APIM-T08 ${label} inválida o peligrosa: ${String(revision)}`,
+  );
+  return revision;
+}
+
+export function assertSafeApimResourceId(resourceId) {
+  assert.ok(
+    typeof resourceId === 'string' && APIM_RESOURCE_ID_RE.test(resourceId),
+    `APIM-T08 apimResourceId inválido o peligroso: ${String(resourceId)}`,
+  );
+  return resourceId;
+}
+
+export function defaultRunAzRead(args) {
+  assert.ok(Array.isArray(args) && args.length >= 4, 'APIM-T08 argumentos az inválidos');
+  assert.equal(args[0], 'rest', 'APIM-T08 solo se permite az rest de solo lectura');
+  const methodIdx = args.indexOf('--method');
+  assert.ok(methodIdx !== -1 && args[methodIdx + 1]?.toLowerCase() === 'get', 'APIM-T08 solo se permite --method get');
+  const raw = execFileSync('az', args, { encoding: 'utf8', timeout: 30_000 });
+  return JSON.parse(raw);
+}
 
 const CASE_IDS = [
   'APIM-T01',
@@ -90,10 +128,23 @@ export function validateRollbackEvidence(rollback, expected) {
   ]) {
     assert.ok(rollback[field] !== undefined && rollback[field] !== '', `APIM-T08 falta campo obligatorio: ${field}`);
   }
+  assertSafeApimResourceId(expected.apimResourceId);
+  assertSafeApimApiId(rollback.apiName);
+  assertSafeApimRevision(rollback.revisionBefore, 'revisionBefore');
+  assertSafeApimRevision(rollback.alternativeRevision, 'alternativeRevision');
+  assertSafeApimRevision(rollback.revisionAfterRollback, 'revisionAfterRollback');
   assert.equal(rollback.resourceId, expected.apimResourceId, 'APIM-T08 resourceId no coincide con APIM esperado');
   assert.equal(rollback.subscriptionId, expected.subscriptionId, 'APIM-T08 subscriptionId no coincide');
   assert.equal(rollback.resourceGroup, expected.resourceGroup, 'APIM-T08 resourceGroup no coincide');
   assert.equal(rollback.environment, expected.environment, 'APIM-T08 ambiente de rollback no coincide');
+  if (expected.revision !== undefined) {
+    assertSafeApimRevision(expected.revision, 'expectedRevision');
+    assert.equal(
+      rollback.revisionAfterRollback,
+      expected.revision,
+      'APIM-T08 revisionAfterRollback no coincide con la revisión exacta esperada',
+    );
+  }
   assert.equal(rollback.rollbackPolicyHash, rollback.previousPolicyHash, 'APIM-T08 hash post-rollback no coincide con hash previo');
   assert.notEqual(rollback.appliedPolicyHash, rollback.previousPolicyHash, 'APIM-T08 no hubo estado alternativo real');
   assert.equal(rollback.restorationResult, 'RESTORED', 'APIM-T08 restorationResult debe ser RESTORED');
@@ -135,6 +186,99 @@ export function validateRollbackEvidence(rollback, expected) {
   return {
     status: 'EVIDENCE_PREPARED',
     verified: false,
+  };
+}
+
+export function verifyLiveRollback({
+  rollback,
+  expected,
+  runAzRead = defaultRunAzRead,
+  independentTransitions = null,
+}) {
+  validateRollbackEvidence(rollback, expected);
+
+  const apimResourceId = assertSafeApimResourceId(expected.apimResourceId);
+  const apiId = assertSafeApimApiId(rollback.apiName);
+  const targetRevision = assertSafeApimRevision(
+    expected.revision ?? rollback.revisionAfterRollback,
+    'targetRevision',
+  );
+  assert.equal(
+    rollback.revisionAfterRollback,
+    targetRevision,
+    'APIM-T08 revisionAfterRollback no coincide con la revisión exacta esperada',
+  );
+
+  // Consulta de solo lectura sobre la revisión exacta (;rev=...) en formato JSON sin alterar el XML con trim().
+  const policyUrl = `https://management.azure.com${apimResourceId}/apis/${apiId};rev=${targetRevision}/policies/policy?api-version=2022-08-01&format=rawxml`;
+  const livePolicyJson = runAzRead(['rest', '--method', 'get', '--url', policyUrl, '-o', 'json']);
+  const livePolicyXml = livePolicyJson?.properties?.value;
+  assert.ok(
+    typeof livePolicyXml === 'string' && livePolicyXml.includes('<policies>'),
+    'APIM-T08 consulta az rest JSON no devolvió properties.value con XML de política válido',
+  );
+  const livePolicyHash = sha256Text(livePolicyXml);
+  assert.equal(
+    livePolicyHash,
+    rollback.rollbackPolicyHash,
+    'APIM-T08 hash real consultado en Azure difiere de rollbackPolicyHash',
+  );
+
+  // No declarar PASS únicamente por observar un hash final correcto:
+  // exigir evidencia independiente y verificable de la secuencia antes -> cambio -> restauración.
+  const revisionsUrl = `https://management.azure.com${apimResourceId}/apis/${apiId}/revisions?api-version=2022-08-01`;
+  const revisionsJson = runAzRead(['rest', '--method', 'get', '--url', revisionsUrl, '-o', 'json']);
+  const revisionsList = Array.isArray(revisionsJson?.value) ? revisionsJson.value : [];
+  const hasBeforeRev = revisionsList.some((r) => String(r?.apiRevision) === rollback.revisionBefore);
+  const hasAltRev = revisionsList.some((r) => String(r?.apiRevision) === rollback.alternativeRevision);
+  const hasAfterRev = revisionsList.some((r) => String(r?.apiRevision) === targetRevision);
+  if (!hasBeforeRev || !hasAltRev || !hasAfterRev) {
+    return {
+      status: 'NOT_VERIFIED',
+      verified: false,
+      reason: 'APIM-T08 revisiones before/alternative/after no corroboradas en Azure APIM',
+    };
+  }
+
+  if (
+    !independentTransitions ||
+    typeof independentTransitions !== 'object' ||
+    !independentTransitions.before ||
+    !independentTransitions.during ||
+    !independentTransitions.after
+  ) {
+    return {
+      status: 'NOT_VERIFIED',
+      verified: false,
+      reason: 'APIM-T08 falta evidencia independiente verificable de la secuencia antes -> cambio -> restauración',
+    };
+  }
+
+  const { before, during, after } = independentTransitions;
+  const timestampsValid =
+    Date.parse(before.capturedAtUtc) < Date.parse(during.capturedAtUtc) &&
+    Date.parse(during.capturedAtUtc) < Date.parse(after.capturedAtUtc);
+  const hashesMatchSequence =
+    before.policyHash === rollback.previousPolicyHash &&
+    during.policyHash === rollback.appliedPolicyHash &&
+    during.policyHash !== before.policyHash &&
+    after.policyHash === livePolicyHash &&
+    after.policyHash === rollback.rollbackPolicyHash &&
+    before.revision === rollback.revisionBefore &&
+    during.revision === rollback.alternativeRevision &&
+    after.revision === targetRevision;
+
+  if (!timestampsValid || !hashesMatchSequence) {
+    return {
+      status: 'NOT_VERIFIED',
+      verified: false,
+      reason: 'APIM-T08 secuencia independiente antes -> cambio -> restauración incompleta o inconsistente',
+    };
+  }
+
+  return {
+    status: 'PASS',
+    verified: true,
   };
 }
 
@@ -378,24 +522,28 @@ export async function main() {
     assert.equal(t07Bad.status, 400, 'APIM-T07 UUID no canónico debe responder 400');
     statusByCase['APIM-T07'] = 'PASS';
 
-    // APIM-T08: integridad local + consulta independiente real del runner en Azure (nunca booleano del JSON)
+    // APIM-T08: integridad local + consulta independiente sin shell en revisión exacta + secuencia de transiciones
     const rollback = readJsonStrict(rollbackEvidencePath, 'APIM_ROLLBACK_EVIDENCE_PATH');
-    validateRollbackEvidence(rollback, {
-      apimResourceId: expectedApimResourceId,
-      subscriptionId: expectedSubscriptionId,
-      resourceGroup: expectedResourceGroup,
-      environment: expectedEnvironment,
+    const transitionEvidencePath = process.env.APIM_ROLLBACK_TRANSITION_EVIDENCE_PATH?.trim() || '';
+    const independentTransitions = transitionEvidencePath
+      ? readJsonStrict(transitionEvidencePath, 'APIM_ROLLBACK_TRANSITION_EVIDENCE_PATH')
+      : null;
+    const t08Result = verifyLiveRollback({
+      rollback,
+      expected: {
+        apimResourceId: expectedApimResourceId,
+        subscriptionId: expectedSubscriptionId,
+        resourceGroup: expectedResourceGroup,
+        environment: expectedEnvironment,
+        revision: expectedRevision,
+      },
+      runAzRead: defaultRunAzRead,
+      independentTransitions,
     });
-    const livePolicyXml = execSync(
-      `az rest --method get --url "https://management.azure.com${expectedApimResourceId}/apis/${rollback.apiName}/policies/policy?api-version=2022-08-01&format=rawxml" --query properties.value -o tsv`,
-      { encoding: 'utf8', timeout: 30_000 },
-    ).trim();
-    assert.ok(livePolicyXml.includes('<policies>'), 'APIM-T08 consulta az rest no devolvió XML de política válido');
-    assert.equal(
-      sha256Text(livePolicyXml),
-      rollback.rollbackPolicyHash,
-      'APIM-T08 hash real consultado en Azure difiere de rollbackPolicyHash',
-    );
+    if (t08Result.status !== 'PASS') {
+      statusByCase['APIM-T08'] = 'NOT_VERIFIED';
+      throw new Error(t08Result.reason || 'APIM-T08 NOT_VERIFIED');
+    }
     statusByCase['APIM-T08'] = 'PASS';
 
     assert.ok(CASE_IDS.every((id) => statusByCase[id] === 'PASS'));
