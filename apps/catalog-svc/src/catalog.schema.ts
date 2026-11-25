@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
+  char,
   check,
   foreignKey,
   index,
@@ -13,6 +14,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 
@@ -457,6 +459,124 @@ export const inbox = catalog.table(
   ],
 );
 
+/** Durable receipts reserved for the versioned BULK_RETRY_V1 extension. */
+export const bulkRetryCommandReceipts = catalog.table(
+  'bulk_retry_command_receipts',
+  {
+    commandAttemptId: uuid('command_attempt_id').notNull(),
+    messageId: uuid('message_id').notNull(),
+    batchId: uuid('batch_id').notNull(),
+    batchOperationId: uuid('batch_operation_id').notNull(),
+    previousCommandMessageId: uuid('previous_command_message_id').notNull(),
+    payloadHash: char('payload_hash', { length: 64 }).notNull(),
+    resultMessageId: uuid('result_message_id'),
+    resultPayload: jsonb('result_payload').$type<Record<string, unknown>>(),
+    createdAt: createdAt(),
+    completedAt: timestamp('completed_at', {
+      withTimezone: true,
+      mode: 'date',
+    }),
+  },
+  (table) => [
+    primaryKey({
+      name: 'pk_catalog_bulk_retry_command_receipts',
+      columns: [table.commandAttemptId],
+    }),
+    unique('uq_catalog_bulk_retry_command_message').on(table.messageId),
+    check(
+      'ck_catalog_bulk_retry_command_payload_hash',
+      sql`${table.payloadHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+    check(
+      'ck_catalog_bulk_retry_command_result_pair',
+      sql`(${table.resultMessageId} IS NULL) = (${table.resultPayload} IS NULL) AND (${table.completedAt} IS NULL) = (${table.resultMessageId} IS NULL)`,
+    ),
+  ],
+);
+
+export const bulkRetryAttemptReceipts = catalog.table(
+  'bulk_retry_attempt_receipts',
+  {
+    attemptId: uuid('attempt_id').notNull(),
+    commandAttemptId: uuid('command_attempt_id'),
+    batchId: uuid('batch_id').notNull(),
+    batchOperationId: uuid('batch_operation_id').notNull(),
+    rowOperationId: uuid('row_operation_id').notNull(),
+    previousAttemptId: uuid('previous_attempt_id'),
+    originalAttemptId: uuid('original_attempt_id'),
+    receiptMessageId: uuid('receipt_message_id').notNull(),
+    attemptNumber: integer('attempt_number').notNull(),
+    payloadHash: char('payload_hash', { length: 64 }).notNull(),
+    intentHash: char('intent_hash', { length: 64 }).notNull(),
+    status: text('status').notNull(),
+    effectState: text('effect_state').notNull(),
+    retriable: boolean('retriable').notNull().default(false),
+    errorCode: text('error_code'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'pk_catalog_bulk_retry_attempt_receipts',
+      columns: [table.attemptId],
+    }),
+    foreignKey({
+      name: 'fk_catalog_bulk_retry_attempt_command',
+      columns: [table.commandAttemptId],
+      foreignColumns: [bulkRetryCommandReceipts.commandAttemptId],
+    }),
+    foreignKey({
+      name: 'fk_catalog_bulk_retry_previous_attempt',
+      columns: [table.previousAttemptId, table.rowOperationId],
+      foreignColumns: [table.attemptId, table.rowOperationId],
+    }),
+    foreignKey({
+      name: 'fk_catalog_bulk_retry_original_attempt',
+      columns: [table.originalAttemptId, table.rowOperationId],
+      foreignColumns: [table.attemptId, table.rowOperationId],
+    }),
+    unique('uq_catalog_bulk_retry_attempt_id_row').on(
+      table.attemptId,
+      table.rowOperationId,
+    ),
+    unique('uq_catalog_bulk_retry_attempt_row_number').on(
+      table.rowOperationId,
+      table.attemptNumber,
+    ),
+    uniqueIndex('uq_catalog_bulk_retry_previous_attempt')
+      .on(table.previousAttemptId)
+      .where(sql`${table.previousAttemptId} IS NOT NULL`),
+    check(
+      'ck_catalog_bulk_retry_attempt_number',
+      sql`${table.attemptNumber} >= 1`,
+    ),
+    check(
+      'ck_catalog_bulk_retry_attempt_payload_hash',
+      sql`${table.payloadHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+    check(
+      'ck_catalog_bulk_retry_attempt_intent_hash',
+      sql`${table.intentHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+    check(
+      'ck_catalog_bulk_retry_attempt_status',
+      sql`${table.status} IN ('COMPLETED','REJECTED','UNKNOWN')`,
+    ),
+    check(
+      'ck_catalog_bulk_retry_attempt_effect',
+      sql`${table.effectState} IN ('NONE','APPLIED','UNKNOWN')`,
+    ),
+    check(
+      'ck_catalog_bulk_retry_attempt_identity',
+      sql`(${table.attemptNumber} = 1 AND ${table.commandAttemptId} IS NULL AND ${table.previousAttemptId} IS NULL AND ${table.originalAttemptId} IS NULL) OR (${table.attemptNumber} >= 2 AND ${table.commandAttemptId} IS NOT NULL AND ${table.previousAttemptId} IS NOT NULL AND ${table.originalAttemptId} IS NOT NULL)`,
+    ),
+    check(
+      'ck_catalog_bulk_retry_attempt_result_consistency',
+      sql`(${table.status} = 'COMPLETED' AND ${table.effectState} = 'APPLIED' AND ${table.retriable} = false) OR (${table.status} = 'REJECTED' AND ${table.effectState} IN ('NONE','UNKNOWN') AND (${table.retriable} = false OR (${table.effectState} = 'NONE' AND ${table.errorCode} = 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE'))) OR (${table.status} = 'UNKNOWN' AND ${table.effectState} = 'UNKNOWN' AND ${table.retriable} = false)`,
+    ),
+  ],
+);
+
 export const catalogSchema = {
   products,
   variants,
@@ -471,4 +591,6 @@ export const catalogSchema = {
   masterBarriers,
   outbox,
   inbox,
+  bulkRetryCommandReceipts,
+  bulkRetryAttemptReceipts,
 };

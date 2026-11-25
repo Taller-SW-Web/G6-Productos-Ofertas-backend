@@ -12,6 +12,7 @@ import { BulkReadinessService } from './health/bulk-readiness.service.js';
 import { BulkImportService } from './bulk-import.service.js';
 import { BulkStorageService } from './storage/bulk-storage.service.js';
 import { BulkExportService } from './bulk-export.service.js';
+import { BulkContentService } from './bulk-content.service.js';
 import { BulkDomainError } from './domain/bulk.domain-error.js';
 import { BulkUserBearerGuard } from './auth/bulk-user-bearer.guard.js';
 import { BulkProblemFilter } from './http/bulk-problem.filter.js';
@@ -124,6 +125,7 @@ describe('Bulk HTTP import routes (isolated)', () => {
         BulkSvcService,
         { provide: BulkImportService, useValue: imports },
         { provide: BulkStorageService, useValue: storage },
+        { provide: BulkContentService, useValue: { download: vi.fn() } },
         {
           provide: BulkExportService,
           useValue: {
@@ -581,6 +583,7 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
             put: vi.fn().mockResolvedValue('private://imports/file.csv'),
           },
         },
+        { provide: BulkContentService, useValue: { download: vi.fn() } },
         {
           provide: BulkExportService,
           useValue: { create: vi.fn().mockResolvedValue({ status: 'QUEUED' }) },

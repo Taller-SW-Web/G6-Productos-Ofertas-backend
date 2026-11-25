@@ -15,3 +15,5 @@ Las migraciones candidatas `0001_outbox_delivery.sql` y `0002_taxonomy_reply_tra
 El candidato requiere colas preaprovisionadas, límites Basic verificados, identidad administrada, RBAC por cola y acuerdos de consumo. Los mensajes Bulk demasiado grandes requieren fragmentación semántica o claim-check antes de la activación. Una expiración en el broker requiere conciliación por ID original y autorización de replay.
 
 [Orden de aplicación, esquema instalado y corte R18/R09](../../../../docs/hito-5/RECONCILIACION_R18_R09_PR258.md).
+
+La migración candidata `0003_bulk_retry_receipts.sql` agrega recibos durables por operación de fila e intento para BULK_RETRY_V1. Se aplica después de `0002_taxonomy_reply_transport.sql` en PostgreSQL descartable; no ejecutar en Supabase compartido sin aprobación de operación.

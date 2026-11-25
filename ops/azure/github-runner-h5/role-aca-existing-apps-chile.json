@@ -4,7 +4,8 @@
   "Description": "Chile-only role: read and update configuration of individually approved existing G6 H5 Container Apps at each app resource scope; no delete permission.",
   "Actions": [
     "Microsoft.App/containerApps/read",
-    "Microsoft.App/containerApps/write"
+    "Microsoft.App/containerApps/write",
+    "Microsoft.App/containerApps/revisions/read"
   ],
   "NotActions": [
     "Microsoft.App/containerApps/delete"
