@@ -113,6 +113,7 @@ const evidenceIndex = {
   schema_version: 1,
   artifact: `evidence-manifest-${process.argv[2]}.json`,
   sha256: evidenceSha256,
+  sha256_artifact: evidenceSha256,
   source_sha: sourceSha,
   docs_sha: manifest.docs_sha,
   case_id: manifest.case_id,

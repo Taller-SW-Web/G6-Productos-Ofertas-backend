@@ -115,13 +115,22 @@ try {
     dataset_checksum: datasetSha256,
     tool_versions: { k6: version.stdout.trim().split(/\r?\n/)[0], node: process.version },
     environment: { platform: process.platform, architecture: process.arch, network_scope: '127.0.0.1 synthetic fixture only' },
+    implementation_state: 'DONE_A',
+    execution_result: outcome.status,
+    configuration: { runtime: 'k6', runtime_version: version.stdout.trim().split(/\r?\n/)[0], localhost_fixture: 'catalog-pagination.fixture-server.h5.mjs', external_calls_allowed: false },
+    test_command: 'node scripts/run-h5-perf01-k6-smoke.mjs',
     profile: { vus: 1, duration_seconds: 5, max_rps: 5, repetition: 1 },
     execution: { process_exit_code: processExitCode, elapsed_ms: elapsedMs, iterations, responses_2xx: responses2xx, unexpected_error_rate: Number.isFinite(unexpectedErrorRate) ? unexpectedErrorRate : null, runtime_failures: runtimeFailures },
     integrity: { preflight_passed: preflightPassed, postflight_passed: postflightPassed, execution_complete: executionComplete, snapshot_preflight_sha256: snapshotPreflightSha, snapshot_postflight_sha256: snapshotPostflightSha },
+    expected: { inspect_and_archive_succeed: true, preflight_and_postflight_pass: true, snapshot_hashes_match: true, process_exit_code: 0, synthetic_smoke_not_real_measurement: true },
+    observed: { inspect_succeeded: inspected.status === 0, archive_succeeded: archived.status === 0, preflight_passed: preflightPassed, postflight_passed: postflightPassed, snapshot_hashes_match: snapshotPreflightSha !== null && snapshotPreflightSha === snapshotPostflightSha, process_exit_code: processExitCode, iterations, responses_2xx: responses2xx, runtime_failures: runtimeFailures },
+    negative_tests: ['Postflight failure/incompletion is rejected as MEASURED by the PERF-01 evidence adjudicator.', 'This synthetic run is explicitly not labeled as a real Catalog measurement.'],
+    known_limits: ['Loopback fixture only; does not establish real Catalog latency, RPS, bytes, provider participation, or a baseline/candidate comparison.', 'No shared, operational, Azure, APIM, Gateway, or Supabase target is contacted.'],
     evidence_level: 'L0_SYNTHETIC_SMOKE',
     status: outcome.status,
     measurement_status: 'NOT_MEASURED_REAL_CATALOG',
     reasons: outcome.reasons,
+    artifact_uri: 'test-results/h5/perf01-k6-loopback-smoke.json.index.json',
     artifacts: [
       { path: relative(process.cwd(), scriptPath).replaceAll('\\', '/'), sha256: createHash('sha256').update(await readFile(scriptPath)).digest('hex') },
       { path: 'catalog-pagination.tar', sha256: createHash('sha256').update(archivedBytes).digest('hex'), bytes: archivedBytes.length },
@@ -132,7 +141,7 @@ try {
   assertSafeEvidenceText(reportBytes.toString('utf8'));
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, reportBytes);
-  const evidenceIndex = { artifact: 'perf01-k6-loopback-smoke.json', sha256: createHash('sha256').update(reportBytes).digest('hex'), source_sha: sourceSha, docs_sha: docsSha, status: outcome.status, measurement_status: result.measurement_status };
+  const evidenceIndex = { schema_version: 1, artifact: 'test-results/h5/perf01-k6-loopback-smoke.json', sha256_artifact: createHash('sha256').update(reportBytes).digest('hex'), case_id: result.case_id, task_id: result.task_id, h5_criterion: result.h5_criterion, repository: result.repository, owner: result.owner, source_sha: sourceSha, docs_sha: docsSha, dataset_seed: result.dataset_seed, dataset_checksum: result.dataset_checksum, timestamp_utc: result.timestamp_utc, test_command: result.test_command, artifact_uri: result.artifact_uri, status: outcome.status, execution_result: result.execution_result, evidence_level: result.evidence_level, measurement_status: result.measurement_status };
   const indexBytes = Buffer.from(`${JSON.stringify(evidenceIndex, null, 2)}\n`, 'utf8');
   assertSafeEvidenceText(indexBytes.toString('utf8'));
   await writeFile(`${outputPath}.index.json`, indexBytes);
