@@ -41,7 +41,12 @@ Cuando `MESSAGING_PROVIDER=AZURE_SERVICE_BUS`, `COMBOS_AMQP_ENABLED=true` o `COM
   2. El rol runtime posee los permisos requeridos (`dependencies.postgres_permissions = ok`).
   3. Ambos receivers (`g6.combos.from.catalog` y `g6.combos.from.inventory`) están en fase `SUBSCRIBED`, con `linkReady = true` (`peekMessages(1)` exitoso) y `subscribed = true`.
 - Si falla conectividad PostgreSQL, faltan permisos runtime, falla el enlace/RBAC de una cola o `processError` degrada una suscripción, responde `503` (`error` / `not_ready`) sin fallback a RabbitMQ.
-- En el arranque (`start()`), se crean receivers, se verifica conectividad/RBAC (`LINK_VERIFIED`), luego se suscriben (`SUBSCRIBED`) y recién entonces se activa `available = true`. Un fallo inicial de cola/RBAC aborta `start()` de forma fail-closed (`COMBOS_SERVICE_BUS_LINK_UNAVAILABLE`). En ejecución, `recoverQueueIfNeeded` coalesca recuperaciones por cola cerrando el receptor/suscripción degradados antes de recrearlos (máximo 1 suscripción activa por cola, sin receptores huérfanos y sin suscribir durante `close()`).
+- En el arranque (`start()`):
+  1. Un error permanente de configuración (`readCombosServiceBus`) falla cerrado antes de iniciar el receptor (`COMBOS_SERVICE_BUS_CONFIGURATION_INVALID`).
+  2. Si `createReceiver` + `checkQueueLink` (`peekMessages(1)`) tiene éxito para ambas colas (`LINK_VERIFIED`), se suscriben (`SUBSCRIBED`) y se activa `available = true`.
+  3. Si una o ambas colas fallan inicialmente por error temporal de red, enlace o RBAC, `start()` **no** llama a `close()` ni hace fallback a RabbitMQ: deja la cola afectada en `DEGRADED` (`available = false` / `NOT_READY`) y programa `scheduleProbe()` con backoff exponencial (`min(maxBackoffMs, probeIntervalMs * 2^(failures - 1))`, por defecto hasta 30 s) para recuperar automáticamente sin reiniciar el proceso.
+- En ejecución, `recoverQueueIfNeeded` coalesca recuperaciones por cola cerrando el receptor/suscripción degradados antes de recrearlos (máximo 1 suscripción activa por cola, sin receptores huérfanos y sin suscribir durante `close()`). Al detenerse (`close()`), todas las colas pasan a `STOPPED`, se cancelan timers, se esperan trabajos en curso y se cierran suscripciones, receptores y `ServiceBusClient`.
+- Para pruebas T3 en Azure (`combos-service-bus.azure.e2e-spec.ts`), las variables `G6_H5_LAB_QUEUES_EXCLUSIVE=true` y `G6_H5_LAB_RESERVATION_ID` deben corresponder a una reserva operativa externa efectiva de las colas de laboratorio (no basta declararlas localmente si las colas están compartidas).
 
 ## 5. Settlement, reintentos, DLQ y riesgo de `maxDeliveryCount`
 

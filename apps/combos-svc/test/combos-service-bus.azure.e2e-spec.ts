@@ -24,6 +24,9 @@ const ZERO_UUID_REGEX = /^0{8}-0{4}-0{4}-0{4}-0{12}$/;
 const RESERVATION_REGEX = /^[A-Za-z0-9._:-]{4,64}$/;
 
 function assertIsolatedLabEnvironment() {
+  // Nota operativa: G6_H5_LAB_QUEUES_EXCLUSIVE=true y G6_H5_LAB_RESERVATION_ID
+  // deben estar respaldados por una reserva externa efectiva del laboratorio;
+  // los flags locales por sí solos no garantizan exclusividad física en Azure.
   if (process.env.G6_H5_COMBOS_LAB_AUTHORIZED !== 'true') {
     throw new Error('G6_H5_COMBOS_LAB_AUTHORIZED=true is required');
   }
@@ -364,11 +367,12 @@ describe.skipIf(!realAzureEnabled)(
           r12MessageId,
         );
 
-        const projections = await pool.query(
-          'SELECT combo_item_id, catalog_deactivated, projected_available, inventory_observed_at FROM combos.component_projection WHERE combo_item_id = ANY($1::uuid[])',
-          [[itemId, itemSecondId]],
-        );
-        expect(projections.rows).toEqual([
+        const projectionsQuery =
+          'SELECT combo_item_id, catalog_deactivated, projected_available, inventory_observed_at FROM combos.component_projection WHERE combo_item_id = ANY($1::uuid[]) ORDER BY combo_item_id';
+        const projectionsBeforeInvalid = await pool.query(projectionsQuery, [
+          [itemId, itemSecondId],
+        ]);
+        expect(projectionsBeforeInvalid.rows).toEqual([
           {
             combo_item_id: itemId,
             catalog_deactivated: true,
@@ -377,7 +381,7 @@ describe.skipIf(!realAzureEnabled)(
           },
         ]);
 
-        // DLQ verification (COM-AUD-14): send invalid wrong-queue message, verify deadLetterMessage + real DLQ inspection
+        // DLQ verification (COM-AUD-14 / COM-AUD-18): send invalid wrong-queue message, verify deadLetterMessage, real DLQ, and unchanged projections
         await catalogSender.sendMessages({
           body: Buffer.from(JSON.stringify(r12Envelope), 'utf8'),
           messageId: invalidMessageId,
@@ -413,6 +417,13 @@ describe.skipIf(!realAzureEnabled)(
           [invalidMessageId],
         );
         expect(invalidInbox.rowCount).toBe(0);
+
+        const projectionsAfterInvalid = await pool.query(projectionsQuery, [
+          [itemId, itemSecondId],
+        ]);
+        expect(projectionsAfterInvalid.rows).toEqual(
+          projectionsBeforeInvalid.rows,
+        );
       } finally {
         await pool
           .query('DELETE FROM combos.inbox WHERE message_id = ANY($1::text[])', [
@@ -606,5 +617,90 @@ describe.skipIf(!realAzureEnabled)(
         ]);
       }
     }, 120_000);
+
+    it.skipIf(process.env.G6_H5_LAB_SIMULATE_DEGRADATION !== '1')(
+      'Suite B (condicionado T3): degradación controlada de receiver -> NOT_READY -> recuperación -> READY en Azure (COM-AUD-17)',
+      async () => {
+        const lab = assertIsolatedLabEnvironment();
+        const pool = new Pool({
+          connectionString: lab.pgUrl,
+          connectionTimeoutMillis: 3000,
+        });
+        const db = {
+          query: async <T>(work: (client: PoolClient) => Promise<T>) => {
+            const client = await pool.connect();
+            try {
+              return await work(client);
+            } finally {
+              client.release();
+            }
+          },
+        } as CombosDatabase;
+        const consumer = new CombosEventConsumer(new CombosRepository(db));
+        const realClient = new ServiceBusClient(
+          lab.ns,
+          new ManagedIdentityCredential({ clientId: lab.combosClientId }),
+          { retryOptions: { maxRetries: 1, timeoutInMs: 8000 } },
+        );
+        const createdReceivers = new Map<string, ServiceBusReceiver>();
+        const bus = new CombosServiceBus(
+          {
+            provider: 'AZURE_SERVICE_BUS',
+            enabled: true,
+            namespace: lab.ns,
+            clientId: lab.combosClientId,
+          },
+          (queue, receiver, message) =>
+            consumer.processServiceBusDelivery(queue, receiver, message),
+          {
+            probeIntervalMs: 300,
+            maxBackoffMs: 600,
+            clientFactory: () => ({
+              createReceiver: (queueName, options) => {
+                const rx = realClient.createReceiver(
+                  queueName,
+                  options as Parameters<ServiceBusClient['createReceiver']>[1],
+                );
+                createdReceivers.set(queueName, rx);
+                return rx;
+              },
+              close: () => realClient.close(),
+            }),
+          },
+        );
+
+        try {
+          await bus.start();
+          expect(bus.available).toBe(true);
+
+          // Provocar degradación controlada cerrando únicamente el receiver propio de inventory
+          const ownedInventoryRx = createdReceivers.get(lab.inventoryQueue);
+          expect(ownedInventoryRx).toBeDefined();
+          await ownedInventoryRx!.close();
+
+          const degradedDeadline = Date.now() + 5000;
+          while (Date.now() < degradedDeadline && bus.available) {
+            await new Promise((r) => setTimeout(r, 100));
+          }
+          expect(bus.available).toBe(false);
+
+          const recoveredDeadline = Date.now() + 15_000;
+          while (Date.now() < recoveredDeadline && !bus.available) {
+            await new Promise((r) => setTimeout(r, 200));
+          }
+          expect(bus.available).toBe(true);
+          expect(bus.getQueueStates()[lab.inventoryQueue]).toMatchObject({
+            phase: 'SUBSCRIBED',
+            linkReady: true,
+            subscribed: true,
+            ready: true,
+          });
+        } finally {
+          await bus.close().catch(() => undefined);
+          await pool.end().catch(() => undefined);
+        }
+      },
+      60_000,
+    );
   },
 );
