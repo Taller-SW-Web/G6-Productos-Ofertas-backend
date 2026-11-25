@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { constanciaComercial } from './evidencia-integracion.mjs';
+import { requiredDeploymentServices } from './verificar-despliegue.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
@@ -141,8 +142,10 @@ async function validateAuthorized(profile, plans, scenarios, selectedIds) {
   if (
     profile.g6_service_shas !== undefined &&
     (typeof profile.g6_service_shas !== 'object' ||
-      cdServices.some(
-        (service) => !sha.test(profile.g6_service_shas[service] ?? ''),
+      Array.isArray(profile.g6_service_shas) ||
+      Object.entries(profile.g6_service_shas).some(
+        ([service, sourceSha]) =>
+          !cdServices.includes(service) || !sha.test(sourceSha ?? ''),
       ))
   )
     fail('G6_SERVICE_SHAS_INVALID');
@@ -162,20 +165,29 @@ async function validateAuthorized(profile, plans, scenarios, selectedIds) {
       profile.gateway !== `${gateway.origin}/`)
   )
     fail('AUTHORIZED_PRIVATE_GATEWAY_REQUIRED');
-  for (const service of cdServices)
-    if (!/^[1-9][0-9]{0,15}$/.test(String(profile.g6_cd_runs?.[service])))
-      fail('FOUR_G6_CD_RUNS_REQUIRED');
   if (
-    new Set(cdServices.map((service) => String(profile.g6_cd_runs[service])))
-      .size !== cdServices.length
+    profile.g6_cd_runs !== undefined &&
+    (typeof profile.g6_cd_runs !== 'object' ||
+      Array.isArray(profile.g6_cd_runs) ||
+      Object.entries(profile.g6_cd_runs).some(
+        ([service, runId]) =>
+          !cdServices.includes(service) ||
+          !/^[1-9][0-9]{0,15}$/.test(String(runId)),
+      ))
   )
-    fail('FOUR_DISTINCT_G6_CD_RUNS_REQUIRED');
+    fail('G6_CD_RUNS_INVALID');
   validateG5Deployment(profile);
   for (const id of selectedIds) {
     const scenario = scenarios.find((entry) => entry.id === id);
     const plan = plans.get(id);
     const input = profile.cases?.[id] ?? {};
     if (!plan || !scenario) fail(`CASE_PLAN_REQUIRED_${id}`);
+    for (const service of requiredDeploymentServices(plan, scenario.stage)) {
+      if (!/^[1-9][0-9]{0,15}$/.test(String(profile.g6_cd_runs?.[service])))
+        fail(`G6_CD_RUN_REQUIRED_${service}_${id}`);
+      if (!sha.test(profile.g6_service_shas?.[service] ?? profile.g6_sha ?? ''))
+        fail(`G6_SERVICE_SHA_REQUIRED_${service}_${id}`);
+    }
     if (scenario.requires_order)
       requiredString(plan.order_id, `G5_SYNTHETIC_ORDER_REQUIRED_${id}`);
     if (scenario.requires_order && id === 'G5-H5-13') {

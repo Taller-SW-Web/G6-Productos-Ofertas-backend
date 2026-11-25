@@ -208,6 +208,31 @@ test('update es idempotente, no rota UUID y authorize nunca activa execute', asy
       JSON.parse(await readFile(join(output, entry.plan), 'utf8')),
     );
   const profile = authorizationProfile(before, keyPair);
+  const reserveOnlyProfile = {
+    ...profile,
+    g6_cd_runs: { 'api-gateway': 501, 'inventory-svc': 503 },
+  };
+  const reserveOnly = await prepararPlanes(
+    reserveOnlyProfile,
+    output,
+    scenarioFile,
+    'authorize',
+    ['G5-H5-01'],
+  );
+  assert.deepEqual(reserveOnly.authorized, ['G5-H5-01']);
+  await assert.rejects(
+    prepararPlanes(
+      {
+        ...profile,
+        g6_cd_runs: { 'api-gateway': 501 },
+      },
+      output,
+      scenarioFile,
+      'authorize',
+      ['G5-H5-01'],
+    ),
+    /G6_CD_RUN_REQUIRED_inventory-svc_G5-H5-01/,
+  );
   const updated = await prepararPlanes(profile, output, scenarioFile, 'update');
   assert.equal(updated.phase, 'PREPARED');
   await prepararPlanes(profile, output, scenarioFile, 'update');

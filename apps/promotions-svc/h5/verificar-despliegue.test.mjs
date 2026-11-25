@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { verificarDespliegue } from './verificar-despliegue.mjs';
+import {
+  requiredDeploymentServices,
+  verificarDespliegue,
+} from './verificar-despliegue.mjs';
 
 const repo = 'Taller-SW-Web/G6-Productos-Ofertas-backend';
 const targets = JSON.parse(
@@ -21,6 +24,7 @@ const services = [
   'catalog-svc',
 ];
 const plan = {
+  case_id: 'G5-H5-05',
   environment: 'integration',
   g6_sha: '1'.repeat(40),
   g6_destination: 'brazil-isolated',
@@ -75,6 +79,8 @@ function fixture(currentPlan = plan, change = (type, result) => result) {
     }
     if (cmd === 'gh' && args[1] === 'download') {
       const service = args[args.indexOf('-n') + 1].replace('azure-image-', '');
+      if (change('download', service) === null)
+        throw new Error('ARTIFACT_UNAVAILABLE');
       writeFileSync(
         join(args[args.indexOf('-D') + 1], 'image-' + service + '.txt'),
         change('image', image(service)),
@@ -130,6 +136,84 @@ test('verifica destinos oficiales de Brasil y Chile y los digests activos', asyn
   }
 });
 
+test('reserva y rechazo de stock insuficiente requieren solo Gateway e Inventory', async () => {
+  for (const case_id of ['G5-H5-01', 'G5-H5-02']) {
+    const currentPlan = {
+      ...plan,
+      case_id,
+      g6_cd_runs: { 'api-gateway': 501, 'inventory-svc': 503 },
+    };
+    assert.deepEqual(requiredDeploymentServices(currentPlan, 'reserve'), [
+      'api-gateway',
+      'inventory-svc',
+    ]);
+    const evidence = await verificarDespliegue(
+      currentPlan,
+      'reserve',
+      fixture(currentPlan),
+    );
+    assert.deepEqual(
+      evidence.map((entry) => entry.service),
+      ['api-gateway', 'inventory-svc'],
+    );
+  }
+});
+
+test('rechaza caso desconocido, etapa cruzada y dependencias follow incompletas', () => {
+  assert.throws(
+    () =>
+      requiredDeploymentServices({ ...plan, case_id: 'G5-H5-99' }, 'reserve'),
+    /DESPLIEGUE_OFICIAL_NO_VERIFICADO/,
+  );
+  assert.throws(
+    () =>
+      requiredDeploymentServices({ ...plan, case_id: 'G5-H5-01' }, 'coupon'),
+    /DESPLIEGUE_OFICIAL_NO_VERIFICADO/,
+  );
+  assert.throws(
+    () =>
+      requiredDeploymentServices(
+        { ...plan, case_id: 'G5-H5-07', follow_type: 'unknown' },
+        'follow',
+      ),
+    /DESPLIEGUE_OFICIAL_NO_VERIFICADO/,
+  );
+});
+
+test('confirmación requiere Gateway e Inventory y mantiene el caso de pago firmado', async () => {
+  const currentPlan = {
+    ...plan,
+    case_id: 'G5-H5-03',
+    g6_cd_runs: { 'api-gateway': 501, 'inventory-svc': 503 },
+  };
+  assert.deepEqual(requiredDeploymentServices(currentPlan, 'confirm'), [
+    'api-gateway',
+    'inventory-svc',
+  ]);
+  assert.deepEqual(
+    requiredDeploymentServices(
+      { ...currentPlan, case_id: 'G5-H5-05' },
+      'coupon',
+    ),
+    ['api-gateway', 'promotions-svc', 'inventory-svc', 'catalog-svc'],
+  );
+  assert.deepEqual(
+    requiredDeploymentServices(
+      { ...currentPlan, case_id: 'G5-H5-12', follow_type: 'cupones' },
+      'follow',
+    ),
+    ['api-gateway', 'promotions-svc', 'inventory-svc'],
+  );
+  assert.throws(
+    () =>
+      requiredDeploymentServices(
+        { ...currentPlan, case_id: 'G5-H5-01' },
+        'confirm',
+      ),
+    /DESPLIEGUE_OFICIAL_NO_VERIFICADO/,
+  );
+});
+
 test('acepta SHA fuente distinta por servicio cuando cada CD y digest lo demuestran', async () => {
   const currentPlan = {
     ...plan,
@@ -170,12 +254,65 @@ test('distingue despliegue observado de certificación cuando el workflow CD ter
   );
 });
 
+test('un CD fallido con digest de artefacto distinto conserva solo la observación y bloquea la mutación', async () => {
+  const currentPlan = { ...plan, g6_destination: 'chile-shared' };
+  const evidence = await verificarDespliegue(
+    currentPlan,
+    'coupon',
+    fixture(currentPlan, (type, record) => {
+      if (type === 'run') return { ...record, conclusion: 'failure' };
+      if (type === 'revision')
+        return record.map((revision) => ({
+          ...revision,
+          containers: revision.containers.map((container) => ({
+            ...container,
+            image: container.image.replace(/f{64}$/, 'e'.repeat(64)),
+          })),
+        }));
+      return record;
+    }),
+  );
+  assert.ok(
+    evidence.every((entry) => entry.deployment_status === 'VERIFIED_SERVING'),
+  );
+  assert.ok(evidence.every((entry) => !entry.provenance_matches_serving));
+  assert.ok(
+    evidence.every((entry) => entry.certification_status !== 'SUCCESS'),
+  );
+  assert.ok(
+    evidence.every((entry) => entry.oci_digest === 'sha256:' + 'e'.repeat(64)),
+  );
+});
+
+test('artifact unavailable permits serving observation but never CD certification', async () => {
+  const currentPlan = {
+    ...plan,
+    case_id: 'G5-H5-01',
+    g6_cd_runs: { 'api-gateway': 501, 'inventory-svc': 503 },
+  };
+  const evidence = await verificarDespliegue(
+    currentPlan,
+    'reserve',
+    fixture(currentPlan, (type, record) =>
+      type === 'download' ? null : record,
+    ),
+  );
+  assert.ok(
+    evidence.every((entry) => entry.deployment_status === 'VERIFIED_SERVING'),
+  );
+  assert.ok(
+    evidence.every(
+      (entry) =>
+        entry.certification_status === 'BLOCKED_CD_EVIDENCE_INSUFFICIENT',
+    ),
+  );
+});
+
 test('bloquea evidencia ausente, ajena, no servida o con procedencia cruzada', async () => {
   const cases = [
     ['workflow', (record) => ({ ...record, path: '.github/workflows/ci.yml' })],
     ['run', (record) => ({ ...record, headSha: '2'.repeat(40) })],
     ['run', (record) => ({ ...record, headBranch: 'cueva' })],
-    ['run', (record) => ({ ...record, jobs: [] })],
     ['app', (record) => ({ ...record, host: 'wrong.example.invalid' })],
     [
       'app',
@@ -192,18 +329,6 @@ test('bloquea evidencia ausente, ajena, no servida o con procedencia cruzada', a
       'revision',
       ([record]) => [record, { ...record, name: 'second', traffic: 100 }],
     ],
-    [
-      'revision',
-      ([record]) => [
-        {
-          ...record,
-          containers: record.containers.map((container) => ({
-            ...container,
-            image: container.image.replace(/f{64}$/, 'e'.repeat(64)),
-          })),
-        },
-      ],
-    ],
   ];
   for (const [target, override] of cases)
     await assert.rejects(
@@ -215,25 +340,51 @@ test('bloquea evidencia ausente, ajena, no servida o con procedencia cruzada', a
       ),
       /DESPLIEGUE_OFICIAL_NO_VERIFICADO/,
     );
-  await assert.rejects(
-    verificarDespliegue({ ...plan, g6_destination: 'invalid' }, fixture()),
-    /DESPLIEGUE_OFICIAL_NO_VERIFICADO/,
+  const missingJobEvidence = await verificarDespliegue(
+    plan,
+    'coupon',
+    fixture(plan, (type, record) =>
+      type === 'run' ? { ...record, jobs: [] } : record,
+    ),
+  );
+  assert.ok(
+    missingJobEvidence.every(
+      (entry) =>
+        entry.deployment_status === 'VERIFIED_SERVING' &&
+        entry.certification_status === 'BLOCKED_DEPLOY_JOB_MISSING',
+    ),
   );
   await assert.rejects(
-    verificarDespliegue({ ...plan, g6_cd_runs: {} }, fixture()),
+    verificarDespliegue({ ...plan, g6_destination: 'invalid' }, fixture()),
     /DESPLIEGUE_OFICIAL_NO_VERIFICADO/,
   );
   await assert.rejects(
     verificarDespliegue(
       {
         ...plan,
-        g6_cd_runs: Object.fromEntries(
-          services.map((service) => [service, 123]),
-        ),
+        case_id: 'G5-H5-01',
+        g6_cd_runs: { 'api-gateway': 501 },
       },
+      'reserve',
       fixture(),
     ),
     /DESPLIEGUE_OFICIAL_NO_VERIFICADO/,
+  );
+  await assert.rejects(
+    verificarDespliegue({ ...plan, g6_cd_runs: {} }, fixture()),
+    /DESPLIEGUE_OFICIAL_NO_VERIFICADO/,
+  );
+  const sharedRunEvidence = await verificarDespliegue(
+    {
+      ...plan,
+      g6_cd_runs: Object.fromEntries(services.map((service) => [service, 123])),
+    },
+    fixture(),
+  );
+  assert.ok(
+    sharedRunEvidence.every(
+      (entry) => entry.certification_status === 'SUCCESS',
+    ),
   );
   await assert.rejects(
     verificarDespliegue(

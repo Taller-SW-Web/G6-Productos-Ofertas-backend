@@ -20,9 +20,66 @@ const services = [
   'inventory-svc',
   'catalog-svc',
 ];
+const scenarios = JSON.parse(
+  readFileSync(new URL('./escenarios.json', import.meta.url), 'utf8'),
+);
+const scenarioServices = {
+  'G5-H5-01': { reserve: ['api-gateway', 'inventory-svc'] },
+  'G5-H5-02': { reserve: ['api-gateway', 'inventory-svc'] },
+  'G5-H5-03': { confirm: ['api-gateway', 'inventory-svc'] },
+  'G5-H5-04': { cancel: ['api-gateway', 'inventory-svc'] },
+  'G5-H5-05': {
+    coupon: ['api-gateway', 'promotions-svc', 'inventory-svc', 'catalog-svc'],
+  },
+  'G5-H5-06': { cancel: ['api-gateway', 'promotions-svc', 'inventory-svc'] },
+  'G5-H5-07': { follow: ['api-gateway'] },
+  'G5-H5-08': {
+    coupon: ['api-gateway', 'promotions-svc', 'inventory-svc', 'catalog-svc'],
+  },
+  'G5-H5-09': { follow: ['api-gateway'] },
+  'G5-H5-10': { expired: ['api-gateway', 'inventory-svc'] },
+  'G5-H5-11': { expired: ['api-gateway', 'inventory-svc'] },
+  'G5-H5-12': { follow: ['api-gateway', 'inventory-svc'] },
+  'G5-H5-13': { auth: ['api-gateway', 'promotions-svc'] },
+  'G5-H5-14': { auth: ['api-gateway', 'promotions-svc'] },
+  'G5-H5-15': { follow: ['api-gateway', 'promotions-svc'] },
+  'G5-H5-16': { follow: ['api-gateway', 'promotions-svc'] },
+  'G5-H5-19': { follow: ['api-gateway', 'inventory-svc'] },
+};
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const digest = /^sha256:[0-9a-f]{64}$/;
 const unavailable = () => new Error('DESPLIEGUE_OFICIAL_NO_VERIFICADO');
+export function requiredDeploymentServices(plan, action) {
+  const scenario = scenarios.find((entry) => entry.id === plan.case_id);
+  const selectedAction = action ?? scenario?.stage;
+  if (!scenario) throw unavailable();
+  if (!selectedAction && scenario.stage === null) return [];
+  if (!selectedAction || scenario.stage !== selectedAction) throw unavailable();
+  const baseRequired = scenarioServices[scenario.id]?.[selectedAction];
+  if (!baseRequired) throw unavailable();
+  const required = [...baseRequired];
+  if (['G5-H5-07', 'G5-H5-09'].includes(scenario.id)) {
+    const service =
+      plan.follow_type === 'cupones'
+        ? 'promotions-svc'
+        : plan.follow_type === 'inventario'
+          ? 'inventory-svc'
+          : undefined;
+    if (!service) throw unavailable();
+    required.push(service);
+  }
+  if (
+    ['G5-H5-12', 'G5-H5-19'].includes(scenario.id) &&
+    plan.follow_type === 'cupones'
+  )
+    required.push('promotions-svc');
+  else if (
+    ['G5-H5-12', 'G5-H5-19'].includes(scenario.id) &&
+    plan.follow_type !== 'inventario'
+  )
+    throw unavailable();
+  return services.filter((service) => required.includes(service));
+}
 const exec = (command, args) =>
   execFileSync(command, args, {
     encoding: 'utf8',
@@ -30,7 +87,18 @@ const exec = (command, args) =>
     timeout: 20_000,
   });
 
-export async function verificarDespliegue(plan, execute = exec) {
+export async function verificarDespliegue(
+  plan,
+  actionOrExecute = undefined,
+  executeOverride = exec,
+) {
+  const action =
+    typeof actionOrExecute === 'string'
+      ? actionOrExecute
+      : scenarios.find((entry) => entry.id === plan.case_id)?.stage;
+  const execute =
+    typeof actionOrExecute === 'function' ? actionOrExecute : executeOverride;
+  const requiredServices = requiredDeploymentServices(plan, action);
   const destination = deploymentTargets.destinations?.[plan.g6_destination];
   if (
     plan.environment !== 'integration' ||
@@ -39,13 +107,21 @@ export async function verificarDespliegue(plan, execute = exec) {
     !['brazil-isolated', 'chile-shared'].includes(plan.g6_destination) ||
     (plan.g6_service_shas !== undefined &&
       (typeof plan.g6_service_shas !== 'object' ||
-        services.some(
+        Array.isArray(plan.g6_service_shas) ||
+        Object.keys(plan.g6_service_shas).some(
           (service) =>
-            !/^[a-f0-9]{40}$/.test(plan.g6_service_shas?.[service] ?? ''),
+            !services.includes(service) ||
+            !/^[a-f0-9]{40}$/.test(plan.g6_service_shas[service]),
         ))) ||
-    new Set(services.map((service) => String(plan.g6_cd_runs?.[service])))
-      .size !== services.length ||
-    services.some(
+    !plan.g6_cd_runs ||
+    typeof plan.g6_cd_runs !== 'object' ||
+    Array.isArray(plan.g6_cd_runs) ||
+    Object.entries(plan.g6_cd_runs).some(
+      ([service, runId]) =>
+        !services.includes(service) ||
+        !/^[1-9][0-9]{0,15}$/.test(String(runId)),
+    ) ||
+    requiredServices.some(
       (service) =>
         !/^[1-9][0-9]{0,15}$/.test(String(plan.g6_cd_runs?.[service])) ||
         !/^[a-f0-9]{40}$/.test(plan.g6_service_shas?.[service] ?? plan.g6_sha),
@@ -70,7 +146,7 @@ export async function verificarDespliegue(plan, execute = exec) {
       throw unavailable();
     const runs = new Map();
     const verified = [];
-    for (const service of services) {
+    for (const service of requiredServices) {
       const runId = String(plan.g6_cd_runs[service]);
       const sourceSha = plan.g6_service_shas?.[service] ?? plan.g6_sha;
       let runEvidence = runs.get(runId);
@@ -106,31 +182,33 @@ export async function verificarDespliegue(plan, execute = exec) {
         runs.set(runId, runEvidence);
       }
       const { run, workflow } = runEvidence;
-      const deploy = run.jobs.find(
+      const deploy = (Array.isArray(run.jobs) ? run.jobs : []).find(
         (job) => job.name === 'Desplegar ' + service + ' en Azure',
       );
-      if (
-        deploy?.conclusion !== 'success' ||
-        !Number.isFinite(Date.parse(deploy.completedAt))
-      )
-        throw unavailable();
-      execute('gh', [
-        'run',
-        'download',
-        runId,
-        '-R',
-        repo,
-        '-n',
-        'azure-image-' + service,
-        '-D',
-        temp,
-      ]);
-      const image = (
-        await readFile(join(temp, 'image-' + service + '.txt'), 'utf8')
-      ).trim();
       const prefix = 'ghcr.io/' + repo.toLowerCase() + '/' + service + '@';
-      if (!image.startsWith(prefix) || !digest.test(image.slice(prefix.length)))
-        throw unavailable();
+      let cdImage;
+      try {
+        execute('gh', [
+          'run',
+          'download',
+          runId,
+          '-R',
+          repo,
+          '-n',
+          'azure-image-' + service,
+          '-D',
+          temp,
+        ]);
+        cdImage = (
+          await readFile(join(temp, 'image-' + service + '.txt'), 'utf8')
+        ).trim();
+      } catch {
+        cdImage = undefined;
+      }
+      const cdArtifactValid =
+        typeof cdImage === 'string' &&
+        cdImage.startsWith(prefix) &&
+        digest.test(cdImage.slice(prefix.length));
 
       const scope = [
         '--resource-group',
@@ -180,14 +258,43 @@ export async function verificarDespliegue(plan, execute = exec) {
       if (
         serving.length !== 1 ||
         serving[0].traffic !== 100 ||
-        !app.latest ||
-        serving[0].name !== app.latest ||
         serving[0].health !== 'Healthy' ||
-        serving[0].containers.filter(
-          (c) => c.name === service && c.image === image,
-        ).length !== 1
+        (service === 'api-gateway' &&
+          (!app.latest || serving[0].name !== app.latest))
       )
         throw unavailable();
+      const serviceContainers = serving[0].containers.filter(
+        (container) => container.name === service,
+      );
+      const image = serviceContainers[0]?.image;
+      if (
+        !image?.startsWith(prefix) ||
+        serviceContainers.length !== 1 ||
+        !digest.test(image.slice(prefix.length))
+      )
+        throw unavailable();
+      const deployJobConclusion = deploy?.conclusion ?? null;
+      const completedAt = deploy?.completedAt;
+      const originApproved =
+        run.headBranch === 'master' &&
+        workflow.head_repository?.full_name?.toLowerCase() ===
+          repo.toLowerCase();
+      const provenanceMatchesServing = cdArtifactValid && cdImage === image;
+      const certificationStatus =
+        run.conclusion === 'success' &&
+        deployJobConclusion === 'success' &&
+        Number.isFinite(Date.parse(completedAt)) &&
+        originApproved &&
+        provenanceMatchesServing
+          ? 'SUCCESS'
+          : run.conclusion !== 'success'
+            ? 'BLOCKED_CD_RUN_' + run.conclusion.toUpperCase()
+            : deployJobConclusion !== 'success'
+              ? 'BLOCKED_DEPLOY_JOB_' +
+                (deployJobConclusion ?? 'MISSING').toUpperCase()
+              : cdArtifactValid && cdImage !== image
+                ? 'BLOCKED_DIGEST_MISMATCH'
+                : 'BLOCKED_CD_EVIDENCE_INSUFFICIENT';
       verified.push({
         service,
         destination: plan.g6_destination,
@@ -199,21 +306,18 @@ export async function verificarDespliegue(plan, execute = exec) {
         run_id: runId,
         run_url: run.url,
         cd_run_conclusion: run.conclusion,
-        deploy_job_conclusion: deploy.conclusion,
+        deploy_job_conclusion: deployJobConclusion,
         deployment_status: 'VERIFIED_SERVING',
-        certification_status:
-          run.conclusion === 'success'
-            ? 'SUCCESS'
-            : 'BLOCKED_CD_RUN_' + run.conclusion.toUpperCase(),
+        certification_status: certificationStatus,
+        provenance_matches_serving: provenanceMatchesServing,
         source_repository: repo,
         source_branch: run.headBranch,
         source_sha: run.headSha,
         source_workflow: workflow.path,
-        origin_approved:
-          run.headBranch === 'master' &&
-          workflow.head_repository?.full_name?.toLowerCase() ===
-            repo.toLowerCase(),
-        deployed_at: deploy.completedAt,
+        origin_approved: originApproved,
+        deployed_at: Number.isFinite(Date.parse(completedAt))
+          ? completedAt
+          : null,
         revision: serving[0].name,
         effective_traffic_percent: serving[0].traffic,
         image,

@@ -330,7 +330,8 @@ export async function ejecutarMatriz(
     }
     if (stage === null && !fixture.attestation) continue;
     try {
-      row.deployment = await verifyDeployment(plan);
+      row.deployment =
+        stage === null ? [] : await verifyDeployment(plan, stage);
     } catch {
       row.reason = 'DESPLIEGUE_OFICIAL_NO_VERIFICADO';
       continue;
@@ -453,7 +454,7 @@ export async function ejecutarMatriz(
           (proof.status === 'PASS' && proof.observed !== expected)
         )
           throw new Error();
-        if (proof.status === 'PASS') {
+        if (proof.status === 'PASS' && row.deployment.length) {
           if (
             row.deployment.some(
               (entry) =>
@@ -494,7 +495,7 @@ export async function ejecutarMatriz(
     }
     if (technicalPassed) {
       try {
-        const current = await verifyDeployment(plan);
+        const current = await verifyDeployment(plan, stage);
         if (JSON.stringify(current) !== JSON.stringify(row.deployment))
           throw new Error();
       } catch {

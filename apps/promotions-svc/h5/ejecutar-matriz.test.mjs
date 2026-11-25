@@ -111,6 +111,7 @@ test('clasifica homologación técnica y bilateral', async (t) => {
     },
   ];
   const scenario = async (id, record, result, verify = deployment) => {
+    await writeFile(planPath, JSON.stringify({ ...plan, case_id: id }));
     const report = await ejecutarMatriz(
       { [id]: record },
       [id],
@@ -376,11 +377,22 @@ test('clasifica homologación técnica y bilateral', async (t) => {
     },
   );
   await t.test('G5-H5-05 con ambas evidencias pasa', async () => {
-    assert.equal(
-      (await scenario(coupon, { ...fixture, attestation: signed() }, validRun))
-        .status,
-      'PASS',
+    const calls = [];
+    const verify = async (plan, action) => {
+      calls.push({ case_id: plan.case_id, action });
+      return deployment();
+    };
+    const row = await scenario(
+      coupon,
+      { ...fixture, attestation: signed() },
+      validRun,
+      verify,
     );
+    assert.equal(row.status, 'PASS');
+    assert.deepEqual(calls, [
+      { case_id: coupon, action: 'coupon' },
+      { case_id: coupon, action: 'coupon' },
+    ]);
   });
   await t.test(
     'CD fallido conserva evidencia del digest servido y bloquea certificación',

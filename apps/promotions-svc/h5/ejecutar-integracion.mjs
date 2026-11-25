@@ -108,7 +108,7 @@ async function main() {
       authorization,
       execute: executeFlag === 'true',
     });
-    const deployment = await verificarDespliegue(plan);
+    const deployment = await verificarDespliegue(plan, action);
     ensure(
       deployment.every((service) => service.certification_status === 'SUCCESS'),
       'CD_CERTIFICATION_BLOCKED',
