@@ -41,7 +41,8 @@ function Initialize-AcaPatchJournal {
 }
 
 function Get-AcaPatchJournalLatestOperations {
-    $path = Get-AcaPatchJournalPath
+    param([string]$Path)
+    $path = if ([string]::IsNullOrWhiteSpace($Path)) { Get-AcaPatchJournalPath } else { $Path }
     if (-not (Test-Path -LiteralPath $path)) { return @() }
     Protect-AcaPatchJournalPath -Path (Split-Path -Parent $path) -Directory $true
     Protect-AcaPatchJournalPath -Path $path -Directory $false
@@ -56,15 +57,29 @@ function Get-AcaPatchJournalLatestOperations {
 }
 
 function Get-AcaPatchJournalPendingOperations {
-    $latest = @(Get-AcaPatchJournalLatestOperations)
-    return @($latest | Where-Object {
-        $_.terminalState -notin @('Succeeded','Failed','Canceled','Cancelled','Rejected') -or
-        ($_.terminalState -in @('Succeeded','Failed','Canceled','Cancelled') -and $_.readbackResult -notin @('VerifiedPresent','VerifiedAbsent'))
+    param([string]$ResourceId,[string]$Path,[switch]$AllowOtherResourceIds)
+    $latest = @(Get-AcaPatchJournalLatestOperations -Path $Path)
+    if (-not [string]::IsNullOrWhiteSpace($ResourceId)) {
+        foreach ($operation in $latest) {
+            if ([string]::IsNullOrWhiteSpace([string]$operation.resourceId) -or (-not $AllowOtherResourceIds -and -not [string]::Equals([string]$operation.resourceId,$ResourceId,[System.StringComparison]::OrdinalIgnoreCase))) {
+                throw 'PATCH_JOURNAL_RESOURCE_MISMATCH: destination-scoped journal contains an operation for another or unknown Resource ID.'
+            }
+        }
+    }
+    $pending = @($latest | Where-Object {
+        $belongsToTarget = [string]::IsNullOrWhiteSpace($ResourceId) -or [string]::Equals([string]$_.resourceId,$ResourceId,[System.StringComparison]::OrdinalIgnoreCase)
+        $terminalState=if($_.PSObject.Properties.Name -contains 'terminalState') {[string]$_.terminalState} else {$null}
+        $readback=if($_.PSObject.Properties.Name -contains 'readbackResult') {[string]$_.readbackResult} else {$null}
+        $notTerminal = $terminalState -notin @('Succeeded','Failed','Canceled','Cancelled','Rejected') -or
+            ($terminalState -in @('Succeeded','Failed','Canceled','Cancelled') -and $readback -notin @('VerifiedPresent','VerifiedAbsent'))
+        $belongsToTarget -and $notTerminal
     })
+    return $pending
 }
 
 function Assert-AcaPatchJournalReady {
-    $pending = @(Get-AcaPatchJournalPendingOperations)
+    param([string]$ResourceId)
+    $pending = @(Get-AcaPatchJournalPendingOperations -ResourceId $ResourceId)
     if ($pending.Count -gt 0) {
         $ids = @($pending | ForEach-Object { [string]$_.attemptId }) -join ','
         throw "ARM_PATCH_JOURNAL_BLOCKED: unresolved local PATCH/LRO attempt(s) $ids; reconcile the stored operation reference and readback before another PATCH."
@@ -414,11 +429,16 @@ function Resolve-AcaPatchJournalOperations {
         [Parameter(Mandatory)][string]$ResourceGroup,
         [Parameter(Mandatory)][string]$EnvironmentId,
         [Parameter(Mandatory)][string]$ExpectedImage,
+        [string]$ResourceId,
+        [switch]$AllowOtherResourceIds,
         [int]$TimeoutSeconds = 120,
         [scriptblock]$Sleep = { Start-Sleep -Seconds 3 }
     )
     $results=[System.Collections.Generic.List[object]]::new()
-    foreach($operation in @(Get-AcaPatchJournalPendingOperations)) {
+    $expectedResourceId = "/subscriptions/$((([uri]$Uri).AbsolutePath -split '/')[2])/resourceGroups/$ResourceGroup/providers/Microsoft.App/jobs/$JobName"
+    if ([string]::IsNullOrWhiteSpace($ResourceId)) { $ResourceId=$expectedResourceId }
+    if (-not [string]::Equals($ResourceId,$expectedResourceId,[System.StringComparison]::OrdinalIgnoreCase)) { throw 'PATCH_JOURNAL_TARGET_MISMATCH: requested Resource ID does not match the supplied ARM Job URI.' }
+    foreach($operation in @(Get-AcaPatchJournalPendingOperations -ResourceId $ResourceId -AllowOtherResourceIds:$AllowOtherResourceIds)) {
         if ([string]::IsNullOrWhiteSpace([string]$operation.lroReference)) {
             $results.Add([pscustomobject]@{AttemptId=$operation.attemptId;State='HISTORICAL_LRO_UNVERIFIABLE';Readback='NotAttempted'})
             continue
