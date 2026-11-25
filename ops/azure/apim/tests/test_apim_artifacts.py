@@ -745,6 +745,28 @@ class ApimClosureRequirementsTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "fixedFilteredOpenApi"):
                 ARM.validate(fake_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=True)
 
+            # R6-03: alias indirectos $fxv#0, ciclos, faltantes y expresiones no permitidas
+            indirect_arm = copy.deepcopy(fake_arm)
+            indirect_arm["resources"]["api"]["properties"]["value"] = "[variables('fixedFilteredOpenApi')]"
+            indirect_arm["variables"]["fixedFilteredOpenApiObject"] = "[variables('$fxv#0')]"
+            indirect_arm["variables"]["$fxv#0"] = filtered
+            ARM.validate(indirect_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=True)
+
+            cyclic_arm = copy.deepcopy(indirect_arm)
+            cyclic_arm["variables"]["$fxv#0"] = "[variables('fixedFilteredOpenApiObject')]"
+            with self.assertRaisesRegex(ValueError, "Referencia circular"):
+                ARM.validate(cyclic_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=True)
+
+            missing_arm = copy.deepcopy(indirect_arm)
+            missing_arm["variables"]["fixedFilteredOpenApiObject"] = "[variables('$fxv#999')]"
+            with self.assertRaisesRegex(ValueError, "Variable ARM inexistente"):
+                ARM.validate(missing_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=True)
+
+            param_arm = copy.deepcopy(indirect_arm)
+            param_arm["variables"]["fixedFilteredOpenApiObject"] = "[parameters('evilParam')]"
+            with self.assertRaisesRegex(ValueError, "Expresión ARM no permitida"):
+                ARM.validate(param_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=True)
+
     def test_rejects_unknown_security_profile_and_public_without_enabled_provider(self):
         private = {
             f"interna{i}": {"get": {"operationId": f"interna{i}", "x-internal": True}}

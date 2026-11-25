@@ -60,6 +60,10 @@ const expectedEnvironment = requireEnv('APIM_EXPECTED_ENVIRONMENT');
 const expectedSubscriptionId = requireEnv('APIM_EXPECTED_SUBSCRIPTION_ID');
 const expectedResourceGroup = requireEnv('APIM_EXPECTED_RESOURCE_GROUP');
 const expectedGatewayResourceId = requireEnv('APIM_EXPECTED_GATEWAY_RESOURCE_ID');
+const expectedApimResourceId = requireEnv('APIM_EXPECTED_APIM_RESOURCE_ID');
+const expectedRegion = requireEnv('APIM_EXPECTED_REGION');
+const expectedRevision = requireEnv('APIM_EXPECTED_REVISION');
+const expectedPolicyHash = requireEnv('APIM_EXPECTED_POLICY_HASH');
 const expectedOriginCidrs = requireEnv('APIM_EXPECTED_ORIGIN_CIDRS')
   .split(',')
   .map((c) => c.trim())
@@ -207,11 +211,19 @@ async function run() {
     assert.equal(gwApp.directRoutesBlocked, true, 'APIM-T05 rutas directas alternativas no acreditadas como bloqueadas');
 
     const k6Summary = readJsonStrict(k6SummaryPath, 'APIM_K6_SUMMARY_PATH');
+    assert.equal(k6Summary.verificationStatus, 'VERIFIED', 'APIM-T05 k6 verificationStatus debe ser VERIFIED');
+    assert.equal(k6Summary.causes?.quota_burst_collision_429, 0, 'APIM-T05 k6 tuvo colisión cuota/burst');
+    assert.equal(k6Summary.causes?.authz_false_positive, 0, 'APIM-T05 k6 tuvo falsos positivos de autorización');
     assert.ok((k6Summary.metrics?.burst429?.count ?? 0) > 0, 'APIM-T05 falta evidencia k6 de 429 burst');
+    assert.ok((k6Summary.metrics?.burstRetryAfter?.count ?? 0) > 0, 'APIM-T05 falta evidencia k6 de Retry-After');
+    assert.ok((k6Summary.metrics?.recovery200?.count ?? 0) > 0, 'APIM-T05 falta evidencia k6 de recuperación 200');
     assert.ok((k6Summary.metrics?.quota403?.count ?? 0) > 0, 'APIM-T05 falta evidencia k6 de cuota 403');
     assert.ok((k6Summary.metrics?.concurrency429?.count ?? 0) > 0, 'APIM-T05 falta evidencia k6 de concurrencia 429');
-    assert.equal(k6Summary.metrics?.authzFalsePositive?.count ?? 1, 0, 'APIM-T05 k6 tuvo falsos positivos de autorización');
+    assert.ok((k6Summary.metrics?.clientB200?.count ?? 0) > 0, 'APIM-T05 falta evidencia k6 de cliente B');
     assert.equal(k6Summary.metrics?.clientBFailed?.rate ?? 1, 0, 'APIM-T05 cliente B aislado tuvo fallos');
+    assert.equal(k6Summary.metadata?.region, expectedRegion, 'APIM-T05 región k6 no coincide');
+    assert.equal(k6Summary.metadata?.revision, expectedRevision, 'APIM-T05 revisión k6 no coincide');
+    assert.equal(k6Summary.metadata?.policyHash, expectedPolicyHash, 'APIM-T05 policyHash k6 no coincide');
 
     for (const directPath of [`/api/v1${protectedPath}`, '/health']) {
       let directHttpStatus = null;
@@ -264,7 +276,7 @@ async function run() {
     assert.equal(t07Bad.status, 400, 'APIM-T07 UUID no canónico debe responder 400');
     statusByCase['APIM-T07'] = 'PASS';
 
-    // APIM-T08: esquema estructurado de evidencia de rollback
+    // APIM-T08: esquema estructurado de evidencia de rollback + snapshots az independientes (before/during/after)
     const rollback = readJsonStrict(rollbackEvidencePath, 'APIM_ROLLBACK_EVIDENCE_PATH');
     for (const field of [
       'resourceId',
@@ -282,15 +294,37 @@ async function run() {
       'operationalApproval',
       'privateConnectivityCheck',
       'postRollbackSmokeResult',
+      'azSnapshots',
     ]) {
       assert.ok(rollback[field] !== undefined && rollback[field] !== '', `APIM-T08 falta campo obligatorio: ${field}`);
     }
+    assert.equal(rollback.resourceId, expectedApimResourceId, 'APIM-T08 resourceId no coincide con APIM esperado');
     assert.equal(rollback.environment, expectedEnvironment, 'APIM-T08 ambiente de rollback no coincide');
     assert.equal(rollback.rollbackPolicyHash, rollback.previousPolicyHash, 'APIM-T08 hash post-rollback no coincide con hash previo');
     assert.notEqual(rollback.appliedPolicyHash, rollback.previousPolicyHash, 'APIM-T08 no hubo estado alternativo real');
     assert.equal(rollback.restorationResult, 'RESTORED', 'APIM-T08 restorationResult debe ser RESTORED');
     assert.equal(rollback.privateConnectivityCheck, 'PASS', 'APIM-T08 conectividad privada debe ser PASS');
     assert.equal(rollback.postRollbackSmokeResult, 'PASS', 'APIM-T08 smoke post-rollback debe ser PASS');
+
+    const snaps = rollback.azSnapshots;
+    for (const [phase, expectedHash] of [
+      ['before', rollback.previousPolicyHash],
+      ['during', rollback.appliedPolicyHash],
+      ['after', rollback.rollbackPolicyHash],
+    ]) {
+      const snap = snaps[phase];
+      assert.ok(snap && typeof snap === 'object', `APIM-T08 falta azSnapshots.${phase}`);
+      assert.ok(String(snap.sourceCommand || '').startsWith('az apim '), `APIM-T08 azSnapshots.${phase}.sourceCommand inválido`);
+      assert.equal(snap.policyHash, expectedHash, `APIM-T08 azSnapshots.${phase}.policyHash no coincide`);
+      assert.ok(snap.revision, `APIM-T08 azSnapshots.${phase} sin revisión`);
+      assert.ok(snap.capturedAtUtc, `APIM-T08 azSnapshots.${phase} sin capturedAtUtc`);
+    }
+    assert.ok(
+      Date.parse(snaps.before.capturedAtUtc) < Date.parse(snaps.during.capturedAtUtc) &&
+        Date.parse(snaps.during.capturedAtUtc) < Date.parse(snaps.after.capturedAtUtc),
+      'APIM-T08 secuencia temporal before < during < after inválida',
+    );
+    assert.equal(snaps.after.revision, rollback.revisionAfterRollback, 'APIM-T08 revisión final no coincide con snapshot az');
     statusByCase['APIM-T08'] = 'PASS';
 
     assert.ok(CASE_IDS.every((id) => statusByCase[id] === 'PASS'));

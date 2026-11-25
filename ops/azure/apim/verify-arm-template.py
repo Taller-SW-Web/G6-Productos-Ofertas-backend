@@ -4,13 +4,35 @@
 import argparse
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+VAR_REF = re.compile(r"^\[variables\('([^']+)'\)\]$")
 FILTER_SPEC = importlib.util.spec_from_file_location("filter_openapi", ROOT / "filter-openapi.py")
 FILTER = importlib.util.module_from_spec(FILTER_SPEC)
 assert FILTER_SPEC.loader is not None
 FILTER_SPEC.loader.exec_module(FILTER)
+
+
+def resolve_arm_variable(variables: dict, value: object, *, label: str) -> dict:
+    """Resuelve un objeto ARM literal o una cadena de alias [variables('...')] sin ciclos ni expresiones ajenas."""
+    visited: set[str] = set()
+    current = value
+    while isinstance(current, str):
+        match = VAR_REF.fullmatch(current.strip())
+        if not match:
+            raise ValueError(f"Expresión ARM no permitida en {label}: {current!r}")
+        symbol = match.group(1)
+        if symbol in visited:
+            raise ValueError(f"Referencia circular en {label}: {symbol}")
+        if symbol not in variables:
+            raise ValueError(f"Variable ARM inexistente en {label}: {symbol}")
+        visited.add(symbol)
+        current = variables[symbol]
+    if not isinstance(current, dict):
+        raise ValueError(f"{label} debe resolver a un objeto JSON")
+    return current
 
 
 def load_json(path: Path):
@@ -51,10 +73,7 @@ def validate(
         raise ValueError("Faltan dependencias de API o named values en las políticas")
 
     manifest_expression = variables.get("operationsManifest")
-    if not isinstance(manifest_expression, str) or not manifest_expression.startswith("[variables('"):
-        raise ValueError("El ARM no referencia una variable de manifiesto compilada")
-    symbol = manifest_expression[len("[variables('") : -3]
-    compiled_manifest = variables.get(symbol)
+    compiled_manifest = resolve_arm_variable(variables, manifest_expression, label="operationsManifest")
     if compiled_manifest != manifest:
         raise ValueError("El manifiesto compilado no corresponde al artefacto suministrado")
     if not manifest.get("operations"):
@@ -81,8 +100,12 @@ def validate(
         raise ValueError("El recurso API en ARM debe consumir variables('fixedFilteredOpenApi') fijado")
     if variables.get("fixedFilteredOpenApi") != "[string(variables('fixedFilteredOpenApiObject'))]":
         raise ValueError("fixedFilteredOpenApi debe serializar fixedFilteredOpenApiObject")
-    compiled_openapi = variables.get("fixedFilteredOpenApiObject")
-    if not isinstance(compiled_openapi, dict) or FILTER.canonical_sha256(compiled_openapi) != manifest.get("filteredOpenApiCanonicalSha256"):
+    compiled_openapi = resolve_arm_variable(
+        variables,
+        variables.get("fixedFilteredOpenApiObject"),
+        label="fixedFilteredOpenApiObject",
+    )
+    if FILTER.canonical_sha256(compiled_openapi) != manifest.get("filteredOpenApiCanonicalSha256"):
         raise ValueError("El OpenAPI embebido en ARM (fixedFilteredOpenApiObject) no coincide con el SHA canónico del manifiesto")
     if compiled_openapi != filtered:
         raise ValueError("El OpenAPI embebido en ARM no coincide exactamente con gateway-filtered.json")

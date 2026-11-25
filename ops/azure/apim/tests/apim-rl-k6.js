@@ -3,8 +3,10 @@
 // k6 run -e APIM_RL_AUTHORIZED=1 -e APIM_BASE_URL=https://<host>/api/v1 \
 //   -e APIM_JWT_M2M_A=<jwtM2mA> -e APIM_JWT_M2M_B=<jwtM2mB> \
 //   -e APIM_JWT_HUMAN_QUOTA=<jwtHuman> -e APIM_JWT_HUMAN_CONCURRENCY=<jwtHumanConc> \
+//   -e APIM_RL_EXPORT_ID=<uuidExportValido> \
 //   -e APIM_LAB_BURST_CALLS=5 -e APIM_LAB_BURST_WINDOW_SEC=10 \
-//   -e APIM_LAB_QUOTA_CALLS=60 -e APIM_LAB_CONCURRENCY_MAX=2 \
+//   -e APIM_LAB_QUOTA_CALLS=60 -e APIM_LAB_QUOTA_BURST_CALLS=10 -e APIM_LAB_QUOTA_BURST_WINDOW_SEC=10 \
+//   -e APIM_LAB_CONCURRENCY_MAX=2 -e APIM_LAB_EXPENSIVE_BURST_CALLS=5 \
 //   -e APIM_REGION=chilecentral -e APIM_SKU=Developer -e APIM_REVISION=1 -e APIM_POLICY_HASH=<sha> \
 //   ops/azure/apim/tests/apim-rl-k6.js
 import http from 'k6/http';
@@ -51,6 +53,44 @@ if (labConcurrencyMax + 1 >= labExpensiveBurstCalls) {
   );
 }
 
+const manifest = JSON.parse(open('../openapi/operation-security.json'));
+const CONCURRENCY_PROFILES = {
+  expensive_export: true,
+  multipart_import: true,
+  g5_protected: true,
+};
+
+function matchesTemplatePath(actualPath, templatePath) {
+  const actualParts = actualPath.split('/').filter(Boolean);
+  const templateParts = templatePath.split('/').filter(Boolean);
+  if (actualParts.length !== templateParts.length) return false;
+  return templateParts.every((part, i) =>
+    part.startsWith('{') && part.endsWith('}') ? actualParts[i].length > 0 : part === actualParts[i],
+  );
+}
+
+const exportId = (__ENV.APIM_RL_EXPORT_ID || '').trim();
+const expensivePath =
+  (__ENV.APIM_RL_EXPENSIVE_PATH || '').trim() ||
+  (exportId ? `/auditoria-precios/exportaciones/${exportId}/archivo` : '');
+
+if (!expensivePath || /\{[^}]+\}/.test(expensivePath)) {
+  throw new Error(
+    'RL-05 requiere ruta resuelta real (APIM_RL_EXPORT_ID o APIM_RL_EXPENSIVE_PATH sin placeholders sin resolver)',
+  );
+}
+const matchedExpensiveOp = manifest.operations.find(
+  (op) => op.method === 'GET' && matchesTemplatePath(expensivePath, op.path),
+);
+if (!matchedExpensiveOp) {
+  throw new Error(`RL-05 ruta ${expensivePath} no corresponde a ninguna operación GET del manifiesto APIM`);
+}
+if (!CONCURRENCY_PROFILES[matchedExpensiveOp.rateProfile]) {
+  throw new Error(
+    `RL-05 operación ${matchedExpensiveOp.operationId} tiene rateProfile=${matchedExpensiveOp.rateProfile} sin concurrencia habilitada`,
+  );
+}
+
 const burstRatePerSec = Math.max(labBurstCalls * 3, 15);
 const quotaSafeRate = Math.max(1, labQuotaBurstCalls - 1);
 const quotaIterations = labQuotaCalls + 5;
@@ -63,6 +103,7 @@ const burstRetryAfter = new Counter('apim_rl_burst_retry_after');
 const quota403 = new Counter('apim_rl_quota_403');
 const quotaBurstCollision = new Counter('apim_rl_quota_burst_collision');
 const concurrency429 = new Counter('apim_rl_concurrency_429');
+const concurrencyUnexpectedStatus = new Counter('apim_rl_concurrency_unexpected_status');
 const recovery200 = new Counter('apim_rl_recovery_200');
 const clientB200 = new Counter('apim_rl_client_b_200');
 const clientBFailed = new Rate('apim_rl_client_b_failed');
@@ -117,9 +158,11 @@ export const options = {
     apim_rl_quota_403: ['count>0'],
     apim_rl_quota_burst_collision: ['count==0'],
     apim_rl_concurrency_429: ['count>0'],
+    apim_rl_concurrency_unexpected_status: ['count==0'],
     apim_rl_client_b_200: ['count>0'],
     apim_rl_client_b_failed: ['rate==0'],
     apim_rl_authz_false_positive: ['count==0'],
+    checks: ['rate==1'],
   },
 };
 
@@ -130,7 +173,6 @@ const tokenHumanQuota = __ENV.APIM_JWT_HUMAN_QUOTA;
 const tokenHumanConcurrency = __ENV.APIM_JWT_HUMAN_CONCURRENCY;
 const burstPath = __ENV.APIM_RL_M2M_PATH || '/productos';
 const quotaPath = __ENV.APIM_RL_QUOTA_PATH || '/productos/administracion';
-const expensivePath = __ENV.APIM_RL_EXPENSIVE_PATH || '/auditoria-precios/exportar';
 
 function isAuthzRejection(res) {
   const body = String(res.body || '');
@@ -192,14 +234,16 @@ export function concurrencyExpensive() {
   const res = http.get(`${baseUrl}${expensivePath}`, {
     headers: { Authorization: `Bearer ${tokenHumanConcurrency}` },
   });
-  if (isAuthzRejection(res)) authzFalsePositive.add(1);
-  // Total de peticiones en rl05 (concurrencyVus < labExpensiveBurstCalls) impide rate-limit-by-key;
-  // cualquier 429 en este escenario aislado proviene exclusivamente de limit-concurrency.
-  if (res.status === 429) {
+  if (isAuthzRejection(res)) {
+    authzFalsePositive.add(1);
+    concurrencyUnexpectedStatus.add(1);
+  } else if (res.status === 404 || res.status === 403 || res.status === 401) {
+    concurrencyUnexpectedStatus.add(1);
+  } else if (res.status === 429) {
     concurrency429.add(1);
   }
   check(res, {
-    'RL-05 limit-concurrency isolated returns 200 or 429': (r) =>
+    'RL-05 limit-concurrency isolated returns 200 or 429 (never 401/403/404)': (r) =>
       r.status === 200 || r.status === 429,
   });
 }
@@ -219,18 +263,30 @@ export function isolatedClientB() {
 
 export function handleSummary(data) {
   const burstCount = data.metrics?.apim_rl_burst_429?.values?.count || 0;
+  const burstRetryAfterCount = data.metrics?.apim_rl_burst_retry_after?.values?.count || 0;
+  const recoveryCount = data.metrics?.apim_rl_recovery_200?.values?.count || 0;
   const quotaCount = data.metrics?.apim_rl_quota_403?.values?.count || 0;
   const concCount = data.metrics?.apim_rl_concurrency_429?.values?.count || 0;
+  const concUnexpected = data.metrics?.apim_rl_concurrency_unexpected_status?.values?.count || 0;
   const quotaCollision = data.metrics?.apim_rl_quota_burst_collision?.values?.count || 0;
   const authzFp = data.metrics?.apim_rl_authz_false_positive?.values?.count || 0;
+  const clientBCount = data.metrics?.apim_rl_client_b_200?.values?.count || 0;
   const clientBFailRate = data.metrics?.apim_rl_client_b_failed?.values?.rate ?? 1;
+  const checksRate = data.metrics?.checks?.values?.rate ?? 0;
+
   const verified =
     burstCount > 0 &&
+    burstRetryAfterCount > 0 &&
+    recoveryCount > 0 &&
     quotaCount > 0 &&
     concCount > 0 &&
+    concUnexpected === 0 &&
     quotaCollision === 0 &&
     authzFp === 0 &&
-    clientBFailRate === 0;
+    clientBCount > 0 &&
+    clientBFailRate === 0 &&
+    checksRate === 1;
+
   return {
     stdout: JSON.stringify(
       {
@@ -240,6 +296,9 @@ export function handleSummary(data) {
           sku: __ENV.APIM_SKU || 'UNSET',
           revision: __ENV.APIM_REVISION || 'UNSET',
           policyHash: __ENV.APIM_POLICY_HASH || 'UNSET',
+          rl05OperationId: matchedExpensiveOp.operationId,
+          rl05RateProfile: matchedExpensiveOp.rateProfile,
+          rl05ResolvedPath: expensivePath,
           labProfile: {
             burstCalls: labBurstCalls,
             burstWindowSec: labBurstWindowSec,
@@ -252,12 +311,17 @@ export function handleSummary(data) {
         },
         causes: {
           burst_rate_limit_by_key_429: burstCount,
+          burst_retry_after: burstRetryAfterCount,
+          recovery_200: recoveryCount,
           quota_by_key_403: quotaCount,
           quota_burst_collision_429: quotaCollision,
           limit_concurrency_429: concCount,
+          concurrency_unexpected_status: concUnexpected,
           authz_false_positive: authzFp,
+          client_b_200: clientBCount,
         },
         metrics: {
+          checksRate,
           duration: data.metrics?.http_req_duration?.values || {},
           requests: data.metrics?.http_reqs?.values || {},
           failed: data.metrics?.http_req_failed?.values || {},
