@@ -13,12 +13,10 @@ from pathlib import Path
 import yaml
 
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head"}
-ROUTE_ENTRY = re.compile(
-    r"\{\s*method:\s*['\"]([A-Z]+)['\"]\s*,\s*"
-    r"path:\s*['\"]([^'\"]+)['\"]\s*,\s*"
-    r"operationId:\s*['\"]([A-Za-z0-9_.-]+)['\"](.*?)(?=\n  \{|\n\];)",
-    re.S,
-)
+BICEP_LOAD_JSON_MAX_CHARS = 1_048_576
+METHOD_PROP = re.compile(r"method:\s*['\"]([A-Z]+)['\"]")
+PATH_PROP = re.compile(r"path:\s*['\"]([^'\"]+)['\"]")
+OP_ID_PROP = re.compile(r"operationId:\s*['\"]([A-Za-z0-9_.-]+)['\"]")
 SERVICE_PROP = re.compile(r"service:\s*['\"]([a-z0-9-]+)['\"]")
 ROLE_PROP = re.compile(r"role:\s*['\"]([A-Za-z0-9_.-]+)['\"]")
 LEGACY_UNCONTRACTED = {
@@ -37,17 +35,63 @@ KNOWN_RATE_PROFILES = {
 }
 
 
+def _scan_route_blocks(contents: str) -> list[str]:
+    stripped = contents.lstrip()
+    if stripped.startswith("["):
+        start = contents.find("[")
+    else:
+        assign_match = re.search(r"=\s*\[", contents)
+        start = assign_match.end() - 1 if assign_match else contents.find("[")
+    if start == -1:
+        return []
+    blocks: list[str] = []
+    depth = 0
+    block_start = -1
+    quote: str | None = None
+    escaped = False
+    for idx in range(start + 1, len(contents)):
+        ch = contents[idx]
+        if escaped:
+            escaped = False
+            continue
+        if quote:
+            if ch == "\\":
+                escaped = True
+            elif ch == quote:
+                quote = None
+            continue
+        if ch in ("'", '"', "`"):
+            quote = ch
+        elif ch == "{":
+            if depth == 0:
+                block_start = idx
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and block_start != -1:
+                blocks.append(contents[block_start : idx + 1])
+                block_start = -1
+        elif ch == "]" and depth == 0:
+            break
+    return blocks
+
+
 def read_registry(path: Path) -> list[dict[str, str]]:
     contents = path.read_text(encoding="utf-8")
     entries = []
-    for method, route_path, operation_id, tail in ROUTE_ENTRY.findall(contents):
-        service_match = SERVICE_PROP.search(tail)
-        role_match = ROLE_PROP.search(tail)
+    for block in _scan_route_blocks(contents):
+        method_match = METHOD_PROP.search(block)
+        path_match = PATH_PROP.search(block)
+        op_match = OP_ID_PROP.search(block)
+        if not (method_match and path_match and op_match):
+            raise ValueError(f"Entrada de registro malformada en {path}: {block[:80]}")
+        service_match = SERVICE_PROP.search(block)
+        role_match = ROLE_PROP.search(block)
         entries.append(
             {
-                "method": method,
-                "path": route_path,
-                "operationId": operation_id,
+                "method": method_match.group(1),
+                "path": path_match.group(1),
+                "operationId": op_match.group(1),
                 **({"service": service_match.group(1)} if service_match else {}),
                 **({"role": role_match.group(1)} if role_match else {}),
             }
@@ -596,6 +640,7 @@ def main() -> None:
     parser.add_argument("--allow-human-only-when-m2m-pending", action="store_true")
     parser.add_argument("--effective-publish", action="store_true", help="Exige publicación efectiva fail-closed")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--compact-output", type=Path, required=False)
     parser.add_argument("--manifest", type=Path, required=True)
     args = parser.parse_args()
 
@@ -619,6 +664,14 @@ def main() -> None:
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
     output_text = json.dumps(filtered, indent=2) + "\n"
     args.output.write_text(output_text, encoding="utf-8")
+    compact_path = args.compact_output or args.output.with_name(f"{args.output.stem}.compact.json")
+    compact_text = json.dumps(filtered, ensure_ascii=False, separators=(",", ":"))
+    if len(compact_text) > BICEP_LOAD_JSON_MAX_CHARS:
+        raise ValueError(
+            f"El OpenAPI compacto ({len(compact_text)} chars) excede el límite de Bicep loadJsonContent ({BICEP_LOAD_JSON_MAX_CHARS})"
+        )
+    compact_path.parent.mkdir(parents=True, exist_ok=True)
+    compact_path.write_text(compact_text, encoding="utf-8")
     args.manifest.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 

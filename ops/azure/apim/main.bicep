@@ -56,7 +56,8 @@ param expectedFilteredOpenApiSha256 string
 
 var apiName = 'g6-productos-ofertas'
 var operationsManifest = loadJsonContent('./openapi/operation-security.json')
-var fixedFilteredOpenApi = loadTextContent('./openapi/gateway-filtered.json')
+var fixedFilteredOpenApiObject = loadJsonContent('./openapi/gateway-filtered.compact.json')
+var fixedFilteredOpenApi = string(fixedFilteredOpenApiObject)
 var publicationGatePassed = operationsManifest.publicationMode == 'effective' && operationsManifest.effectivePublication.authorized == true && operationsManifest.operationSetSha256 == expectedOperationSetSha256 && operationsManifest.filteredOpenApiCanonicalSha256 == expectedFilteredOpenApiSha256
 var authorizedOperations = publicationGatePassed ? filter(operationsManifest.operations, op => op.environmentEnabled == true) : []
 var corsOriginNodes = join(map(corsAllowedOrigins, origin => '<origin>${xmlEscape(origin)}</origin>'), '')

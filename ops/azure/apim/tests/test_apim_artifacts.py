@@ -306,7 +306,8 @@ class ApimPolicyTests(unittest.TestCase):
             self.assertEqual(item["apimOperationId"], FILTER.normalize_apim_operation_id(item["operationId"]))
             self.assertIn(item["operationId"], str(filtered["paths"][item["path"]][item["method"].lower()]))
         bicep = (ROOT / "main.bicep").read_text(encoding="utf-8")
-        self.assertIn("[for operation in operationsManifest.operations", bicep)
+        self.assertIn("var publicationGatePassed", bicep)
+        self.assertIn("[for operation in authorizedOperations", bicep)
         self.assertIn("${operation.apimOperationId}/policy", bicep)
 
     def test_final_manifest_keeps_h5_operation_count_and_exclusions(self):
@@ -717,6 +718,8 @@ class ApimClosureRequirementsTests(unittest.TestCase):
                 "variables": {
                     "operationsManifest": "[variables('compiled')]",
                     "compiled": manifest,
+                    "fixedFilteredOpenApi": "[string(variables('fixedFilteredOpenApiObject'))]",
+                    "fixedFilteredOpenApiObject": filtered,
                 },
                 "resources": {
                     "api": {"properties": {"value": "[variables('fixedFilteredOpenApi')]"}},
@@ -732,7 +735,12 @@ class ApimClosureRequirementsTests(unittest.TestCase):
             # Negativo: G5 presente sin autorización
             with self.assertRaisesRegex(ValueError, "sin opt-in autorizado"):
                 ARM.validate(fake_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=False)
-            # Negativo: OpenAPI intercambiado en ARM
+            # Negativo: OpenAPI embebido en ARM sustituido con ruta extra
+            tampered_arm = copy.deepcopy(fake_arm)
+            tampered_arm["variables"]["fixedFilteredOpenApiObject"]["paths"]["/extra"] = {"get": {"operationId": "extra"}}
+            with self.assertRaisesRegex(ValueError, "SHA canónico"):
+                ARM.validate(tampered_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=True)
+            # Negativo: OpenAPI intercambiado en ARM por parámetro
             fake_arm["resources"]["api"]["properties"]["value"] = "[parameters('filteredOpenApi')]"
             with self.assertRaisesRegex(ValueError, "fixedFilteredOpenApi"):
                 ARM.validate(fake_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=True)
@@ -794,12 +802,21 @@ class ApimClosureRequirementsTests(unittest.TestCase):
         self.assertIn("param reuseExistingApim bool", bicep_text)
         self.assertIn("param environmentTier string", bicep_text)
         self.assertIn("param rateProfiles object\n", bicep_text)
-        self.assertIn("var fixedFilteredOpenApi = loadTextContent('./openapi/gateway-filtered.json')", bicep_text)
+        self.assertIn("var fixedFilteredOpenApiObject = loadJsonContent('./openapi/gateway-filtered.compact.json')", bicep_text)
+        self.assertIn("var fixedFilteredOpenApi = string(fixedFilteredOpenApiObject)", bicep_text)
+        self.assertNotIn("loadTextContent('./openapi/gateway-filtered.json')", bicep_text)
         self.assertNotIn("param filteredOpenApi string", bicep_text)
         self.assertIn("var publicationGatePassed", bicep_text)
         self.assertIn("var authorizedOperations", bicep_text)
         self.assertNotIn("requireEffectivePublication", bicep_text)
         self.assertIn("bytes: 0", bicep_text)
+
+        compact_text = (ROOT / "openapi/gateway-filtered.compact.json").read_text(encoding="utf-8")
+        self.assertLessEqual(len(compact_text), FILTER.BICEP_LOAD_JSON_MAX_CHARS)
+        self.assertEqual(
+            FILTER.canonical_sha256(json.loads(compact_text)),
+            FILTER.canonical_sha256(json.loads((ROOT / "openapi/gateway-filtered.json").read_text(encoding="utf-8"))),
+        )
 
 
 if __name__ == "__main__":

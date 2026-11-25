@@ -28,11 +28,21 @@ for (const envName of [
 const labBurstCalls = Number(__ENV.APIM_LAB_BURST_CALLS || '0');
 const labBurstWindowSec = Number(__ENV.APIM_LAB_BURST_WINDOW_SEC || '0');
 const labQuotaCalls = Number(__ENV.APIM_LAB_QUOTA_CALLS || '0');
+const labQuotaBurstCalls = Number(__ENV.APIM_LAB_QUOTA_BURST_CALLS || '0');
+const labQuotaBurstWindowSec = Number(__ENV.APIM_LAB_QUOTA_BURST_WINDOW_SEC || '0');
 const labConcurrencyMax = Number(__ENV.APIM_LAB_CONCURRENCY_MAX || '0');
 const labExpensiveBurstCalls = Number(__ENV.APIM_LAB_EXPENSIVE_BURST_CALLS || '0');
-if (!labBurstCalls || !labBurstWindowSec || !labQuotaCalls || !labConcurrencyMax || !labExpensiveBurstCalls) {
+if (
+  !labBurstCalls ||
+  !labBurstWindowSec ||
+  !labQuotaCalls ||
+  !labQuotaBurstCalls ||
+  !labQuotaBurstWindowSec ||
+  !labConcurrencyMax ||
+  !labExpensiveBurstCalls
+) {
   throw new Error(
-    'APIM_LAB_BURST_CALLS, APIM_LAB_BURST_WINDOW_SEC, APIM_LAB_QUOTA_CALLS, APIM_LAB_CONCURRENCY_MAX y APIM_LAB_EXPENSIVE_BURST_CALLS son obligatorios',
+    'APIM_LAB_BURST_CALLS, APIM_LAB_BURST_WINDOW_SEC, APIM_LAB_QUOTA_CALLS, APIM_LAB_QUOTA_BURST_CALLS, APIM_LAB_QUOTA_BURST_WINDOW_SEC, APIM_LAB_CONCURRENCY_MAX y APIM_LAB_EXPENSIVE_BURST_CALLS son obligatorios',
   );
 }
 if (labConcurrencyMax + 1 >= labExpensiveBurstCalls) {
@@ -42,13 +52,16 @@ if (labConcurrencyMax + 1 >= labExpensiveBurstCalls) {
 }
 
 const burstRatePerSec = Math.max(labBurstCalls * 3, 15);
-const quotaIterations = labQuotaCalls + 10;
+const quotaSafeRate = Math.max(1, labQuotaBurstCalls - 1);
+const quotaIterations = labQuotaCalls + 5;
+const quotaDurationSec = Math.ceil((quotaIterations / quotaSafeRate) * labQuotaBurstWindowSec) + 5;
 const concurrencyVus = Math.min(labConcurrencyMax + 2, labExpensiveBurstCalls - 1);
 const recoveryStartSec = labBurstWindowSec + 4;
 
 const burst429 = new Counter('apim_rl_burst_429');
 const burstRetryAfter = new Counter('apim_rl_burst_retry_after');
 const quota403 = new Counter('apim_rl_quota_403');
+const quotaBurstCollision = new Counter('apim_rl_quota_burst_collision');
 const concurrency429 = new Counter('apim_rl_concurrency_429');
 const recovery200 = new Counter('apim_rl_recovery_200');
 const clientB200 = new Counter('apim_rl_client_b_200');
@@ -73,9 +86,11 @@ export const options = {
       exec: 'recoveryClientA',
     },
     rl04_quota_exhaustion: {
-      executor: 'shared-iterations',
-      vus: 2,
-      iterations: quotaIterations,
+      executor: 'constant-arrival-rate',
+      rate: quotaSafeRate,
+      timeUnit: `${labQuotaBurstWindowSec}s`,
+      duration: `${quotaDurationSec}s`,
+      preAllocatedVUs: 4,
       startTime: `${recoveryStartSec + 6}s`,
       exec: 'quotaHumanClient',
     },
@@ -83,7 +98,7 @@ export const options = {
       executor: 'per-vu-iterations',
       vus: concurrencyVus,
       iterations: 1,
-      startTime: `${recoveryStartSec + 25}s`,
+      startTime: `${recoveryStartSec + quotaDurationSec + 10}s`,
       exec: 'concurrencyExpensive',
     },
     rl06_isolated_client_b: {
@@ -100,6 +115,7 @@ export const options = {
     apim_rl_burst_retry_after: ['count>0'],
     apim_rl_recovery_200: ['count>0'],
     apim_rl_quota_403: ['count>0'],
+    apim_rl_quota_burst_collision: ['count==0'],
     apim_rl_concurrency_429: ['count>0'],
     apim_rl_client_b_200: ['count>0'],
     apim_rl_client_b_failed: ['rate==0'],
@@ -158,6 +174,8 @@ export function quotaHumanClient() {
   });
   if (isAuthzRejection(res)) {
     authzFalsePositive.add(1);
+  } else if (res.status === 429) {
+    quotaBurstCollision.add(1);
   } else if (res.status === 403) {
     const body = String(res.body || '').toLowerCase();
     if (res.headers['Retry-After'] || body.includes('quota')) {
@@ -165,8 +183,8 @@ export function quotaHumanClient() {
     }
   }
   check(res, {
-    'RL-04 quota returns 200 or quota-exhausted 403 (never authz 403)': (r) =>
-      !isAuthzRejection(r) && (r.status === 200 || r.status === 403),
+    'RL-04 quota returns 200 or quota-exhausted 403 (never burst 429 or authz 403)': (r) =>
+      !isAuthzRejection(r) && r.status !== 429 && (r.status === 200 || r.status === 403),
   });
 }
 
@@ -200,9 +218,23 @@ export function isolatedClientB() {
 }
 
 export function handleSummary(data) {
+  const burstCount = data.metrics?.apim_rl_burst_429?.values?.count || 0;
+  const quotaCount = data.metrics?.apim_rl_quota_403?.values?.count || 0;
+  const concCount = data.metrics?.apim_rl_concurrency_429?.values?.count || 0;
+  const quotaCollision = data.metrics?.apim_rl_quota_burst_collision?.values?.count || 0;
+  const authzFp = data.metrics?.apim_rl_authz_false_positive?.values?.count || 0;
+  const clientBFailRate = data.metrics?.apim_rl_client_b_failed?.values?.rate ?? 1;
+  const verified =
+    burstCount > 0 &&
+    quotaCount > 0 &&
+    concCount > 0 &&
+    quotaCollision === 0 &&
+    authzFp === 0 &&
+    clientBFailRate === 0;
   return {
     stdout: JSON.stringify(
       {
+        verificationStatus: verified ? 'VERIFIED' : 'NOT_VERIFIED',
         metadata: {
           region: __ENV.APIM_REGION || 'UNSET',
           sku: __ENV.APIM_SKU || 'UNSET',
@@ -212,14 +244,18 @@ export function handleSummary(data) {
             burstCalls: labBurstCalls,
             burstWindowSec: labBurstWindowSec,
             quotaCalls: labQuotaCalls,
+            quotaBurstCalls: labQuotaBurstCalls,
+            quotaBurstWindowSec: labQuotaBurstWindowSec,
             concurrencyMax: labConcurrencyMax,
+            expensiveBurstCalls: labExpensiveBurstCalls,
           },
         },
         causes: {
-          burst_rate_limit_by_key_429: data.metrics?.apim_rl_burst_429?.values?.count || 0,
-          quota_by_key_403: data.metrics?.apim_rl_quota_403?.values?.count || 0,
-          limit_concurrency_429: data.metrics?.apim_rl_concurrency_429?.values?.count || 0,
-          authz_false_positive: data.metrics?.apim_rl_authz_false_positive?.values?.count || 0,
+          burst_rate_limit_by_key_429: burstCount,
+          quota_by_key_403: quotaCount,
+          quota_burst_collision_429: quotaCollision,
+          limit_concurrency_429: concCount,
+          authz_false_positive: authzFp,
         },
         metrics: {
           duration: data.metrics?.http_req_duration?.values || {},

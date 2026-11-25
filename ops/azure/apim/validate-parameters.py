@@ -241,13 +241,24 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("parameters", type=Path, help="JSON local entregado para revisión")
     parser.add_argument("--openapi", type=Path, required=True, help="OpenAPI JSON filtrado")
+    parser.add_argument("--compact-openapi", type=Path, required=False, help="OpenAPI compacto para Bicep loadJsonContent")
     parser.add_argument("--manifest", type=Path, required=True, help="Manifiesto generado junto al OpenAPI")
     parser.add_argument("--expected-docs-sha", required=True, help="SHA aprobado de Docs")
     parser.add_argument("--expected-gateway-sha", required=True, help="SHA aprobado de Backend Gateway")
     args = parser.parse_args()
+    filtered_openapi = json.loads(args.openapi.read_text(encoding="utf-8"))
+    compact_path = args.compact_openapi or args.openapi.with_name(f"{args.openapi.stem}.compact.json")
+    if not compact_path.exists():
+        raise ValueError(f"Falta artefacto compacto de despliegue: {compact_path}")
+    compact_text = compact_path.read_text(encoding="utf-8")
+    if len(compact_text) > FILTER.BICEP_LOAD_JSON_MAX_CHARS:
+        raise ValueError(f"OpenAPI compacto excede el límite de Bicep loadJsonContent ({FILTER.BICEP_LOAD_JSON_MAX_CHARS})")
+    compact_openapi = json.loads(compact_text)
+    if FILTER.canonical_sha256(compact_openapi) != FILTER.canonical_sha256(filtered_openapi):
+        raise ValueError("El OpenAPI compacto de despliegue no coincide con el OpenAPI filtrado aprobado")
     validate(
         json.loads(args.parameters.read_text(encoding="utf-8")),
-        json.loads(args.openapi.read_text(encoding="utf-8")),
+        filtered_openapi,
         json.loads(args.manifest.read_text(encoding="utf-8")),
         expected_docs_sha=args.expected_docs_sha,
         expected_gateway_sha=args.expected_gateway_sha,

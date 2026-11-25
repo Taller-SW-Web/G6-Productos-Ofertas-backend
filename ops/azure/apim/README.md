@@ -25,8 +25,9 @@ python ops/azure/apim/filter-openapi.py `
   --openapi ..\docs\contratos\http\openapi.yaml `
   --gateway-routes apps/api-gateway/src/routing/contract-routes.ts `
   --g5-routes apps/api-gateway/src/routing/g5-h5-routes.ts `
-  --docs-sha 490172c11cb4b83ddd1996f8d5834d0402184cf8 --gateway-sha b0c41cb41e089cffb349da9c3938f8f62e793cd6 `
+  --docs-sha 490172c11cb4b83ddd1996f8d5834d0402184cf8 --gateway-sha 1b90543dc39a8919fd94f0e059d10e1002b3b2a9 `
   --output ops/azure/apim/openapi/gateway-filtered.json `
+  --compact-output ops/azure/apim/openapi/gateway-filtered.compact.json `
   --manifest ops/azure/apim/openapi/operation-security.json
 ```
 

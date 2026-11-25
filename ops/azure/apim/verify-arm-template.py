@@ -79,6 +79,13 @@ def validate(
     api_resource = resources.get("api", {})
     if api_resource.get("properties", {}).get("value") != "[variables('fixedFilteredOpenApi')]":
         raise ValueError("El recurso API en ARM debe consumir variables('fixedFilteredOpenApi') fijado")
+    if variables.get("fixedFilteredOpenApi") != "[string(variables('fixedFilteredOpenApiObject'))]":
+        raise ValueError("fixedFilteredOpenApi debe serializar fixedFilteredOpenApiObject")
+    compiled_openapi = variables.get("fixedFilteredOpenApiObject")
+    if not isinstance(compiled_openapi, dict) or FILTER.canonical_sha256(compiled_openapi) != manifest.get("filteredOpenApiCanonicalSha256"):
+        raise ValueError("El OpenAPI embebido en ARM (fixedFilteredOpenApiObject) no coincide con el SHA canónico del manifiesto")
+    if compiled_openapi != filtered:
+        raise ValueError("El OpenAPI embebido en ARM no coincide exactamente con gateway-filtered.json")
     if set(manifest.get("excludedUncontractedLegacyOperationIds", [])) != set(FILTER.LEGACY_UNCONTRACTED):
         raise ValueError("Las exclusiones legacy de Pricing no corresponden al contrato")
     if len(filtered.get("paths", {})) == 0:
@@ -172,7 +179,12 @@ def main():
         allow_human_only_when_m2m_pending=args.allow_human_only_when_m2m_pending,
     )
     count = validate(
-        load_json(args.template), filtered, manifest, args.expected_docs_sha, args.expected_gateway_sha
+        load_json(args.template),
+        filtered,
+        manifest,
+        args.expected_docs_sha,
+        args.expected_gateway_sha,
+        g5_authorized=args.g5_authorized,
     )
     print(f"ARM APIM: PASS ({count} políticas; 5 rutas privadas excluidas; G5 deshabilitado por defecto)")
 
