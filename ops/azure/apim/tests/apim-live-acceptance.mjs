@@ -189,11 +189,14 @@ export function validateRollbackEvidence(rollback, expected) {
   };
 }
 
+const LIVE_CAPTURE_PROVENANCE = Symbol('apim.t08.liveCaptureProvenance');
+
 export function verifyLiveRollback({
   rollback,
   expected,
   runAzRead = defaultRunAzRead,
   independentTransitions = null,
+  liveCapture = null,
 }) {
   validateRollbackEvidence(rollback, expected);
 
@@ -240,21 +243,27 @@ export function verifyLiveRollback({
     };
   }
 
+  // Ningún JSON suministrado por el operador (rollback ni independentTransitions) puede activar PASS por sí solo.
+  // Solo se acepta una captura en vivo con procedencia verificable generada durante la operación autorizada.
+  void independentTransitions;
   if (
-    !independentTransitions ||
-    typeof independentTransitions !== 'object' ||
-    !independentTransitions.before ||
-    !independentTransitions.during ||
-    !independentTransitions.after
+    !liveCapture ||
+    typeof liveCapture !== 'object' ||
+    liveCapture[LIVE_CAPTURE_PROVENANCE] !== true ||
+    liveCapture.captureSource !== 'RUNNER_LIVE_AZ_REST' ||
+    !liveCapture.before ||
+    !liveCapture.during ||
+    !liveCapture.after
   ) {
     return {
       status: 'NOT_VERIFIED',
       verified: false,
-      reason: 'APIM-T08 falta evidencia independiente verificable de la secuencia antes -> cambio -> restauración',
+      reason:
+        'APIM-T08 sin procedencia independiente verificable de captura real antes -> cambio -> restauración (JSON de operador insuficiente)',
     };
   }
 
-  const { before, during, after } = independentTransitions;
+  const { before, during, after } = liveCapture;
   const timestampsValid =
     Date.parse(before.capturedAtUtc) < Date.parse(during.capturedAtUtc) &&
     Date.parse(during.capturedAtUtc) < Date.parse(after.capturedAtUtc);
@@ -522,12 +531,9 @@ export async function main() {
     assert.equal(t07Bad.status, 400, 'APIM-T07 UUID no canónico debe responder 400');
     statusByCase['APIM-T07'] = 'PASS';
 
-    // APIM-T08: integridad local + consulta independiente sin shell en revisión exacta + secuencia de transiciones
+    // APIM-T08: integridad local + consulta independiente sin shell en revisión exacta.
+    // Ningún JSON suministrado por el operador activa PASS: sin captura en vivo de transiciones emite NOT_VERIFIED.
     const rollback = readJsonStrict(rollbackEvidencePath, 'APIM_ROLLBACK_EVIDENCE_PATH');
-    const transitionEvidencePath = process.env.APIM_ROLLBACK_TRANSITION_EVIDENCE_PATH?.trim() || '';
-    const independentTransitions = transitionEvidencePath
-      ? readJsonStrict(transitionEvidencePath, 'APIM_ROLLBACK_TRANSITION_EVIDENCE_PATH')
-      : null;
     const t08Result = verifyLiveRollback({
       rollback,
       expected: {
@@ -538,7 +544,7 @@ export async function main() {
         revision: expectedRevision,
       },
       runAzRead: defaultRunAzRead,
-      independentTransitions,
+      liveCapture: null,
     });
     if (t08Result.status !== 'PASS') {
       statusByCase['APIM-T08'] = 'NOT_VERIFIED';

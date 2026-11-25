@@ -324,20 +324,24 @@ test('APIM-T08 live verification rejects dangerous identifiers, wrong revision, 
   assert.equal(noTransRes.verified, false);
   assert.ok(urlsNoTrans.some((u) => u.includes('/apis/g6-productos-ofertas;rev=1/policies/policy')));
 
-  // 5. Positivo: revisión exacta + XML exacto sin trim + transiciones independientes verificables -> PASS
-  const urlsValid = [];
-  const passRes = verifyLiveRollback({
+  // 5. Negativo: los tres estados del JSON son coherentes y el estado final coincide en Azure,
+  // pero falta procedencia independiente verificable -> NOT_VERIFIED obligatorio (ningún JSON activa PASS).
+  const urlsOperatorJson = [];
+  const coherentOperatorJson = {
+    captureSource: 'RUNNER_LIVE_AZ_REST',
+    before: { revision: '1', policyHash: hashBefore, capturedAtUtc: '2026-11-25T14:55:00Z' },
+    during: { revision: '2', policyHash: hashDuring, capturedAtUtc: '2026-11-25T14:57:00Z' },
+    after: { revision: '1', policyHash: hashBefore, capturedAtUtc: '2026-11-25T14:59:00Z' },
+  };
+  const operatorJsonRes = verifyLiveRollback({
     rollback: baseRollback,
     expected: { ...baseExpected, revision: '1' },
-    runAzRead: mockAzSuccess(urlsValid),
-    independentTransitions: {
-      before: { revision: '1', policyHash: hashBefore, capturedAtUtc: '2026-11-25T14:55:00Z' },
-      during: { revision: '2', policyHash: hashDuring, capturedAtUtc: '2026-11-25T14:57:00Z' },
-      after: { revision: '1', policyHash: hashBefore, capturedAtUtc: '2026-11-25T14:59:00Z' },
-    },
+    runAzRead: mockAzSuccess(urlsOperatorJson),
+    independentTransitions: coherentOperatorJson,
+    liveCapture: coherentOperatorJson,
   });
-  assert.equal(passRes.status, 'PASS');
-  assert.equal(passRes.verified, true);
-  assert.ok(urlsValid.some((u) => u.includes('/apis/g6-productos-ofertas;rev=1/policies/policy')));
-  assert.ok(urlsValid.some((u) => u.includes('/apis/g6-productos-ofertas/revisions?')));
+  assert.equal(operatorJsonRes.status, 'NOT_VERIFIED');
+  assert.equal(operatorJsonRes.verified, false);
+  assert.ok(urlsOperatorJson.some((u) => u.includes('/apis/g6-productos-ofertas;rev=1/policies/policy')));
+  assert.ok(urlsOperatorJson.some((u) => u.includes('/apis/g6-productos-ofertas/revisions?')));
 });
