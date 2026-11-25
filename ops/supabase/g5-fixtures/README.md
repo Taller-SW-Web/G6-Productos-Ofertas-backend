@@ -4,6 +4,28 @@ Este paquete contiene pruebas locales reproducibles y candidatos de SQL. No se c
 
 ## Frontera de aislamiento
 
+`tests/run-local-h04-bootstrap.mjs` is the shared H04 database bootstrap. It
+starts a uniquely labeled PostgreSQL 17.11 container, binds its ephemeral port
+to loopback only, applies the versioned Catalog, Inventory, Pricing, and
+Promotions test DDL, and checks a single synthetic identity across all four
+schemas. Each service uses a separate non-superuser runtime principal. The
+runner checks each intended read, rejects cross-schema access, and removes only
+the container carrying its matching ownership label, including on failure.
+G5/G7, shared Supabase, Azure, and Service Bus are not contacted. This first
+increment proves common-schema bootstrap and isolation; it does not claim the
+four-service commercial flow or complete H04.
+
+Run from the repository root with the supported Node/npm engines installed:
+
+```powershell
+node ops/supabase/g5-fixtures/tests/run-local-h04-bootstrap.mjs
+```
+
+The bootstrap seeds Catalog and Inventory from the existing deterministic
+fixture, adds matching Pricing validity and Promotions coupon rows, and checks
+the generated Inventory availability value. These inserts initialize the test
+database only; no business operation is modeled by direct SQL.
+
 `tests/run-local-inventory-lifecycle.ps1` crea una instancia desechable `postgres:17.11` con nombre y etiqueta únicos, sin publicar un puerto. Su `finally` verifica la etiqueta de propiedad antes de eliminarla y confirma que desapareció. No usa `docker prune` ni toca otros contenedores. El helper crea únicamente la base local `h5_fixtures` dentro de ese contenedor.
 
 La prueba carga DDL de las fixtures oficiales de Catalog e Inventory y la migración local de lifecycle. Los productos, variantes, SKU y ubicación son sintéticos y deterministas, no comparten prefijos/IDs con las fixtures Marketplace conocidas. Los triggers e invariantes de Catalog se mantienen activos; `stock_balance.available` se deja generar y `reserved + blocked <= on_hand`.
