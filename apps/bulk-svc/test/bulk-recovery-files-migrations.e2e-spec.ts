@@ -1,5 +1,6 @@
 import { createSign, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { createConnection, createServer, type Socket } from 'node:net';
 import { resolve } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -21,6 +22,7 @@ import { BulkExportService } from '../src/bulk-export.service.js';
 import {
   batchJobs,
   bulkSchema,
+  fileManifests,
   outbox as bulkOutbox,
 } from '../src/persistence/bulk.schema.js';
 import { BulkPersistenceRepository } from '../src/persistence/bulk.repository.js';
@@ -824,7 +826,7 @@ integration(
       }
     }, 30_000);
 
-    it('handles temporary disposable PostgreSQL unavailability and recovers durable admission without duplicates', async () => {
+    it('handles temporary PostgreSQL role/schema access denial and recovers durable admission without duplicates', async () => {
       if (!adminDatabaseUrl) return;
       const adminPool = new Pool({
         connectionString: adminDatabaseUrl,
@@ -893,6 +895,196 @@ integration(
         }
         await app.close();
         await adminPool.end();
+      }
+    }, 60_000);
+
+    it('handles real PostgreSQL connectivity outage via disposable TCP proxy, reports readiness 503/200, recovers correlation without duplicating batch/manifest/outbox/catalog, and restores connectivity', async () => {
+      const targetUrl = new URL(bulkDatabaseUrl!);
+      const targetHost = targetUrl.hostname;
+      const targetPort = Number(targetUrl.port || 5432);
+      const activeSockets = new Set<Socket>();
+      let outageActive = false;
+
+      const proxyServer = createServer((clientSocket) => {
+        if (outageActive) {
+          clientSocket.destroy();
+          return;
+        }
+        const upstreamSocket = createConnection({
+          host: targetHost,
+          port: targetPort,
+        });
+        activeSockets.add(clientSocket);
+        activeSockets.add(upstreamSocket);
+
+        const cleanupSocket = () => {
+          activeSockets.delete(clientSocket);
+          activeSockets.delete(upstreamSocket);
+        };
+        clientSocket.on('close', cleanupSocket);
+        upstreamSocket.on('close', cleanupSocket);
+        clientSocket.on('error', () => upstreamSocket.destroy());
+        upstreamSocket.on('error', () => clientSocket.destroy());
+
+        clientSocket.pipe(upstreamSocket);
+        upstreamSocket.pipe(clientSocket);
+      });
+
+      await new Promise<void>((resolveListen) =>
+        proxyServer.listen(0, '127.0.0.1', () => resolveListen()),
+      );
+      const address = proxyServer.address();
+      if (!address || typeof address === 'string') {
+        proxyServer.close();
+        throw new Error('Failed to bind disposable PostgreSQL TCP proxy');
+      }
+      const proxyUrl = new URL(bulkDatabaseUrl!);
+      proxyUrl.hostname = '127.0.0.1';
+      proxyUrl.port = String(address.port);
+
+      const prevDatabaseUrl = process.env.DATABASE_URL;
+      process.env.DATABASE_URL = proxyUrl.toString();
+
+      const mod = await Test.createTestingModule({
+        imports: [BulkSvcModule],
+      }).compile();
+      const app = mod.createNestApplication({ logger: false });
+      app.useGlobalFilters(new BulkProblemFilter());
+      await app.init();
+
+      const token = signUser(ownerA);
+      const realOutageCorrelationId = randomUUID();
+      const sku = `PG-PROXY-${randomUUID().slice(0, 8)}`;
+      const csv = Buffer.from(
+        `${BULK_TEMPLATE_HEADERS.join(',')}\r\n"ALTA","","","${sku}","","Producto PG Proxy Outage","Desc","category-fixture","brand-fixture","type-fixture","false","18.50","[]","","","0"\r\n`,
+        'utf8',
+      );
+
+      try {
+        // 1. Initial readiness is 200 READY
+        const readyBefore = await request(app.getHttpServer())
+          .get('/api/v1/carga-masiva/productos/health/readiness')
+          .expect(200);
+        expect(readyBefore.body.status).toBe('ready');
+        expect(readyBefore.body.reason).toBe('READY');
+
+        // 2. Interrupt real PostgreSQL connectivity
+        outageActive = true;
+        for (const sock of activeSockets) {
+          sock.destroy();
+        }
+        activeSockets.clear();
+
+        // 3. Readiness fails with 503 DATABASE_UNAVAILABLE
+        const readyDuringOutage = await request(app.getHttpServer())
+          .get('/api/v1/carga-masiva/productos/health/readiness')
+          .expect(503);
+        expect(readyDuringOutage.body.status).toBe('not_ready');
+        expect(readyDuringOutage.body.reason).toBe('DATABASE_UNAVAILABLE');
+
+        // 4. Admission fails deterministically with 503 SERVICIO_NO_DISPONIBLE
+        const outageRes = await request(app.getHttpServer())
+          .post('/api/v1/carga-masiva/productos/importaciones')
+          .set('Authorization', `Bearer ${token}`)
+          .set('X-Correlation-Id', realOutageCorrelationId)
+          .field('template_version', '2')
+          .attach('archivo', csv, {
+            filename: 'pg-proxy-outage.csv',
+            contentType: 'text/csv',
+          })
+          .expect(503);
+        expect(outageRes.body.status).toBe(503);
+        expect(outageRes.body.code).toBe('SERVICIO_NO_DISPONIBLE');
+
+        // 5. Restore connectivity and verify real readiness recovers to 200 READY
+        outageActive = false;
+        const readyAfter = await request(app.getHttpServer())
+          .get('/api/v1/carga-masiva/productos/health/readiness')
+          .expect(200);
+        expect(readyAfter.body.status).toBe('ready');
+        expect(readyAfter.body.reason).toBe('READY');
+
+        // 6. Recover operation with original correlation ID -> 202
+        const recoveredRes = await request(app.getHttpServer())
+          .post('/api/v1/carga-masiva/productos/importaciones')
+          .set('Authorization', `Bearer ${token}`)
+          .set('X-Correlation-Id', realOutageCorrelationId)
+          .field('template_version', '2')
+          .attach('archivo', csv, {
+            filename: 'pg-proxy-outage.csv',
+            contentType: 'text/csv',
+          })
+          .expect(202);
+        const batchId = String(recoveredRes.body.batch_id);
+        expect(batchId).toMatch(/^[0-9a-f-]{36}$/i);
+
+        // 7. Verify unique persistence of batch, manifest, and outbox
+        const batchRows = await bulkDb
+          .select()
+          .from(batchJobs)
+          .where(eq(batchJobs.correlationId, realOutageCorrelationId));
+        expect(batchRows).toHaveLength(1);
+        expect(batchRows[0]?.id).toBe(batchId);
+
+        const manifestRows = await bulkDb
+          .select()
+          .from(fileManifests)
+          .where(eq(fileManifests.id, batchRows[0]!.manifestId));
+        expect(manifestRows).toHaveLength(1);
+
+        const outboxRows = await bulkDb
+          .select()
+          .from(bulkOutbox)
+          .where(eq(bulkOutbox.correlationId, realOutageCorrelationId));
+        expect(outboxRows).toHaveLength(1);
+
+        // 8. Consume outbox twice -> APPLIED then DUPLICATE, zero commercial duplication
+        const storage = mod.get(BulkStorageService);
+        const tx = new CatalogTransactionManager(catalogDb);
+        const mutations = new CatalogMutationService(
+          tx,
+          new PostgresCatalogWriteRepository(),
+          {
+            masters: async () => ({ schemaVersion: 1 }),
+            attributes: async (_t: string, v: unknown[]) => v,
+          } as never,
+          { resolve: async (_i, id) => ({ slug: `rec-${id}`, moneda: 'PEN' }) },
+        );
+        const idMock = new CatalogBulkIdentity(
+          undefined,
+          new CatalogTokenVerifier(undefined),
+        );
+        vi.spyOn(idMock, 'authorization').mockResolvedValue(
+          'Bearer isolated-master-fixture',
+        );
+        const consumer = new CatalogBulkService(catalogDb, mutations, idMock, {
+          getDocument: async (ref: { content_id: string }) => {
+            const res = await bulkRepo.findContentDocument(ref.content_id);
+            const bytes = await storage.get(res!.contentRef);
+            return JSON.parse(bytes.toString('utf8'));
+          },
+        } as unknown as CatalogBulkContentClient);
+        const envelope = outboxRows[0]!.payload as unknown as CatalogEnvelope;
+        await expect(consumer.consume(envelope)).resolves.toBe('APPLIED');
+        await expect(consumer.consume(envelope)).resolves.toBe('DUPLICATE');
+        const catalogRows = await catalogDb.read((db) =>
+          db.select().from(products),
+        );
+        expect(
+          catalogRows.filter((p) => p.nombre === 'Producto PG Proxy Outage'),
+        ).toHaveLength(1);
+      } finally {
+        outageActive = false;
+        if (prevDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+        else process.env.DATABASE_URL = prevDatabaseUrl;
+        await app.close().catch(() => {});
+        for (const sock of activeSockets) {
+          sock.destroy();
+        }
+        activeSockets.clear();
+        await new Promise<void>((resolveClose) =>
+          proxyServer.close(() => resolveClose()),
+        );
       }
     }, 60_000);
   },
