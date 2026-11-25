@@ -411,8 +411,12 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
         .set('Authorization', `Bearer ${tokenFor(actorA)}`)
         .set('Idempotency-Key', randomUUID())
         .set('X-Correlation-Id', correlationA)
-        .attach('archivo', createValidBulkV2Csv(), 'importacion.csv')
-        .expect(202);
+        .field('template_version', '2')
+        .attach('archivo', createValidBulkV2Csv(), {
+          filename: 'importacion.csv',
+          contentType: 'text/csv',
+        });
+      expect(importRes.status, JSON.stringify(importRes.body)).toBe(202);
       batchIdA = importRes.body?.batch_id;
       expect(typeof batchIdA).toBe('string');
     } catch (error) {
