@@ -16,10 +16,12 @@ import {
 } from '../config/service-bus.js';
 import {
   parseChecked,
+  TaxonomyMessageIdentityConflict,
   type TaxonomyMessageStore,
 } from '../persistence/taxonomy-message.store.js';
 
 type Config = NonNullable<ReturnType<typeof readTaxonomyServiceBus>>;
+export const TAXONOMY_SERVICE_BUS_MAX_BATCH_BYTES = 240 * 1024;
 type Store = Pick<
   TaxonomyMessageStore,
   | 'consumir'
@@ -84,7 +86,7 @@ export async function publishTaxonomyDelivery(
   try {
     if (message) {
       const batch = await sender.createMessageBatch({
-        maxSizeInBytes: 256 * 1024,
+        maxSizeInBytes: TAXONOMY_SERVICE_BUS_MAX_BATCH_BYTES,
         abortSignal: AbortSignal.timeout(5000),
       });
       if (!batch.tryAddMessage(message)) outcome = 'terminal';
@@ -115,7 +117,7 @@ export async function receiveTaxonomyDelivery(
   try {
     if (
       !(message.body instanceof Uint8Array) ||
-      message.body.byteLength > 256 * 1024 ||
+      message.body.byteLength > TAXONOMY_SERVICE_BUS_MAX_BATCH_BYTES ||
       message.contentType !== 'application/json'
     )
       throw new Error('INVALID_ENVELOPE');
@@ -144,7 +146,15 @@ export async function receiveTaxonomyDelivery(
   }
   try {
     await store.consumir(checked);
-  } catch {
+  } catch (error) {
+    if (error instanceof TaxonomyMessageIdentityConflict) {
+      await receiver.deadLetterMessage(message, {
+        deadLetterReason: 'TAXONOMY_MESSAGE_ID_CONFLICT',
+        deadLetterErrorDescription:
+          'Message identity conflicts with persisted inbox',
+      });
+      return true;
+    }
     await receiver.abandonMessage(message);
     return false;
   }
@@ -163,11 +173,16 @@ export class TaxonomyServiceBusRuntime {
   private stopped = false;
   private failures = 0;
   available = false;
+  storageAvailable = false;
+  brokerAvailable = false;
 
   constructor(
     private readonly config: Config,
     private readonly store: Store,
-  ) {}
+  ) {
+    // Un transporte pausado no constituye una dependencia activa de readiness.
+    this.available = !config.enabled;
+  }
 
   start(): void {
     if (!this.config.enabled || this.client || this.stopped) return;
@@ -178,18 +193,36 @@ export class TaxonomyServiceBusRuntime {
         : new DefaultAzureCredential(),
       { retryOptions: { maxRetries: 0, timeoutInMs: 5000 } },
     );
-    const receiver = this.client.createReceiver(catalogTaxonomyQueue, {
-      receiveMode: 'peekLock',
-      skipParsingBodyAsJson: true,
-      maxAutoLockRenewalDurationInMs: 60_000,
-    });
+    const receiver = this.config.receiveEnabled
+      ? this.client.createReceiver(catalogTaxonomyQueue, {
+          receiveMode: 'peekLock',
+          skipParsingBodyAsJson: true,
+          maxAutoLockRenewalDurationInMs: 60_000,
+        })
+      : undefined;
     this.receiver = receiver;
-    const sender = this.client.createSender(taxonomyCatalogQueue);
+    const sender = this.config.sendEnabled
+      ? this.client.createSender(taxonomyCatalogQueue)
+      : undefined;
     this.sender = sender;
-    this.subscription = receiver.subscribe(
+    this.subscription = receiver?.subscribe(
       {
         processMessage: (message) => {
-          const task = receiveTaxonomyDelivery(this.store, receiver, message)
+          const task = receiveTaxonomyDelivery(
+            {
+              consumir: async (envelope) => {
+                try {
+                  await this.store.consumir(envelope);
+                } catch (error) {
+                  if (!(error instanceof TaxonomyMessageIdentityConflict))
+                    this.storageAvailable = false;
+                  throw error;
+                }
+              },
+            },
+            receiver!,
+            message,
+          )
             .then((settled) => {
               if (!settled) this.markUnavailable();
             })
@@ -204,22 +237,35 @@ export class TaxonomyServiceBusRuntime {
     );
     const cycle = () => {
       const failures = this.failures;
+      let phase: 'postgres' | 'service_bus' = 'postgres';
       this.tick = this.store
         .verifyServiceBusStorage()
+        .then(() => {
+          this.storageAvailable = true;
+          phase = 'service_bus';
+        })
         .then(() =>
-          receiver.peekMessages(1, { abortSignal: AbortSignal.timeout(5000) }),
+          receiver?.peekMessages(1, { abortSignal: AbortSignal.timeout(5000) }),
         )
         .then(() =>
-          sender.createMessageBatch({
-            maxSizeInBytes: 256 * 1024,
+          sender?.createMessageBatch({
+            maxSizeInBytes: TAXONOMY_SERVICE_BUS_MAX_BATCH_BYTES,
             abortSignal: AbortSignal.timeout(5000),
           }),
         )
-        .then(() => publishTaxonomyDelivery(this.store, sender))
-        .then((ready) => {
-          this.available = ready && this.failures === failures && !this.stopped;
+        .then(() => {
+          phase = 'postgres';
+          return sender ? publishTaxonomyDelivery(this.store, sender) : true;
         })
-        .catch(() => this.markUnavailable())
+        .then((ready) => {
+          this.brokerAvailable =
+            ready && this.failures === failures && !this.stopped;
+          this.available = this.storageAvailable && this.brokerAvailable;
+        })
+        .catch(() => {
+          if (phase === 'postgres') this.storageAvailable = false;
+          this.markUnavailable();
+        })
         .finally(() => {
           if (!this.stopped) {
             this.timer = setTimeout(cycle, 1000);
@@ -232,12 +278,15 @@ export class TaxonomyServiceBusRuntime {
 
   private markUnavailable(): void {
     this.available = false;
+    this.brokerAvailable = false;
     this.failures++;
   }
 
   async close(): Promise<void> {
     this.stopped = true;
     this.available = false;
+    this.storageAvailable = false;
+    this.brokerAvailable = false;
     clearTimeout(this.timer);
     await this.subscription?.close().catch(() => undefined);
     await this.tick;
