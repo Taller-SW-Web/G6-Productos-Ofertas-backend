@@ -37,7 +37,9 @@ if [[ "${1:-}" == containerapp && "${2:-}" == show ]]; then
   exit 0
 fi
 if [[ "${1:-}" == containerapp && "${2:-}" == revision && "${3:-}" == show ]]; then
-  jq -c --arg startup "${MOCK_STARTUP:-false}" '(.revisionPolls += 1) | if $startup == "true" and .revisionPolls == 1 then .revision.properties.runningState="Processing" elif $startup == "true" and .revisionPolls >= 2 then .revision.properties.runningState="Running" else . end | .revision' "$state"
+  requested=''
+  while (($#)); do [[ "$1" != --revision ]] || { shift; requested="$1"; }; shift || true; done
+  jq -c --arg requested "$requested" --arg startup "${MOCK_STARTUP:-false}" '(.revisionPolls += 1) | if $startup == "true" and .revisionPolls == 1 then .revision.properties.runningState="Processing" elif $startup == "true" and .revisionPolls >= 2 then .revision.properties.runningState="Running" else . end | if .previousRevisionName == $requested then .previousRevision else .revision end' "$state"
   jq --arg startup "${MOCK_STARTUP:-false}" '(.revisionPolls += 1) | if $startup == "true" and .revisionPolls == 1 then .revision.properties.runningState="Processing" elif $startup == "true" and .revisionPolls >= 2 then .revision.properties.runningState="Running" else . end' "$state" > "$state.tmp"
   mv "$state.tmp" "$state"
   exit 0
@@ -61,6 +63,8 @@ if [[ "${1:-}" == containerapp && "${2:-}" == update ]]; then
   while (($#)); do [[ "$1" != --image ]] || { shift; image="$1"; }; shift || true; done
   [[ -n "$image" ]] || exit 63
   jq --arg image "$image" --arg service "$service" --arg unhealthy_target "${MOCK_UNHEALTHY_TARGET:-}" --arg unhealthy_rollback "${MOCK_UNHEALTHY_ROLLBACK:-false}" --arg scale_zero "${MOCK_SCALE_ZERO:-false}" --arg concurrent_traffic "${MOCK_CONCURRENT_TRAFFIC:-}" '
+    .previousRevision = .revision |
+    .previousRevisionName = .properties.latestRevisionName |
     .updates += 1 |
     .properties.template.containers |= map(if .name == $service then .image=$image else . end) |
     .properties.latestRevisionName = ("rev-" + (.updates|tostring)) |
@@ -152,15 +156,18 @@ mv "$TEMP/state.tmp" "$MOCK_STATE"
 AZURE_CHILE_DEPLOY_ENABLED=false bash "$DEPLOY" --restore api-gateway "$PREVIOUS" "$TARGET" "$config_from_receipt" > "$TEMP/restore.log" 2>&1 || { cat "$TEMP/restore.log"; fail 'recuperación coordinada con ventana cerrada'; }
 grep -Fq 'ROLLBACK COORDINADO VERIFICADO' "$TEMP/restore.log" || fail 'recuperación no quedó confirmada'
 updates_before_present_restore="$(jq -r .updates "$MOCK_STATE")"
-wrong_traffic_config="$(MOCK_TRAFFIC=old az containerapp show --subscription fef42188-accd-4470-ae88-78f583eb4906 --name api-gateway --resource-group rg-g6-aca-chile --output json | jq -S -c --arg target api-gateway '{identity:.identity,location:.location,tags:.tags,kind:.kind,properties:(.properties|del(.latestRevisionName,.latestReadyRevisionName,.latestRevisionFqdn,.provisioningState,.configuration.ingress.traffic)|.template|= (del(.revisionSuffix)|.containers|=map(if .name==$target then del(.image) else . end)))}')"
-wrong_traffic_hash="$(printf '%s' "$wrong_traffic_config" | sha256sum | awk '{print $1}')"
-jq '.properties.configuration.ingress.traffic=[{revisionName:"rev-0",weight:100}]' "$MOCK_STATE" > "$TEMP/state.tmp"
+[[ "$config_from_receipt" =~ ^[0-9a-f]{64}$ ]] || fail 'recibo no contiene un hash normalizado válido para la prueba de recuperación'
+jq '.properties.configuration.ingress.traffic=[{latestRevision:true,weight:50},{revisionName:"rev-0",weight:50}]' "$MOCK_STATE" > "$TEMP/state.tmp"
 mv "$TEMP/state.tmp" "$MOCK_STATE"
-if AZURE_CHILE_DEPLOY_ENABLED=false bash "$DEPLOY" --restore api-gateway "$PREVIOUS" "$TARGET" "$wrong_traffic_hash" > "$TEMP/restore-present-wrong-traffic.log" 2>&1; then fail 'recuperación ya presente aceptó una revisión saludable con tráfico en otra revisión'; fi
-grep -Eq 'RECUPERACIÓN (NO VERIFICADA|OMITIDA)' "$TEMP/restore-present-wrong-traffic.log" || { cat "$TEMP/restore-present-wrong-traffic.log"; fail 'recuperación ya presente sin tráfico efectivo no fue bloqueada'; }
+if AZURE_CHILE_DEPLOY_ENABLED=false bash "$DEPLOY" --restore api-gateway "$PREVIOUS" "$TARGET" "$config_from_receipt" > "$TEMP/restore-present-wrong-traffic.log" 2>&1; then fail 'recuperación ya presente aceptó tráfico ambiguo con hash válido'; fi
+grep -Fq 'RECUPERACIÓN NO VERIFICADA: Gateway' "$TEMP/restore-present-wrong-traffic.log" || { cat "$TEMP/restore-present-wrong-traffic.log"; fail 'recuperación ya presente sin tráfico efectivo no fue bloqueada'; }
 [[ "$(jq -r .updates "$MOCK_STATE")" == "$updates_before_present_restore" ]] || fail 'recuperación ya presente intentó cambiar el tráfico'
 jq '.properties.configuration.ingress.traffic=[{revisionName:.properties.latestRevisionName,weight:100}]' "$MOCK_STATE" > "$TEMP/state.tmp"
 mv "$TEMP/state.tmp" "$MOCK_STATE"
+updates_before_present_restore="$(jq -r .updates "$MOCK_STATE")"
+AZURE_CHILE_DEPLOY_ENABLED=false bash "$DEPLOY" --restore api-gateway "$PREVIOUS" "$TARGET" "$config_from_receipt" > "$TEMP/restore-present-valid.log" 2>&1 || { cat "$TEMP/restore-present-valid.log"; fail 'recuperación presente con tráfico saludable no fue aceptada'; }
+grep -Fq 'RECUPERACIÓN YA PRESENTE' "$TEMP/restore-present-valid.log" || fail 'recuperación presente saludable no quedó identificada'
+[[ "$(jq -r .updates "$MOCK_STATE")" == "$updates_before_present_restore" ]] || fail 'recuperación ya presente creó una revisión'
 DEPLOY_RECEIPT="$TEMP/redeploy.receipt" bash "$DEPLOY" api-gateway "$TARGET" >/dev/null 2>&1 || fail 'reaplicación de fixture'
 jq --arg previous "$PREVIOUS" '.properties.template.containers |= map(if .name == "api-gateway" then .image=$previous else . end) | .revision.properties.template.containers |= map(if .name == "api-gateway" then .image=$previous else . end)' "$MOCK_STATE" > "$TEMP/state.tmp"
 mv "$TEMP/state.tmp" "$MOCK_STATE"
@@ -181,8 +188,13 @@ export MOCK_UNHEALTHY_TARGET="$TARGET"
 if bash "$DEPLOY" api-gateway "$TARGET" > "$TEMP/rollback.log" 2>&1; then fail 'despliegue unhealthy aceptado'; fi
 grep -Fq 'TRÁFICO PREVIO CONSERVADO' "$TEMP/rollback.log" || { cat "$TEMP/rollback.log"; fail 'tráfico anterior no se conservó ante revisión unhealthy'; }
 jq -e '.properties.configuration.ingress.traffic[0].revisionName == "rev-restore" and .properties.configuration.ingress.traffic[0].weight == 100' "$MOCK_STATE" >/dev/null || fail 'revisión unhealthy recibió tráfico'
-printf 'PASS: Gateway no corta tráfico a revisión no saludable\n'
+[[ "$(jq -r '[.properties.template.containers[] | select(.name == "api-gateway")][0].image' "$MOCK_STATE")" == "$PREVIOUS" ]] || fail 'recuperación no restauró el digest anterior en la plantilla'
+printf 'PASS: revisión unhealthy no recibe tráfico y la plantilla vuelve al digest anterior\n'
 unset MOCK_UNHEALTHY_TARGET
+if bash "$DEPLOY" api-gateway "$TARGET" > "$TEMP/retry-after-recovery.log" 2>&1; then :; else cat "$TEMP/retry-after-recovery.log"; fail 'nuevo despliegue falló tras recuperación de plantilla'; fi
+grep -Fq 'Despliegue verificado' "$TEMP/retry-after-recovery.log" || fail 'nuevo despliegue no quedó verificado tras recuperación'
+jq -e --arg target "$TARGET" '.properties.template.containers[] | select(.name == "api-gateway") | .image == $target' "$MOCK_STATE" >/dev/null || fail 'nuevo despliegue no aplicó digest candidato'
+printf 'PASS: nuevo despliegue oficial vuelve a ser ejecutable tras recuperar plantilla\n'
 [[ -f "$MOCK_STATE" ]] || fail 'mock state missing'
 jq --arg previous "$PREVIOUS" '.properties.template.containers |= map(if .name == "api-gateway" then .image=$previous else . end) | .properties.configuration.ingress.traffic=[{revisionName:"rev-restore",weight:100}] | .properties.latestRevisionName="rev-restore" | .properties.latestReadyRevisionName="rev-restore" | .revision.properties.template.containers |= map(if .name == "api-gateway" then .image=$previous else . end) | .revision.properties.healthState="Healthy" | .revision.properties.runningState="Running" | .revision.properties.replicas=1 | .revision.properties.provisioningState="Provisioned" | .updates=0 | .trafficSetCount=0' "$MOCK_STATE" > "$TEMP/state.tmp"
 mv "$TEMP/state.tmp" "$MOCK_STATE"

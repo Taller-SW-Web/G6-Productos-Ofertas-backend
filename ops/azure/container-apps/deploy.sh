@@ -196,6 +196,26 @@ verify_chile_gateway_current_traffic() {
   verified_served_digest="${expected##*@}"
 }
 
+recover_chile_gateway_template() {
+  local current_image
+  verify_chile_gateway_current_traffic "$previous_image" || fail 'RECUPERACIÓN OMITIDA: revisión anterior no sigue saludable, servida y escalada 1/1'
+  read_app > "$after" || fail 'RECUPERACIÓN OMITIDA: no se pudo releer Gateway antes de restaurar la plantilla'
+  normalize_app "$after" > "$work/pre-template-recovery-normalized.json"
+  cmp -s "$work/before-normalized.json" "$work/pre-template-recovery-normalized.json" || fail 'RECUPERACIÓN OMITIDA: configuración cambió antes de restaurar la plantilla'
+  current_image="$(container_image "$after")"
+  [[ "$current_image" == "$image" ]] || fail 'RECUPERACIÓN OMITIDA: digest de plantilla cambió concurrentemente'
+  traffic_is_revision "$after" "$previous_served_revision" || fail 'RECUPERACIÓN OMITIDA: tráfico cambió antes de restaurar la plantilla'
+  az containerapp update --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --container-name "$container" --image "$previous_image" --output none || fail 'RECUPERACIÓN INCOMPLETA: Azure rechazó restaurar el digest anterior en la plantilla; ruta anterior permanece servida'
+  verify_revision "$previous_image" || fail "RECUPERACIÓN INCOMPLETA: plantilla anterior aplicada pero revisión latest no Healthy: $revision_verify_detail"
+  read_app > "$after" || fail 'RECUPERACIÓN INCOMPLETA: no se pudo verificar la plantilla restaurada'
+  normalize_app "$after" > "$work/post-template-recovery-normalized.json"
+  cmp -s "$work/before-normalized.json" "$work/post-template-recovery-normalized.json" || fail 'RECUPERACIÓN INCOMPLETA: configuración cambió durante la restauración de plantilla'
+  [[ "$(container_image "$after")" == "$previous_image" ]] || fail 'RECUPERACIÓN INCOMPLETA: plantilla no conserva el digest anterior'
+  traffic_is_revision "$after" "$previous_served_revision" || fail 'RECUPERACIÓN INCOMPLETA: tráfico cambió durante la restauración de plantilla'
+  verify_chile_gateway_current_traffic "$previous_image" || fail 'RECUPERACIÓN INCOMPLETA: la ruta anterior perdió salud o escala 1/1'
+  printf 'PLANTILLA RECUPERADA: Gateway sirve revisión anterior %s; siguiente despliegue puede reintentarse.\n' "$previous_served_revision" >&2
+}
+
 verify_chile_transition_traffic() {
   local target_image="$1" previous_image="$2" previous_revision="$3" app_json mode latest traffic served_revision served_weight revision_json="$work/transition-revision.json" revision_image active
   app_json="$(read_app)" || return 1
@@ -255,6 +275,9 @@ if [[ "$mode" == restore ]]; then
   normalize_app "$before" > "$work/current-normalized.json"
   current_hash="$(sha256sum "$work/current-normalized.json" | awk '{print $1}')"
   if [[ "$current" == "$previous_image" && "$current_hash" == "$expected_config_hash" ]]; then
+    if [[ "$destination" == chile-shared && "$service" == api-gateway ]]; then
+      verify_chile_gateway_current_traffic "$previous_image" || fail 'RECUPERACIÓN NO VERIFICADA: Gateway no sirve al 100% una revisión saludable con el digest anterior y escala 1/1'
+    fi
     printf 'RECUPERACIÓN YA PRESENTE: servicio=%s conserva digest anterior y configuración.\n' "$service"
     exit 0
   fi
@@ -384,6 +407,14 @@ else
   if [[ "$destination" == chile-shared && "$service" == api-gateway ]]; then
     normalize_app "$after" > "$work/failure-normalized.json" || fail 'RECUPERACIÓN NO VERIFICADA: no se pudo comparar configuración'
     cmp -s "$work/before-normalized.json" "$work/failure-normalized.json" || fail 'RECUPERACIÓN OMITIDA: configuración cambió concurrentemente'
+    current="$(container_image "$after" 2>/dev/null || true)"
+    if [[ "$current" == "$previous_image" ]]; then
+      traffic_is_revision "$after" "$previous_served_revision" || fail 'RECUPERACIÓN OMITIDA: tráfico cambió concurrentemente; no se sobrescribe'
+      verify_chile_gateway_current_traffic "$previous_image" || fail 'RECUPERACIÓN NO VERIFICADA: revisión anterior perdió salud o escala 1/1'
+      printf 'ACTUALIZACIÓN NO APLICADA: Gateway conserva digest, configuración y ruta previos.\n' >&2
+      exit 1
+    fi
+    [[ "$current" == "$image" ]] || fail 'RECUPERACIÓN OMITIDA: digest de plantilla cambió concurrentemente'
     current_traffic="$(traffic_snapshot "$after")"
     candidate_revision="$(jq -r '.properties.latestRevisionName' "$after")"
     if traffic_is_revision "$after" "$candidate_revision"; then
@@ -392,11 +423,12 @@ else
       traffic_is_revision "$after" "$previous_served_revision" || fail 'RECUPERACIÓN NO VERIFICADA: tráfico posterior no coincide con la revisión anterior'
       normalize_app "$after" > "$work/recovered-normalized.json"
       cmp -s "$work/before-normalized.json" "$work/recovered-normalized.json" || fail 'RECUPERACIÓN NO VERIFICADA: configuración cambió durante recuperación'
-      printf 'TRÁFICO RECUPERADO: Gateway sigue sirviendo revisión anterior %s; revisión candidata conservada.\n' "$previous_served_revision" >&2
+      recover_chile_gateway_template
       exit 1
     fi
     traffic_is_revision "$after" "$previous_served_revision" || fail 'RECUPERACIÓN OMITIDA: tráfico cambió concurrentemente; no se sobrescribe'
     printf 'TRÁFICO PREVIO CONSERVADO: Gateway mantiene revisión %s.\n' "$previous_served_revision" >&2
+    recover_chile_gateway_template
     exit 1
   fi
   current="$(container_image "$after" 2>/dev/null || true)"
