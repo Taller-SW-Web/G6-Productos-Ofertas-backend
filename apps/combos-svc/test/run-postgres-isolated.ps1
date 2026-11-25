@@ -157,7 +157,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'No se pudo iniciar PostgreSQL 17 desechable.' }
   $started = $true
   $ready = $false
-  for ($i=0; $i -lt 60; $i++) { & docker exec $container pg_isready -U postgres -d combos_test *> $null; if ($LASTEXITCODE -eq 0) { $ready=$true; break }; Start-Sleep -Seconds 1 }
+  for ($i=0; $i -lt 60; $i++) { & docker exec $container psql -h 127.0.0.1 -U postgres -d combos_test -v ON_ERROR_STOP=1 -c 'SELECT 1;' *> $null; if ($LASTEXITCODE -eq 0) { $ready=$true; break }; Start-Sleep -Seconds 1 }
   if (-not $ready) { & docker logs $container 2>&1 | Select-Object -Last 30; throw 'PostgreSQL desechable no alcanzó readiness.' }
   Assert-ContainerRunning $container 'PostgreSQL después de readiness'
   $portLine = & docker port $container '5432/tcp'
