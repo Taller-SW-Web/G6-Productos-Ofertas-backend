@@ -566,7 +566,7 @@ export class CombosServiceBus {
         state.subscribed = false;
         state.ready = false;
       }
-      await Promise.allSettled([...this.recovering.values()]);
+      await Promise.allSettled(this.recovering.values());
       await Promise.allSettled(
         [...this.subscriptions.values()].map((subscription) =>
           subscription.close(),
