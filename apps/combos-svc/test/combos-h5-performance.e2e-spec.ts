@@ -66,14 +66,18 @@ describe.skipIf(!isolatedPerformanceEnabled)(
     const encode = (value: unknown) =>
       Buffer.from(JSON.stringify(value)).toString('base64url');
 
-    const makeHumanToken = (sub: string) => {
+    const makeToken = (
+      kind: 'acceso' | 'servicio',
+      sub: string,
+      scope?: string,
+    ) => {
       const now = Math.floor(Date.now() / 1000);
       const claims = {
         iss: issuer,
         sub,
-        tipo: 'acceso',
+        tipo: kind,
         aud: ['api-productos'],
-        roles: ['GESTOR_COMERCIAL'],
+        ...(kind === 'acceso' ? { roles: ['GESTOR_COMERCIAL'] } : { scope }),
         iat: now,
         exp: now + 1800,
         jti: randomUUID(),
@@ -81,6 +85,8 @@ describe.skipIf(!isolatedPerformanceEnabled)(
       const unsigned = `${encode({ alg: 'RS256', kid })}.${encode(claims)}`;
       return `${unsigned}.${sign('RSA-SHA256', Buffer.from(unsigned), keyPair.privateKey).toString('base64url')}`;
     };
+
+    const makeHumanToken = (sub: string) => makeToken('acceso', sub);
 
     beforeAll(async () => {
       for (const key of keys) backup[key] = process.env[key];
@@ -99,7 +105,7 @@ describe.skipIf(!isolatedPerformanceEnabled)(
       process.env.COMBOS_CATALOG_SERVICE_BEARER = 'isolated-perf-service-token';
       process.env.COMBOS_PRICING_SERVICE_BEARER = 'isolated-perf-service-token';
 
-      identity = createServer((req, res) => {
+      identity = createServer(async (req, res) => {
         res.setHeader('content-type', 'application/json');
         res.setHeader('cache-control', 'public, max-age=60');
         if (req.url === '/.well-known/openid-configuration') {
@@ -121,6 +127,29 @@ describe.skipIf(!isolatedPerformanceEnabled)(
           );
           return;
         }
+        if (req.url === '/token' && req.method === 'POST') {
+          let body = '';
+          for await (const chunk of req) body += chunk.toString();
+          const form = new URLSearchParams(body);
+          if (
+            form.get('grant_type') !== 'client_credentials' ||
+            form.get('client_id') !== 'modulo-productos' ||
+            form.get('client_secret') !== 'isolated-perf-secret'
+          ) {
+            res.writeHead(401).end('{}');
+            return;
+          }
+          const scope = form.get('scope') ?? '';
+          res.end(
+            JSON.stringify({
+              accessToken: makeToken('servicio', 'modulo-productos', scope),
+              tokenType: 'Bearer',
+              expiresIn: 600,
+              scopes: [scope],
+            }),
+          );
+          return;
+        }
         res.writeHead(404).end('{}');
       });
       identity.listen(0, '127.0.0.1');
@@ -129,6 +158,8 @@ describe.skipIf(!isolatedPerformanceEnabled)(
       process.env.SECURITY_ISSUER = issuer;
       process.env.SECURITY_DISCOVERY_URL = `${issuer}/.well-known/openid-configuration`;
       process.env.SECURITY_JWKS_URL = `${issuer}/jwks`;
+      process.env.COMBOS_G7_TOKEN_URL = `${issuer}/token`;
+      process.env.COMBOS_G7_CLIENT_SECRET = 'isolated-perf-secret';
 
       catalog = createServer((req, res) => {
         const sku = decodeURIComponent((req.url ?? '').split('/').at(-2) ?? '');
