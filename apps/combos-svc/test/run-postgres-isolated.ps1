@@ -135,11 +135,19 @@ try {
   if ($Mode -eq 'postgres-only') {
     $localOpenssl = Get-Command openssl -ErrorAction SilentlyContinue
     if ($localOpenssl) {
-      & $localOpenssl.Source req -x509 -nodes -newkey rsa:2048 -keyout (Join-Path $folder 'server.key') -out (Join-Path $folder 'server.crt') -days 1 -subj '/CN=127.0.0.1' -addext 'subjectAltName=IP:127.0.0.1' 2>$null
+      $sslProc = Start-Process -FilePath $localOpenssl.Source -ArgumentList @(
+        'req', '-x509', '-nodes', '-newkey', 'rsa:2048',
+        '-keyout', (Join-Path $folder 'server.key'),
+        '-out', (Join-Path $folder 'server.crt'),
+        '-days', '1', '-subj', '/CN=127.0.0.1',
+        '-addext', 'subjectAltName=IP:127.0.0.1'
+      ) -NoNewWindow -Wait -PassThru -RedirectStandardError (Join-Path $folder 'openssl.err')
+      if ($sslProc.ExitCode -ne 0) { throw 'No se pudo generar el certificado TLS aislado.' }
+      Remove-Item (Join-Path $folder 'openssl.err') -ErrorAction SilentlyContinue
     } else {
       & docker run --rm --volume "${folder}:/cert" alpine/openssl req -x509 -nodes -newkey rsa:2048 -keyout /cert/server.key -out /cert/server.crt -days 1 -subj '/CN=127.0.0.1' -addext 'subjectAltName=IP:127.0.0.1' | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw 'No se pudo generar el certificado TLS aislado.' }
     }
-    if ($LASTEXITCODE -ne 0) { throw 'No se pudo generar el certificado TLS aislado.' }
     & docker run --rm --user root --volume "${folder}:/cert" --entrypoint sh postgres:17-alpine -c 'chmod 600 /cert/server.key && chown 70:70 /cert/server.key /cert/server.crt' | Out-Null
   } else {
     & docker run --rm --user root --volume "${folder}:/cert" --entrypoint sh rabbitmq:4.2.9-alpine -c "openssl req -x509 -nodes -newkey rsa:2048 -keyout /cert/server.key -out /cert/server.crt -days 1 -subj '/CN=127.0.0.1' -addext 'subjectAltName=IP:127.0.0.1' && chmod 600 /cert/server.key && chown 70:70 /cert/server.key /cert/server.crt" | Out-Null
