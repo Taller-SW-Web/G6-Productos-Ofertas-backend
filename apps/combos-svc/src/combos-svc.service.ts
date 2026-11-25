@@ -108,7 +108,14 @@ export class CombosSvcService {
       ? 'not_ready'
       : 'disabled',
   ) {
-    const postgresReady = await this.database.ready();
+    const dbStatus =
+      typeof this.database.readyDetailed === 'function'
+        ? await this.database.readyDetailed()
+        : await this.database.ready().then((ok) => ({
+            available: ok,
+            permissionsOk: ok,
+          }));
+    const postgresReady = dbStatus.available && dbStatus.permissionsOk;
     const consumer: CombosConsumerReadiness =
       typeof brokerInput === 'string'
         ? {
@@ -138,19 +145,38 @@ export class CombosSvcService {
       service: 'combos-svc',
       ...(isAzure ? { transport: 'AZURE_SERVICE_BUS' as const } : {}),
       dependencies: {
-        postgres: postgresReady ? 'ok' : 'error',
+        postgres: dbStatus.available ? 'ok' : 'error',
+        ...(isAzure
+          ? {
+              postgres_permissions: dbStatus.permissionsOk ? 'ok' : 'error',
+            }
+          : {}),
         ...(brokerRequired ? { [brokerKey]: brokerReady ? 'ok' : 'error' } : {}),
       },
       ...(isAzure && consumer.queues
         ? {
             queues: {
-              'g6.combos.from.catalog': consumer.queues['g6.combos.from.catalog'].ready
-                ? 'ok'
-                : 'error',
-              'g6.combos.from.inventory': consumer.queues['g6.combos.from.inventory']
-                .ready
-                ? 'ok'
-                : 'error',
+              'g6.combos.from.catalog': {
+                status: consumer.queues['g6.combos.from.catalog'].ready
+                  ? 'ok'
+                  : 'error',
+                link_ready: consumer.queues['g6.combos.from.catalog'].linkReady,
+                subscribed:
+                  consumer.queues['g6.combos.from.catalog'].subscribed,
+                last_error_code:
+                  consumer.queues['g6.combos.from.catalog'].lastErrorCode,
+              },
+              'g6.combos.from.inventory': {
+                status: consumer.queues['g6.combos.from.inventory'].ready
+                  ? 'ok'
+                  : 'error',
+                link_ready:
+                  consumer.queues['g6.combos.from.inventory'].linkReady,
+                subscribed:
+                  consumer.queues['g6.combos.from.inventory'].subscribed,
+                last_error_code:
+                  consumer.queues['g6.combos.from.inventory'].lastErrorCode,
+              },
             },
           }
         : {}),

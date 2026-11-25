@@ -68,15 +68,30 @@ export class CombosDatabase implements OnModuleDestroy {
       client.release();
     }
   }
-  async ready(): Promise<boolean> {
+  async readyDetailed(): Promise<{ available: boolean; permissionsOk: boolean }> {
     try {
-      await this.query(async (c) => {
+      return await this.query(async (c) => {
         await c.query('SELECT 1 FROM combos.combos LIMIT 0');
+        const { rows } = await c.query<{ ok: boolean }>(
+          `SELECT (
+            has_table_privilege(current_user, 'combos.combos', 'SELECT')
+            AND has_table_privilege(current_user, 'combos.combo_items', 'SELECT')
+            AND has_table_privilege(current_user, 'combos.component_projection', 'SELECT, INSERT, UPDATE')
+            AND has_table_privilege(current_user, 'combos.inbox', 'SELECT, INSERT')
+          ) AS ok`,
+        );
+        return {
+          available: true,
+          permissionsOk: rows[0]?.ok === true,
+        };
       });
-      return true;
     } catch {
-      return false;
+      return { available: false, permissionsOk: false };
     }
+  }
+  async ready(): Promise<boolean> {
+    const detailed = await this.readyDetailed();
+    return detailed.available && detailed.permissionsOk;
   }
   async onModuleDestroy(): Promise<void> {
     this.closed = true;

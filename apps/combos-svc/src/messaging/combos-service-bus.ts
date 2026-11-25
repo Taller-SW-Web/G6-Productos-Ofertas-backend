@@ -100,10 +100,20 @@ export type CombosServiceBusEnabledConfig = Extract<
   { enabled: true }
 >;
 
+export type QueuePhase =
+  | 'IDLE'
+  | 'LINK_VERIFIED'
+  | 'SUBSCRIBED'
+  | 'DEGRADED'
+  | 'RECOVERING'
+  | 'STOPPED';
+
 export interface QueueRuntimeState {
   queue: CombosEventQueue;
-  ready: boolean;
+  phase: QueuePhase;
+  linkReady: boolean;
   subscribed: boolean;
+  ready: boolean;
   lastErrorCode: string | null;
   lastCheckedAt: string | null;
 }
@@ -155,6 +165,7 @@ export class CombosServiceBus {
     { close(): Promise<void> }
   >();
   private readonly states = new Map<CombosEventQueue, QueueRuntimeState>();
+  private readonly recovering = new Map<CombosEventQueue, Promise<void>>();
   private readonly active = new Set<Promise<void>>();
   private readonly probeIntervalMs: number;
   private timer?: ReturnType<typeof setTimeout>;
@@ -175,8 +186,10 @@ export class CombosServiceBus {
     ) as CombosEventQueue[]) {
       this.states.set(queue, {
         queue,
-        ready: false,
+        phase: 'IDLE',
+        linkReady: false,
         subscribed: false,
+        ready: false,
         lastErrorCode: null,
         lastCheckedAt: null,
       });
@@ -198,22 +211,32 @@ export class CombosServiceBus {
         );
   }
 
+  private recomputeQueueReady(state: QueueRuntimeState): boolean {
+    state.ready =
+      !this.stopped &&
+      this.started &&
+      state.phase === 'SUBSCRIBED' &&
+      state.linkReady &&
+      state.subscribed;
+    return state.ready;
+  }
+
   get available(): boolean {
     if (this.stopped || !this.started) return false;
     for (const state of this.states.values()) {
-      if (!state.ready || !state.subscribed) return false;
+      if (!this.recomputeQueueReady(state)) return false;
     }
     return this.states.size === 2;
   }
 
   getQueueStates(): Record<CombosEventQueue, QueueRuntimeState> {
+    const catalog = this.states.get('g6.combos.from.catalog')!;
+    const inventory = this.states.get('g6.combos.from.inventory')!;
+    this.recomputeQueueReady(catalog);
+    this.recomputeQueueReady(inventory);
     return {
-      'g6.combos.from.catalog': {
-        ...this.states.get('g6.combos.from.catalog')!,
-      },
-      'g6.combos.from.inventory': {
-        ...this.states.get('g6.combos.from.inventory')!,
-      },
+      'g6.combos.from.catalog': { ...catalog },
+      'g6.combos.from.inventory': { ...inventory },
     };
   }
 
@@ -226,14 +249,22 @@ export class CombosServiceBus {
       for (const queue of queues) {
         this.createQueueReceiver(queue);
       }
-      const linkResults = await this.checkAllLinks(5000);
+      const linkResults = await Promise.all(
+        queues.map((queue) => this.checkQueueLink(queue, 5000)),
+      );
       if (!linkResults.every(Boolean)) {
         throw new Error('COMBOS_SERVICE_BUS_LINK_UNAVAILABLE');
+      }
+      if (this.stopped) {
+        throw new Error('COMBOS_SERVICE_BUS_ALREADY_STOPPED');
       }
       for (const queue of queues) {
         this.subscribeQueue(queue);
       }
       this.started = true;
+      for (const state of this.states.values()) {
+        this.recomputeQueueReady(state);
+      }
       this.hooks.onLog?.('log', {
         event: 'service_bus_started',
         queues,
@@ -245,7 +276,8 @@ export class CombosServiceBus {
     } catch (error) {
       await this.close();
       throw error instanceof Error &&
-        error.message === 'COMBOS_SERVICE_BUS_LINK_UNAVAILABLE'
+        (error.message === 'COMBOS_SERVICE_BUS_LINK_UNAVAILABLE' ||
+          error.message === 'COMBOS_SERVICE_BUS_ALREADY_STOPPED')
         ? error
         : new Error('COMBOS_SERVICE_BUS_START_FAILED');
     } finally {
@@ -264,19 +296,20 @@ export class CombosServiceBus {
   }
 
   private subscribeQueue(queue: CombosEventQueue): void {
+    if (this.stopped) return;
     const receiver = this.receivers.get(queue);
-    if (!receiver || this.subscriptions.has(queue)) return;
+    if (!receiver || receiver.isClosed || this.subscriptions.has(queue)) return;
+    const state = this.states.get(queue)!;
     const subscription = receiver.subscribe(
       {
         processMessage: async (message) => {
           if (this.stopped) return;
           const task = this.handle(queue, receiver, message).catch((error) => {
             const code = safeSdkErrorCode(error);
-            const state = this.states.get(queue);
-            if (state) {
-              state.ready = false;
-              state.lastErrorCode = code;
-            }
+            state.phase = 'DEGRADED';
+            state.linkReady = false;
+            state.lastErrorCode = code;
+            this.recomputeQueueReady(state);
             this.hooks.onLog?.('error', {
               event: 'service_bus_delivery_error',
               queue,
@@ -293,11 +326,15 @@ export class CombosServiceBus {
         },
         processError: async (args: ProcessErrorArgs) => {
           const code = safeSdkErrorCode(args.error);
-          const state = this.states.get(queue);
-          if (state) {
-            state.ready = false;
-            state.lastErrorCode = code;
+          if (!this.stopped) {
+            state.phase = 'DEGRADED';
+            state.linkReady = false;
+            if (receiver.isClosed) {
+              state.subscribed = false;
+            }
           }
+          state.lastErrorCode = code;
+          this.recomputeQueueReady(state);
           this.hooks.onConnectionError?.(queue, code, args.errorSource);
           this.hooks.onLog?.('warn', {
             event: 'service_bus_receiver_error',
@@ -310,12 +347,10 @@ export class CombosServiceBus {
       { autoCompleteMessages: false, maxConcurrentCalls: 1 },
     );
     this.subscriptions.set(queue, subscription);
-    const state = this.states.get(queue);
-    if (state) {
-      state.subscribed = true;
-      state.ready = true;
-      state.lastErrorCode = null;
-    }
+    state.subscribed = true;
+    state.phase = 'SUBSCRIBED';
+    state.lastErrorCode = null;
+    this.recomputeQueueReady(state);
   }
 
   private async checkQueueLink(
@@ -324,72 +359,125 @@ export class CombosServiceBus {
   ): Promise<boolean> {
     const state = this.states.get(queue)!;
     const receiver = this.receivers.get(queue);
+    if (this.stopped) {
+      state.linkReady = false;
+      state.phase = 'STOPPED';
+      this.recomputeQueueReady(state);
+      return false;
+    }
     if (!receiver || receiver.isClosed) {
-      state.ready = false;
+      state.linkReady = false;
       state.subscribed = false;
+      state.phase = 'DEGRADED';
       state.lastCheckedAt = new Date().toISOString();
       state.lastErrorCode = 'RECEIVER_CLOSED';
+      this.recomputeQueueReady(state);
       return false;
     }
     try {
       await receiver.peekMessages(1, {
         abortSignal: AbortSignal.timeout(timeoutMs),
       });
-      state.ready = !this.stopped && state.subscribed;
+      if (this.stopped || receiver.isClosed) {
+        state.linkReady = false;
+        if (this.stopped) state.phase = 'STOPPED';
+        this.recomputeQueueReady(state);
+        return false;
+      }
+      state.linkReady = true;
+      if (state.phase === 'IDLE') {
+        state.phase = 'LINK_VERIFIED';
+      }
       state.lastErrorCode = null;
       state.lastCheckedAt = new Date().toISOString();
-      return state.ready;
+      this.recomputeQueueReady(state);
+      return true;
     } catch (error) {
       const code = safeSdkErrorCode(error);
-      state.ready = false;
+      state.linkReady = false;
+      state.phase = 'DEGRADED';
       state.lastErrorCode = code;
       state.lastCheckedAt = new Date().toISOString();
+      this.recomputeQueueReady(state);
       this.hooks.onConnectionError?.(queue, code, 'peek_probe');
       return false;
     }
   }
 
-  private async checkAllLinks(timeoutMs: number): Promise<boolean[]> {
-    const queues = Object.keys(combosServiceBusRoutes) as CombosEventQueue[];
-    return Promise.all(
-      queues.map((queue) => this.checkQueueLink(queue, timeoutMs)),
-    );
+  private async teardownQueue(queue: CombosEventQueue): Promise<void> {
+    const sub = this.subscriptions.get(queue);
+    this.subscriptions.delete(queue);
+    if (sub) {
+      await sub.close().catch(() => undefined);
+    }
+    const rx = this.receivers.get(queue);
+    this.receivers.delete(queue);
+    if (rx && !rx.isClosed) {
+      await rx.close().catch(() => undefined);
+    }
   }
 
   private async recoverQueueIfNeeded(queue: CombosEventQueue): Promise<void> {
     if (this.stopped) return;
-    const receiver = this.receivers.get(queue);
-    if (receiver && !receiver.isClosed && this.subscriptions.has(queue)) {
-      return;
-    }
-    const oldSub = this.subscriptions.get(queue);
-    this.subscriptions.delete(queue);
-    if (oldSub) await oldSub.close().catch(() => undefined);
-    if (receiver && !receiver.isClosed) {
-      await receiver.close().catch(() => undefined);
-    }
-    this.receivers.delete(queue);
-    if (this.stopped) return;
-    try {
-      this.createQueueReceiver(queue);
-      const ok = await this.checkQueueLink(queue, 3000);
-      if (ok && !this.stopped) {
-        this.subscribeQueue(queue);
-        this.hooks.onLog?.('log', {
-          event: 'service_bus_receiver_recovered',
-          queue,
-        });
+    const existing = this.recovering.get(queue);
+    if (existing) return existing;
+
+    const task = (async () => {
+      if (this.stopped) return;
+      const state = this.states.get(queue)!;
+      const receiver = this.receivers.get(queue);
+      const hasSub = this.subscriptions.has(queue);
+      if (
+        state.phase === 'SUBSCRIBED' &&
+        state.linkReady &&
+        state.subscribed &&
+        hasSub &&
+        receiver &&
+        !receiver.isClosed
+      ) {
+        await this.checkQueueLink(queue, 2000);
+        if (state.phase === 'SUBSCRIBED' && state.linkReady) return;
       }
-    } catch (error) {
-      const code = safeSdkErrorCode(error);
-      const state = this.states.get(queue);
-      if (state) {
-        state.ready = false;
+
+      if (this.stopped) return;
+      state.phase = 'RECOVERING';
+      state.linkReady = false;
+      state.subscribed = false;
+      this.recomputeQueueReady(state);
+
+      await this.teardownQueue(queue);
+      if (this.stopped) return;
+
+      try {
+        this.createQueueReceiver(queue);
+        const ok = await this.checkQueueLink(queue, 3000);
+        if (ok && !this.stopped) {
+          this.subscribeQueue(queue);
+          this.hooks.onLog?.('log', {
+            event: 'service_bus_receiver_recovered',
+            queue,
+          });
+        } else if (!this.stopped) {
+          await this.teardownQueue(queue);
+          state.phase = 'DEGRADED';
+          this.recomputeQueueReady(state);
+        }
+      } catch (error) {
+        const code = safeSdkErrorCode(error);
+        await this.teardownQueue(queue);
+        state.phase = this.stopped ? 'STOPPED' : 'DEGRADED';
+        state.linkReady = false;
         state.subscribed = false;
         state.lastErrorCode = code;
+        this.recomputeQueueReady(state);
+        this.hooks.onConnectionError?.(queue, code, 'recovery');
       }
-      this.hooks.onConnectionError?.(queue, code, 'recovery');
-    }
+    })().finally(() => {
+      this.recovering.delete(queue);
+    });
+
+    this.recovering.set(queue, task);
+    return task;
   }
 
   private scheduleProbe(): void {
@@ -403,9 +491,6 @@ export class CombosServiceBus {
         for (const queue of queues) {
           if (this.stopped) break;
           await this.recoverQueueIfNeeded(queue);
-          if (!this.stopped) {
-            await this.checkQueueLink(queue, 2000);
-          }
         }
       })().finally(() => {
         if (!this.stopped) this.scheduleProbe();
@@ -420,9 +505,12 @@ export class CombosServiceBus {
       this.stopped = true;
       clearTimeout(this.timer);
       for (const state of this.states.values()) {
-        state.ready = false;
+        state.phase = 'STOPPED';
+        state.linkReady = false;
         state.subscribed = false;
+        state.ready = false;
       }
+      await Promise.allSettled([...this.recovering.values()]);
       await Promise.allSettled(
         [...this.subscriptions.values()].map((subscription) =>
           subscription.close(),

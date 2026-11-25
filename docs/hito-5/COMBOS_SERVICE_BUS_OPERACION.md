@@ -35,9 +35,13 @@ Cuando `MESSAGING_PROVIDER=AZURE_SERVICE_BUS`, `COMBOS_AMQP_ENABLED=true` o `COM
 
 ## 4. Readiness (`/ready` y `/health/ready`)
 
-- **H5 OFF** (`COMBOS_SERVICE_BUS_EVENTS_ENABLED=false`): `readinessStatus()` es `disabled`; la disponibilidad del servicio depende solo de PostgreSQL.
-- **H5 ON**: reporta `ready` (`200 OK`) únicamente cuando PostgreSQL está disponible **y** ambos receivers (`g6.combos.from.catalog` y `g6.combos.from.inventory`) están suscritos y superan el probe periódico `peekMessages(1)`.
-- Si falla una cola, el enlace, RBAC o la inicialización, responde `503` (`error` / `not_ready`) sin fallback a RabbitMQ.
+- **H5 OFF** (`COMBOS_SERVICE_BUS_EVENTS_ENABLED=false`): `readinessStatus()` es `disabled`; `dependencies.postgres` y `dependencies.postgres_permissions` validan conectividad y privilegios mínimos de solo lectura (`SELECT` en `combos.combos`/`combos.combo_items`, `SELECT, INSERT, UPDATE` en `combos.component_projection`, `SELECT, INSERT` en `combos.inbox`) sin escrituras ni privilegios de propietario.
+- **H5 ON**: reporta `ready` (`200 OK`) únicamente cuando:
+  1. PostgreSQL está disponible (`dependencies.postgres = ok`).
+  2. El rol runtime posee los permisos requeridos (`dependencies.postgres_permissions = ok`).
+  3. Ambos receivers (`g6.combos.from.catalog` y `g6.combos.from.inventory`) están en fase `SUBSCRIBED`, con `linkReady = true` (`peekMessages(1)` exitoso) y `subscribed = true`.
+- Si falla conectividad PostgreSQL, faltan permisos runtime, falla el enlace/RBAC de una cola o `processError` degrada una suscripción, responde `503` (`error` / `not_ready`) sin fallback a RabbitMQ.
+- En el arranque (`start()`), se crean receivers, se verifica conectividad/RBAC (`LINK_VERIFIED`), luego se suscriben (`SUBSCRIBED`) y recién entonces se activa `available = true`. Un fallo inicial de cola/RBAC aborta `start()` de forma fail-closed (`COMBOS_SERVICE_BUS_LINK_UNAVAILABLE`). En ejecución, `recoverQueueIfNeeded` coalesca recuperaciones por cola cerrando el receptor/suscripción degradados antes de recrearlos (máximo 1 suscripción activa por cola, sin receptores huérfanos y sin suscribir durante `close()`).
 
 ## 5. Settlement, reintentos, DLQ y riesgo de `maxDeliveryCount`
 
@@ -58,3 +62,16 @@ Cuando `MESSAGING_PROVIDER=AZURE_SERVICE_BUS`, `COMBOS_AMQP_ENABLED=true` o `COM
 
 1. **Antes de activar H5:** drenar o clasificar mensajes pendientes en `po.combos.q` (RabbitMQ H4), verificar que no existan consumidores H4 y H5 activos en paralelo y confirmar que `combos.inbox` está intacto.
 2. **Rollback H5 → H4:** establecer `COMBOS_SERVICE_BUS_EVENTS_ENABLED=false`, `MESSAGING_PROVIDER=RABBITMQ`, `COMBOS_AMQP_ENABLED=true` y `COMBOS_AMQP_URL` válido. La tabla compartida `combos.inbox` preserva la deduplicación por `(message_id, handler)`.
+
+## 8. Estado de productores (R05 Catalog y R12 Inventory)
+
+| Etapa | R05 (`catalog-svc` → `g6.combos.from.catalog`) | R12 (`inventory-svc` → `g6.combos.from.inventory`) |
+|---|---|---|
+| 1. Contrato definido | `asyncapi.yaml` `0.7.0-rc.3` | `asyncapi.yaml` `0.7.0-rc.3` |
+| 2. Código productor implementado | Sí (`catalogDestinations`, `catalog.product.deactivated`, `catalog.sku.deactivated`) | Sí (`APPROVED_ROUTES`, `inventory.stock.changed`) |
+| 3. Destino habilitado por flags | Pendiente config (`CATALOG_H5_DESTINATIONS` incluyendo `g6.combos.from.catalog`) | Pendiente config (`MESSAGING_PROVIDER=AZURE_SERVICE_BUS`) |
+| 4. Outbox durable | Implementado (`catalog.outbox` + `catalog.outbox_delivery`) | Implementado (`inventory.outbox` + `inventory.outbox_delivery`) |
+| 5. Relay funcionando | Implementado (`relayCatalogDelivery`) | Implementado (`InventoryServiceBusRelay`) |
+| 6. Sender con RBAC | Pendiente (`Azure Service Bus Data Sender` en ambiente) | Pendiente (`Azure Service Bus Data Sender` en ambiente) |
+| 7. Publicación real verificada | `NOT_RUN` (bloqueado por config/RBAC de ambiente) | `NOT_RUN` (bloqueado por config/RBAC de ambiente) |
+| 8. E2E Azure ejecutado | `NOT_RUN_PENDING_CODE_AUDIT` | `NOT_RUN_PENDING_CODE_AUDIT` |

@@ -186,16 +186,28 @@ describe('CombosServiceBus runtime (COM-SB-01 / COR-05 / T08 / T11)', () => {
     await bus.start();
     expect(client.createReceiver).toHaveBeenCalledTimes(2);
     expect(bus.available).toBe(true);
-    expect(bus.getQueueStates()['g6.combos.from.catalog'].ready).toBe(true);
-    expect(bus.getQueueStates()['g6.combos.from.inventory'].ready).toBe(true);
+    expect(bus.getQueueStates()['g6.combos.from.catalog']).toMatchObject({
+      phase: 'SUBSCRIBED',
+      linkReady: true,
+      subscribed: true,
+      ready: true,
+    });
+    expect(bus.getQueueStates()['g6.combos.from.inventory']).toMatchObject({
+      phase: 'SUBSCRIBED',
+      linkReady: true,
+      subscribed: true,
+      ready: true,
+    });
 
-    // Error on one queue marks overall readiness not_ready
+    // Error on one queue marks overall readiness not_ready without false READY
     await receivers
       .get('g6.combos.from.inventory')!
       .emitError(Object.assign(new Error('UnauthorizedAccess'), { code: 'UnauthorizedAccess' }));
     expect(bus.available).toBe(false);
     expect(bus.getQueueStates()['g6.combos.from.catalog'].ready).toBe(true);
     expect(bus.getQueueStates()['g6.combos.from.inventory']).toMatchObject({
+      phase: 'DEGRADED',
+      linkReady: false,
       ready: false,
       lastErrorCode: 'UnauthorizedAccess',
     });
@@ -204,6 +216,49 @@ describe('CombosServiceBus runtime (COM-SB-01 / COR-05 / T08 / T11)', () => {
     await bus.close();
     expect(bus.available).toBe(false);
     expect(client.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers a degraded queue without duplicate subscriptions or orphaned receivers (COM-AUD-02)', async () => {
+    const created: ReturnType<typeof makeFakeReceiver>[] = [];
+    const client: ServiceBusClientLike = {
+      createReceiver: vi.fn(() => {
+        const rx = makeFakeReceiver();
+        created.push(rx);
+        return rx as unknown as ServiceBusReceiver;
+      }),
+      close: vi.fn(async () => undefined),
+    };
+    const bus = new CombosServiceBus(
+      {
+        provider: 'AZURE_SERVICE_BUS',
+        enabled: true,
+        namespace: 'g6combosdev.servicebus.windows.net',
+        clientId: randomUUID(),
+      },
+      async () => undefined,
+      { clientFactory: () => client, probeIntervalMs: 20 },
+    );
+
+    await bus.start();
+    expect(created).toHaveLength(2);
+    await created[1]!.emitError(
+      Object.assign(new Error('ConnectionLost'), { code: 'ConnectionLost' }),
+    );
+    expect(bus.available).toBe(false);
+
+    // Wait for probe recovery cycle
+    await new Promise((r) => setTimeout(r, 60));
+    expect(created[1]!.close).toHaveBeenCalled();
+    expect(bus.available).toBe(true);
+    expect(bus.getQueueStates()['g6.combos.from.inventory']).toMatchObject({
+      phase: 'SUBSCRIBED',
+      linkReady: true,
+      subscribed: true,
+      ready: true,
+      lastErrorCode: null,
+    });
+
+    await bus.close();
   });
 
   it('fails start when RBAC peekMessages is denied on either queue', async () => {
@@ -538,9 +593,15 @@ describe('CombosEventConsumer Service Bus delivery & settlement (T03 / T06 / T07
   });
 });
 
-describe('CombosSvcService.readiness (COR-05)', () => {
-  it('reports service_bus and per-queue status in H5 mode without false ready', async () => {
-    const db = { ready: vi.fn(async () => true) } as unknown as CombosDatabase;
+describe('CombosSvcService.readiness (COR-05 / COM-AUD-07)', () => {
+  it('reports service_bus, postgres_permissions, and per-queue status in H5 mode without false ready', async () => {
+    const db = {
+      readyDetailed: vi.fn(async () => ({
+        available: true,
+        permissionsOk: true,
+      })),
+      ready: vi.fn(async () => true),
+    } as unknown as CombosDatabase;
     const service = new CombosSvcService(
       db,
       {} as CombosRepository,
@@ -552,15 +613,19 @@ describe('CombosSvcService.readiness (COR-05)', () => {
       queues: {
         'g6.combos.from.catalog': {
           queue: 'g6.combos.from.catalog',
-          ready: true,
+          phase: 'SUBSCRIBED',
+          linkReady: true,
           subscribed: true,
+          ready: true,
           lastErrorCode: null,
           lastCheckedAt: null,
         },
         'g6.combos.from.inventory': {
           queue: 'g6.combos.from.inventory',
-          ready: false,
+          phase: 'DEGRADED',
+          linkReady: false,
           subscribed: false,
+          ready: false,
           lastErrorCode: 'UnauthorizedAccess',
           lastCheckedAt: null,
         },
@@ -570,10 +635,43 @@ describe('CombosSvcService.readiness (COR-05)', () => {
       status: 'error',
       service: 'combos-svc',
       transport: 'AZURE_SERVICE_BUS',
-      dependencies: { postgres: 'ok', service_bus: 'error' },
+      dependencies: {
+        postgres: 'ok',
+        postgres_permissions: 'ok',
+        service_bus: 'error',
+      },
       queues: {
-        'g6.combos.from.catalog': 'ok',
-        'g6.combos.from.inventory': 'error',
+        'g6.combos.from.catalog': {
+          status: 'ok',
+          link_ready: true,
+          subscribed: true,
+          last_error_code: null,
+        },
+        'g6.combos.from.inventory': {
+          status: 'error',
+          link_ready: false,
+          subscribed: false,
+          last_error_code: 'UnauthorizedAccess',
+        },
+      },
+    });
+
+    (db.readyDetailed as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      available: true,
+      permissionsOk: false,
+    });
+    const missingPerms = await service.readiness({
+      transport: 'AZURE_SERVICE_BUS',
+      status: 'ready',
+    });
+    expect(missingPerms).toEqual({
+      status: 'error',
+      service: 'combos-svc',
+      transport: 'AZURE_SERVICE_BUS',
+      dependencies: {
+        postgres: 'ok',
+        postgres_permissions: 'error',
+        service_bus: 'ok',
       },
     });
   });

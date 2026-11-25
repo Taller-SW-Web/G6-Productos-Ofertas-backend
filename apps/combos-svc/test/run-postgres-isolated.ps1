@@ -1,15 +1,29 @@
 ﻿param(
   [switch]$TestEnvironmentRestoration,
   [string]$EvidenceDirectory,
+  [ValidateSet('legacy', 'postgres-only')]
+  [string]$Mode = 'legacy',
+  [switch]$PostgresOnly,
   [ValidateSet('app.e2e-spec.ts', 'combos-postgres.e2e-spec.ts', 'combos-service-bus-postgres.e2e-spec.ts', 'combos-rabbitmq.e2e-spec.ts', 'combos-catalog-rabbitmq.e2e-spec.ts')]
   [string]$TestFile,
   [string]$TestNamePattern
 )
 
 $ErrorActionPreference = 'Stop'
+if ($PostgresOnly) { $Mode = 'postgres-only' }
+if ($Mode -eq 'postgres-only') {
+  if ($TestFile -and $TestFile -notin @('combos-postgres.e2e-spec.ts', 'combos-service-bus-postgres.e2e-spec.ts')) {
+    throw "Suite focalizada no permitida en modo postgres-only: $TestFile"
+  }
+  if (-not $TestFile) { $TestFile = 'combos-postgres.e2e-spec.ts' }
+}
 $environmentNames = @(
-  'COMBOS_TEST_EPHEMERAL', 'COMBOS_TEST_DATABASE_URL', 'COMBOS_TEST_CA',
-  'COMBOS_TEST_RABBITMQ_URL', 'COMBOS_TEST_RABBITMQ_CONTAINER', 'COMBOS_TEST_CATALOG_PASSWORD', 'COMBOS_TEST_PRICING_PASSWORD', 'COMBOS_TEST_CWD', 'COMBOS_RUN_ISOLATED_E2E',
+  'COMBOS_TEST_EPHEMERAL', 'COMBOS_TEST_DATABASE_URL', 'COMBOS_TEST_CA', 'COMBOS_TEST_MODE',
+  'COMBOS_TEST_RABBITMQ_URL', 'COMBOS_TEST_RABBITMQ_CONTAINER', 'COMBOS_TEST_EXPECT_RUNTIME_ROLE',
+  'COMBOS_TEST_CATALOG_PASSWORD', 'COMBOS_TEST_PRICING_PASSWORD', 'COMBOS_TEST_CWD', 'COMBOS_RUN_ISOLATED_E2E',
+  'COMBOS_AMQP_ENABLED', 'COMBOS_AMQP_URL', 'G6_AMQP_CONNECT_IP',
+  'MESSAGING_PROVIDER', 'COMBOS_SERVICE_BUS_EVENTS_ENABLED', 'SERVICE_BUS_NAMESPACE_FQDN',
+  'AZURE_CLIENT_ID', 'G6_SERVICE_BUS_PRODUCTION_ENABLED', 'DATABASE_URL',
   'PGPORT', 'PGDATABASE', 'PGUSER', 'PGPASSWORD', 'PGHOST', 'PGSSLMODE', 'PGSSLROOTCERT'
 )
 $originalEnvironment = @{}
@@ -65,12 +79,18 @@ $catalogMigration = Join-Path $docsRoot 'datos\catalog-svc\migrations\0001_creat
 $pricingMigration = Join-Path $repoRoot 'apps\pricing-svc\test\fixtures\pricing.sql'
 $pricingOfficialMigration = Join-Path $docsRoot 'datos\pricing\migrations\0001_create_pricing.sql'
 $pricingContextMigration = Join-Path $repoRoot 'apps\pricing-svc\migrations\0002_schedule_effective_events.sql'
-foreach ($requiredMigration in @($migration, $receiptMigration, $catalogMigration, $pricingMigration, $pricingOfficialMigration, $pricingContextMigration)) {
+$requiredMigrations = @($migration, $receiptMigration)
+if ($Mode -eq 'legacy') {
+  $requiredMigrations += @($catalogMigration, $pricingMigration, $pricingOfficialMigration, $pricingContextMigration)
+}
+foreach ($requiredMigration in $requiredMigrations) {
   if (-not (Test-Path -LiteralPath $requiredMigration)) { throw "No se encontró la migración oficial: $requiredMigration" }
 }
-$pricingFixtureText = ([IO.File]::ReadAllText($pricingMigration) -replace "`r`n", "`n")
-$pricingOfficialText = ([IO.File]::ReadAllText($pricingOfficialMigration) -replace "`r`n", "`n")
-if ($pricingFixtureText -cne $pricingOfficialText) { throw 'La fixture Pricing no coincide con la migración oficial fijada.' }
+if ($Mode -eq 'legacy') {
+  $pricingFixtureText = ([IO.File]::ReadAllText($pricingMigration) -replace "`r`n", "`n")
+  $pricingOfficialText = ([IO.File]::ReadAllText($pricingOfficialMigration) -replace "`r`n", "`n")
+  if ($pricingFixtureText -cne $pricingOfficialText) { throw 'La fixture Pricing no coincide con la migración oficial fijada.' }
+}
 $dockerInfo = & docker info --format '{{.ServerVersion}}' 2>$null
 if ($LASTEXITCODE -ne 0) { throw 'Docker daemon no disponible; PostgreSQL aislado no ejecutado.' }
 $id = [guid]::NewGuid().ToString('N')
@@ -83,6 +103,9 @@ if (-not $folder.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) {
 $randomBytes = [byte[]]::new(24)
 [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($randomBytes)
 $password = [BitConverter]::ToString($randomBytes).Replace('-', '')
+$combosRuntimeBytes = [byte[]]::new(24)
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($combosRuntimeBytes)
+$combosRuntimePassword = [BitConverter]::ToString($combosRuntimeBytes).Replace('-', '')
 $catalogRandomBytes = [byte[]]::new(24)
 [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($catalogRandomBytes)
 $catalogPassword = [BitConverter]::ToString($catalogRandomBytes).Replace('-', '')
@@ -117,36 +140,49 @@ try {
   $portLine = & docker port $container '5432/tcp'
   if ($portLine -notmatch '^127\.0\.0\.1:(\d+)$') { throw 'PostgreSQL no quedó publicado en loopback.' }
   $port = $Matches[1]
-  & docker run --detach --name $rabbitContainer --label "$harnessLabel=true" --label "com.taller-sw.g6.combos-harness-id=$id" --publish '127.0.0.1::5672' --env 'RABBITMQ_DEFAULT_USER=combos_test' --env "RABBITMQ_DEFAULT_PASS=$rabbitPassword" rabbitmq:4.2.9-alpine | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw 'No se pudo iniciar RabbitMQ 4.2.9 desechable.' }
-  $rabbitStarted = $true
-  $rabbitReady = $false
-  for ($i=0; $i -lt 60; $i++) {
-    & docker exec --user rabbitmq $rabbitContainer rabbitmq-diagnostics -q check_running *> $null
-    $nodeRunning = $LASTEXITCODE -eq 0
-    if ($nodeRunning) {
-      & docker exec --user rabbitmq $rabbitContainer rabbitmq-diagnostics -q check_port_connectivity *> $null
-      $rabbitReady = $LASTEXITCODE -eq 0
+  $rabbitPort = 0
+  if ($Mode -eq 'legacy') {
+    & docker run --detach --name $rabbitContainer --label "$harnessLabel=true" --label "com.taller-sw.g6.combos-harness-id=$id" --publish '127.0.0.1::5672' --env 'RABBITMQ_DEFAULT_USER=combos_test' --env "RABBITMQ_DEFAULT_PASS=$rabbitPassword" rabbitmq:4.2.9-alpine | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'No se pudo iniciar RabbitMQ 4.2.9 desechable.' }
+    $rabbitStarted = $true
+    $rabbitReady = $false
+    for ($i=0; $i -lt 60; $i++) {
+      & docker exec --user rabbitmq $rabbitContainer rabbitmq-diagnostics -q check_running *> $null
+      $nodeRunning = $LASTEXITCODE -eq 0
+      if ($nodeRunning) {
+        & docker exec --user rabbitmq $rabbitContainer rabbitmq-diagnostics -q check_port_connectivity *> $null
+        $rabbitReady = $LASTEXITCODE -eq 0
+      }
+      if ($rabbitReady) { break }
+      Assert-ContainerRunning $rabbitContainer 'RabbitMQ durante readiness'
+      Start-Sleep -Seconds 1
     }
-    if ($rabbitReady) { break }
-    Assert-ContainerRunning $rabbitContainer 'RabbitMQ durante readiness'
-    Start-Sleep -Seconds 1
+    if (-not $rabbitReady) { throw 'RabbitMQ desechable no completó readiness de nodo y listeners AMQP.' }
+    $rabbitPortLine = & docker port $rabbitContainer '5672/tcp'
+    if ($rabbitPortLine -notmatch '^127\.0\.0\.1:(\d+)$') { throw 'RabbitMQ no quedó publicado en loopback.' }
+    $rabbitPort = [int]$Matches[1]
+    Assert-ContainerRunning $rabbitContainer 'RabbitMQ antes de preparar el esquema'
   }
-  if (-not $rabbitReady) { throw 'RabbitMQ desechable no completó readiness de nodo y listeners AMQP.' }
-  $rabbitPortLine = & docker port $rabbitContainer '5672/tcp'
-  if ($rabbitPortLine -notmatch '^127\.0\.0\.1:(\d+)$') { throw 'RabbitMQ no quedó publicado en loopback.' }
-  $rabbitPort = [int]$Matches[1]
   Assert-ContainerRunning $container 'PostgreSQL antes de preparar el esquema'
-  Assert-ContainerRunning $rabbitContainer 'RabbitMQ antes de preparar el esquema'
-  & docker exec $container psql -U postgres -d combos_test -v ON_ERROR_STOP=1 -c "CREATE ROLE po_combos_owner NOLOGIN; CREATE ROLE po_catalog_owner NOLOGIN; CREATE ROLE po_pricing_owner NOLOGIN; CREATE ROLE catalog_app LOGIN PASSWORD '$catalogPassword'; CREATE ROLE pricing_app LOGIN PASSWORD '$pricingPassword'; CREATE SCHEMA combos AUTHORIZATION po_combos_owner; CREATE SCHEMA catalog AUTHORIZATION po_catalog_owner; CREATE SCHEMA pricing AUTHORIZATION po_pricing_owner; CREATE SCHEMA extensions; CREATE EXTENSION btree_gist WITH SCHEMA extensions; GRANT USAGE ON SCHEMA extensions TO po_pricing_owner;"
-  if ($LASTEXITCODE -ne 0) { throw "No se pudieron preparar owners/schemas de prueba en la base desechable (psql exit $LASTEXITCODE)." }
-  foreach ($migrationSpec in @(
-    @{ Path = $catalogMigration; Owner = 'po_catalog_owner'; Name = 'catalog' },
-    @{ Path = $migration; Owner = 'po_combos_owner'; Name = 'combos' },
-    @{ Path = $receiptMigration; Owner = 'po_combos_owner'; Name = 'combos-receipts' },
-    @{ Path = $pricingMigration; Owner = 'po_pricing_owner'; Name = 'pricing' },
-    @{ Path = $pricingContextMigration; Owner = 'po_pricing_owner'; Name = 'pricing-context' }
-  )) {
+  if ($Mode -eq 'postgres-only') {
+    & docker exec $container psql -U postgres -d combos_test -v ON_ERROR_STOP=1 -c "CREATE ROLE po_combos_owner NOLOGIN; CREATE ROLE po_combos_app NOSUPERUSER NOCREATEDB NOCREATEROLE LOGIN PASSWORD '$combosRuntimePassword'; CREATE SCHEMA combos AUTHORIZATION po_combos_owner;"
+    if ($LASTEXITCODE -ne 0) { throw "No se pudieron preparar roles/schema combos en la base desechable (psql exit $LASTEXITCODE)." }
+    $migrationSpecs = @(
+      @{ Path = $migration; Owner = 'po_combos_owner'; Name = 'combos' },
+      @{ Path = $receiptMigration; Owner = 'po_combos_owner'; Name = 'combos-receipts' }
+    )
+  } else {
+    & docker exec $container psql -U postgres -d combos_test -v ON_ERROR_STOP=1 -c "CREATE ROLE po_combos_owner NOLOGIN; CREATE ROLE po_catalog_owner NOLOGIN; CREATE ROLE po_pricing_owner NOLOGIN; CREATE ROLE catalog_app LOGIN PASSWORD '$catalogPassword'; CREATE ROLE pricing_app LOGIN PASSWORD '$pricingPassword'; CREATE SCHEMA combos AUTHORIZATION po_combos_owner; CREATE SCHEMA catalog AUTHORIZATION po_catalog_owner; CREATE SCHEMA pricing AUTHORIZATION po_pricing_owner; CREATE SCHEMA extensions; CREATE EXTENSION btree_gist WITH SCHEMA extensions; GRANT USAGE ON SCHEMA extensions TO po_pricing_owner;"
+    if ($LASTEXITCODE -ne 0) { throw "No se pudieron preparar owners/schemas de prueba en la base desechable (psql exit $LASTEXITCODE)." }
+    $migrationSpecs = @(
+      @{ Path = $catalogMigration; Owner = 'po_catalog_owner'; Name = 'catalog' },
+      @{ Path = $migration; Owner = 'po_combos_owner'; Name = 'combos' },
+      @{ Path = $receiptMigration; Owner = 'po_combos_owner'; Name = 'combos-receipts' },
+      @{ Path = $pricingMigration; Owner = 'po_pricing_owner'; Name = 'pricing' },
+      @{ Path = $pricingContextMigration; Owner = 'po_pricing_owner'; Name = 'pricing-context' }
+    )
+  }
+  foreach ($migrationSpec in $migrationSpecs) {
     $migrationSql = [IO.File]::ReadAllText($migrationSpec.Path)
     $bootstrapSql = Join-Path $folder "apply-$($migrationSpec.Name).sql"
     [IO.File]::WriteAllText($bootstrapSql, "SET ROLE $($migrationSpec.Owner);`n$migrationSql", [Text.UTF8Encoding]::new($false))
@@ -154,20 +190,42 @@ try {
     & docker exec $container psql -U postgres -d combos_test -v ON_ERROR_STOP=1 -f "/tmp/apply-$($migrationSpec.Name).sql"
     if ($LASTEXITCODE -ne 0) { throw "Falló la migración oficial de $($migrationSpec.Name) en la instancia desechable (psql exit $LASTEXITCODE)." }
   }
-  $env:COMBOS_TEST_EPHEMERAL = '1'; $env:COMBOS_TEST_DATABASE_URL = 'harness-owned'; $env:COMBOS_TEST_CA = Join-Path $folder 'server.crt'
-  $env:COMBOS_TEST_CATALOG_PASSWORD = $catalogPassword
-  $env:COMBOS_TEST_PRICING_PASSWORD = $pricingPassword
+  if ($Mode -eq 'postgres-only') {
+    & docker exec $container psql -U postgres -d combos_test -v ON_ERROR_STOP=1 -c "GRANT USAGE ON SCHEMA combos TO po_combos_app; GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA combos TO po_combos_app; GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA combos TO po_combos_app;"
+    if ($LASTEXITCODE -ne 0) { throw "No se pudieron otorgar permisos runtime a po_combos_app (psql exit $LASTEXITCODE)." }
+  }
+  Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
+  $env:COMBOS_TEST_EPHEMERAL = '1'; $env:COMBOS_TEST_DATABASE_URL = 'harness-owned'; $env:COMBOS_TEST_MODE = $Mode; $env:COMBOS_TEST_CA = Join-Path $folder 'server.crt'
   $env:COMBOS_TEST_CWD = $folder
-  $env:COMBOS_TEST_RABBITMQ_URL = "amqp://combos_test:${rabbitPassword}@127.0.0.1:${rabbitPort}/%2f"
-  $env:COMBOS_TEST_RABBITMQ_CONTAINER = $rabbitContainer
-  Write-Output "HARNESS_FIXTURES: isolated=$($env:COMBOS_TEST_EPHEMERAL -eq '1') database=$($env:COMBOS_TEST_DATABASE_URL -eq 'harness-owned') rabbit=$($env:COMBOS_TEST_RABBITMQ_URL.StartsWith('amqp://')) catalogCredential=$([bool]$env:COMBOS_TEST_CATALOG_PASSWORD)"
   $env:PGPORT = $port; $env:PGDATABASE = 'combos_test'; $env:PGUSER = 'postgres'; $env:PGPASSWORD = $password
   $env:PGHOST = '127.0.0.1'; $env:PGSSLMODE = 'verify-full'; $env:PGSSLROOTCERT = $env:COMBOS_TEST_CA
+  if ($Mode -eq 'postgres-only') {
+    if ($TestFile -eq 'combos-service-bus-postgres.e2e-spec.ts') {
+      $env:PGUSER = 'po_combos_app'
+      $env:PGPASSWORD = $combosRuntimePassword
+      $env:COMBOS_TEST_EXPECT_RUNTIME_ROLE = '1'
+    }
+    $env:COMBOS_AMQP_ENABLED = 'false'
+    $env:COMBOS_SERVICE_BUS_EVENTS_ENABLED = 'false'
+    $env:G6_SERVICE_BUS_PRODUCTION_ENABLED = 'false'
+    foreach ($unsetName in @('COMBOS_AMQP_URL', 'COMBOS_TEST_RABBITMQ_URL', 'COMBOS_TEST_RABBITMQ_CONTAINER', 'G6_AMQP_CONNECT_IP', 'COMBOS_TEST_CATALOG_PASSWORD', 'COMBOS_TEST_PRICING_PASSWORD', 'MESSAGING_PROVIDER', 'SERVICE_BUS_NAMESPACE_FQDN', 'AZURE_CLIENT_ID')) {
+      Remove-Item "Env:$unsetName" -ErrorAction SilentlyContinue
+    }
+    Write-Output "HARNESS_FIXTURES: isolated=True mode=postgres-only database=True rabbitmq=False runtimeUser=$($env:PGUSER)"
+  } else {
+    $env:COMBOS_TEST_CATALOG_PASSWORD = $catalogPassword
+    $env:COMBOS_TEST_PRICING_PASSWORD = $pricingPassword
+    $env:COMBOS_TEST_RABBITMQ_URL = "amqp://combos_test:${rabbitPassword}@127.0.0.1:${rabbitPort}/%2f"
+    $env:COMBOS_TEST_RABBITMQ_CONTAINER = $rabbitContainer
+    Write-Output "HARNESS_FIXTURES: isolated=$($env:COMBOS_TEST_EPHEMERAL -eq '1') database=$($env:COMBOS_TEST_DATABASE_URL -eq 'harness-owned') rabbit=$($env:COMBOS_TEST_RABBITMQ_URL.StartsWith('amqp://')) catalogCredential=$([bool]$env:COMBOS_TEST_CATALOG_PASSWORD)"
+  }
   Push-Location $repoRoot
-  & npm.cmd run build:catalog-svc
-  if ($LASTEXITCODE -ne 0) { throw 'Falló el build de Catalog requerido por la suite de integración real.' }
-  & npm.cmd run build:pricing-svc
-  if ($LASTEXITCODE -ne 0) { throw 'Falló el build de Pricing requerido por la suite de integración real.' }
+  if ($Mode -eq 'legacy') {
+    & npm.cmd run build:catalog-svc
+    if ($LASTEXITCODE -ne 0) { throw 'Falló el build de Catalog requerido por la suite de integración real.' }
+    & npm.cmd run build:pricing-svc
+    if ($LASTEXITCODE -ne 0) { throw 'Falló el build de Pricing requerido por la suite de integración real.' }
+  }
   $testTarget = if ($TestFile) { "apps/combos-svc/test/$TestFile" } else { 'apps/combos-svc' }
   $testArguments = @($testTarget, '--maxWorkers=1', '--no-file-parallelism')
   if ($TestNamePattern) { $testArguments += @('--testNamePattern', $TestNamePattern) }

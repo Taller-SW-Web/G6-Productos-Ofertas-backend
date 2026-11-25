@@ -92,19 +92,28 @@ describe.skipIf(!isolatedHarnessEnabled)(
 
     const encode = (value: unknown) =>
       Buffer.from(JSON.stringify(value)).toString('base64url');
-    const makeToken = (kind: 'acceso' | 'servicio', scope?: string) => {
+    const makeToken = (
+      kind: 'acceso' | 'servicio',
+      scope?: string,
+      overrides: Record<string, unknown> = {},
+    ) => {
       const now = Math.floor(Date.now() / 1000);
-      const header = encode({ alg: 'RS256', typ: 'JWT', kid });
+      const header = encode({ alg: 'RS256', kid });
       const payload = encode({
         iss: issuer,
-        aud: 'g6-productos-ofertas',
-        sub: kind === 'servicio' ? 'combos-svc' : 'user-1',
-        token_tipo: kind,
+        aud: ['api-productos'],
+        sub:
+          kind === 'servicio'
+            ? 'modulo-productos'
+            : '00000000-0000-4000-8000-000000000010',
+        tipo: kind,
         ...(kind === 'acceso'
-          ? { rol: 'GESTOR_COMERCIAL' }
-          : { client_id: 'combos-svc', scope }),
+          ? { roles: ['GESTOR_COMERCIAL'] }
+          : { scope }),
         iat: now,
-        exp: now + 300,
+        exp: now + 600,
+        jti: randomUUID(),
+        ...overrides,
       });
       const signature = sign(
         'RSA-SHA256',
@@ -153,18 +162,27 @@ describe.skipIf(!isolatedHarnessEnabled)(
       });
       pricing = createServer((req, res) => {
         const parsed = new URL(req.url ?? '/', 'http://127.0.0.1');
-        const skus = (parsed.searchParams.get('skus') ?? '')
-          .split(',')
-          .filter(Boolean);
+        const skus = parsed.pathname.includes('/skus/')
+          ? [decodeURIComponent(parsed.pathname.split('/').at(-1)!)]
+          : (parsed.searchParams.get('skus') ?? '')
+              .split(',')
+              .filter(Boolean);
+        const item = (sku: string) => ({
+          sku,
+          precio_regular: 25.0,
+          precio_oferta: 22.0,
+          currency: 'PEN',
+          channel_id: null,
+          valid_from: '2026-01-01T00:00:00Z',
+          valid_until: null,
+          price_version: 1,
+          vigencia_id: `validity-${sku}`,
+          origen: 'PRODUCTO',
+        });
         res.writeHead(200, { 'content-type': 'application/json' }).end(
-          JSON.stringify({
-            items: skus.map((sku) => ({
-              sku,
-              precio_regular: 25,
-              precio_publico: 22,
-              moneda: 'PEN',
-            })),
-          }),
+          parsed.pathname.includes('/skus/')
+            ? JSON.stringify(item(skus[0]!))
+            : JSON.stringify({ items: skus.map(item) }),
         );
       });
       identity = createServer((req, res) => {
@@ -190,12 +208,21 @@ describe.skipIf(!isolatedHarnessEnabled)(
           req.on('data', (c) => chunks.push(c));
           req.on('end', () => {
             const form = new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
+            if (
+              form.get('grant_type') !== 'client_credentials' ||
+              form.get('client_id') !== 'modulo-productos' ||
+              form.get('client_secret') !== 'test-secret'
+            ) {
+              res.writeHead(401, { 'content-type': 'application/json' }).end('{}');
+              return;
+            }
             const scope = form.get('scope') ?? 'catalogo:leer';
             res.writeHead(200, { 'content-type': 'application/json' }).end(
               JSON.stringify({
-                access_token: makeToken('servicio', scope),
-                token_type: 'Bearer',
-                expires_in: 300,
+                accessToken: makeToken('servicio', scope),
+                tokenType: 'Bearer',
+                expiresIn: 600,
+                scopes: [scope],
               }),
             );
           });
@@ -278,6 +305,36 @@ describe.skipIf(!isolatedHarnessEnabled)(
         .expect(201);
       return String(response.body.combo_id);
     }
+
+    it('T08 + T12: enforces 401/403 HTTP auth, runs under non-owner runtime role, and reports readiness permissions', async () => {
+      await request(app.getHttpServer()).get('/api/v1/combos').expect(401);
+      await request(app.getHttpServer())
+        .get('/api/v1/combos')
+        .set(
+          'authorization',
+          `Bearer ${makeToken('acceso', undefined, { roles: ['OTRO_ROL'] })}`,
+        )
+        .expect(403);
+
+      const roleCheck = await database.query((c) =>
+        c.query<{ current_user: string; is_super: boolean }>(
+          'SELECT current_user, usesuper AS is_super FROM pg_user WHERE usename = current_user',
+        ),
+      );
+      if (process.env.COMBOS_TEST_EXPECT_RUNTIME_ROLE === '1') {
+        expect(roleCheck.rows[0]?.current_user).toBe('po_combos_app');
+        expect(roleCheck.rows[0]?.is_super).toBe(false);
+      }
+      const readiness = await service.readiness(consumer.readinessDetails());
+      expect(readiness).toMatchObject({
+        status: 'ok',
+        transport: 'AZURE_SERVICE_BUS',
+        dependencies: {
+          postgres: 'ok',
+          postgres_permissions: 'ok',
+        },
+      });
+    });
 
     it('T01 + T05 + T09: deactivates SKU, preserves other component, blocks Inventory reactivation, and preserves conservative HTTP availability', async () => {
       const skuA = `H5-T01-A-${randomUUID().slice(0, 8)}`;
