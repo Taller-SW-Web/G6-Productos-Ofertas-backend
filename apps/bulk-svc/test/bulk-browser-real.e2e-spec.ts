@@ -273,7 +273,7 @@ describe.skipIf(!enabled)(
       let injectedTransientFailure = false;
       const transientIdentity = new CatalogBulkIdentity(undefined, new CatalogTokenVerifier(undefined));
       vi.spyOn(transientIdentity, 'authorization').mockRejectedValue(
-        new CatalogIdentityAcquisitionError('Simulated transient Catalog auth outage for browser retry E2E', 503),
+        new CatalogIdentityAcquisitionError('TRANSIENT'),
       );
       const healthyIdentity = new CatalogBulkIdentity(undefined, new CatalogTokenVerifier(undefined));
       vi.spyOn(healthyIdentity, 'authorization').mockResolvedValue('Bearer isolated-master-fixture');

@@ -13,7 +13,7 @@ import { createValidBulkXlsx } from './support/bulk-template-fixtures.js';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { eq } from 'drizzle-orm';
-import { bulkSchema, batchRows } from '../src/persistence/bulk.schema.js';
+import { bulkSchema, batchRows, outbox as bulkOutbox } from '../src/persistence/bulk.schema.js';
 import { BulkPersistenceRepository } from '../src/persistence/bulk.repository.js';
 
 const bulkDatabaseUrl = process.env.BULK_RETRY_INTEGRATION_BULK_DATABASE_URL;
@@ -277,8 +277,13 @@ describe.skipIf(!enabled)('P1 Bulk Performance Suite (PostgreSQL 17 + Storage lo
     const rowId = firstRow!.rowId;
     const msgId = randomUUID();
     const opId = randomUUID();
-    const causId = randomUUID();
     const corrId = String(retryAdmit.body.correlation_id);
+    const [admittedOutbox] = await bulkDb
+      .select()
+      .from(bulkOutbox)
+      .where(eq(bulkOutbox.correlationId, corrId))
+      .limit(1);
+    const causId = admittedOutbox!.messageId;
     await bulkRepo.recordCatalogBulkResult({
       messageId: msgId,
       operationId: opId,

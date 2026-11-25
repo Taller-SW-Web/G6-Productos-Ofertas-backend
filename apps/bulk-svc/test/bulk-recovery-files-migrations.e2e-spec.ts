@@ -240,23 +240,26 @@ integration('P1 Bulk Recovery, Files/Exports & Migrations (PostgreSQL 17 + Stora
     const tokenA = signUser(ownerA);
     const tokenB = signUser(ownerB);
     const exportSource: BulkExportSource = {
-      catalog: async () => ({
-        items: [
-          {
-            productId: randomUUID(),
-            skuBase: 'EXP-FORMULA-1',
-            variantSku: null,
-            name: '=CMD("calc")',
-            description: '+SUM(1,2)',
-            categoryId: 'cat-1',
-            brandId: 'brand-1',
-            productTypeId: 'type-1',
-          },
-        ],
-        nextCursor: null,
-        observedAt: new Date().toISOString(),
-        version: '1',
-      }),
+      catalog: async () => {
+        console.info('[export-test] exportSource.catalog invoked');
+        return {
+          items: [
+            {
+              productId: randomUUID(),
+              skuBase: 'EXP-FORMULA-1',
+              variantSku: null,
+              name: '=CMD("calc")',
+              description: '+SUM(1,2)',
+              categoryId: 'cat-1',
+              brandId: 'brand-1',
+              productTypeId: 'type-1',
+            },
+          ],
+          nextCursor: null,
+          observedAt: new Date().toISOString(),
+          version: '1',
+        };
+      },
       pricing: async () => ({ items: [], nextCursor: null, observedAt: new Date().toISOString(), version: '1' }),
       inventory: async () => ({ items: [], nextCursor: null, observedAt: new Date().toISOString(), version: '1' }),
     };
