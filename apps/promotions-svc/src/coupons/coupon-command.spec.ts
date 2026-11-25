@@ -51,6 +51,18 @@ describe('coupon command contract and semantic identity', () => {
     expect(parseCouponCommand(input, 'modulo-ventas')).toEqual(input);
   });
 
+  it.each(['MARKETPLACE', 'CHATBOT', 'RETAIL'] as const)(
+    'accepts commercial snapshot channel %s without conflating the sender module',
+    (channel_id) => {
+      const input = command();
+      input.data.channel_id = channel_id;
+      expect(parseCouponCommand(input, 'modulo-ventas').data.channel_id).toBe(
+        channel_id,
+      );
+      expect(input.producer).toBe('modulo-ventas');
+    },
+  );
+
   it.each([
     (value: ReturnType<typeof command>) => {
       value.schema_version = 1;
@@ -69,6 +81,9 @@ describe('coupon command contract and semantic identity', () => {
     },
     (value: ReturnType<typeof command>) => {
       value.data.channel_id = 'UNKNOWN';
+    },
+    (value: ReturnType<typeof command>) => {
+      value.data.channel_id = 'VENTAS';
     },
   ])('rejects malformed envelope/data before any persistence', (mutate) => {
     const input = command();

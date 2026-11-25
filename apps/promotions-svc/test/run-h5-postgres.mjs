@@ -29,8 +29,10 @@ try {
     '--env',
     'POSTGRES_PASSWORD=synthetic-h5-local-only',
     '--env',
+    'POSTGRES_HOST_AUTH_METHOD=trust',
+    '--env',
     'POSTGRES_DB=' + database,
-    'postgres:17-alpine',
+    'postgres:17.11',
   ]);
   created = true;
   let ready = false;
@@ -71,6 +73,8 @@ try {
           port +
           '/' +
           database,
+        PROMOTIONS_H5_RUNTIME_DATABASE_URL:
+          'postgresql://promotions_h5_runtime_test@' + port + '/' + database,
       },
       timeout: 120000,
     },
