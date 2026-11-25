@@ -1,0 +1,1091 @@
+import { createSign, generateKeyPairSync, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { createConnection, createServer, type Socket } from 'node:net';
+import { resolve } from 'node:path';
+import { inflateRawSync } from 'node:zlib';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { eq } from 'drizzle-orm';
+import { Test } from '@nestjs/testing';
+import request from 'supertest';
+import { BulkSvcModule } from '../src/bulk-svc.module.js';
+import { BulkProblemFilter } from '../src/http/bulk-problem.filter.js';
+import { BulkReadinessService } from '../src/health/bulk-readiness.service.js';
+import { BulkStorageService } from '../src/storage/bulk-storage.service.js';
+import { BulkDomainError } from '../src/domain/bulk.domain-error.js';
+import {
+  BULK_EXPORT_SOURCE,
+  type BulkExportSource,
+} from '../src/export/bulk-export-source.js';
+import { BulkExportService } from '../src/bulk-export.service.js';
+import {
+  batchJobs,
+  bulkSchema,
+  fileManifests,
+  outbox as bulkOutbox,
+} from '../src/persistence/bulk.schema.js';
+import { BulkPersistenceRepository } from '../src/persistence/bulk.repository.js';
+import { BULK_TEMPLATE_HEADERS } from '../src/domain/bulk-template-v2.js';
+import { EXPORT_HEADERS } from '../src/export/bulk-export-format.js';
+import {
+  Database,
+  type PostgresSettings,
+} from '../../catalog-svc/src/database.js';
+import { CatalogTransactionManager } from '../../catalog-svc/src/catalog-transaction.js';
+import { CatalogMutationService } from '../../catalog-svc/src/catalog-mutation.service.js';
+import { PostgresCatalogWriteRepository } from '../../catalog-svc/src/postgres-catalog-write.repository.js';
+import {
+  CatalogBulkService,
+  CatalogBulkIdentity,
+} from '../../catalog-svc/src/catalog-bulk.service.js';
+import { CatalogTokenVerifier } from '../../catalog-svc/src/catalog-auth.js';
+import {
+  CatalogBulkContentClient,
+  CatalogBulkContentIdentity,
+} from '../../catalog-svc/src/catalog-bulk-content.js';
+import { products } from '../../catalog-svc/src/catalog.schema.js';
+import type { CatalogEnvelope } from '../../catalog-svc/src/catalog-messages.js';
+
+const bulkDatabaseUrl = process.env.BULK_RETRY_INTEGRATION_BULK_DATABASE_URL;
+const catalogDatabaseUrl =
+  process.env.BULK_RETRY_INTEGRATION_CATALOG_DATABASE_URL;
+const storageUrl = process.env.BULK_RETRY_INTEGRATION_STORAGE_URL;
+const storageServiceKey =
+  process.env.BULK_RETRY_INTEGRATION_STORAGE_SERVICE_ROLE_KEY;
+const adminDatabaseUrl = process.env.BULK_MIGRATION_ADMIN_DATABASE_URL;
+
+const integration =
+  bulkDatabaseUrl && catalogDatabaseUrl && storageUrl && storageServiceKey
+    ? describe
+    : describe.skip;
+
+const jwtKeys = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const ownerA = '11111111-1111-4111-8111-111111111111';
+const ownerB = '22222222-2222-4222-8222-222222222222';
+
+function signUser(sub: string, roles = ['GESTOR_COMERCIAL']) {
+  const encode = (v: object) =>
+    Buffer.from(JSON.stringify(v)).toString('base64url');
+  const h = encode({ alg: 'RS256', typ: 'JWT' });
+  const c = encode({
+    iss: 'bulk-recovery-suite',
+    sub,
+    tipo: 'acceso',
+    aud: 'api-productos',
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 900,
+    jti: randomUUID(),
+    roles,
+  });
+  const s = createSign('RSA-SHA256');
+  s.update(`${h}.${c}`);
+  return `${h}.${c}.${s.sign(jwtKeys.privateKey, 'base64url')}`;
+}
+
+function readZipEntries(archive: Buffer): Map<string, Buffer> {
+  const entries = new Map<string, Buffer>();
+  let offset = 0;
+  while (
+    offset + 30 <= archive.length &&
+    archive.readUInt32LE(offset) === 0x04034b50
+  ) {
+    const method = archive.readUInt16LE(offset + 8);
+    const compressedSize = archive.readUInt32LE(offset + 18);
+    const nameLen = archive.readUInt16LE(offset + 26);
+    const extraLen = archive.readUInt16LE(offset + 28);
+    const name = archive
+      .subarray(offset + 30, offset + 30 + nameLen)
+      .toString('utf8');
+    const dataStart = offset + 30 + nameLen + extraLen;
+    const raw = archive.subarray(dataStart, dataStart + compressedSize);
+    const content = method === 8 ? inflateRawSync(raw) : Buffer.from(raw);
+    entries.set(name, content);
+    offset = dataStart + compressedSize;
+  }
+  return entries;
+}
+
+function writeZipStored(
+  entries: Array<{ name: string; content: Buffer }>,
+): Buffer {
+  const crc32 = (bytes: Buffer) => {
+    let crc = 0xffffffff;
+    for (const byte of bytes) {
+      crc ^= byte;
+      for (let bit = 0; bit < 8; bit++)
+        crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  };
+  const local: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+  for (const entry of entries) {
+    const name = Buffer.from(entry.name, 'utf8');
+    const checksum = crc32(entry.content);
+    const header = Buffer.alloc(30 + name.length);
+    header.writeUInt32LE(0x04034b50, 0);
+    header.writeUInt16LE(20, 4);
+    header.writeUInt16LE(0x0800, 6);
+    header.writeUInt32LE(checksum, 14);
+    header.writeUInt32LE(entry.content.length, 18);
+    header.writeUInt32LE(entry.content.length, 22);
+    header.writeUInt16LE(name.length, 26);
+    name.copy(header, 30);
+    local.push(header, entry.content);
+
+    const dir = Buffer.alloc(46 + name.length);
+    dir.writeUInt32LE(0x02014b50, 0);
+    dir.writeUInt16LE(20, 4);
+    dir.writeUInt16LE(20, 6);
+    dir.writeUInt16LE(0x0800, 8);
+    dir.writeUInt32LE(checksum, 16);
+    dir.writeUInt32LE(entry.content.length, 20);
+    dir.writeUInt32LE(entry.content.length, 24);
+    dir.writeUInt16LE(name.length, 28);
+    dir.writeUInt32LE(offset, 42);
+    name.copy(dir, 46);
+    central.push(dir);
+    offset += header.length + entry.content.length;
+  }
+  const centralBuf = Buffer.concat(central);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(centralBuf.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  return Buffer.concat([...local, centralBuf, eocd]);
+}
+
+function extractSheetRows(sheetXml: string): string[][] {
+  const rows: string[][] = [];
+  for (const rowMatch of sheetXml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+    const cells: string[] = [];
+    for (const cellMatch of rowMatch[1]!.matchAll(
+      /<c\b[^>]*>([\s\S]*?)<\/c>/g,
+    )) {
+      const inner = cellMatch[1]!;
+      const textMatch =
+        inner.match(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/) ??
+        inner.match(/<v>([\s\S]*?)<\/v>/);
+      const decoded = (textMatch?.[1] ?? '')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&apos;', "'");
+      cells.push(decoded);
+    }
+    rows.push(cells);
+  }
+  return rows;
+}
+
+integration(
+  'P1 Bulk Recovery, Files/Exports & Migrations (PostgreSQL 17 + Storage local)',
+  () => {
+    let pool: Pool;
+    let bulkDb: ReturnType<typeof drizzle<typeof bulkSchema>>;
+    let bulkRepo: BulkPersistenceRepository;
+    let catalogDb: Database;
+    const restoreFlags: Array<[string, string | undefined]> = [];
+
+    const setFlag = (name: string, value: string) => {
+      restoreFlags.push([name, process.env[name]]);
+      process.env[name] = value;
+    };
+
+    beforeAll(async () => {
+      setFlag('NODE_ENV', 'test');
+      setFlag('DATABASE_URL', bulkDatabaseUrl!);
+      setFlag('G6_SECURITY_MODE', 'G7_AUTHENTICATED');
+      setFlag('G7_JWT_ISSUER', 'bulk-recovery-suite');
+      setFlag(
+        'G7_JWT_PUBLIC_KEY',
+        jwtKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+      );
+      setFlag('BULK_STORAGE_BUCKET', 'bulk-retry-integration');
+      setFlag('SUPABASE_URL', storageUrl!);
+      setFlag('SUPABASE_SERVICE_ROLE_KEY', storageServiceKey!);
+      setFlag('BULK_CATALOG_V3_ENABLED', 'true');
+      setFlag('BULK_CATALOG_V3_AUTHORIZATION_VERIFIED', 'true');
+      setFlag('BULK_RETRY_CATALOG_V1_ENABLED', 'true');
+      setFlag('BULK_RETRY_ELIGIBILITY_ENABLED', 'true');
+      setFlag('BULK_CORRELATION_RECONCILIATION_ENABLED', 'true');
+      setFlag('BULK_AMQP_ENABLED', 'false');
+
+      pool = new Pool({ connectionString: bulkDatabaseUrl, max: 6 });
+      pool.on('error', () => {});
+      bulkDb = drizzle(pool, { schema: bulkSchema, logger: false });
+      bulkRepo = new BulkPersistenceRepository(bulkDb);
+
+      const catalogUrl = new URL(catalogDatabaseUrl!);
+      const catalogSettings: PostgresSettings = {
+        pool: {
+          host: catalogUrl.hostname,
+          port: Number(catalogUrl.port || 5432),
+          database: catalogUrl.pathname.slice(1),
+          user: decodeURIComponent(catalogUrl.username),
+          password: decodeURIComponent(catalogUrl.password),
+          ssl: false,
+          max: 4,
+        },
+        expectedRole: decodeURIComponent(catalogUrl.username),
+        database: catalogUrl.pathname.slice(1),
+        user: decodeURIComponent(catalogUrl.username),
+        password: decodeURIComponent(catalogUrl.password),
+        mode: 'direct',
+      };
+      catalogDb = new Database(catalogSettings);
+      await catalogDb.verifyIdentity();
+    });
+
+    afterAll(async () => {
+      await pool
+        ?.query(
+          'UPDATE bulk.outbox SET published_at = COALESCE(published_at, NOW())',
+        )
+        .catch(() => {});
+      await catalogDb?.onModuleDestroy();
+      await pool?.end();
+      for (const [name, value] of restoreFlags) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    });
+
+    it('preserves pending Outbox across NestJS module recreation, deduplicates Catalog consumer, and handles simulated Storage adapter fault injection + malformed claim-check', async () => {
+      const token = signUser(ownerA);
+      const mod1 = await Test.createTestingModule({ imports: [BulkSvcModule] })
+        .overrideProvider(BulkReadinessService)
+        .useValue({ probe: async () => ({ ready: true }) })
+        .compile();
+      const app1 = mod1.createNestApplication({ logger: false });
+      app1.useGlobalFilters(new BulkProblemFilter());
+      await app1.init();
+
+      const correlationId = randomUUID();
+      const sku = `BULK-RESTART-${randomUUID().slice(0, 8)}`;
+      const csv = Buffer.from(
+        `${BULK_TEMPLATE_HEADERS.join(',')}\r\n"ALTA","","","${sku}","","Producto Restart","Desc","category-fixture","brand-fixture","type-fixture","false","10.50","[]","","","0"\r\n`,
+        'utf8',
+      );
+      const admitRes = await request(app1.getHttpServer())
+        .post('/api/v1/carga-masiva/productos/importaciones')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-Correlation-Id', correlationId)
+        .field('template_version', '2')
+        .attach('archivo', csv, {
+          filename: 'restart.csv',
+          contentType: 'text/csv',
+        })
+        .expect(202);
+      expect(admitRes.body.batch_id).toMatch(/^[0-9a-f-]{36}$/i);
+
+      // Close first Bulk instance while outbox is still pending
+      await app1.close();
+
+      // Recreate a fresh Bulk instance
+      const mod2 = await Test.createTestingModule({ imports: [BulkSvcModule] })
+        .overrideProvider(BulkReadinessService)
+        .useValue({ probe: async () => ({ ready: true }) })
+        .compile();
+      const app2 = mod2.createNestApplication({ logger: false });
+      app2.useGlobalFilters(new BulkProblemFilter());
+      await app2.init();
+      try {
+        const [outboxRow] = await bulkDb
+          .select()
+          .from(bulkOutbox)
+          .where(eq(bulkOutbox.correlationId, correlationId));
+        expect(outboxRow).toBeDefined();
+        expect(outboxRow?.publishedAt).toBeNull();
+
+        // Test Storage outage -> 503, then recovery -> 200
+        const storage = mod2.get(BulkStorageService);
+        const putSpy = vi
+          .spyOn(storage, 'put')
+          .mockRejectedValueOnce(
+            new BulkDomainError('STORAGE_UNAVAILABLE', 'Storage 503 simulated'),
+          );
+        await request(app2.getHttpServer())
+          .post('/api/v1/carga-masiva/productos/importaciones')
+          .set('Authorization', `Bearer ${token}`)
+          .set('X-Correlation-Id', randomUUID())
+          .field('template_version', '2')
+          .attach('archivo', csv, {
+            filename: 'outage.csv',
+            contentType: 'text/csv',
+          })
+          .expect(503);
+        putSpy.mockRestore();
+
+        // Test malformed claim-check document -> Catalog rejects without commercial mutation
+        const productsBefore = await catalogDb.read((db) =>
+          db.select().from(products),
+        );
+        const tx = new CatalogTransactionManager(catalogDb);
+        const mutations = new CatalogMutationService(
+          tx,
+          new PostgresCatalogWriteRepository(),
+          {
+            masters: async () => ({ schemaVersion: 1 }),
+            attributes: async (_t: string, v: unknown[]) => v,
+          } as never,
+          { resolve: async (_i, id) => ({ slug: `rec-${id}`, moneda: 'PEN' }) },
+        );
+        const idMock = new CatalogBulkIdentity(
+          undefined,
+          new CatalogTokenVerifier(undefined),
+        );
+        vi.spyOn(idMock, 'authorization').mockResolvedValue(
+          'Bearer isolated-master-fixture',
+        );
+        const badClient = {
+          getDocument: async () => {
+            throw new Error('Malformed claim-check JSON');
+          },
+        } as unknown as CatalogBulkContentClient;
+        const badConsumer = new CatalogBulkService(
+          catalogDb,
+          mutations,
+          idMock,
+          badClient,
+        );
+        const envelope = outboxRow!.payload as unknown as CatalogEnvelope;
+        await expect(badConsumer.consume(envelope)).rejects.toThrow();
+        expect(
+          await catalogDb.read((db) => db.select().from(products)),
+        ).toEqual(productsBefore);
+
+        // Contradictory batch/family identity -> rejected without mutation
+        await expect(
+          bulkRepo.recordCatalogBulkResult({
+            messageId: randomUUID(),
+            operationId: randomUUID(),
+            causationId: randomUUID(),
+            eventName: 'catalog.bulk.upsert.completed',
+            correlationId,
+            payload: { unknown: true },
+          }),
+        ).rejects.toThrow(/inconsistent|INVALID_INPUT/i);
+
+        // Simulate Catalog restart after durable commit -> redelivery is deduplicated
+        const contentIdentity = new CatalogBulkContentIdentity(
+          undefined,
+          new CatalogTokenVerifier(undefined),
+        );
+        vi.spyOn(contentIdentity, 'authorization').mockResolvedValue(
+          'Bearer invalid-unused',
+        );
+        const localContentClient = {
+          getDocument: async (ref: { content_id: string }) => {
+            const res = await bulkRepo.findContentDocument(ref.content_id);
+            const bytes = await storage.get(res!.contentRef);
+            return JSON.parse(bytes.toString('utf8'));
+          },
+        } as unknown as CatalogBulkContentClient;
+        const consumer1 = new CatalogBulkService(
+          catalogDb,
+          mutations,
+          idMock,
+          localContentClient,
+        );
+        await expect(consumer1.consume(envelope)).resolves.toBe('APPLIED');
+        const productsAfterFirst = await catalogDb.read((db) =>
+          db.select().from(products),
+        );
+        expect(productsAfterFirst.length).toBe(productsBefore.length + 1);
+
+        // Recreate CatalogBulkService (simulating Catalog restart) and redeliver same envelope
+        const consumer2 = new CatalogBulkService(
+          catalogDb,
+          mutations,
+          idMock,
+          localContentClient,
+        );
+        await expect(consumer2.consume(envelope)).resolves.toBe('DUPLICATE');
+        expect(
+          await catalogDb.read((db) => db.select().from(products)),
+        ).toEqual(productsAfterFirst);
+      } finally {
+        await app2.close();
+      }
+    }, 60_000);
+
+    it('validates CSV/XLSX templates, roundtrip, formula injection protection, exports, report download, and owner isolation', async () => {
+      const tokenA = signUser(ownerA);
+      const tokenB = signUser(ownerB);
+      const exportSource: BulkExportSource = {
+        catalog: async () => {
+          console.info('[export-test] exportSource.catalog invoked');
+          return {
+            items: [
+              {
+                productId: randomUUID(),
+                skuBase: 'EXP-FORMULA-1',
+                variantSku: null,
+                name: '=CMD("calc")',
+                description: '+SUM(1,2)',
+                categoryId: 'cat-1',
+                brandId: 'brand-1',
+                productTypeId: 'type-1',
+              },
+            ],
+            nextCursor: null,
+            observedAt: new Date().toISOString(),
+            version: '1',
+          };
+        },
+        pricing: async () => ({
+          items: [],
+          nextCursor: null,
+          observedAt: new Date().toISOString(),
+          version: '1',
+        }),
+        inventory: async () => ({
+          items: [],
+          nextCursor: null,
+          observedAt: new Date().toISOString(),
+          version: '1',
+        }),
+      };
+
+      const mod = await Test.createTestingModule({ imports: [BulkSvcModule] })
+        .overrideProvider(BULK_EXPORT_SOURCE)
+        .useValue(exportSource)
+        .overrideProvider(BulkExportService)
+        .useFactory({
+          factory: (
+            repo: BulkPersistenceRepository,
+            storage: BulkStorageService,
+          ) => new BulkExportService(repo, storage, exportSource),
+          inject: [BulkPersistenceRepository, BulkStorageService],
+        })
+        .overrideProvider(BulkReadinessService)
+        .useValue({ probe: async () => ({ ready: true }) })
+        .compile();
+      const app = mod.createNestApplication();
+      app.useGlobalFilters(new BulkProblemFilter());
+      await app.init();
+      const server = app.getHttpServer();
+
+      // Templates CSV & XLSX + unsupported format
+      const csvTpl = await request(server)
+        .get('/api/v1/carga-masiva/productos/plantilla?formato=CSV')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      expect(csvTpl.headers['content-type']).toContain('text/csv');
+      expect(csvTpl.headers['content-disposition']).toMatch(/filename=/i);
+      expect(csvTpl.text).toContain('sku');
+
+      const xlsxTpl = await request(server)
+        .get('/api/v1/carga-masiva/productos/plantilla?formato=XLSX')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .buffer(true)
+        .parse((res, cb) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => chunks.push(c));
+          res.on('end', () => cb(null, Buffer.concat(chunks)));
+        })
+        .expect(200);
+      expect(xlsxTpl.headers['content-type']).toContain('spreadsheetml.sheet');
+      expect((xlsxTpl.body as Buffer).subarray(0, 2).toString('hex')).toBe(
+        '504b',
+      );
+
+      await request(server)
+        .get('/api/v1/carga-masiva/productos/plantilla?formato=PDF')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(400);
+
+      // Roundtrip: use downloaded CSV template + 1 valid row -> import 202
+      const roundtripRow = `"ALTA","","","RT-${randomUUID().slice(0, 8)}","","Roundtrip","Desc","cat","brand","type","false","15.00","[]","","","0"`;
+      const roundtripCsv = Buffer.from(
+        `${csvTpl.text.trimEnd()}\r\n${roundtripRow}\r\n`,
+        'utf8',
+      );
+      await request(server)
+        .post('/api/v1/carga-masiva/productos/importaciones')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .set('X-Correlation-Id', randomUUID())
+        .field('template_version', '2')
+        .attach('archivo', roundtripCsv, {
+          filename: 'roundtrip.csv',
+          contentType: 'text/csv',
+        })
+        .expect(202);
+
+      // Real XLSX roundtrip: parse downloaded template, insert valid row, repackage ZIP, import -> Catalog persistence
+      const tplEntries = readZipEntries(xlsxTpl.body as Buffer);
+      expect(tplEntries.get('xl/workbook.xml')?.toString('utf8')).toContain(
+        'Plantilla v2',
+      );
+      const tplSheetXml = tplEntries.get('xl/worksheets/sheet1.xml');
+      expect(tplSheetXml).toBeDefined();
+      const tplRows = extractSheetRows(tplSheetXml!.toString('utf8'));
+      expect(tplRows[0]).toEqual([...BULK_TEMPLATE_HEADERS]);
+
+      const xlsxSku = `RT-XLSX-${randomUUID().slice(0, 8)}`;
+      const xlsxDataRow = [
+        'ALTA',
+        '',
+        '',
+        xlsxSku,
+        '',
+        'Producto XLSX Roundtrip',
+        'Desc XLSX',
+        'category-fixture',
+        'brand-fixture',
+        'type-fixture',
+        'false',
+        '29.90',
+        '[]',
+        '',
+        '',
+        '0',
+      ];
+      const escapeXml = (val: string) =>
+        val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const colName = (idx: number) => {
+        let n = idx + 1;
+        let out = '';
+        while (n > 0) {
+          const rem = (n - 1) % 26;
+          out = String.fromCharCode(65 + rem) + out;
+          n = Math.floor((n - 1) / 26);
+        }
+        return out;
+      };
+      const renderRow = (rowNum: number, values: readonly string[]) =>
+        `<row r="${rowNum}">${values
+          .map(
+            (v, i) =>
+              `<c r="${colName(i)}${rowNum}" t="inlineStr"><is><t>${escapeXml(v)}</t></is></c>`,
+          )
+          .join('')}</row>`;
+      const editedSheetXml =
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' +
+        renderRow(1, BULK_TEMPLATE_HEADERS) +
+        renderRow(2, xlsxDataRow) +
+        '</sheetData></worksheet>';
+      tplEntries.set(
+        'xl/worksheets/sheet1.xml',
+        Buffer.from(editedSheetXml, 'utf8'),
+      );
+      const roundtripXlsx = writeZipStored(
+        Array.from(tplEntries, ([name, content]) => ({ name, content })),
+      );
+
+      const xlsxCorrelationId = randomUUID();
+      const xlsxImportRes = await request(server)
+        .post('/api/v1/carga-masiva/productos/importaciones')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .set('X-Correlation-Id', xlsxCorrelationId)
+        .field('template_version', '2')
+        .attach('archivo', roundtripXlsx, {
+          filename: 'roundtrip.xlsx',
+          contentType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        })
+        .expect(202);
+      expect(xlsxImportRes.body.batch_id).toMatch(/^[0-9a-f-]{36}$/i);
+
+      const [xlsxOutboxRow] = await bulkDb
+        .select()
+        .from(bulkOutbox)
+        .where(eq(bulkOutbox.correlationId, xlsxCorrelationId));
+      expect(xlsxOutboxRow).toBeDefined();
+
+      const storageForXlsx = mod.get(BulkStorageService);
+      const txXlsx = new CatalogTransactionManager(catalogDb);
+      const mutationsXlsx = new CatalogMutationService(
+        txXlsx,
+        new PostgresCatalogWriteRepository(),
+        {
+          masters: async () => ({ schemaVersion: 1 }),
+          attributes: async (_t: string, v: unknown[]) => v,
+        } as never,
+        { resolve: async (_i, id) => ({ slug: `rec-${id}`, moneda: 'PEN' }) },
+      );
+      const idMockXlsx = new CatalogBulkIdentity(
+        undefined,
+        new CatalogTokenVerifier(undefined),
+      );
+      vi.spyOn(idMockXlsx, 'authorization').mockResolvedValue(
+        'Bearer isolated-master-fixture',
+      );
+      const xlsxConsumer = new CatalogBulkService(
+        catalogDb,
+        mutationsXlsx,
+        idMockXlsx,
+        {
+          getDocument: async (ref: { content_id: string }) => {
+            const res = await bulkRepo.findContentDocument(ref.content_id);
+            const bytes = await storageForXlsx.get(res!.contentRef);
+            return JSON.parse(bytes.toString('utf8'));
+          },
+        } as unknown as CatalogBulkContentClient,
+      );
+      await expect(
+        xlsxConsumer.consume(
+          xlsxOutboxRow!.payload as unknown as CatalogEnvelope,
+        ),
+      ).resolves.toBe('APPLIED');
+      const allCatalogProducts = await catalogDb.read((db) =>
+        db.select().from(products),
+      );
+      const catalogXlsxRows = allCatalogProducts.filter(
+        (p) => p.nombre === 'Producto XLSX Roundtrip',
+      );
+      expect(catalogXlsxRows).toHaveLength(1);
+      expect(catalogXlsxRows[0]?.nombre).toBe('Producto XLSX Roundtrip');
+
+      // Export CSV with formula injection protection + XLSX + owner isolation + 404
+      const storage2 = mod.get(BulkStorageService);
+      const origPut = storage2.put.bind(storage2);
+      vi.spyOn(storage2, 'put').mockImplementation(async (...args) => {
+        try {
+          return await origPut(...args);
+        } catch (err) {
+          console.error('[export-test storage.put error]', err);
+          throw err;
+        }
+      });
+      const expCsv = await request(server)
+        .post('/api/v1/carga-masiva/productos/exportaciones')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ formato: 'CSV' })
+        .expect(202);
+      const exportId = String(expCsv.body.export_id);
+
+      let status = 'QUEUED';
+      for (let i = 0; i < 30; i++) {
+        const poll = await request(server)
+          .get(`/api/v1/carga-masiva/productos/exportaciones/${exportId}`)
+          .set('Authorization', `Bearer ${tokenA}`)
+          .expect(200);
+        status = poll.body.status;
+        if (status === 'COMPLETED' || status === 'FAILED_GENERAL') break;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      expect(status).toBe('COMPLETED');
+
+      const dlCsv = await request(server)
+        .get(`/api/v1/carga-masiva/productos/exportaciones/${exportId}/archivo`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+      expect(dlCsv.headers['content-type']).toContain('text/csv');
+      expect(dlCsv.text).toContain("'=CMD");
+      expect(dlCsv.text).toContain("'+SUM");
+
+      // Export XLSX with structured workbook validation + formula injection protection
+      const expXlsx = await request(server)
+        .post('/api/v1/carga-masiva/productos/exportaciones')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ formato: 'XLSX' })
+        .expect(202);
+      const xlsxExportId = String(expXlsx.body.export_id);
+
+      let xlsxExportStatus = 'QUEUED';
+      for (let i = 0; i < 30; i++) {
+        const poll = await request(server)
+          .get(`/api/v1/carga-masiva/productos/exportaciones/${xlsxExportId}`)
+          .set('Authorization', `Bearer ${tokenA}`)
+          .expect(200);
+        xlsxExportStatus = poll.body.status;
+        if (
+          xlsxExportStatus === 'COMPLETED' ||
+          xlsxExportStatus === 'FAILED_GENERAL'
+        ) {
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      expect(xlsxExportStatus).toBe('COMPLETED');
+
+      const dlXlsx = await request(server)
+        .get(
+          `/api/v1/carga-masiva/productos/exportaciones/${xlsxExportId}/archivo`,
+        )
+        .set('Authorization', `Bearer ${tokenA}`)
+        .buffer(true)
+        .parse((res, cb) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => chunks.push(c));
+          res.on('end', () => cb(null, Buffer.concat(chunks)));
+        })
+        .expect(200);
+      expect(dlXlsx.headers['content-type']).toContain('spreadsheetml.sheet');
+      const expEntries = readZipEntries(dlXlsx.body as Buffer);
+      expect(expEntries.get('xl/workbook.xml')).toBeDefined();
+      const expSheetXml = expEntries.get('xl/worksheets/sheet1.xml');
+      expect(expSheetXml).toBeDefined();
+      const expRows = extractSheetRows(expSheetXml!.toString('utf8'));
+      expect(expRows[0]).toEqual([...EXPORT_HEADERS]);
+      const formulaRow = expRows.find((r) => r.includes('EXP-FORMULA-1'));
+      expect(formulaRow).toBeDefined();
+      expect(formulaRow?.some((cell) => cell.startsWith("'=CMD"))).toBe(true);
+
+      // Other owner isolated with 404
+      await request(server)
+        .get(`/api/v1/carga-masiva/productos/exportaciones/${exportId}/archivo`)
+        .set('Authorization', `Bearer ${tokenB}`)
+        .expect(404);
+
+      // Missing object 404
+      await request(server)
+        .get(
+          `/api/v1/carga-masiva/productos/exportaciones/${randomUUID()}/archivo`,
+        )
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(404);
+
+      await app.close();
+    }, 60_000);
+
+    it('verifies Bulk 0001-0008 upgrade with pre-existing data and transactional DDL rollback on isolated schema', async () => {
+      if (!adminDatabaseUrl) return;
+      const adminPool = new Pool({
+        connectionString: adminDatabaseUrl,
+        max: 2,
+      });
+      const testSchema = `bulk_mig_${randomUUID().slice(0, 8)}`;
+      try {
+        await adminPool.query(`CREATE SCHEMA ${testSchema};`);
+        const apply = async (file: string) => {
+          const sql = readFileSync(resolve(file), 'utf8').replaceAll(
+            'bulk.',
+            `${testSchema}.`,
+          );
+          await adminPool.query(
+            `SET search_path TO ${testSchema}, public;\n${sql}`,
+          );
+        };
+        await apply(
+          'apps/bulk-svc/test/fixtures/0001_create_bulk_persistence.sql',
+        );
+        await apply('apps/bulk-svc/migrations/0002_export_source_snapshot.sql');
+        await apply('apps/bulk-svc/migrations/0003_export_claim_lease.sql');
+        await apply(
+          'apps/bulk-svc/migrations/0004_catalog_claim_check_content.sql',
+        );
+        await apply('apps/bulk-svc/migrations/0005_actor_ownership.sql');
+        await apply(
+          'apps/bulk-svc/migrations/0006_owner_correlation_identity.sql',
+        );
+
+        const mId = randomUUID();
+        const bId = randomUUID();
+        await adminPool.query(
+          `INSERT INTO ${testSchema}.file_manifests (id, role, format, content_ref) VALUES ($1, 'ENTRADA_IMPORTACION', 'CSV', 'fixture://pre-upgrade.csv');`,
+          [mId],
+        );
+        await adminPool.query(
+          `INSERT INTO ${testSchema}.batch_jobs (batch_id, owner_sub, input_file_id, template_version, correlation_id) VALUES ($1, $2, $3, 2, $4);`,
+          [bId, ownerA, mId, randomUUID()],
+        );
+
+        // Upgrade 0007 + 0008 with pre-existing data
+        await apply('apps/bulk-svc/migrations/0007_bulk_retry_v1.sql');
+        await apply('apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql');
+
+        const preserved = await adminPool.query(
+          `SELECT batch_id FROM ${testSchema}.batch_jobs WHERE batch_id = $1`,
+          [bId],
+        );
+        expect(preserved.rows).toHaveLength(1);
+
+        // Simulate failed DDL migration -> rollback preserves existing rows
+        const client = await adminPool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query(
+            `ALTER TABLE ${testSchema}.batch_jobs ADD COLUMN temp_col TEXT;`,
+          );
+          await client.query(
+            'SELECT * FROM non_existent_table_for_rollback_test;',
+          );
+          await client.query('COMMIT');
+        } catch {
+          await client.query('ROLLBACK');
+        } finally {
+          client.release();
+        }
+        const cols = await adminPool.query(
+          `SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'batch_jobs' AND column_name = 'temp_col'`,
+          [testSchema],
+        );
+        expect(cols.rows).toHaveLength(0);
+      } finally {
+        await adminPool.query(`DROP SCHEMA IF EXISTS ${testSchema} CASCADE;`);
+        await adminPool.end();
+      }
+    }, 30_000);
+
+    it('handles temporary PostgreSQL role/schema access denial and recovers durable admission without duplicates', async () => {
+      if (!adminDatabaseUrl) return;
+      const adminPool = new Pool({
+        connectionString: adminDatabaseUrl,
+        max: 2,
+      });
+      const token = signUser(ownerA);
+      const mod = await Test.createTestingModule({ imports: [BulkSvcModule] })
+        .overrideProvider(BulkReadinessService)
+        .useValue({ probe: async () => ({ ready: true }) })
+        .compile();
+      const app = mod.createNestApplication({ logger: false });
+      app.useGlobalFilters(new BulkProblemFilter());
+      await app.init();
+
+      const outageCorrelationId = randomUUID();
+      const sku = `PG-OUTAGE-${randomUUID().slice(0, 8)}`;
+      const csv = Buffer.from(
+        `${BULK_TEMPLATE_HEADERS.join(',')}\r\n"ALTA","","","${sku}","","Producto PG Outage","Desc","category-fixture","brand-fixture","type-fixture","false","12.00","[]","","","0"\r\n`,
+        'utf8',
+      );
+
+      let roleLocked = false;
+      try {
+        await adminPool.query('ALTER ROLE bulk_app NOLOGIN');
+        await adminPool.query('REVOKE USAGE ON SCHEMA bulk FROM bulk_app');
+        roleLocked = true;
+
+        const outageRes = await request(app.getHttpServer())
+          .post('/api/v1/carga-masiva/productos/importaciones')
+          .set('Authorization', `Bearer ${token}`)
+          .set('X-Correlation-Id', outageCorrelationId)
+          .field('template_version', '2')
+          .attach('archivo', csv, {
+            filename: 'pg-outage.csv',
+            contentType: 'text/csv',
+          });
+        expect(outageRes.status).toBeGreaterThanOrEqual(500);
+
+        await adminPool.query('GRANT USAGE ON SCHEMA bulk TO bulk_app');
+        await adminPool.query('ALTER ROLE bulk_app LOGIN');
+        roleLocked = false;
+
+        const recoveredRes = await request(app.getHttpServer())
+          .post('/api/v1/carga-masiva/productos/importaciones')
+          .set('Authorization', `Bearer ${token}`)
+          .set('X-Correlation-Id', outageCorrelationId)
+          .field('template_version', '2')
+          .attach('archivo', csv, {
+            filename: 'pg-outage.csv',
+            contentType: 'text/csv',
+          })
+          .expect(202);
+        expect(recoveredRes.body.batch_id).toMatch(/^[0-9a-f-]{36}$/i);
+
+        const rows = await bulkDb
+          .select()
+          .from(batchJobs)
+          .where(eq(batchJobs.correlationId, outageCorrelationId));
+        expect(rows).toHaveLength(1);
+      } finally {
+        if (roleLocked) {
+          await adminPool
+            .query('GRANT USAGE ON SCHEMA bulk TO bulk_app')
+            .catch(() => {});
+          await adminPool.query('ALTER ROLE bulk_app LOGIN').catch(() => {});
+        }
+        await app.close();
+        await adminPool.end();
+      }
+    }, 60_000);
+
+    it('handles real PostgreSQL connectivity outage via disposable TCP proxy, reports readiness 503/200, recovers correlation without duplicating batch/manifest/outbox/catalog, and restores connectivity', async () => {
+      const targetUrl = new URL(bulkDatabaseUrl!);
+      const targetHost = targetUrl.hostname;
+      const targetPort = Number(targetUrl.port || 5432);
+      const activeSockets = new Set<Socket>();
+      let outageActive = false;
+
+      const proxyServer = createServer((clientSocket) => {
+        if (outageActive) {
+          clientSocket.destroy();
+          return;
+        }
+        const upstreamSocket = createConnection({
+          host: targetHost,
+          port: targetPort,
+        });
+        activeSockets.add(clientSocket);
+        activeSockets.add(upstreamSocket);
+
+        const cleanupSocket = () => {
+          activeSockets.delete(clientSocket);
+          activeSockets.delete(upstreamSocket);
+        };
+        clientSocket.on('close', cleanupSocket);
+        upstreamSocket.on('close', cleanupSocket);
+        clientSocket.on('error', () => upstreamSocket.destroy());
+        upstreamSocket.on('error', () => clientSocket.destroy());
+
+        clientSocket.pipe(upstreamSocket);
+        upstreamSocket.pipe(clientSocket);
+      });
+
+      await new Promise<void>((resolveListen) =>
+        proxyServer.listen(0, '127.0.0.1', () => resolveListen()),
+      );
+      const address = proxyServer.address();
+      if (!address || typeof address === 'string') {
+        proxyServer.close();
+        throw new Error('Failed to bind disposable PostgreSQL TCP proxy');
+      }
+      const proxyUrl = new URL(bulkDatabaseUrl!);
+      proxyUrl.hostname = '127.0.0.1';
+      proxyUrl.port = String(address.port);
+
+      const prevDatabaseUrl = process.env.DATABASE_URL;
+      process.env.DATABASE_URL = proxyUrl.toString();
+
+      const mod = await Test.createTestingModule({
+        imports: [BulkSvcModule],
+      }).compile();
+      const app = mod.createNestApplication({ logger: false });
+      app.useGlobalFilters(new BulkProblemFilter());
+      await app.init();
+
+      const token = signUser(ownerA);
+      const realOutageCorrelationId = randomUUID();
+      const sku = `PG-PROXY-${randomUUID().slice(0, 8)}`;
+      const csv = Buffer.from(
+        `${BULK_TEMPLATE_HEADERS.join(',')}\r\n"ALTA","","","${sku}","","Producto PG Proxy Outage","Desc","category-fixture","brand-fixture","type-fixture","false","18.50","[]","","","0"\r\n`,
+        'utf8',
+      );
+
+      try {
+        // 1. Initial readiness is 200 READY
+        const readyBefore = await request(app.getHttpServer())
+          .get('/health/readiness/reads')
+          .expect(200);
+        expect(readyBefore.body.status).toBe('ready');
+        expect(readyBefore.body.reason).toBe('READY');
+
+        // 2. Interrupt real PostgreSQL connectivity
+        outageActive = true;
+        for (const sock of activeSockets) {
+          sock.destroy();
+        }
+        activeSockets.clear();
+
+        // 3. Readiness fails with 503 DATABASE_UNAVAILABLE
+        const readyDuringOutage = await request(app.getHttpServer())
+          .get('/health/readiness/reads')
+          .expect(503);
+        expect(readyDuringOutage.body.status).toBe('not_ready');
+        expect(readyDuringOutage.body.reason).toBe('DATABASE_UNAVAILABLE');
+
+        // 4. Admission fails deterministically with 503 SERVICIO_NO_DISPONIBLE
+        const outageRes = await request(app.getHttpServer())
+          .post('/api/v1/carga-masiva/productos/importaciones')
+          .set('Authorization', `Bearer ${token}`)
+          .set('X-Correlation-Id', realOutageCorrelationId)
+          .field('template_version', '2')
+          .attach('archivo', csv, {
+            filename: 'pg-proxy-outage.csv',
+            contentType: 'text/csv',
+          })
+          .expect(503);
+        expect(outageRes.body.status).toBe(503);
+        expect(outageRes.body.code).toBe('SERVICIO_NO_DISPONIBLE');
+
+        // 5. Restore connectivity and verify real readiness recovers to 200 READY
+        outageActive = false;
+        const readyAfter = await request(app.getHttpServer())
+          .get('/health/readiness/reads')
+          .expect(200);
+        expect(readyAfter.body.status).toBe('ready');
+        expect(readyAfter.body.reason).toBe('READY');
+
+        // 6. Recover operation with original correlation ID -> 202
+        const recoveredRes = await request(app.getHttpServer())
+          .post('/api/v1/carga-masiva/productos/importaciones')
+          .set('Authorization', `Bearer ${token}`)
+          .set('X-Correlation-Id', realOutageCorrelationId)
+          .field('template_version', '2')
+          .attach('archivo', csv, {
+            filename: 'pg-proxy-outage.csv',
+            contentType: 'text/csv',
+          })
+          .expect(202);
+        const batchId = String(recoveredRes.body.batch_id);
+        expect(batchId).toMatch(/^[0-9a-f-]{36}$/i);
+
+        // 7. Verify unique persistence of batch, manifest, and outbox
+        const batchRows = await bulkDb
+          .select()
+          .from(batchJobs)
+          .where(eq(batchJobs.correlationId, realOutageCorrelationId));
+        expect(batchRows).toHaveLength(1);
+        expect(batchRows[0]?.batchId).toBe(batchId);
+
+        const manifestRows = await bulkDb
+          .select()
+          .from(fileManifests)
+          .where(eq(fileManifests.id, batchRows[0]!.inputFileId));
+        expect(manifestRows).toHaveLength(1);
+
+        const outboxRows = await bulkDb
+          .select()
+          .from(bulkOutbox)
+          .where(eq(bulkOutbox.correlationId, realOutageCorrelationId));
+        expect(outboxRows).toHaveLength(1);
+
+        // 8. Consume outbox twice -> APPLIED then DUPLICATE, zero commercial duplication
+        const storage = mod.get(BulkStorageService);
+        const tx = new CatalogTransactionManager(catalogDb);
+        const mutations = new CatalogMutationService(
+          tx,
+          new PostgresCatalogWriteRepository(),
+          {
+            masters: async () => ({ schemaVersion: 1 }),
+            attributes: async (_t: string, v: unknown[]) => v,
+          } as never,
+          { resolve: async (_i, id) => ({ slug: `rec-${id}`, moneda: 'PEN' }) },
+        );
+        const idMock = new CatalogBulkIdentity(
+          undefined,
+          new CatalogTokenVerifier(undefined),
+        );
+        vi.spyOn(idMock, 'authorization').mockResolvedValue(
+          'Bearer isolated-master-fixture',
+        );
+        const consumer = new CatalogBulkService(catalogDb, mutations, idMock, {
+          getDocument: async (ref: { content_id: string }) => {
+            const res = await bulkRepo.findContentDocument(ref.content_id);
+            const bytes = await storage.get(res!.contentRef);
+            return JSON.parse(bytes.toString('utf8'));
+          },
+        } as unknown as CatalogBulkContentClient);
+        const envelope = outboxRows[0]!.payload as unknown as CatalogEnvelope;
+        await expect(consumer.consume(envelope)).resolves.toBe('APPLIED');
+        await expect(consumer.consume(envelope)).resolves.toBe('DUPLICATE');
+        const catalogRows = await catalogDb.read((db) =>
+          db.select().from(products),
+        );
+        expect(
+          catalogRows.filter((p) => p.nombre === 'Producto PG Proxy Outage'),
+        ).toHaveLength(1);
+      } finally {
+        outageActive = false;
+        if (prevDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+        else process.env.DATABASE_URL = prevDatabaseUrl;
+        await app.close().catch(() => {});
+        for (const sock of activeSockets) {
+          sock.destroy();
+        }
+        activeSockets.clear();
+        await new Promise<void>((resolveClose) =>
+          proxyServer.close(() => resolveClose()),
+        );
+      }
+    }, 60_000);
+  },
+);

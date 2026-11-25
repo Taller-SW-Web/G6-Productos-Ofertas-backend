@@ -8,16 +8,22 @@ cat > "$TEMP/curl" <<'MOCK'
 set -Eeuo pipefail
 output=''
 url=''
+method='GET'
+[[ -z "${CURL_ARGS_LOG:-}" ]] || printf '%s\n' "$*" >> "$CURL_ARGS_LOG"
 while (($#)); do
   case "$1" in
     --output) shift; output="$1" ;;
+    --request) shift; method="$1" ;;
     https://*) url="$1" ;;
   esac
   shift
 done
 [[ -z "${CURL_LOG:-}" ]] || printf '%s\n' "$url" >> "$CURL_LOG"
 if [[ -n "$output" && "$output" != /dev/null ]]; then printf '{"status":"ready"}' > "$output"; fi
-if [[ "$url" == *'/private/read' ]]; then printf '401'; exit 0; fi
+if [[ "$url" == *'/private/read' || "$url" == *'/api/v1/promociones/evaluar' ]]; then
+  if [[ "$method" == POST ]]; then printf '%s' "${MOCK_POST_STATUS:-401}"; else printf '401'; fi
+  exit 0
+fi
 if [[ "${MOCK_READINESS_FAILURE:-false}" == true && "$url" == */health/ready || "${MOCK_READINESS_FAILURE:-false}" == true && "$url" == */health/readiness ]]; then printf '503'; else printf '200'; fi
 MOCK
 chmod +x "$TEMP/curl"
@@ -35,12 +41,48 @@ MOCK
   chmod +x "$TEMP/jq"
 fi
 
+export CURL_ARGS_LOG="$TEMP/default-get-args.log"
 PATH="$TEMP:$PATH" SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH='/private/read' \
   SMOKE_MAX_ATTEMPTS=1 bash "$ROOT/ops/azure/container-apps/smoke-service.sh" catalog-svc > "$TEMP/pass.log"
 grep -Fq 'PASS /health HTTP 200' "$TEMP/pass.log"
 grep -Fq 'PASS /health/ready HTTP 200' "$TEMP/pass.log"
 grep -Fq 'PASS ruta protegida sin credenciales: HTTP 401' "$TEMP/pass.log"
+if grep -q -- '--request POST' "$CURL_ARGS_LOG"; then
+  echo 'FAIL: servicio existente dejó de utilizar el GET predeterminado' >&2; exit 1
+fi
 echo 'PASS: liveness, readiness y rechazo 401 sin token'
+
+# Existing services keep GET by default; Promotions uses a bodyless-auth-free POST guard probe.
+export CURL_ARGS_LOG="$TEMP/curl-args.log"
+PATH="$TEMP:$PATH" SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH='/api/v1/promociones/evaluar' \
+  SMOKE_PROTECTED_METHOD=POST SMOKE_MAX_ATTEMPTS=1 bash "$ROOT/ops/azure/container-apps/smoke-service.sh" promotions-svc > "$TEMP/post-pass.log"
+grep -Fq 'PASS ruta protegida sin credenciales: HTTP 401' "$TEMP/post-pass.log"
+grep -Fq -- '--request POST --header Content-Type: application/json --data {}' "$CURL_ARGS_LOG"
+if grep -qi 'authorization' "$CURL_ARGS_LOG"; then
+  echo 'FAIL: el smoke POST anónimo envió Authorization' >&2; exit 1
+fi
+echo 'PASS: Promotions POST anónimo envía solo JSON mínimo y exige HTTP 401'
+
+for response in 200 400 403; do
+  if PATH="$TEMP:$PATH" SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH='/api/v1/promociones/evaluar' \
+    SMOKE_PROTECTED_METHOD=POST SMOKE_MAX_ATTEMPTS=1 MOCK_POST_STATUS="$response" \
+    bash "$ROOT/ops/azure/container-apps/smoke-service.sh" promotions-svc > "$TEMP/post-$response.log" 2>&1; then
+    echo "FAIL: POST anónimo HTTP $response debe bloquear el smoke" >&2; exit 1
+  fi
+done
+echo 'PASS: Promotions POST falla ante 200, 400 o 403'
+
+if PATH="$TEMP:$PATH" SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH='/private/read' \
+  SMOKE_PROTECTED_METHOD=POST SMOKE_MAX_ATTEMPTS=1 bash "$ROOT/ops/azure/container-apps/smoke-service.sh" catalog-svc > "$TEMP/post-unallowed.log" 2>&1; then
+  echo 'FAIL: POST en servicio/ruta no permitidos fue aceptado' >&2; exit 1
+fi
+grep -Fq 'POST protegido solo está permitido para Promotions evaluarPromociones' "$TEMP/post-unallowed.log"
+if PATH="$TEMP:$PATH" SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH='/private/read' \
+  SMOKE_PROTECTED_METHOD=PATCH SMOKE_MAX_ATTEMPTS=1 bash "$ROOT/ops/azure/container-apps/smoke-service.sh" catalog-svc > "$TEMP/invalid-method.log" 2>&1; then
+  echo 'FAIL: método inválido fue aceptado' >&2; exit 1
+fi
+grep -Fq 'Método protegido no admitido' "$TEMP/invalid-method.log"
+echo 'PASS: POST fuera de la única ruta autorizada y métodos inválidos son rechazados'
 
 if PATH="$TEMP:$PATH" SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH='/private/read' SMOKE_MAX_ATTEMPTS=1 MOCK_READINESS_FAILURE=true \
   bash "$ROOT/ops/azure/container-apps/smoke-service.sh" inventory-svc > "$TEMP/fail.log" 2>&1; then

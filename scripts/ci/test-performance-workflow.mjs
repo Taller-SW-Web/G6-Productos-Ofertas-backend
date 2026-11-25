@@ -18,6 +18,7 @@ const pricingPersistence = await readFile(
 const scenarioJobs = {
   catalog_http_performance: 'catalog',
   pricing_individual_http_performance: 'pricing',
+  combos_h5_http_performance: 'combos',
   combos_pricing_http_performance: 'combos',
   bulk_http_performance: 'bulk',
 };
@@ -96,12 +97,31 @@ for (const [jobId, component] of Object.entries(scenarioJobs)) {
 }
 
 assert.match(summary, /'PARTIAL'/);
+assert.match(summary, /SIN_UMBRAL_APROBADO/);
 assert.match(summary, /integral: false/);
 assert.match(summary, /pricing: \['pricing_individual_http_performance'\]/);
+assert.match(summary, /combos_h5_http_performance/);
+assert.match(summary, /INCLUDE_LEGACY_COMBOS/);
 assert.doesNotMatch(summary, /pricing_batch_benchmark/);
 assert.match(
   performance,
   /inputs\.component == 'pricing' && inputs\.include_legacy_pricing/,
+);
+assert.match(
+  performance,
+  /include_legacy_combos:[\s\S]*?default: false/,
+);
+assert.match(
+  performance,
+  /combos_pricing_http_performance:[\s\S]*?if: inputs\.component == 'combos' && inputs\.include_legacy_combos/,
+);
+assert.match(
+  performance,
+  /combos_h5_http_performance:[\s\S]*?if: inputs\.component == 'combos'\n/,
+);
+assert.match(
+  ci,
+  /include_legacy_combos: \$\{\{ inputs\.include_legacy_combos \}\}/,
 );
 assert.match(performance, /selection-summary\.json/);
 assert.match(
@@ -118,6 +138,7 @@ assert.match(
 for (const jobId of [
   'catalog_http_performance',
   'pricing_individual_http_performance',
+  'combos_h5_http_performance',
   'combos_pricing_http_performance',
   'bulk_http_performance',
 ]) {
