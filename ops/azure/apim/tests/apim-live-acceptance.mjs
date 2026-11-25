@@ -130,14 +130,11 @@ export function validateRollbackEvidence(rollback, expected) {
     'APIM-T08 secuencia temporal before < during < after inválida',
   );
 
-  // R9 Corrección 4: separar integridad de evidencia local (EVIDENCE_PREPARED) de adquisición real verificada en Azure (PASS)
-  const hasIndependentAcquisition =
-    rollback.azAcquisitionVerified === true &&
-    typeof rollback.independentQueryDigest === 'string' &&
-    rollback.independentQueryDigest.length >= 16;
+  // R10 P1: validateRollbackEvidence() solo valida integridad local y devuelve EVIDENCE_PREPARED.
+  // Ningún booleano ni digest dentro del mismo JSON acredita adquisición real en Azure.
   return {
-    status: hasIndependentAcquisition ? 'PASS' : 'EVIDENCE_PREPARED',
-    verified: hasIndependentAcquisition,
+    status: 'EVIDENCE_PREPARED',
+    verified: false,
   };
 }
 
@@ -381,18 +378,24 @@ export async function main() {
     assert.equal(t07Bad.status, 400, 'APIM-T07 UUID no canónico debe responder 400');
     statusByCase['APIM-T07'] = 'PASS';
 
-    // APIM-T08
+    // APIM-T08: integridad local + consulta independiente real del runner en Azure (nunca booleano del JSON)
     const rollback = readJsonStrict(rollbackEvidencePath, 'APIM_ROLLBACK_EVIDENCE_PATH');
-    const rollbackEval = validateRollbackEvidence(rollback, {
+    validateRollbackEvidence(rollback, {
       apimResourceId: expectedApimResourceId,
       subscriptionId: expectedSubscriptionId,
       resourceGroup: expectedResourceGroup,
       environment: expectedEnvironment,
     });
-    if (!rollbackEval.verified) {
-      statusByCase['APIM-T08'] = 'NOT_VERIFIED';
-      throw new Error('APIM-T08 evidencia local válida (EVIDENCE_PREPARED), pero falta adquisición real verificada en Azure');
-    }
+    const livePolicyXml = execSync(
+      `az rest --method get --url "https://management.azure.com${expectedApimResourceId}/apis/${rollback.apiName}/policies/policy?api-version=2022-08-01&format=rawxml" --query properties.value -o tsv`,
+      { encoding: 'utf8', timeout: 30_000 },
+    ).trim();
+    assert.ok(livePolicyXml.includes('<policies>'), 'APIM-T08 consulta az rest no devolvió XML de política válido');
+    assert.equal(
+      sha256Text(livePolicyXml),
+      rollback.rollbackPolicyHash,
+      'APIM-T08 hash real consultado en Azure difiere de rollbackPolicyHash',
+    );
     statusByCase['APIM-T08'] = 'PASS';
 
     assert.ok(CASE_IDS.every((id) => statusByCase[id] === 'PASS'));

@@ -150,14 +150,15 @@ test('R7-02 rollback evidence verifies real policyXml SHA256 and az rest --metho
   assert.equal(evalPrepared.status, 'EVIDENCE_PREPARED');
   assert.equal(evalPrepared.verified, false);
 
-  const acquiredRollback = {
+  // Negativo R10: falsificar azAcquisitionVerified/independentQueryDigest en el JSON NO produce PASS
+  const selfDeclared = {
     ...validRollback,
     azAcquisitionVerified: true,
     independentQueryDigest: 'a'.repeat(64),
   };
-  const evalPass = validateRollbackEvidence(acquiredRollback, baseExpected);
-  assert.equal(evalPass.status, 'PASS');
-  assert.equal(evalPass.verified, true);
+  const evalSelfDeclared = validateRollbackEvidence(selfDeclared, baseExpected);
+  assert.equal(evalSelfDeclared.status, 'EVIDENCE_PREPARED');
+  assert.equal(evalSelfDeclared.verified, false);
 
   const tampered = structuredClone(validRollback);
   tampered.azSnapshots.after.policyXml = xmlDuring;
