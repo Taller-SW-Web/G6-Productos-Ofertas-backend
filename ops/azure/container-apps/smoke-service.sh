@@ -41,6 +41,17 @@ fi
   exit 1
 }
 [[ "$SMOKE_PROTECTED_PATH" == /* && "$SMOKE_PROTECTED_PATH" != *'?'* ]] || { echo 'La ruta protegida debe ser una ruta absoluta sin query.' >&2; exit 2; }
+protected_method="${SMOKE_PROTECTED_METHOD:-GET}"
+case "$protected_method" in
+  GET) ;;
+  POST)
+    [[ "$service" == promotions-svc && "$SMOKE_PROTECTED_PATH" == '/api/v1/promociones/evaluar' ]] || {
+      echo 'POST protegido solo está permitido para Promotions evaluarPromociones.' >&2
+      exit 2
+    }
+    ;;
+  *) echo 'Método protegido no admitido; use GET o POST.' >&2; exit 2 ;;
+esac
 readonly max_attempts="${SMOKE_MAX_ATTEMPTS:-6}"
 readonly request_timeout="${SMOKE_REQUEST_TIMEOUT:-20}"
 readonly retry_delay="${SMOKE_RETRY_DELAY_SECONDS:-5}"
@@ -69,16 +80,31 @@ else
   echo "Nota: $service no tiene ruta HTTP readiness en este contrato; /health acredita solo liveness y la ruta protegida es obligatoria."
 fi
 
-status="$(curl --silent --show-error --max-time "$request_timeout" --output /dev/null --write-out '%{http_code}' "${base}${SMOKE_PROTECTED_PATH}" 2>/dev/null || true)"
-[[ "$status" == 401 || "$status" == 403 ]] || {
+protected_curl_args=(--silent --show-error --max-time "$request_timeout" --output /dev/null --write-out '%{http_code}')
+if [[ "$protected_method" == POST ]]; then
+  protected_curl_args+=(--request POST --header 'Content-Type: application/json' --data '{}')
+fi
+status="$(curl "${protected_curl_args[@]}" "${base}${SMOKE_PROTECTED_PATH}" 2>/dev/null || true)"
+if [[ "$protected_method" == POST ]]; then
+  [[ "$status" == 401 ]] || {
+    printf 'FALLO: la ruta protegida %s respondió %s sin credenciales; POST anónimo requiere HTTP 401.\n' "$SMOKE_PROTECTED_PATH" "${status:-sin-respuesta}" >&2
+    exit 1
+  }
+else
+  [[ "$status" == 401 || "$status" == 403 ]] || {
   printf 'FALLO: la ruta protegida %s respondió %s sin credenciales.\n' "$SMOKE_PROTECTED_PATH" "${status:-sin-respuesta}" >&2
   exit 1
-}
+  }
+fi
 printf 'PASS ruta protegida sin credenciales: HTTP %s %s\n' "$status" "$SMOKE_PROTECTED_PATH"
 
 {
   printf "Infraestructura HTTP verificada para \`%s\`: liveness 200." "$service"
   [[ -z "$readiness_path" ]] || printf " Readiness \`%s\` 2xx." "$readiness_path"
-  printf ' La ruta protegida respondió 401/403 sin credenciales.'
+  if [[ "$protected_method" == POST ]]; then
+    printf ' La ruta protegida respondió 401 al POST anónimo.'
+  else
+    printf ' La ruta protegida respondió 401/403 sin credenciales.'
+  fi
   printf '\n'
 } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"

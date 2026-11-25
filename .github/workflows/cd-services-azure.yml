@@ -493,15 +493,18 @@ jobs:
           SMOKE_PROTECTED_PRICING_SVC: ${{ vars.AZURE_SMOKE_PROTECTED_PRICING_SVC }}
           SMOKE_PROTECTED_PROMOTIONS_SVC: ${{ vars.AZURE_SMOKE_PROTECTED_PROMOTIONS_SVC }}
           SMOKE_PROTECTED_TAXONOMY_SVC: ${{ vars.AZURE_SMOKE_PROTECTED_TAXONOMY_SVC }}
+          SMOKE_PROTECTED_METHOD_PROMOTIONS_SVC: ${{ vars.AZURE_SMOKE_PROTECTED_METHOD_PROMOTIONS_SVC }}
         run: |
           set -Eeuo pipefail
           service_key="${SERVICE^^}"
           service_key="${service_key//-/_}"
           url_var="SMOKE_URL_${service_key}"
           protected_var="SMOKE_PROTECTED_${service_key}"
+          method_var="SMOKE_PROTECTED_METHOD_${service_key}"
           url="${!url_var:-}"
           protected="${!protected_var:-}"
-          export SMOKE_URL="$url" SMOKE_PROTECTED_PATH="$protected"
+          protected_method="${!method_var:-GET}"
+          export SMOKE_URL="$url" SMOKE_PROTECTED_PATH="$protected" SMOKE_PROTECTED_METHOD="$protected_method"
           bash ops/azure/container-apps/smoke-service.sh "$SERVICE"
 
   recover:
