@@ -656,6 +656,80 @@ jobs:
         path: .ci/performance/paired/
         if-no-files-found: warn
         retention-days: 30
+  combos_h5_http_performance:
+    name: Comparar HTTP Combos H5 sin RabbitMQ en el mismo runner
+    if: inputs.component == 'combos'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs:
+    - preflight
+    permissions:
+      contents: read
+    steps:
+    - name: Obtener revisión candidata
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.preflight.outputs.candidate_sha }}
+        persist-credentials: false
+    - name: Obtener revisión base
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.preflight.outputs.baseline_sha }}
+        path: .ci/baseline
+        persist-credentials: false
+    - name: Obtener migraciones y contratos H5 fijados (0.7.0-rc.3)
+      uses: actions/checkout@v4
+      with:
+        repository: Taller-SW-Web/G6-Productos-Ofertas-docs
+        ref: c9e1e5c217616d28229fccf5315fb97a1ae061a9
+        path: .ci/G6-Productos-Ofertas-docs
+        persist-credentials: 'false'
+    - name: Preparar Node.js y dependencias en ambas revisiones
+      uses: actions/setup-node@v4
+      with:
+        node-version: 24.15.0
+        cache: npm
+    - name: Fijar harness H5 del candidato en baseline
+      run: |
+        set -Eeuo pipefail
+        cp package.json package-lock.json vitest.config.e2e.ts .ci/baseline/
+        cp apps/combos-svc/test/combos-h5-performance.e2e-spec.ts .ci/baseline/apps/combos-svc/test/combos-h5-performance.e2e-spec.ts
+        cp apps/combos-svc/test/run-postgres-isolated.sh .ci/baseline/apps/combos-svc/test/run-postgres-isolated.sh
+        (cd .ci/baseline && npm ci)
+        npm ci
+        mkdir -p .ci/performance/h5-paired
+    - name: Ejecutar pares alternados Combos H5 (PostgreSQL 17 TLS sin RabbitMQ)
+      env:
+        G6_PERFORMANCE_HTTP: '1'
+        G6_PERFORMANCE_BASELINE_SHA: ${{ needs.preflight.outputs.baseline_sha }}
+        G6_PERFORMANCE_PAIR_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+        COMBOS_TEST_DOCS_ROOT: ${{ github.workspace }}/.ci/G6-Productos-Ofertas-docs
+      run: |
+        set -Eeuo pipefail
+        run_profile() {
+          local tree="$1" variant="$2" key="$3"
+          local output="$GITHUB_WORKSPACE/.ci/performance/h5-paired/$key"
+          mkdir -p "$output"
+          (cd "$tree" && \
+            G6_PERFORMANCE_VARIANT="$variant" \
+            G6_PERFORMANCE_SHA="$(git rev-parse HEAD)" \
+            G6_PERFORMANCE_OUTPUT="$output" \
+            COMBOS_TEST_EVIDENCE_DIR="$output/evidence" \
+            COMBOS_TEST_DOCS_ROOT="$COMBOS_TEST_DOCS_ROOT" \
+            bash apps/combos-svc/test/run-postgres-isolated.sh --mode postgres-only --test-file combos-h5-performance.e2e-spec.ts) 2>&1 | tee "$output.log"
+        }
+        run_profile .ci/baseline baseline-first baseline-first
+        run_profile . candidate-first candidate-first
+        run_profile . candidate-second candidate-second
+        run_profile .ci/baseline baseline-second baseline-second
+    - name: Publicar perfiles pareados H5 de Combos
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: combos-h5-paired-${{ needs.preflight.outputs.candidate_sha }}
+        path: .ci/performance/h5-paired/
+        if-no-files-found: warn
+        retention-days: 30
   taxonomy_http_performance:
     name: Medir HTTP Taxonomy/PostgreSQL/RabbitMQ (${{ matrix.variant }})
     if: inputs.component == 'taxonomy'
@@ -746,6 +820,7 @@ jobs:
     - catalog_http_performance
     - pricing_individual_http_performance
     - combos_pricing_http_performance
+    - combos_h5_http_performance
     - taxonomy_http_performance
     permissions:
       contents: read

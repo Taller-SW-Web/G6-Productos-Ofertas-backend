@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+mode='legacy'
 test_file=''
 test_name_pattern=''
 while (($#)); do
   case "$1" in
+    --mode)
+      mode="${2:?--mode requiere un valor (legacy o postgres-only)}"
+      shift 2
+      ;;
+    --postgres-only)
+      mode='postgres-only'
+      shift
+      ;;
     --test-file)
       test_file="${2:?--test-file requiere un nombre}"
       shift 2
@@ -20,15 +29,36 @@ while (($#)); do
   esac
 done
 
-case "$test_file" in
-  ''|app.e2e-spec.ts|combos-postgres.e2e-spec.ts|combos-rabbitmq.e2e-spec.ts|combos-catalog-rabbitmq.e2e-spec.ts) ;;
-  *) printf 'Suite focalizada no permitida: %s\n' "$test_file" >&2; exit 2 ;;
+case "$mode" in
+  legacy|postgres-only) ;;
+  *)
+    printf 'Modo no reconocido: %s (use legacy o postgres-only)\n' "$mode" >&2
+    exit 2
+    ;;
 esac
 
-if [[ -n "$test_file" ]]; then
+if [[ "$mode" == 'postgres-only' ]]; then
+  case "$test_file" in
+    ''|combos-postgres.e2e-spec.ts|combos-h5-performance.e2e-spec.ts) ;;
+    *)
+      printf 'Suite focalizada no permitida en modo postgres-only: %s\n' "$test_file" >&2
+      exit 2
+      ;;
+  esac
+  if [[ -z "$test_file" ]]; then
+    test_file='combos-postgres.e2e-spec.ts'
+  fi
   expected_suites="$test_file"
 else
-  expected_suites='app.e2e-spec.ts,combos-postgres.e2e-spec.ts,combos-rabbitmq.e2e-spec.ts,combos-catalog-rabbitmq.e2e-spec.ts'
+  case "$test_file" in
+    ''|app.e2e-spec.ts|combos-postgres.e2e-spec.ts|combos-rabbitmq.e2e-spec.ts|combos-catalog-rabbitmq.e2e-spec.ts) ;;
+    *) printf 'Suite focalizada no permitida: %s\n' "$test_file" >&2; exit 2 ;;
+  esac
+  if [[ -n "$test_file" ]]; then
+    expected_suites="$test_file"
+  else
+    expected_suites='app.e2e-spec.ts,combos-postgres.e2e-spec.ts,combos-rabbitmq.e2e-spec.ts,combos-catalog-rabbitmq.e2e-spec.ts'
+  fi
 fi
 export COMBOS_TEST_EXPECTED_SUITES="$expected_suites"
 
@@ -40,15 +70,27 @@ combo_receipts_migration="$repo_root/apps/combos-svc/migrations/0002_create_comb
 pricing_migration="$repo_root/apps/pricing-svc/test/fixtures/pricing.sql"
 pricing_official_migration="$docs_root/datos/pricing/migrations/0001_create_pricing.sql"
 pricing_context_migration="$repo_root/apps/pricing-svc/migrations/0002_schedule_effective_events.sql"
-for migration in "$catalog_migration" "$combos_migration" "$combo_receipts_migration" "$pricing_migration" "$pricing_official_migration" "$pricing_context_migration"; do
+
+required_migrations=("$combos_migration" "$combo_receipts_migration")
+if [[ "$mode" == 'legacy' ]]; then
+  required_migrations+=(
+    "$catalog_migration"
+    "$pricing_migration"
+    "$pricing_official_migration"
+    "$pricing_context_migration"
+  )
+fi
+for migration in "${required_migrations[@]}"; do
   if [[ ! -f "$migration" ]]; then
     printf 'No se encontró la migración oficial: %s\n' "$migration" >&2
     exit 1
   fi
 done
-if ! cmp -s <(tr -d '\r' < "$pricing_migration") <(tr -d '\r' < "$pricing_official_migration"); then
-  printf 'La fixture Pricing no coincide con la migración oficial fijada.\n' >&2
-  exit 1
+if [[ "$mode" == 'legacy' ]]; then
+  if ! cmp -s <(tr -d '\r' < "$pricing_migration") <(tr -d '\r' < "$pricing_official_migration"); then
+    printf 'La fixture Pricing no coincide con la migración oficial fijada.\n' >&2
+    exit 1
+  fi
 fi
 
 docker info --format '{{.ServerVersion}}' >/dev/null
@@ -76,15 +118,25 @@ if [[ "$tmp_dir" != "$tmp_root"/* ]]; then
 fi
 
 pg_password="$(openssl rand -hex 24)"
-catalog_password="$(openssl rand -hex 24)"
-pricing_password="$(openssl rand -hex 24)"
-rabbit_password="$(openssl rand -hex 24)"
+catalog_password=''
+pricing_password=''
+rabbit_password=''
+if [[ "$mode" == 'legacy' ]]; then
+  catalog_password="$(openssl rand -hex 24)"
+  pricing_password="$(openssl rand -hex 24)"
+  rabbit_password="$(openssl rand -hex 24)"
+fi
 
 environment_names=(
-  COMBOS_TEST_EPHEMERAL COMBOS_TEST_DATABASE_URL COMBOS_TEST_CA
+  COMBOS_TEST_EPHEMERAL COMBOS_TEST_DATABASE_URL COMBOS_TEST_CA COMBOS_TEST_MODE
   COMBOS_TEST_RABBITMQ_URL COMBOS_TEST_RABBITMQ_CONTAINER
   COMBOS_TEST_CATALOG_PASSWORD COMBOS_TEST_PRICING_PASSWORD COMBOS_TEST_CWD
   COMBOS_TEST_EXPECTED_SUITES
+  COMBOS_AMQP_ENABLED COMBOS_AMQP_URL G6_AMQP_CONNECT_IP
+  AZURE_SERVICE_BUS_ENABLED COMBOS_SERVICE_BUS_ENABLED SERVICE_BUS_ENABLED
+  AZURE_SERVICE_BUS_NAMESPACE AZURE_SERVICE_BUS_FQDN AZURE_SERVICE_BUS_CONNECTION_STRING
+  COMBOS_SERVICE_BUS_CONNECTION_STRING COMBOS_SERVICE_BUS_FQDN COMBOS_SERVICE_BUS_QUEUE
+  DATABASE_URL
   PGHOST PGPORT PGDATABASE PGUSER PGPASSWORD PGSSLMODE PGSSLROOTCERT
 )
 declare -A original_defined=()
@@ -124,26 +176,64 @@ cleanup() {
   local status=$?
   restore_environment
   remove_owned_container "$pg_container"
-  remove_owned_container "$rabbit_container"
+  if [[ "$mode" == 'legacy' ]]; then
+    remove_owned_container "$rabbit_container"
+  fi
   if [[ -n "${COMBOS_TEST_EVIDENCE_DIR:-}" ]]; then
     mkdir -p -- "$COMBOS_TEST_EVIDENCE_DIR"
     if [[ -n "${test_report:-}" && -f "$test_report" ]]; then
       cp -- "$test_report" "$COMBOS_TEST_EVIDENCE_DIR/vitest-results.json"
-      node --input-type=module - "$test_report" "$COMBOS_TEST_EVIDENCE_DIR/run-summary.txt" "$status" <<'NODE'
+      node --input-type=module - "$test_report" "$COMBOS_TEST_EVIDENCE_DIR/run-summary.txt" "$COMBOS_TEST_EVIDENCE_DIR/run-environment.json" "$status" "$mode" "$docs_root" <<'NODE'
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 const report = JSON.parse(readFileSync(process.argv[2], 'utf8'));
-const status = Number(process.argv[4]);
+const summaryPath = process.argv[3];
+const envPath = process.argv[4];
+const status = Number(process.argv[5]);
+const mode = process.argv[6];
+const docsRoot = process.argv[7];
 const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 const tree = execFileSync('git', ['status', '--short'], { encoding: 'utf8' }).trimEnd();
-writeFileSync(process.argv[3], [
-  `result=${status === 0 ? 'PASS' : 'FAIL'}`,
+let docsSha = 'unknown';
+try {
+  docsSha = execFileSync('git', ['-C', docsRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+} catch {
+  docsSha = 'unavailable';
+}
+const suites = report.testResults?.map((result) => result.name.split(/[\\/]/).pop()) ?? [];
+const environment = {
+  result: status === 0 ? 'PASS' : 'FAIL',
+  sha,
+  docsSha,
+  mode,
+  postgresImage: 'postgres:17-alpine',
+  tlsEnabled: true,
+  rabbitmqStarted: mode === 'legacy',
+  azureServiceBusEnabled: false,
+  providers:
+    mode === 'postgres-only'
+      ? 'local-http-fixtures (Catalog/Pricing/Identity, non-production)'
+      : 'legacy-isolated-catalog-pricing-rabbitmq',
+  passed: report.numPassedTests,
+  failed: report.numFailedTests,
+  skipped: report.numPendingTests,
+  todo: report.numTodoTests,
+  suites,
+};
+writeFileSync(envPath, `${JSON.stringify(environment, null, 2)}\n`);
+writeFileSync(summaryPath, [
+  `result=${environment.result}`,
   `sha=${sha}`,
+  `docs_sha=${docsSha}`,
+  `mode=${mode}`,
+  `rabbitmq_started=${environment.rabbitmqStarted}`,
+  `azure_service_bus_enabled=${environment.azureServiceBusEnabled}`,
+  `providers=${environment.providers}`,
   `passed=${report.numPassedTests}`,
   `failed=${report.numFailedTests}`,
   `skipped=${report.numPendingTests}`,
-  `suites=${report.testResults?.map((result) => result.name.split(/[\\/]/).pop()).join(',') ?? ''}`,
+  `suites=${suites.join(',')}`,
   'working_tree_status:',
   tree,
   '',
@@ -165,11 +255,11 @@ diagnostics() {
   if docker inspect "$name" >/dev/null 2>&1; then
     printf 'Diagnóstico de %s (sin volcar configuración ni variables):\n' "$name" >&2
     docker inspect --format 'image={{.Config.Image}} running={{.State.Running}} oom={{.State.OOMKilled}} labels={{json .Config.Labels}}' "$name" >&2 || true
-    docker logs --timestamps --tail 80 "$name" 2>&1 |
-      sed -e "s/$pg_password/[REDACTED]/g" \
-          -e "s/$catalog_password/[REDACTED]/g" \
-          -e "s/$pricing_password/[REDACTED]/g" \
-          -e "s/$rabbit_password/[REDACTED]/g" >&2 || true
+    local sed_args=(-e "s/$pg_password/[REDACTED]/g")
+    [[ -n "$catalog_password" ]] && sed_args+=(-e "s/$catalog_password/[REDACTED]/g")
+    [[ -n "$pricing_password" ]] && sed_args+=(-e "s/$pricing_password/[REDACTED]/g")
+    [[ -n "$rabbit_password" ]] && sed_args+=(-e "s/$rabbit_password/[REDACTED]/g")
+    docker logs --timestamps --tail 80 "$name" 2>&1 | sed "${sed_args[@]}" >&2 || true
   fi
 }
 
@@ -177,13 +267,26 @@ on_error() {
   local code=$?
   printf 'HARNESS_FAILURE: línea=%s código=%s\n' "${BASH_LINENO[0]:-unknown}" "$code" >&2
   diagnostics "$pg_container"
-  diagnostics "$rabbit_container"
+  if [[ "$mode" == 'legacy' ]]; then
+    diagnostics "$rabbit_container"
+  fi
   return "$code"
 }
 trap on_error ERR
 
-docker run --rm --user root --volume "$tmp_dir:/cert" --entrypoint sh rabbitmq:4.2.9-alpine -c \
-  "openssl req -x509 -nodes -newkey rsa:2048 -keyout /cert/server.key -out /cert/server.crt -days 1 -subj '/CN=127.0.0.1' -addext 'subjectAltName=IP:127.0.0.1' && chmod 600 /cert/server.key && chown 70:70 /cert/server.key /cert/server.crt" >/dev/null
+(
+  umask 077
+  openssl req -x509 -nodes -newkey rsa:2048 \
+    -keyout "$tmp_dir/server.key" \
+    -out "$tmp_dir/server.crt" \
+    -days 1 \
+    -subj '/CN=127.0.0.1' \
+    -addext 'subjectAltName=IP:127.0.0.1' >/dev/null 2>&1
+)
+chmod 600 "$tmp_dir/server.key"
+chmod 644 "$tmp_dir/server.crt"
+docker run --rm --user root --volume "$tmp_dir:/cert" --entrypoint sh postgres:17-alpine -c \
+  'chown 70:70 /cert/server.key /cert/server.crt && chmod 600 /cert/server.key && chmod 644 /cert/server.crt' >/dev/null
 chmod 711 "$tmp_dir"
 
 pg_server_options=(-c ssl=on -c ssl_cert_file=/cert/server.crt -c ssl_key_file=/cert/server.key)
@@ -220,69 +323,96 @@ fi
 pg_port="$(docker port "$pg_container" 5432/tcp | awk -F: '{print $NF}')"
 [[ "$pg_port" =~ ^[0-9]+$ ]]
 
-docker run --detach --name "$rabbit_container" \
-  --label "$harness_label=true" \
-  --label "com.taller-sw.g6.combos-harness-id=$harness_id" \
-  --publish '127.0.0.1::5672' \
-  --env RABBITMQ_DEFAULT_USER=combos_test \
-  --env "RABBITMQ_DEFAULT_PASS=$rabbit_password" \
-  rabbitmq:4.2.9-alpine >/dev/null
+rabbit_port=''
+if [[ "$mode" == 'legacy' ]]; then
+  docker run --detach --name "$rabbit_container" \
+    --label "$harness_label=true" \
+    --label "com.taller-sw.g6.combos-harness-id=$harness_id" \
+    --publish '127.0.0.1::5672' \
+    --env RABBITMQ_DEFAULT_USER=combos_test \
+    --env "RABBITMQ_DEFAULT_PASS=$rabbit_password" \
+    rabbitmq:4.2.9-alpine >/dev/null
 
-rabbit_ready=0
-for _ in $(seq 1 60); do
-  if docker exec --user rabbitmq "$rabbit_container" rabbitmq-diagnostics -q check_running >/dev/null 2>&1 && \
-    docker exec --user rabbitmq "$rabbit_container" rabbitmq-diagnostics -q check_port_connectivity >/dev/null 2>&1; then
-    rabbit_ready=1
-    break
+  rabbit_ready=0
+  for _ in $(seq 1 60); do
+    if docker exec --user rabbitmq "$rabbit_container" rabbitmq-diagnostics -q check_running >/dev/null 2>&1 && \
+      docker exec --user rabbitmq "$rabbit_container" rabbitmq-diagnostics -q check_port_connectivity >/dev/null 2>&1; then
+      rabbit_ready=1
+      break
+    fi
+    sleep 1
+  done
+  if [[ "$rabbit_ready" != 1 ]]; then
+    diagnostics "$rabbit_container"
+    printf 'RabbitMQ 4.2.9 desechable no alcanzó readiness.\n' >&2
+    exit 1
   fi
-  sleep 1
-done
-if [[ "$rabbit_ready" != 1 ]]; then
-  diagnostics "$rabbit_container"
-  printf 'RabbitMQ 4.2.9 desechable no alcanzó readiness.\n' >&2
-  exit 1
+  rabbit_port="$(docker port "$rabbit_container" 5672/tcp | awk -F: '{print $NF}')"
+  [[ "$rabbit_port" =~ ^[0-9]+$ ]]
 fi
-rabbit_port="$(docker port "$rabbit_container" 5672/tcp | awk -F: '{print $NF}')"
-[[ "$rabbit_port" =~ ^[0-9]+$ ]]
 
-docker exec "$pg_container" psql -U postgres -d combos_test -v ON_ERROR_STOP=1 \
-  -c "CREATE ROLE po_combos_owner NOLOGIN; CREATE ROLE po_catalog_owner NOLOGIN; CREATE ROLE po_pricing_owner NOLOGIN; CREATE ROLE catalog_app LOGIN PASSWORD '$catalog_password'; CREATE ROLE pricing_app LOGIN PASSWORD '$pricing_password'; CREATE SCHEMA combos AUTHORIZATION po_combos_owner; CREATE SCHEMA catalog AUTHORIZATION po_catalog_owner; CREATE SCHEMA pricing AUTHORIZATION po_pricing_owner; CREATE SCHEMA extensions; CREATE EXTENSION btree_gist WITH SCHEMA extensions; GRANT USAGE ON SCHEMA extensions TO po_pricing_owner;" >/dev/null
-
-for context in catalog combos; do
-  if [[ "$context" == catalog ]]; then
-    owner='po_catalog_owner'
-    source_file="$catalog_migration"
-  else
-    owner='po_combos_owner'
-    source_file="$combos_migration"
-  fi
+if [[ "$mode" == 'postgres-only' ]]; then
+  docker exec "$pg_container" psql -U postgres -d combos_test -v ON_ERROR_STOP=1 \
+    -c "CREATE ROLE po_combos_owner NOLOGIN; CREATE SCHEMA combos AUTHORIZATION po_combos_owner;" >/dev/null
   {
-    printf 'SET ROLE %s;\n' "$owner"
-    cat "$source_file"
-    if [[ "$context" == combos ]]; then cat "$combo_receipts_migration"; fi
+    printf 'SET ROLE po_combos_owner;\n'
+    cat "$combos_migration"
+    cat "$combo_receipts_migration"
   } | docker exec -i "$pg_container" psql -U postgres -d combos_test -v ON_ERROR_STOP=1 -f - >/dev/null
-done
+else
+  docker exec "$pg_container" psql -U postgres -d combos_test -v ON_ERROR_STOP=1 \
+    -c "CREATE ROLE po_combos_owner NOLOGIN; CREATE ROLE po_catalog_owner NOLOGIN; CREATE ROLE po_pricing_owner NOLOGIN; CREATE ROLE catalog_app LOGIN PASSWORD '$catalog_password'; CREATE ROLE pricing_app LOGIN PASSWORD '$pricing_password'; CREATE SCHEMA combos AUTHORIZATION po_combos_owner; CREATE SCHEMA catalog AUTHORIZATION po_catalog_owner; CREATE SCHEMA pricing AUTHORIZATION po_pricing_owner; CREATE SCHEMA extensions; CREATE EXTENSION btree_gist WITH SCHEMA extensions; GRANT USAGE ON SCHEMA extensions TO po_pricing_owner;" >/dev/null
 
-{
-  printf 'SET ROLE po_pricing_owner;\n'
-  cat "$pricing_migration"
-  cat "$pricing_context_migration"
-} | docker exec -i "$pg_container" psql -U postgres -d combos_test -v ON_ERROR_STOP=1 -f - >/dev/null
+  for context in catalog combos; do
+    if [[ "$context" == catalog ]]; then
+      owner='po_catalog_owner'
+      source_file="$catalog_migration"
+    else
+      owner='po_combos_owner'
+      source_file="$combos_migration"
+    fi
+    {
+      printf 'SET ROLE %s;\n' "$owner"
+      cat "$source_file"
+      if [[ "$context" == combos ]]; then cat "$combo_receipts_migration"; fi
+    } | docker exec -i "$pg_container" psql -U postgres -d combos_test -v ON_ERROR_STOP=1 -f - >/dev/null
+  done
 
+  {
+    printf 'SET ROLE po_pricing_owner;\n'
+    cat "$pricing_migration"
+    cat "$pricing_context_migration"
+  } | docker exec -i "$pg_container" psql -U postgres -d combos_test -v ON_ERROR_STOP=1 -f - >/dev/null
+fi
+
+unset DATABASE_URL
 export COMBOS_TEST_EPHEMERAL=1
 export COMBOS_TEST_DATABASE_URL=harness-owned
+export COMBOS_TEST_MODE="$mode"
 export COMBOS_TEST_CA="$tmp_dir/server.crt"
-export COMBOS_TEST_CATALOG_PASSWORD="$catalog_password"
-export COMBOS_TEST_PRICING_PASSWORD="$pricing_password"
 export COMBOS_TEST_CWD="$tmp_dir"
-export COMBOS_TEST_RABBITMQ_URL="amqp://combos_test:${rabbit_password}@127.0.0.1:${rabbit_port}/%2f"
-export COMBOS_TEST_RABBITMQ_CONTAINER="$rabbit_container"
 export PGHOST=127.0.0.1 PGPORT="$pg_port" PGDATABASE=combos_test PGUSER=postgres PGPASSWORD="$pg_password"
 export PGSSLMODE=verify-full PGSSLROOTCERT="$COMBOS_TEST_CA"
 
+if [[ "$mode" == 'postgres-only' ]]; then
+  export COMBOS_AMQP_ENABLED=false
+  unset COMBOS_AMQP_URL COMBOS_TEST_RABBITMQ_URL COMBOS_TEST_RABBITMQ_CONTAINER G6_AMQP_CONNECT_IP
+  unset COMBOS_TEST_CATALOG_PASSWORD COMBOS_TEST_PRICING_PASSWORD
+  unset AZURE_SERVICE_BUS_ENABLED COMBOS_SERVICE_BUS_ENABLED SERVICE_BUS_ENABLED
+  unset AZURE_SERVICE_BUS_NAMESPACE AZURE_SERVICE_BUS_FQDN AZURE_SERVICE_BUS_CONNECTION_STRING
+  unset COMBOS_SERVICE_BUS_CONNECTION_STRING COMBOS_SERVICE_BUS_FQDN COMBOS_SERVICE_BUS_QUEUE
+else
+  export COMBOS_TEST_CATALOG_PASSWORD="$catalog_password"
+  export COMBOS_TEST_PRICING_PASSWORD="$pricing_password"
+  export COMBOS_TEST_RABBITMQ_URL="amqp://combos_test:${rabbit_password}@127.0.0.1:${rabbit_port}/%2f"
+  export COMBOS_TEST_RABBITMQ_CONTAINER="$rabbit_container"
+fi
+
 cd "$repo_root"
-npm run build:catalog-svc
-npm run build:pricing-svc
+if [[ "$mode" == 'legacy' ]]; then
+  npm run build:catalog-svc
+  npm run build:pricing-svc
+fi
 
 test_target='apps/combos-svc'
 if [[ -n "$test_file" ]]; then
