@@ -36,9 +36,9 @@ const BULK_V2_TEMPLATE_HEADERS = [
   'tiene_variantes',
   'precio_regular',
   'atributos_producto',
+  'atributos_variante',
   'imagen_url',
   'stock_inicial',
-  'precio_oferta',
 ];
 
 function createValidBulkV2Csv(sku = 'GW-BULK-001'): Buffer {
@@ -57,8 +57,8 @@ function createValidBulkV2Csv(sku = 'GW-BULK-001'): Buffer {
     '10.50',
     '[]',
     '',
+    'https://example.test/product.png',
     '0',
-    '',
   ];
   return Buffer.from(
     `${BULK_V2_TEMPLATE_HEADERS.join(',')}\r\n${values.map((v) => `"${v.replace(/"/g, '""')}"`).join(',')}\r\n`,
