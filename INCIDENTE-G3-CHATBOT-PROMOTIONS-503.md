@@ -169,3 +169,32 @@ HEAD funcional auditado anteriormente: `6e04a3389a1b0c9c52dd62cc65c723ac6948b5ed
 ### Estado PR/CI y bloqueos
 
 PR #277 permanece como único PR de este cambio; #275 no se tocó. Estado previo a publicar estos cambios: Draft y CI anterior `SKIPPED`, que no valida esta revisión. Tras subir los commits de este addendum y pruebas, el PR debe pasar a Ready solo si quedan verdes las validaciones locales; se verificarán los checks oficiales contra el SHA exacto y mergeabilidad antes del merge normal autorizado. Merge y despliegue son etapas distintas. No existe todavía `LIVE_HTTP_200` para la evaluación bilateral con la identidad real de Chatbot; queda para retest después del rollout.
+
+## Addendum — run CD #45561641541 y recuperación (2026-11-25)
+
+### Evidencia operativa
+
+- Run `45561641541` terminó `failure`; los jobs de despliegue y recuperación finalizaron y el smoke quedó `skipped`. OIDC sí completó; no se ejecutó el smoke oficial privado.
+- Tras el run, `AZURE_CHILE_DEPLOY_ENABLED` se restauró y leyó como `false`.
+- Promotions sirve el digest `sha256:679ca22d1545f5e90cb51574d329a90f487b2c0c3c11e2d62e6b666fe342bca6` en `promotions-svc--ghpx4p3`, Healthy/Provisioned, 100% vía `latestRevision`, modo `Single`, ingress interno. `minReplicas=0`; el estado observado fue `ScaledToZero`/0 réplicas. No se hizo rollback ni redeploy.
+- Gateway conserva su revisión segura `api-gateway--g3sec1125a`, 100% de tráfico, modo `Multiple`. POST anónimo de evaluación por Gateway respondió 401 y GET público de promociones respondió 200.
+- Inspección acotada dentro de Promotions confirmó `PUBLIC_READ_ONLY`, allowlist pública de 9 operaciones sin `evaluarPromociones`. El POST directo interno sin JWT con el DTO reportado respondió 404 `PROMOCION_NO_ENCONTRADA` (correlation ID `d2feea13-bed2-4724-934d-7d580b0a31ee`); no es smoke privado ni resultado bilateral. La ruta directa no demostró 401. No se registró JWT ni se contactó a Sonny.
+
+### Causa exacta del fallo CD y correcciones locales
+
+- El despliegue alcanzó la actualización de ACA, luego falló una verificación de deploy. El mensaje de “cambio concurrente” no acredita una escritura ajena: el digest reportado era el objetivo y la normalización incluía `ingress.traffic`, cuyo valor puede transicionar de una revisión nombrada a `latestRevision` en Single mode.
+- La recuperación falló porque `reconcile-recovery.sh` ejecutaba directamente `deploy.sh`, que está versionado como modo `100644`. Se corrigieron ambas invocaciones para usar `bash`; la regresión deja el stub sin permiso de ejecución y verifica restore, inspect y rechazo por procedencia incompatible.
+- `deploy.sh` ahora separa el drift persistente de la transición permitida de imagen/revisión/tráfico; compara el tráfico efectivamente servido, valida modo `Multiple` de Gateway y `Single` de Promotions, readiness/health/running/replicas, reconoce `ScaledToZero` de ACA y reporta la etapa concreta. Una actualización rechazada sin cambios verificados no dispara rollback; un drift persistente o tráfico ambiguo mantiene el bloqueo. No se debilita la validación de tráfico ni la protección de rollback.
+
+### Validación local
+
+- `bash -n` para scripts y tests modificados: PASS.
+- `tests/deploy.test.sh`: PASS, incluye configuración ajena que bloquea rollback, tráfico no servido, rollback verificado/no verificable y scale-to-zero.
+- `tests/reconcile-recovery.test.sh`: PASS con ejecutor de modo 100644.
+- `git diff --check`: PASS.
+- ShellCheck y Actionlint no están instalados localmente; requieren CI oficial.
+- Cambios limitados a `deploy.sh`, `reconcile-recovery.sh` y sus dos pruebas. Aún no se ha creado/publicado PR ni se han ejecutado CI oficiales para estas modificaciones.
+
+### Estado
+
+`GATE_FALSE=PASS`; `ACA_CURRENT_DIGEST=679ca22d...342bca6`; `ACA_EFFECTIVE_REVISION=promotions-svc--ghpx4p3`; `ACA_TRAFFIC=100%`; `ACA_HEALTH=Healthy`; `DEPLOY_FAILURE_EXACT_STAGE=verificación de deploy tras actualización, antes del smoke; recovery falló por permiso de ejecución`; `RECOVERY_PERMISSION_BUG_FIXED=LOCAL`; `CONFIG_DRIFT_ANALYSIS=normalización anterior confundía ingress.traffic dinámico con drift; tests preservan bloqueo ante ingress/config persistente`; `DEPLOYMENT_REQUIRED=NO, el digest corregido ya sirve 100%`; `DEPLOYMENT_RESULT=imagen servida, smoke oficial omitido`; `PRIVATE_SMOKE=NOT_RUN`; `JIT_CLEANUP=el job smoke fue skipped, no se creó runner en este run`; `LIVE_HTTP_200=NOT_VERIFIED`; `G3_BILATERAL_RETEST=pendiente de prueba legítima de G3, no contactado por solicitud del coordinador`.
