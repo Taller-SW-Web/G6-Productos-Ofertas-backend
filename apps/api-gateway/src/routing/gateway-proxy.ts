@@ -149,9 +149,15 @@ export class GatewayProxy {
     res.setHeader('X-Correlation-Id', correlationId);
     let finalStatus = 500;
     let resultOrigin: 'gateway' | 'provider' = 'gateway';
+    let failureOrigin: 'gateway' | 'provider' | null = null;
+    let transportState: 'completed' | 'aborted' | 'failed' | 'rejected' =
+      'completed';
+    let upstreamReached = false;
     let preUpstreamOutcome: string | null = null;
     if (!route) {
       finalStatus = 404;
+      transportState = 'rejected';
+      failureOrigin = 'gateway';
       preUpstreamOutcome = 'route_not_found';
       res.status(404).end();
       process.stdout.write(
@@ -162,9 +168,12 @@ export class GatewayProxy {
           method: req.method,
           owner: null,
           status: finalStatus,
+          transportState,
           durationMs: Math.max(0, Date.now() - startedAt),
           correlationId,
           resultOrigin,
+          failureOrigin,
+          upstreamReached,
           preUpstreamOutcome,
         }) + '\n',
       );
@@ -289,6 +298,7 @@ export class GatewayProxy {
         body,
         ...(upload ? { duplex: 'half' as const } : {}),
       };
+      upstreamReached = true;
       const response = await fetch(new URL(req.originalUrl, base), init);
       const contractResponse = route.responses[String(response.status)];
       if (
@@ -332,6 +342,8 @@ export class GatewayProxy {
           /* Never forward raw upstream failures. */
         }
         resultOrigin = 'provider';
+        failureOrigin = 'provider';
+        transportState = 'rejected';
         finalStatus = sendGatewayProblem(
           res,
           route,
@@ -359,6 +371,7 @@ export class GatewayProxy {
         finalStatus = response.status;
         res.status(response.status);
         await streamFileResponse(response, res, controller.signal);
+        transportState = 'completed';
         return;
       }
       const payload = await readLimitedResponse(
@@ -367,14 +380,17 @@ export class GatewayProxy {
       );
       resultOrigin = 'provider';
       finalStatus = response.status;
+      transportState = 'completed';
       res.status(response.status).send(payload);
     } catch (error: unknown) {
       const failure =
         error instanceof GatewayFailure
           ? error
           : new GatewayFailure(503, 'SERVICIO_NO_DISPONIBLE');
-      resultOrigin = 'gateway';
+      failureOrigin = 'gateway';
       if (!res.destroyed && !res.headersSent) {
+        resultOrigin = 'gateway';
+        transportState = controller.signal.aborted ? 'aborted' : 'rejected';
         if (controller.signal.aborted) res.setHeader('Connection', 'close');
         finalStatus = sendGatewayProblem(
           res,
@@ -385,7 +401,7 @@ export class GatewayProxy {
           'gateway',
         ).status;
       } else {
-        finalStatus = failure.status;
+        transportState = controller.signal.aborted ? 'aborted' : 'failed';
       }
     } finally {
       clearTimeout(timer);
@@ -399,9 +415,12 @@ export class GatewayProxy {
           method: route.method,
           owner: route.service,
           status: finalStatus,
+          transportState,
           durationMs: Math.max(0, Date.now() - startedAt),
           correlationId,
           resultOrigin,
+          failureOrigin,
+          upstreamReached,
           preUpstreamOutcome,
         }) + '\n',
       );
