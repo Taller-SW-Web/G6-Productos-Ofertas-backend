@@ -54,6 +54,7 @@ describe('Gateway to Promotions H5 without commercial evidence', () => {
             MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
             SERVICE_BUS_NAMESPACE_FQDN:
               'g6-coupon-isolated.servicebus.windows.net',
+            AZURE_CLIENT_ID: '11111111-1111-4111-8111-111111111111',
             PROMOTIONS_H5_COUPON_COMMANDS_ENABLED: 'true',
             PROMOTIONS_SERVICE_TOKEN_URL:
               'https://isolated.test/api/v1/auth/token',

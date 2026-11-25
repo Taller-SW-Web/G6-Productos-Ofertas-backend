@@ -18,7 +18,7 @@ El perfil de entrada sigue [perfil-autorizado.schema.json](perfil-autorizado.sch
 
 Cada caso mutante del manifiesto debe indicar `execute:true` y `mutation_authorization` apuntando a un archivo firmado por el owner que aprueba la ventana/fixture. El contenedor del archivo lleva `execute:true` y `document.payload`/`document.signature` Ed25519 base64url. El payload firmado liga `issuer:"G6_H5_MUTATION_AUTHORIZATION"`, `authorized_by`, `case_id`, `stage`, `environment`, origen Gateway, SHA G5/G6, pedido, `correlation_id`, `operation_id`, `reservation_id`, `restore_operation_id` si aplica, `plan_sha256` del plan completo, referencias HTTPS de ventana y fixture, `issued_at` y `expires_at` (máximo 24 h). Configurar `G5_H5_MUTATION_AUTHORIZATION_PUBLIC_KEY` con el PEM público del aprobador por canal autenticado. El wrapper, la matriz y `ejecutar-integracion.mjs` verifican la firma y el alcance; proporcionar URLs HTTPS sin firma no autoriza la ejecución. Las mutaciones exigen además `G5_H5_MUTATIONS=integration-only` y el Gateway privado autorizado.
 
-Para lecturas permitidas ejecutar `node apps/promotions-svc/h5/ejecutar-controlado.mjs preflight directorio/manifiesto.azure.json resultado-nuevo.json [G5-H5-NN ...]`. El preflight exige `G5_H5_AUTHORIZED_GATEWAY_ORIGIN` y `G5_H5_VENTAS_JWT` reales, corre GET de disponibilidad/precio y la validación no mutante del cupón, y deja `status=BLOCKED` aunque el preflight técnico pase. Para `auth` se requieren además `G5_H5_EXPIRED_JWT`, `G5_H5_WRONG_AUDIENCE_JWT` y `G5_H5_WRONG_SCOPE_JWT` emitidos para pruebas por G7.
+Para lecturas permitidas ejecutar `node apps/promotions-svc/h5/ejecutar-controlado.mjs preflight directorio/manifiesto.azure.json resultado-nuevo.json [G5-H5-NN ...]`. El preflight exige `G5_H5_AUTHORIZED_GATEWAY_ORIGIN`, `G5_H5_VENTAS_JWT` para la disponibilidad detallada de Inventory, `G5_H5_PRICING_READ_JWT` para consultar Pricing y `G5_H5_COUPON_VALIDATION_JWT` para validar el cupón sin consumirlo. Pricing y validación usan un cliente y scope permitidos por OpenAPI para el canal del fixture; no amplían los grants de `modulo-ventas`. Los tres tokens deben ser JWT G7 reales de sus clientes autorizados y nunca se escriben al reporte ni a la salida. El preflight deja `status=BLOCKED` aunque su etapa técnica pase. Para `auth` se requieren además `G5_H5_EXPIRED_JWT`, `G5_H5_WRONG_AUDIENCE_JWT` y `G5_H5_WRONG_SCOPE_JWT` emitidos para pruebas por G7.
 
 La batería usa `node apps/promotions-svc/h5/ejecutar-controlado.mjs matrix ...`. La misma autorización firmada se verifica también al invocar `ejecutar-matriz.mjs` o `ejecutar-integracion.mjs` directamente: una llamada directa sin archivo de autorización, `execute:true` y el flag de ventana falla antes de HTTP. `G5_H5_AUTHORIZED_GATEWAY_ORIGIN` debe coincidir exactamente con el origen privado del plan. El runner registra UUID de correlación, operación, revisión, estado y códigos; JWTs se mantienen fuera del archivo y salida. La reserva generada guarda el `reservation_id` en un sidecar `.runtime.json`; conservar plan, sidecar y todos los operation UUID para retries.
 
@@ -29,6 +29,13 @@ Referencia de estructura del plan. Los valores entre `<...>` son campos pendient
   "environment": "integration",
   "gateway": "<origen HTTPS privado autorizado>",
   "g6_sha": "<SHA desplegado G6>",
+  "g6_destination": "chile-shared",
+  "g6_service_shas": {
+    "api-gateway": "<SHA fuente del run Gateway>",
+    "catalog-svc": "<SHA fuente del run Catalog>",
+    "inventory-svc": "<SHA fuente del run Inventory>",
+    "promotions-svc": "<SHA fuente del run Promotions>"
+  },
   "g6_cd_runs": {
     "api-gateway": "<ID CD único Gateway>",
     "catalog-svc": "<ID CD único Catalog>",
@@ -110,37 +117,37 @@ Para homologar cualquier caso, usar el runner desde la red privada con `gh` y `a
 
 Los casos 07, 15 y 16 requieren `follow` terminal y constancia supervisada con `runtime_evidence` firmado. Usar `operation_id` del `follow` y marcas horarias del ambiente posteriores al despliegue y anteriores a `observed_at`. Conservar en `evidence_url` las trazas depuradas y los conteos obtenidos en lectura autorizada. El supervisor verifica estos hechos antes de firmar:
 
-| Caso | Campos de `runtime_evidence` y hechos que acreditan |
-|---|---|
-| G5-H5-07 | `request_operation_id` y `recovered_operation_id` coinciden con `operation_id`. `response_lost_at` precede a `recovered_at`, la operación queda `COMPLETED` y la lectura durable confirma `operation_rows: 1` y `effect_count: 1`. |
+| Caso     | Campos de `runtime_evidence` y hechos que acreditan                                                                                                                                                                                                                                                                                                  |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G5-H5-07 | `request_operation_id` y `recovered_operation_id` coinciden con `operation_id`. `response_lost_at` precede a `recovered_at`, la operación queda `COMPLETED` y la lectura durable confirma `operation_rows: 1` y `effect_count: 1`.                                                                                                                   |
 | G5-H5-15 | `message_id`, `outbox_pending_message_id` y `outbox_recovered_message_id` coinciden. Registrar `outbox_pending_at` antes del reinicio, `worker_before` y `worker_after` distintos, y la secuencia `worker_stopped_at`, `worker_restarted_at`, `outbox_recovered_at` y `terminal_at`. Este último coincide con `completed_at` del resultado terminal. |
-| G5-H5-16 | `inbox_message_id` coincide con `message_id`. Cada entrada de `deliveries` incluye ese `message_id`, un `trace_id` distinto, `observed_at` y el `settlement` observado. Se exigen dos o más entregas y la última queda `COMPLETED`. La operación queda `COMPLETED` y la lectura durable confirma `inbox_rows: 1` y `effect_count: 1`. |
+| G5-H5-16 | `inbox_message_id` coincide con `message_id`. Cada entrada de `deliveries` incluye ese `message_id`, un `trace_id` distinto, `observed_at` y el `settlement` observado. Se exigen dos o más entregas y la última queda `COMPLETED`. La operación queda `COMPLETED` y la lectura durable confirma `inbox_rows: 1` y `effect_count: 1`.                |
 
 ## Matriz de los 20 escenarios
 
 Estado real al 21/11/2026. Los 20 casos completos quedan `BLOCKED` hasta que se pueda ejecutar y recoger la evidencia de homologación. Los casos 15 y 16 tienen evidencia real de los componentes G6: reinicio del runtime, redelivery, duplicado y settlement de una restauración sintética sin efecto comercial. El ambiente aislado sigue pendiente de los workloads del flujo y de la fixture bilateral autorizada. [Evidencia Azure](VALIDACION.md#reauditoría-del-head-740cb91).
 
-| Caso | Comprobación | Ejecución preparada | Estado real |
-|---|---|---|---|
-| G5-H5-01 | Reserva y resultado durable | `reserve` / `follow` | Pendiente Gateway aislado y token G7 |
-| G5-H5-02 | Reserva rechazada y M1 evita cupón/pago | `reserve` negativo + verificación M1 | Pendiente G5 y ambiente |
-| G5-H5-03 | Confirmación de consumo de stock | `confirm` tras pago G5 | Pendiente bilateral |
-| G5-H5-04 | Liberación por anulación | `cancel` en modo `release-only` y seguimiento M1 | Pendiente bilateral; no llama a restauración de cupón |
-| G5-H5-05 | Cupón y GET terminal | `coupon` y constancia bilateral firmada | BLOCKED. Pendiente snapshot de G5 y constancia vinculada a la ejecución real |
-| G5-H5-06 | Restauración del consumo original | `cancel` con fecha original y política | Pendiente bilateral |
-| G5-H5-07 | Pérdida de respuesta del POST | `follow` y mismo UUID, con pérdida de respuesta y conteos firmados | BLOCKED. Reintento cubierto localmente. Pendiente evidencia del ambiente aislado |
-| G5-H5-08 | Identidad reutilizada con otro contenido | Conflicto del paso `coupon` | 409 cubierto localmente; pendiente ambiente |
-| G5-H5-09 | Reinicio de G5 | Reinicio coordinado de M1 y `follow` durable | Etapa técnica obligatoria y constancia bilateral; pendiente G5 |
-| G5-H5-10 | ACTIVA y vencida | `expired` antes del barrido | Pendiente fixture y ambiente |
-| G5-H5-11 | EXPIRADA entre barridos | `expired` tras barrido | Pendiente bilateral |
-| G5-H5-12 | Carrera pago/anulación/vencimiento | Carrera controlada M1 con consultas de reserva | Pendiente bilateral |
-| G5-H5-13 | Pedido/cliente ajeno | `auth` con ID conocido y pedido ajeno | 404 cubierto localmente; pendiente ambiente |
-| G5-H5-14 | JWT válido, ausente, expirado y scope incorrecto | `auth` y smoke privado Inventory/G5 | Pruebas locales con firmas de prueba; pendiente emisión G7 real |
-| G5-H5-15 | Broker/worker caído y recuperación | Outbox pendiente, reinicio, recuperación y `follow` terminal correlacionados | BLOCKED. Recuperación observada en el runtime temporal. Pendiente recorrido en Gateway aislado |
-| G5-H5-16 | Entrega duplicada o settlement perdido | Entregas del mismo MessageId, un Inbox y un efecto comercial, más `follow` | BLOCKED. Duplicado y settlement observados en el runtime temporal. Pendiente efecto comercial en el ambiente aislado |
-| G5-H5-17 | Devolución parcial apta | Recepción M2, reintegro y saldo antes/después | Pendiente bilateral |
-| G5-H5-18 | Orden de reemplazo por CAMBIO | M2/M1, reserva y consumo antes de despacho | Pendiente G5/G2 y ambiente |
-| G5-H5-19 | Corte y reversión conciliados | Pausa de admisión, consulta y conciliación por ID | Pendiente bilateral e Infra |
-| G5-H5-20 | Destinos internos obligatorios | Matriz Service Bus H5 por emisor/receptor | Colas candidatas verificadas; pendiente validar workloads y efectos |
+| Caso     | Comprobación                                     | Ejecución preparada                                                          | Estado real                                                                                                          |
+| -------- | ------------------------------------------------ | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| G5-H5-01 | Reserva y resultado durable                      | `reserve` / `follow`                                                         | Pendiente Gateway aislado y token G7                                                                                 |
+| G5-H5-02 | Reserva rechazada y M1 evita cupón/pago          | `reserve` negativo + verificación M1                                         | Pendiente G5 y ambiente                                                                                              |
+| G5-H5-03 | Confirmación de consumo de stock                 | `confirm` tras pago G5                                                       | Pendiente bilateral                                                                                                  |
+| G5-H5-04 | Liberación por anulación                         | `cancel` en modo `release-only` y seguimiento M1                             | Pendiente bilateral; no llama a restauración de cupón                                                                |
+| G5-H5-05 | Cupón y GET terminal                             | `coupon` y constancia bilateral firmada                                      | BLOCKED. Pendiente snapshot de G5 y constancia vinculada a la ejecución real                                         |
+| G5-H5-06 | Restauración del consumo original                | `cancel` con fecha original y política                                       | Pendiente bilateral                                                                                                  |
+| G5-H5-07 | Pérdida de respuesta del POST                    | `follow` y mismo UUID, con pérdida de respuesta y conteos firmados           | BLOCKED. Reintento cubierto localmente. Pendiente evidencia del ambiente aislado                                     |
+| G5-H5-08 | Identidad reutilizada con otro contenido         | Conflicto del paso `coupon`                                                  | 409 cubierto localmente; pendiente ambiente                                                                          |
+| G5-H5-09 | Reinicio de G5                                   | Reinicio coordinado de M1 y `follow` durable                                 | Etapa técnica obligatoria y constancia bilateral; pendiente G5                                                       |
+| G5-H5-10 | ACTIVA y vencida                                 | `expired` antes del barrido                                                  | Pendiente fixture y ambiente                                                                                         |
+| G5-H5-11 | EXPIRADA entre barridos                          | `expired` tras barrido                                                       | Pendiente bilateral                                                                                                  |
+| G5-H5-12 | Carrera pago/anulación/vencimiento               | Carrera controlada M1 con consultas de reserva                               | Pendiente bilateral                                                                                                  |
+| G5-H5-13 | Pedido/cliente ajeno                             | `auth` con ID conocido y pedido ajeno                                        | 404 cubierto localmente; pendiente ambiente                                                                          |
+| G5-H5-14 | JWT válido, ausente, expirado y scope incorrecto | `auth` y smoke privado Inventory/G5                                          | Pruebas locales con firmas de prueba; pendiente emisión G7 real                                                      |
+| G5-H5-15 | Broker/worker caído y recuperación               | Outbox pendiente, reinicio, recuperación y `follow` terminal correlacionados | BLOCKED. Recuperación observada en el runtime temporal. Pendiente recorrido en Gateway aislado                       |
+| G5-H5-16 | Entrega duplicada o settlement perdido           | Entregas del mismo MessageId, un Inbox y un efecto comercial, más `follow`   | BLOCKED. Duplicado y settlement observados en el runtime temporal. Pendiente efecto comercial en el ambiente aislado |
+| G5-H5-17 | Devolución parcial apta                          | Recepción M2, reintegro y saldo antes/después                                | Pendiente bilateral                                                                                                  |
+| G5-H5-18 | Orden de reemplazo por CAMBIO                    | M2/M1, reserva y consumo antes de despacho                                   | Pendiente G5/G2 y ambiente                                                                                           |
+| G5-H5-19 | Corte y reversión conciliados                    | Pausa de admisión, consulta y conciliación por ID                            | Pendiente bilateral e Infra                                                                                          |
+| G5-H5-20 | Destinos internos obligatorios                   | Matriz Service Bus H5 por emisor/receptor                                    | Colas candidatas verificadas; pendiente validar workloads y efectos                                                  |
 
 Detalle ejecutable por escenario: [ESCENARIOS_G5_H5.md](ESCENARIOS_G5_H5.md); definición estructurada: [escenarios.json](escenarios.json). La configuración comercial de `ejecutar-integracion.mjs` ahora debe venir del plan autorizado. preparar-planes.mjs genera planes aislados y UUID una sola vez; no genera pedidos ni firmas. Ejecutar lecturas con `ejecutar-controlado.mjs` preflight ...; la matriz mutante exige referencias de ventana y fixture autorizadas.
