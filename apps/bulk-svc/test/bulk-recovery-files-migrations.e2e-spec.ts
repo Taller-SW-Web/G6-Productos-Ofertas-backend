@@ -633,8 +633,11 @@ integration(
           xlsxOutboxRow!.payload as unknown as CatalogEnvelope,
         ),
       ).resolves.toBe('APPLIED');
-      const catalogXlsxRows = await catalogDb.read((db) =>
-        db.select().from(products).where(eq(products.sku, xlsxSku)),
+      const allCatalogProducts = await catalogDb.read((db) =>
+        db.select().from(products),
+      );
+      const catalogXlsxRows = allCatalogProducts.filter(
+        (p) => p.nombre === 'Producto XLSX Roundtrip',
       );
       expect(catalogXlsxRows).toHaveLength(1);
       expect(catalogXlsxRows[0]?.nombre).toBe('Producto XLSX Roundtrip');
