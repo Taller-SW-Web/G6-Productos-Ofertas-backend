@@ -53,13 +53,16 @@ $armToken = $null
 $cleanupFailures = [System.Collections.Generic.List[string]]::new()
 $executionNamesBefore = @()
 $executionCorrelationFailed = $false
-$cleanupMarker = Join-Path (Join-Path $env:LOCALAPPDATA 'G6\azure-h5-smoke') 'CLEANUP_INCOMPLETE.json'
-$attemptRecordPath = Join-Path (Split-Path -Parent $cleanupMarker) 'JIT_ATTEMPT.json'
 $jitRegistrationAttempted = $false
 $jitRunnerAbsenceVerified = $false
 
 . (Join-Path $PSScriptRoot 'aca-job-secret-patch.ps1')
 . (Join-Path $PSScriptRoot 'jit-runner-operations.ps1')
+. (Join-Path $PSScriptRoot 'jit-local-state.ps1')
+$jitStatePaths = Get-H5JitLocalStatePaths -Target $destinationTarget
+$cleanupMarker = $jitStatePaths.CleanupMarker
+$attemptRecordPath = $jitStatePaths.AttemptRecord
+Set-AcaPatchJournalPathOverride $jitStatePaths.PatchJournal
 
 function Invoke-GhJson {
     param([Parameter(Mandatory)][string[]]$Arguments)
@@ -218,8 +221,8 @@ function Remove-JitRegistration {
         $parent = Split-Path -Parent $cleanupMarker
         $null = New-Item -ItemType Directory -Path $parent -Force
         $patchOutcome = if ($jobPatchOutcomeAmbiguous) { 'Ambiguous' } else { $script:AcaLastPatchOutcome }
-        $marker = @{ createdAt=[DateTimeOffset]::UtcNow.ToString('o'); runnerName=$jitRunnerName; runnerId=$jitRunnerId; executionName=$jobExecutionName; patchOutcome=$patchOutcome; failures=@($script:cleanupFailures) } | ConvertTo-Json -Depth 5
-        [System.IO.File]::WriteAllText($cleanupMarker,$marker,[System.Text.UTF8Encoding]::new($false))
+        $marker = @{ createdAt=[DateTimeOffset]::UtcNow.ToString('o'); destination=$destinationTarget.Destination; resourceId=$jitStatePaths.ResourceId; subscriptionId=$destinationTarget.SubscriptionId; resourceGroup=$destinationTarget.ResourceGroup; acaEnvironment=$destinationTarget.AcaEnvironment; jobName=$destinationTarget.JobName; runnerName=$jitRunnerName; runnerId=$jitRunnerId; executionName=$jobExecutionName; patchOutcome=$patchOutcome; failures=@($script:cleanupFailures) }
+        Write-H5JitLocalStateRecord -Path $cleanupMarker -Record $marker
         throw "CLEANUP_INCOMPLETE: $($script:cleanupFailures -join '; '). New JIT attempts are blocked by $cleanupMarker."
     }
     if ($jitRegistrationAttempted -or $jobExecutionName -or $jitSecretTouched) {
@@ -294,10 +297,8 @@ function Start-JitCycle {
     $script:jitRunnerName = $cycleRunnerName
     $requestJson = New-GitHubJitRequestJson -Mode $CycleMode -Name $cycleRunnerName -RunnerGroupId $RunnerGroupId -DiagnosticLabel $diagnosticLabel -SmokeLabel $SmokeLabel
     Write-Information "JIT_REQUEST_JSON: $requestJson" -InformationAction Continue
-    $attemptRecord = @{ attemptedAt=[DateTimeOffset]::UtcNow.ToString('o'); organization=$Organization; runnerGroupId=$RunnerGroupId; runnerName=$cycleRunnerName; mode=$CycleMode } | ConvertTo-Json -Compress
-    $parent = Split-Path -Parent $attemptRecordPath
-    $null = New-Item -ItemType Directory -Path $parent -Force
-    [System.IO.File]::WriteAllText($attemptRecordPath,$attemptRecord,[System.Text.UTF8Encoding]::new($false))
+    $attemptRecord = @{ attemptedAt=[DateTimeOffset]::UtcNow.ToString('o'); destination=$destinationTarget.Destination; resourceId=$jitStatePaths.ResourceId; subscriptionId=$destinationTarget.SubscriptionId; resourceGroup=$destinationTarget.ResourceGroup; acaEnvironment=$destinationTarget.AcaEnvironment; jobName=$destinationTarget.JobName; organization=$Organization; runnerGroupId=$RunnerGroupId; runnerName=$cycleRunnerName; mode=$CycleMode }
+    Write-H5JitLocalStateRecord -Path $attemptRecordPath -Record $attemptRecord
     $script:jitRegistrationAttempted = $true
     $jitProcess = Invoke-GhJitConfigRequest -GhExecutable ((Get-Command gh).Source) -Organization $Organization -RequestJson $requestJson
     $jitResponse = Get-GitHubJitResponseFields -ResponseText ([string]$jitProcess.Stdout)
@@ -455,10 +456,9 @@ try {
     foreach ($tool in @('gh','az')) {
         if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "Required CLI not found: $tool" }
     }
-    if (Test-Path -LiteralPath $cleanupMarker) { throw "CLEANUP_INCOMPLETE: marker exists at $cleanupMarker; verify runner, Job execution and secret absence before clearing it manually." }
-    if (Test-Path -LiteralPath $attemptRecordPath) { throw "CLEANUP_INCOMPLETE: unresolved JIT attempt record exists at $attemptRecordPath; reconcile it before another request." }
-    $stage = 'local ARM PATCH/LRO journal check'
-    Assert-AcaPatchJournalReady
+    $stage = 'legacy and destination-scoped local JIT state check'
+    Assert-H5LegacyJitStateSafe -Target $destinationTarget -StatePaths $jitStatePaths
+    Assert-H5DestinationJitStateClear -Target $destinationTarget -StatePaths $jitStatePaths
     $account = Invoke-AzJson @('account','show','--output','json')
     $script:subscriptionId = [string]$account.id
     if ([string]::IsNullOrWhiteSpace($subscriptionId)) { throw 'Azure CLI has no active subscription.' }
@@ -466,13 +466,8 @@ try {
 
     $stage = 'runner-group authorization check'
     $group = Invoke-GhJson @('api',"orgs/$Organization/actions/runner-groups/$RunnerGroupId")
-    if ($group.restricted_to_workflows -ne $true -or @($group.selected_workflows).Count -ne 1 -or $group.selected_workflows[0] -cne $expectedWorkflow) {
-        throw 'Runner group does not restrict exactly to the CD workflow on master; JIT registration was not requested.'
-    }
     $selectedRepos = Invoke-GhJson @('api',"orgs/$Organization/actions/runner-groups/$RunnerGroupId/repositories")
-    if (@($selectedRepos.repositories).Count -ne 1 -or $selectedRepos.repositories[0].full_name -cne $Repository) {
-        throw 'Runner group repository allowlist is not exactly the G6 backend repository.'
-    }
+    Assert-H5RunnerGroupRestriction -Group $group -Repositories $selectedRepos -Repository $Repository -ExpectedWorkflow $expectedWorkflow
 
     $stage = 'CD queue check'
     $workflow = Invoke-GhJson @('api',"repos/$Repository/actions/workflows/cd-services-azure.yml")
