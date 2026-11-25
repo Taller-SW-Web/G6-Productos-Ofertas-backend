@@ -10,7 +10,7 @@ readonly TARGET='ghcr.io/taller-sw-web/g6-productos-ofertas-backend/api-gateway@
 trap 'rm -rf "$TEMP"' EXIT
 mkdir "$TEMP/bin"
 cat > "$TEMP/state.json" <<EOF
-{"properties":{"configuration":{"secrets":[{"name":"ACA_PRIVATE_SENTINEL","value":"must-not-be-printed"}],"ingress":{"external":true,"targetPort":3000}},"template":{"revisionSuffix":"initial","containers":[{"name":"api-gateway","image":"$PREVIOUS","env":[{"name":"PRIVATE_SETTING","value":"must-not-be-printed"}]},{"name":"caddy","image":"ghcr.io/taller-sw-web/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],"scale":{"minReplicas":0,"maxReplicas":1}},"latestRevisionName":"rev-0","latestReadyRevisionName":"rev-0"},"revision":{"properties":{"healthState":"Healthy","active":true,"runningState":"Running","template":{"containers":[{"name":"api-gateway","image":"$PREVIOUS","env":[{"name":"PRIVATE_SETTING","value":"must-not-be-printed"}]},{"name":"caddy","image":"ghcr.io/taller-sw-web/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],"scale":{"minReplicas":0,"maxReplicas":1}}}},"updates":0}
+{"properties":{"configuration":{"activeRevisionsMode":"Multiple","secrets":[{"name":"ACA_PRIVATE_SENTINEL","value":"must-not-be-printed"}],"ingress":{"external":true,"targetPort":3000}},"template":{"revisionSuffix":"initial","containers":[{"name":"api-gateway","image":"$PREVIOUS","env":[{"name":"PRIVATE_SETTING","value":"must-not-be-printed"}]},{"name":"caddy","image":"ghcr.io/taller-sw-web/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],"scale":{"minReplicas":0,"maxReplicas":1}},"latestRevisionName":"rev-0","latestReadyRevisionName":"rev-0"},"revision":{"properties":{"healthState":"Healthy","active":true,"runningState":"Running","template":{"containers":[{"name":"api-gateway","image":"$PREVIOUS","env":[{"name":"PRIVATE_SETTING","value":"must-not-be-printed"}]},{"name":"caddy","image":"ghcr.io/taller-sw-web/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],"scale":{"minReplicas":0,"maxReplicas":1}}}},"updates":0}
 EOF
 cat > "$TEMP/bin/az" <<'MOCK'
 #!/usr/bin/env bash
@@ -54,7 +54,7 @@ if [[ "${1:-}" == containerapp && "${2:-}" == update ]]; then
     .revision.properties.replicas = (if $scale_zero == "true" then 0 else 1 end) |
     .revision.properties.provisioningState = "Provisioned" |
     .revision.properties.healthState = (if $image == $unhealthy_target or ($unhealthy_rollback == "true" and ($image | contains("@sha256:aaaaaaaa"))) then "Unhealthy" elif $scale_zero == "true" then "None" else "Healthy" end) |
-    .revision.properties.runningState = (if $image == $unhealthy_target or ($unhealthy_rollback == "true" and ($image | contains("@sha256:aaaaaaaa"))) then "Failed" elif $scale_zero == "true" then "Stopped" else "Running" end)
+    .revision.properties.runningState = (if $image == $unhealthy_target or ($unhealthy_rollback == "true" and ($image | contains("@sha256:aaaaaaaa"))) then "Failed" elif $scale_zero == "true" then "ScaledToZero" else "Running" end)
   ' "$state" > "$state.tmp"
   mv "$state.tmp" "$state"
   exit 0
@@ -136,7 +136,7 @@ mv "$TEMP/state.tmp" "$MOCK_STATE"
 AZURE_CHILE_DEPLOY_ENABLED=false bash "$DEPLOY" --restore api-gateway "$PREVIOUS" "$TARGET" "$config_from_receipt" > "$TEMP/restore.log" 2>&1 || { cat "$TEMP/restore.log"; fail 'recuperación coordinada con ventana cerrada'; }
 grep -Fq 'ROLLBACK COORDINADO VERIFICADO' "$TEMP/restore.log" || fail 'recuperación no quedó confirmada'
 updates_before_present_restore="$(jq -r .updates "$MOCK_STATE")"
-wrong_traffic_config="$(MOCK_TRAFFIC=old az containerapp show --subscription fef42188-accd-4470-ae88-78f583eb4906 --name api-gateway --resource-group rg-g6-aca-chile --output json | jq -S -c --arg target api-gateway '{identity:.identity,location:.location,tags:.tags,kind:.kind,properties:(.properties|del(.latestRevisionName,.latestReadyRevisionName,.latestRevisionFqdn,.provisioningState)|.template|= (del(.revisionSuffix)|.containers|=map(if .name==$target then del(.image) else . end)))}')"
+wrong_traffic_config="$(MOCK_TRAFFIC=old az containerapp show --subscription fef42188-accd-4470-ae88-78f583eb4906 --name api-gateway --resource-group rg-g6-aca-chile --output json | jq -S -c --arg target api-gateway '{identity:.identity,location:.location,tags:.tags,kind:.kind,properties:(.properties|del(.latestRevisionName,.latestReadyRevisionName,.latestRevisionFqdn,.provisioningState,.configuration.ingress.traffic)|.template|= (del(.revisionSuffix)|.containers|=map(if .name==$target then del(.image) else . end)))}')"
 wrong_traffic_hash="$(printf '%s' "$wrong_traffic_config" | sha256sum | awk '{print $1}')"
 if MOCK_TRAFFIC=old AZURE_CHILE_DEPLOY_ENABLED=false bash "$DEPLOY" --restore api-gateway "$PREVIOUS" "$TARGET" "$wrong_traffic_hash" > "$TEMP/restore-present-wrong-traffic.log" 2>&1; then fail 'recuperación ya presente aceptó una revisión saludable con tráfico en otra revisión'; fi
 grep -Fq 'RECUPERACIÓN NO VERIFICADA' "$TEMP/restore-present-wrong-traffic.log" || { cat "$TEMP/restore-present-wrong-traffic.log"; fail 'recuperación ya presente sin tráfico efectivo no fue bloqueada'; }
