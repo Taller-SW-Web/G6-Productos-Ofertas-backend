@@ -415,7 +415,6 @@ else
       exit 1
     fi
     [[ "$current" == "$image" ]] || fail 'RECUPERACIÓN OMITIDA: digest de plantilla cambió concurrentemente'
-    current_traffic="$(traffic_snapshot "$after")"
     candidate_revision="$(jq -r '.properties.latestRevisionName' "$after")"
     if traffic_is_revision "$after" "$candidate_revision"; then
       set_traffic_revision "$previous_served_revision" || fail 'RECUPERACIÓN NO VERIFICADA: no se pudo restaurar el tráfico a la revisión anterior'
