@@ -84,9 +84,9 @@ describe('Expanded Phase 1 Gateway HTTP transport', () => {
     if (provider)
       await new Promise<void>((resolve) => provider.close(() => resolve()));
   });
-  it('selects 58 GET and six non-mutating POST candidates', () => {
+  it('selects 58 GET and five non-mutating POST candidates', () => {
     expect(routes.filter((r) => r.method === 'GET')).toHaveLength(58);
-    expect(routes.filter((r) => r.method === 'POST')).toHaveLength(6);
+    expect(routes.filter((r) => r.method === 'POST')).toHaveLength(5);
   });
   for (const route of routes)
     it(
