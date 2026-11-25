@@ -301,7 +301,11 @@ describe.skipIf(!isolatedPerformanceEnabled)(
           );
         }
         const elapsedMs = performance.now() - started;
-        if (latencies.length === 0 || !Number.isFinite(elapsedMs) || elapsedMs <= 0) {
+        if (
+          latencies.length === 0 ||
+          !Number.isFinite(elapsedMs) ||
+          elapsedMs <= 0
+        ) {
           throw new Error(
             `Sin muestras válidas para ${operation} (errors=${errors}, samples=${samples})`,
           );
@@ -537,7 +541,8 @@ describe.skipIf(!isolatedPerformanceEnabled)(
         azureServiceBusEnabled: false,
         postgresImage: 'postgres:17-alpine',
         tlsEnabled: true,
-        providers: 'local-http-fixtures (Catalog/Pricing/Identity, non-production)',
+        providers:
+          'local-http-fixtures (Catalog/Pricing/Identity, non-production)',
         limitation:
           'Proveedores HTTP locales simulados; no mide latencia de red real hacia Catalog, Pricing, G7 ni Azure Service Bus.',
         config: {
