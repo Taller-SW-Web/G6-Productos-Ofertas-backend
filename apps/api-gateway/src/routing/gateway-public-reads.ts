@@ -12,12 +12,6 @@ const publicReadRoutes = [
   ['pricing-svc', 'consultarPrecios', 'GET', '/api/v1/precios'],
   ['pricing-svc', 'obtenerPrecioSku', 'GET', '/api/v1/precios/skus/{sku}'],
   ['promotions-svc', 'listarPromociones', 'GET', '/api/v1/promociones'],
-  [
-    'promotions-svc',
-    'evaluarPromociones',
-    'POST',
-    '/api/v1/promociones/evaluar',
-  ],
   ['promotions-svc', 'validarCupon', 'POST', '/api/v1/cupones/validar'],
   [
     'promotions-svc',

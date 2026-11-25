@@ -75,6 +75,17 @@ describe('Gateway route boundaries and configuration', () => {
         }),
       ).toThrow();
   });
+  it.each(['crearPromocion', 'evaluarPromociones', 'admitirConsumoCuponH5'])(
+    'never exposes the mutating operation %s as an anonymous read',
+    (id) => {
+      expect(() =>
+        readGatewaySettings({
+          G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+          GATEWAY_PUBLIC_OPERATION_IDS: id,
+        }),
+      ).toThrow('Invalid Gateway configuration');
+    },
+  );
   it('allows the G5 H5 route opt-in in PUBLIC_READ_ONLY only with G7 trust configured', () => {
     const settings = readGatewaySettings({
       G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',

@@ -77,6 +77,12 @@ describe('G5 H5 routes behind authenticated Gateway opt-in', () => {
     expect(upstream).toHaveBeenCalledTimes(1);
     expect(upstream.mock.calls[0][1].headers.authorization).toBeUndefined();
 
+    await request(app.getHttpServer())
+      .post('/api/v1/promociones/evaluar')
+      .send({})
+      .expect(401);
+    expect(upstream).toHaveBeenCalledTimes(1);
+
     upstream.mockReset();
     await request(app.getHttpServer())
       .post('/api/v1/cupones/consumos')

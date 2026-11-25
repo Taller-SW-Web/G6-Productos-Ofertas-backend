@@ -23,17 +23,25 @@ describe('Phase 1 exact operation policy and JWT coexistence', () => {
       .filter(
         (id): id is string =>
           !!id &&
+          id !== 'evaluarPromociones' &&
           id !== 'prevalidarImportacionPrecios' &&
           id !== 'obtenerContextoSku',
       )
       .sort();
-    expect(expected).toHaveLength(64);
+    expect(expected).toHaveLength(63);
     expect(
       CONTRACT_ROUTES.filter(isEligiblePublicRead)
         .map((route) => route.operationId)
         .sort(),
     ).toEqual(expected);
     expect(PHASE1_INTERNAL_READ_ROUTES).toEqual([]);
+    expect(
+      isEligiblePublicRead(
+        CONTRACT_ROUTES.find(
+          (route) => route.operationId === 'evaluarPromociones',
+        )!,
+      ),
+    ).toBe(false);
     expect(
       matchContractRoute('GET', '/api/v1/productos/skus/TEST/contexto'),
     ).toBeUndefined();
