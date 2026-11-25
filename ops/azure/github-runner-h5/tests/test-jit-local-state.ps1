@@ -81,7 +81,38 @@ try {
     Write-LegacyJournal $chilePaths.LegacyPatchJournal $legacyChile
     Write-LegacyJournal $chilePaths.PatchJournal @((New-LegacyResolution 'chile-resolved' $chileId 'PATCH add Job secret' 'https://management.azure.com/exact-chile-lro'))
     Assert-H5LegacyJitStateSafe -Target $chile -StatePaths $chilePaths
+    $legacyRows=@(Get-H5LegacyJournalOperations -Path $chilePaths.LegacyPatchJournal)
+    $validResolutions=@(Get-H5LegacyJournalResolutions -Path $chilePaths.PatchJournal -ResourceId $chileId)
+    Assert-True (@(Get-H5LegacyPendingOperations -Operations $legacyRows -Resolutions $validResolutions -ResourceId $chileId).Count -eq 0) 'exact valid reconciliation was not excluded from legacy pending operations'
     Assert-Throws { Assert-H5LegacyJitStateSafe -Target $brazil -StatePaths $brazilPaths } 'HISTORICAL_LRO_UNVERIFIABLE' 'resolving a Chile attempt cleared the Brazil historical block'
+
+    # Re-running the resolver after exact reconciliation is a local no-op: no ARM query and no journal writes.
+    $legacyBytesBefore=[System.IO.File]::ReadAllBytes($chilePaths.LegacyPatchJournal)
+    $isolatedBytesBefore=[System.IO.File]::ReadAllBytes($chilePaths.PatchJournal)
+    $script:azCalls=0
+    function az { $script:azCalls++; throw 'unexpected ARM CLI call after local reconciliation' }
+    $resolverOutput=@(& (Join-Path $PSScriptRoot '..\resolve-patch-journal.ps1') -Destination 'chile-shared')
+    Assert-True ($resolverOutput.Count -eq 1 -and $resolverOutput[0].state -ceq 'NO_PENDING_LOCAL_PATCH_OPERATIONS') 'second resolver run did not return NO_PENDING_LOCAL_PATCH_OPERATIONS'
+    Assert-True ($script:azCalls -eq 0) 'second resolver run queried ARM despite completed reconciliation'
+    Assert-True ([System.Linq.Enumerable]::SequenceEqual([byte[]]$legacyBytesBefore,[byte[]][System.IO.File]::ReadAllBytes($chilePaths.LegacyPatchJournal))) 'legacy journal bytes changed on second resolver run'
+    Assert-True ([System.Linq.Enumerable]::SequenceEqual([byte[]]$isolatedBytesBefore,[byte[]][System.IO.File]::ReadAllBytes($chilePaths.PatchJournal))) 'isolated journal bytes changed on second resolver run'
+    Remove-Item Function:\az
+
+    # Non-resolving observations and mismatched evidence never suppress the pending source operation.
+    $observed=New-LegacyResolution 'chile-resolved' $chileId 'PATCH add Job secret' 'https://management.azure.com/exact-chile-lro' 'VerifiedAbsent' 'Failed'
+    $observed.event='LegacyResolutionObserved'
+    Assert-True (@(Get-H5LegacyPendingOperations -Operations $legacyRows -Resolutions @($observed) -ResourceId $chileId).Count -eq 1) 'LegacyResolutionObserved was incorrectly treated as a reconciliation'
+    foreach($mismatch in @(
+        (New-LegacyResolution 'chile-resolved' $brazilId 'PATCH add Job secret' 'https://management.azure.com/exact-chile-lro'),
+        (New-LegacyResolution 'chile-resolved' $chileId 'DELETE Job secret' 'https://management.azure.com/exact-chile-lro'),
+        (New-LegacyResolution 'chile-resolved' $chileId 'PATCH add Job secret' 'https://management.azure.com/different-lro'))) {
+        Assert-True (@(Get-H5LegacyPendingOperations -Operations $legacyRows -Resolutions @($mismatch) -ResourceId $chileId).Count -eq 1) 'mismatched reconciliation evidence suppressed a pending source operation'
+    }
+
+    # Duplicate evidence remains invalid at full-journal validation rather than making the selector ambiguous.
+    $duplicate=New-LegacyResolution 'chile-resolved' $chileId 'PATCH add Job secret' 'https://management.azure.com/exact-chile-lro'
+    Write-LegacyJournal $chilePaths.PatchJournal @($validResolutions[0],$duplicate)
+    Assert-Throws { Get-H5LegacyJournalResolutions -Path $chilePaths.PatchJournal -ResourceId $chileId } 'PATCH_JOURNAL_SEQUENCE_INVALID' 'duplicate reconciliation for one source attempt was accepted'
 
     # Wrong operation readback and foreign Resource ID reconciliation cannot resolve the source attempt.
     $base=Reset-TestState $testRoot

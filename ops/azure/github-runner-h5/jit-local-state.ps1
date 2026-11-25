@@ -152,6 +152,23 @@ function Test-H5LegacyOperationReconciled {
     return $matches.Count -eq 1
 }
 
+function Get-H5LegacyPendingOperations {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Operations,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Resolutions,
+        [Parameter(Mandatory)][string]$ResourceId
+    )
+    $pending=@()
+    foreach($operation in $Operations) {
+        if (-not [string]::Equals([string]$operation.resourceId,$ResourceId,[System.StringComparison]::OrdinalIgnoreCase)) { continue }
+        if (-not (Test-H5PatchOperationPending -Operation $operation)) { continue }
+        if (Test-H5LegacyOperationReconciled -Operation $operation -Resolutions $Resolutions) { continue }
+        $pending+=@($operation)
+    }
+    return @($pending)
+}
+
 function Assert-H5LegacyJitStateSafe {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Target,[Parameter(Mandatory)]$StatePaths)

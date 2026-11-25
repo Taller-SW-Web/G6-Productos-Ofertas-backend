@@ -22,6 +22,20 @@ foreach($entry in @(@{Path=$statePaths.LegacyCleanupMarker;Type='CLEANUP_INCOMPL
     if(Test-Path -LiteralPath $entry.Path) { $null=Get-H5LegacyRecordResourceId -Path $entry.Path -RecordType $entry.Type }
 }
 
+# Validate both complete local journals before any ARM reads. Exact prior legacy
+# reconciliations are idempotently excluded; observations remain pending.
+$legacyOperations=@(Get-H5LegacyJournalOperations -Path $statePaths.LegacyPatchJournal)
+$resolutions=@(Get-H5LegacyJournalResolutions -Path $statePaths.PatchJournal -ResourceId $targetResourceId)
+$legacyPending=@(Get-H5LegacyPendingOperations -Operations $legacyOperations -Resolutions $resolutions -ResourceId $targetResourceId)
+$scopedPending=@(Get-AcaPatchJournalPendingOperations -ResourceId $targetResourceId -Path $statePaths.PatchJournal)
+$work=@()
+if($legacyPending.Count -gt 0) { $work+=@([pscustomobject]@{Operations=$legacyPending;LegacySource=$true}) }
+if($scopedPending.Count -gt 0) { $work+=@([pscustomobject]@{Operations=$scopedPending;LegacySource=$false}) }
+if($work.Count -eq 0) {
+    [pscustomobject]@{destination=$Destination;resourceId=$targetResourceId;state='NO_PENDING_LOCAL_PATCH_OPERATIONS'}
+    return
+}
+
 $account=az account show --subscription $target.SubscriptionId --output json | ConvertFrom-Json
 if($LASTEXITCODE -ne 0 -or [string]$account.id -cne [string]$target.SubscriptionId) { throw 'PATCH_JOURNAL_SUBSCRIPTION_MISMATCH: Azure CLI context does not match the selected destination.' }
 $resource=az containerapp job show --subscription $target.SubscriptionId --resource-group $target.ResourceGroup --name $target.JobName --output json | ConvertFrom-Json
@@ -33,18 +47,6 @@ $containers=@($resource.properties.template.containers)
 if($containers.Count -ne 1 -or [string]$containers[0].image -notmatch '^ghcr\.io/actions/actions-runner@sha256:[0-9a-f]{64}$') { throw 'PATCH_JOURNAL_JOB_TEMPLATE_REJECTED: expected one digest-pinned official runner container.' }
 if((@($containers[0].command)-join ' ') -cne '/bin/bash -c' -or (@($containers[0].args)-join ' ') -notmatch 'run\.sh --jitconfig') { throw 'PATCH_JOURNAL_JOB_TEMPLATE_REJECTED: expected the official run.sh --jitconfig entry point.' }
 $image=[string]$containers[0].image
-
-# Validate every legacy row by its complete ARM Resource ID before selecting this Job's operations.
-$legacyOperations=@(Get-H5LegacyJournalOperations -Path $statePaths.LegacyPatchJournal)
-$legacyPending=@($legacyOperations|Where-Object{[string]::Equals([string]$_.resourceId,$targetResourceId,[System.StringComparison]::OrdinalIgnoreCase) -and (Test-H5PatchOperationPending -Operation $_)})
-$scopedPending=@(Get-AcaPatchJournalPendingOperations -ResourceId $targetResourceId -Path $statePaths.PatchJournal)
-$work=@()
-if($legacyPending.Count -gt 0) { $work+=@([pscustomobject]@{Operations=$legacyPending;LegacySource=$true}) }
-if($scopedPending.Count -gt 0) { $work+=@([pscustomobject]@{Operations=$scopedPending;LegacySource=$false}) }
-if($work.Count -eq 0) {
-    [pscustomobject]@{destination=$Destination;resourceId=$targetResourceId;state='NO_PENDING_LOCAL_PATCH_OPERATIONS'}
-    return
-}
 
 $tokenResponse=az account get-access-token --subscription $target.SubscriptionId --resource https://management.azure.com/ --output json | ConvertFrom-Json
 if($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$tokenResponse.accessToken)) { throw 'PATCH_JOURNAL_TOKEN_UNAVAILABLE: Azure CLI could not provide an ARM token.' }
