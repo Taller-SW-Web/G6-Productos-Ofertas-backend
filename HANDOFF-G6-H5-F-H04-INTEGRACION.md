@@ -4,6 +4,7 @@ Fecha: 2026-11-24 (America/Lima)
 Rama: `trabajo/castilla/h5-integracion-cuatro-servicios`
 Base de inicio: `d1f4af9401a142c8c1217e5eb9591fe5e4696c4e`
 Master sincronizado sin reescritura: `b601f57c4ba00c45fe46061023b548bf49d6df16`
+PR focalizado: [#278](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/278), OPEN / Draft. El commit `d18b049b36ce9c710f6abce4a9fdc71a54ab5cb7` añadió el runner y sus pruebas locales; este cambio actualiza el handoff y mantiene el PR Draft.
 
 ## Estado de H04
 
@@ -97,4 +98,4 @@ Secuencia aún pendiente: gate Chile cerrado; verificar master/CI y un candidato
 | `G5_G7_REAL_HOMOLOGATION`   | NOT_RUN.                                                                                                                |
 | `SERVICE_BUS_REAL`          | NOT_RUN.                                                                                                                |
 | `HTTP_CD_REAL`              | NOT_RUN.                                                                                                                |
-| `Draft PR`                  | Se prepara un PR Draft focalizado para el incremento 1 validado; no implica H04 completo ni habilitación de despliegue. |
+| `Draft PR #278`             | OPEN / Draft / mergeable; las CI oficiales aparecen SKIPPED mientras permanece Draft. No implica H04 completo ni habilitación de despliegue. |
