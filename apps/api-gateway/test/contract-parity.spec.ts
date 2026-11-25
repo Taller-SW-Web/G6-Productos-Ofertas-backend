@@ -135,7 +135,8 @@ describe('Gateway parity with the pinned H5 OpenAPI snapshot', () => {
     const expectedBaseCount =
       snapshot.operations.filter(
         (operation) =>
-          !operation.internal && !h5OperationIds.includes(operation.operationId),
+          !operation.internal &&
+          !h5OperationIds.includes(operation.operationId),
       ).length + legacyPricingOperationIds.length;
     expect(CONTRACT_ROUTES).toHaveLength(expectedBaseCount);
     expect(G5_H5_ROUTES).toHaveLength(h5OperationIds.length);

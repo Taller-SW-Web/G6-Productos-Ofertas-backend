@@ -2,7 +2,12 @@ import { createServer, type Server } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { generateKeyPairSync, randomBytes, randomUUID, sign } from 'node:crypto';
+import {
+  generateKeyPairSync,
+  randomBytes,
+  randomUUID,
+  sign,
+} from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Pool } from 'pg';
@@ -111,7 +116,10 @@ async function waitForPostgresReady(connectionString: string): Promise<void> {
   throw new Error('PostgreSQL descartable no quedó disponible a tiempo');
 }
 
-async function waitForHealth(child: ChildProcess, origin: string): Promise<void> {
+async function waitForHealth(
+  child: ChildProcess,
+  origin: string,
+): Promise<void> {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
@@ -160,10 +168,9 @@ run('Gateway -> Bulk real -> PostgreSQL descartable (GW-T03)', () => {
   const storageKey =
     process.env.BULK_RETRY_INTEGRATION_STORAGE_SERVICE_ROLE_KEY ||
     'bulk-storage-test-only-key';
-  const storageBucket =
-    process.env.BULK_RETRY_INTEGRATION_STORAGE_URL
-      ? 'bulk-retry-integration'
-      : 'bulk-gw-e2e-private';
+  const storageBucket = process.env.BULK_RETRY_INTEGRATION_STORAGE_URL
+    ? 'bulk-retry-integration'
+    : 'bulk-gw-e2e-private';
   const storedObjects = new Map<string, Buffer>();
 
   let containerCreated = false;
@@ -348,7 +355,9 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
             if (req.method === 'POST' || req.method === 'PUT') {
               storedObjects.set(objectName, body);
               res.writeHead(200, { 'content-type': 'application/json' });
-              res.end(JSON.stringify({ Key: `${storageBucket}/${objectName}` }));
+              res.end(
+                JSON.stringify({ Key: `${storageBucket}/${objectName}` }),
+              );
               return;
             }
             if (req.method === 'GET') {
@@ -357,7 +366,9 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
                 res.writeHead(404).end();
                 return;
               }
-              res.writeHead(200, { 'content-type': 'application/octet-stream' });
+              res.writeHead(200, {
+                'content-type': 'application/octet-stream',
+              });
               res.end(existing);
               return;
             }
@@ -492,7 +503,10 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
       .get(
         `/api/v1/carga-masiva/productos/importaciones/por-correlacion/${correlationA}`,
       )
-      .set('Authorization', `Bearer ${tokenFor(actorA, { roles: ['CONSULTA'] })}`)
+      .set(
+        'Authorization',
+        `Bearer ${tokenFor(actorA, { roles: ['CONSULTA'] })}`,
+      )
       .expect(403);
     expect(JSON.stringify(noRole.body)).not.toContain(batchIdA);
   });
