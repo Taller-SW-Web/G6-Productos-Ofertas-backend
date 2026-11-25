@@ -237,11 +237,6 @@ export class PromotionsQueryService {
             stage: 'evaluation_total',
             durationMs: performance.now() - evaluationStarted,
             outcome,
-            deadlineMs: 2500,
-            budgetRemainingMs: Math.max(
-              0,
-              2500 - (performance.now() - evaluationStarted),
-            ),
             ...(errorCode ? { errorCode } : {}),
           });
         const raw = request.body as BasketRequest;
@@ -262,7 +257,6 @@ export class PromotionsQueryService {
           at,
           deadlineAt: performance.now() + 2500,
           deadlineMs: 2500,
-          stage: 'commercial_context',
           observe: (event) =>
             this.logger.commercialStage({
               correlationId: context.correlationId,
@@ -313,12 +307,7 @@ export class PromotionsQueryService {
               stage: 'postgres_promotion_read',
               durationMs: performance.now() - persistenceStarted,
               outcome: 'internal_error',
-              deadlineMs: 2500,
               errorCode: 'PROMOTIONS_PERSISTENCE_FAILED',
-              budgetRemainingMs: Math.max(
-                0,
-                commercialTrace.deadlineAt! - performance.now(),
-              ),
             });
             logEvaluationTotal(
               'internal_error',
@@ -333,11 +322,6 @@ export class PromotionsQueryService {
           stage: 'postgres_promotion_read',
           durationMs: performance.now() - persistenceStarted,
           outcome: 'success',
-          deadlineMs: 2500,
-          budgetRemainingMs: Math.max(
-            0,
-            commercialTrace.deadlineAt! - performance.now(),
-          ),
         });
         const processingStarted = performance.now();
         try {
@@ -384,11 +368,6 @@ export class PromotionsQueryService {
             stage: 'basket_processing',
             durationMs: performance.now() - processingStarted,
             outcome: 'success',
-            deadlineMs: 2500,
-            budgetRemainingMs: Math.max(
-              0,
-              commercialTrace.deadlineAt! - performance.now(),
-            ),
           });
         } catch (error) {
           this.logger.commercialStage({
@@ -397,12 +376,7 @@ export class PromotionsQueryService {
             stage: 'basket_processing',
             durationMs: performance.now() - processingStarted,
             outcome: 'internal_error',
-            deadlineMs: 2500,
             errorCode: 'BASKET_PROCESSING_FAILED',
-            budgetRemainingMs: Math.max(
-              0,
-              commercialTrace.deadlineAt! - performance.now(),
-            ),
           });
           logEvaluationTotal('internal_error', 'BASKET_PROCESSING_FAILED');
           throw error;

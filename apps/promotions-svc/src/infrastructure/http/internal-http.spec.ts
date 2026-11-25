@@ -25,6 +25,73 @@ async function fixture(
 }
 
 describe('Internal HTTP credential boundary (PR143)', () => {
+  it('tracks concurrent dependency reads independently through timeout', async () => {
+    await fixture(
+      () => undefined,
+      async (origin) => {
+        const events: Array<Record<string, unknown>> = [];
+        const controller = new AbortController();
+        const correlationId = '77777777-7777-4777-8777-777777777777';
+        const context = {
+          correlationId,
+          at: '2026-11-25T00:00:00Z',
+          deadlineAt: performance.now() + 15,
+          deadlineMs: 2500,
+          pendingStages: new Map(),
+          observe: (event: Record<string, unknown>) => events.push(event),
+        };
+        const reader = new InternalHttpReader({
+          origin,
+          origins: { catalog: origin, pricing: origin },
+          getServiceAccessToken: async () => 'synthetic-own-service-token',
+        });
+        const abort = setTimeout(() => controller.abort(), 40);
+        try {
+          const outcomes = await Promise.allSettled([
+            reader.read(
+              'obtenerContextoSku',
+              '/productos/fixture/contexto-sku',
+              controller.signal,
+              false,
+              correlationId,
+              context,
+            ),
+            reader.read(
+              'obtenerPrecioSku',
+              '/precios/fixture',
+              controller.signal,
+              false,
+              correlationId,
+              context,
+            ),
+          ]);
+          expect(outcomes.every((result) => result.status === 'rejected')).toBe(
+            true,
+          );
+        } finally {
+          clearTimeout(abort);
+        }
+        expect(events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              operation: 'obtenerContextoSku',
+              upstream: 'catalog',
+              stage: 'upstream_request',
+              outcome: 'timeout',
+            }),
+            expect.objectContaining({
+              operation: 'obtenerPrecioSku',
+              upstream: 'pricing',
+              stage: 'upstream_request',
+              outcome: 'timeout',
+            }),
+          ]),
+        );
+        expect(context.pendingStages.size).toBe(0);
+      },
+    );
+  });
+
   it('uses anonymous GETs only with explicitly selected Phase 1 and never retries as anonymous', async () => {
     await fixture(
       (request, response) => {

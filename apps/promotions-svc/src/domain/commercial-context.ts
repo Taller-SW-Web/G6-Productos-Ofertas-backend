@@ -19,6 +19,11 @@ export interface ResolvedLine {
 export interface ResolvedBasket {
   lines: ResolvedLine[];
 }
+export interface CommercialPendingStage {
+  operation: string;
+  upstream: string;
+  stage: string;
+}
 // Request metadata is separate from commercial DTOs and credentials. Callers
 // capture one instant and correlation for all dependency reads of a response.
 export interface CommercialReadContext {
@@ -27,7 +32,8 @@ export interface CommercialReadContext {
   /** Monotonic deadline shared by the evaluation and all commercial reads. */
   deadlineAt?: number;
   deadlineMs?: number;
-  stage?: string;
+  /** Per-call entries; concurrent dependency reads never overwrite one another. */
+  pendingStages?: Map<string, CommercialPendingStage>;
   observe?: (event: {
     operation: string;
     upstream?: string;
@@ -45,6 +51,10 @@ export interface CommercialReadContext {
     deadlineMs?: number;
     budgetRemainingMs?: number;
     exhaustedStage?: string;
+    pendingStageCount?: number;
+    pendingStages?: string[];
+    pendingOperations?: string[];
+    pendingUpstreams?: string[];
   }) => void;
 }
 export interface CommercialContext {

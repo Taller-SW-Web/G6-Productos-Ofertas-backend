@@ -147,6 +147,14 @@ export class InternalHttpReader {
       throw new Error('INVALID_COMMERCIAL_CORRELATION');
     const spec = internalOperations[operation];
     const operationName = operation;
+    const callId = randomUUID();
+    const pendingStage = (stage: string) => {
+      trace?.pendingStages?.set(callId, {
+        operation: operationName,
+        upstream: spec.service,
+        stage,
+      });
+    };
     const remaining = () =>
       trace?.deadlineAt === undefined
         ? undefined
@@ -159,8 +167,8 @@ export class InternalHttpReader {
       status?: number,
       errorCode?: string,
     ) => {
+      trace?.pendingStages?.delete(callId);
       if (!trace?.observe || !trace.correlationId) return;
-      trace.stage = stage;
       trace.observe({
         operation: operationName,
         upstream: spec.service,
@@ -189,7 +197,7 @@ export class InternalHttpReader {
       // Own service credentials only. For HTTP aliases, the deployment must first
       // prove the private network above; an alias string alone proves no secrecy.
       const tokenStarted = performance.now();
-      if (trace) trace.stage = 'service_token';
+      pendingStage('service_token');
       let token: string | null | undefined;
       try {
         const tokenRequest = {
@@ -235,7 +243,7 @@ export class InternalHttpReader {
     if (spec.service === 'ventas' && !origin)
       throw new Error('COMMERCIAL_HTTP_UNAVAILABLE');
     const requestStarted = performance.now();
-    if (trace) trace.stage = 'upstream_request';
+    pendingStage('upstream_request');
     let response: Response;
     try {
       response = await fetch((origin ?? this.fallback) + '/api/v1' + path, {

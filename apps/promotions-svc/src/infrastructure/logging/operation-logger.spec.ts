@@ -80,6 +80,10 @@ describe('Sanitized operation telemetry', () => {
       deadlineMs: 2500,
       budgetRemainingMs: 118,
       exhaustedStage: 'upstream_request',
+      pendingStageCount: 2,
+      pendingStages: ['upstream_request'],
+      pendingOperations: ['obtenerContextoSku', 'obtenerPrecioSku'],
+      pendingUpstreams: ['catalog', 'pricing'],
     });
     logger.commercialStage({
       correlationId: 'invalid-correlation',
@@ -102,6 +106,10 @@ describe('Sanitized operation telemetry', () => {
       deadline_ms: 2500,
       budget_remaining_ms: 118,
       exhausted_stage: 'upstream_request',
+      pending_stage_count: 2,
+      pending_stages: ['upstream_request'],
+      pending_operations: ['obtenerContextoSku', 'obtenerPrecioSku'],
+      pending_upstreams: ['catalog', 'pricing'],
     });
     expect(lines).toHaveLength(1);
     expect(lines.join('')).not.toContain('Bearer');

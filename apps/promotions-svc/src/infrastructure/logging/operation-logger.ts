@@ -23,6 +23,10 @@ export type PromotionsCommercialStage = {
   deadlineMs?: number;
   budgetRemainingMs?: number;
   exhaustedStage?: string;
+  pendingStageCount?: number;
+  pendingStages?: string[];
+  pendingOperations?: string[];
+  pendingUpstreams?: string[];
 };
 // Only fixed operation identifiers, bounded numbers and validated correlation
 // UUIDs cross this boundary. No request object, exception, URL, claims or payload.
@@ -100,7 +104,16 @@ export class PromotionsOperationLogger {
       (event.budgetRemainingMs !== undefined &&
         !Number.isFinite(event.budgetRemainingMs)) ||
       (event.exhaustedStage !== undefined &&
-        !fixed(event.exhaustedStage, /^[a-z][a-z0-9_.-]{0,63}$/))
+        !fixed(event.exhaustedStage, /^[a-z][a-z0-9_.-]{0,63}$/)) ||
+      (event.pendingStageCount !== undefined &&
+        (!Number.isSafeInteger(event.pendingStageCount) ||
+          event.pendingStageCount < 0)) ||
+      !this.validLabels(event.pendingStages, /^[a-z][a-z0-9_.-]{0,63}$/) ||
+      !this.validLabels(
+        event.pendingOperations,
+        /^[a-zA-Z][a-zA-Z0-9/]{0,79}$/,
+      ) ||
+      !this.validLabels(event.pendingUpstreams, /^[a-z][a-z0-9-]{0,31}$/)
     )
       return;
     this.emit({
@@ -129,6 +142,16 @@ export class PromotionsOperationLogger {
         : {}),
       ...(event.exhaustedStage
         ? { exhausted_stage: event.exhaustedStage }
+        : {}),
+      ...(event.pendingStageCount === undefined
+        ? {}
+        : { pending_stage_count: event.pendingStageCount }),
+      ...(event.pendingStages ? { pending_stages: event.pendingStages } : {}),
+      ...(event.pendingOperations
+        ? { pending_operations: event.pendingOperations }
+        : {}),
+      ...(event.pendingUpstreams
+        ? { pending_upstreams: event.pendingUpstreams }
         : {}),
     });
   }
@@ -171,5 +194,12 @@ export class PromotionsOperationLogger {
     } catch {
       /* Telemetry cannot change a business result. */
     }
+  }
+
+  private validLabels(values: string[] | undefined, pattern: RegExp): boolean {
+    return (
+      values === undefined ||
+      (values.length <= 16 && values.every((value) => pattern.test(value)))
+    );
   }
 }

@@ -148,7 +148,18 @@ describe('Bounded commercial integration boundary', () => {
     const source = {
       ...blockedCommercialContext,
       basket: vi.fn((_request, _at, _signal, context) => {
-        context.stage = 'service_token';
+        const pendingStages = new Map();
+        context.pendingStages = pendingStages;
+        pendingStages.set('catalog-read', {
+          operation: 'obtenerProducto',
+          upstream: 'catalog',
+          stage: 'upstream_request',
+        });
+        pendingStages.set('pricing-read', {
+          operation: 'obtenerPrecioSku',
+          upstream: 'pricing',
+          stage: 'upstream_request',
+        });
         return new Promise<{ lines: [] }>(() => {});
       }),
     };
@@ -165,7 +176,7 @@ describe('Bounded commercial integration boundary', () => {
     );
     const rejected = expect(pending).rejects.toMatchObject({
       message: 'COMMERCIAL_CONTEXT_UNAVAILABLE',
-      unblock: 'deadline de 2500 ms agotado en service_token',
+      unblock: 'deadline de 2500 ms agotado; 2 lecturas pendientes',
     });
     await vi.advanceTimersByTimeAsync(2500);
     await rejected;
@@ -175,10 +186,14 @@ describe('Bounded commercial integration boundary', () => {
         stage: 'commercial_context',
         outcome: 'timeout',
         deadlineMs: 2500,
-        exhaustedStage: 'service_token',
         budgetRemainingMs: 0,
+        pendingStageCount: 2,
+        pendingStages: ['upstream_request'],
+        pendingOperations: ['obtenerPrecioSku', 'obtenerProducto'],
+        pendingUpstreams: ['catalog', 'pricing'],
       }),
     );
+    expect(events[0]).not.toHaveProperty('exhaustedStage');
   });
   it('classifies caller cancellation separately from deadline exhaustion', async () => {
     const events: Array<Record<string, unknown>> = [];

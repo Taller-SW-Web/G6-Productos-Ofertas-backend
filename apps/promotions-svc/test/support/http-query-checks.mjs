@@ -449,6 +449,35 @@ export async function verifyHttpReadQueries(resources, baseConfig, adminPool) {
         (entry) =>
           entry.correlation_id === trace && entry.event !== 'commercial_stage',
       );
+      if (id === 'evaluarPromociones' || id === 'validarCupon') {
+        const stages = observations.filter(
+          (entry) =>
+            entry.correlation_id === trace &&
+            entry.event === 'commercial_stage',
+        );
+        for (const entry of stages.filter((stage) =>
+          [
+            'evaluation_total',
+            'postgres_promotion_read',
+            'basket_processing',
+          ].includes(stage.stage),
+        )) {
+          assert.equal(
+            Object.hasOwn(entry, 'deadline_ms'),
+            false,
+            `${entry.stage} is outside the commercial-context deadline`,
+          );
+          assert.equal(
+            Object.hasOwn(entry, 'budget_remaining_ms'),
+            false,
+            `${entry.stage} must not report commercial budget`,
+          );
+        }
+        for (const entry of stages.filter(
+          (stage) => stage.stage === 'commercial_context',
+        ))
+          assert.equal(entry.deadline_ms, 2500);
+      }
       assert.equal(
         matching.length,
         1,

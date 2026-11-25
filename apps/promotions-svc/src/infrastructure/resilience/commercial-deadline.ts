@@ -25,7 +25,7 @@ export class BoundedCommercialContext implements CommercialContext {
     if (context) {
       context.deadlineAt = deadlineAt;
       context.deadlineMs = this.milliseconds;
-      context.stage ??= 'commercial_context';
+      context.pendingStages ??= new Map();
     }
     try {
       const result = await withDeadline(
@@ -54,8 +54,20 @@ export class BoundedCommercialContext implements CommercialContext {
         (deadlineAt > performance.now() &&
           error instanceof Error &&
           error.name === 'AbortError');
-      const exhaustedStage = timeout
-        ? (context?.stage ?? 'commercial_context')
+      const pending = timeout
+        ? [...(context?.pendingStages?.values() ?? [])]
+        : [];
+      const exhaustedStage =
+        pending.length === 1 ? pending[0].stage : undefined;
+      const pendingStageCount = timeout ? pending.length : undefined;
+      const pendingStages = timeout
+        ? [...new Set(pending.map((entry) => entry.stage))].sort()
+        : undefined;
+      const pendingOperations = timeout
+        ? [...new Set(pending.map((entry) => entry.operation))].sort()
+        : undefined;
+      const pendingUpstreams = timeout
+        ? [...new Set(pending.map((entry) => entry.upstream))].sort()
         : undefined;
       context?.observe?.({
         operation,
@@ -77,13 +89,19 @@ export class BoundedCommercialContext implements CommercialContext {
               : 'COMMERCIAL_CONTEXT_FAILED',
         deadlineMs: this.milliseconds,
         budgetRemainingMs: Math.max(0, deadlineAt - performance.now()),
+        ...(pendingStageCount === undefined ? {} : { pendingStageCount }),
+        ...(pendingStages === undefined ? {} : { pendingStages }),
+        ...(pendingOperations === undefined ? {} : { pendingOperations }),
+        ...(pendingUpstreams === undefined ? {} : { pendingUpstreams }),
         ...(exhaustedStage ? { exhaustedStage } : {}),
       });
       if (timeout) {
         throw new CommercialDependencyError(
           operation,
           'Catálogo/Pricing + integración G6',
-          `deadline de ${this.milliseconds} ms agotado en ${exhaustedStage}`,
+          exhaustedStage
+            ? `deadline de ${this.milliseconds} ms agotado en ${exhaustedStage}`
+            : `deadline de ${this.milliseconds} ms agotado; ${pending.length} lecturas pendientes`,
         );
       }
       if (
