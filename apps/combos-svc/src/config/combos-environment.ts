@@ -4,6 +4,7 @@ import { isAbsolute } from 'node:path';
 import { isIP } from 'node:net';
 import { checkServerIdentity } from 'node:tls';
 import type { PoolConfig } from 'pg';
+import { readCombosServiceBus } from '../messaging/combos-service-bus.js';
 
 export interface CombosEnvironment {
   readonly host: string;
@@ -195,6 +196,11 @@ export function readCombosEnvironment(
     } catch {
       errors.push('COMBOS_AMQP_URL');
     }
+  }
+  try {
+    readCombosServiceBus(env);
+  } catch {
+    errors.push('COMBOS_SERVICE_BUS');
   }
 
   const required = [

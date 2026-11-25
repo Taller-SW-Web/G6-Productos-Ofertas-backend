@@ -1,7 +1,7 @@
-param(
+﻿param(
   [switch]$TestEnvironmentRestoration,
   [string]$EvidenceDirectory,
-  [ValidateSet('app.e2e-spec.ts', 'combos-postgres.e2e-spec.ts', 'combos-rabbitmq.e2e-spec.ts', 'combos-catalog-rabbitmq.e2e-spec.ts')]
+  [ValidateSet('app.e2e-spec.ts', 'combos-postgres.e2e-spec.ts', 'combos-service-bus-postgres.e2e-spec.ts', 'combos-rabbitmq.e2e-spec.ts', 'combos-catalog-rabbitmq.e2e-spec.ts')]
   [string]$TestFile,
   [string]$TestNamePattern
 )

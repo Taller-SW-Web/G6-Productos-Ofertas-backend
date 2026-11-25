@@ -39,7 +39,7 @@ esac
 
 if [[ "$mode" == 'postgres-only' ]]; then
   case "$test_file" in
-    ''|combos-postgres.e2e-spec.ts|combos-h5-performance.e2e-spec.ts) ;;
+    ''|combos-postgres.e2e-spec.ts|combos-service-bus-postgres.e2e-spec.ts|combos-h5-performance.e2e-spec.ts) ;;
     *)
       printf 'Suite focalizada no permitida en modo postgres-only: %s\n' "$test_file" >&2
       exit 2

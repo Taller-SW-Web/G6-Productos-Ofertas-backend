@@ -22,6 +22,17 @@ import {
   IntegrationFailure,
 } from '../integrations/catalog-sku-context.client.js';
 import { CombosServiceIdentity } from '../integrations/combos-service-identity.js';
+import type {
+  ServiceBusReceivedMessage,
+  ServiceBusReceiver,
+} from '@azure/service-bus';
+import {
+  CombosServiceBus,
+  combosServiceBusRoutes,
+  readCombosServiceBus,
+  type CombosEventQueue,
+  type QueueRuntimeState,
+} from './combos-service-bus.js';
 
 export const COMBOS_QUEUE = 'po.combos.q';
 const MAX_ATTEMPTS = 3;
@@ -123,7 +134,13 @@ function validDate(value: unknown): value is string {
 
 export function validateCombosEvent(
   value: unknown,
-  message: ConsumeMessage,
+  message: {
+    fields: Pick<ConsumeMessage['fields'], 'routingKey'>;
+    properties: Pick<
+      ConsumeMessage['properties'],
+      'messageId' | 'correlationId' | 'type' | 'contentType'
+    >;
+  },
 ): Envelope {
   if (
     !object(value) ||
@@ -210,6 +227,79 @@ export function validateCombosEvent(
   return value as unknown as Envelope;
 }
 
+export type CombosRelation = 'R05' | 'R12';
+
+export interface QueueObservabilityMetrics {
+  relation: CombosRelation;
+  received: number;
+  completed: number;
+  abandoned: number;
+  deadLettered: number;
+  duplicateInbox: number;
+  identityConflict: number;
+  processingFailures: number;
+  settlementFailures: number;
+  connectionErrors: number;
+}
+
+export interface CombosConsumerReadiness {
+  transport: 'NONE' | 'RABBITMQ' | 'AZURE_SERVICE_BUS';
+  status: 'disabled' | 'ready' | 'not_ready';
+  queues?: Record<CombosEventQueue, QueueRuntimeState>;
+  catalogAuthBlocked?: boolean;
+  lastCatalogErrorReason?: string | null;
+}
+
+const SERVICE_BUS_MAX_MESSAGE_BYTES = 256 * 1024;
+const CATALOG_AUTH_BLOCK_REASONS = new Set([
+  'SERVICE_AUTHENTICATION_FAILED',
+  'SERVICE_AUTHORIZATION_FAILED',
+  'AUTH_NOT_CONFIGURED',
+  'INVALID_CONFIGURATION',
+]);
+
+function createEmptyQueueMetrics(
+  relation: CombosRelation,
+): QueueObservabilityMetrics {
+  return {
+    relation,
+    received: 0,
+    completed: 0,
+    abandoned: 0,
+    deadLettered: 0,
+    duplicateInbox: 0,
+    identityConflict: 0,
+    processingFailures: 0,
+    settlementFailures: 0,
+    connectionErrors: 0,
+  };
+}
+
+function estimateServiceBusMessageBytes(
+  message: ServiceBusReceivedMessage,
+): number {
+  const bodyBytes =
+    message.body instanceof Uint8Array ? message.body.byteLength : 0;
+  let overhead = 0;
+  for (const field of [
+    message.messageId,
+    message.correlationId,
+    message.subject,
+    message.contentType,
+  ]) {
+    if (typeof field === 'string') {
+      overhead += Buffer.byteLength(field, 'utf8');
+    }
+  }
+  if (message.applicationProperties) {
+    overhead += Buffer.byteLength(
+      JSON.stringify(message.applicationProperties),
+      'utf8',
+    );
+  }
+  return bodyBytes + overhead;
+}
+
 @Injectable()
 export class CombosEventConsumer implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CombosEventConsumer.name);
@@ -220,6 +310,25 @@ export class CombosEventConsumer implements OnModuleInit, OnModuleDestroy {
   private paused = false;
   private connecting = false;
   private enabled = false;
+  private transport: 'NONE' | 'RABBITMQ' | 'AZURE_SERVICE_BUS' = 'NONE';
+  private serviceBusEnabled = false;
+  private serviceBus?: CombosServiceBus;
+  private catalogAuthBlocked = false;
+  private lastCatalogErrorReason: string | null = null;
+  private readonly queueMetrics: Record<
+    CombosEventQueue,
+    QueueObservabilityMetrics
+  > = {
+    'g6.combos.from.catalog': createEmptyQueueMetrics('R05'),
+    'g6.combos.from.inventory': createEmptyQueueMetrics('R12'),
+  };
+  private readonly catalogResolution = {
+    calls: 0,
+    failures: 0,
+    totalLatencyMs: 0,
+    maxLatencyMs: 0,
+    lastLatencyMs: 0,
+  };
   private processing = Promise.resolve();
 
   constructor(
@@ -238,6 +347,38 @@ export class CombosEventConsumer implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit(): Promise<void> {
+    const azure = readCombosServiceBus(process.env);
+    if (azure) {
+      this.transport = 'AZURE_SERVICE_BUS';
+      if (!azure.enabled) {
+        this.serviceBusEnabled = false;
+        return;
+      }
+      this.serviceBusEnabled = true;
+      this.serviceBus = new CombosServiceBus(
+        azure,
+        (queue, receiver, message) =>
+          this.processServiceBusDelivery(queue, receiver, message),
+        {
+          onConnectionError: (queue, code) => {
+            this.queueMetrics[queue].connectionErrors += 1;
+            this.logger.warn(
+              JSON.stringify({
+                event: 'service_bus_connection_error',
+                queue,
+                relation: this.queueMetrics[queue].relation,
+                code,
+              }),
+            );
+          },
+          onLog: (level, payload) => {
+            this.logger[level](JSON.stringify(payload));
+          },
+        },
+      );
+      await this.serviceBus.start();
+      return;
+    }
     if (
       process.env.COMBOS_AMQP_ENABLED === undefined ||
       process.env.COMBOS_AMQP_ENABLED === 'false'
@@ -245,6 +386,7 @@ export class CombosEventConsumer implements OnModuleInit, OnModuleDestroy {
       return;
     if (process.env.COMBOS_AMQP_ENABLED !== 'true')
       throw new Error('COMBOS_AMQP_ENABLED_INVALID');
+    this.transport = 'RABBITMQ';
     this.enabled = true;
     const url = process.env.COMBOS_AMQP_URL;
     if (!url) throw new Error('COMBOS_AMQP_URL_REQUIRED');
@@ -264,6 +406,10 @@ export class CombosEventConsumer implements OnModuleInit, OnModuleDestroy {
   }
 
   readinessStatus(): 'disabled' | 'ready' | 'not_ready' {
+    if (this.transport === 'AZURE_SERVICE_BUS') {
+      if (!this.serviceBusEnabled) return 'disabled';
+      return this.serviceBus?.available && !this.stopping ? 'ready' : 'not_ready';
+    }
     if (!this.enabled) return 'disabled';
     return this.connection &&
       this.channel &&
@@ -274,8 +420,46 @@ export class CombosEventConsumer implements OnModuleInit, OnModuleDestroy {
       : 'not_ready';
   }
 
+  readinessDetails(): CombosConsumerReadiness {
+    const status = this.readinessStatus();
+    if (this.transport === 'AZURE_SERVICE_BUS') {
+      return {
+        transport: 'AZURE_SERVICE_BUS',
+        status,
+        ...(this.serviceBus ? { queues: this.serviceBus.getQueueStates() } : {}),
+        catalogAuthBlocked: this.catalogAuthBlocked,
+        lastCatalogErrorReason: this.lastCatalogErrorReason,
+      };
+    }
+    return {
+      transport: this.transport,
+      status,
+    };
+  }
+
+  getObservabilitySnapshot() {
+    return {
+      transport: this.transport,
+      readiness: this.readinessDetails(),
+      queues: {
+        'g6.combos.from.catalog': {
+          ...this.queueMetrics['g6.combos.from.catalog'],
+        },
+        'g6.combos.from.inventory': {
+          ...this.queueMetrics['g6.combos.from.inventory'],
+        },
+      },
+      catalogResolution: {
+        ...this.catalogResolution,
+        authBlocked: this.catalogAuthBlocked,
+        lastErrorReason: this.lastCatalogErrorReason,
+      },
+    };
+  }
+
   async onModuleDestroy(): Promise<void> {
     this.stopping = true;
+    await this.serviceBus?.close();
     const channel = this.channel;
     const tag = this.consumerTag;
     if (channel && tag) await channel.cancel(tag).catch(() => undefined);
@@ -426,10 +610,252 @@ export class CombosEventConsumer implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    await this.applyEnvelope(envelope);
+  }
+
+  async processServiceBusDelivery(
+    queue: CombosEventQueue,
+    receiver: Pick<
+      ServiceBusReceiver,
+      'completeMessage' | 'abandonMessage' | 'deadLetterMessage'
+    >,
+    message: ServiceBusReceivedMessage,
+  ): Promise<void> {
+    const metrics = this.queueMetrics[queue];
+    metrics.received += 1;
+    let envelope: Envelope;
+    let validationReason = 'INVALID_COMBOS_EVENT';
+    try {
+      if (!(message.body instanceof Uint8Array)) {
+        validationReason = 'INVALID_MESSAGE_BODY';
+        throw new Error('INVALID_SERVICE_BUS_EVENT');
+      }
+      if (estimateServiceBusMessageBytes(message) > SERVICE_BUS_MAX_MESSAGE_BYTES) {
+        validationReason = 'MESSAGE_TOO_LARGE';
+        throw new Error('INVALID_SERVICE_BUS_EVENT');
+      }
+      if (
+        typeof message.subject !== 'string' ||
+        !(combosServiceBusRoutes[queue] as readonly string[]).includes(
+          message.subject,
+        )
+      ) {
+        validationReason = 'EVENT_NOT_ALLOWED_FOR_QUEUE';
+        throw new Error('INVALID_SERVICE_BUS_EVENT');
+      }
+      if (
+        typeof message.messageId !== 'string' ||
+        !message.messageId.trim() ||
+        typeof message.correlationId !== 'string' ||
+        !message.correlationId.trim()
+      ) {
+        validationReason = 'MISSING_REQUIRED_TRANSPORT_IDENTIFIERS';
+        throw new Error('INVALID_SERVICE_BUS_EVENT');
+      }
+      if (message.contentType !== 'application/json') {
+        validationReason = 'INVALID_CONTENT_TYPE';
+        throw new Error('INVALID_SERVICE_BUS_EVENT');
+      }
+      envelope = validateCombosEvent(
+        JSON.parse(
+          new TextDecoder('utf-8', { fatal: true }).decode(message.body),
+        ),
+        {
+          fields: { routingKey: message.subject },
+          properties: {
+            messageId: message.messageId,
+            correlationId: message.correlationId,
+            type: message.subject,
+            contentType: message.contentType,
+          },
+        },
+      );
+      const tags = message.applicationProperties ?? {};
+      if (
+        (Object.hasOwn(tags, 'producer') &&
+          tags.producer !== envelope.producer) ||
+        (Object.hasOwn(tags, 'schema_version') &&
+          tags.schema_version !== envelope.schema_version) ||
+        (Object.hasOwn(tags, 'route_version') && tags.route_version !== 1) ||
+        (Object.hasOwn(tags, 'operation_id') &&
+          tags.operation_id !== null &&
+          tags.operation_id !== undefined &&
+          tags.operation_id !== envelope.operation_id) ||
+        (Object.hasOwn(tags, 'causation_id') &&
+          tags.causation_id !== null &&
+          tags.causation_id !== undefined &&
+          tags.causation_id !== envelope.causation_id)
+      ) {
+        validationReason = 'INCOMPATIBLE_APPLICATION_PROPERTIES';
+        throw new Error('INVALID_SERVICE_BUS_EVENT');
+      }
+    } catch {
+      try {
+        await receiver.deadLetterMessage(message, {
+          deadLetterReason: validationReason,
+          deadLetterErrorDescription: 'Contract or queue validation failed',
+        });
+        metrics.deadLettered += 1;
+        this.logger.warn(
+          JSON.stringify({
+            event: 'message_dead_lettered',
+            queue,
+            relation: metrics.relation,
+            reason: validationReason,
+            message_id:
+              typeof message.messageId === 'string'
+                ? safeLog(message.messageId)
+                : 'missing',
+          }),
+        );
+        return;
+      } catch (settlementError) {
+        metrics.settlementFailures += 1;
+        this.logger.error(
+          JSON.stringify({
+            event: 'settlement_failed',
+            action: 'deadLetter',
+            queue,
+            relation: metrics.relation,
+            reason: validationReason,
+            code: safeErrorCode(settlementError),
+          }),
+        );
+        throw settlementError;
+      }
+    }
+
+    let result: 'PROCESSED' | 'DUPLICATE';
+    try {
+      result = await this.applyEnvelope(envelope);
+      if (result === 'DUPLICATE') {
+        metrics.duplicateInbox += 1;
+      }
+    } catch (error) {
+      if (error instanceof InboxMessageConflictError) {
+        metrics.identityConflict += 1;
+        try {
+          await receiver.deadLetterMessage(message, {
+            deadLetterReason: 'COMBOS_MESSAGE_ID_CONFLICT',
+            deadLetterErrorDescription:
+              'Message ID already recorded with different contents',
+          });
+          metrics.deadLettered += 1;
+          this.logger.warn(
+            JSON.stringify({
+              event: 'message_dead_lettered',
+              queue,
+              relation: metrics.relation,
+              reason: 'COMBOS_MESSAGE_ID_CONFLICT',
+              message_id: safeLog(envelope.message_id),
+              correlation_id: safeLog(envelope.correlation_id),
+            }),
+          );
+          return;
+        } catch (settlementError) {
+          metrics.settlementFailures += 1;
+          this.logger.error(
+            JSON.stringify({
+              event: 'settlement_failed',
+              action: 'deadLetter',
+              queue,
+              relation: metrics.relation,
+              reason: 'COMBOS_MESSAGE_ID_CONFLICT',
+              message_id: safeLog(envelope.message_id),
+              code: safeErrorCode(settlementError),
+            }),
+          );
+          throw settlementError;
+        }
+      }
+
+      metrics.processingFailures += 1;
+      const deliveryCount =
+        typeof message.deliveryCount === 'number' && message.deliveryCount > 0
+          ? message.deliveryCount
+          : 1;
+      await delay(Math.min(2000, deliveryCount * 250));
+      try {
+        await receiver.abandonMessage(message);
+        metrics.abandoned += 1;
+        this.logger.warn(
+          JSON.stringify({
+            event: 'message_abandoned',
+            queue,
+            relation: metrics.relation,
+            event_name: envelope.name,
+            message_id: safeLog(envelope.message_id),
+            correlation_id: safeLog(envelope.correlation_id),
+            delivery_count: deliveryCount,
+            code: safeErrorCode(error),
+          }),
+        );
+        return;
+      } catch (settlementError) {
+        metrics.settlementFailures += 1;
+        this.logger.error(
+          JSON.stringify({
+            event: 'settlement_failed',
+            action: 'abandon',
+            queue,
+            relation: metrics.relation,
+            message_id: safeLog(envelope.message_id),
+            code: safeErrorCode(settlementError),
+          }),
+        );
+        throw settlementError;
+      }
+    }
+
+    try {
+      await receiver.completeMessage(message);
+      metrics.completed += 1;
+      this.logger.log(
+        JSON.stringify({
+          event: 'message_completed',
+          queue,
+          relation: metrics.relation,
+          event_name: envelope.name,
+          message_id: safeLog(envelope.message_id),
+          correlation_id: safeLog(envelope.correlation_id),
+          result,
+        }),
+      );
+    } catch (settlementError) {
+      metrics.settlementFailures += 1;
+      this.logger.error(
+        JSON.stringify({
+          event: 'settlement_failed',
+          action: 'complete',
+          queue,
+          relation: metrics.relation,
+          message_id: safeLog(envelope.message_id),
+          code: safeErrorCode(settlementError),
+        }),
+      );
+      throw settlementError;
+    }
+  }
+
+  private async applyEnvelope(
+    envelope: Envelope,
+  ): Promise<'PROCESSED' | 'DUPLICATE'> {
     const data = envelope.data;
     if (envelope.name === 'catalog.product.deactivated') {
       const catalogUrl = process.env.COMBOS_CATALOG_URL;
-      if (!catalogUrl) throw new Error('CATALOG_MAPPING_NOT_CONFIGURED');
+      if (!catalogUrl) {
+        this.catalogAuthBlocked = true;
+        this.lastCatalogErrorReason = 'CATALOG_MAPPING_NOT_CONFIGURED';
+        this.logger.error(
+          JSON.stringify({
+            event: 'catalog_mapping_blocked',
+            reason: 'CATALOG_MAPPING_NOT_CONFIGURED',
+            message_id: safeLog(envelope.message_id),
+            correlation_id: safeLog(envelope.correlation_id),
+          }),
+        );
+        throw new Error('CATALOG_MAPPING_NOT_CONFIGURED');
+      }
       const catalog = new CatalogSkuContextClient(
         catalogUrl,
         (signal) => this.serviceBearer(signal),
@@ -453,35 +879,64 @@ export class CombosEventConsumer implements OnModuleInit, OnModuleDestroy {
       }
       const mappingDeadline = AbortSignal.timeout(15000);
       const resolveProductSkus = async (candidates: string[]) => {
-        const contexts = await mapWithConcurrency(
-          candidates,
-          8,
-          async (sku) => {
-            try {
-              return await catalog.getContextForMapping(
+        const startedAt = performance.now();
+        this.catalogResolution.calls += 1;
+        try {
+          // Conservative resolution: every candidate SKU must resolve to a
+          // PricingCatalogContext. A 404 SKU_NO_ENCONTRADO does not prove the
+          // SKU never belonged to the deactivated product, so any failure aborts
+          // and prevents marking the event as PROCESSED.
+          const contexts = await mapWithConcurrency(
+            candidates,
+            8,
+            async (sku) =>
+              catalog.getContextForMapping(
                 sku,
                 catalogRequestCorrelationId,
                 mappingDeadline,
+              ),
+          );
+          const elapsedMs = Math.round(performance.now() - startedAt);
+          this.catalogResolution.lastLatencyMs = elapsedMs;
+          this.catalogResolution.totalLatencyMs += elapsedMs;
+          this.catalogResolution.maxLatencyMs = Math.max(
+            this.catalogResolution.maxLatencyMs,
+            elapsedMs,
+          );
+          this.catalogAuthBlocked = false;
+          this.lastCatalogErrorReason = null;
+          return contexts
+            .filter((context) => context.productId === data.product_id)
+            .map((context) => context.sku);
+        } catch (error) {
+          this.catalogResolution.failures += 1;
+          const elapsedMs = Math.round(performance.now() - startedAt);
+          this.catalogResolution.lastLatencyMs = elapsedMs;
+          this.catalogResolution.totalLatencyMs += elapsedMs;
+          this.catalogResolution.maxLatencyMs = Math.max(
+            this.catalogResolution.maxLatencyMs,
+            elapsedMs,
+          );
+          if (
+            error instanceof IntegrationFailure &&
+            error.dependency === 'CATALOG'
+          ) {
+            this.lastCatalogErrorReason = error.reason;
+            if (CATALOG_AUTH_BLOCK_REASONS.has(error.reason)) {
+              this.catalogAuthBlocked = true;
+              this.logger.error(
+                JSON.stringify({
+                  event: 'catalog_mapping_blocked',
+                  reason: error.reason,
+                  upstream_status: error.upstreamStatus ?? null,
+                  message_id: safeLog(envelope.message_id),
+                  correlation_id: safeLog(envelope.correlation_id),
+                }),
               );
-            } catch (error) {
-              // Product resolution scans combo references. A SKU no longer present
-              // in Catalog cannot belong to this product; other failures remain retryable.
-              if (
-                error instanceof IntegrationFailure &&
-                error.dependency === 'CATALOG' &&
-                error.reason === 'SKU_NO_ENCONTRADO'
-              )
-                return undefined;
-              throw error;
             }
-          },
-        );
-        return contexts
-          .filter(
-            (context): context is NonNullable<typeof context> =>
-              context?.productId === data.product_id,
-          )
-          .map((context) => context.sku);
+          }
+          throw error;
+        }
       };
       const result = await this.repository.processEvent({
         messageId: envelope.message_id,
@@ -498,7 +953,7 @@ export class CombosEventConsumer implements OnModuleInit, OnModuleDestroy {
         changedAt: String(data.changed_at),
       });
       this.logDisposition(envelope.message_id, envelope.correlation_id, result);
-      return;
+      return result;
     }
     const result = await this.repository.processEvent({
       messageId: envelope.message_id,
@@ -515,6 +970,7 @@ export class CombosEventConsumer implements OnModuleInit, OnModuleDestroy {
       changedAt: String(data.changed_at ?? data.updated_at),
     });
     this.logDisposition(envelope.message_id, envelope.correlation_id, result);
+    return result;
   }
 
   private async retryOrPause(

@@ -6,6 +6,7 @@ import {
 } from './integrations/catalog-sku-context.client.js';
 import { PricingClient, sumPrice } from './integrations/pricing.client.js';
 import { CombosServiceIdentity } from './integrations/combos-service-identity.js';
+import type { CombosConsumerReadiness } from './messaging/combos-event-consumer.js';
 import { CombosDatabase } from './persistence/combos.database.js';
 import {
   CatalogComponentDeactivatedError,
@@ -98,23 +99,61 @@ export class CombosSvcService {
     return Promise.resolve(undefined);
   }
   async readiness(
-    amqpStatus: 'disabled' | 'ready' | 'not_ready' = process.env
-      .COMBOS_AMQP_ENABLED === 'true'
+    brokerInput:
+      | 'disabled'
+      | 'ready'
+      | 'not_ready'
+      | CombosConsumerReadiness = process.env.COMBOS_AMQP_ENABLED === 'true' ||
+    process.env.COMBOS_SERVICE_BUS_EVENTS_ENABLED === 'true'
       ? 'not_ready'
       : 'disabled',
   ) {
     const postgresReady = await this.database.ready();
-    const amqpRequired =
-      process.env.COMBOS_AMQP_ENABLED === 'true' || amqpStatus !== 'disabled';
-    const amqpReady = amqpStatus === 'ready';
-    const ready = postgresReady && (!amqpRequired || amqpReady);
+    const consumer: CombosConsumerReadiness =
+      typeof brokerInput === 'string'
+        ? {
+            transport:
+              process.env.MESSAGING_PROVIDER === 'AZURE_SERVICE_BUS'
+                ? 'AZURE_SERVICE_BUS'
+                : process.env.COMBOS_AMQP_ENABLED === 'true' ||
+                    brokerInput !== 'disabled'
+                  ? 'RABBITMQ'
+                  : 'NONE',
+            status: brokerInput,
+          }
+        : brokerInput;
+    const isAzure =
+      consumer.transport === 'AZURE_SERVICE_BUS' ||
+      process.env.MESSAGING_PROVIDER === 'AZURE_SERVICE_BUS';
+    const brokerRequired = isAzure
+      ? process.env.COMBOS_SERVICE_BUS_EVENTS_ENABLED === 'true' ||
+        consumer.status !== 'disabled'
+      : process.env.COMBOS_AMQP_ENABLED === 'true' ||
+        consumer.status !== 'disabled';
+    const brokerKey = isAzure ? 'service_bus' : 'rabbitmq';
+    const brokerReady = consumer.status === 'ready';
+    const ready = postgresReady && (!brokerRequired || brokerReady);
     return {
       status: ready ? 'ok' : 'error',
       service: 'combos-svc',
+      ...(isAzure ? { transport: 'AZURE_SERVICE_BUS' as const } : {}),
       dependencies: {
         postgres: postgresReady ? 'ok' : 'error',
-        ...(amqpRequired ? { rabbitmq: amqpReady ? 'ok' : 'error' } : {}),
+        ...(brokerRequired ? { [brokerKey]: brokerReady ? 'ok' : 'error' } : {}),
       },
+      ...(isAzure && consumer.queues
+        ? {
+            queues: {
+              'g6.combos.from.catalog': consumer.queues['g6.combos.from.catalog'].ready
+                ? 'ok'
+                : 'error',
+              'g6.combos.from.inventory': consumer.queues['g6.combos.from.inventory']
+                .ready
+                ? 'ok'
+                : 'error',
+            },
+          }
+        : {}),
     };
   }
 
