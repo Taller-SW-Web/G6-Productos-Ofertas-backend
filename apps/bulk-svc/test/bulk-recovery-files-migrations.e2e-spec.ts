@@ -1,6 +1,7 @@
 import { createSign, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { inflateRawSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -18,11 +19,13 @@ import {
 } from '../src/export/bulk-export-source.js';
 import { BulkExportService } from '../src/bulk-export.service.js';
 import {
+  batchJobs,
   bulkSchema,
   outbox as bulkOutbox,
 } from '../src/persistence/bulk.schema.js';
 import { BulkPersistenceRepository } from '../src/persistence/bulk.repository.js';
 import { BULK_TEMPLATE_HEADERS } from '../src/domain/bulk-template-v2.js';
+import { EXPORT_HEADERS } from '../src/export/bulk-export-format.js';
 import {
   Database,
   type PostgresSettings,
@@ -76,6 +79,106 @@ function signUser(sub: string, roles = ['GESTOR_COMERCIAL']) {
   const s = createSign('RSA-SHA256');
   s.update(`${h}.${c}`);
   return `${h}.${c}.${s.sign(jwtKeys.privateKey, 'base64url')}`;
+}
+
+function readZipEntries(archive: Buffer): Map<string, Buffer> {
+  const entries = new Map<string, Buffer>();
+  let offset = 0;
+  while (
+    offset + 30 <= archive.length &&
+    archive.readUInt32LE(offset) === 0x04034b50
+  ) {
+    const method = archive.readUInt16LE(offset + 8);
+    const compressedSize = archive.readUInt32LE(offset + 18);
+    const nameLen = archive.readUInt16LE(offset + 26);
+    const extraLen = archive.readUInt16LE(offset + 28);
+    const name = archive
+      .subarray(offset + 30, offset + 30 + nameLen)
+      .toString('utf8');
+    const dataStart = offset + 30 + nameLen + extraLen;
+    const raw = archive.subarray(dataStart, dataStart + compressedSize);
+    const content = method === 8 ? inflateRawSync(raw) : Buffer.from(raw);
+    entries.set(name, content);
+    offset = dataStart + compressedSize;
+  }
+  return entries;
+}
+
+function writeZipStored(
+  entries: Array<{ name: string; content: Buffer }>,
+): Buffer {
+  const crc32 = (bytes: Buffer) => {
+    let crc = 0xffffffff;
+    for (const byte of bytes) {
+      crc ^= byte;
+      for (let bit = 0; bit < 8; bit++)
+        crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  };
+  const local: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+  for (const entry of entries) {
+    const name = Buffer.from(entry.name, 'utf8');
+    const checksum = crc32(entry.content);
+    const header = Buffer.alloc(30 + name.length);
+    header.writeUInt32LE(0x04034b50, 0);
+    header.writeUInt16LE(20, 4);
+    header.writeUInt16LE(0x0800, 6);
+    header.writeUInt32LE(checksum, 14);
+    header.writeUInt32LE(entry.content.length, 18);
+    header.writeUInt32LE(entry.content.length, 22);
+    header.writeUInt16LE(name.length, 26);
+    name.copy(header, 30);
+    local.push(header, entry.content);
+
+    const dir = Buffer.alloc(46 + name.length);
+    dir.writeUInt32LE(0x02014b50, 0);
+    dir.writeUInt16LE(20, 4);
+    dir.writeUInt16LE(20, 6);
+    dir.writeUInt16LE(0x0800, 8);
+    dir.writeUInt32LE(checksum, 16);
+    dir.writeUInt32LE(entry.content.length, 20);
+    dir.writeUInt32LE(entry.content.length, 24);
+    dir.writeUInt16LE(name.length, 28);
+    dir.writeUInt32LE(offset, 42);
+    name.copy(dir, 46);
+    central.push(dir);
+    offset += header.length + entry.content.length;
+  }
+  const centralBuf = Buffer.concat(central);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(centralBuf.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  return Buffer.concat([...local, centralBuf, eocd]);
+}
+
+function extractSheetRows(sheetXml: string): string[][] {
+  const rows: string[][] = [];
+  for (const rowMatch of sheetXml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+    const cells: string[] = [];
+    for (const cellMatch of rowMatch[1]!.matchAll(
+      /<c\b[^>]*>([\s\S]*?)<\/c>/g,
+    )) {
+      const inner = cellMatch[1]!;
+      const textMatch =
+        inner.match(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/) ??
+        inner.match(/<v>([\s\S]*?)<\/v>/);
+      const decoded = (textMatch?.[1] ?? '')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&apos;', "'");
+      cells.push(decoded);
+    }
+    rows.push(cells);
+  }
+  return rows;
 }
 
 integration(
@@ -145,7 +248,7 @@ integration(
       }
     });
 
-    it('recovers pending Outbox across real Bulk instance restart, deduplicates Catalog after restart, and handles Storage outage + malformed claim-check', async () => {
+    it('preserves pending Outbox across NestJS module recreation, deduplicates Catalog consumer, and handles simulated Storage adapter fault injection + malformed claim-check', async () => {
       const token = signUser(ownerA);
       const mod1 = await Test.createTestingModule({ imports: [BulkSvcModule] })
         .overrideProvider(BulkReadinessService)
@@ -407,6 +510,127 @@ integration(
         })
         .expect(202);
 
+      // Real XLSX roundtrip: parse downloaded template, insert valid row, repackage ZIP, import -> Catalog persistence
+      const tplEntries = readZipEntries(xlsxTpl.body as Buffer);
+      expect(tplEntries.get('xl/workbook.xml')?.toString('utf8')).toContain(
+        'Plantilla v2',
+      );
+      const tplSheetXml = tplEntries.get('xl/worksheets/sheet1.xml');
+      expect(tplSheetXml).toBeDefined();
+      const tplRows = extractSheetRows(tplSheetXml!.toString('utf8'));
+      expect(tplRows[0]).toEqual([...BULK_TEMPLATE_HEADERS]);
+
+      const xlsxSku = `RT-XLSX-${randomUUID().slice(0, 8)}`;
+      const xlsxDataRow = [
+        'ALTA',
+        '',
+        '',
+        xlsxSku,
+        '',
+        'Producto XLSX Roundtrip',
+        'Desc XLSX',
+        'category-fixture',
+        'brand-fixture',
+        'type-fixture',
+        'false',
+        '29.90',
+        '[]',
+        '',
+        '',
+        '0',
+      ];
+      const escapeXml = (val: string) =>
+        val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const colName = (idx: number) => {
+        let n = idx + 1;
+        let out = '';
+        while (n > 0) {
+          const rem = (n - 1) % 26;
+          out = String.fromCharCode(65 + rem) + out;
+          n = Math.floor((n - 1) / 26);
+        }
+        return out;
+      };
+      const renderRow = (rowNum: number, values: readonly string[]) =>
+        `<row r="${rowNum}">${values
+          .map(
+            (v, i) =>
+              `<c r="${colName(i)}${rowNum}" t="inlineStr"><is><t>${escapeXml(v)}</t></is></c>`,
+          )
+          .join('')}</row>`;
+      const editedSheetXml =
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' +
+        renderRow(1, BULK_TEMPLATE_HEADERS) +
+        renderRow(2, xlsxDataRow) +
+        '</sheetData></worksheet>';
+      tplEntries.set(
+        'xl/worksheets/sheet1.xml',
+        Buffer.from(editedSheetXml, 'utf8'),
+      );
+      const roundtripXlsx = writeZipStored(tplEntries);
+
+      const xlsxCorrelationId = randomUUID();
+      const xlsxImportRes = await request(server)
+        .post('/api/v1/carga-masiva/productos/importaciones')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .set('X-Correlation-Id', xlsxCorrelationId)
+        .field('template_version', '2')
+        .attach('archivo', roundtripXlsx, {
+          filename: 'roundtrip.xlsx',
+          contentType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        })
+        .expect(202);
+      expect(xlsxImportRes.body.batch_id).toMatch(/^[0-9a-f-]{36}$/i);
+
+      const [xlsxOutboxRow] = await bulkDb
+        .select()
+        .from(bulkOutbox)
+        .where(eq(bulkOutbox.correlationId, xlsxCorrelationId));
+      expect(xlsxOutboxRow).toBeDefined();
+
+      const storageForXlsx = mod.get(BulkStorageService);
+      const txXlsx = new CatalogTransactionManager(catalogDb);
+      const mutationsXlsx = new CatalogMutationService(
+        txXlsx,
+        new PostgresCatalogWriteRepository(),
+        {
+          masters: async () => ({ schemaVersion: 1 }),
+          attributes: async (_t: string, v: unknown[]) => v,
+        } as never,
+        { resolve: async (_i, id) => ({ slug: `rec-${id}`, moneda: 'PEN' }) },
+      );
+      const idMockXlsx = new CatalogBulkIdentity(
+        undefined,
+        new CatalogTokenVerifier(undefined),
+      );
+      vi.spyOn(idMockXlsx, 'authorization').mockResolvedValue(
+        'Bearer isolated-master-fixture',
+      );
+      const xlsxConsumer = new CatalogBulkService(
+        catalogDb,
+        mutationsXlsx,
+        idMockXlsx,
+        {
+          getDocument: async (ref: { content_id: string }) => {
+            const res = await bulkRepo.findContentDocument(ref.content_id);
+            const bytes = await storageForXlsx.get(res!.contentRef);
+            return JSON.parse(bytes.toString('utf8'));
+          },
+        } as unknown as CatalogBulkContentClient,
+      );
+      await expect(
+        xlsxConsumer.consume(
+          xlsxOutboxRow!.payload as unknown as CatalogEnvelope,
+        ),
+      ).resolves.toBe('APPLIED');
+      const catalogXlsxRows = await catalogDb.read((db) =>
+        db.select().from(products).where(eq(products.sku, xlsxSku)),
+      );
+      expect(catalogXlsxRows).toHaveLength(1);
+      expect(catalogXlsxRows[0]?.nombre).toBe('Producto XLSX Roundtrip');
+
       // Export CSV with formula injection protection + XLSX + owner isolation + 404
       const storage2 = mod.get(BulkStorageService);
       const origPut = storage2.put.bind(storage2);
@@ -444,6 +668,54 @@ integration(
       expect(dlCsv.headers['content-type']).toContain('text/csv');
       expect(dlCsv.text).toContain("'=CMD");
       expect(dlCsv.text).toContain("'+SUM");
+
+      // Export XLSX with structured workbook validation + formula injection protection
+      const expXlsx = await request(server)
+        .post('/api/v1/carga-masiva/productos/exportaciones')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ formato: 'XLSX' })
+        .expect(202);
+      const xlsxExportId = String(expXlsx.body.export_id);
+
+      let xlsxExportStatus = 'QUEUED';
+      for (let i = 0; i < 30; i++) {
+        const poll = await request(server)
+          .get(`/api/v1/carga-masiva/productos/exportaciones/${xlsxExportId}`)
+          .set('Authorization', `Bearer ${tokenA}`)
+          .expect(200);
+        xlsxExportStatus = poll.body.status;
+        if (
+          xlsxExportStatus === 'COMPLETED' ||
+          xlsxExportStatus === 'FAILED_GENERAL'
+        ) {
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      expect(xlsxExportStatus).toBe('COMPLETED');
+
+      const dlXlsx = await request(server)
+        .get(
+          `/api/v1/carga-masiva/productos/exportaciones/${xlsxExportId}/archivo`,
+        )
+        .set('Authorization', `Bearer ${tokenA}`)
+        .buffer(true)
+        .parse((res, cb) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => chunks.push(c));
+          res.on('end', () => cb(null, Buffer.concat(chunks)));
+        })
+        .expect(200);
+      expect(dlXlsx.headers['content-type']).toContain('spreadsheetml.sheet');
+      const expEntries = readZipEntries(dlXlsx.body as Buffer);
+      expect(expEntries.get('xl/workbook.xml')).toBeDefined();
+      const expSheetXml = expEntries.get('xl/worksheets/sheet1.xml');
+      expect(expSheetXml).toBeDefined();
+      const expRows = extractSheetRows(expSheetXml!.toString('utf8'));
+      expect(expRows[0]).toEqual([...EXPORT_HEADERS]);
+      const formulaRow = expRows.find((r) => r.includes('EXP-FORMULA-1'));
+      expect(formulaRow).toBeDefined();
+      expect(formulaRow?.some((cell) => cell.startsWith("'=CMD"))).toBe(true);
 
       // Other owner isolated with 404
       await request(server)
@@ -540,5 +812,75 @@ integration(
         await adminPool.end();
       }
     }, 30_000);
+
+    it('handles temporary disposable PostgreSQL unavailability and recovers durable admission without duplicates', async () => {
+      if (!adminDatabaseUrl) return;
+      const adminPool = new Pool({
+        connectionString: adminDatabaseUrl,
+        max: 2,
+      });
+      const token = signUser(ownerA);
+      const mod = await Test.createTestingModule({ imports: [BulkSvcModule] })
+        .overrideProvider(BulkReadinessService)
+        .useValue({ probe: async () => ({ ready: true }) })
+        .compile();
+      const app = mod.createNestApplication({ logger: false });
+      app.useGlobalFilters(new BulkProblemFilter());
+      await app.init();
+
+      const outageCorrelationId = randomUUID();
+      const sku = `PG-OUTAGE-${randomUUID().slice(0, 8)}`;
+      const csv = Buffer.from(
+        `${BULK_TEMPLATE_HEADERS.join(',')}\r\n"ALTA","","","${sku}","","Producto PG Outage","Desc","category-fixture","brand-fixture","type-fixture","false","12.00","[]","","","0"\r\n`,
+        'utf8',
+      );
+
+      let roleLocked = false;
+      try {
+        await adminPool.query('ALTER ROLE bulk_app NOLOGIN');
+        roleLocked = true;
+        await adminPool.query(
+          "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'bulk_app' AND pid <> pg_backend_pid()",
+        );
+
+        const outageRes = await request(app.getHttpServer())
+          .post('/api/v1/carga-masiva/productos/importaciones')
+          .set('Authorization', `Bearer ${token}`)
+          .set('X-Correlation-Id', outageCorrelationId)
+          .field('template_version', '2')
+          .attach('archivo', csv, {
+            filename: 'pg-outage.csv',
+            contentType: 'text/csv',
+          });
+        expect(outageRes.status).toBeGreaterThanOrEqual(500);
+
+        await adminPool.query('ALTER ROLE bulk_app LOGIN');
+        roleLocked = false;
+
+        const recoveredRes = await request(app.getHttpServer())
+          .post('/api/v1/carga-masiva/productos/importaciones')
+          .set('Authorization', `Bearer ${token}`)
+          .set('X-Correlation-Id', outageCorrelationId)
+          .field('template_version', '2')
+          .attach('archivo', csv, {
+            filename: 'pg-outage.csv',
+            contentType: 'text/csv',
+          })
+          .expect(202);
+        expect(recoveredRes.body.batch_id).toMatch(/^[0-9a-f-]{36}$/i);
+
+        const rows = await bulkDb
+          .select()
+          .from(batchJobs)
+          .where(eq(batchJobs.correlationId, outageCorrelationId));
+        expect(rows).toHaveLength(1);
+      } finally {
+        if (roleLocked) {
+          await adminPool.query('ALTER ROLE bulk_app LOGIN').catch(() => {});
+        }
+        await app.close();
+        await adminPool.end();
+      }
+    }, 60_000);
   },
 );
