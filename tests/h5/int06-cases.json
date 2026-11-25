@@ -1,0 +1,197 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "TAX-HTTP-READ-TREE",
+      "suite": "TAX-HTTP-READ",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs read"
+    },
+    {
+      "case_id": "TAX-HTTP-READ-CATEGORY",
+      "suite": "TAX-HTTP-READ",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs read"
+    },
+    {
+      "case_id": "TAX-HTTP-READ-BRAND",
+      "suite": "TAX-HTTP-READ",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs read"
+    },
+    {
+      "case_id": "TAX-HTTP-READ-SEO",
+      "suite": "TAX-HTTP-READ",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs read"
+    },
+    {
+      "case_id": "TAX-HTTP-READ-PRODUCT_TYPE",
+      "suite": "TAX-HTTP-READ",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs read"
+    },
+    {
+      "case_id": "TAX-HTTP-READ-401",
+      "suite": "TAX-HTTP-READ",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs read"
+    },
+    {
+      "case_id": "TAX-HTTP-READ-403",
+      "suite": "TAX-HTTP-READ",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs read"
+    },
+    {
+      "case_id": "TAX-HTTP-DEACTIVATE-202",
+      "suite": "TAX-HTTP-DEACTIVATE",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs deactivate"
+    },
+    {
+      "case_id": "TAX-HTTP-DEACTIVATE-PENDING",
+      "suite": "TAX-HTTP-DEACTIVATE",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs deactivate"
+    },
+    {
+      "case_id": "TAX-HTTP-DEACTIVATE-OPERATION_POLL",
+      "suite": "TAX-HTTP-DEACTIVATE",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs deactivate"
+    },
+    {
+      "case_id": "TAX-HTTP-DEACTIVATE-COMPLETED",
+      "suite": "TAX-HTTP-DEACTIVATE",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs deactivate"
+    },
+    {
+      "case_id": "TAX-HTTP-DEACTIVATE-REJECTED",
+      "suite": "TAX-HTTP-DEACTIVATE",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs deactivate"
+    },
+    {
+      "case_id": "TAX-CONTRACT-R09-R18-SIX_R18_SCHEMAS",
+      "suite": "TAX-CONTRACT-R09-R18",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs contract"
+    },
+    {
+      "case_id": "TAX-CONTRACT-R09-R18-CATEGORY_CLEAR_IN_USE",
+      "suite": "TAX-CONTRACT-R09-R18",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs contract"
+    },
+    {
+      "case_id": "TAX-CONTRACT-R09-R18-BRAND_CLEAR_IN_USE",
+      "suite": "TAX-CONTRACT-R09-R18",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs contract"
+    },
+    {
+      "case_id": "TAX-CONTRACT-R09-R18-CAUSATION_OPTIONAL",
+      "suite": "TAX-CONTRACT-R09-R18",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs contract"
+    },
+    {
+      "case_id": "TAX-CONTRACT-R09-R18-OPERATION_REQUIRED",
+      "suite": "TAX-CONTRACT-R09-R18",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs contract"
+    },
+    {
+      "case_id": "TAX-CONTRACT-R09-R18-INVALID_UUID",
+      "suite": "TAX-CONTRACT-R09-R18",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs contract"
+    },
+    {
+      "case_id": "TAX-CONTRACT-R09-R18-STALE_AND_FOREIGN",
+      "suite": "TAX-CONTRACT-R09-R18",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs contract"
+    },
+    {
+      "case_id": "TAX-DB-BARRIER-CATEGORY_IN_USE_CLEAR",
+      "suite": "TAX-DB-BARRIER",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs barrier"
+    },
+    {
+      "case_id": "TAX-DB-BARRIER-BRAND_IN_USE_CLEAR",
+      "suite": "TAX-DB-BARRIER",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs barrier"
+    },
+    {
+      "case_id": "TAX-DB-BARRIER-DUPLICATE_IDEMPOTENCE",
+      "suite": "TAX-DB-BARRIER",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs barrier"
+    },
+    {
+      "case_id": "TAX-DB-BARRIER-LATE_NO_RESURRECTION",
+      "suite": "TAX-DB-BARRIER",
+      "implementation_state": "DONE_LOCAL",
+      "execution_result": "NOT_RUN",
+      "owner": "Lopez / Taxonomy",
+      "test_command": "node tests/h5/run-int06.mjs barrier"
+    },
+    {
+      "case_id": "TAX-AZURE-R18-REAL_AZURE",
+      "suite": "TAX-AZURE-R18",
+      "implementation_state": "BLOCKED_DEPENDENCY",
+      "execution_result": "BLOCKED_SB",
+      "owner": "Axel / Azure",
+      "test_command": "node tests/h5/run-int06.mjs azure"
+    }
+  ]
+}

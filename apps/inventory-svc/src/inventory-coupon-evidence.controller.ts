@@ -9,7 +9,6 @@ import {
 import { AllowedClients, RequireScope } from './auth/auth.decorators.js';
 import { INVENTORY_SCOPES } from './auth/auth.constants.js';
 import { InventoryAuthGuard } from './auth/inventory-auth.guard.js';
-import { ProblemDetailsException } from './errors/inventory.errors.js';
 import { ReservationsService } from './reservations/reservations.service.js';
 import type { ConsultaEstadoReservaResponse } from './types/inventory.dto.js';
 
@@ -26,14 +25,6 @@ export class InventoryCouponEvidenceController {
     @Query('order_id') orderId: string,
     @Headers('x-correlation-id') correlationId?: string,
   ): Promise<ConsultaEstadoReservaResponse> {
-    if (
-      (process.env.G6_SECURITY_MODE ?? 'G7_AUTHENTICATED') !==
-      'G7_AUTHENTICATED'
-    )
-      throw ProblemDetailsException.scopeInsuficiente(
-        'Se requiere autenticación de servicio G7',
-        correlationId,
-      );
     return this.reservations.consultarEstadoReserva(
       reservationId,
       orderId,

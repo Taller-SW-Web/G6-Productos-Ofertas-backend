@@ -14,11 +14,11 @@ Docs fijado a c1f7fabd16f46643b6dd6fb480bd925428da7f7c: OpenAPI 0.6.0-rc.5, Asyn
 
 service-bus-events.ts compone el SDK con PromotionsAssignedEventDispatcher y los adapters H4 actuales. Catalog mantiene los writers de proyección y el guard de versiones SQL. Pricing/Inventory mantienen las invalidaciones durables en Inbox; no se inventan precios ni disponibilidad agregada desde un evento de stock físico.
 
-| Cola | Productor esperado | Eventos |
-|---|---|---|
-| g6.promotions.from.catalog | catalog-svc | catalog.product.deactivated, catalog.sku.deactivated |
-| g6.promotions.from.pricing | pricing-svc | pricing.price.changed |
-| g6.promotions.from.inventory | inventory-svc | inventory.stock.changed |
+| Cola                         | Productor esperado | Eventos                                              |
+| ---------------------------- | ------------------ | ---------------------------------------------------- |
+| g6.promotions.from.catalog   | catalog-svc        | catalog.product.deactivated, catalog.sku.deactivated |
+| g6.promotions.from.pricing   | pricing-svc        | pricing.price.changed                                |
+| g6.promotions.from.inventory | inventory-svc      | inventory.stock.changed                              |
 
 La configuración identifica el namespace aprobado. Infra debe comprobar Sender exclusivo por cola y Receiver de Promotions; una propiedad producer del mensaje no es una credencial. Se validan cola/nombre/productor, MessageId, correlationId, subject, contentType, schema_version y route_version=1. No hay autenticación por headers HTTP ni por productor declarado aislado.
 
@@ -28,20 +28,22 @@ Los probes periódicos revalidan enlace; readiness interna observa el worker sel
 
 ## Variables respaldadas por el parser
 
-| Variable | Comportamiento |
-|---|---|
-| MESSAGING_PROVIDER | Ausente/RABBITMQ conserva H4; AZURE_SERVICE_BUS selecciona H5; otro valor falla |
-| SERVICE_BUS_NAMESPACE_FQDN | Host Azure exacto, sin esquema/path/credenciales |
-| PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED | true explícito para iniciar los consumidores; no habilita cupones |
-| G6_SERVICE_BUS_PRODUCTION_ENABLED | true obligatorio en producción H5; se rechaza true en desarrollo/test |
-| AZURE_CLIENT_ID | Identidad administrada explícita obligatoria en producción; cuando se define no hay fallback a usuario CLI |
-| G6_SECURITY_MODE | Producción H5 exige G7_AUTHENTICATED; no acredita grant real |
-| RABBITMQ_URL | Debe estar ausente en selección Azure; no se acepta un segundo transporte |
-| PROMOTIONS_COUPON_RUNTIME_ENABLED | El runtime H4 debe permanecer false en H5 |
-| PROMOTIONS_H5_COUPON_COMMANDS_ENABLED | Habilita las rutas H5 y el ciclo de trabajo de `g6.promotions.commands` con G7. Por defecto es false |
-| PROMOTIONS_H5_COUPON_ADMISSION_PAUSED | Pausa los POST durante el drenaje. GET y worker siguen activos. Por defecto es false |
-| PROMOTIONS_H5_SERVICE_CLIENT_SECRET | Credencial técnica de `promotions-svc` para el scope privado de estado de reserva. Es distinta de la credencial `modulo-productos` |
-| PROMOTIONS_DEPENDENCY_PROBES_ENABLED | Habilita monitor/probes existentes; usar true en validación operativa |
+| Variable                              | Comportamiento                                                                                                                                                                                                                                              |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MESSAGING_PROVIDER                    | Ausente/RABBITMQ conserva H4; AZURE_SERVICE_BUS selecciona H5; otro valor falla                                                                                                                                                                             |
+| SERVICE_BUS_NAMESPACE_FQDN            | Host Azure exacto, sin esquema/path/credenciales                                                                                                                                                                                                            |
+| PROMOTIONS_SERVICE_BUS_EVENTS_ENABLED | true explícito para iniciar los consumidores; no habilita cupones                                                                                                                                                                                           |
+| G6_SERVICE_BUS_PRODUCTION_ENABLED     | true obligatorio en producción H5; se rechaza true en desarrollo/test                                                                                                                                                                                       |
+| AZURE_CLIENT_ID                       | Identidad administrada explícita obligatoria en producción; cuando se define no hay fallback a usuario CLI                                                                                                                                                  |
+| G6_SECURITY_MODE                      | H5 exige autenticación G7 real. `PUBLIC_READ_ONLY` conserva lecturas públicas existentes y puede habilitar solo los comandos privados H5 si se cumplen las condiciones de seguridad siguientes; no acredita grants reales. `SIMULATED_AUTH` no habilita H5. |
+| RABBITMQ_URL                          | Debe estar ausente en selección Azure; no se acepta un segundo transporte                                                                                                                                                                                   |
+| PROMOTIONS_COUPON_RUNTIME_ENABLED     | El runtime H4 debe permanecer false en H5                                                                                                                                                                                                                   |
+| PROMOTIONS_H5_COUPON_COMMANDS_ENABLED | Habilita las rutas H5 y el ciclo de trabajo de `g6.promotions.commands` con G7. Por defecto es false                                                                                                                                                        |
+| PROMOTIONS_H5_COUPON_ADMISSION_PAUSED | Pausa los POST durante el drenaje. GET y worker siguen activos. Por defecto es false                                                                                                                                                                        |
+| PROMOTIONS_H5_SERVICE_CLIENT_SECRET   | Credencial técnica de `promotions-svc` para el scope privado de estado de reserva. Es distinta de la credencial `modulo-productos`                                                                                                                          |
+| PROMOTIONS_DEPENDENCY_PROBES_ENABLED  | Habilita monitor/probes existentes; usar true en validación operativa                                                                                                                                                                                       |
+
+Para habilitar `PROMOTIONS_H5_COUPON_COMMANDS_ENABLED=true` bajo `PUBLIC_READ_ONLY`, deben estar presentes al mismo tiempo `AUTH_ISSUER` y `AUTH_JWKS_URL` HTTPS válidos de G7, `AZURE_CLIENT_ID` con GUID de la identidad administrada, `SERVICE_BUS_NAMESPACE_FQDN` válido, `MESSAGING_PROVIDER=AZURE_SERVICE_BUS`, `PROMOTIONS_COUPON_RUNTIME_ENABLED=false`, `RABBITMQ_URL` ausente y `G6_SERVICE_BUS_PRODUCTION_ENABLED=true` cuando `NODE_ENV=production`. La configuración rechaza el comando si falta una condición. La identidad técnica H5 conserva su secreto separado del cliente de lecturas internas. El controller H5 mantiene autenticación G7, allowlist de `modulo-ventas` y los scopes exactos; no se concede acceso anónimo ni se agregan consumidores de eventos.
 
 Se conservan PG/TLS, puerto, upstreams y configuración de auth existentes. El pool usa verify-full/CA; no se lee ni publica configuración privada. No habilitar esta configuración sobre el namespace piloto ni en apps compartidas sin su revisión y evidencia de RBAC/productores.
 
@@ -78,17 +80,17 @@ Prueba opt-in solo contra base local VACÍA y descartable cuyo nombre comience g
 
 Con Docker disponible, el runner crea una base local descartable y elimina únicamente su propio contenedor, previa comprobación de su etiqueta:
 
-~~~powershell
+```powershell
 node apps/promotions-svc/test/run-h5-postgres.mjs
-~~~
+```
 
 Para una base local descartable administrada manualmente:
 
-~~~powershell
+```powershell
 $env:PROMOTIONS_H5_POSTGRES_TESTS='1'
 $env:PROMOTIONS_H5_TEST_DATABASE_URL='<URL privada de la base local descartable>'
 npm run test:e2e -- apps/promotions-svc/test/coupon-h5.postgres.e2e-spec.ts --maxWorkers=1
-~~~
+```
 
 La prueba SQL aplica las migraciones históricas verificadas y las dos candidatas en PostgreSQL descartable. Ejecuta admisión, reintentos, cuarentena y consumo con el procesador de cupones bajo el rol runtime. Azure Service Bus y la fuente comercial se simulan en la suite. La [evidencia y el procedimiento de recuperación](h5/VALIDACION.md) detallan la verificación pendiente en el ambiente autorizado.
 
@@ -104,14 +106,14 @@ No se atribuyen respuesta, aceptación, grant ni compromiso de otros owners a la
 
 ## Dependencias de cierre
 
-| Responsable | Frontera | Condición concreta |
-|---|---|---|
-| G5/G6 Docs | Tres rutas de cupones | Homologar la ejecución contra la versión publicada y verificar el límite de 240 KiB del envelope completo |
-| G7 | HTTP | Verificar los grants de los scopes dedicados del OpenAPI y probar autorización real con `modulo-ventas` |
-| G5/Inventory/G6 | Reserva y snapshot | Fuente autorizada con hechos durables verificables; mientras tanto evidencia sigue bloqueada |
-| Arquitectura/integración G6 | BFF y productores compartidos | Resolver todos los destinatarios/handlers requeridos antes del corte |
-| Infra/owners | Azure | Namespace/colas/identidades/RBAC por ambiente, prueba positiva/negativa, alerts/DLQ y recuperación sin tráfico |
-| Owner datos/QA | SQL | Revisar modelo/grants y validar el runtime de negocio completo antes de aplicación compartida; suite transaccional local ejecutada |
+| Responsable                 | Frontera                      | Condición concreta                                                                                                                 |
+| --------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| G5/G6 Docs                  | Tres rutas de cupones         | Homologar la ejecución contra la versión publicada y verificar el límite de 240 KiB del envelope completo                          |
+| G7                          | HTTP                          | Verificar los grants de los scopes dedicados del OpenAPI y probar autorización real con `modulo-ventas`                            |
+| G5/Inventory/G6             | Reserva y snapshot            | Fuente autorizada con hechos durables verificables; mientras tanto evidencia sigue bloqueada                                       |
+| Arquitectura/integración G6 | BFF y productores compartidos | Resolver todos los destinatarios/handlers requeridos antes del corte                                                               |
+| Infra/owners                | Azure                         | Namespace/colas/identidades/RBAC por ambiente, prueba positiva/negativa, alerts/DLQ y recuperación sin tráfico                     |
+| Owner datos/QA              | SQL                           | Revisar modelo/grants y validar el runtime de negocio completo antes de aplicación compartida; suite transaccional local ejecutada |
 
 Inventory #240 se fusionó en `master`. Se prepararon y probaron la ruta correspondiente del Gateway y la evidencia privada de Inventory en una copia aislada del `master` oficial `81f66c8`. El perfil Azure G5 H5 separado del piloto #234 asigna las identidades existentes y mantiene Inventory y Promociones con una réplica mínima. Los despliegues y los veinte escenarios con consumidores reales requieren su propia evidencia.
 
