@@ -39,7 +39,7 @@ esac
 
 if [[ "$mode" == 'postgres-only' ]]; then
   case "$test_file" in
-    ''|combos-postgres.e2e-spec.ts|combos-h5-performance.e2e-spec.ts) ;;
+    ''|combos-postgres.e2e-spec.ts|combos-service-bus-postgres.e2e-spec.ts|combos-h5-performance.e2e-spec.ts) ;;
     *)
       printf 'Suite focalizada no permitida en modo postgres-only: %s\n' "$test_file" >&2
       exit 2
@@ -122,9 +122,15 @@ if [[ "$tmp_dir" != "$tmp_root"/* ]]; then
 fi
 
 pg_password="$(openssl rand -hex 24)"
+combos_runtime_password=''
+combos_readonly_password=''
 catalog_password=''
 pricing_password=''
 rabbit_password=''
+if [[ "$mode" == 'postgres-only' ]]; then
+  combos_runtime_password="$(openssl rand -hex 24)"
+  combos_readonly_password="$(openssl rand -hex 24)"
+fi
 if [[ "$mode" == 'legacy' ]]; then
   catalog_password="$(openssl rand -hex 24)"
   pricing_password="$(openssl rand -hex 24)"
@@ -133,7 +139,8 @@ fi
 
 environment_names=(
   COMBOS_TEST_EPHEMERAL COMBOS_TEST_DATABASE_URL COMBOS_TEST_CA COMBOS_TEST_MODE
-  COMBOS_TEST_RABBITMQ_URL COMBOS_TEST_RABBITMQ_CONTAINER
+  COMBOS_TEST_RABBITMQ_URL COMBOS_TEST_RABBITMQ_CONTAINER COMBOS_TEST_EXPECT_RUNTIME_ROLE
+  COMBOS_TEST_READONLY_PGUSER COMBOS_TEST_READONLY_PGPASSWORD
   COMBOS_TEST_CATALOG_PASSWORD COMBOS_TEST_PRICING_PASSWORD COMBOS_TEST_CWD
   COMBOS_TEST_EXPECTED_SUITES
   COMBOS_AMQP_ENABLED COMBOS_AMQP_URL G6_AMQP_CONNECT_IP
@@ -262,6 +269,8 @@ diagnostics() {
     printf 'Diagnóstico de %s (sin volcar configuración ni variables):\n' "$name" >&2
     docker inspect --format 'image={{.Config.Image}} running={{.State.Running}} oom={{.State.OOMKilled}} labels={{json .Config.Labels}}' "$name" >&2 || true
     local sed_args=(-e "s/$pg_password/[REDACTED]/g")
+    [[ -n "$combos_runtime_password" ]] && sed_args+=(-e "s/$combos_runtime_password/[REDACTED]/g")
+    [[ -n "$combos_readonly_password" ]] && sed_args+=(-e "s/$combos_readonly_password/[REDACTED]/g")
     [[ -n "$catalog_password" ]] && sed_args+=(-e "s/$catalog_password/[REDACTED]/g")
     [[ -n "$pricing_password" ]] && sed_args+=(-e "s/$pricing_password/[REDACTED]/g")
     [[ -n "$rabbit_password" ]] && sed_args+=(-e "s/$rabbit_password/[REDACTED]/g")
@@ -359,11 +368,16 @@ fi
 
 if [[ "$mode" == 'postgres-only' ]]; then
   docker exec "$pg_container" psql -U postgres -d combos_test -v ON_ERROR_STOP=1 \
-    -c "CREATE ROLE po_combos_owner NOLOGIN; CREATE SCHEMA combos AUTHORIZATION po_combos_owner;" >/dev/null
+    -c "CREATE ROLE po_combos_owner NOLOGIN; CREATE ROLE po_combos_app NOSUPERUSER NOCREATEDB NOCREATEROLE LOGIN PASSWORD '$combos_runtime_password'; CREATE ROLE po_combos_readonly NOSUPERUSER NOCREATEDB NOCREATEROLE LOGIN PASSWORD '$combos_readonly_password'; CREATE SCHEMA combos AUTHORIZATION po_combos_owner;" >/dev/null
   {
     printf 'SET ROLE po_combos_owner;\n'
     cat "$combos_migration"
     cat "$combo_receipts_migration"
+    printf 'GRANT USAGE ON SCHEMA combos TO po_combos_app;\n'
+    printf 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA combos TO po_combos_app;\n'
+    printf 'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA combos TO po_combos_app;\n'
+    printf 'GRANT USAGE ON SCHEMA combos TO po_combos_readonly;\n'
+    printf 'GRANT SELECT ON ALL TABLES IN SCHEMA combos TO po_combos_readonly;\n'
   } | docker exec -i "$pg_container" psql -U postgres -d combos_test -v ON_ERROR_STOP=1 -f - >/dev/null
 else
   docker exec "$pg_container" psql -U postgres -d combos_test -v ON_ERROR_STOP=1 \
@@ -401,6 +415,13 @@ export PGHOST=127.0.0.1 PGPORT="$pg_port" PGDATABASE=combos_test PGUSER=postgres
 export PGSSLMODE=verify-full PGSSLROOTCERT="$COMBOS_TEST_CA"
 
 if [[ "$mode" == 'postgres-only' ]]; then
+  if [[ "$test_file" == 'combos-service-bus-postgres.e2e-spec.ts' ]]; then
+    export PGUSER=po_combos_app
+    export PGPASSWORD="$combos_runtime_password"
+    export COMBOS_TEST_EXPECT_RUNTIME_ROLE=1
+    export COMBOS_TEST_READONLY_PGUSER=po_combos_readonly
+    export COMBOS_TEST_READONLY_PGPASSWORD="$combos_readonly_password"
+  fi
   export COMBOS_AMQP_ENABLED=false
   export COMBOS_SERVICE_BUS_EVENTS_ENABLED=false
   export G6_SERVICE_BUS_PRODUCTION_ENABLED=false
