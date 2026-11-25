@@ -1024,12 +1024,12 @@ integration(
           .from(batchJobs)
           .where(eq(batchJobs.correlationId, realOutageCorrelationId));
         expect(batchRows).toHaveLength(1);
-        expect(batchRows[0]?.id).toBe(batchId);
+        expect(batchRows[0]?.batchId).toBe(batchId);
 
         const manifestRows = await bulkDb
           .select()
           .from(fileManifests)
-          .where(eq(fileManifests.id, batchRows[0]!.manifestId));
+          .where(eq(fileManifests.id, batchRows[0]!.inputFileId));
         expect(manifestRows).toHaveLength(1);
 
         const outboxRows = await bulkDb
