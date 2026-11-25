@@ -138,8 +138,7 @@ export class GatewayProxy {
     const route = matchContractRoute(
       req.method,
       path,
-      this.settings.securityMode === 'G7_AUTHENTICATED' &&
-        this.settings.g5H5Enabled === true,
+      this.settings.g5H5Enabled === true,
     );
     if (!route) {
       res.status(404).end();

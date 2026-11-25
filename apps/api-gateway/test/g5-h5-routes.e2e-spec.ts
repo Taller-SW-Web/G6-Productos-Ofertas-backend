@@ -15,9 +15,10 @@ describe('G5 H5 routes behind authenticated Gateway opt-in', () => {
   let app: INestApplication;
   const upstream = vi.fn();
   const settings = {
-    securityMode: 'G7_AUTHENTICATED',
+    securityMode: 'PUBLIC_READ_ONLY',
     g5H5Enabled: false,
     upstreams: {
+      'catalog-svc': 'https://catalog.fixture.test',
       'inventory-svc': 'https://inventory.fixture.test',
       'promotions-svc': 'https://promotions.fixture.test',
     },
@@ -45,6 +46,7 @@ describe('G5 H5 routes behind authenticated Gateway opt-in', () => {
   afterAll(async () => app?.close());
   beforeEach(() => {
     settings.g5H5Enabled = false;
+    settings.publicOperations.splice(0);
     upstream.mockReset();
     vi.stubGlobal('fetch', upstream);
   });
@@ -64,6 +66,71 @@ describe('G5 H5 routes behind authenticated Gateway opt-in', () => {
       .post('/api/v1/cupones/consumos')
       .expect(404);
     expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it('preserves an allowlisted public read while H5 mutations still require G7 JWT and scope', async () => {
+    settings.g5H5Enabled = true;
+    settings.publicOperations.push('listarProductos');
+    upstream.mockResolvedValue(Response.json({ items: [] }, { status: 200 }));
+
+    await request(app.getHttpServer()).get('/api/v1/productos').expect(200);
+    expect(upstream).toHaveBeenCalledTimes(1);
+    expect(upstream.mock.calls[0][1].headers.authorization).toBeUndefined();
+
+    upstream.mockReset();
+    await request(app.getHttpServer())
+      .post('/api/v1/cupones/consumos')
+      .set('Idempotency-Key', '11111111-1111-4111-8111-111111111111')
+      .send({})
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/api/v1/cupones/consumos')
+      .set('Authorization', 'Bearer ' + token('cupones:operaciones:leer'))
+      .set('Idempotency-Key', '11111111-1111-4111-8111-111111111111')
+      .send({})
+      .expect(403);
+    expect(upstream).not.toHaveBeenCalled();
+
+    upstream.mockResolvedValue(Response.json({}, { status: 202 }));
+    await request(app.getHttpServer())
+      .post('/api/v1/cupones/consumos')
+      .set('Authorization', 'Bearer ' + token('cupones:consumir'))
+      .set('Idempotency-Key', '11111111-1111-4111-8111-111111111111')
+      .send({})
+      .expect(202);
+    expect(upstream).toHaveBeenCalledTimes(1);
+  });
+
+  it('protects the existing Inventory reservation contract without enabling coupon routes', async () => {
+    const path = '/api/v1/inventario/reservas';
+    await request(app.getHttpServer()).post(path).send({}).expect(401);
+    await request(app.getHttpServer())
+      .post(path)
+      .set('Authorization', 'Bearer ' + token('inventario:operaciones:leer'))
+      .send({})
+      .expect(403);
+    expect(upstream).not.toHaveBeenCalled();
+
+    upstream.mockResolvedValue(
+      Response.json(
+        {
+          type: 'about:blank',
+          status: 404,
+          code: 'OPERACION_INVENTARIO_NO_ENCONTRADA',
+        },
+        {
+          status: 404,
+          headers: { 'content-type': 'application/problem+json' },
+        },
+      ),
+    );
+    await request(app.getHttpServer())
+      .get(
+        '/api/v1/inventario/operaciones/11111111-1111-4111-8111-111111111111',
+      )
+      .set('Authorization', 'Bearer ' + token('inventario:operaciones:leer'))
+      .expect(404);
+    expect(upstream).toHaveBeenCalledTimes(1);
   });
 
   it('forwards 202 with the opaque order location, retry header and idempotency key', async () => {

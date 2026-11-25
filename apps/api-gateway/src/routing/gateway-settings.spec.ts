@@ -75,6 +75,31 @@ describe('Gateway route boundaries and configuration', () => {
         }),
       ).toThrow();
   });
+  it('allows the G5 H5 route opt-in in PUBLIC_READ_ONLY only with G7 trust configured', () => {
+    const settings = readGatewaySettings({
+      G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+      GATEWAY_G5_H5_ENABLED: 'true',
+      AUTH_ISSUER: 'https://g7.example.test/issuer',
+      AUTH_JWKS_URL: 'https://g7.example.test/jwks',
+      GATEWAY_PUBLIC_OPERATION_IDS: 'listarProductos',
+    });
+
+    expect(settings).toMatchObject({
+      securityMode: 'PUBLIC_READ_ONLY',
+      g5H5Enabled: true,
+      publicOperations: ['listarProductos'],
+      issuer: 'https://g7.example.test/issuer',
+      jwksUrl: 'https://g7.example.test/jwks',
+    });
+    expect(() =>
+      readGatewaySettings({
+        G6_SECURITY_MODE: 'SIMULATED_AUTH',
+        GATEWAY_G5_H5_ENABLED: 'true',
+        SIMULATED_AUTH_ISSUER: 'https://simulated.example.test/issuer',
+        SIMULATED_AUTH_JWKS_URL: 'https://simulated.example.test/jwks',
+      }),
+    ).toThrow('Invalid Gateway configuration');
+  });
   it('keeps anonymous legacy mode disabled and rejects attempts to enable it', () => {
     expect(readGatewaySettings({}).demoNoAuthEnabled).toBe(false);
     expect(
