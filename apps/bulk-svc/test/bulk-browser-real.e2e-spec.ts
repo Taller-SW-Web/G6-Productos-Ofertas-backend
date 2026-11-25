@@ -18,6 +18,8 @@ import { BulkReadinessService } from '../src/health/bulk-readiness.service.js';
 import { BulkPersistenceRepository } from '../src/persistence/bulk.repository.js';
 import { bulkSchema, outbox as bulkOutbox } from '../src/persistence/bulk.schema.js';
 import { BULK_EXPORT_SOURCE, type BulkExportSource } from '../src/export/bulk-export-source.js';
+import { BulkExportService } from '../src/bulk-export.service.js';
+import { BulkStorageService } from '../src/storage/bulk-storage.service.js';
 import { BULK_TEMPLATE_HEADERS } from '../src/domain/bulk-template-v2.js';
 import { ApiGatewayModule } from '../../api-gateway/src/api-gateway.module.js';
 import {
@@ -228,6 +230,12 @@ describe.skipIf(!enabled)(
       const bulkModule = await Test.createTestingModule({ imports: [BulkSvcModule] })
         .overrideProvider(BULK_EXPORT_SOURCE)
         .useValue(exportSource)
+        .overrideProvider(BulkExportService)
+        .useFactory({
+          factory: (repo: BulkPersistenceRepository, storage: BulkStorageService) =>
+            new BulkExportService(repo, storage, exportSource),
+          inject: [BulkPersistenceRepository, BulkStorageService],
+        })
         .overrideProvider(BulkReadinessService)
         .useValue({ probe: async () => ({ ready: true }) })
         .compile();
@@ -365,7 +373,7 @@ describe.skipIf(!enabled)(
                 .where(eq(bulkOutbox.id, event.id));
             }
           } catch (error) {
-            console.warn('[bulk-browser-real relay]', error instanceof Error ? error.message : String(error));
+            console.warn('[bulk-browser-real relay]', error);
           }
           await pause(150);
         }

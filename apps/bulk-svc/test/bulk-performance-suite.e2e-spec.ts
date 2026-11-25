@@ -8,6 +8,8 @@ import { BulkSvcModule } from '../src/bulk-svc.module.js';
 import { BulkProblemFilter } from '../src/http/bulk-problem.filter.js';
 import { BulkReadinessService } from '../src/health/bulk-readiness.service.js';
 import { BULK_EXPORT_SOURCE, type BulkExportSource } from '../src/export/bulk-export-source.js';
+import { BulkExportService } from '../src/bulk-export.service.js';
+import { BulkStorageService } from '../src/storage/bulk-storage.service.js';
 import { BULK_TEMPLATE_HEADERS } from '../src/domain/bulk-template-v2.js';
 import { createValidBulkXlsx } from './support/bulk-template-fixtures.js';
 import { Pool } from 'pg';
@@ -156,6 +158,12 @@ describe.skipIf(!enabled)('P1 Bulk Performance Suite (PostgreSQL 17 + Storage lo
     const mod = await Test.createTestingModule({ imports: [BulkSvcModule] })
       .overrideProvider(BULK_EXPORT_SOURCE)
       .useValue(exportSource)
+      .overrideProvider(BulkExportService)
+      .useFactory({
+        factory: (repo: BulkPersistenceRepository, storage: BulkStorageService) =>
+          new BulkExportService(repo, storage, exportSource),
+        inject: [BulkPersistenceRepository, BulkStorageService],
+      })
       .overrideProvider(BulkReadinessService)
       .useValue({ probe: async () => ({ ready: true }) })
       .compile();
@@ -276,13 +284,13 @@ describe.skipIf(!enabled)('P1 Bulk Performance Suite (PostgreSQL 17 + Storage lo
       .limit(1);
     const rowId = firstRow!.rowId;
     const msgId = randomUUID();
-    const opId = randomUUID();
     const corrId = String(retryAdmit.body.correlation_id);
     const [admittedOutbox] = await bulkDb
       .select()
       .from(bulkOutbox)
       .where(eq(bulkOutbox.correlationId, corrId))
       .limit(1);
+    const opId = admittedOutbox!.operationId;
     const causId = admittedOutbox!.messageId;
     await bulkRepo.recordCatalogBulkResult({
       messageId: msgId,
@@ -302,6 +310,7 @@ describe.skipIf(!enabled)('P1 Bulk Performance Suite (PostgreSQL 17 + Storage lo
         name: 'catalog.bulk.upsert.completed',
         data: {
           batch_id: retryBatchId,
+          batch_operation_id: opId,
           operation_id: opId,
           command_attempt_id: null,
           results: [{ row_id: rowId, status: 'REJECTED', effect_state: 'NONE', retriable: true, code: 'CATALOG_AUTH_TEMPORARY_UNAVAILABLE' }],

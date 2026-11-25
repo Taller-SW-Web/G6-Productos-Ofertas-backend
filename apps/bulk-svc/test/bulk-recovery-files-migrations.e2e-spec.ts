@@ -13,6 +13,7 @@ import { BulkReadinessService } from '../src/health/bulk-readiness.service.js';
 import { BulkStorageService } from '../src/storage/bulk-storage.service.js';
 import { BulkDomainError } from '../src/domain/bulk.domain-error.js';
 import { BULK_EXPORT_SOURCE, type BulkExportSource } from '../src/export/bulk-export-source.js';
+import { BulkExportService } from '../src/bulk-export.service.js';
 import { bulkSchema, outbox as bulkOutbox } from '../src/persistence/bulk.schema.js';
 import { BulkPersistenceRepository } from '../src/persistence/bulk.repository.js';
 import { BULK_TEMPLATE_HEADERS } from '../src/domain/bulk-template-v2.js';
@@ -267,6 +268,12 @@ integration('P1 Bulk Recovery, Files/Exports & Migrations (PostgreSQL 17 + Stora
     const mod = await Test.createTestingModule({ imports: [BulkSvcModule] })
       .overrideProvider(BULK_EXPORT_SOURCE)
       .useValue(exportSource)
+      .overrideProvider(BulkExportService)
+      .useFactory({
+        factory: (repo: BulkPersistenceRepository, storage: BulkStorageService) =>
+          new BulkExportService(repo, storage, exportSource),
+        inject: [BulkPersistenceRepository, BulkStorageService],
+      })
       .overrideProvider(BulkReadinessService)
       .useValue({ probe: async () => ({ ready: true }) })
       .compile();
