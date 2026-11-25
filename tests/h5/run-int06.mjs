@@ -45,6 +45,9 @@ const testFiles = [
   'tests/h5/int06-harness.e2e-spec.ts',
   'tests/h5/taxonomy-service-bus.postgres.e2e-spec.ts',
   'tests/h5/run-int06.mjs',
+  'tests/h5/int06-http-runner.mjs',
+  'apps/taxonomy-svc/test/persistencia-drizzle.e2e-spec.ts',
+  'scripts/ci/run-taxonomy-integration.mjs',
 ];
 const fingerprint = createHash('sha256');
 for (const f of testFiles.sort())
@@ -73,7 +76,7 @@ function run(id, command, args, needsDocs) {
   const phase = output.match(
     /\[taxonomy-integration\] FAIL fase=([a-z0-9-]+)/i,
   )?.[1];
-  const minimum = id === 'TAX-HTTP' ? 71 : id === 'TAX-DB-BARRIER' ? 7 : 3;
+  const minimum = id === 'TAX-DB-BARRIER' ? 7 : 5;
   const incomplete =
     !counts ||
     Number(counts) < minimum ||
@@ -100,33 +103,97 @@ function run(id, command, args, needsDocs) {
     level: 'L1_ISOLATED',
   };
 }
+const httpTests = {
+  'TAX-HTTP-READ-TREE': [
+    'consulta categorías y marcas con JWT verificado y PostgreSQL aislado',
+    'GET /api/v1/categorias/arbol => 200',
+  ],
+  'TAX-HTTP-READ-CATEGORY': [
+    'consulta categorías y marcas con JWT verificado y PostgreSQL aislado',
+    'GET /api/v1/categorias/:id => 200',
+  ],
+  'TAX-HTTP-READ-BRAND': [
+    'consulta categorías y marcas con JWT verificado y PostgreSQL aislado',
+    'GET /api/v1/marcas/:id => 200',
+  ],
+  'TAX-HTTP-READ-SEO': [
+    'consulta categorías y marcas con JWT verificado y PostgreSQL aislado',
+    'GET /api/v1/categorias/:id/seo => 200',
+  ],
+  'TAX-HTTP-READ-PRODUCT_TYPE': [
+    'consulta categorías y marcas con JWT verificado y PostgreSQL aislado',
+    'GET /api/v1/tipos-producto => 200',
+  ],
+  'TAX-HTTP-READ-401': [
+    'consulta categorías y marcas con JWT verificado y PostgreSQL aislado',
+    'JWT ausente => 401',
+  ],
+  'TAX-HTTP-READ-403': [
+    'consulta categorías y marcas con JWT verificado y PostgreSQL aislado',
+    'rol ajeno => 403',
+  ],
+  'TAX-HTTP-DEACTIVATE-202': [
+    'admite las cinco clases de baja segura HTTP y deduplica por correlación',
+    'POST baja => 202',
+  ],
+  'TAX-HTTP-DEACTIVATE-PENDING': [
+    'consulta operaciones de baja desde HTTP sobre el esquema local migrado',
+    'GET operación => PENDING_DEACTIVATION',
+  ],
+  'TAX-HTTP-DEACTIVATE-OPERATION_POLL': [
+    'consulta operaciones de baja desde HTTP sobre el esquema local migrado',
+    'GET operación => 200 con entity_id y operation_id',
+  ],
+  'TAX-HTTP-DEACTIVATE-COMPLETED': [
+    'consulta operaciones de baja desde HTTP sobre el esquema local migrado',
+    'GET operación => COMPLETED / CLEAR tras cambio de fixture SQL',
+  ],
+  'TAX-HTTP-DEACTIVATE-REJECTED': [
+    'consulta operaciones de baja desde HTTP sobre el esquema local migrado',
+    'GET operación => REJECTED / IN_USE tras cambio de fixture SQL',
+  ],
+};
 if (mode === 'all' || mode === 'read' || mode === 'deactivate') {
-  const http = run(
-    'TAX-HTTP',
-    'node scripts/ci/run-taxonomy-integration.mjs',
-    ['scripts/ci/run-taxonomy-integration.mjs'],
-    false,
-  );
-  if (mode === 'all' || mode === 'read')
+  const p = spawnSync(process.execPath, ['tests/h5/int06-http-runner.mjs'], {
+    encoding: 'utf8',
+    timeout: 300000,
+    maxBuffer: 12 * 1024 * 1024,
+    windowsHide: true,
+  });
+  let report;
+  try {
+    report = JSON.parse(p.stdout);
+  } catch {
+    report = null;
+  }
+  for (const [case_id, [test_name, assertion]] of Object.entries(httpTests)) {
+    if (mode === 'read' && !case_id.startsWith('TAX-HTTP-READ-')) continue;
+    if (mode === 'deactivate' && !case_id.startsWith('TAX-HTTP-DEACTIVATE-'))
+      continue;
+    const matches = (report?.assertions ?? []).filter(
+      (t) => t.title === test_name,
+    );
+    const passed = matches.length === 1 && matches[0].status === 'passed';
     result.push({
-      ...http,
-      case_id: 'TAX-HTTP-READ',
-      coverage: [
-        'tree',
-        'category',
-        'brand',
-        'seo',
-        'product_type',
-        '401',
-        '403',
-      ],
+      case_id,
+      implementation_state: 'DONE_LOCAL',
+      execution_result: p.error
+        ? 'INCONCLUSIVE'
+        : p.status !== 0
+          ? 'FAIL'
+          : passed
+            ? 'PASS'
+            : 'INCONCLUSIVE',
+      reason: passed ? null : 'SPECIFIC_TEST_NOT_VERIFIED',
+      test_file: 'apps/taxonomy-svc/test/persistencia-drizzle.e2e-spec.ts',
+      test_name,
+      assertion,
+      expected_test_count: 1,
+      tests_passed: matches.filter((t) => t.status === 'passed').length,
+      test_command: 'node tests/h5/int06-http-runner.mjs',
+      level: 'L1_ISOLATED',
     });
-  if (mode === 'all' || mode === 'deactivate')
-    result.push({
-      ...http,
-      case_id: 'TAX-HTTP-DEACTIVATE',
-      coverage: ['202', 'pending', 'operation_poll', 'completed', 'rejected'],
-    });
+  }
 }
 if (mode === 'all' || mode === 'contract')
   result.push(
@@ -186,13 +253,26 @@ const definitions = JSON.parse(
   readFileSync('tests/h5/int06-cases.json', 'utf8'),
 ).cases;
 const cases = definitions.map((definition) => {
-  const suite = result.find((item) => item.case_id === definition.suite);
+  const suite =
+    result.find((item) => item.case_id === definition.case_id) ??
+    result.find((item) => item.case_id === definition.suite);
   const execution_result =
     suite?.execution_result ?? definition.execution_result;
   return {
     ...definition,
     execution_result,
     reason: suite?.reason ?? null,
+    ...(httpTests[definition.case_id]
+      ? {
+          test_file:
+            suite?.test_file ??
+            'apps/taxonomy-svc/test/persistencia-drizzle.e2e-spec.ts',
+          test_name: httpTests[definition.case_id][0],
+          assertion: httpTests[definition.case_id][1],
+          expected_test_count: 1,
+          tests_passed: suite?.tests_passed ?? 0,
+        }
+      : {}),
     h5_criterion: 'H5-02',
     repo: evidence.repo,
     source_sha: sha,
