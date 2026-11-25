@@ -16,7 +16,7 @@ import {
   type CombosRepository,
 } from '../persistence/combos.repository.js';
 import { CombosSvcService } from '../combos-svc.service.js';
-import type { CombosDatabase } from '../persistence/combos.database.js';
+import { CombosDatabase } from '../persistence/combos.database.js';
 
 function makeSbMessage(
   envelope: Record<string, unknown>,
@@ -261,18 +261,25 @@ describe('CombosServiceBus runtime (COM-SB-01 / COR-05 / T08 / T11)', () => {
     await bus.close();
   });
 
-  it('fails start when RBAC peekMessages is denied on either queue', async () => {
+  it('starts in degraded NOT_READY state when RBAC/link fails initially and recovers automatically without restart (COM-AUD-11)', async () => {
     const catalogRx = makeFakeReceiver();
-    const inventoryRx = makeFakeReceiver();
-    inventoryRx.peekMessages.mockRejectedValueOnce(
-      Object.assign(new Error('RBAC denied'), { code: 'UnauthorizedAccess' }),
-    );
+    let inventoryAttempts = 0;
     const client: ServiceBusClientLike = {
-      createReceiver: vi.fn((queue: string) =>
-        (queue === 'g6.combos.from.catalog'
-          ? catalogRx
-          : inventoryRx) as unknown as ServiceBusReceiver,
-      ),
+      createReceiver: vi.fn((queue: string) => {
+        if (queue === 'g6.combos.from.catalog') {
+          return catalogRx as unknown as ServiceBusReceiver;
+        }
+        inventoryAttempts += 1;
+        const rx = makeFakeReceiver();
+        if (inventoryAttempts === 1) {
+          rx.peekMessages.mockRejectedValueOnce(
+            Object.assign(new Error('RBAC denied'), {
+              code: 'UnauthorizedAccess',
+            }),
+          );
+        }
+        return rx as unknown as ServiceBusReceiver;
+      }),
       close: vi.fn(async () => undefined),
     };
     const bus = new CombosServiceBus(
@@ -283,11 +290,32 @@ describe('CombosServiceBus runtime (COM-SB-01 / COR-05 / T08 / T11)', () => {
         clientId: randomUUID(),
       },
       async () => undefined,
-      { clientFactory: () => client },
+      { clientFactory: () => client, probeIntervalMs: 20, maxBackoffMs: 40 },
     );
 
-    await expect(bus.start()).rejects.toThrow(/COMBOS_SERVICE_BUS_LINK_UNAVAILABLE/);
+    await bus.start();
     expect(bus.available).toBe(false);
+    expect(bus.getQueueStates()['g6.combos.from.catalog'].ready).toBe(true);
+    expect(bus.getQueueStates()['g6.combos.from.inventory']).toMatchObject({
+      phase: 'DEGRADED',
+      linkReady: false,
+      subscribed: false,
+      ready: false,
+      lastErrorCode: 'UnauthorizedAccess',
+    });
+
+    // Wait for backoff probe recovery without restarting the service
+    await new Promise((r) => setTimeout(r, 80));
+    expect(bus.available).toBe(true);
+    expect(bus.getQueueStates()['g6.combos.from.inventory']).toMatchObject({
+      phase: 'SUBSCRIBED',
+      linkReady: true,
+      subscribed: true,
+      ready: true,
+      lastErrorCode: null,
+    });
+
+    await bus.close();
     expect(client.close).toHaveBeenCalledTimes(1);
   });
 });
@@ -674,5 +702,30 @@ describe('CombosSvcService.readiness (COR-05 / COM-AUD-07)', () => {
         service_bus: 'ok',
       },
     });
+  });
+
+  it('requires every individual PostgreSQL privilege via CombosDatabase.readyDetailed (COM-AUD-10)', async () => {
+    const db = new CombosDatabase();
+    const queries: string[] = [];
+    vi.spyOn(db, 'query').mockImplementation(async (fn) => {
+      const client = {
+        query: vi.fn(async (sql: string) => {
+          queries.push(sql);
+          return { rows: [{ ok: false }] };
+        }),
+      } as unknown as import('pg').PoolClient;
+      return fn(client);
+    });
+
+    await expect(db.readyDetailed()).resolves.toEqual({
+      available: true,
+      permissionsOk: false,
+    });
+    await expect(db.ready()).resolves.toBe(false);
+    const privQuery = queries.find((q) => q.includes('has_table_privilege')) ?? '';
+    expect(privQuery).toContain("has_schema_privilege(current_user, 'combos', 'USAGE')");
+    expect(privQuery).toContain("has_table_privilege(current_user, 'combos.component_projection', 'INSERT')");
+    expect(privQuery).toContain("has_table_privilege(current_user, 'combos.component_projection', 'UPDATE')");
+    expect(privQuery).toContain("has_table_privilege(current_user, 'combos.inbox', 'INSERT')");
   });
 });

@@ -71,19 +71,31 @@ export class CombosDatabase implements OnModuleDestroy {
   async readyDetailed(): Promise<{ available: boolean; permissionsOk: boolean }> {
     try {
       return await this.query(async (c) => {
-        await c.query('SELECT 1 FROM combos.combos LIMIT 0');
-        const { rows } = await c.query<{ ok: boolean }>(
-          `SELECT (
-            has_table_privilege(current_user, 'combos.combos', 'SELECT')
-            AND has_table_privilege(current_user, 'combos.combo_items', 'SELECT')
-            AND has_table_privilege(current_user, 'combos.component_projection', 'SELECT, INSERT, UPDATE')
-            AND has_table_privilege(current_user, 'combos.inbox', 'SELECT, INSERT')
-          ) AS ok`,
-        );
-        return {
-          available: true,
-          permissionsOk: rows[0]?.ok === true,
-        };
+        await c.query('BEGIN READ ONLY');
+        try {
+          await c.query("SET LOCAL statement_timeout = '2000'");
+          await c.query('SELECT 1 FROM combos.combos LIMIT 0');
+          const { rows } = await c.query<{ ok: boolean }>(
+            `SELECT (
+              has_schema_privilege(current_user, 'combos', 'USAGE')
+              AND has_table_privilege(current_user, 'combos.combos', 'SELECT')
+              AND has_table_privilege(current_user, 'combos.combo_items', 'SELECT')
+              AND has_table_privilege(current_user, 'combos.component_projection', 'SELECT')
+              AND has_table_privilege(current_user, 'combos.component_projection', 'INSERT')
+              AND has_table_privilege(current_user, 'combos.component_projection', 'UPDATE')
+              AND has_table_privilege(current_user, 'combos.inbox', 'SELECT')
+              AND has_table_privilege(current_user, 'combos.inbox', 'INSERT')
+            ) AS ok`,
+          );
+          await c.query('COMMIT');
+          return {
+            available: true,
+            permissionsOk: rows[0]?.ok === true,
+          };
+        } catch (error) {
+          await c.query('ROLLBACK').catch(() => undefined);
+          throw error;
+        }
       });
     } catch {
       return { available: false, permissionsOk: false };

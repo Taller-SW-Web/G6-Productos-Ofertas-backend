@@ -20,6 +20,7 @@ if ($Mode -eq 'postgres-only') {
 $environmentNames = @(
   'COMBOS_TEST_EPHEMERAL', 'COMBOS_TEST_DATABASE_URL', 'COMBOS_TEST_CA', 'COMBOS_TEST_MODE',
   'COMBOS_TEST_RABBITMQ_URL', 'COMBOS_TEST_RABBITMQ_CONTAINER', 'COMBOS_TEST_EXPECT_RUNTIME_ROLE',
+  'COMBOS_TEST_READONLY_PGUSER', 'COMBOS_TEST_READONLY_PGPASSWORD',
   'COMBOS_TEST_CATALOG_PASSWORD', 'COMBOS_TEST_PRICING_PASSWORD', 'COMBOS_TEST_CWD', 'COMBOS_RUN_ISOLATED_E2E',
   'COMBOS_AMQP_ENABLED', 'COMBOS_AMQP_URL', 'G6_AMQP_CONNECT_IP',
   'MESSAGING_PROVIDER', 'COMBOS_SERVICE_BUS_EVENTS_ENABLED', 'SERVICE_BUS_NAMESPACE_FQDN',
@@ -106,6 +107,9 @@ $password = [BitConverter]::ToString($randomBytes).Replace('-', '')
 $combosRuntimeBytes = [byte[]]::new(24)
 [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($combosRuntimeBytes)
 $combosRuntimePassword = [BitConverter]::ToString($combosRuntimeBytes).Replace('-', '')
+$combosReadonlyBytes = [byte[]]::new(24)
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($combosReadonlyBytes)
+$combosReadonlyPassword = [BitConverter]::ToString($combosReadonlyBytes).Replace('-', '')
 $catalogRandomBytes = [byte[]]::new(24)
 [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($catalogRandomBytes)
 $catalogPassword = [BitConverter]::ToString($catalogRandomBytes).Replace('-', '')
@@ -128,7 +132,18 @@ function Assert-ContainerRunning([string]$Name, [string]$Stage) {
 
 try {
   New-Item -ItemType Directory -Path $folder | Out-Null
-  & docker run --rm --user root --volume "${folder}:/cert" --entrypoint sh rabbitmq:4.2.9-alpine -c "openssl req -x509 -nodes -newkey rsa:2048 -keyout /cert/server.key -out /cert/server.crt -days 1 -subj '/CN=127.0.0.1' -addext 'subjectAltName=IP:127.0.0.1' && chmod 600 /cert/server.key && chown 70:70 /cert/server.key /cert/server.crt" | Out-Null
+  if ($Mode -eq 'postgres-only') {
+    $localOpenssl = Get-Command openssl -ErrorAction SilentlyContinue
+    if ($localOpenssl) {
+      & $localOpenssl.Source req -x509 -nodes -newkey rsa:2048 -keyout (Join-Path $folder 'server.key') -out (Join-Path $folder 'server.crt') -days 1 -subj '/CN=127.0.0.1' -addext 'subjectAltName=IP:127.0.0.1' 2>$null
+    } else {
+      & docker run --rm --volume "${folder}:/cert" alpine/openssl req -x509 -nodes -newkey rsa:2048 -keyout /cert/server.key -out /cert/server.crt -days 1 -subj '/CN=127.0.0.1' -addext 'subjectAltName=IP:127.0.0.1' | Out-Null
+    }
+    if ($LASTEXITCODE -ne 0) { throw 'No se pudo generar el certificado TLS aislado.' }
+    & docker run --rm --user root --volume "${folder}:/cert" --entrypoint sh postgres:17-alpine -c 'chmod 600 /cert/server.key && chown 70:70 /cert/server.key /cert/server.crt' | Out-Null
+  } else {
+    & docker run --rm --user root --volume "${folder}:/cert" --entrypoint sh rabbitmq:4.2.9-alpine -c "openssl req -x509 -nodes -newkey rsa:2048 -keyout /cert/server.key -out /cert/server.crt -days 1 -subj '/CN=127.0.0.1' -addext 'subjectAltName=IP:127.0.0.1' && chmod 600 /cert/server.key && chown 70:70 /cert/server.key /cert/server.crt" | Out-Null
+  }
   if ($LASTEXITCODE -ne 0) { throw 'No se pudo generar el certificado TLS aislado.' }
   & docker run --detach --name $container --label "$harnessLabel=true" --label "com.taller-sw.g6.combos-harness-id=$id" --publish '127.0.0.1::5432' --volume "${folder}:/cert:ro" --env "POSTGRES_PASSWORD=$password" --env 'POSTGRES_DB=combos_test' postgres:17-alpine postgres -c ssl=on -c ssl_cert_file=/cert/server.crt -c ssl_key_file=/cert/server.key | Out-Null
   if ($LASTEXITCODE -ne 0) { throw 'No se pudo iniciar PostgreSQL 17 desechable.' }
@@ -165,7 +180,7 @@ try {
   }
   Assert-ContainerRunning $container 'PostgreSQL antes de preparar el esquema'
   if ($Mode -eq 'postgres-only') {
-    & docker exec $container psql -U postgres -d combos_test -v ON_ERROR_STOP=1 -c "CREATE ROLE po_combos_owner NOLOGIN; CREATE ROLE po_combos_app NOSUPERUSER NOCREATEDB NOCREATEROLE LOGIN PASSWORD '$combosRuntimePassword'; CREATE SCHEMA combos AUTHORIZATION po_combos_owner;"
+    & docker exec $container psql -U postgres -d combos_test -v ON_ERROR_STOP=1 -c "CREATE ROLE po_combos_owner NOLOGIN; CREATE ROLE po_combos_app NOSUPERUSER NOCREATEDB NOCREATEROLE LOGIN PASSWORD '$combosRuntimePassword'; CREATE ROLE po_combos_readonly NOSUPERUSER NOCREATEDB NOCREATEROLE LOGIN PASSWORD '$combosReadonlyPassword'; CREATE SCHEMA combos AUTHORIZATION po_combos_owner;"
     if ($LASTEXITCODE -ne 0) { throw "No se pudieron preparar roles/schema combos en la base desechable (psql exit $LASTEXITCODE)." }
     $migrationSpecs = @(
       @{ Path = $migration; Owner = 'po_combos_owner'; Name = 'combos' },
@@ -191,7 +206,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Falló la migración oficial de $($migrationSpec.Name) en la instancia desechable (psql exit $LASTEXITCODE)." }
   }
   if ($Mode -eq 'postgres-only') {
-    & docker exec $container psql -U postgres -d combos_test -v ON_ERROR_STOP=1 -c "GRANT USAGE ON SCHEMA combos TO po_combos_app; GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA combos TO po_combos_app; GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA combos TO po_combos_app;"
+    & docker exec $container psql -U postgres -d combos_test -v ON_ERROR_STOP=1 -c "GRANT USAGE ON SCHEMA combos TO po_combos_app; GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA combos TO po_combos_app; GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA combos TO po_combos_app; GRANT USAGE ON SCHEMA combos TO po_combos_readonly; GRANT SELECT ON ALL TABLES IN SCHEMA combos TO po_combos_readonly;"
     if ($LASTEXITCODE -ne 0) { throw "No se pudieron otorgar permisos runtime a po_combos_app (psql exit $LASTEXITCODE)." }
   }
   Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
@@ -204,6 +219,8 @@ try {
       $env:PGUSER = 'po_combos_app'
       $env:PGPASSWORD = $combosRuntimePassword
       $env:COMBOS_TEST_EXPECT_RUNTIME_ROLE = '1'
+      $env:COMBOS_TEST_READONLY_PGUSER = 'po_combos_readonly'
+      $env:COMBOS_TEST_READONLY_PGPASSWORD = $combosReadonlyPassword
     }
     $env:COMBOS_AMQP_ENABLED = 'false'
     $env:COMBOS_SERVICE_BUS_EVENTS_ENABLED = 'false'

@@ -144,6 +144,7 @@ export interface CombosServiceBusHooks {
   ) => void;
   clientFactory?: (config: CombosServiceBusEnabledConfig) => ServiceBusClientLike;
   probeIntervalMs?: number;
+  maxBackoffMs?: number;
 }
 
 function safeSdkErrorCode(error: unknown): string {
@@ -166,8 +167,11 @@ export class CombosServiceBus {
   >();
   private readonly states = new Map<CombosEventQueue, QueueRuntimeState>();
   private readonly recovering = new Map<CombosEventQueue, Promise<void>>();
+  private readonly consecutiveFailures = new Map<CombosEventQueue, number>();
+  private readonly nextRecoveryAt = new Map<CombosEventQueue, number>();
   private readonly active = new Set<Promise<void>>();
   private readonly probeIntervalMs: number;
+  private readonly maxBackoffMs: number;
   private timer?: ReturnType<typeof setTimeout>;
   private probe?: Promise<void>;
   private started = false;
@@ -181,9 +185,12 @@ export class CombosServiceBus {
     private readonly hooks: CombosServiceBusHooks = {},
   ) {
     this.probeIntervalMs = hooks.probeIntervalMs ?? 5000;
+    this.maxBackoffMs = hooks.maxBackoffMs ?? 30_000;
     for (const queue of Object.keys(
       combosServiceBusRoutes,
     ) as CombosEventQueue[]) {
+      this.consecutiveFailures.set(queue, 0);
+      this.nextRecoveryAt.set(queue, 0);
       this.states.set(queue, {
         queue,
         phase: 'IDLE',
@@ -240,6 +247,25 @@ export class CombosServiceBus {
     };
   }
 
+  private computeBackoffMs(failures: number): number {
+    if (failures <= 0) return 0;
+    return Math.min(
+      this.maxBackoffMs,
+      this.probeIntervalMs * Math.pow(2, Math.min(failures - 1, 6)),
+    );
+  }
+
+  private recordQueueFailure(queue: CombosEventQueue): void {
+    const failures = (this.consecutiveFailures.get(queue) ?? 0) + 1;
+    this.consecutiveFailures.set(queue, failures);
+    this.nextRecoveryAt.set(queue, Date.now() + this.computeBackoffMs(failures));
+  }
+
+  private clearQueueFailure(queue: CombosEventQueue): void {
+    this.consecutiveFailures.set(queue, 0);
+    this.nextRecoveryAt.set(queue, 0);
+  }
+
   async start(): Promise<void> {
     if (this.stopped) throw new Error('COMBOS_SERVICE_BUS_ALREADY_STOPPED');
     if (this.started || this.starting) return;
@@ -247,27 +273,39 @@ export class CombosServiceBus {
     const queues = Object.keys(combosServiceBusRoutes) as CombosEventQueue[];
     try {
       for (const queue of queues) {
+        if (this.stopped) break;
         this.createQueueReceiver(queue);
       }
       const linkResults = await Promise.all(
         queues.map((queue) => this.checkQueueLink(queue, 5000)),
       );
-      if (!linkResults.every(Boolean)) {
-        throw new Error('COMBOS_SERVICE_BUS_LINK_UNAVAILABLE');
-      }
       if (this.stopped) {
         throw new Error('COMBOS_SERVICE_BUS_ALREADY_STOPPED');
       }
-      for (const queue of queues) {
-        this.subscribeQueue(queue);
+      for (const [index, queue] of queues.entries()) {
+        if (linkResults[index]) {
+          this.clearQueueFailure(queue);
+          this.subscribeQueue(queue);
+        } else {
+          await this.teardownQueue(queue);
+          this.recordQueueFailure(queue);
+          const state = this.states.get(queue)!;
+          state.phase = 'DEGRADED';
+          state.subscribed = false;
+          state.linkReady = false;
+          this.recomputeQueueReady(state);
+        }
       }
       this.started = true;
       for (const state of this.states.values()) {
         this.recomputeQueueReady(state);
       }
-      this.hooks.onLog?.('log', {
-        event: 'service_bus_started',
+      this.hooks.onLog?.(this.available ? 'log' : 'warn', {
+        event: this.available
+          ? 'service_bus_started'
+          : 'service_bus_started_degraded',
         queues,
+        ready: this.available,
         identity_mode: this.config.clientId
           ? 'managed_identity'
           : 'default_azure_credential',
@@ -276,8 +314,7 @@ export class CombosServiceBus {
     } catch (error) {
       await this.close();
       throw error instanceof Error &&
-        (error.message === 'COMBOS_SERVICE_BUS_LINK_UNAVAILABLE' ||
-          error.message === 'COMBOS_SERVICE_BUS_ALREADY_STOPPED')
+        error.message === 'COMBOS_SERVICE_BUS_ALREADY_STOPPED'
         ? error
         : new Error('COMBOS_SERVICE_BUS_START_FAILED');
     } finally {
@@ -440,6 +477,9 @@ export class CombosServiceBus {
       }
 
       if (this.stopped) return;
+      if (Date.now() < (this.nextRecoveryAt.get(queue) ?? 0)) {
+        return;
+      }
       state.phase = 'RECOVERING';
       state.linkReady = false;
       state.subscribed = false;
@@ -452,6 +492,7 @@ export class CombosServiceBus {
         this.createQueueReceiver(queue);
         const ok = await this.checkQueueLink(queue, 3000);
         if (ok && !this.stopped) {
+          this.clearQueueFailure(queue);
           this.subscribeQueue(queue);
           this.hooks.onLog?.('log', {
             event: 'service_bus_receiver_recovered',
@@ -459,12 +500,14 @@ export class CombosServiceBus {
           });
         } else if (!this.stopped) {
           await this.teardownQueue(queue);
+          this.recordQueueFailure(queue);
           state.phase = 'DEGRADED';
           this.recomputeQueueReady(state);
         }
       } catch (error) {
         const code = safeSdkErrorCode(error);
         await this.teardownQueue(queue);
+        this.recordQueueFailure(queue);
         state.phase = this.stopped ? 'STOPPED' : 'DEGRADED';
         state.linkReady = false;
         state.subscribed = false;

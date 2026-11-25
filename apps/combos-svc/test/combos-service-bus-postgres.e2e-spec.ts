@@ -334,6 +334,29 @@ describe.skipIf(!isolatedHarnessEnabled)(
           postgres_permissions: 'ok',
         },
       });
+
+      if (
+        process.env.COMBOS_TEST_READONLY_PGUSER &&
+        process.env.COMBOS_TEST_READONLY_PGPASSWORD
+      ) {
+        const prevUser = process.env.PGUSER;
+        const prevPass = process.env.PGPASSWORD;
+        process.env.PGUSER = process.env.COMBOS_TEST_READONLY_PGUSER;
+        process.env.PGPASSWORD = process.env.COMBOS_TEST_READONLY_PGPASSWORD;
+        const readonlyDb = new CombosDatabase();
+        try {
+          const readonlyDetails = await readonlyDb.readyDetailed();
+          expect(readonlyDetails).toEqual({
+            available: true,
+            permissionsOk: false,
+          });
+          expect(await readonlyDb.ready()).toBe(false);
+        } finally {
+          await readonlyDb.onModuleDestroy().catch(() => undefined);
+          process.env.PGUSER = prevUser;
+          process.env.PGPASSWORD = prevPass;
+        }
+      }
     });
 
     it('T01 + T05 + T09: deactivates SKU, preserves other component, blocks Inventory reactivation, and preserves conservative HTTP availability', async () => {
