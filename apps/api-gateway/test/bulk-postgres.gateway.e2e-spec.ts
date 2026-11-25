@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { generateKeyPairSync, randomBytes, randomUUID, sign } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Pool } from 'pg';
@@ -152,17 +152,18 @@ async function stopProcess(child?: ChildProcess): Promise<void> {
   }
 }
 
-/**
- * GW-T03 (AUD-P0-08 / GW-R2-01..03): Integración real Gateway -> bulk-svc -> PostgreSQL descartable.
- * Sin G6_BULK_GATEWAY_POSTGRES_E2E=1 el caso queda omitido (nunca PASS).
- */
 run('Gateway -> Bulk real -> PostgreSQL descartable (GW-T03)', () => {
   const containerName = `g6-gw-bulk-pg-${process.pid}-${randomUUID().slice(0, 8)}`;
   const databaseName = 'bulk_gw_e2e';
   const adminPassword = randomBytes(18).toString('base64url');
   const appPassword = randomBytes(18).toString('base64url');
-  const storageKey = 'bulk-storage-test-only-key';
-  const storageBucket = 'bulk-gw-e2e-private';
+  const storageKey =
+    process.env.BULK_RETRY_INTEGRATION_STORAGE_SERVICE_ROLE_KEY ||
+    'bulk-storage-test-only-key';
+  const storageBucket =
+    process.env.BULK_RETRY_INTEGRATION_STORAGE_URL
+      ? 'bulk-retry-integration'
+      : 'bulk-gw-e2e-private';
   const storedObjects = new Map<string, Buffer>();
 
   let containerCreated = false;
@@ -172,6 +173,24 @@ run('Gateway -> Bulk real -> PostgreSQL descartable (GW-T03)', () => {
   let jwksServer: Server | undefined;
   let storageServer: Server | undefined;
   let signed: ReturnType<typeof createSignedIdentity>;
+
+  const actorA = randomUUID();
+  const actorB = randomUUID();
+  const correlationA = randomUUID();
+  let batchIdA = '';
+
+  function tokenFor(
+    sub: string,
+    overrides: Record<string, unknown> = {},
+  ): string {
+    return signed.token({
+      tipo: 'acceso',
+      sub,
+      roles: ['GESTOR_COMERCIAL'],
+      iss: issuer,
+      ...overrides,
+    });
+  }
 
   async function closeHttpServer(server?: Server): Promise<void> {
     if (!server) return;
@@ -211,55 +230,57 @@ run('Gateway -> Bulk real -> PostgreSQL descartable (GW-T03)', () => {
 
   beforeAll(async () => {
     try {
-      const pgPort = await unusedPort();
-      containerCreated = true;
-      docker([
-        'run',
-        '--detach',
-        '--name',
-        containerName,
-        '--publish',
-        `127.0.0.1:${pgPort}:5432`,
-        '--env',
-        `POSTGRES_PASSWORD=${adminPassword}`,
-        '--env',
-        `POSTGRES_DB=${databaseName}`,
-        'postgres:17-alpine',
-        '-c',
-        'shared_buffers=32MB',
-        '-c',
-        'max_connections=20',
-      ]);
-
-      const adminUrl = `postgresql://postgres:${adminPassword}@127.0.0.1:${pgPort}/${databaseName}?sslmode=disable`;
-      const appUrl = `postgresql://bulk_fixture_app:${appPassword}@127.0.0.1:${pgPort}/${databaseName}?sslmode=disable`;
-      await waitForPostgresReady(adminUrl);
-
-      const sqlFiles = [
-        'apps/bulk-svc/test/fixtures/0001_create_bulk_persistence.sql',
-        'apps/bulk-svc/migrations/0002_export_source_snapshot.sql',
-        'apps/bulk-svc/migrations/0003_export_claim_lease.sql',
-        'apps/bulk-svc/migrations/0004_catalog_claim_check_content.sql',
-        'apps/bulk-svc/migrations/0005_actor_ownership.sql',
-        'apps/bulk-svc/migrations/0006_owner_correlation_identity.sql',
-        'apps/bulk-svc/migrations/0007_bulk_retry_v1.sql',
-        'apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql',
-      ].map((p) => readFileSync(resolve(process.cwd(), p), 'utf8'));
-
-      docker(
-        [
-          'exec',
-          '-i',
+      let dbUrl = process.env.BULK_RETRY_INTEGRATION_BULK_DATABASE_URL;
+      if (!dbUrl) {
+        const pgPort = await unusedPort();
+        containerCreated = true;
+        docker([
+          'run',
+          '--detach',
+          '--name',
           containerName,
-          'psql',
-          '-v',
-          'ON_ERROR_STOP=1',
-          '-U',
-          'postgres',
-          '-d',
-          databaseName,
-        ],
-        `CREATE ROLE po_bulk_owner NOLOGIN;
+          '--publish',
+          `127.0.0.1:${pgPort}:5432`,
+          '--env',
+          `POSTGRES_PASSWORD=${adminPassword}`,
+          '--env',
+          `POSTGRES_DB=${databaseName}`,
+          'postgres:17-alpine',
+          '-c',
+          'shared_buffers=32MB',
+          '-c',
+          'max_connections=20',
+        ]);
+
+        const adminUrl = `postgresql://postgres:${adminPassword}@127.0.0.1:${pgPort}/${databaseName}?sslmode=disable`;
+        dbUrl = `postgresql://bulk_fixture_app:${appPassword}@127.0.0.1:${pgPort}/${databaseName}?sslmode=disable`;
+        await waitForPostgresReady(adminUrl);
+
+        const sqlFiles = [
+          'apps/bulk-svc/test/fixtures/0001_create_bulk_persistence.sql',
+          'apps/bulk-svc/migrations/0002_export_source_snapshot.sql',
+          'apps/bulk-svc/migrations/0003_export_claim_lease.sql',
+          'apps/bulk-svc/migrations/0004_catalog_claim_check_content.sql',
+          'apps/bulk-svc/migrations/0005_actor_ownership.sql',
+          'apps/bulk-svc/migrations/0006_owner_correlation_identity.sql',
+          'apps/bulk-svc/migrations/0007_bulk_retry_v1.sql',
+          'apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql',
+        ].map((p) => readFileSync(resolve(process.cwd(), p), 'utf8'));
+
+        docker(
+          [
+            'exec',
+            '-i',
+            containerName,
+            'psql',
+            '-v',
+            'ON_ERROR_STOP=1',
+            '-U',
+            'postgres',
+            '-d',
+            databaseName,
+          ],
+          `CREATE ROLE po_bulk_owner NOLOGIN;
 CREATE ROLE bulk_fixture_app LOGIN PASSWORD '${appPassword}';
 CREATE SCHEMA bulk AUTHORIZATION po_bulk_owner;
 SET ROLE po_bulk_owner;
@@ -267,8 +288,11 @@ ${sqlFiles.join('\n')}
 GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA bulk TO bulk_fixture_app;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
-      );
-      adminPool = new Pool({ connectionString: adminUrl, max: 2 });
+        );
+        adminPool = new Pool({ connectionString: adminUrl, max: 2 });
+      } else {
+        adminPool = new Pool({ connectionString: dbUrl, max: 2 });
+      }
 
       const bulkPort = await unusedPort();
       const bulkOrigin = `http://127.0.0.1:${bulkPort}`;
@@ -295,61 +319,65 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
         throw new Error('No JWKS port');
       }
 
-      storageServer = createServer(async (req, res) => {
-        const chunks: Buffer[] = [];
-        for await (const chunk of req) chunks.push(Buffer.from(chunk));
-        const body = Buffer.concat(chunks);
-        const url = new URL(req.url ?? '/', 'http://127.0.0.1');
-        const segments = url.pathname.split('/').map(decodeURIComponent);
-        if (
-          req.method === 'GET' &&
-          segments[1] === 'storage' &&
-          segments[2] === 'v1' &&
-          segments[3] === 'bucket' &&
-          segments[4] === storageBucket
-        ) {
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ id: storageBucket, public: false }));
-          return;
-        }
-        if (
-          segments[1] === 'storage' &&
-          segments[2] === 'v1' &&
-          segments[3] === 'object' &&
-          segments[4] === storageBucket
-        ) {
-          const objectName = segments.slice(5).join('/');
-          if (req.method === 'POST' || req.method === 'PUT') {
-            storedObjects.set(objectName, body);
+      let storageUrl = process.env.BULK_RETRY_INTEGRATION_STORAGE_URL;
+      if (!storageUrl) {
+        storageServer = createServer(async (req, res) => {
+          const chunks: Buffer[] = [];
+          for await (const chunk of req) chunks.push(Buffer.from(chunk));
+          const body = Buffer.concat(chunks);
+          const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+          const segments = url.pathname.split('/').map(decodeURIComponent);
+          if (
+            req.method === 'GET' &&
+            segments[1] === 'storage' &&
+            segments[2] === 'v1' &&
+            segments[3] === 'bucket' &&
+            segments[4] === storageBucket
+          ) {
             res.writeHead(200, { 'content-type': 'application/json' });
-            res.end(JSON.stringify({ Key: `${storageBucket}/${objectName}` }));
+            res.end(JSON.stringify({ id: storageBucket, public: false }));
             return;
           }
-          if (req.method === 'GET') {
-            const existing = storedObjects.get(objectName);
-            if (!existing) {
-              res.writeHead(404).end();
+          if (
+            segments[1] === 'storage' &&
+            segments[2] === 'v1' &&
+            segments[3] === 'object' &&
+            segments[4] === storageBucket
+          ) {
+            const objectName = segments.slice(5).join('/');
+            if (req.method === 'POST' || req.method === 'PUT') {
+              storedObjects.set(objectName, body);
+              res.writeHead(200, { 'content-type': 'application/json' });
+              res.end(JSON.stringify({ Key: `${storageBucket}/${objectName}` }));
               return;
             }
-            res.writeHead(200, { 'content-type': 'application/octet-stream' });
-            res.end(existing);
-            return;
+            if (req.method === 'GET') {
+              const existing = storedObjects.get(objectName);
+              if (!existing) {
+                res.writeHead(404).end();
+                return;
+              }
+              res.writeHead(200, { 'content-type': 'application/octet-stream' });
+              res.end(existing);
+              return;
+            }
           }
+          res.writeHead(404).end();
+        });
+        storageServer.listen(0, '127.0.0.1');
+        await once(storageServer, 'listening');
+        const storageAddress = storageServer.address();
+        if (!storageAddress || typeof storageAddress === 'string') {
+          throw new Error('No storage port');
         }
-        res.writeHead(404).end();
-      });
-      storageServer.listen(0, '127.0.0.1');
-      await once(storageServer, 'listening');
-      const storageAddress = storageServer.address();
-      if (!storageAddress || typeof storageAddress === 'string') {
-        throw new Error('No storage port');
+        storageUrl = `http://127.0.0.1:${storageAddress.port}`;
       }
 
       const bulkEnv: NodeJS.ProcessEnv = {
         ...process.env,
         PORT: String(bulkPort),
         NODE_ENV: 'test',
-        DATABASE_URL: appUrl,
+        DATABASE_URL: dbUrl,
         BULK_AMQP_ENABLED: 'false',
         GATEWAY_DEMO_NO_AUTH_ENABLED: 'false',
         BULK_CORRELATION_RECONCILIATION_ENABLED: 'true',
@@ -357,7 +385,7 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
         G7_JWT_JWKS_URL: `http://127.0.0.1:${jwksAddress.port}/jwks.json`,
         BULK_STORAGE_BUCKET: storageBucket,
         SUPABASE_SERVICE_ROLE_KEY: storageKey,
-        SUPABASE_URL: `http://127.0.0.1:${storageAddress.port}`,
+        SUPABASE_URL: storageUrl,
       };
       bulkProcess = spawn(
         process.execPath,
@@ -376,6 +404,17 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
         .compile();
       app = module.createNestApplication({ bodyParser: false });
       await app.listen(0, '127.0.0.1');
+
+      // Crear el lote persistido real de A una sola vez antes de las 7 aserciones
+      const importRes = await request(app.getHttpServer())
+        .post('/api/v1/carga-masiva/productos/importaciones')
+        .set('Authorization', `Bearer ${tokenFor(actorA)}`)
+        .set('Idempotency-Key', randomUUID())
+        .set('X-Correlation-Id', correlationA)
+        .attach('archivo', createValidBulkV2Csv(), 'importacion.csv')
+        .expect(202);
+      batchIdA = importRes.body?.batch_id;
+      expect(typeof batchIdA).toBe('string');
     } catch (error) {
       await cleanupDisposableResources();
       throw error;
@@ -386,81 +425,147 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
     await cleanupDisposableResources();
   });
 
-  it('creates a real import, returns 200 + Cache-Control: no-store for owner, 404 for other actor, and performs pure read', async () => {
-    const ownerActorId = randomUUID();
-    const otherActorId = randomUUID();
-    const correlationId = randomUUID();
-    const idempotencyKey = randomUUID();
-    const ownerToken = signed.token({
-      tipo: 'acceso',
-      sub: ownerActorId,
-      roles: ['GESTOR_COMERCIAL'],
-      iss: issuer,
-    });
-    const otherToken = signed.token({
-      tipo: 'acceso',
-      sub: otherActorId,
-      roles: ['GESTOR_COMERCIAL'],
-      iss: issuer,
-    });
+  it('autentica a A, concilia su lote persistido y conserva no-store sin mutaciones', async () => {
+    const ownerToken = tokenFor(actorA);
+    const beforeCount = await adminPool!.query<{ total: number }>(
+      'SELECT count(*)::int AS total FROM bulk.batch_jobs WHERE owner_sub = $1 AND correlation_id = $2',
+      [actorA.toLowerCase(), correlationA.toLowerCase()],
+    );
+    expect(beforeCount.rows[0]?.total).toBe(1);
 
-    const csvPayload = createValidBulkV2Csv();
-    const importRes = await request(app!.getHttpServer())
-      .post('/api/v1/carga-masiva/productos/importaciones')
-      .set('Authorization', `Bearer ${ownerToken}`)
-      .set('Idempotency-Key', idempotencyKey)
-      .set('X-Correlation-Id', correlationId)
-      .attach('archivo', csvPayload, 'importacion.csv')
-      .expect(202);
-
-    const batchId = importRes.body?.batch_id;
-    expect(typeof batchId).toBe('string');
-
-    const ownerRead1 = await request(app!.getHttpServer())
+    const res = await request(app!.getHttpServer())
       .get(
-        `/api/v1/carga-masiva/productos/importaciones/por-correlacion/${correlationId}`,
+        `/api/v1/carga-masiva/productos/importaciones/por-correlacion/${correlationA}`,
       )
       .set('Authorization', `Bearer ${ownerToken}`)
       .expect(200);
-    expect(ownerRead1.headers['cache-control']).toBe('no-store');
-    expect(ownerRead1.body.batch_id).toBe(batchId);
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.body.batch_id).toBe(batchIdA);
 
+    const afterCount = await adminPool!.query<{ total: number }>(
+      'SELECT count(*)::int AS total FROM bulk.batch_jobs WHERE owner_sub = $1 AND correlation_id = $2',
+      [actorA.toLowerCase(), correlationA.toLowerCase()],
+    );
+    expect(afterCount.rows[0]?.total).toBe(1);
+  });
+
+  it('oculta el lote de A a B con 404 y sin datos privados', async () => {
+    const res = await request(app!.getHttpServer())
+      .get(
+        `/api/v1/carga-masiva/productos/importaciones/por-correlacion/${correlationA}`,
+      )
+      .set('Authorization', `Bearer ${tokenFor(actorB)}`)
+      .expect(404);
+    expect(JSON.stringify(res.body)).not.toContain(batchIdA);
+    expect(JSON.stringify(res.body)).not.toContain(actorA);
+  });
+
+  it('devuelve 404 para correlación inexistente y 400 para UUID inválido', async () => {
+    const ownerToken = tokenFor(actorA);
     await request(app!.getHttpServer())
       .get(
-        `/api/v1/carga-masiva/productos/importaciones/por-correlacion/${correlationId}`,
-      )
-      .set('Authorization', `Bearer ${otherToken}`)
-      .expect(404);
-
-    // Confirmar lectura pura: mismo batch_id y exactamente 1 lote en bulk.batch_jobs
-    const ownerRead2 = await request(app!.getHttpServer())
-      .get(
-        `/api/v1/carga-masiva/productos/importaciones/por-correlacion/${correlationId}`,
+        `/api/v1/carga-masiva/productos/importaciones/por-correlacion/${randomUUID()}`,
       )
       .set('Authorization', `Bearer ${ownerToken}`)
-      .expect(200);
-    expect(ownerRead2.headers['cache-control']).toBe('no-store');
-    expect(ownerRead2.body.batch_id).toBe(batchId);
+      .expect(404);
+    await request(app!.getHttpServer())
+      .get(
+        '/api/v1/carga-masiva/productos/importaciones/por-correlacion/no-es-uuid',
+      )
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .expect(400);
+  });
 
-    const totalResult = await adminPool!.query<{ total: number }>(
-      'SELECT count(*)::int AS total FROM bulk.batch_jobs',
-    );
-    expect(totalResult.rows[0]?.total).toBe(1);
+  it('rechaza ausencia de JWT y JWT humano sin rol con 401/403 sin filtrar datos', async () => {
+    const noJwt = await request(app!.getHttpServer())
+      .get(
+        `/api/v1/carga-masiva/productos/importaciones/por-correlacion/${correlationA}`,
+      )
+      .expect(401);
+    expect(JSON.stringify(noJwt.body)).not.toContain(batchIdA);
 
-    const exactJob = await adminPool!.query<{
-      batch_id: string;
-      owner_sub: string;
-      correlation_id: string;
-    }>(
-      'SELECT batch_id::text AS batch_id, owner_sub::text AS owner_sub, correlation_id::text AS correlation_id FROM bulk.batch_jobs WHERE batch_id = $1 AND owner_sub = $2 AND correlation_id = $3',
-      [batchId, ownerActorId.toLowerCase(), correlationId.toLowerCase()],
+    const noRole = await request(app!.getHttpServer())
+      .get(
+        `/api/v1/carga-masiva/productos/importaciones/por-correlacion/${correlationA}`,
+      )
+      .set('Authorization', `Bearer ${tokenFor(actorA, { roles: ['CONSULTA'] })}`)
+      .expect(403);
+    expect(JSON.stringify(noRole.body)).not.toContain(batchIdA);
+  });
+
+  it('rechaza JWT mal formado, firma inválida, expirado, issuer y audience incorrectos', async () => {
+    const otherKey = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const header = Buffer.from(
+      JSON.stringify({ alg: 'RS256', kid: signed.key.kid, typ: 'JWT' }),
+    ).toString('base64url');
+    const payload = Buffer.from(
+      JSON.stringify({
+        iss: issuer,
+        sub: actorA,
+        tipo: 'acceso',
+        roles: ['GESTOR_COMERCIAL'],
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 600,
+        jti: randomUUID(),
+      }),
+    ).toString('base64url');
+    const invalidSig = `${header}.${payload}.${sign('RSA-SHA256', Buffer.from(`${header}.${payload}`), otherKey.privateKey).toString('base64url')}`;
+
+    const badTokens = [
+      'malformed.jwt',
+      invalidSig,
+      tokenFor(actorA, { exp: Math.floor(Date.now() / 1000) - 60 }),
+      tokenFor(actorA, { iss: 'https://wrong-issuer.test' }),
+      // Para servicio (M2M) con audience incorrecta también debe rechazarse
+      signed.token({ aud: ['wrong-audience'], scope: 'carga-masiva:leer' }),
+    ];
+
+    for (const bad of badTokens) {
+      const res = await request(app!.getHttpServer())
+        .get(
+          `/api/v1/carga-masiva/productos/importaciones/por-correlacion/${correlationA}`,
+        )
+        .set('Authorization', `Bearer ${bad}`);
+      expect([401, 403]).toContain(res.status);
+    }
+  });
+
+  it('bloquea retry y reporte de un lote ajeno sin cambiar persistencia', async () => {
+    const tokenB = tokenFor(actorB);
+    const beforeRow = await adminPool!.query<{ status: string }>(
+      'SELECT status::text AS status FROM bulk.batch_jobs WHERE batch_id = $1',
+      [batchIdA],
     );
-    expect(exactJob.rows).toEqual([
-      {
-        batch_id: batchId,
-        owner_sub: ownerActorId.toLowerCase(),
-        correlation_id: correlationId.toLowerCase(),
-      },
-    ]);
+
+    await request(app!.getHttpServer())
+      .post(`/api/v1/carga-masiva/productos/importaciones/${batchIdA}/reanudar`)
+      .set('Authorization', `Bearer ${tokenB}`)
+      .set('Idempotency-Key', randomUUID())
+      .expect(404);
+
+    await request(app!.getHttpServer())
+      .get(`/api/v1/carga-masiva/productos/importaciones/${batchIdA}/reporte`)
+      .set('Authorization', `Bearer ${tokenB}`)
+      .expect(404);
+
+    const afterRow = await adminPool!.query<{ status: string }>(
+      'SELECT status::text AS status FROM bulk.batch_jobs WHERE batch_id = $1',
+      [batchIdA],
+    );
+    expect(afterRow.rows[0]?.status).toBe(beforeRow.rows[0]?.status);
+  });
+
+  it('devuelve 503 no-store cuando el proveedor real se detiene', async () => {
+    const currentBulk = bulkProcess;
+    bulkProcess = undefined;
+    await stopProcess(currentBulk);
+
+    const res = await request(app!.getHttpServer())
+      .get(
+        `/api/v1/carga-masiva/productos/importaciones/por-correlacion/${correlationA}`,
+      )
+      .set('Authorization', `Bearer ${tokenFor(actorA)}`)
+      .expect(503);
+    expect(res.headers['cache-control']).toBe('no-store');
   });
 });

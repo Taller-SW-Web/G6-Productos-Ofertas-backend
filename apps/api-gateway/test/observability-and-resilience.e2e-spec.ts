@@ -358,13 +358,15 @@ describe('Gateway observability, correlation, and transport resilience (GW-C03, 
       res.end('sku,precio\nSKU-1,10.50\n');
     };
     const csvRes = await request(app.getHttpServer())
-      .get('/api/v1/auditoria-precios/exportar')
+      .get(
+        '/api/v1/auditoria-precios/exportaciones/00000000-0000-4000-8000-000000000001/archivo',
+      )
       .set('Authorization', `Bearer ${token}`)
       .expect(200)
-      .expect('Content-Disposition', 'attachment; filename="auditoria.csv"');
+      .expect('Content-Type', /text\/csv/);
     expect(csvRes.text).toContain('SKU-1,10.50');
     expect(logs.at(-1)).toMatchObject({
-      operationId: 'exportarAuditoriaPrecios',
+      operationId: 'descargarExportacionAuditoriaPrecios',
       status: 200,
       transportState: 'completed',
       resultOrigin: 'provider',
@@ -377,8 +379,9 @@ describe('Gateway observability, correlation, and transport resilience (GW-C03, 
         'content-type': 'text/csv; charset=utf-8',
         'content-disposition': 'attachment; filename="roto.csv"',
       });
+      res.flushHeaders();
       res.write('sku,precio\n');
-      res.destroy(new Error('upstream reset'));
+      setTimeout(() => res.destroy(new Error('upstream reset')), 20);
     };
     await new Promise<void>((resolveStream) => {
       const req = httpRequest(
@@ -386,13 +389,15 @@ describe('Gateway observability, correlation, and transport resilience (GW-C03, 
           host: '127.0.0.1',
           port: gatewayPort,
           method: 'GET',
-          path: '/api/v1/auditoria-precios/exportar',
+          path: '/api/v1/auditoria-precios/exportaciones/00000000-0000-4000-8000-000000000001/archivo',
           headers: { Authorization: `Bearer ${token}` },
         },
         (res) => {
+          res.resume();
           res.on('error', () => resolveStream());
           res.on('aborted', () => resolveStream());
           res.on('end', () => resolveStream());
+          res.on('close', () => resolveStream());
         },
       );
       req.on('error', () => resolveStream());
@@ -400,7 +405,7 @@ describe('Gateway observability, correlation, and transport resilience (GW-C03, 
     });
     await new Promise((r) => setTimeout(r, 50));
     expect(logs.at(-1)).toMatchObject({
-      operationId: 'exportarAuditoriaPrecios',
+      operationId: 'descargarExportacionAuditoriaPrecios',
       status: 200,
       failureOrigin: 'gateway',
       upstreamReached: true,

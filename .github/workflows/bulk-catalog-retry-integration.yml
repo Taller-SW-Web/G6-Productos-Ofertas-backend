@@ -147,9 +147,12 @@ jobs:
             echo "BULK_RETRY_INTEGRATION_STORAGE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
           } >> "$GITHUB_ENV"
           echo 'Supabase Storage local: iniciado con CLI 3.4.0; bucket privado y efímero.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Compilar bulk-svc
+        run: npm run build:bulk-svc
       - name: Ejecutar E2E persistente Bulk-Catalog y seguridad Gateway
         env:
           NODE_ENV: test
+          G6_BULK_GATEWAY_POSTGRES_E2E: '1'
           BULK_H5_SCENARIO_EVIDENCE: .ci/evidence/bulk-h5-scenarios.json
           BULK_RETRY_INTEGRATION_BULK_DATABASE_URL: postgresql://bulk_app:bulk-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
           BULK_RETRY_INTEGRATION_CATALOG_DATABASE_URL: postgresql://catalog_app:catalog-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
