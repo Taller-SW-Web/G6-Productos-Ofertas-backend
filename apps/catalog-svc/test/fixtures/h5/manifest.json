@@ -1,0 +1,1055 @@
+{
+  "dataset_id": "poma-catalog-h5-20261123",
+  "expected": {
+    "commercial_product_ids_by_channel": {
+      "CHATBOT": [
+        "036d75e8-ce90-54a8-9f63-ca33db8cda28",
+        "085c54c9-bc1f-50b2-a758-d8ed1ff12fc8",
+        "161d6139-21cc-5231-8737-c80bd9eb4c8d",
+        "1729a402-e13b-5ae1-850c-f9ad2f3ab539",
+        "17e02198-93ba-5e08-9ac6-3f8ffb89fc4b",
+        "3b7992bf-e9af-535c-a542-ed121d3803e3",
+        "44fa124d-7f0a-58ff-a7f2-e3433971dbb3",
+        "5d75f2e8-1a13-562a-8e34-ec2c4a185c9b",
+        "62ee55b0-e8ad-5cd5-8917-74c4971afacd",
+        "7ab7c96f-134d-5dec-8704-7ee1145bc4e4",
+        "7cd4fde2-1869-56ed-a5ee-a4c90d0d9bbc",
+        "8e34f5a9-3324-587b-a17f-5a85beccf06a",
+        "9901f99a-03b2-5c83-b047-1c40ec47a062",
+        "9a3ec037-635e-512c-ac10-c8cfb0a45128",
+        "9e86e28d-0db0-54f3-9f15-ea33d7af1b6b",
+        "9eb51837-fc74-5af7-9197-58266d171038",
+        "b6898acf-8828-56b0-88a8-e4e90b125165",
+        "b89788f1-d7cb-5ac4-9b15-cef48bbf97ec",
+        "ce3f8504-f786-567b-adf2-2016deb8e541",
+        "e2b1323a-5da8-59b9-8899-c593969167b2",
+        "ed836306-6909-5f5c-a071-71cc07673de3",
+        "f56e4d91-3356-5cf6-8a11-9e4b0c0617ad",
+        "fe95bf5a-6dbc-5f60-a672-cd0363a7ae56"
+      ],
+      "MARKETPLACE": [
+        "036d75e8-ce90-54a8-9f63-ca33db8cda28",
+        "085c54c9-bc1f-50b2-a758-d8ed1ff12fc8",
+        "161d6139-21cc-5231-8737-c80bd9eb4c8d",
+        "1729a402-e13b-5ae1-850c-f9ad2f3ab539",
+        "17e02198-93ba-5e08-9ac6-3f8ffb89fc4b",
+        "3b7992bf-e9af-535c-a542-ed121d3803e3",
+        "44fa124d-7f0a-58ff-a7f2-e3433971dbb3",
+        "5d75f2e8-1a13-562a-8e34-ec2c4a185c9b",
+        "62ee55b0-e8ad-5cd5-8917-74c4971afacd",
+        "7ab7c96f-134d-5dec-8704-7ee1145bc4e4",
+        "7cd4fde2-1869-56ed-a5ee-a4c90d0d9bbc",
+        "8e34f5a9-3324-587b-a17f-5a85beccf06a",
+        "9901f99a-03b2-5c83-b047-1c40ec47a062",
+        "9a3ec037-635e-512c-ac10-c8cfb0a45128",
+        "9e86e28d-0db0-54f3-9f15-ea33d7af1b6b",
+        "9eb51837-fc74-5af7-9197-58266d171038",
+        "b6898acf-8828-56b0-88a8-e4e90b125165",
+        "b89788f1-d7cb-5ac4-9b15-cef48bbf97ec",
+        "ce3f8504-f786-567b-adf2-2016deb8e541",
+        "e2b1323a-5da8-59b9-8899-c593969167b2",
+        "ed836306-6909-5f5c-a071-71cc07673de3",
+        "f56e4d91-3356-5cf6-8a11-9e4b0c0617ad",
+        "fe95bf5a-6dbc-5f60-a672-cd0363a7ae56"
+      ],
+      "RETAIL": [
+        "036d75e8-ce90-54a8-9f63-ca33db8cda28",
+        "085c54c9-bc1f-50b2-a758-d8ed1ff12fc8",
+        "161d6139-21cc-5231-8737-c80bd9eb4c8d",
+        "1729a402-e13b-5ae1-850c-f9ad2f3ab539",
+        "17e02198-93ba-5e08-9ac6-3f8ffb89fc4b",
+        "3b7992bf-e9af-535c-a542-ed121d3803e3",
+        "44fa124d-7f0a-58ff-a7f2-e3433971dbb3",
+        "5d75f2e8-1a13-562a-8e34-ec2c4a185c9b",
+        "62ee55b0-e8ad-5cd5-8917-74c4971afacd",
+        "7ab7c96f-134d-5dec-8704-7ee1145bc4e4",
+        "7cd4fde2-1869-56ed-a5ee-a4c90d0d9bbc",
+        "8e34f5a9-3324-587b-a17f-5a85beccf06a",
+        "9901f99a-03b2-5c83-b047-1c40ec47a062",
+        "9a3ec037-635e-512c-ac10-c8cfb0a45128",
+        "9e86e28d-0db0-54f3-9f15-ea33d7af1b6b",
+        "9eb51837-fc74-5af7-9197-58266d171038",
+        "b6898acf-8828-56b0-88a8-e4e90b125165",
+        "b89788f1-d7cb-5ac4-9b15-cef48bbf97ec",
+        "ce3f8504-f786-567b-adf2-2016deb8e541",
+        "e2b1323a-5da8-59b9-8899-c593969167b2",
+        "ed836306-6909-5f5c-a071-71cc07673de3",
+        "f56e4d91-3356-5cf6-8a11-9e4b0c0617ad",
+        "fe95bf5a-6dbc-5f60-a672-cd0363a7ae56"
+      ],
+      "VENTAS": [
+        "036d75e8-ce90-54a8-9f63-ca33db8cda28",
+        "085c54c9-bc1f-50b2-a758-d8ed1ff12fc8",
+        "161d6139-21cc-5231-8737-c80bd9eb4c8d",
+        "1729a402-e13b-5ae1-850c-f9ad2f3ab539",
+        "17e02198-93ba-5e08-9ac6-3f8ffb89fc4b",
+        "3b7992bf-e9af-535c-a542-ed121d3803e3",
+        "44fa124d-7f0a-58ff-a7f2-e3433971dbb3",
+        "5d75f2e8-1a13-562a-8e34-ec2c4a185c9b",
+        "62ee55b0-e8ad-5cd5-8917-74c4971afacd",
+        "7ab7c96f-134d-5dec-8704-7ee1145bc4e4",
+        "7cd4fde2-1869-56ed-a5ee-a4c90d0d9bbc",
+        "8e34f5a9-3324-587b-a17f-5a85beccf06a",
+        "9901f99a-03b2-5c83-b047-1c40ec47a062",
+        "9a3ec037-635e-512c-ac10-c8cfb0a45128",
+        "9e86e28d-0db0-54f3-9f15-ea33d7af1b6b",
+        "9eb51837-fc74-5af7-9197-58266d171038",
+        "b6898acf-8828-56b0-88a8-e4e90b125165",
+        "b89788f1-d7cb-5ac4-9b15-cef48bbf97ec",
+        "ce3f8504-f786-567b-adf2-2016deb8e541",
+        "e2b1323a-5da8-59b9-8899-c593969167b2",
+        "ed836306-6909-5f5c-a071-71cc07673de3",
+        "f56e4d91-3356-5cf6-8a11-9e4b0c0617ad",
+        "fe95bf5a-6dbc-5f60-a672-cd0363a7ae56"
+      ]
+    },
+    "excluded_product_ids": [
+      "57d95e88-e400-599a-bf05-f29c112de12c",
+      "a5c4f66c-80a8-549c-b4bf-dcef3913e59b"
+    ],
+    "product_ids": [
+      "036d75e8-ce90-54a8-9f63-ca33db8cda28",
+      "085c54c9-bc1f-50b2-a758-d8ed1ff12fc8",
+      "161d6139-21cc-5231-8737-c80bd9eb4c8d",
+      "1729a402-e13b-5ae1-850c-f9ad2f3ab539",
+      "17e02198-93ba-5e08-9ac6-3f8ffb89fc4b",
+      "3b7992bf-e9af-535c-a542-ed121d3803e3",
+      "44fa124d-7f0a-58ff-a7f2-e3433971dbb3",
+      "57d95e88-e400-599a-bf05-f29c112de12c",
+      "5d75f2e8-1a13-562a-8e34-ec2c4a185c9b",
+      "62ee55b0-e8ad-5cd5-8917-74c4971afacd",
+      "7ab7c96f-134d-5dec-8704-7ee1145bc4e4",
+      "7cd4fde2-1869-56ed-a5ee-a4c90d0d9bbc",
+      "8e34f5a9-3324-587b-a17f-5a85beccf06a",
+      "9901f99a-03b2-5c83-b047-1c40ec47a062",
+      "9a3ec037-635e-512c-ac10-c8cfb0a45128",
+      "9e86e28d-0db0-54f3-9f15-ea33d7af1b6b",
+      "9eb51837-fc74-5af7-9197-58266d171038",
+      "a5c4f66c-80a8-549c-b4bf-dcef3913e59b",
+      "b6898acf-8828-56b0-88a8-e4e90b125165",
+      "b89788f1-d7cb-5ac4-9b15-cef48bbf97ec",
+      "ce3f8504-f786-567b-adf2-2016deb8e541",
+      "e2b1323a-5da8-59b9-8899-c593969167b2",
+      "ed836306-6909-5f5c-a071-71cc07673de3",
+      "f56e4d91-3356-5cf6-8a11-9e4b0c0617ad",
+      "fe95bf5a-6dbc-5f60-a672-cd0363a7ae56"
+    ],
+    "sellable_skus": [
+      {
+        "product_id": "5d75f2e8-1a13-562a-8e34-ec2c4a185c9b",
+        "sku": "POMA-H5-NO-PRICE-0005",
+        "variant_id": null
+      },
+      {
+        "product_id": "f56e4d91-3356-5cf6-8a11-9e4b0c0617ad",
+        "sku": "POMA-H5-NO-STOCK-0006",
+        "variant_id": null
+      },
+      {
+        "product_id": "1729a402-e13b-5ae1-850c-f9ad2f3ab539",
+        "sku": "POMA-H5-PAGE-0008",
+        "variant_id": null
+      },
+      {
+        "product_id": "3b7992bf-e9af-535c-a542-ed121d3803e3",
+        "sku": "POMA-H5-PAGE-0009",
+        "variant_id": null
+      },
+      {
+        "product_id": "44fa124d-7f0a-58ff-a7f2-e3433971dbb3",
+        "sku": "POMA-H5-PAGE-0010",
+        "variant_id": null
+      },
+      {
+        "product_id": "9e86e28d-0db0-54f3-9f15-ea33d7af1b6b",
+        "sku": "POMA-H5-PAGE-0011",
+        "variant_id": null
+      },
+      {
+        "product_id": "ce3f8504-f786-567b-adf2-2016deb8e541",
+        "sku": "POMA-H5-PAGE-0012",
+        "variant_id": null
+      },
+      {
+        "product_id": "b89788f1-d7cb-5ac4-9b15-cef48bbf97ec",
+        "sku": "POMA-H5-PAGE-0013",
+        "variant_id": null
+      },
+      {
+        "product_id": "e2b1323a-5da8-59b9-8899-c593969167b2",
+        "sku": "POMA-H5-PAGE-0014",
+        "variant_id": null
+      },
+      {
+        "product_id": "036d75e8-ce90-54a8-9f63-ca33db8cda28",
+        "sku": "POMA-H5-PAGE-0015",
+        "variant_id": null
+      },
+      {
+        "product_id": "161d6139-21cc-5231-8737-c80bd9eb4c8d",
+        "sku": "POMA-H5-PAGE-0016",
+        "variant_id": null
+      },
+      {
+        "product_id": "17e02198-93ba-5e08-9ac6-3f8ffb89fc4b",
+        "sku": "POMA-H5-PAGE-0017",
+        "variant_id": null
+      },
+      {
+        "product_id": "9eb51837-fc74-5af7-9197-58266d171038",
+        "sku": "POMA-H5-PAGE-0018",
+        "variant_id": null
+      },
+      {
+        "product_id": "7cd4fde2-1869-56ed-a5ee-a4c90d0d9bbc",
+        "sku": "POMA-H5-PAGE-0019",
+        "variant_id": null
+      },
+      {
+        "product_id": "ed836306-6909-5f5c-a071-71cc07673de3",
+        "sku": "POMA-H5-PAGE-0020",
+        "variant_id": null
+      },
+      {
+        "product_id": "fe95bf5a-6dbc-5f60-a672-cd0363a7ae56",
+        "sku": "POMA-H5-PAGE-0021",
+        "variant_id": null
+      },
+      {
+        "product_id": "9a3ec037-635e-512c-ac10-c8cfb0a45128",
+        "sku": "POMA-H5-PAGE-0022",
+        "variant_id": null
+      },
+      {
+        "product_id": "8e34f5a9-3324-587b-a17f-5a85beccf06a",
+        "sku": "POMA-H5-PAGE-0023",
+        "variant_id": null
+      },
+      {
+        "product_id": "b6898acf-8828-56b0-88a8-e4e90b125165",
+        "sku": "POMA-H5-PAGE-0024",
+        "variant_id": null
+      },
+      {
+        "product_id": "7ab7c96f-134d-5dec-8704-7ee1145bc4e4",
+        "sku": "POMA-H5-PAGE-0025",
+        "variant_id": null
+      },
+      {
+        "product_id": "62ee55b0-e8ad-5cd5-8917-74c4971afacd",
+        "sku": "POMA-H5-SIMPLE-0001",
+        "variant_id": null
+      },
+      {
+        "product_id": "085c54c9-bc1f-50b2-a758-d8ed1ff12fc8",
+        "sku": "POMA-H5-VAR-BLUE-M-0002",
+        "variant_id": "6614dc90-a54e-541e-9d87-782ba852131b"
+      },
+      {
+        "product_id": "9901f99a-03b2-5c83-b047-1c40ec47a062",
+        "sku": "POMA-H5-VAR-ENABLED-0004",
+        "variant_id": "b273ca18-9731-57ba-be78-201a8f8daa86"
+      },
+      {
+        "product_id": "085c54c9-bc1f-50b2-a758-d8ed1ff12fc8",
+        "sku": "POMA-H5-VAR-RED-S-0002",
+        "variant_id": "7ef0de8e-5303-5920-9dfd-5826fb6972c4"
+      }
+    ],
+    "sku_bases": [
+      "POMA-H5-INACTIVE-0003",
+      "POMA-H5-NO-PRICE-0005",
+      "POMA-H5-NO-STOCK-0006",
+      "POMA-H5-NOT-SELLABLE-0007",
+      "POMA-H5-PAGE-0008",
+      "POMA-H5-PAGE-0009",
+      "POMA-H5-PAGE-0010",
+      "POMA-H5-PAGE-0011",
+      "POMA-H5-PAGE-0012",
+      "POMA-H5-PAGE-0013",
+      "POMA-H5-PAGE-0014",
+      "POMA-H5-PAGE-0015",
+      "POMA-H5-PAGE-0016",
+      "POMA-H5-PAGE-0017",
+      "POMA-H5-PAGE-0018",
+      "POMA-H5-PAGE-0019",
+      "POMA-H5-PAGE-0020",
+      "POMA-H5-PAGE-0021",
+      "POMA-H5-PAGE-0022",
+      "POMA-H5-PAGE-0023",
+      "POMA-H5-PAGE-0024",
+      "POMA-H5-PAGE-0025",
+      "POMA-H5-SIMPLE-0001",
+      "POMA-H5-VARIABLE-0002",
+      "POMA-H5-VARIANT-0004"
+    ]
+  },
+  "inventory": [
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 8,
+      "product_id": "62ee55b0-e8ad-5cd5-8917-74c4971afacd",
+      "sku": "POMA-H5-SIMPLE-0001",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 5,
+      "product_id": "085c54c9-bc1f-50b2-a758-d8ed1ff12fc8",
+      "sku": "POMA-H5-VAR-RED-S-0002",
+      "variant_id": "7ef0de8e-5303-5920-9dfd-5826fb6972c4"
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 2,
+      "product_id": "085c54c9-bc1f-50b2-a758-d8ed1ff12fc8",
+      "sku": "POMA-H5-VAR-BLUE-M-0002",
+      "variant_id": "6614dc90-a54e-541e-9d87-782ba852131b"
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 4,
+      "product_id": "57d95e88-e400-599a-bf05-f29c112de12c",
+      "sku": "POMA-H5-INACTIVE-0003",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 4,
+      "product_id": "9901f99a-03b2-5c83-b047-1c40ec47a062",
+      "sku": "POMA-H5-VAR-ENABLED-0004",
+      "variant_id": "b273ca18-9731-57ba-be78-201a8f8daa86"
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 3,
+      "product_id": "9901f99a-03b2-5c83-b047-1c40ec47a062",
+      "sku": "POMA-H5-VAR-DISABLED-0004",
+      "variant_id": "8b775ccc-44c2-5bd1-88ab-9ba066213512"
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 3,
+      "product_id": "5d75f2e8-1a13-562a-8e34-ec2c4a185c9b",
+      "sku": "POMA-H5-NO-PRICE-0005",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 6,
+      "product_id": "a5c4f66c-80a8-549c-b4bf-dcef3913e59b",
+      "sku": "POMA-H5-NOT-SELLABLE-0007",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 1,
+      "product_id": "1729a402-e13b-5ae1-850c-f9ad2f3ab539",
+      "sku": "POMA-H5-PAGE-0008",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 2,
+      "product_id": "3b7992bf-e9af-535c-a542-ed121d3803e3",
+      "sku": "POMA-H5-PAGE-0009",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 3,
+      "product_id": "44fa124d-7f0a-58ff-a7f2-e3433971dbb3",
+      "sku": "POMA-H5-PAGE-0010",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 4,
+      "product_id": "9e86e28d-0db0-54f3-9f15-ea33d7af1b6b",
+      "sku": "POMA-H5-PAGE-0011",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 5,
+      "product_id": "ce3f8504-f786-567b-adf2-2016deb8e541",
+      "sku": "POMA-H5-PAGE-0012",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 6,
+      "product_id": "b89788f1-d7cb-5ac4-9b15-cef48bbf97ec",
+      "sku": "POMA-H5-PAGE-0013",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 7,
+      "product_id": "e2b1323a-5da8-59b9-8899-c593969167b2",
+      "sku": "POMA-H5-PAGE-0014",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 8,
+      "product_id": "036d75e8-ce90-54a8-9f63-ca33db8cda28",
+      "sku": "POMA-H5-PAGE-0015",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 9,
+      "product_id": "161d6139-21cc-5231-8737-c80bd9eb4c8d",
+      "sku": "POMA-H5-PAGE-0016",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 1,
+      "product_id": "17e02198-93ba-5e08-9ac6-3f8ffb89fc4b",
+      "sku": "POMA-H5-PAGE-0017",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 2,
+      "product_id": "9eb51837-fc74-5af7-9197-58266d171038",
+      "sku": "POMA-H5-PAGE-0018",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 3,
+      "product_id": "7cd4fde2-1869-56ed-a5ee-a4c90d0d9bbc",
+      "sku": "POMA-H5-PAGE-0019",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 4,
+      "product_id": "ed836306-6909-5f5c-a071-71cc07673de3",
+      "sku": "POMA-H5-PAGE-0020",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 5,
+      "product_id": "fe95bf5a-6dbc-5f60-a672-cd0363a7ae56",
+      "sku": "POMA-H5-PAGE-0021",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 6,
+      "product_id": "9a3ec037-635e-512c-ac10-c8cfb0a45128",
+      "sku": "POMA-H5-PAGE-0022",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 7,
+      "product_id": "8e34f5a9-3324-587b-a17f-5a85beccf06a",
+      "sku": "POMA-H5-PAGE-0023",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 8,
+      "product_id": "b6898acf-8828-56b0-88a8-e4e90b125165",
+      "sku": "POMA-H5-PAGE-0024",
+      "variant_id": null
+    },
+    {
+      "location_id": "POMA-H5-LOCATION-01",
+      "observed_on_hand": 9,
+      "product_id": "7ab7c96f-134d-5dec-8704-7ee1145bc4e4",
+      "sku": "POMA-H5-PAGE-0025",
+      "variant_id": null
+    }
+  ],
+  "pagination": {
+    "page_size": 10,
+    "stable_sort": "nombre:asc,product_id:asc"
+  },
+  "pricing": [
+    {
+      "amount_minor": 12990,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "62ee55b0-e8ad-5cd5-8917-74c4971afacd",
+      "sku": "POMA-H5-SIMPLE-0001",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 18990,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "085c54c9-bc1f-50b2-a758-d8ed1ff12fc8",
+      "sku": "POMA-H5-VAR-RED-S-0002",
+      "variant_id": "7ef0de8e-5303-5920-9dfd-5826fb6972c4"
+    },
+    {
+      "amount_minor": 19990,
+      "channel_id": null,
+      "currency": "PEN",
+      "product_id": "085c54c9-bc1f-50b2-a758-d8ed1ff12fc8",
+      "sku": "POMA-H5-VAR-BLUE-M-0002",
+      "variant_id": "6614dc90-a54e-541e-9d87-782ba852131b"
+    },
+    {
+      "amount_minor": 10990,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "57d95e88-e400-599a-bf05-f29c112de12c",
+      "sku": "POMA-H5-INACTIVE-0003",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 15990,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "9901f99a-03b2-5c83-b047-1c40ec47a062",
+      "sku": "POMA-H5-VAR-ENABLED-0004",
+      "variant_id": "b273ca18-9731-57ba-be78-201a8f8daa86"
+    },
+    {
+      "amount_minor": 16990,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "9901f99a-03b2-5c83-b047-1c40ec47a062",
+      "sku": "POMA-H5-VAR-DISABLED-0004",
+      "variant_id": "8b775ccc-44c2-5bd1-88ab-9ba066213512"
+    },
+    {
+      "amount_minor": 17990,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "f56e4d91-3356-5cf6-8a11-9e4b0c0617ad",
+      "sku": "POMA-H5-NO-STOCK-0006",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 11990,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "a5c4f66c-80a8-549c-b4bf-dcef3913e59b",
+      "sku": "POMA-H5-NOT-SELLABLE-0007",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 10000,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "1729a402-e13b-5ae1-850c-f9ad2f3ab539",
+      "sku": "POMA-H5-PAGE-0008",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 10100,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "3b7992bf-e9af-535c-a542-ed121d3803e3",
+      "sku": "POMA-H5-PAGE-0009",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 10200,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "44fa124d-7f0a-58ff-a7f2-e3433971dbb3",
+      "sku": "POMA-H5-PAGE-0010",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 10300,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "9e86e28d-0db0-54f3-9f15-ea33d7af1b6b",
+      "sku": "POMA-H5-PAGE-0011",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 10400,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "ce3f8504-f786-567b-adf2-2016deb8e541",
+      "sku": "POMA-H5-PAGE-0012",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 10500,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "b89788f1-d7cb-5ac4-9b15-cef48bbf97ec",
+      "sku": "POMA-H5-PAGE-0013",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 10600,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "e2b1323a-5da8-59b9-8899-c593969167b2",
+      "sku": "POMA-H5-PAGE-0014",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 10700,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "036d75e8-ce90-54a8-9f63-ca33db8cda28",
+      "sku": "POMA-H5-PAGE-0015",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 10800,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "161d6139-21cc-5231-8737-c80bd9eb4c8d",
+      "sku": "POMA-H5-PAGE-0016",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 10900,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "17e02198-93ba-5e08-9ac6-3f8ffb89fc4b",
+      "sku": "POMA-H5-PAGE-0017",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 11000,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "9eb51837-fc74-5af7-9197-58266d171038",
+      "sku": "POMA-H5-PAGE-0018",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 11100,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "7cd4fde2-1869-56ed-a5ee-a4c90d0d9bbc",
+      "sku": "POMA-H5-PAGE-0019",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 11200,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "ed836306-6909-5f5c-a071-71cc07673de3",
+      "sku": "POMA-H5-PAGE-0020",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 11300,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "fe95bf5a-6dbc-5f60-a672-cd0363a7ae56",
+      "sku": "POMA-H5-PAGE-0021",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 11400,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "9a3ec037-635e-512c-ac10-c8cfb0a45128",
+      "sku": "POMA-H5-PAGE-0022",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 11500,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "8e34f5a9-3324-587b-a17f-5a85beccf06a",
+      "sku": "POMA-H5-PAGE-0023",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 11600,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "b6898acf-8828-56b0-88a8-e4e90b125165",
+      "sku": "POMA-H5-PAGE-0024",
+      "variant_id": null
+    },
+    {
+      "amount_minor": 11700,
+      "channel_id": "MARKETPLACE",
+      "currency": "PEN",
+      "product_id": "7ab7c96f-134d-5dec-8704-7ee1145bc4e4",
+      "sku": "POMA-H5-PAGE-0025",
+      "variant_id": null
+    }
+  ],
+  "products": [
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-015",
+      "product_id": "036d75e8-ce90-54a8-9f63-ca33db8cda28",
+      "sku_base": "POMA-H5-PAGE-0015",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 variable",
+      "product_id": "085c54c9-bc1f-50b2-a758-d8ed1ff12fc8",
+      "sku_base": "POMA-H5-VARIABLE-0002",
+      "state": "ACTIVO",
+      "variants": [
+        {
+          "eligible": true,
+          "sku": "POMA-H5-VAR-RED-S-0002",
+          "state": "ACTIVA",
+          "variant_id": "7ef0de8e-5303-5920-9dfd-5826fb6972c4"
+        },
+        {
+          "eligible": true,
+          "sku": "POMA-H5-VAR-BLUE-M-0002",
+          "state": "ACTIVA",
+          "variant_id": "6614dc90-a54e-541e-9d87-782ba852131b"
+        }
+      ]
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-016",
+      "product_id": "161d6139-21cc-5231-8737-c80bd9eb4c8d",
+      "sku_base": "POMA-H5-PAGE-0016",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-008",
+      "product_id": "1729a402-e13b-5ae1-850c-f9ad2f3ab539",
+      "sku_base": "POMA-H5-PAGE-0008",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-017",
+      "product_id": "17e02198-93ba-5e08-9ac6-3f8ffb89fc4b",
+      "sku_base": "POMA-H5-PAGE-0017",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-009",
+      "product_id": "3b7992bf-e9af-535c-a542-ed121d3803e3",
+      "sku_base": "POMA-H5-PAGE-0009",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-010",
+      "product_id": "44fa124d-7f0a-58ff-a7f2-e3433971dbb3",
+      "sku_base": "POMA-H5-PAGE-0010",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": false,
+      "eligible_channels": [],
+      "nombre": "Poma H5 inactive",
+      "product_id": "57d95e88-e400-599a-bf05-f29c112de12c",
+      "sku_base": "POMA-H5-INACTIVE-0003",
+      "state": "INACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 no-price",
+      "product_id": "5d75f2e8-1a13-562a-8e34-ec2c4a185c9b",
+      "sku_base": "POMA-H5-NO-PRICE-0005",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 simple",
+      "product_id": "62ee55b0-e8ad-5cd5-8917-74c4971afacd",
+      "sku_base": "POMA-H5-SIMPLE-0001",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-025",
+      "product_id": "7ab7c96f-134d-5dec-8704-7ee1145bc4e4",
+      "sku_base": "POMA-H5-PAGE-0025",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-019",
+      "product_id": "7cd4fde2-1869-56ed-a5ee-a4c90d0d9bbc",
+      "sku_base": "POMA-H5-PAGE-0019",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-023",
+      "product_id": "8e34f5a9-3324-587b-a17f-5a85beccf06a",
+      "sku_base": "POMA-H5-PAGE-0023",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 variant-disabled",
+      "product_id": "9901f99a-03b2-5c83-b047-1c40ec47a062",
+      "sku_base": "POMA-H5-VARIANT-0004",
+      "state": "ACTIVO",
+      "variants": [
+        {
+          "eligible": true,
+          "sku": "POMA-H5-VAR-ENABLED-0004",
+          "state": "ACTIVA",
+          "variant_id": "b273ca18-9731-57ba-be78-201a8f8daa86"
+        },
+        {
+          "eligible": false,
+          "sku": "POMA-H5-VAR-DISABLED-0004",
+          "state": "INACTIVA",
+          "variant_id": "8b775ccc-44c2-5bd1-88ab-9ba066213512"
+        }
+      ]
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-022",
+      "product_id": "9a3ec037-635e-512c-ac10-c8cfb0a45128",
+      "sku_base": "POMA-H5-PAGE-0022",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-011",
+      "product_id": "9e86e28d-0db0-54f3-9f15-ea33d7af1b6b",
+      "sku_base": "POMA-H5-PAGE-0011",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-018",
+      "product_id": "9eb51837-fc74-5af7-9197-58266d171038",
+      "sku_base": "POMA-H5-PAGE-0018",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": false,
+      "eligible_channels": [],
+      "nombre": "Poma H5 not-sellable",
+      "product_id": "a5c4f66c-80a8-549c-b4bf-dcef3913e59b",
+      "sku_base": "POMA-H5-NOT-SELLABLE-0007",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-024",
+      "product_id": "b6898acf-8828-56b0-88a8-e4e90b125165",
+      "sku_base": "POMA-H5-PAGE-0024",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-013",
+      "product_id": "b89788f1-d7cb-5ac4-9b15-cef48bbf97ec",
+      "sku_base": "POMA-H5-PAGE-0013",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-012",
+      "product_id": "ce3f8504-f786-567b-adf2-2016deb8e541",
+      "sku_base": "POMA-H5-PAGE-0012",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-014",
+      "product_id": "e2b1323a-5da8-59b9-8899-c593969167b2",
+      "sku_base": "POMA-H5-PAGE-0014",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-020",
+      "product_id": "ed836306-6909-5f5c-a071-71cc07673de3",
+      "sku_base": "POMA-H5-PAGE-0020",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 no-observed-stock",
+      "product_id": "f56e4d91-3356-5cf6-8a11-9e4b0c0617ad",
+      "sku_base": "POMA-H5-NO-STOCK-0006",
+      "state": "ACTIVO",
+      "variants": []
+    },
+    {
+      "eligible": true,
+      "eligible_channels": [
+        "MARKETPLACE",
+        "CHATBOT",
+        "RETAIL",
+        "VENTAS"
+      ],
+      "nombre": "Poma H5 page-021",
+      "product_id": "fe95bf5a-6dbc-5f60-a672-cd0363a7ae56",
+      "sku_base": "POMA-H5-PAGE-0021",
+      "state": "ACTIVO",
+      "variants": []
+    }
+  ],
+  "schema_version": 1,
+  "seed": 20261123
+}
