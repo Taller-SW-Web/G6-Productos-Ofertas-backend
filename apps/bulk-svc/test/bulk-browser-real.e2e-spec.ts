@@ -47,7 +47,7 @@ const enabled = Boolean(
 
 const ownerASub = '00000000-0000-4000-8000-000000000050';
 const ownerBSub = '00000000-0000-4000-8000-000000000051';
-const issuer = 'bulk-browser-real';
+const issuer = 'https://isolated.test/issuer';
 const originalEnv = new Map<string, string | undefined>();
 
 function setEnv(name: string, value: string): void {

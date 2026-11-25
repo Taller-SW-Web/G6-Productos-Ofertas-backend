@@ -12,7 +12,8 @@ import { BULK_TEMPLATE_HEADERS } from '../src/domain/bulk-template-v2.js';
 import { createValidBulkXlsx } from './support/bulk-template-fixtures.js';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { bulkSchema } from '../src/persistence/bulk.schema.js';
+import { eq } from 'drizzle-orm';
+import { bulkSchema, batchRows } from '../src/persistence/bulk.schema.js';
 import { BulkPersistenceRepository } from '../src/persistence/bulk.repository.js';
 
 const bulkDatabaseUrl = process.env.BULK_RETRY_INTEGRATION_BULK_DATABASE_URL;
@@ -268,7 +269,12 @@ describe.skipIf(!enabled)('P1 Bulk Performance Suite (PostgreSQL 17 + Storage lo
       .expect(202);
     const retryBatchId = String(retryAdmit.body.batch_id);
     const batchState = await bulkRepo.findBatchByBatchId(retryBatchId);
-    const rowId = batchState!.rows[0]!.row_id;
+    const [firstRow] = await bulkDb
+      .select()
+      .from(batchRows)
+      .where(eq(batchRows.batchJobId, batchState!.id))
+      .limit(1);
+    const rowId = firstRow!.rowId;
     await bulkRepo.recordCatalogBulkResult({
       messageId: randomUUID(),
       operationId: randomUUID(),

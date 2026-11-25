@@ -157,82 +157,83 @@ integration('P1 Bulk Recovery, Files/Exports & Migrations (PostgreSQL 17 + Stora
     const app2 = mod2.createNestApplication({ logger: false });
     app2.useGlobalFilters(new BulkProblemFilter());
     await app2.init();
+    try {
+      const [outboxRow] = await bulkDb
+        .select()
+        .from(bulkOutbox)
+        .where(eq(bulkOutbox.correlationId, correlationId));
+      expect(outboxRow).toBeDefined();
+      expect(outboxRow?.publishedAt).toBeNull();
 
-    const [outboxRow] = await bulkDb
-      .select()
-      .from(bulkOutbox)
-      .where(eq(bulkOutbox.correlationId, correlationId));
-    expect(outboxRow).toBeDefined();
-    expect(outboxRow?.publishedAt).toBeNull();
+      // Test Storage outage -> 503, then recovery -> 200
+      const storage = mod2.get(BulkStorageService);
+      const putSpy = vi
+        .spyOn(storage, 'put')
+        .mockRejectedValueOnce(
+          new BulkDomainError('STORAGE_UNAVAILABLE', 'Storage 503 simulated'),
+        );
+      await request(app2.getHttpServer())
+        .post('/api/v1/carga-masiva/productos/importaciones')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-Correlation-Id', randomUUID())
+        .field('template_version', '2')
+        .attach('archivo', csv, { filename: 'outage.csv', contentType: 'text/csv' })
+        .expect(503);
+      putSpy.mockRestore();
 
-    // Test Storage outage -> 503, then recovery -> 200
-    const storage = mod2.get(BulkStorageService);
-    const putSpy = vi
-      .spyOn(storage, 'put')
-      .mockRejectedValueOnce(
-        new BulkDomainError('STORAGE_UNAVAILABLE', 'Storage 503 simulated'),
+      // Test malformed claim-check document -> Catalog rejects without commercial mutation
+      const productsBefore = await catalogDb.read((db) => db.select().from(products));
+      const tx = new CatalogTransactionManager(catalogDb);
+      const mutations = new CatalogMutationService(
+        tx,
+        new PostgresCatalogWriteRepository(),
+        { masters: async () => ({ schemaVersion: 1 }), attributes: async (_t: string, v: unknown[]) => v } as never,
+        { resolve: async (_i, id) => ({ slug: `rec-${id}`, moneda: 'PEN' }) },
       );
-    await request(app2.getHttpServer())
-      .post('/api/v1/carga-masiva/productos/importaciones')
-      .set('Authorization', `Bearer ${token}`)
-      .set('X-Correlation-Id', randomUUID())
-      .field('template_version', '2')
-      .attach('archivo', csv, { filename: 'outage.csv', contentType: 'text/csv' })
-      .expect(503);
-    putSpy.mockRestore();
+      const idMock = new CatalogBulkIdentity(undefined, new CatalogTokenVerifier(undefined));
+      vi.spyOn(idMock, 'authorization').mockResolvedValue('Bearer isolated-master-fixture');
+      const badClient = {
+        getDocument: async () => { throw new Error('Malformed claim-check JSON'); },
+      } as unknown as CatalogBulkContentClient;
+      const badConsumer = new CatalogBulkService(catalogDb, mutations, idMock, badClient);
+      const envelope = outboxRow!.payload as unknown as CatalogEnvelope;
+      await expect(badConsumer.consume(envelope)).rejects.toThrow();
+      expect(await catalogDb.read((db) => db.select().from(products))).toEqual(productsBefore);
 
-    // Test malformed claim-check document -> Catalog rejects without commercial mutation
-    const productsBefore = await catalogDb.read((db) => db.select().from(products));
-    const tx = new CatalogTransactionManager(catalogDb);
-    const mutations = new CatalogMutationService(
-      tx,
-      new PostgresCatalogWriteRepository(),
-      { masters: async () => ({ schemaVersion: 1 }), attributes: async (_t: string, v: unknown[]) => v } as never,
-      { resolve: async (_i, id) => ({ slug: `rec-${id}`, moneda: 'PEN' }) },
-    );
-    const idMock = new CatalogBulkIdentity(undefined, new CatalogTokenVerifier(undefined));
-    vi.spyOn(idMock, 'authorization').mockResolvedValue('Bearer isolated-master-fixture');
-    const badClient = {
-      getDocument: async () => { throw new Error('Malformed claim-check JSON'); },
-    } as unknown as CatalogBulkContentClient;
-    const badConsumer = new CatalogBulkService(catalogDb, mutations, idMock, badClient);
-    const envelope = outboxRow!.payload as unknown as CatalogEnvelope;
-    await expect(badConsumer.consume(envelope)).rejects.toThrow();
-    expect(await catalogDb.read((db) => db.select().from(products))).toEqual(productsBefore);
+      // Contradictory batch/family identity -> rejected without mutation
+      await expect(
+        bulkRepo.recordCatalogBulkResult({
+          messageId: randomUUID(),
+          operationId: randomUUID(),
+          causationId: randomUUID(),
+          eventName: 'catalog.bulk.upsert.completed',
+          correlationId,
+          payload: { unknown: true },
+        }),
+      ).rejects.toThrow(/inconsistent|INVALID_INPUT/i);
 
-    // Contradictory batch/family identity -> rejected without mutation
-    await expect(
-      bulkRepo.recordCatalogBulkResult({
-        messageId: randomUUID(),
-        operationId: randomUUID(),
-        causationId: randomUUID(),
-        eventName: 'catalog.bulk.upsert.completed',
-        correlationId,
-        payload: { unknown: true },
-      }),
-    ).resolves.not.toThrow();
+      // Simulate Catalog restart after durable commit -> redelivery is deduplicated
+      const contentIdentity = new CatalogBulkContentIdentity(undefined, new CatalogTokenVerifier(undefined));
+      vi.spyOn(contentIdentity, 'authorization').mockResolvedValue('Bearer invalid-unused');
+      const localContentClient = {
+        getDocument: async (ref: { content_id: string }) => {
+          const res = await bulkRepo.getContentDocument(ref.content_id);
+          const bytes = await storage.get(res!.contentRef);
+          return JSON.parse(bytes.toString('utf8'));
+        },
+      } as unknown as CatalogBulkContentClient;
+      const consumer1 = new CatalogBulkService(catalogDb, mutations, idMock, localContentClient);
+      await expect(consumer1.consume(envelope)).resolves.toBe('APPLIED');
+      const productsAfterFirst = await catalogDb.read((db) => db.select().from(products));
+      expect(productsAfterFirst.length).toBe(productsBefore.length + 1);
 
-    // Simulate Catalog restart after durable commit -> redelivery is deduplicated
-    const contentIdentity = new CatalogBulkContentIdentity(undefined, new CatalogTokenVerifier(undefined));
-    vi.spyOn(contentIdentity, 'authorization').mockResolvedValue('Bearer invalid-unused');
-    const localContentClient = {
-      getDocument: async (ref: { content_id: string }) => {
-        const res = await bulkRepo.getContentDocument(ref.content_id);
-        const bytes = await storage.get(res!.contentRef);
-        return JSON.parse(bytes.toString('utf8'));
-      },
-    } as unknown as CatalogBulkContentClient;
-    const consumer1 = new CatalogBulkService(catalogDb, mutations, idMock, localContentClient);
-    await expect(consumer1.consume(envelope)).resolves.toBe('APPLIED');
-    const productsAfterFirst = await catalogDb.read((db) => db.select().from(products));
-    expect(productsAfterFirst.length).toBe(productsBefore.length + 1);
-
-    // Recreate CatalogBulkService (simulating Catalog restart) and redeliver same envelope
-    const consumer2 = new CatalogBulkService(catalogDb, mutations, idMock, localContentClient);
-    await expect(consumer2.consume(envelope)).resolves.toBe('DUPLICATE');
-    expect(await catalogDb.read((db) => db.select().from(products))).toEqual(productsAfterFirst);
-
-    await app2.close();
+      // Recreate CatalogBulkService (simulating Catalog restart) and redeliver same envelope
+      const consumer2 = new CatalogBulkService(catalogDb, mutations, idMock, localContentClient);
+      await expect(consumer2.consume(envelope)).resolves.toBe('DUPLICATE');
+      expect(await catalogDb.read((db) => db.select().from(products))).toEqual(productsAfterFirst);
+    } finally {
+      await app2.close();
+    }
   }, 60_000);
 
   it('validates CSV/XLSX templates, roundtrip, formula injection protection, exports, report download, and owner isolation', async () => {
