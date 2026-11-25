@@ -523,6 +523,49 @@ describe('Gateway identity from G6/G7 contracts', () => {
       status: 403,
     });
   });
+  it('requires G3 service JWT for evaluation when only that public allowlist entry is removed', async () => {
+    const evaluation = CONTRACT_ROUTES.find(
+      (r) => r.operationId === 'evaluarPromociones',
+    )!;
+    const publicList = CONTRACT_ROUTES.find(
+      (r) => r.operationId === 'listarPromociones',
+    )!;
+    const readonly = new GatewayIdentity({
+      ...settings,
+      securityMode: 'PUBLIC_READ_ONLY',
+      publicOperations: ['listarPromociones'],
+    });
+    await expect(
+      readonly.authorize(publicList, undefined),
+    ).resolves.toBeUndefined();
+    await expect(
+      readonly.authorize(evaluation, undefined),
+    ).rejects.toMatchObject({ status: 401, code: 'TOKEN_INVALIDO' });
+    const g3 = `Bearer ${signed.token({ sub: 'modulo-chatbot', scope: 'promociones:evaluar' })}`;
+    const authenticatedReadonly = new GatewayIdentity({
+      ...settings,
+      securityMode: 'PUBLIC_READ_ONLY',
+      publicOperations: ['listarPromociones'],
+    });
+    authenticatedReadonly.authenticate = signed.identity.authenticate.bind(
+      signed.identity,
+    );
+    await expect(
+      authenticatedReadonly.authorize(evaluation, g3),
+    ).resolves.toBeUndefined();
+    await expect(
+      authenticatedReadonly.authorize(
+        evaluation,
+        `Bearer ${signed.token({ sub: 'modulo-chatbot', scope: 'promociones:evaluar', exp: 1 })}`,
+      ),
+    ).rejects.toMatchObject({ status: 401 });
+    await expect(
+      authenticatedReadonly.authorize(
+        evaluation,
+        `Bearer ${signed.token({ sub: 'modulo-chatbot', scope: 'promociones:leer' })}`,
+      ),
+    ).rejects.toMatchObject({ status: 403, code: 'SCOPE_INSUFICIENTE' });
+  });
   it('fails closed before forwarding without token or trust configuration', async () => {
     const identity = new GatewayIdentity(settings);
     await expect(identity.authorize(product, undefined)).rejects.toMatchObject({

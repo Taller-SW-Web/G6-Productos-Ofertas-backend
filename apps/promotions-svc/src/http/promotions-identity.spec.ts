@@ -9,6 +9,7 @@ import {
   remotePromotionsKeys,
 } from './promotions-identity.js';
 import { httpContracts } from './http-contract.generated.js';
+import { isPhase1PublicRead } from '../phase1-public-reads.js';
 import { createEnvironmentFixture } from '../../test/support/environment.js';
 import {
   PromotionsConfigService,
@@ -71,6 +72,66 @@ describe('Promotions signed identity', () => {
         'Bearer ' + token(),
       ),
     ).resolves.toBeUndefined();
+  });
+  it('requires G3 JWT for evaluation when removed from the public allowlist, while retaining other public reads', async () => {
+    const publicConfig = new PromotionsConfigService(
+      validatePromotionsConfiguration({
+        ...fixture.environment,
+        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+        PROMOTIONS_PUBLIC_OPERATION_IDS: 'listarPromociones',
+        AUTH_ISSUER: 'https://security.isolated.test/api/v1/auth',
+        AUTH_JWKS_URL:
+          'https://security.isolated.test/api/v1/auth/.well-known/jwks.json',
+      }),
+    );
+    const promotions = new PromotionsIdentity(publicConfig, async () => [jwk]);
+    const evaluationRequest = {
+      method: 'POST',
+      path: '/api/v1/promociones/evaluar',
+      headers: {},
+    };
+    const listingRequest = {
+      method: 'GET',
+      path: '/api/v1/promociones',
+      headers: {},
+    };
+    expect(
+      isPhase1PublicRead(
+        evaluationRequest,
+        'PUBLIC_READ_ONLY',
+        ['listarPromociones'],
+        'evaluarPromociones',
+      ),
+    ).toBe(false);
+    expect(
+      isPhase1PublicRead(
+        listingRequest,
+        'PUBLIC_READ_ONLY',
+        ['listarPromociones'],
+        'listarPromociones',
+      ),
+    ).toBe(true);
+    await expect(
+      promotions.authorize(httpContracts.evaluarPromociones, undefined),
+    ).rejects.toMatchObject({ status: 401, code: 'TOKEN_INVALIDO' });
+    await expect(
+      promotions.authorize(
+        httpContracts.evaluarPromociones,
+        `Bearer ${token({ sub: 'modulo-chatbot' })}`,
+      ),
+    ).resolves.toBeUndefined();
+    await expect(
+      promotions.authorize(
+        httpContracts.evaluarPromociones,
+        `Bearer ${token({ sub: 'modulo-chatbot', exp: 1 })}`,
+      ),
+    ).rejects.toMatchObject({ status: 401, code: 'TOKEN_INVALIDO' });
+    await expect(
+      promotions.authorize(
+        httpContracts.evaluarPromociones,
+        `Bearer ${token({ sub: 'modulo-chatbot', scope: 'promociones:leer' })}`,
+      ),
+    ).rejects.toMatchObject({ status: 403, code: 'SCOPE_INSUFICIENTE' });
   });
   it('accepts a human Gestor Comercial without inventing a user audience or scope', async () => {
     await expect(
