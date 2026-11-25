@@ -135,15 +135,21 @@ async function stopProcess(child?: ChildProcess): Promise<void> {
   if (!child || child.exitCode !== null) return;
   const exited = once(child, 'exit');
   child.kill();
-  await Promise.race([
-    exited,
-    new Promise<void>((done) =>
-      setTimeout(() => {
-        child.kill('SIGKILL');
-        done();
-      }, 5000),
-    ),
-  ]);
+  let forceTimer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      exited,
+      new Promise<void>((done) => {
+        forceTimer = setTimeout(() => {
+          child.kill('SIGKILL');
+          done();
+        }, 5000);
+        forceTimer.unref();
+      }),
+    ]);
+  } finally {
+    if (forceTimer) clearTimeout(forceTimer);
+  }
 }
 
 /**
@@ -166,6 +172,42 @@ run('Gateway -> Bulk real -> PostgreSQL descartable (GW-T03)', () => {
   let jwksServer: Server | undefined;
   let storageServer: Server | undefined;
   let signed: ReturnType<typeof createSignedIdentity>;
+
+  async function closeHttpServer(server?: Server): Promise<void> {
+    if (!server) return;
+    server.closeAllConnections();
+    if (server.listening) {
+      await new Promise<void>((done) => server.close(() => done()));
+    }
+  }
+
+  async function cleanupDisposableResources(): Promise<void> {
+    const currentApp = app;
+    app = undefined;
+    await currentApp?.close().catch(() => undefined);
+
+    const currentBulk = bulkProcess;
+    bulkProcess = undefined;
+    await stopProcess(currentBulk).catch(() => undefined);
+
+    const currentPool = adminPool;
+    adminPool = undefined;
+    await currentPool?.end().catch(() => undefined);
+
+    const currentJwks = jwksServer;
+    jwksServer = undefined;
+    await closeHttpServer(currentJwks);
+
+    const currentStorage = storageServer;
+    storageServer = undefined;
+    await closeHttpServer(currentStorage);
+    storedObjects.clear();
+
+    if (containerCreated) {
+      containerCreated = false;
+      spawnSync('docker', ['rm', '-f', containerName], { windowsHide: true });
+    }
+  }
 
   beforeAll(async () => {
     try {
@@ -335,30 +377,13 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
       app = module.createNestApplication({ bodyParser: false });
       await app.listen(0, '127.0.0.1');
     } catch (error) {
-      await stopProcess(bulkProcess);
-      await adminPool?.end().catch(() => undefined);
-      if (containerCreated) {
-        spawnSync('docker', ['rm', '-f', containerName], { windowsHide: true });
-      }
+      await cleanupDisposableResources();
       throw error;
     }
   }, 90_000);
 
   afterAll(async () => {
-    await app?.close();
-    await stopProcess(bulkProcess);
-    await adminPool?.end().catch(() => undefined);
-    jwksServer?.closeAllConnections();
-    if (jwksServer) {
-      await new Promise<void>((done) => jwksServer!.close(() => done()));
-    }
-    storageServer?.closeAllConnections();
-    if (storageServer) {
-      await new Promise<void>((done) => storageServer!.close(() => done()));
-    }
-    if (containerCreated) {
-      spawnSync('docker', ['rm', '-f', containerName], { windowsHide: true });
-    }
+    await cleanupDisposableResources();
   });
 
   it('creates a real import, returns 200 + Cache-Control: no-store for owner, 404 for other actor, and performs pure read', async () => {
@@ -407,18 +432,35 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
       .set('Authorization', `Bearer ${otherToken}`)
       .expect(404);
 
-    // Confirmar lectura pura: mismo batch_id y exactamente 1 lote en BD
+    // Confirmar lectura pura: mismo batch_id y exactamente 1 lote en bulk.batch_jobs
     const ownerRead2 = await request(app!.getHttpServer())
       .get(
         `/api/v1/carga-masiva/productos/importaciones/por-correlacion/${correlationId}`,
       )
       .set('Authorization', `Bearer ${ownerToken}`)
       .expect(200);
+    expect(ownerRead2.headers['cache-control']).toBe('no-store');
     expect(ownerRead2.body.batch_id).toBe(batchId);
 
-    const countResult = await adminPool!.query<{ total: number }>(
-      'SELECT count(*)::int AS total FROM bulk.import_batches',
+    const totalResult = await adminPool!.query<{ total: number }>(
+      'SELECT count(*)::int AS total FROM bulk.batch_jobs',
     );
-    expect(countResult.rows[0]?.total).toBe(1);
+    expect(totalResult.rows[0]?.total).toBe(1);
+
+    const exactJob = await adminPool!.query<{
+      batch_id: string;
+      owner_sub: string;
+      correlation_id: string;
+    }>(
+      'SELECT batch_id::text AS batch_id, owner_sub::text AS owner_sub, correlation_id::text AS correlation_id FROM bulk.batch_jobs WHERE batch_id = $1 AND owner_sub = $2 AND correlation_id = $3',
+      [batchId, ownerActorId.toLowerCase(), correlationId.toLowerCase()],
+    );
+    expect(exactJob.rows).toEqual([
+      {
+        batch_id: batchId,
+        owner_sub: ownerActorId.toLowerCase(),
+        correlation_id: correlationId.toLowerCase(),
+      },
+    ]);
   });
 });
