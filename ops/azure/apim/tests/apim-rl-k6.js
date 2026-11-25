@@ -1,6 +1,9 @@
 // Script k6 parametrizado para RL-01..RL-06 y APIM-T05 (sin ejecución automática).
+// Exige manifiesto efectivo autorizado (nunca el catálogo candidate) y perfil real de despliegue.
 // Uso autorizado:
 // k6 run -e APIM_RL_AUTHORIZED=1 -e APIM_BASE_URL=https://<host>/api/v1 \
+//   -e APIM_EFFECTIVE_MANIFEST_PATH=/ruta/effective-manifest.json \
+//   -e APIM_OPERATION_SET_SHA256=<sha> -e APIM_FILTERED_OPENAPI_SHA256=<sha> \
 //   -e APIM_JWT_M2M_A=<jwtM2mA> -e APIM_JWT_M2M_B=<jwtM2mB> \
 //   -e APIM_JWT_HUMAN_QUOTA=<jwtHuman> -e APIM_JWT_HUMAN_CONCURRENCY=<jwtHumanConc> \
 //   -e APIM_RL_EXPORT_ID=<uuidExportValido> \
@@ -17,13 +20,18 @@ if (__ENV.APIM_RL_AUTHORIZED !== '1' || !__ENV.APIM_BASE_URL) {
   throw new Error('APIM_RL_AUTHORIZED=1 y APIM_BASE_URL son obligatorios');
 }
 for (const envName of [
+  'APIM_EFFECTIVE_MANIFEST_PATH',
+  'APIM_OPERATION_SET_SHA256',
+  'APIM_FILTERED_OPENAPI_SHA256',
+  'APIM_POLICY_HASH',
+  'APIM_REVISION',
   'APIM_JWT_M2M_A',
   'APIM_JWT_M2M_B',
   'APIM_JWT_HUMAN_QUOTA',
   'APIM_JWT_HUMAN_CONCURRENCY',
 ]) {
   if (!__ENV[envName]) {
-    throw new Error(`${envName} es obligatorio para separar identidades por escenario`);
+    throw new Error(`${envName} es obligatorio`);
   }
 }
 
@@ -53,7 +61,20 @@ if (labConcurrencyMax + 1 >= labExpensiveBurstCalls) {
   );
 }
 
-const manifest = JSON.parse(open('../openapi/operation-security.json'));
+// R7-03: exigir manifiesto efectivo autorizado y vinculado por SHA al deployment real
+const manifest = JSON.parse(open(__ENV.APIM_EFFECTIVE_MANIFEST_PATH));
+if (manifest.publicationMode !== 'effective' || manifest.effectivePublication?.authorized !== true) {
+  throw new Error(
+    'Manifiesto rechazado: k6 requiere publicationMode="effective" y effectivePublication.authorized=true',
+  );
+}
+if (manifest.operationSetSha256 !== __ENV.APIM_OPERATION_SET_SHA256) {
+  throw new Error('operationSetSha256 del manifiesto efectivo no coincide con APIM_OPERATION_SET_SHA256');
+}
+if (manifest.filteredOpenApiCanonicalSha256 !== __ENV.APIM_FILTERED_OPENAPI_SHA256) {
+  throw new Error('filteredOpenApiCanonicalSha256 del manifiesto efectivo no coincide con APIM_FILTERED_OPENAPI_SHA256');
+}
+
 const CONCURRENCY_PROFILES = {
   expensive_export: true,
   multipart_import: true,
@@ -70,24 +91,34 @@ function matchesTemplatePath(actualPath, templatePath) {
 }
 
 const exportId = (__ENV.APIM_RL_EXPORT_ID || '').trim();
-const expensivePath =
-  (__ENV.APIM_RL_EXPENSIVE_PATH || '').trim() ||
-  (exportId ? `/auditoria-precios/exportaciones/${exportId}/archivo` : '');
-
-if (!expensivePath || /\{[^}]+\}/.test(expensivePath)) {
-  throw new Error(
-    'RL-05 requiere ruta resuelta real (APIM_RL_EXPORT_ID o APIM_RL_EXPENSIVE_PATH sin placeholders sin resolver)',
-  );
+if (!exportId) {
+  throw new Error('RL-05 requiere APIM_RL_EXPORT_ID de fixture autorizado');
 }
+const expensivePath = `/auditoria-precios/exportaciones/${exportId}/archivo`;
+if (/\{[^}]+\}/.test(expensivePath)) {
+  throw new Error('RL-05 ruta contiene placeholders sin resolver');
+}
+
+const publishedSet = new Set(manifest.effectivePublication.publishedOperationIds || []);
+const excludedSet = new Set([
+  ...(manifest.privateOperationIds || []),
+  ...(manifest.excludedUncontractedLegacyOperationIds || []),
+]);
 const matchedExpensiveOp = manifest.operations.find(
   (op) => op.method === 'GET' && matchesTemplatePath(expensivePath, op.path),
 );
 if (!matchedExpensiveOp) {
-  throw new Error(`RL-05 ruta ${expensivePath} no corresponde a ninguna operación GET del manifiesto APIM`);
+  throw new Error(`RL-05 ruta ${expensivePath} no corresponde al manifiesto efectivo`);
+}
+if (!publishedSet.has(matchedExpensiveOp.operationId) || matchedExpensiveOp.environmentEnabled !== true) {
+  throw new Error(`RL-05 operación ${matchedExpensiveOp.operationId} no está habilitada en el ambiente`);
+}
+if (excludedSet.has(matchedExpensiveOp.operationId)) {
+  throw new Error(`RL-05 operación ${matchedExpensiveOp.operationId} pertenece a rutas excluidas`);
 }
 if (!CONCURRENCY_PROFILES[matchedExpensiveOp.rateProfile]) {
   throw new Error(
-    `RL-05 operación ${matchedExpensiveOp.operationId} tiene rateProfile=${matchedExpensiveOp.rateProfile} sin concurrencia habilitada`,
+    `RL-05 operación ${matchedExpensiveOp.operationId} tiene rateProfile=${matchedExpensiveOp.rateProfile} sin maxConcurrency > 0`,
   );
 }
 
@@ -237,13 +268,13 @@ export function concurrencyExpensive() {
   if (isAuthzRejection(res)) {
     authzFalsePositive.add(1);
     concurrencyUnexpectedStatus.add(1);
-  } else if (res.status === 404 || res.status === 403 || res.status === 401) {
+  } else if (res.status === 404 || res.status === 403 || res.status === 401 || res.status >= 500) {
     concurrencyUnexpectedStatus.add(1);
   } else if (res.status === 429) {
     concurrency429.add(1);
   }
   check(res, {
-    'RL-05 limit-concurrency isolated returns 200 or 429 (never 401/403/404)': (r) =>
+    'RL-05 limit-concurrency isolated returns 200 or 429 (never 401/403/404/5xx)': (r) =>
       r.status === 200 || r.status === 429,
   });
 }
@@ -296,6 +327,8 @@ export function handleSummary(data) {
           sku: __ENV.APIM_SKU || 'UNSET',
           revision: __ENV.APIM_REVISION || 'UNSET',
           policyHash: __ENV.APIM_POLICY_HASH || 'UNSET',
+          operationSetSha256: manifest.operationSetSha256,
+          filteredOpenApiCanonicalSha256: manifest.filteredOpenApiCanonicalSha256,
           rl05OperationId: matchedExpensiveOp.operationId,
           rl05RateProfile: matchedExpensiveOp.rateProfile,
           rl05ResolvedPath: expensivePath,

@@ -59,6 +59,36 @@ def gateway_path_for_public_request(gateway_backend_url: str, public_path: str) 
     return backend_path + public_path[len(api_prefix) :]
 
 
+OPEN_WILDCARD_CIDRS = {"0.0.0.0/0", "*", "::/0"}
+
+
+def validate_aca_network_evidence(gateway_app: dict, aca_env: dict, expected_cidrs: list[str]) -> None:
+    """Valida reglas ACA válidas: Modalidad A (external=false) o Modalidad B (external=true Allow-only)."""
+    external = gateway_app.get("external")
+    if external is False:
+        if aca_env.get("vnetConfiguration") is None:
+            raise ValueError("Modalidad A (external=false) requiere vnetConfiguration != null en acaEnvironment")
+    elif external is True:
+        restrictions = gateway_app.get("ipSecurityRestrictions") or []
+        if not restrictions:
+            raise ValueError("Modalidad B (external=true) requiere ipSecurityRestrictions Allow-only hacia APIM")
+        actions = {r.get("action") for r in restrictions}
+        if actions != {"Allow"}:
+            raise ValueError(
+                "ACA no permite mezclar reglas Allow y Deny: ipSecurityRestrictions debe contener exclusivamente reglas Allow"
+            )
+        allow_cidrs = [r.get("ipAddressRange") for r in restrictions]
+        if any(not c or c in OPEN_WILDCARD_CIDRS for c in allow_cidrs):
+            raise ValueError("ipSecurityRestrictions no admite CIDRs vacíos ni abiertos (0.0.0.0/0, *, ::/0)")
+        if not set(allow_cidrs).issubset(set(expected_cidrs)):
+            raise ValueError("ipSecurityRestrictions contiene CIDRs fuera de expectedApimOriginCidrs")
+    else:
+        raise ValueError("gatewayApp.external debe ser booleano explícito (true o false)")
+
+    if gateway_app.get("directRoutesBlocked") is not True:
+        raise ValueError("Evidencia Azure CLI no acredita bloqueo de rutas directas alternativas")
+
+
 def validate(
     parameters: dict,
     filtered_openapi: dict,
@@ -141,16 +171,7 @@ def validate(
     gateway_app = cli_evidence["gatewayApp"]
     if gateway_app.get("resourceId") != parameters["expectedGatewayResourceId"]:
         raise ValueError("gatewayApp.resourceId de evidencia Azure CLI no coincide con expectedGatewayResourceId")
-    restrictions = gateway_app.get("ipSecurityRestrictions") or []
-    allow_cidrs = {r.get("ipAddressRange") for r in restrictions if r.get("action") == "Allow" and r.get("ipAddressRange")}
-    has_authorized_apim_allow = bool(allow_cidrs) and allow_cidrs.issubset(set(expected_cidrs))
-    has_default_deny = gateway_app.get("external") is False or any(
-        r.get("action") == "Deny" and r.get("ipAddressRange") in {"0.0.0.0/0", "*"} for r in restrictions
-    )
-    if not (gateway_app.get("external") is False or (has_authorized_apim_allow and has_default_deny)):
-        raise ValueError("Evidencia Azure CLI no acredita restricción exacta al origen APIM autorizado ni denegación por defecto")
-    if gateway_app.get("directRoutesBlocked") is not True:
-        raise ValueError("Evidencia Azure CLI no acredita bloqueo de rutas directas alternativas")
+    validate_aca_network_evidence(gateway_app, cli_evidence["acaEnvironment"], expected_cidrs)
 
     if manifest.get("docsSha") != expected_docs_sha:
         raise ValueError("docsSha del manifiesto no coincide con el SHA aprobado")

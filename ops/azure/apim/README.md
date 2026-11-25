@@ -44,8 +44,12 @@ python ops/azure/apim/filter-openapi.py `
 ## Infraestructura, red privada y anti-bypass (`APIM-C06`)
 
 - `main.bicep` permite aprovisionar el candidato `Developer` clásico de laboratorio (`reuseExistingApim = false`) o reutilizar una instancia compatible existente (`reuseExistingApim = true`).
-- La comunicación APIM → Gateway exige HTTPS privado, DNS privado y subred dedicada; el acceso directo externo al Gateway debe denegarse una vez activo APIM, y los ocho microservicios permanecen sin ingress público (`external: false`).
-- Rollback reversible mediante exportación previa de revisión, `operationSetSha256` y hashes de políticas XML.
+- La comunicación APIM → Gateway admite dos modalidades válidas en ACA (`validate-parameters.py` / `apim-live-acceptance.mjs`):
+  - **Modalidad A (Gateway interno):** `external = false`, `vnetConfiguration != null`, DNS privado y conectividad privada verificada.
+  - **Modalidad B (Gateway externo con allowlist):** `external = true`, reglas `ipSecurityRestrictions` exclusivamente `Allow` (sin mezclar `Allow`/`Deny` ni usar `0.0.0.0/0`), restringidas a `expectedApimOriginCidrs` y con bloqueo real desde orígenes no autorizados.
+- Los ocho microservicios permanecen sin ingress público (`external: false`).
+- Rollback reversible mediante exportación previa de revisión, `operationSetSha256` y hashes SHA256 calculados sobre el XML real de políticas obtenido vía `az apim` / `az rest --method get`.
+- Las pruebas k6 (`apim-rl-k6.js`) exigen explícitamente un manifiesto efectivo autorizado (`APIM_EFFECTIVE_MANIFEST_PATH` con `publicationMode="effective"` y `effectivePublication.authorized=true`, nunca el catálogo candidate).
 
 ## Plan de aceptación APIM-T01–T08 / RL-01–RL-06
 

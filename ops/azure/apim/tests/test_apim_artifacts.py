@@ -840,6 +840,61 @@ class ApimClosureRequirementsTests(unittest.TestCase):
             FILTER.canonical_sha256(json.loads((ROOT / "openapi/gateway-filtered.json").read_text(encoding="utf-8"))),
         )
 
+    def test_aca_network_evidence_allow_only_and_internal_modes(self):
+        expected_cidrs = ["20.10.20.30/32"]
+        # Modalidad A: external=false con vnetConfiguration
+        PARAMS.validate_aca_network_evidence(
+            {"external": False, "directRoutesBlocked": True},
+            {"vnetConfiguration": {"infrastructureSubnetId": "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s"}},
+            expected_cidrs,
+        )
+        # Modalidad B: external=true con reglas exclusivamente Allow hacia APIM
+        PARAMS.validate_aca_network_evidence(
+            {
+                "external": True,
+                "ipSecurityRestrictions": [{"action": "Allow", "ipAddressRange": "20.10.20.30/32"}],
+                "directRoutesBlocked": True,
+            },
+            {"vnetConfiguration": None},
+            expected_cidrs,
+        )
+        # Negativo: mezcla Allow y Deny (inválida en ACA)
+        with self.assertRaisesRegex(ValueError, "mezclar reglas Allow y Deny"):
+            PARAMS.validate_aca_network_evidence(
+                {
+                    "external": True,
+                    "ipSecurityRestrictions": [
+                        {"action": "Allow", "ipAddressRange": "20.10.20.30/32"},
+                        {"action": "Deny", "ipAddressRange": "0.0.0.0/0"},
+                    ],
+                    "directRoutesBlocked": True,
+                },
+                {"vnetConfiguration": None},
+                expected_cidrs,
+            )
+        # Negativo: wildcard 0.0.0.0/0 en Allow
+        with self.assertRaisesRegex(ValueError, "abiertos"):
+            PARAMS.validate_aca_network_evidence(
+                {
+                    "external": True,
+                    "ipSecurityRestrictions": [{"action": "Allow", "ipAddressRange": "0.0.0.0/0"}],
+                    "directRoutesBlocked": True,
+                },
+                {"vnetConfiguration": None},
+                expected_cidrs,
+            )
+        # Negativo: CIDR fuera de APIM autorizado
+        with self.assertRaisesRegex(ValueError, "expectedApimOriginCidrs"):
+            PARAMS.validate_aca_network_evidence(
+                {
+                    "external": True,
+                    "ipSecurityRestrictions": [{"action": "Allow", "ipAddressRange": "198.51.100.10/32"}],
+                    "directRoutesBlocked": True,
+                },
+                {"vnetConfiguration": None},
+                expected_cidrs,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
