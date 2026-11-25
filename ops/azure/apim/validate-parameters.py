@@ -78,6 +78,11 @@ def validate(
 
     for key in (
         "environmentTier",
+        "expectedSubscriptionId",
+        "expectedResourceGroup",
+        "expectedEnvironment",
+        "expectedGatewayResourceId",
+        "expectedApimOriginCidrs",
         "apimSubnetResourceId",
         "gatewayBackendUrl",
         "azureCliEvidencePath",
@@ -93,7 +98,6 @@ def validate(
         "rateProfiles",
         "applicationInsightsResourceId",
         "applicationInsightsConnectionString",
-        "filteredOpenApi",
         "expectedOperationSetSha256",
         "expectedFilteredOpenApiSha256",
     ):
@@ -107,6 +111,10 @@ def validate(
     if not isinstance(parameters["operationalApprovalRef"], str) or not parameters["operationalApprovalRef"].strip():
         raise ValueError("Falta operationalApprovalRef aprobado por Castilla/Infra")
 
+    expected_cidrs = parameters["expectedApimOriginCidrs"]
+    if not isinstance(expected_cidrs, list) or not expected_cidrs or any(not isinstance(c, str) or not c.strip() for c in expected_cidrs):
+        raise ValueError("expectedApimOriginCidrs debe ser una lista no vacía de CIDRs APIM autorizados")
+
     cli_evidence_path = Path(str(parameters["azureCliEvidencePath"]))
     if not cli_evidence_path.exists() or cli_evidence_path.stat().st_size == 0:
         raise ValueError(
@@ -116,6 +124,12 @@ def validate(
     for req_field in ("subscriptionId", "resourceGroup", "environment", "capturedAtUtc", "sourceCommand", "acaEnvironment", "gatewayApp"):
         if not cli_evidence.get(req_field):
             raise ValueError(f"Evidencia Azure CLI incompleta: falta {req_field}")
+    if cli_evidence["subscriptionId"] != parameters["expectedSubscriptionId"]:
+        raise ValueError("subscriptionId de evidencia Azure CLI no coincide con expectedSubscriptionId")
+    if cli_evidence["resourceGroup"] != parameters["expectedResourceGroup"]:
+        raise ValueError("resourceGroup de evidencia Azure CLI no coincide con expectedResourceGroup")
+    if cli_evidence["environment"] != parameters["expectedEnvironment"]:
+        raise ValueError("environment de evidencia Azure CLI no coincide con expectedEnvironment")
     if not str(cli_evidence["sourceCommand"]).strip().startswith("az "):
         raise ValueError("Evidencia Azure CLI debe registrar comando az de solo lectura")
     captured_at = datetime.fromisoformat(str(cli_evidence["capturedAtUtc"]).replace("Z", "+00:00"))
@@ -125,13 +139,16 @@ def validate(
     if cli_evidence["acaEnvironment"].get("vnetConfiguration") is None:
         raise ValueError("Evidencia Azure CLI indica vnetConfiguration=null; red privada no acreditada")
     gateway_app = cli_evidence["gatewayApp"]
+    if gateway_app.get("resourceId") != parameters["expectedGatewayResourceId"]:
+        raise ValueError("gatewayApp.resourceId de evidencia Azure CLI no coincide con expectedGatewayResourceId")
     restrictions = gateway_app.get("ipSecurityRestrictions") or []
-    has_apim_allow = any(r.get("action") == "Allow" and r.get("ipAddressRange") for r in restrictions)
+    allow_cidrs = {r.get("ipAddressRange") for r in restrictions if r.get("action") == "Allow" and r.get("ipAddressRange")}
+    has_authorized_apim_allow = bool(allow_cidrs) and allow_cidrs.issubset(set(expected_cidrs))
     has_default_deny = gateway_app.get("external") is False or any(
         r.get("action") == "Deny" and r.get("ipAddressRange") in {"0.0.0.0/0", "*"} for r in restrictions
     )
-    if not (gateway_app.get("external") is False or (has_apim_allow and has_default_deny)):
-        raise ValueError("Evidencia Azure CLI no acredita restricción de origen APIM ni denegación por defecto")
+    if not (gateway_app.get("external") is False or (has_authorized_apim_allow and has_default_deny)):
+        raise ValueError("Evidencia Azure CLI no acredita restricción exacta al origen APIM autorizado ni denegación por defecto")
     if gateway_app.get("directRoutesBlocked") is not True:
         raise ValueError("Evidencia Azure CLI no acredita bloqueo de rutas directas alternativas")
 
@@ -215,14 +232,8 @@ def validate(
             concurrency = profile.get("maxConcurrency", 0)
             if not isinstance(concurrency, int) or isinstance(concurrency, bool) or concurrency < 0:
                 raise ValueError(f"maxConcurrency inválido en perfil {profile_name}")
-    if not isinstance(parameters["filteredOpenApi"], str) or not parameters["filteredOpenApi"].strip():
-        raise ValueError("filteredOpenApi debe contener el contrato JSON filtrado")
-    try:
-        supplied_spec = json.loads(parameters["filteredOpenApi"])
-    except json.JSONDecodeError as error:
-        raise ValueError("filteredOpenApi no contiene JSON válido") from error
-    if FILTER.canonical_sha256(supplied_spec) != FILTER.canonical_sha256(filtered_openapi):
-        raise ValueError("filteredOpenApi no coincide con el artefacto validado")
+    if parameters["expectedFilteredOpenApiSha256"] != FILTER.canonical_sha256(filtered_openapi):
+        raise ValueError("expectedFilteredOpenApiSha256 no coincide con el contenido de gateway-filtered.json")
     FILTER.validate_artifact_pair(filtered_openapi, manifest)
 
 

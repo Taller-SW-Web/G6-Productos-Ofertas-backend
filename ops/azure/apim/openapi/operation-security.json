@@ -694,7 +694,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -703,7 +705,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -732,7 +736,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -741,7 +747,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -770,7 +778,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -779,7 +789,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -808,7 +820,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -817,7 +831,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -846,7 +862,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -855,7 +873,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -884,7 +904,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -893,7 +915,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -922,7 +946,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -931,7 +957,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -960,7 +988,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -969,7 +999,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -998,7 +1030,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -1007,7 +1041,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -1036,7 +1072,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -1045,7 +1083,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -1074,7 +1114,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -1083,7 +1125,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -1196,7 +1240,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -1205,7 +1251,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -1234,7 +1282,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -1243,7 +1293,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -1272,7 +1324,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -1281,7 +1335,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -1310,7 +1366,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -1319,7 +1377,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -1348,7 +1408,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -1357,7 +1419,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -1386,7 +1450,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -1395,7 +1461,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -1424,7 +1492,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -1433,7 +1503,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -1462,7 +1534,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -1471,7 +1545,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -1500,7 +1576,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -1509,7 +1587,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -1680,7 +1760,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         },
@@ -1708,7 +1790,9 @@
       "scopes": [
         "inventario:disponibilidad:leer"
       ],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [
         "modulo-postventa",
         "modulo-ventas"
@@ -1741,7 +1825,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         },
@@ -1766,7 +1852,9 @@
       "scopes": [
         "combos:leer"
       ],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "PENDING_G7_ALLOWLIST",
       "m2mAlternativeExcludedReason": null,
@@ -1896,7 +1984,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         },
@@ -1926,7 +2016,9 @@
       "scopes": [
         "precios:leer"
       ],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [
         "modulo-chatbot",
         "modulo-marketplace",
@@ -1960,7 +2052,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -1969,7 +2063,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -1998,7 +2094,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2007,7 +2105,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2036,7 +2136,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2045,7 +2147,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2116,7 +2220,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2125,7 +2231,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2154,7 +2262,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2163,7 +2273,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2192,7 +2304,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2201,7 +2315,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2230,7 +2346,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2239,7 +2357,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2310,7 +2430,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2319,7 +2441,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2348,7 +2472,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2357,7 +2483,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2386,7 +2514,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2395,7 +2525,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2424,7 +2556,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2433,7 +2567,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2462,7 +2598,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2471,7 +2609,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2500,7 +2640,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2509,7 +2651,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2538,7 +2682,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2547,7 +2693,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2576,7 +2724,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2585,7 +2735,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2614,7 +2766,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2623,7 +2777,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2652,7 +2808,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2661,7 +2819,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2690,7 +2850,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2699,7 +2861,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2728,7 +2892,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2737,7 +2903,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2766,7 +2934,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2775,7 +2945,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2804,7 +2976,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2813,7 +2987,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2842,7 +3018,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2851,7 +3029,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2880,7 +3060,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2889,7 +3071,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2918,7 +3102,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2927,7 +3113,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2956,7 +3144,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -2965,7 +3155,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -2994,7 +3186,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -3003,7 +3197,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -3032,7 +3228,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -3041,7 +3239,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -3070,7 +3270,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -3079,7 +3281,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -3248,7 +3452,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -3257,7 +3463,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -3328,7 +3536,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -3337,7 +3547,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -3418,7 +3630,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         },
@@ -3445,7 +3659,9 @@
       "scopes": [
         "catalogo:leer"
       ],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [
         "modulo-productos"
       ],
@@ -3476,7 +3692,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -3485,7 +3703,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -3514,7 +3734,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -3523,7 +3745,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -3552,7 +3776,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -3561,7 +3787,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -3642,7 +3870,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         },
@@ -3669,7 +3899,9 @@
       "scopes": [
         "catalogo:leer"
       ],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [
         "modulo-productos"
       ],
@@ -3701,7 +3933,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         },
@@ -3730,7 +3964,9 @@
       "scopes": [
         "catalogo:leer"
       ],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [
         "modulo-chatbot",
         "modulo-marketplace",
@@ -3805,7 +4041,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -3814,7 +4052,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -3843,7 +4083,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -3852,7 +4094,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -3882,7 +4126,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         },
@@ -3911,7 +4157,9 @@
       "scopes": [
         "promociones:leer"
       ],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [
         "modulo-chatbot",
         "modulo-marketplace",
@@ -3944,7 +4192,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -3953,7 +4203,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -3982,7 +4234,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -3991,7 +4245,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -4063,7 +4319,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         },
@@ -4090,7 +4348,9 @@
       "scopes": [
         "catalogo:leer"
       ],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [
         "modulo-productos"
       ],
@@ -4121,7 +4381,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -4130,7 +4392,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -4201,7 +4465,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -4210,7 +4476,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -4239,7 +4507,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -4248,7 +4518,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -4278,7 +4550,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         },
@@ -4305,7 +4579,9 @@
       "scopes": [
         "catalogo:leer"
       ],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [
         "modulo-productos"
       ],
@@ -4336,7 +4612,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -4345,7 +4623,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -4416,7 +4696,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -4425,7 +4707,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -4455,7 +4739,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         },
@@ -4482,7 +4768,9 @@
       "scopes": [
         "catalogo:leer"
       ],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [
         "modulo-productos"
       ],
@@ -4514,7 +4802,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         },
@@ -4539,7 +4829,9 @@
       "scopes": [
         "combos:leer"
       ],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "PENDING_G7_ALLOWLIST",
       "m2mAlternativeExcludedReason": null,
@@ -4568,7 +4860,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -4577,7 +4871,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -4606,7 +4902,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -4615,7 +4913,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -4645,7 +4945,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         },
@@ -4672,7 +4974,9 @@
       "scopes": [
         "catalogo:leer"
       ],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [
         "modulo-productos"
       ],
@@ -4703,7 +5007,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -4712,7 +5018,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -4741,7 +5049,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -4750,7 +5060,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -4779,7 +5091,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -4788,7 +5102,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -4817,7 +5133,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -4826,7 +5144,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -4856,7 +5176,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         },
@@ -4883,7 +5205,9 @@
       "scopes": [
         "catalogo:leer"
       ],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [
         "modulo-productos"
       ],
@@ -4914,7 +5238,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -4923,7 +5249,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -4952,7 +5280,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -4961,7 +5291,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -4991,7 +5323,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         },
@@ -5021,7 +5355,9 @@
       "scopes": [
         "precios:leer"
       ],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [
         "modulo-chatbot",
         "modulo-marketplace",
@@ -5055,7 +5391,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -5064,7 +5402,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -5094,7 +5434,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         },
@@ -5124,7 +5466,9 @@
       "scopes": [
         "catalogo:leer"
       ],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [
         "modulo-chatbot",
         "modulo-marketplace",
@@ -5201,7 +5545,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         },
@@ -5230,7 +5576,9 @@
       "scopes": [
         "catalogo:leer"
       ],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [
         "modulo-chatbot",
         "modulo-marketplace",
@@ -5263,7 +5611,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -5272,7 +5622,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -5352,7 +5704,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -5361,7 +5715,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -5390,7 +5746,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -5399,7 +5757,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -5453,7 +5813,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         },
@@ -5480,7 +5842,9 @@
       "scopes": [
         "catalogo:leer"
       ],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [
         "modulo-productos"
       ],
@@ -5511,7 +5875,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -5520,7 +5886,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -5549,7 +5917,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -5558,7 +5928,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -5587,7 +5959,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -5596,7 +5970,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -5625,7 +6001,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -5634,7 +6012,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -5747,7 +6127,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -5756,7 +6138,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -5785,7 +6169,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -5794,7 +6180,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -5823,7 +6211,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -5832,7 +6222,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -5861,7 +6253,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -5870,7 +6264,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -5899,7 +6295,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -5908,7 +6306,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -5937,7 +6337,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -5946,7 +6348,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -5975,7 +6379,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -5984,7 +6390,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -6013,7 +6421,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -6022,7 +6432,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -6051,7 +6463,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -6060,7 +6474,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -6138,7 +6554,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -6147,7 +6565,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -6176,7 +6596,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -6185,7 +6607,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -6421,7 +6845,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -6430,7 +6856,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -6459,7 +6887,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -6468,7 +6898,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -6497,7 +6929,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -6506,7 +6940,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -6535,7 +6971,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -6544,7 +6982,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -6573,7 +7013,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -6582,7 +7024,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,
@@ -6611,7 +7055,9 @@
           "audienceRequired": false,
           "audience": null,
           "scopes": [],
-          "roles": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
           "allowedClients": [],
           "introspectionRequired": false
         }
@@ -6620,7 +7066,9 @@
       "audienceRequired": false,
       "audience": null,
       "scopes": [],
-      "roles": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
       "allowedClients": [],
       "clientAllowlistStatus": "NOT_APPLICABLE",
       "m2mAlternativeExcludedReason": null,

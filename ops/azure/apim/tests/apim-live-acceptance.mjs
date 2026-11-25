@@ -57,6 +57,13 @@ const protectedPath = process.env.APIM_TEST_PROTECTED_PATH?.trim() || '/producto
 const expectedOwner = requireEnv('APIM_EXPECTED_OWNER');
 const expectedOperationId = requireEnv('APIM_EXPECTED_OPERATION_ID');
 const expectedEnvironment = requireEnv('APIM_EXPECTED_ENVIRONMENT');
+const expectedSubscriptionId = requireEnv('APIM_EXPECTED_SUBSCRIPTION_ID');
+const expectedResourceGroup = requireEnv('APIM_EXPECTED_RESOURCE_GROUP');
+const expectedGatewayResourceId = requireEnv('APIM_EXPECTED_GATEWAY_RESOURCE_ID');
+const expectedOriginCidrs = requireEnv('APIM_EXPECTED_ORIGIN_CIDRS')
+  .split(',')
+  .map((c) => c.trim())
+  .filter(Boolean);
 const validM2mJwt = requireEnv('APIM_TEST_M2M_JWT');
 const validHumanJwt = requireEnv('APIM_TEST_HUMAN_JWT');
 const expiredJwt = requireEnv('APIM_TEST_EXPIRED_JWT');
@@ -184,14 +191,19 @@ async function run() {
     assert.ok(String(ingressEvidence.sourceCommand).startsWith('az '), 'APIM-T05 evidencia debe provenir de Azure CLI');
     const ageHours = (Date.now() - Date.parse(ingressEvidence.capturedAtUtc)) / 3600000;
     assert.ok(ageHours >= 0 && ageHours <= 24, 'APIM-T05 evidencia Azure CLI caducada (>24h)');
+    assert.equal(ingressEvidence.subscriptionId, expectedSubscriptionId, 'APIM-T05 subscriptionId no coincide');
+    assert.equal(ingressEvidence.resourceGroup, expectedResourceGroup, 'APIM-T05 resourceGroup no coincide');
     assert.equal(ingressEvidence.environment, expectedEnvironment, 'APIM-T05 evidencia de otro ambiente');
     const gwApp = ingressEvidence.gatewayApp;
+    assert.equal(gwApp.resourceId, expectedGatewayResourceId, 'APIM-T05 gatewayApp.resourceId no coincide');
     const restrictions = gwApp.ipSecurityRestrictions || [];
+    const allowCidrs = restrictions.filter((r) => r.action === 'Allow' && r.ipAddressRange).map((r) => r.ipAddressRange);
     const hasApimOriginRule =
       gwApp.external === false ||
-      (restrictions.some((r) => r.action === 'Allow' && r.ipAddressRange) &&
+      (allowCidrs.length > 0 &&
+        allowCidrs.every((cidr) => expectedOriginCidrs.includes(cidr)) &&
         restrictions.some((r) => r.action === 'Deny' && ['0.0.0.0/0', '*'].includes(r.ipAddressRange)));
-    assert.ok(hasApimOriginRule, 'APIM-T05 falta restricción de origen APIM + denegación por defecto');
+    assert.ok(hasApimOriginRule, 'APIM-T05 falta restricción exacta al CIDR APIM autorizado + denegación por defecto');
     assert.equal(gwApp.directRoutesBlocked, true, 'APIM-T05 rutas directas alternativas no acreditadas como bloqueadas');
 
     const k6Summary = readJsonStrict(k6SummaryPath, 'APIM_K6_SUMMARY_PATH');

@@ -29,15 +29,21 @@ const labBurstCalls = Number(__ENV.APIM_LAB_BURST_CALLS || '0');
 const labBurstWindowSec = Number(__ENV.APIM_LAB_BURST_WINDOW_SEC || '0');
 const labQuotaCalls = Number(__ENV.APIM_LAB_QUOTA_CALLS || '0');
 const labConcurrencyMax = Number(__ENV.APIM_LAB_CONCURRENCY_MAX || '0');
-if (!labBurstCalls || !labBurstWindowSec || !labQuotaCalls || !labConcurrencyMax) {
+const labExpensiveBurstCalls = Number(__ENV.APIM_LAB_EXPENSIVE_BURST_CALLS || '0');
+if (!labBurstCalls || !labBurstWindowSec || !labQuotaCalls || !labConcurrencyMax || !labExpensiveBurstCalls) {
   throw new Error(
-    'APIM_LAB_BURST_CALLS, APIM_LAB_BURST_WINDOW_SEC, APIM_LAB_QUOTA_CALLS y APIM_LAB_CONCURRENCY_MAX son obligatorios',
+    'APIM_LAB_BURST_CALLS, APIM_LAB_BURST_WINDOW_SEC, APIM_LAB_QUOTA_CALLS, APIM_LAB_CONCURRENCY_MAX y APIM_LAB_EXPENSIVE_BURST_CALLS son obligatorios',
+  );
+}
+if (labConcurrencyMax + 1 >= labExpensiveBurstCalls) {
+  throw new Error(
+    'APIM_LAB_EXPENSIVE_BURST_CALLS debe ser mayor que APIM_LAB_CONCURRENCY_MAX + 1 para aislar limit-concurrency de rate-limit-by-key',
   );
 }
 
 const burstRatePerSec = Math.max(labBurstCalls * 3, 15);
 const quotaIterations = labQuotaCalls + 10;
-const concurrencyVus = labConcurrencyMax + 4;
+const concurrencyVus = Math.min(labConcurrencyMax + 2, labExpensiveBurstCalls - 1);
 const recoveryStartSec = labBurstWindowSec + 4;
 
 const burst429 = new Counter('apim_rl_burst_429');
@@ -74,9 +80,9 @@ export const options = {
       exec: 'quotaHumanClient',
     },
     rl05_concurrency_expensive: {
-      executor: 'shared-iterations',
+      executor: 'per-vu-iterations',
       vus: concurrencyVus,
-      iterations: concurrencyVus * 2,
+      iterations: 1,
       startTime: `${recoveryStartSec + 25}s`,
       exec: 'concurrencyExpensive',
     },
@@ -169,11 +175,13 @@ export function concurrencyExpensive() {
     headers: { Authorization: `Bearer ${tokenHumanConcurrency}` },
   });
   if (isAuthzRejection(res)) authzFalsePositive.add(1);
+  // Total de peticiones en rl05 (concurrencyVus < labExpensiveBurstCalls) impide rate-limit-by-key;
+  // cualquier 429 en este escenario aislado proviene exclusivamente de limit-concurrency.
   if (res.status === 429) {
     concurrency429.add(1);
   }
   check(res, {
-    'RL-05 concurrency returns 200 or limit-concurrency 429': (r) =>
+    'RL-05 limit-concurrency isolated returns 200 or 429': (r) =>
       r.status === 200 || r.status === 429,
   });
 }
@@ -206,6 +214,12 @@ export function handleSummary(data) {
             quotaCalls: labQuotaCalls,
             concurrencyMax: labConcurrencyMax,
           },
+        },
+        causes: {
+          burst_rate_limit_by_key_429: data.metrics?.apim_rl_burst_429?.values?.count || 0,
+          quota_by_key_403: data.metrics?.apim_rl_quota_403?.values?.count || 0,
+          limit_concurrency_429: data.metrics?.apim_rl_concurrency_429?.values?.count || 0,
+          authz_false_positive: data.metrics?.apim_rl_authz_false_positive?.values?.count || 0,
         },
         metrics: {
           duration: data.metrics?.http_req_duration?.values || {},

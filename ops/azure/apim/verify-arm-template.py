@@ -17,7 +17,15 @@ def load_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def validate(template, filtered, manifest, expected_docs_sha, expected_gateway_sha):
+def validate(
+    template,
+    filtered,
+    manifest,
+    expected_docs_sha,
+    expected_gateway_sha,
+    *,
+    g5_authorized=False,
+):
     FILTER.validate_artifact_pair(filtered, manifest)
     filter_metadata = filtered.get("x-apim-filter", {})
     for field, expected in (
@@ -56,10 +64,21 @@ def validate(template, filtered, manifest, expected_docs_sha, expected_gateway_s
     operation_ids = {item["operationId"] for item in manifest["operations"]}
     if operation_ids.intersection(manifest["privateOperationIds"]):
         raise ValueError("Una operación privada está incluida en las políticas")
-    if manifest.get("g5EnabledByDefault") is not False or any(
-        item.get("g5OptIn") for item in manifest["operations"]
-    ):
-        raise ValueError("El manifiesto habilita rutas G5 sin opt-in")
+    if manifest.get("g5EnabledByDefault") is not False:
+        raise ValueError("g5EnabledByDefault debe ser siempre false")
+    g5_ops = [item for item in manifest["operations"] if item.get("g5OptIn")]
+    if not g5_authorized:
+        if g5_ops or manifest.get("g5Authorized") is True:
+            raise ValueError("El manifiesto habilita rutas G5 sin opt-in autorizado")
+    else:
+        if manifest.get("g5Flag") is not True or manifest.get("g5Authorized") is not True:
+            raise ValueError("Habilitación G5 inconsistente o sin autorización explícita")
+        for g5_op in g5_ops:
+            if not g5_op.get("scopes") or not g5_op.get("allowedClients"):
+                raise ValueError(f"Operación G5 sin scopes o clientes contractuales: {g5_op['operationId']}")
+    api_resource = resources.get("api", {})
+    if api_resource.get("properties", {}).get("value") != "[variables('fixedFilteredOpenApi')]":
+        raise ValueError("El recurso API en ARM debe consumir variables('fixedFilteredOpenApi') fijado")
     if set(manifest.get("excludedUncontractedLegacyOperationIds", [])) != set(FILTER.LEGACY_UNCONTRACTED):
         raise ValueError("Las exclusiones legacy de Pricing no corresponden al contrato")
     if len(filtered.get("paths", {})) == 0:
@@ -83,6 +102,7 @@ def validate_source_artifacts(
     public_provider_exceptions=None,
     enable_g5=False,
     g5_authorized=False,
+    allow_human_only_when_m2m_pending=False,
 ):
     source = FILTER.yaml.safe_load(source_openapi.read_text(encoding="utf-8"))
     g5_routes = FILTER.read_registry(g5_routes_path)
@@ -102,6 +122,7 @@ def validate_source_artifacts(
         authorized_public_allowlist=authorized_public_allowlist or [],
         public_provider_exceptions=public_provider_exceptions or [],
         effective_publish=effective_publish,
+        allow_human_only_when_m2m_pending=allow_human_only_when_m2m_pending,
     )
     if generated_filtered != filtered or generated_manifest != manifest:
         raise ValueError("Los artefactos APIM no se regeneran exactamente desde Docs y Gateway aprobados")
@@ -127,6 +148,7 @@ def main():
     parser.add_argument("--public-provider-exceptions", nargs="*", default=[])
     parser.add_argument("--enable-g5", action="store_true")
     parser.add_argument("--g5-authorized", action="store_true")
+    parser.add_argument("--allow-human-only-when-m2m-pending", action="store_true")
     parser.add_argument("--filtered-openapi", type=Path, default=ROOT / "openapi/gateway-filtered.json")
     parser.add_argument("--manifest", type=Path, default=ROOT / "openapi/operation-security.json")
     args = parser.parse_args()
@@ -147,6 +169,7 @@ def main():
         public_provider_exceptions=args.public_provider_exceptions,
         enable_g5=args.enable_g5,
         g5_authorized=args.g5_authorized,
+        allow_human_only_when_m2m_pending=args.allow_human_only_when_m2m_pending,
     )
     count = validate(
         load_json(args.template), filtered, manifest, args.expected_docs_sha, args.expected_gateway_sha

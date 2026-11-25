@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import re
@@ -15,9 +16,11 @@ HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head"}
 ROUTE_ENTRY = re.compile(
     r"\{\s*method:\s*['\"]([A-Z]+)['\"]\s*,\s*"
     r"path:\s*['\"]([^'\"]+)['\"]\s*,\s*"
-    r"operationId:\s*['\"]([A-Za-z0-9_.-]+)['\"](?:.*?service:\s*['\"]([a-z0-9-]+)['\"])?",
+    r"operationId:\s*['\"]([A-Za-z0-9_.-]+)['\"](.*?)(?=\n  \{|\n\];)",
     re.S,
 )
+SERVICE_PROP = re.compile(r"service:\s*['\"]([a-z0-9-]+)['\"]")
+ROLE_PROP = re.compile(r"role:\s*['\"]([A-Za-z0-9_.-]+)['\"]")
 LEGACY_UNCONTRACTED = {
     "obtenerDefinicionPrecioProductoAdministracion",
     "obtenerDefinicionPrecioSkuAdministracion",
@@ -36,15 +39,19 @@ KNOWN_RATE_PROFILES = {
 
 def read_registry(path: Path) -> list[dict[str, str]]:
     contents = path.read_text(encoding="utf-8")
-    entries = [
-        {
-            "method": method,
-            "path": route_path,
-            "operationId": operation_id,
-            **({"service": service} if service else {}),
-        }
-        for method, route_path, operation_id, service in ROUTE_ENTRY.findall(contents)
-    ]
+    entries = []
+    for method, route_path, operation_id, tail in ROUTE_ENTRY.findall(contents):
+        service_match = SERVICE_PROP.search(tail)
+        role_match = ROLE_PROP.search(tail)
+        entries.append(
+            {
+                "method": method,
+                "path": route_path,
+                "operationId": operation_id,
+                **({"service": service_match.group(1)} if service_match else {}),
+                **({"role": role_match.group(1)} if role_match else {}),
+            }
+        )
     operation_ids = [entry["operationId"] for entry in entries]
     if not entries:
         raise ValueError(f"No se encontraron operationId en {path}")
@@ -158,6 +165,7 @@ def extract_operation_security_metadata(
     is_g5: bool,
     *,
     service_name: str | None = None,
+    gateway_role: str | None = None,
     enabled_providers: set[str] | None = None,
     authorized_public_allowlist: set[str] | None = None,
     public_provider_exceptions: set[str] | None = None,
@@ -190,6 +198,14 @@ def extract_operation_security_metadata(
         raise ValueError(f"x-auth-validation desconocido en {operation_id}: {introspection_mode!r}")
     introspection_required = introspection_mode == "introspection"
 
+    # APIM-R4-03: paridad de roles humanos APIM/Gateway (predeterminado GESTOR_COMERCIAL cuando falta)
+    effective_human_roles = list(roles) if roles else (["GESTOR_COMERCIAL"] if has_human else [])
+    if gateway_role and has_human and gateway_role not in effective_human_roles:
+        raise ValueError(
+            f"Discrepancia explícita de rol entre Docs y Gateway para {operation_id}: "
+            f"Docs={effective_human_roles}, Gateway={gateway_role}"
+        )
+
     security_alternatives: list[dict] = []
     if has_human:
         security_alternatives.append(
@@ -200,7 +216,7 @@ def extract_operation_security_metadata(
                 "audienceRequired": False,
                 "audience": None,
                 "scopes": [],
-                "roles": roles,
+                "roles": effective_human_roles,
                 "allowedClients": [],
                 "introspectionRequired": introspection_required,
             }
@@ -284,7 +300,7 @@ def extract_operation_security_metadata(
         "audienceRequired": effective_audience_required,
         "audience": audience if "serviceBearer" in effective_auth_schemes else None,
         "scopes": scopes if "serviceBearer" in effective_auth_schemes else [],
-        "roles": roles,
+        "roles": effective_human_roles if "userBearer" in effective_auth_schemes else [],
         "allowedClients": allowed_clients if "serviceBearer" in effective_auth_schemes else [],
         "clientAllowlistStatus": client_allowlist_status,
         "m2mAlternativeExcludedReason": m2m_alternative_excluded_reason,
@@ -352,6 +368,17 @@ def validate_artifact_pair(filtered: dict, manifest: dict) -> None:
             raise ValueError(f"identityType inválido en {operation['operationId']}")
         if operation.get("secured") and not operation.get("securityAlternatives"):
             raise ValueError(f"Faltan securityAlternatives en {operation['operationId']}")
+        # APIM-R4-01: comprobar correspondencia entre security del OpenAPI y securityAlternatives del manifiesto
+        path_item = filtered.get("paths", {}).get(operation["path"], {})
+        op_obj = path_item.get(operation["method"].lower(), {})
+        declared_schemes = _extract_security_schemes(op_obj, filtered)
+        manifest_schemes = sorted(operation.get("authSchemes", []))
+        alt_schemes = sorted(alt["scheme"] for alt in operation.get("securityAlternatives", []))
+        if declared_schemes != manifest_schemes or declared_schemes != alt_schemes:
+            raise ValueError(
+                f"Inconsistencia entre security del OpenAPI filtrado ({declared_schemes}) "
+                f"y securityAlternatives del manifiesto ({alt_schemes}) en {operation['operationId']}"
+            )
 
 
 def filter_spec(
@@ -450,6 +477,7 @@ def filter_spec(
             source,
             operation_id in g5_ids,
             service_name=route_index[operation_id].get("service"),
+            gateway_role=route_index[operation_id].get("role"),
             enabled_providers=provider_set,
             authorized_public_allowlist=public_allowlist_set,
             public_provider_exceptions=public_exception_set,
@@ -477,8 +505,7 @@ def filter_spec(
             f"Publicación efectiva bloqueada (fail-closed): {', '.join(blocked_reasons)}"
         )
 
-    # APIM-R2-02: en modo effective_publish, el OpenAPI filtrado y manifest.operations
-    # contienen EXCLUSIVAMENTE las operaciones autorizadas (subconjunto efectivo).
+    # APIM-R4-01: proyectar copia independiente y eliminar alternativa M2M excluida del OpenAPI efectivo
     emitted_operations = published_operations if effective_publish else candidate_operations
     selected_paths: dict[str, dict] = {}
     for op in emitted_operations:
@@ -486,9 +513,14 @@ def filter_spec(
         path_item = source["paths"][path]
         selected = selected_paths.setdefault(
             path,
-            {key: value for key, value in path_item.items() if key not in HTTP_METHODS},
+            {key: copy.deepcopy(value) for key, value in path_item.items() if key not in HTTP_METHODS},
         )
-        selected[method] = operation
+        projected_op = copy.deepcopy(operation)
+        if op.get("m2mAlternativeExcludedReason") == "PENDING_G7_ALLOWLIST":
+            projected_op["security"] = [{"userBearer": []}]
+            for m2m_ext in ("x-service-audience", "x-required-scope", "x-allowed-client-ids"):
+                projected_op.pop(m2m_ext, None)
+        selected[method] = projected_op
 
     filtered = dict(source)
     filtered["paths"] = selected_paths

@@ -49,8 +49,6 @@ param applicationInsightsResourceId string
 @secure()
 @description('Cadena de conexión de Application Insights; no se almacena en el repositorio.')
 param applicationInsightsConnectionString string
-@description('OpenAPI JSON efectivo generado por filter-openapi.py; se suministra al deployment autorizado.')
-param filteredOpenApi string
 @description('SHA-256 esperado de operationSetSha256 del manifiesto efectivo autorizado.')
 param expectedOperationSetSha256 string
 @description('SHA-256 esperado del OpenAPI filtrado efectivo autorizado.')
@@ -58,6 +56,7 @@ param expectedFilteredOpenApiSha256 string
 
 var apiName = 'g6-productos-ofertas'
 var operationsManifest = loadJsonContent('./openapi/operation-security.json')
+var fixedFilteredOpenApi = loadTextContent('./openapi/gateway-filtered.json')
 var publicationGatePassed = operationsManifest.publicationMode == 'effective' && operationsManifest.effectivePublication.authorized == true && operationsManifest.operationSetSha256 == expectedOperationSetSha256 && operationsManifest.filteredOpenApiCanonicalSha256 == expectedFilteredOpenApiSha256
 var authorizedOperations = publicationGatePassed ? filter(operationsManifest.operations, op => op.environmentEnabled == true) : []
 var corsOriginNodes = join(map(corsAllowedOrigins, origin => '<origin>${xmlEscape(origin)}</origin>'), '')
@@ -107,7 +106,7 @@ resource api 'Microsoft.ApiManagement/service/apis@2022-08-01' = if (publication
     serviceUrl: gatewayBackendUrl
     subscriptionRequired: false
     format: 'openapi+json'
-    value: filteredOpenApi
+    value: fixedFilteredOpenApi
   }
 }
 

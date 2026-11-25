@@ -409,6 +409,7 @@ class CompiledArmTests(unittest.TestCase):
                 manifest,
                 EXPECTED_DOCS_SHA,
                 EXPECTED_GATEWAY_SHA,
+                mode="candidate",
             )
             filtered["paths"]["/productos"]["get"]["summary"] = "Documento obsoleto"
             with self.assertRaisesRegex(ValueError, "no se regeneran exactamente"):
@@ -420,6 +421,7 @@ class CompiledArmTests(unittest.TestCase):
                     manifest,
                     EXPECTED_DOCS_SHA,
                     EXPECTED_GATEWAY_SHA,
+                    mode="candidate",
                 )
 
     def test_compiled_arm_has_exact_hierarchical_policy_set_and_exclusions(self):
@@ -590,12 +592,150 @@ class ApimClosureRequirementsTests(unittest.TestCase):
         self.assertTrue(manifest["effectivePublication"]["authorized"])
         self.assertEqual(manifest["effectivePublication"]["publishedOperationIds"], ["obtenerCombo"])
         self.assertEqual(manifest["operations"][0]["identityType"], "human")
+        self.assertEqual(manifest["operations"][0]["roles"], ["GESTOR_COMERCIAL"])
         self.assertEqual(manifest["operations"][0]["m2mAlternativeExcludedReason"], "PENDING_G7_ALLOWLIST")
         self.assertEqual(set(filtered["paths"].keys()), {"/combo"})
+        self.assertEqual(filtered["paths"]["/combo"]["get"]["security"], [{"userBearer": []}])
+        self.assertNotIn("x-service-audience", filtered["paths"]["/combo"]["get"])
+        self.assertNotIn("x-required-scope", filtered["paths"]["/combo"]["get"])
         self.assertIn(
             {"operationId": "consultarDisponibilidadCombo", "reason": "PENDING_G7_ALLOWLIST"},
             manifest["effectivePublication"]["excludedOperations"],
         )
+
+        # APIM-R4-01 negativo: OpenAPI que anuncia serviceBearer cuando manifiesto permite solo userBearer
+        tampered = copy.deepcopy(filtered)
+        tampered["paths"]["/combo"]["get"]["security"] = [{"userBearer": []}, {"serviceBearer": []}]
+        with self.assertRaisesRegex(ValueError, "Inconsistencia entre security"):
+            FILTER.validate_artifact_pair(tampered, manifest)
+
+    def test_human_role_parity_default_explicit_and_mismatch(self):
+        private = {
+            f"interna{i}": {"get": {"operationId": f"interna{i}", "x-internal": True}}
+            for i in range(1, 6)
+        }
+        spec = {
+            "openapi": "3.0.3",
+            "info": {"title": "t", "version": "1"},
+            "paths": {
+                **{f"/{p}": item for p, item in private.items()},
+                "/sin-rol": {"get": {"operationId": "opSinRol", "security": [{"userBearer": []}]}},
+                "/con-rol": {
+                    "get": {
+                        "operationId": "opConRol",
+                        "security": [{"userBearer": []}],
+                        "x-required-role": "ADMIN_SISTEMA",
+                    }
+                },
+            },
+            "servers": [{"url": "/api/v1"}],
+        }
+        routes = [
+            {"method": "GET", "path": "/api/v1/sin-rol", "operationId": "opSinRol", "service": "catalog-svc"},
+            {"method": "GET", "path": "/api/v1/con-rol", "operationId": "opConRol", "service": "catalog-svc"},
+        ]
+        _, manifest = FILTER.filter_spec(
+            spec, routes, [], False, "d", "g",
+            security_profile="G7_AUTHENTICATED", enabled_providers=["catalog-svc"], effective_publish=True,
+        )
+        by_id = {op["operationId"]: op for op in manifest["operations"]}
+        self.assertEqual(by_id["opSinRol"]["roles"], ["GESTOR_COMERCIAL"])
+        self.assertEqual(by_id["opConRol"]["roles"], ["ADMIN_SISTEMA"])
+
+        # Discrepancia explícita entre rol Docs y Gateway bloquea generación
+        bad_routes = [
+            {"method": "GET", "path": "/api/v1/sin-rol", "operationId": "opSinRol", "service": "catalog-svc"},
+            {
+                "method": "GET",
+                "path": "/api/v1/con-rol",
+                "operationId": "opConRol",
+                "service": "catalog-svc",
+                "role": "OTRO_ROL",
+            },
+        ]
+        with self.assertRaisesRegex(ValueError, "Discrepancia explícita de rol"):
+            FILTER.filter_spec(spec, bad_routes, [], False, "d", "g")
+
+    def test_effective_g5_opt_in_reproducibility_and_arm_fixed_openapi(self):
+        private = {
+            f"interna{i}": {"get": {"operationId": f"interna{i}", "x-internal": True}}
+            for i in range(1, 6)
+        }
+        g5_paths = {
+            f"/g5/{i}": {
+                "post": {
+                    "operationId": f"operacionG5{i}",
+                    "security": [{"serviceBearer": []}],
+                    "x-service-audience": "api-productos",
+                    "x-required-scope": "cupones:consumir",
+                    "x-allowed-client-ids": ["modulo-ventas"],
+                }
+            }
+            for i in range(1, 5)
+        }
+        spec = {
+            "openapi": "3.1.0",
+            "info": {"title": "fixture", "version": "0.7.0-rc.3"},
+            "servers": [{"url": "/api/v1"}],
+            "paths": {
+                **{f"/{p}": item for p, item in private.items()},
+                "/productos": {
+                    "get": {"operationId": "listarProductos", "security": [{"userBearer": []}]}
+                },
+                **g5_paths,
+            },
+        }
+        with tempfile.TemporaryDirectory(prefix="apim-effective-g5-") as tmp:
+            d = Path(tmp)
+            src = d / "openapi.yaml"
+            gw = d / "contract-routes.ts"
+            g5 = d / "g5-h5-routes.ts"
+            src.write_text(json.dumps(spec), encoding="utf-8")
+            gw.write_text("[{ method: 'GET', path: '/api/v1/productos', operationId: 'listarProductos', service: 'catalog-svc' }]", encoding="utf-8")
+            g5.write_text("[\n" + ",\n".join(f"{{ method: 'POST', path: '/api/v1/g5/{i}', operationId: 'operacionG5{i}', service: 'promotions-svc' }}" for i in range(1, 5)) + "\n]", encoding="utf-8")
+            filtered, manifest = FILTER.filter_spec(
+                spec,
+                FILTER.read_registry(gw),
+                FILTER.read_registry(g5),
+                True,
+                EXPECTED_DOCS_SHA,
+                EXPECTED_GATEWAY_SHA,
+                g5_authorized=True,
+                security_profile="G7_AUTHENTICATED",
+                enabled_providers=["catalog-svc", "promotions-svc"],
+                effective_publish=True,
+            )
+            ARM.validate_source_artifacts(
+                src, gw, g5, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA,
+                mode="effective",
+                security_profile="G7_AUTHENTICATED",
+                enabled_providers=["catalog-svc", "promotions-svc"],
+                enable_g5=True,
+                g5_authorized=True,
+            )
+            fake_arm = {
+                "variables": {
+                    "operationsManifest": "[variables('compiled')]",
+                    "compiled": manifest,
+                },
+                "resources": {
+                    "api": {"properties": {"value": "[variables('fixedFilteredOpenApi')]"}},
+                    "operationPolicies": {
+                        "type": "Microsoft.ApiManagement/service/apis/operations/policies",
+                        "copy": {"count": "[length(variables('authorizedOperations'))]"},
+                        "name": "[format('{0}/{1}/{2}/policy', parameters('apimName'), variables('apiName'), variables('authorizedOperations')[copyIndex()].apimOperationId)]",
+                        "dependsOn": ["api", "openIdNamedValue", "issuerNamedValue", "audienceNamedValue"],
+                    },
+                },
+            }
+            ARM.validate(fake_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=True)
+            # Negativo: G5 presente sin autorización
+            with self.assertRaisesRegex(ValueError, "sin opt-in autorizado"):
+                ARM.validate(fake_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=False)
+            # Negativo: OpenAPI intercambiado en ARM
+            fake_arm["resources"]["api"]["properties"]["value"] = "[parameters('filteredOpenApi')]"
+            with self.assertRaisesRegex(ValueError, "fixedFilteredOpenApi"):
+                ARM.validate(fake_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=True)
 
     def test_rejects_unknown_security_profile_and_public_without_enabled_provider(self):
         private = {
@@ -654,6 +794,8 @@ class ApimClosureRequirementsTests(unittest.TestCase):
         self.assertIn("param reuseExistingApim bool", bicep_text)
         self.assertIn("param environmentTier string", bicep_text)
         self.assertIn("param rateProfiles object\n", bicep_text)
+        self.assertIn("var fixedFilteredOpenApi = loadTextContent('./openapi/gateway-filtered.json')", bicep_text)
+        self.assertNotIn("param filteredOpenApi string", bicep_text)
         self.assertIn("var publicationGatePassed", bicep_text)
         self.assertIn("var authorizedOperations", bicep_text)
         self.assertNotIn("requireEffectivePublication", bicep_text)
