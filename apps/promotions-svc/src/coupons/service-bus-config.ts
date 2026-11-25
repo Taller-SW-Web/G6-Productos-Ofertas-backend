@@ -6,6 +6,22 @@ export interface PromotionsServiceBusConfig {
   couponAdmissionPaused?: boolean;
 }
 
+function isSecureG7Issuer(value: string | undefined): boolean {
+  try {
+    const url = new URL(value ?? '');
+    return (
+      url.protocol === 'https:' &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      value?.trim() === value
+    );
+  } catch {
+    return false;
+  }
+}
+
 // Internal transport configuration, never a grant for the proposed G5 API.
 export function readPromotionsServiceBus(
   env: Readonly<NodeJS.ProcessEnv>,
@@ -44,13 +60,20 @@ export function readPromotionsServiceBus(
     env.RABBITMQ_URL !== undefined ||
     env.PROMOTIONS_COUPON_RUNTIME_ENABLED === 'true' ||
     (couponCommands === 'true' &&
-      env.G6_SECURITY_MODE !== 'G7_AUTHENTICATED') ||
+      (!['G7_AUTHENTICATED', 'PUBLIC_READ_ONLY'].includes(
+        env.G6_SECURITY_MODE ?? '',
+      ) ||
+        !isSecureG7Issuer(env.AUTH_ISSUER) ||
+        !isSecureG7Issuer(env.AUTH_JWKS_URL) ||
+        !identity)) ||
     (identity !== undefined &&
       (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(identity) ||
         /^0{8}-0{4}-0{4}-0{4}-0{12}$/.test(identity))) ||
     (env.NODE_ENV === 'production' &&
       (production !== 'true' ||
-        env.G6_SECURITY_MODE !== 'G7_AUTHENTICATED' ||
+        !['G7_AUTHENTICATED', 'PUBLIC_READ_ONLY'].includes(
+          env.G6_SECURITY_MODE ?? '',
+        ) ||
         !identity)) ||
     (env.NODE_ENV !== 'production' && production === 'true')
   )
