@@ -85,6 +85,7 @@ for (const line of lines) {
       security: [],
       responses: new Set(),
       errorCodes: new Map(),
+      errorCodeParseFailures: [],
     };
     operations.push(current);
     section = '';
@@ -136,10 +137,14 @@ for (const line of lines) {
       currentErrorStatus = status;
       if (rhs.startsWith('*')) {
         const aliasName = rhs.slice(1).trim();
-        current.errorCodes.set(
-          status,
-          [...(yamlListAnchors.get(aliasName) ?? [])],
-        );
+        const resolved = yamlListAnchors.get(aliasName);
+        if (!resolved || resolved.length === 0) {
+          current.errorCodeParseFailures.push(
+            `OpenAPI: alias YAML '*${aliasName}' en x-error-codes (${status}) de ${current.method} ${current.path} no pudo resolverse`,
+          );
+        } else {
+          current.errorCodes.set(status, [...resolved]);
+        }
       } else if (rhs.startsWith('[') && rhs.endsWith(']')) {
         const inlineItems = rhs
           .slice(1, -1)
@@ -406,6 +411,14 @@ failures.push(...extras('NestJS', operations, runtime));
 
 for (const op of operations) {
   const opKey = key(op.method, op.path);
+  failures.push(...op.errorCodeParseFailures);
+  for (const [status, codes] of op.errorCodes.entries()) {
+    if (codes.length === 0) {
+      failures.push(
+        `OpenAPI: x-error-codes vacío para HTTP ${status} en ${op.operationId} (${opKey})`,
+      );
+    }
+  }
   const gw = gateway.find((r) => key(r.method, r.path) === opKey);
   if (gw) {
     if (gw.operationId !== op.operationId) {

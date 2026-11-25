@@ -48,6 +48,10 @@ if [[ "$mode" == 'postgres-only' ]]; then
   if [[ -z "$test_file" ]]; then
     test_file='combos-postgres.e2e-spec.ts'
   fi
+  if [[ "$test_file" == 'combos-h5-performance.e2e-spec.ts' && "${G6_PERFORMANCE_HTTP:-}" != 1 ]]; then
+    printf 'combos-h5-performance.e2e-spec.ts requiere G6_PERFORMANCE_HTTP=1.\n' >&2
+    exit 2
+  fi
   expected_suites="$test_file"
 else
   case "$test_file" in
@@ -419,11 +423,17 @@ if [[ "$mode" == 'legacy' ]]; then
   npm run build:pricing-svc
 fi
 
-test_target='apps/combos-svc'
 if [[ -n "$test_file" ]]; then
-  test_target="apps/combos-svc/test/$test_file"
+  test_targets=("apps/combos-svc/test/$test_file")
+else
+  test_targets=(
+    'apps/combos-svc/test/app.e2e-spec.ts'
+    'apps/combos-svc/test/combos-postgres.e2e-spec.ts'
+    'apps/combos-svc/test/combos-rabbitmq.e2e-spec.ts'
+    'apps/combos-svc/test/combos-catalog-rabbitmq.e2e-spec.ts'
+  )
 fi
-test_args=("$test_target" --maxWorkers=1 --no-file-parallelism)
+test_args=("${test_targets[@]}" --maxWorkers=1 --no-file-parallelism)
 if [[ -n "$test_name_pattern" ]]; then
   test_args+=(--testNamePattern "$test_name_pattern")
 fi
