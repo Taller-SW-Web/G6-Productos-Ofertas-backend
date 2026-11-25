@@ -1,6 +1,7 @@
 {
   "docsSha": "490172c11cb4b83ddd1996f8d5834d0402184cf8",
   "gatewaySha": "b0c41cb41e089cffb349da9c3938f8f62e793cd6",
+  "publicationMode": "candidate",
   "securityProfile": "UNSPECIFIED",
   "enabledProviders": [],
   "authorizedPublicAllowlist": [],
@@ -46,12 +47,621 @@
     "authorized": false,
     "status": "BLOCKED_MISSING_ENV_CONFIG",
     "blockedReasons": [
-      "NO_ENABLED_PROVIDERS",
       "NO_SECURITY_PROFILE",
-      "PENDING_G7_CLIENT_ALLOWLIST",
-      "NO_ENVIRONMENT_ENABLED_OPERATIONS"
+      "NO_ENABLED_PROVIDERS_OR_ALLOWLIST",
+      "NO_AUTHORIZED_OPERATIONS"
     ],
-    "publishedOperationIds": []
+    "publishedOperationIds": [],
+    "excludedOperations": [
+      {
+        "operationId": "activarCupon",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "activarProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "activarPromocion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "activarReglaRecomendacion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "activarVariante",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "actualizarAsociacionTipoCaracteristica",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "actualizarCaracteristica",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "actualizarCategoria",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "actualizarCombo",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "actualizarCupon",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "actualizarMarca",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "actualizarPrecioBaseProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "actualizarPrecioSku",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "actualizarProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "actualizarPromocion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "actualizarReglaRecomendacion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "actualizarSeoCategoria",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "actualizarUmbralGlobal",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "actualizarValorCaracteristica",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "actualizarVariante",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "asociarCaracteristicaTipoProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "conciliarImportacionGeneralPorCorrelacion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "conciliarVentaOffline",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "confirmarReserva",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "consultarDatosFisicos",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "consultarDisponibilidad",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "consultarDisponibilidadCombo",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "consultarDisponibilidadComercial",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "consultarOperacionInventario",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "consultarPrecios",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "crearCaracteristica",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "crearCategoria",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "crearCombo",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "crearComboAdministracion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "crearCupon",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "crearExportacionAuditoriaPrecios",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "crearExportacionGeneralProductos",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "crearImportacionGeneralProductos",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "crearImportacionPrecios",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "crearMarca",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "crearProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "crearPromocion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "crearReglaRecomendacion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "crearTipoProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "crearValorCaracteristica",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "crearVariante",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "desactivarCaracteristica",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "desactivarCombo",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "desactivarCupon",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "desactivarProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "desactivarPromocion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "desactivarReglaRecomendacion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "desactivarVariante",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "descargarExportacionAuditoriaPrecios",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "descargarExportacionGeneralProductos",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "descargarPlantillaProductos",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "descargarReporteImportacionGeneral",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "descargarReporteImportacionPrecios",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "eliminarUmbralSku",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "establecerUmbralSku",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "evaluarPromociones",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "filtrarSkusVendiblesInterno",
+        "reason": "INTERNAL_EXCLUDED"
+      },
+      {
+        "operationId": "liberarReserva",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarAlertasOperativasInventario",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarAuditoriaPrecios",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarAuditoriaPreciosAdministracion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarCaracteristicas",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarCategorias",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarCategoriasAdmin",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarCombosAdmin",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarCupones",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarHistorialSlugCategoria",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarMarcas",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarMarcasAdmin",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarProductos",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarProductosAdministracion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarProgramacionesPrecioProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarProgramacionesPrecioSku",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarPromociones",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarPromocionesAdmin",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarReglasRecomendacion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarSaldosFisicosAdministracion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarTiposProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarTrasladosInventario",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarUbicacionesInventario",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarValoresCaracteristica",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "listarVariantesProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerArbolCategoriasAdmin",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerAuditoriaPrecio",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerAuditoriaPrecioAdministracion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerCaracteristica",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerCategoriaAdmin",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerCombo",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerContenidoCargaMasivaInternoH5",
+        "reason": "INTERNAL_EXCLUDED"
+      },
+      {
+        "operationId": "obtenerContextoSku",
+        "reason": "INTERNAL_EXCLUDED"
+      },
+      {
+        "operationId": "obtenerContextosSkuLote",
+        "reason": "INTERNAL_EXCLUDED"
+      },
+      {
+        "operationId": "obtenerCuponAdmin",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerDashboardInventario",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerDefinicionPrecioProductoAdministracion",
+        "reason": "LEGACY_PRICING_EXCLUDED"
+      },
+      {
+        "operationId": "obtenerDefinicionPrecioSkuAdministracion",
+        "reason": "LEGACY_PRICING_EXCLUDED"
+      },
+      {
+        "operationId": "obtenerEsquemaTipoProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerEvidenciaReservaCuponInterno",
+        "reason": "INTERNAL_EXCLUDED"
+      },
+      {
+        "operationId": "obtenerExportacionAuditoriaPrecios",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerExportacionGeneralProductos",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerImportacionGeneralProductos",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerImportacionPrecios",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerMarcaAdmin",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerOperacionMaestra",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerPrecioBaseProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerPrecioSku",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerPreparacionProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerProductoAdministracion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerProductoPorSlug",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerPromocionAdmin",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerRecomendaciones",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerReglaRecomendacion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerSeoCategoriaAdmin",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerSeoPorSlug",
+        "reason": "PUBLIC_NOT_IN_ALLOWLIST"
+      },
+      {
+        "operationId": "obtenerTipoProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerTrasladoInventario",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerUmbralesInventario",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerVariante",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "prevalidarImportacionPrecios",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "programarPrecioBaseProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "programarPrecioSku",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "reactivarCaracteristica",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "reactivarCategoria",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "reactivarMarca",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "reactivarProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "reactivarTipoProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "reactivarValorCaracteristica",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "reactivarVariante",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "reanudarImportacionGeneral",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "registrarRecepcionTrasladoInventario",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "reintegrarInventario",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "reintentarPreparacionProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "reintentarPreparacionVariante",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "reportarIncidenciaInventario",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "resolverCodigoBarras",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "resolverIncidenciaInventario",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "resolverSkusAdministracion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "resolverSlugAnterior",
+        "reason": "PUBLIC_NOT_IN_ALLOWLIST"
+      },
+      {
+        "operationId": "resolverSlugCategoriaCreacion",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "solicitarDesactivacionCategoria",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "solicitarDesactivacionMarca",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "solicitarDesactivacionTipoProducto",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "solicitarDesactivacionValorCaracteristica",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "solicitarDesasociacionTipoCaracteristica",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "solicitarReserva",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "validarCupon",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "verificarCantidadComercial",
+        "reason": "NO_SECURITY_PROFILE"
+      }
+    ]
   },
   "privateOperationIds": [
     "filtrarSkusVendiblesInterno",
@@ -6026,5 +6636,5 @@
     }
   ],
   "operationSetSha256": "040544e1666747ff00c9eb77c6509b6831c83368dcba7b0ef29f3668ac7365fb",
-  "filteredOpenApiCanonicalSha256": "b15cf916664a5f7008029dc33c50eeafd38127b32b3c54db0a50d32178124247"
+  "filteredOpenApiCanonicalSha256": "366af8b3b0a51047ce2492052c9ac7990fc2fba091af3ec6dff736ce27fadda2"
 }

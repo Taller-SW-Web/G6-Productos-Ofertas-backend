@@ -58,12 +58,26 @@ def gateway_path_for_public_request(gateway_backend_url: str, public_path: str) 
     return backend_path + public_path[len(api_prefix) :]
 
 
-def validate(parameters: dict, filtered_openapi: dict, manifest: dict) -> None:
+def validate(
+    parameters: dict,
+    filtered_openapi: dict,
+    manifest: dict,
+    *,
+    expected_docs_sha: str | None = None,
+    expected_gateway_sha: str | None = None,
+) -> None:
+    if manifest.get("effectivePublication", {}).get("authorized") is not True:
+        raise ValueError(
+            "Publicación efectiva bloqueada: effectivePublication.authorized es false "
+            f"({manifest.get('effectivePublication', {}).get('blockedReasons', [])})"
+        )
+
     for key in (
         "environmentTier",
         "apimSubnetResourceId",
         "gatewayBackendUrl",
-        "privateNetworkProof",
+        "azureCliEvidencePath",
+        "operationalApprovalRef",
         "g7Issuer",
         "g7OpenIdConfigurationUrl",
         "g7Audience",
@@ -76,6 +90,8 @@ def validate(parameters: dict, filtered_openapi: dict, manifest: dict) -> None:
         "applicationInsightsResourceId",
         "applicationInsightsConnectionString",
         "filteredOpenApi",
+        "expectedOperationSetSha256",
+        "expectedFilteredOpenApiSha256",
     ):
         if key not in parameters:
             raise ValueError(f"Falta parámetro obligatorio: {key}")
@@ -84,16 +100,29 @@ def validate(parameters: dict, filtered_openapi: dict, manifest: dict) -> None:
     if tier not in {"lab", "production"}:
         raise ValueError("environmentTier debe ser 'lab' o 'production'")
 
-    net_proof = parameters["privateNetworkProof"]
-    if not isinstance(net_proof, dict):
-        raise ValueError("privateNetworkProof debe ser un objeto verificable")
-    if tier == "production":
-        if net_proof.get("verified") is not True or net_proof.get("antiBypassVerified") is not True:
-            raise ValueError(
-                "Deployment bloqueado: gatewayBackendUrl requiere evidencia verificada de red privada y anti-bypass"
-            )
-        if not isinstance(parameters.get("approvedBy"), str) or not parameters["approvedBy"].strip():
-            raise ValueError("Deployment productivo requiere approvedBy explícito")
+    if not isinstance(parameters["operationalApprovalRef"], str) or not parameters["operationalApprovalRef"].strip():
+        raise ValueError("Falta operationalApprovalRef aprobado por Castilla/Infra")
+
+    cli_evidence_path = Path(str(parameters["azureCliEvidencePath"]))
+    if not cli_evidence_path.exists() or cli_evidence_path.stat().st_size == 0:
+        raise ValueError(
+            "Deployment bloqueado: falta evidencia verificable de Azure CLI en azureCliEvidencePath"
+        )
+    cli_evidence = json.loads(cli_evidence_path.read_text(encoding="utf-8"))
+    if cli_evidence.get("vnetConfiguration") is None:
+        raise ValueError("Evidencia Azure CLI indica vnetConfiguration=null; red privada no acreditada")
+    if cli_evidence.get("gatewayExternal") is True and not cli_evidence.get("gatewayIpSecurityRestrictions"):
+        raise ValueError("Evidencia Azure CLI indica Gateway público sin ipSecurityRestrictions (anti-bypass no acreditado)")
+
+    if expected_docs_sha and manifest.get("docsSha") != expected_docs_sha:
+        raise ValueError("docsSha del manifiesto no coincide con el SHA aprobado")
+    if expected_gateway_sha and manifest.get("gatewaySha") != expected_gateway_sha:
+        raise ValueError("gatewaySha del manifiesto no coincide con el SHA aprobado")
+
+    if parameters["expectedOperationSetSha256"] != manifest.get("operationSetSha256"):
+        raise ValueError("expectedOperationSetSha256 no coincide con el manifiesto efectivo")
+    if parameters["expectedFilteredOpenApiSha256"] != manifest.get("filteredOpenApiCanonicalSha256"):
+        raise ValueError("expectedFilteredOpenApiSha256 no coincide con el OpenAPI filtrado")
 
     if not APPLICATION_INSIGHTS_RESOURCE_ID.fullmatch(
         parameters["applicationInsightsResourceId"]

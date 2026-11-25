@@ -49,11 +49,19 @@ param applicationInsightsResourceId string
 @secure()
 @description('Cadena de conexión de Application Insights; no se almacena en el repositorio.')
 param applicationInsightsConnectionString string
-@description('OpenAPI JSON generado por filter-openapi.py; se suministra al deployment autorizado.')
+@description('OpenAPI JSON efectivo generado por filter-openapi.py; se suministra al deployment autorizado.')
 param filteredOpenApi string
+@description('SHA-256 esperado de operationSetSha256 del manifiesto efectivo autorizado.')
+param expectedOperationSetSha256 string
+@description('SHA-256 esperado del OpenAPI filtrado efectivo autorizado.')
+param expectedFilteredOpenApiSha256 string
+@description('Confirmación explícita de autorización efectiva de publicación (debe coincidir con effectivePublication.authorized).')
+param requireEffectivePublication bool = true
 
 var apiName = 'g6-productos-ofertas'
 var operationsManifest = loadJsonContent('./openapi/operation-security.json')
+var publicationGatePassed = !requireEffectivePublication || (operationsManifest.effectivePublication.authorized == true && operationsManifest.operationSetSha256 == expectedOperationSetSha256 && operationsManifest.filteredOpenApiCanonicalSha256 == expectedFilteredOpenApiSha256)
+var authorizedOperations = publicationGatePassed ? filter(operationsManifest.operations, op => op.environmentEnabled == true) : []
 var corsOriginNodes = join(map(corsAllowedOrigins, origin => '<origin>${xmlEscape(origin)}</origin>'), '')
 var apiPolicyTemplate = loadTextContent('./policies/api.xml')
 var securedOperationPolicyTemplate = loadTextContent('./policies/operation-secured.xml')
@@ -86,7 +94,7 @@ resource existingApim 'Microsoft.ApiManagement/service@2022-08-01' existing = if
   name: apimName
 }
 
-resource api 'Microsoft.ApiManagement/service/apis@2022-08-01' = {
+resource api 'Microsoft.ApiManagement/service/apis@2022-08-01' = if (publicationGatePassed && !empty(authorizedOperations)) {
   name: '${apimName}/${apiName}'
   dependsOn: [
     apim
@@ -144,7 +152,7 @@ resource audienceNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08
   }
 }
 
-resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2022-08-01' = {
+resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2022-08-01' = if (publicationGatePassed && !empty(authorizedOperations)) {
   parent: api
   name: 'policy'
   properties: {
@@ -153,7 +161,7 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2022-08-01' = 
   }
 }
 
-resource operationPolicies 'Microsoft.ApiManagement/service/apis/operations/policies@2022-08-01' = [for operation in operationsManifest.operations: {
+resource operationPolicies 'Microsoft.ApiManagement/service/apis/operations/policies@2022-08-01' = [for operation in authorizedOperations: {
   name: '${apimName}/${apiName}/${operation.apimOperationId}/policy'
   dependsOn: [
     api
@@ -236,7 +244,7 @@ resource applicationInsightsLogger 'Microsoft.ApiManagement/service/loggers@2022
   }
 }
 
-resource apiDiagnostics 'Microsoft.ApiManagement/service/apis/diagnostics@2022-08-01' = {
+resource apiDiagnostics 'Microsoft.ApiManagement/service/apis/diagnostics@2022-08-01' = if (publicationGatePassed && !empty(authorizedOperations)) {
   parent: api
   name: 'applicationinsights'
   properties: {

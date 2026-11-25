@@ -542,12 +542,42 @@ class ApimClosureRequirementsTests(unittest.TestCase):
                         "x-required-scope": "combos:leer",
                     }
                 },
+                "/m2m-pending": {
+                    "get": {
+                        "operationId": "consultarDisponibilidadCombo",
+                        "security": [{"serviceBearer": []}],
+                        "x-service-audience": "api-productos",
+                        "x-required-scope": "combos:leer",
+                    }
+                },
             },
             "servers": [{"url": "/api/v1"}],
         }
-        routes = [{"method": "GET", "path": "/api/v1/combo", "operationId": "obtenerCombo", "service": "combos-svc"}]
+        routes = [
+            {"method": "GET", "path": "/api/v1/combo", "operationId": "obtenerCombo", "service": "combos-svc"},
+            {"method": "GET", "path": "/api/v1/m2m-pending", "operationId": "consultarDisponibilidadCombo", "service": "combos-svc"},
+        ]
         with self.assertRaisesRegex(ValueError, "Publicación efectiva bloqueada"):
             FILTER.filter_spec(spec, routes, [], False, "d", "g", effective_publish=True)
+
+        filtered, manifest = FILTER.filter_spec(
+            spec,
+            routes,
+            [],
+            False,
+            "d",
+            "g",
+            security_profile="G7_AUTHENTICATED",
+            enabled_providers=["combos-svc"],
+            effective_publish=True,
+        )
+        self.assertTrue(manifest["effectivePublication"]["authorized"])
+        self.assertEqual(manifest["effectivePublication"]["publishedOperationIds"], ["obtenerCombo"])
+        self.assertEqual(set(filtered["paths"].keys()), {"/combo"})
+        self.assertIn(
+            {"operationId": "consultarDisponibilidadCombo", "reason": "PENDING_G7_ALLOWLIST"},
+            manifest["effectivePublication"]["excludedOperations"],
+        )
 
     def test_policies_and_bicep_enforce_canonical_uuid_dual_auth_and_profiles(self):
         api_xml = (ROOT / "policies/api.xml").read_text(encoding="utf-8")
@@ -576,6 +606,8 @@ class ApimClosureRequirementsTests(unittest.TestCase):
         self.assertIn("param reuseExistingApim bool", bicep_text)
         self.assertIn("param environmentTier string", bicep_text)
         self.assertIn("param rateProfiles object\n", bicep_text)
+        self.assertIn("var publicationGatePassed", bicep_text)
+        self.assertIn("var authorizedOperations", bicep_text)
         self.assertIn("bytes: 0", bicep_text)
 
 

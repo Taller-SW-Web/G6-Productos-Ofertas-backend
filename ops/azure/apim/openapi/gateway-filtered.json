@@ -47000,6 +47000,7 @@
     "gatewaySha": "b0c41cb41e089cffb349da9c3938f8f62e793cd6",
     "g5EnabledByDefault": false,
     "privateOperationCount": 5,
+    "publicationMode": "candidate",
     "operationSetSha256": "040544e1666747ff00c9eb77c6509b6831c83368dcba7b0ef29f3668ac7365fb"
   }
 }

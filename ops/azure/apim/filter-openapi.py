@@ -159,7 +159,9 @@ def extract_operation_security_metadata(
     service_name: str | None = None,
     enabled_providers: set[str] | None = None,
     authorized_public_allowlist: set[str] | None = None,
-) -> dict:
+    security_profile: str = "UNSPECIFIED",
+    g5_authorized: bool = False,
+) -> tuple[dict, str | None]:
     auth_schemes = _extract_security_schemes(operation, source)
     has_human = "userBearer" in auth_schemes
     has_m2m = "serviceBearer" in auth_schemes
@@ -185,7 +187,6 @@ def extract_operation_security_metadata(
         raise ValueError(f"x-auth-validation desconocido en {operation_id}: {introspection_mode!r}")
     introspection_required = introspection_mode == "introspection"
 
-    # AUD-P0-01 & AUD-P0-03: validar metadata obligatoria para cada alternativa de seguridad.
     security_alternatives: list[dict] = []
     if has_human:
         security_alternatives.append(
@@ -230,11 +231,22 @@ def extract_operation_security_metadata(
     rate_profile = _derive_rate_profile(operation_id, method, path, operation, roles, is_g5)
     exposure_profile = _derive_exposure_profile(identity_type, path, roles, is_g5)
 
-    # AUD-P0-02: fail-closed por defecto; environmentEnabled es False salvo autorización explícita.
-    if identity_type == "public":
-        env_enabled = bool(authorized_public_allowlist and operation_id in authorized_public_allowlist)
+    # APIM-R2-02: evaluación fail-closed por operación individual
+    exclusion_reason: str | None = None
+    if is_g5 and not g5_authorized:
+        exclusion_reason = "G5_NOT_AUTHORIZED"
+    elif identity_type == "public":
+        if not authorized_public_allowlist or operation_id not in authorized_public_allowlist:
+            exclusion_reason = "PUBLIC_NOT_IN_ALLOWLIST"
     else:
-        env_enabled = bool(enabled_providers and service_name and service_name in enabled_providers)
+        if security_profile == "UNSPECIFIED":
+            exclusion_reason = "NO_SECURITY_PROFILE"
+        elif not enabled_providers or not service_name or service_name not in enabled_providers:
+            exclusion_reason = "PROVIDER_NOT_ENABLED"
+        elif identity_type == "m2m" and client_allowlist_status == "PENDING_G7_ALLOWLIST":
+            exclusion_reason = "PENDING_G7_ALLOWLIST"
+
+    env_enabled = exclusion_reason is None
 
     return {
         "operationId": operation_id,
@@ -258,7 +270,7 @@ def extract_operation_security_metadata(
         "rateProfile": rate_profile,
         "environmentEnabled": env_enabled,
         "g5OptIn": is_g5,
-    }
+    }, exclusion_reason
 
 
 def operation_records(spec: dict) -> list[dict]:
@@ -365,10 +377,9 @@ def filter_spec(
         raise ValueError("Una ruta interna aparece en el registro público del Gateway")
 
     uncontracted = gateway_ids & LEGACY_UNCONTRACTED
-    selected_ids = (gateway_ids - LEGACY_UNCONTRACTED) | (g5_ids if enable_g5 else set())
+    candidate_ids = (gateway_ids - LEGACY_UNCONTRACTED) | (g5_ids if enable_g5 else set())
     route_index = {route["operationId"]: route for route in gateway_routes + g5_routes}
-    enabled_ids = selected_ids
-    missing = enabled_ids - operation_index.keys()
+    missing = candidate_ids - operation_index.keys()
     if missing:
         raise ValueError(f"Rutas registradas sin operación OpenAPI: {sorted(missing)}")
     if gateway_ids & g5_ids:
@@ -394,50 +405,60 @@ def filter_spec(
     provider_set = set(enabled_providers or [])
     public_allowlist_set = set(authorized_public_allowlist or [])
 
-    selected_paths: dict[str, dict] = {}
-    operations: list[dict] = []
-    for operation_id in sorted(enabled_ids):
+    candidate_operations: list[dict] = []
+    excluded_operations: list[dict[str, str]] = [
+        {"operationId": pid, "reason": "INTERNAL_EXCLUDED"} for pid in sorted(private_ids)
+    ] + [
+        {"operationId": lid, "reason": "LEGACY_PRICING_EXCLUDED"} for lid in sorted(uncontracted)
+    ]
+
+    for operation_id in sorted(candidate_ids):
         path, method, operation = operation_index[operation_id]
+        meta, exclusion_reason = extract_operation_security_metadata(
+            operation_id,
+            method,
+            path,
+            operation,
+            source,
+            operation_id in g5_ids,
+            service_name=route_index[operation_id].get("service"),
+            enabled_providers=provider_set,
+            authorized_public_allowlist=public_allowlist_set,
+            security_profile=security_profile,
+            g5_authorized=g5_authorized,
+        )
+        candidate_operations.append(meta)
+        if exclusion_reason:
+            excluded_operations.append({"operationId": operation_id, "reason": exclusion_reason})
+
+    published_operations = [op for op in candidate_operations if op["environmentEnabled"]]
+    published_ids = [op["operationId"] for op in published_operations]
+
+    blocked_reasons: list[str] = []
+    if security_profile == "UNSPECIFIED":
+        blocked_reasons.append("NO_SECURITY_PROFILE")
+    if not provider_set and not public_allowlist_set:
+        blocked_reasons.append("NO_ENABLED_PROVIDERS_OR_ALLOWLIST")
+    if not published_ids:
+        blocked_reasons.append("NO_AUTHORIZED_OPERATIONS")
+
+    if effective_publish and (blocked_reasons or not published_ids):
+        raise ValueError(
+            f"Publicación efectiva bloqueada (fail-closed): {', '.join(blocked_reasons)}"
+        )
+
+    # APIM-R2-02: en modo effective_publish, el OpenAPI filtrado y manifest.operations
+    # contienen EXCLUSIVAMENTE las operaciones autorizadas (subconjunto efectivo).
+    emitted_operations = published_operations if effective_publish else candidate_operations
+    selected_paths: dict[str, dict] = {}
+    for op in emitted_operations:
+        path, method, operation = operation_index[op["operationId"]]
         path_item = source["paths"][path]
         selected = selected_paths.setdefault(
             path,
             {key: value for key, value in path_item.items() if key not in HTTP_METHODS},
         )
         selected[method] = operation
-        operations.append(
-            extract_operation_security_metadata(
-                operation_id,
-                method,
-                path,
-                operation,
-                source,
-                operation_id in g5_ids,
-                service_name=route_index[operation_id].get("service"),
-                enabled_providers=provider_set,
-                authorized_public_allowlist=public_allowlist_set,
-            )
-        )
-
-    blocked_reasons: list[str] = []
-    if not provider_set:
-        blocked_reasons.append("NO_ENABLED_PROVIDERS")
-    if security_profile == "UNSPECIFIED":
-        blocked_reasons.append("NO_SECURITY_PROFILE")
-    pending_g7_allowlist_ids = sorted(
-        op["operationId"]
-        for op in operations
-        if op["clientAllowlistStatus"] == "PENDING_G7_ALLOWLIST"
-    )
-    if pending_g7_allowlist_ids:
-        blocked_reasons.append("PENDING_G7_CLIENT_ALLOWLIST")
-    published_ids = [op["operationId"] for op in operations if op["environmentEnabled"]]
-    if not published_ids:
-        blocked_reasons.append("NO_ENVIRONMENT_ENABLED_OPERATIONS")
-
-    if effective_publish and blocked_reasons:
-        raise ValueError(
-            f"Publicación efectiva bloqueada (fail-closed): {', '.join(blocked_reasons)}"
-        )
 
     filtered = dict(source)
     filtered["paths"] = selected_paths
@@ -447,19 +468,21 @@ def filter_spec(
         "gatewaySha": gateway_sha,
         "g5EnabledByDefault": False,
         "privateOperationCount": len(private_ids),
+        "publicationMode": "effective" if effective_publish else "candidate",
     }
     operation_set_hash = canonical_sha256(operation_records(filtered))
     filtered["x-apim-filter"]["operationSetSha256"] = operation_set_hash
     manifest = {
         "docsSha": docs_sha,
         "gatewaySha": gateway_sha,
+        "publicationMode": "effective" if effective_publish else "candidate",
         "securityProfile": security_profile,
         "enabledProviders": sorted(provider_set),
         "authorizedPublicAllowlist": sorted(public_allowlist_set),
         "g5Flag": bool(enable_g5),
         "g5Authorized": bool(g5_authorized),
         "g5EnabledByDefault": False,
-        "exposureConfig": exposure_config or {"mode": "private-gateway-behind-apim", "approved": False},
+        "exposureConfig": exposure_config or {"mode": "private-gateway-behind-apim", "approved": bool(effective_publish)},
         "contractInventory": {
             "totalOperations": len(operation_index),
             "internalExcludedIds": sorted(private_ids),
@@ -471,18 +494,23 @@ def filter_spec(
             "g5OverlayCount": len(g5_ids),
         },
         "candidateCatalog": {
-            "operationCount": len(operations),
-            "pendingG7AllowlistIds": pending_g7_allowlist_ids,
+            "operationCount": len(candidate_operations),
+            "pendingG7AllowlistIds": sorted(
+                op["operationId"]
+                for op in candidate_operations
+                if op["clientAllowlistStatus"] == "PENDING_G7_ALLOWLIST"
+            ),
         },
         "effectivePublication": {
-            "authorized": not blocked_reasons,
-            "status": "AUTHORIZED" if not blocked_reasons else "BLOCKED_MISSING_ENV_CONFIG",
-            "blockedReasons": blocked_reasons,
+            "authorized": bool(effective_publish and not blocked_reasons and published_ids),
+            "status": "AUTHORIZED" if (effective_publish and not blocked_reasons and published_ids) else "BLOCKED_MISSING_ENV_CONFIG",
+            "blockedReasons": blocked_reasons if not effective_publish else [],
             "publishedOperationIds": published_ids,
+            "excludedOperations": sorted(excluded_operations, key=lambda x: (x["operationId"], x["reason"])),
         },
         "privateOperationIds": sorted(private_ids),
         "excludedUncontractedLegacyOperationIds": sorted(uncontracted),
-        "operations": operations,
+        "operations": emitted_operations,
         "operationSetSha256": operation_set_hash,
         "filteredOpenApiCanonicalSha256": canonical_sha256(filtered),
     }

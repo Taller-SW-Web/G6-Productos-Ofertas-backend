@@ -33,11 +33,11 @@ def validate(template, filtered, manifest, expected_docs_sha, expected_gateway_s
         raise ValueError("El ARM compilado no contiene operationPolicies")
     if policy.get("type") != "Microsoft.ApiManagement/service/apis/operations/policies":
         raise ValueError("operationPolicies no es un recurso policy de operación APIM")
-    if policy.get("copy", {}).get("count") != "[length(variables('operationsManifest').operations)]":
-        raise ValueError("El bucle de políticas no está ligado al manifiesto")
-    expected_name = "[format('{0}/{1}/{2}/policy', parameters('apimName'), variables('apiName'), variables('operationsManifest').operations[copyIndex()].apimOperationId)]"
+    if policy.get("copy", {}).get("count") != "[length(variables('authorizedOperations'))]":
+        raise ValueError("El bucle de políticas no está ligado a authorizedOperations")
+    expected_name = "[format('{0}/{1}/{2}/policy', parameters('apimName'), variables('apiName'), variables('authorizedOperations')[copyIndex()].apimOperationId)]"
     if policy.get("name") != expected_name:
-        raise ValueError("La jerarquía ARM de policy no usa APIM/API/apimOperationId/policy")
+        raise ValueError("La jerarquía ARM de policy no usa APIM/API/apimOperationId/policy sobre authorizedOperations")
     required_dependencies = {"api", "openIdNamedValue", "issuerNamedValue", "audienceNamedValue"}
     if not required_dependencies.issubset(set(policy.get("dependsOn", []))):
         raise ValueError("Faltan dependencias de API o named values en las políticas")
