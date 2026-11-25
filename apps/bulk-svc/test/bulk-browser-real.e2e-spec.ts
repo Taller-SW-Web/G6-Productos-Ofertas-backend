@@ -293,68 +293,72 @@ describe.skipIf(!enabled)(
       relayActive = true;
       relayLoop = (async () => {
         while (relayActive) {
-          const pending = await bulkDb
-            .select()
-            .from(bulkOutbox)
-            .where(isNull(bulkOutbox.publishedAt))
-            .limit(10);
-          for (const event of pending) {
-            const envelope = event.payload as unknown as CatalogEnvelope;
-            const isRetryBatch = JSON.stringify(envelope).includes(retrySkuBase) || event.schemaVersion === 4;
-            const shouldFail =
-              !injectedTransientFailure &&
-              event.schemaVersion === 3 &&
-              isRetryBatch;
-            // Check content for retrySkuBase if V3
-            let useTransientFailure = false;
-            if (!injectedTransientFailure && event.schemaVersion === 3) {
-              const contentRef = envelope.data?.content_ref as { content_id: string; sha256: string; byte_length: number; content_type: string } | undefined;
-              if (contentRef) {
-                const doc = await contentClient.getDocument(contentRef);
-                if (JSON.stringify(doc).includes(retrySkuBase)) {
-                  useTransientFailure = true;
-                  injectedTransientFailure = true;
+          try {
+            const pending = await bulkDb
+              .select()
+              .from(bulkOutbox)
+              .where(isNull(bulkOutbox.publishedAt))
+              .limit(10);
+            for (const event of pending) {
+              const envelope = event.payload as unknown as CatalogEnvelope;
+              const isRetryBatch = JSON.stringify(envelope).includes(retrySkuBase) || event.schemaVersion === 4;
+              const shouldFail =
+                !injectedTransientFailure &&
+                event.schemaVersion === 3 &&
+                isRetryBatch;
+              // Check content for retrySkuBase if V3
+              let useTransientFailure = false;
+              if (!injectedTransientFailure && event.schemaVersion === 3) {
+                const contentRef = envelope.data?.content_ref as { content_id: string; sha256: string; byte_length: number; content_type: string } | undefined;
+                if (contentRef) {
+                  const doc = await contentClient.getDocument(contentRef);
+                  if (JSON.stringify(doc).includes(retrySkuBase)) {
+                    useTransientFailure = true;
+                    injectedTransientFailure = true;
+                  }
                 }
+              } else if (shouldFail) {
+                useTransientFailure = true;
+                injectedTransientFailure = true;
               }
-            } else if (shouldFail) {
-              useTransientFailure = true;
-              injectedTransientFailure = true;
+              const consumer = new CatalogBulkService(
+                catalogDatabase!,
+                catalogMutations,
+                useTransientFailure ? transientIdentity : healthyIdentity,
+                contentClient as never,
+              );
+              await consumer.consume(envelope);
+              const [resultRow] = await catalogDatabase!.read((db) =>
+                db.select().from(catalogOutbox).where(eq(catalogOutbox.causation_id, envelope.message_id)).limit(1),
+              );
+              if (resultRow) {
+                await bulkRepository.recordCatalogBulkResult({
+                  messageId: resultRow.message_id,
+                  operationId: String(resultRow.operation_id),
+                  causationId: String(resultRow.causation_id),
+                  eventName: String(resultRow.event_name) as 'catalog.bulk.upsert.completed',
+                  correlationId: resultRow.correlation_id,
+                  payload: {
+                    message_id: resultRow.message_id,
+                    schema_version: resultRow.schema_version,
+                    occurred_at: resultRow.occurred_at.toISOString(),
+                    correlation_id: resultRow.correlation_id,
+                    causation_id: resultRow.causation_id,
+                    operation_id: resultRow.operation_id,
+                    producer: 'catalog-svc',
+                    kind: resultRow.kind,
+                    name: resultRow.event_name,
+                    data: resultRow.payload,
+                  },
+                });
+              }
+              await bulkDb
+                .update(bulkOutbox)
+                .set({ publishedAt: new Date() })
+                .where(eq(bulkOutbox.id, event.id));
             }
-            const consumer = new CatalogBulkService(
-              catalogDatabase!,
-              catalogMutations,
-              useTransientFailure ? transientIdentity : healthyIdentity,
-              contentClient as never,
-            );
-            await consumer.consume(envelope);
-            const [resultRow] = await catalogDatabase!.read((db) =>
-              db.select().from(catalogOutbox).where(eq(catalogOutbox.causation_id, envelope.message_id)).limit(1),
-            );
-            if (resultRow) {
-              await bulkRepository.recordCatalogBulkResult({
-                messageId: resultRow.message_id,
-                operationId: String(resultRow.operation_id),
-                causationId: String(resultRow.causation_id),
-                eventName: String(resultRow.event_name) as 'catalog.bulk.upsert.completed',
-                correlationId: resultRow.correlation_id,
-                payload: {
-                  message_id: resultRow.message_id,
-                  schema_version: resultRow.schema_version,
-                  occurred_at: resultRow.occurred_at.toISOString(),
-                  correlation_id: resultRow.correlation_id,
-                  causation_id: resultRow.causation_id,
-                  operation_id: resultRow.operation_id,
-                  producer: 'catalog-svc',
-                  kind: resultRow.kind,
-                  name: resultRow.event_name,
-                  data: resultRow.payload,
-                },
-              });
-            }
-            await bulkDb
-              .update(bulkOutbox)
-              .set({ publishedAt: new Date() })
-              .where(eq(bulkOutbox.id, event.id));
+          } catch (error) {
+            console.warn('[bulk-browser-real relay]', error instanceof Error ? error.message : String(error));
           }
           await pause(150);
         }

@@ -267,7 +267,7 @@ describe.skipIf(!enabled)('P1 Bulk Performance Suite (PostgreSQL 17 + Storage lo
       .attach('archivo', smallCsv, { filename: 'retry-perf.csv', contentType: 'text/csv' })
       .expect(202);
     const retryBatchId = String(retryAdmit.body.batch_id);
-    const batchState = await bulkRepo.getBatch(retryBatchId, ownerSub);
+    const batchState = await bulkRepo.findBatchByBatchId(retryBatchId);
     const rowId = batchState!.rows[0]!.row_id;
     await bulkRepo.recordCatalogBulkResult({
       messageId: randomUUID(),

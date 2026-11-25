@@ -153,6 +153,7 @@ jobs:
         run: |
           mkdir -p .ci/evidence
           npm run test:e2e -- \
+            --no-file-parallelism \
             apps/bulk-svc/test/bulk-browser-real.e2e-spec.ts \
             apps/bulk-svc/test/bulk-recovery-files-migrations.e2e-spec.ts \
             apps/bulk-svc/test/bulk-performance-suite.e2e-spec.ts \

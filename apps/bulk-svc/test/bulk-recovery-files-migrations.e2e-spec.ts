@@ -11,6 +11,7 @@ import { BulkSvcModule } from '../src/bulk-svc.module.js';
 import { BulkProblemFilter } from '../src/http/bulk-problem.filter.js';
 import { BulkReadinessService } from '../src/health/bulk-readiness.service.js';
 import { BulkStorageService } from '../src/storage/bulk-storage.service.js';
+import { BulkDomainError } from '../src/domain/bulk.domain-error.js';
 import { BULK_EXPORT_SOURCE, type BulkExportSource } from '../src/export/bulk-export-source.js';
 import { bulkSchema, outbox as bulkOutbox } from '../src/persistence/bulk.schema.js';
 import { BulkPersistenceRepository } from '../src/persistence/bulk.repository.js';
@@ -166,7 +167,11 @@ integration('P1 Bulk Recovery, Files/Exports & Migrations (PostgreSQL 17 + Stora
 
     // Test Storage outage -> 503, then recovery -> 200
     const storage = mod2.get(BulkStorageService);
-    const putSpy = vi.spyOn(storage, 'put').mockRejectedValueOnce(new Error('Storage 503 simulated'));
+    const putSpy = vi
+      .spyOn(storage, 'put')
+      .mockRejectedValueOnce(
+        new BulkDomainError('STORAGE_UNAVAILABLE', 'Storage 503 simulated'),
+      );
     await request(app2.getHttpServer())
       .post('/api/v1/carga-masiva/productos/importaciones')
       .set('Authorization', `Bearer ${token}`)
