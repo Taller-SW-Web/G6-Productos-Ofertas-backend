@@ -385,9 +385,25 @@ describe.skipIf(!enabled)(
 
       // Prepare CSVs
       const createSku = `BULK-BROWSER-${randomUUID().slice(0, 8)}`;
+      const createSeed = await seedMutations.createProduct(
+        {
+          nombre: 'Browser Create Seed',
+          descripcion: 'Before browser update',
+          categoriaId: 'category-fixture',
+          tipoProductoId: 'type-fixture',
+          marcaId: 'brand-fixture',
+          skuBase: createSku,
+          tieneVariantes: false,
+          precioBaseInicial: 19.9,
+          imagenes: [{ url: 'https://example.test/browser-create-seed' }],
+          perfilFisico: { pesoKg: 1.0, dimensionesCm: { largo: 10, ancho: 10, alto: 10 } },
+        },
+        { authorization: 'Bearer isolated-master-fixture', correlationId: randomUUID() },
+      );
       const createValues = [
-        'ALTA', '', '', createSku, '', 'Producto Navegador Real', 'Creado desde Chromium E2E',
-        'category-fixture', 'brand-fixture', 'type-fixture', 'false', '19.90', '[]', '', '', '0',
+        'ACTUALIZACION', createSeed.product_id, JSON.stringify({ producto: Number(createSeed.catalog_version), variante: null }),
+        createSku, '', 'Producto Navegador Real', 'Actualizado desde Chromium E2E',
+        'category-fixture', 'brand-fixture', 'type-fixture', 'false', '', '[]', '', '', '0',
       ];
       const csvPath = join(directory, 'bulk-browser-real.csv');
       writeFileSync(
