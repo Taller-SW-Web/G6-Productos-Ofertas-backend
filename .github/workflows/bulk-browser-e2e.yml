@@ -15,7 +15,7 @@ on:
         description: SHA completo (40 hex) de G6-Productos-Ofertas-frontend
         required: false
         type: string
-        default: f26864bb2b20c5abd693fb415f392ed6110e317b
+        default: 4624a1800d84611107785b8b3aa793ed44285f50
 
 permissions:
   contents: read
@@ -48,7 +48,7 @@ jobs:
 
       - name: Validar formato SHA de Frontend
         env:
-          FRONTEND_REF_INPUT: ${{ inputs.frontend_ref || 'f26864bb2b20c5abd693fb415f392ed6110e317b' }}
+          FRONTEND_REF_INPUT: ${{ inputs.frontend_ref || '4624a1800d84611107785b8b3aa793ed44285f50' }}
         run: |
           set -euo pipefail
           if [[ ! "$FRONTEND_REF_INPUT" =~ ^[0-9a-f]{40}$ ]]; then

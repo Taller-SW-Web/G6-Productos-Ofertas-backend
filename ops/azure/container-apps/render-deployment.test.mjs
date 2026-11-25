@@ -298,3 +298,62 @@ test('G7 deployment renders with nine aligned trust configurations and no anonym
     }
   }
 });
+
+test('Chile CD compatibility: Gateway uses Multiple, Promotions keeps Single, scale 1/1, unsafe reapply blocked, and authorized traffic preserved', () => {
+  const bootstrapInput = fixture();
+  const bootstrapPlan = makeDeployment(bootstrapInput);
+  const apps = bootstrapPlan.template.resources.slice(1);
+  const gatewayApp = apps.find((a) => a.name === 'api-gateway');
+  const promotionsApp = apps.find((a) => a.name === 'promotions-svc');
+
+  assert.equal(gatewayApp.properties.configuration.activeRevisionsMode, 'Multiple');
+  assert.equal(promotionsApp.properties.configuration.activeRevisionsMode, 'Single');
+  assert.deepEqual(
+    [gatewayApp.properties.template.scale.minReplicas, gatewayApp.properties.template.scale.maxReplicas],
+    [1, 1],
+  );
+  assert.deepEqual(
+    [promotionsApp.properties.template.scale.minReplicas, promotionsApp.properties.template.scale.maxReplicas],
+    [1, 1],
+  );
+  assert.equal(bootstrapPlan.template.outputs.gatewayDeploymentMode.value, 'bootstrap-only');
+  assert.deepEqual(gatewayApp.properties.configuration.ingress.traffic, [
+    { latestRevision: true, weight: 100 },
+  ]);
+
+  // Prohibición de reaplicación insegura sobre Gateway existente
+  assert.throws(
+    () => makeDeployment({ ...fixture(), existingGateway: true }),
+    /UNSAFE_GATEWAY_REAPPLY_REQUIRES_CD_OR_AUTHORIZED_REVISION/,
+  );
+  assert.throws(
+    () => makeDeployment({ ...fixture(), deploymentMode: 'update' }),
+    /UNSAFE_GATEWAY_REAPPLY_REQUIRES_CD_OR_AUTHORIZED_REVISION/,
+  );
+  assert.throws(
+    () =>
+      makeDeployment({
+        ...fixture(),
+        existingGateway: true,
+        authorizedGatewayRevision: 'invalid revision!',
+      }),
+    /INVALID_AUTHORIZED_GATEWAY_REVISION/,
+  );
+
+  // Conservación del tráfico en revisión previamente autorizada (sin latestRevision=true)
+  const pinnedPlan = makeDeployment({
+    ...fixture(),
+    existingGateway: true,
+    deploymentMode: 'update',
+    authorizedGatewayRevision: 'api-gateway--r-prev0001',
+  });
+  const pinnedGateway = pinnedPlan.template.resources
+    .slice(1)
+    .find((a) => a.name === 'api-gateway');
+  assert.equal(pinnedGateway.properties.configuration.activeRevisionsMode, 'Multiple');
+  assert.deepEqual(pinnedGateway.properties.configuration.ingress.traffic, [
+    { revisionName: 'api-gateway--r-prev0001', weight: 100 },
+  ]);
+  assert.equal(pinnedPlan.template.outputs.gatewayDeploymentMode.value, 'pinned-authorized-revision');
+  assert.ok(pinnedGateway.properties.template.containers[0].image.includes('@sha256:'));
+});

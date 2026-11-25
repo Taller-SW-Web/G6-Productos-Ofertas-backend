@@ -30,7 +30,7 @@ export function sendGatewayProblem(
   code: string,
   correlationId: string,
   source: 'gateway' | 'provider',
-): void {
+): { status: number; code: string } {
   const problem = gatewayProblem(route, status, code, source);
   const titles: Readonly<Record<number, string>> = {
     400: 'Datos de entrada inválidos',
@@ -47,4 +47,5 @@ export function sendGatewayProblem(
       ...problem,
       correlationId,
     });
+  return problem;
 }
