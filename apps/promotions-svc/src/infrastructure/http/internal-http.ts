@@ -167,7 +167,10 @@ export class InternalHttpReader {
       status?: number,
       errorCode?: string,
     ) => {
-      trace?.pendingStages?.delete(callId);
+      // Keep an aborted read in the live registry until the global deadline
+      // observer snapshots it; sibling abort handlers must not make the set
+      // appear empty or change which dependency is attributed.
+      if (!signal.aborted) trace?.pendingStages?.delete(callId);
       if (!trace?.observe || !trace.correlationId) return;
       trace.observe({
         operation: operationName,

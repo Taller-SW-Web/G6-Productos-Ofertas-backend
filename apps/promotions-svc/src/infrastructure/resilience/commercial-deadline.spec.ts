@@ -147,7 +147,7 @@ describe('Bounded commercial integration boundary', () => {
     const events: Array<Record<string, unknown>> = [];
     const source = {
       ...blockedCommercialContext,
-      basket: vi.fn((_request, _at, _signal, context) => {
+      basket: vi.fn((_request, _at, signal, context) => {
         const pendingStages = new Map();
         context.pendingStages = pendingStages;
         pendingStages.set('catalog-read', {
@@ -159,6 +159,11 @@ describe('Bounded commercial integration boundary', () => {
           operation: 'obtenerPrecioSku',
           upstream: 'pricing',
           stage: 'upstream_request',
+        });
+        // Deterministically model concurrent abort handlers pruning the live
+        // registry immediately after the global timeout signal fires.
+        signal.addEventListener('abort', () => pendingStages.clear(), {
+          once: true,
         });
         return new Promise<{ lines: [] }>(() => {});
       }),
@@ -180,6 +185,7 @@ describe('Bounded commercial integration boundary', () => {
     });
     await vi.advanceTimersByTimeAsync(2500);
     await rejected;
+    expect(trace.pendingStages.size).toBe(0);
     expect(events).toContainEqual(
       expect.objectContaining({
         operation: 'evaluarPromociones/validarCupon',
@@ -194,6 +200,39 @@ describe('Bounded commercial integration boundary', () => {
       }),
     );
     expect(events[0]).not.toHaveProperty('exhaustedStage');
+  });
+  it('reports an unknown stage instead of treating an empty uncertain snapshot as zero reads', async () => {
+    vi.useFakeTimers();
+    const events: Array<Record<string, unknown>> = [];
+    const trace = {
+      correlationId: '55555555-5555-4555-8555-555555555556',
+      at: '2026-11-25T00:00:00Z',
+      observe: (event: Record<string, unknown>) => events.push(event),
+    };
+    const source = {
+      ...blockedCommercialContext,
+      basket: vi.fn(() => new Promise<{ lines: [] }>(() => {})),
+    };
+    const pending = new BoundedCommercialContext(source, 10).basket(
+      basket,
+      trace.at,
+      undefined,
+      trace,
+    );
+    const rejected = expect(pending).rejects.toMatchObject({
+      message: 'COMMERCIAL_CONTEXT_UNAVAILABLE',
+      unblock:
+        'deadline de 10 ms agotado; etapa no atribuible (snapshot de lecturas desconocido)',
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    await rejected;
+    const event = events[0];
+    expect(event).toMatchObject({
+      outcome: 'timeout',
+      pendingStages: ['unknown'],
+    });
+    expect(event).not.toHaveProperty('pendingStageCount');
+    expect(event).not.toHaveProperty('exhaustedStage');
   });
   it('classifies caller cancellation separately from deadline exhaustion', async () => {
     const events: Array<Record<string, unknown>> = [];

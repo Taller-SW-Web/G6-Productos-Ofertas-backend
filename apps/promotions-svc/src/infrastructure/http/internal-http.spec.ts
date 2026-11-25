@@ -87,7 +87,19 @@ describe('Internal HTTP credential boundary (PR143)', () => {
             }),
           ]),
         );
-        expect(context.pendingStages.size).toBe(0);
+        expect(context.pendingStages.size).toBe(2);
+        expect([...context.pendingStages.values()]).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              operation: 'obtenerContextoSku',
+              upstream: 'catalog',
+            }),
+            expect.objectContaining({
+              operation: 'obtenerPrecioSku',
+              upstream: 'pricing',
+            }),
+          ]),
+        );
       },
     );
   });

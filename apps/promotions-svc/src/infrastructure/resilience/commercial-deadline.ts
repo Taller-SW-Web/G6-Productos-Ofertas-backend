@@ -4,6 +4,7 @@ import {
   type CommercialContext,
   type BasketRequest,
   type CommercialReadContext,
+  type CommercialPendingStage,
 } from '../../domain/commercial-context.js';
 import { PromotionsDependencyTimeout, withDeadline } from './deadline.js';
 
@@ -27,9 +28,21 @@ export class BoundedCommercialContext implements CommercialContext {
       context.deadlineMs = this.milliseconds;
       context.pendingStages ??= new Map();
     }
+    let deadlineSnapshot: CommercialPendingStage[] | undefined;
     try {
       const result = await withDeadline(
-        work,
+        (signal) => {
+          // This listener is installed before the adapter starts. Abort handlers
+          // registered by concurrent reads therefore cannot mutate the snapshot.
+          signal.addEventListener(
+            'abort',
+            () => {
+              deadlineSnapshot = [...(context?.pendingStages?.values() ?? [])];
+            },
+            { once: true },
+          );
+          return work(signal);
+        },
         Math.max(
           1,
           Math.floor(
@@ -54,20 +67,26 @@ export class BoundedCommercialContext implements CommercialContext {
         (deadlineAt > performance.now() &&
           error instanceof Error &&
           error.name === 'AbortError');
-      const pending = timeout
-        ? [...(context?.pendingStages?.values() ?? [])]
-        : [];
+      const pending = timeout ? (deadlineSnapshot ?? []) : [];
       const exhaustedStage =
-        pending.length === 1 ? pending[0].stage : undefined;
-      const pendingStageCount = timeout ? pending.length : undefined;
+        deadlineSnapshot?.length === 1 ? pending[0].stage : undefined;
+      const snapshotKnown =
+        deadlineSnapshot !== undefined && pending.length > 0;
+      const pendingStageCount = snapshotKnown ? pending.length : undefined;
       const pendingStages = timeout
-        ? [...new Set(pending.map((entry) => entry.stage))].sort()
+        ? snapshotKnown
+          ? [...new Set(pending.map((entry) => entry.stage))].sort()
+          : ['unknown']
         : undefined;
       const pendingOperations = timeout
-        ? [...new Set(pending.map((entry) => entry.operation))].sort()
+        ? snapshotKnown
+          ? [...new Set(pending.map((entry) => entry.operation))].sort()
+          : undefined
         : undefined;
       const pendingUpstreams = timeout
-        ? [...new Set(pending.map((entry) => entry.upstream))].sort()
+        ? snapshotKnown
+          ? [...new Set(pending.map((entry) => entry.upstream))].sort()
+          : undefined
         : undefined;
       context?.observe?.({
         operation,
@@ -95,13 +114,17 @@ export class BoundedCommercialContext implements CommercialContext {
         ...(pendingUpstreams === undefined ? {} : { pendingUpstreams }),
         ...(exhaustedStage ? { exhaustedStage } : {}),
       });
+      if (timeout || cancelled) context?.pendingStages?.clear();
       if (timeout) {
+        const timeoutDetail = exhaustedStage
+          ? `deadline de ${this.milliseconds} ms agotado en ${exhaustedStage}`
+          : snapshotKnown
+            ? `deadline de ${this.milliseconds} ms agotado; ${pending.length} lecturas pendientes`
+            : `deadline de ${this.milliseconds} ms agotado; etapa no atribuible (snapshot de lecturas desconocido)`;
         throw new CommercialDependencyError(
           operation,
           'Catálogo/Pricing + integración G6',
-          exhaustedStage
-            ? `deadline de ${this.milliseconds} ms agotado en ${exhaustedStage}`
-            : `deadline de ${this.milliseconds} ms agotado; ${pending.length} lecturas pendientes`,
+          timeoutDetail,
         );
       }
       if (
