@@ -74,8 +74,10 @@ import {
           tokens: CatalogServiceToken,
           h4: ReturnType<typeof createH4CatalogClient>,
         ) =>
-        async (sku?: string) =>
-          h4 && sku !== undefined ? h4.issue(sku) : tokens.get(),
+        async (sku?: string, correlationId?: string) =>
+          h4 && sku !== undefined
+            ? h4.issue(sku)
+            : tokens.get('catalogo:leer', correlationId),
       inject: [CatalogServiceToken, PRICING_CATALOG_H4],
     },
     {

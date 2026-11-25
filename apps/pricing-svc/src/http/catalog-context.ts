@@ -5,16 +5,21 @@ import { PRICING_CONFIG, type PricingConfig } from '../config/environment.js';
 import type { PricingCatalogContext } from './commercial-prices.js';
 import { record, uuid } from './pricing-read.guard.js';
 import { PricingHttpError } from './pricing-http.error.js';
+import { SafeLogger } from '../logging/safe-logger.js';
 
 import { createH4CatalogClient } from './h4-catalog-client.js';
 
 export const PRICING_CATALOG_H4 = Symbol('PRICING_CATALOG_H4');
 export const PRICING_CATALOG_TOKEN = Symbol('PRICING_CATALOG_TOKEN');
-export type PricingCatalogToken = (sku?: string) => Promise<string | null>;
+export type PricingCatalogToken = (
+  sku?: string,
+  correlationId?: string,
+) => Promise<string | null>;
 
 @Injectable()
 export class CatalogContextHttp implements PricingCatalogContext {
   readonly batchMode: PricingCatalogContext['batchMode'];
+  private readonly logger: SafeLogger;
 
   constructor(
     @Inject(PRICING_CONFIG) private readonly config: PricingConfig,
@@ -25,6 +30,7 @@ export class CatalogContextHttp implements PricingCatalogContext {
     @Inject(PRICING_CATALOG_H4)
     private readonly h4?: ReturnType<typeof createH4CatalogClient>,
   ) {
+    this.logger = new SafeLogger(config.nodeEnv);
     // The batch endpoint is private and is supported only by the normal G7
     // technical identity. Historical H4 clients and Phase 1 / simulated
     // security retain only the individually authorized context GET.
@@ -47,7 +53,9 @@ export class CatalogContextHttp implements PricingCatalogContext {
         operationId !== undefined &&
         this.config.publicOperations?.includes(operationId) &&
         PHASE1_PUBLIC_OPERATION_IDS.has(operationId);
-      const authorization = publicRead ? undefined : await this.token?.(sku);
+      const authorization = publicRead
+        ? undefined
+        : await this.token?.(sku, correlationId);
       if (!publicRead && !authorization) throw new Error();
       const headers = {
         Accept: 'application/json, application/problem+json',
@@ -112,6 +120,8 @@ export class CatalogContextHttp implements PricingCatalogContext {
   }
 
   async resolveBatch(skus: readonly string[], correlationId = randomUUID()) {
+    let contextHeaderStarted: number | undefined;
+    let bodyStageStarted: number | undefined;
     try {
       if (
         this.batchMode !== 'G7_AUTHENTICATED' ||
@@ -125,8 +135,29 @@ export class CatalogContextHttp implements PricingCatalogContext {
         throw new Error();
       // Este endpoint es privado: exige siempre identidad técnica propia, aun
       // en modos legacy de lecturas públicas. Nunca recibe el bearer humano.
-      const authorization = await this.token?.();
+      const tokenLookupStarted = performance.now();
+      let authorization: string | null | undefined;
+      try {
+        authorization = await this.token?.(undefined, correlationId);
+        this.logger.dependency(
+          correlationId,
+          'g7',
+          'token_lookup',
+          performance.now() - tokenLookupStarted,
+          authorization ? 'success' : 'error',
+        );
+      } catch {
+        this.logger.dependency(
+          correlationId,
+          'g7',
+          'token_lookup',
+          performance.now() - tokenLookupStarted,
+          'error',
+        );
+        throw new Error();
+      }
       if (!authorization) throw new Error();
+      contextHeaderStarted = performance.now();
       const response = await fetch(
         this.config.catalogUrl + '/api/v1/productos/skus/contexto/lote',
         {
@@ -142,6 +173,16 @@ export class CatalogContextHttp implements PricingCatalogContext {
           body: JSON.stringify({ skus }),
         },
       );
+      this.logger.dependency(
+        correlationId,
+        'catalog',
+        'context_headers',
+        performance.now() - contextHeaderStarted,
+        response.status === 200 ? 'success' : 'http_error',
+        { status: response.status, itemCount: skus.length, mode: 'batch' },
+      );
+      contextHeaderStarted = undefined;
+      bodyStageStarted = performance.now();
       if (!response.body) throw new Error();
       const reader = response.body.getReader();
       const chunks: Uint8Array[] = [];
@@ -163,7 +204,7 @@ export class CatalogContextHttp implements PricingCatalogContext {
       const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       if (!record(body) || !Array.isArray(body.items)) throw new Error();
       if (body.items.length !== skus.length) throw new Error();
-      return body.items.map((item: unknown, index: number) => {
+      const contexts = body.items.map((item: unknown, index: number) => {
         const expectedSku = skus[index]!;
         if (!record(item) || item.sku !== expectedSku) throw new Error();
         if (item.status === 'SKU_NO_ENCONTRADO' && item.context === null)
@@ -187,7 +228,35 @@ export class CatalogContextHttp implements PricingCatalogContext {
           eligible: context.eligible,
         };
       });
+      this.logger.dependency(
+        correlationId,
+        'catalog',
+        'context_body',
+        performance.now() - bodyStageStarted,
+        'success',
+        { status: response.status, itemCount: skus.length, mode: 'batch' },
+      );
+      bodyStageStarted = undefined;
+      return contexts;
     } catch {
+      if (contextHeaderStarted !== undefined)
+        this.logger.dependency(
+          correlationId,
+          'catalog',
+          'context_headers',
+          performance.now() - contextHeaderStarted,
+          'error',
+          { itemCount: skus.length, mode: 'batch' },
+        );
+      if (bodyStageStarted !== undefined)
+        this.logger.dependency(
+          correlationId,
+          'catalog',
+          'context_body',
+          performance.now() - bodyStageStarted,
+          'error',
+          { itemCount: skus.length, mode: 'batch' },
+        );
       // No retry: una sola consulta privada y cualquier frontera inválida falla cerrada.
       throw new PricingHttpError(503, 'SERVICIO_NO_DISPONIBLE');
     }
