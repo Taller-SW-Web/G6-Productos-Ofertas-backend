@@ -36,16 +36,17 @@ export class CombosSvcController {
   @Get('health') getHealth() {
     return this.service.getHealth();
   }
+  private consumerReadiness() {
+    return typeof this.consumer.readinessDetails === 'function'
+      ? this.consumer.readinessDetails()
+      : this.consumer.readinessStatus();
+  }
   @Get('ready') async ready(@Res() res: Response) {
-    const result = await this.service.readiness(
-      this.consumer.readinessStatus(),
-    );
+    const result = await this.service.readiness(this.consumerReadiness());
     return res.status(result.status === 'ok' ? 200 : 503).json(result);
   }
   @Get('health/ready') async gatewayReadiness(@Res() res: Response) {
-    const result = await this.service.readiness(
-      this.consumer.readinessStatus(),
-    );
+    const result = await this.service.readiness(this.consumerReadiness());
     const ready = result.status === 'ok';
     return res.status(ready ? 200 : 503).json({
       ...result,
