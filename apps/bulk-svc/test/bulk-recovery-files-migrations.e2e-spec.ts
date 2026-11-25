@@ -963,7 +963,7 @@ integration(
       try {
         // 1. Initial readiness is 200 READY
         const readyBefore = await request(app.getHttpServer())
-          .get('/health/readiness')
+          .get('/health/readiness/reads')
           .expect(200);
         expect(readyBefore.body.status).toBe('ready');
         expect(readyBefore.body.reason).toBe('READY');
@@ -977,7 +977,7 @@ integration(
 
         // 3. Readiness fails with 503 DATABASE_UNAVAILABLE
         const readyDuringOutage = await request(app.getHttpServer())
-          .get('/health/readiness')
+          .get('/health/readiness/reads')
           .expect(503);
         expect(readyDuringOutage.body.status).toBe('not_ready');
         expect(readyDuringOutage.body.reason).toBe('DATABASE_UNAVAILABLE');
@@ -999,7 +999,7 @@ integration(
         // 5. Restore connectivity and verify real readiness recovers to 200 READY
         outageActive = false;
         const readyAfter = await request(app.getHttpServer())
-          .get('/health/readiness')
+          .get('/health/readiness/reads')
           .expect(200);
         expect(readyAfter.body.status).toBe('ready');
         expect(readyAfter.body.reason).toBe('READY');
