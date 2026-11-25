@@ -12,6 +12,12 @@ const basket = {
 };
 describe('Bounded commercial integration boundary', () => {
   it('preserves a contractual input error through the deadline boundary', async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const context = {
+      correlationId: '88888888-8888-4888-8888-888888888888',
+      at: '2026-11-25T00:00:00Z',
+      observe: (event: Record<string, unknown>) => events.push(event),
+    };
     const source = {
       ...blockedCommercialContext,
       basket: async () => {
@@ -19,8 +25,19 @@ describe('Bounded commercial integration boundary', () => {
       },
     };
     await expect(
-      new BoundedCommercialContext(source).basket(basket, 'at'),
+      new BoundedCommercialContext(source).basket(
+        basket,
+        'at',
+        undefined,
+        context,
+      ),
     ).rejects.toBeInstanceOf(CommercialInputError);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        outcome: 'input_error',
+        errorCode: 'COMMERCIAL_INPUT_REJECTED',
+      }),
+    );
   });
   afterEach(() => vi.useRealTimers());
   it('preserves the explicit default gate and its unblock condition', async () => {

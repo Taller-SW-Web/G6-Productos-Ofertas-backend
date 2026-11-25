@@ -34,7 +34,12 @@ export interface CommercialReadContext {
     stage: string;
     durationMs: number;
     outcome:
-      'success' | 'http_error' | 'internal_error' | 'timeout' | 'cancelled';
+      | 'success'
+      | 'http_error'
+      | 'input_error'
+      | 'internal_error'
+      | 'timeout'
+      | 'cancelled';
     status?: number;
     errorCode?: string;
     deadlineMs?: number;

@@ -48,6 +48,7 @@ export class BoundedCommercialContext implements CommercialContext {
       return result;
     } catch (error) {
       const timeout = error instanceof PromotionsDependencyTimeout;
+      const inputError = error instanceof CommercialInputError;
       const cancelled =
         parent?.aborted === true ||
         (deadlineAt > performance.now() &&
@@ -64,12 +65,16 @@ export class BoundedCommercialContext implements CommercialContext {
           ? 'timeout'
           : cancelled
             ? 'cancelled'
-            : 'internal_error',
+            : inputError
+              ? 'input_error'
+              : 'internal_error',
         errorCode: timeout
           ? 'COMMERCIAL_DEADLINE_EXCEEDED'
           : cancelled
             ? 'DEPENDENCY_CANCELLED'
-            : 'COMMERCIAL_CONTEXT_FAILED',
+            : inputError
+              ? 'COMMERCIAL_INPUT_REJECTED'
+              : 'COMMERCIAL_CONTEXT_FAILED',
         deadlineMs: this.milliseconds,
         budgetRemainingMs: Math.max(0, deadlineAt - performance.now()),
         ...(exhaustedStage ? { exhaustedStage } : {}),
