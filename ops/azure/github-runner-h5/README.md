@@ -1,5 +1,11 @@
 # Runner privado H5: estado y recuperación
 
+## Aprobación del Environment Chile para CD
+
+`azure-h5-chile` conserva Required Reviewers activo y requiere exactamente al usuario GitHub `mrcastilla8` (ID `143348512`), con `prevent_self_review=false`. El bypass administrativo permanece deshabilitado y la única rama de despliegue permitida es `master`. El destino `chile-shared` debe corresponder exactamente a ese Environment; el preflight y el verificador del grupo validan esta asociación antes de solicitar un runner JIT.
+
+Esta regla es exclusiva de Chile. Brasil (`azure-h5`) conserva `prevent_self_review=true`; la excepción histórica de `azure-h5-pilot-234` mantiene su propia validación y alcance.
+
 Evidencia recogida el 2026-11-23 para `G6-Productos-Ofertas-backend`. No se crearon recursos Azure persistentes ni se modificaron protecciones de GitHub; se lanzaron dos ejecuciones de diagnóstico del Job existente.
 
 ## Hallazgos verificados

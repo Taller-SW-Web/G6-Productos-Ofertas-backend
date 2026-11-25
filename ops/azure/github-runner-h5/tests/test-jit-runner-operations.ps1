@@ -4,6 +4,48 @@ $ErrorActionPreference = 'Stop'
 
 function Assert-True([bool]$Condition,[string]$Message) { if (-not $Condition) { throw $Message } }
 function Get-RequestBody([string]$Json) { [System.Text.Json.JsonDocument]::Parse($Json) }
+function New-ApprovalEnvironment([string]$Name,[bool]$SelfReview,[object[]]$Reviewers,[bool]$AdminBypass=$false,[bool]$CustomBranches=$true,[bool]$ProtectedBranches=$false) {
+    return [pscustomobject]@{
+        name=$Name
+        can_admins_bypass=$AdminBypass
+        protection_rules=@([pscustomobject]@{type='required_reviewers';prevent_self_review=$SelfReview;reviewers=@($Reviewers)})
+        deployment_branch_policy=[pscustomobject]@{custom_branch_policies=$CustomBranches;protected_branches=$ProtectedBranches}
+    }
+}
+function New-MasterPolicies([string[]]$Names=@('master')) {
+    $items=@($Names|ForEach-Object{[pscustomobject]@{name=$_;type='branch'}})
+    return [pscustomobject]@{total_count=$items.Count;branch_policies=$items}
+}
+function Assert-ApprovalPolicyRejected($Environment,$BranchPolicies,[string]$Destination,[string]$ExpectedEnvironment) {
+    $rejected=$false
+    try { Assert-H5EnvironmentApprovalPolicy -Environment $Environment -BranchPolicies $BranchPolicies -Destination $Destination -ExpectedEnvironment $ExpectedEnvironment } catch { $rejected=$true }
+    Assert-True $rejected "invalid $Destination Environment approval policy was accepted"
+}
+
+# Chile permits only mrcastilla8 to self-approve while preserving Required Reviewers,
+# no admin bypass, and the exact master deployment branch policy.
+$mrcastillaReviewer=[pscustomobject]@{type='User';reviewer=[pscustomobject]@{id=143348512}}
+$validChileEnvironment=New-ApprovalEnvironment 'azure-h5-chile' $false @($mrcastillaReviewer)
+$validMasterPolicies=New-MasterPolicies
+Assert-H5EnvironmentApprovalPolicy -Environment $validChileEnvironment -BranchPolicies $validMasterPolicies -Destination chile-shared -ExpectedEnvironment azure-h5-chile
+Assert-ApprovalPolicyRejected (New-ApprovalEnvironment 'azure-h5-chile' $false @([pscustomobject]@{type='User';reviewer=[pscustomobject]@{id=1}})) $validMasterPolicies chile-shared azure-h5-chile
+Assert-ApprovalPolicyRejected (New-ApprovalEnvironment 'azure-h5-chile' $false @()) $validMasterPolicies chile-shared azure-h5-chile
+Assert-ApprovalPolicyRejected (New-ApprovalEnvironment 'azure-h5-chile' $false @($mrcastillaReviewer,[pscustomobject]@{type='User';reviewer=[pscustomobject]@{id=1}})) $validMasterPolicies chile-shared azure-h5-chile
+Assert-ApprovalPolicyRejected (New-ApprovalEnvironment 'azure-h5-chile' $true @($mrcastillaReviewer)) $validMasterPolicies chile-shared azure-h5-chile
+Assert-ApprovalPolicyRejected (New-ApprovalEnvironment 'azure-h5-chile' $false @($mrcastillaReviewer) $true) $validMasterPolicies chile-shared azure-h5-chile
+Assert-ApprovalPolicyRejected $validChileEnvironment (New-MasterPolicies @('master','release')) chile-shared azure-h5-chile
+Assert-ApprovalPolicyRejected (New-ApprovalEnvironment 'azure-h5-chile' $false @($mrcastillaReviewer) $false $false $false) $validMasterPolicies chile-shared azure-h5-chile
+Assert-ApprovalPolicyRejected ([pscustomobject]@{name='azure-h5-chile';can_admins_bypass=$false;protection_rules=@();deployment_branch_policy=$validChileEnvironment.deployment_branch_policy}) $validMasterPolicies chile-shared azure-h5-chile
+Assert-ApprovalPolicyRejected $validChileEnvironment $validMasterPolicies brazil-isolated azure-h5
+
+# Brazil keeps its prior reviewer-required and self-review-blocked policy.
+$validBrazilEnvironment=New-ApprovalEnvironment 'azure-h5' $true @([pscustomobject]@{type='User';reviewer=[pscustomobject]@{id=1}})
+Assert-H5EnvironmentApprovalPolicy -Environment $validBrazilEnvironment -BranchPolicies $validMasterPolicies -Destination brazil-isolated -ExpectedEnvironment azure-h5
+Assert-ApprovalPolicyRejected (New-ApprovalEnvironment 'azure-h5' $false @($mrcastillaReviewer)) $validMasterPolicies brazil-isolated azure-h5
+
+$groupVerifierSource=Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\verify-runner-group.ps1') -Raw
+$preflightSource=Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\run-jit-registration-preflight.ps1') -Raw
+Assert-True ($groupVerifierSource -match 'Assert-H5EnvironmentApprovalPolicy' -and $preflightSource -match 'Assert-H5EnvironmentApprovalPolicy') 'JIT authorization entry points do not share the destination-specific approval-policy validator'
 
 # An accepted HTTP response without a locally parsed runner ID is reconciled by
 # the exact generated name. Query errors and ambiguous matches never prove absence.

@@ -24,24 +24,31 @@ environment_path="repos/${repository}/environments/${environment_name}"
 branch_policies_path="${environment_path}/deployment-branch-policies"
 env_json="$(gh api -H 'X-GitHub-Api-Version: 2022-11-28' "$environment_path")" || fail 'el Environment no existe o no se pudo leer'
 
-# azure-h5 y azure-h5-chile deben conservar las protecciones estrictas.
-if [[ "$environment_name" != azure-h5-pilot-234 ]]; then
-  admin_bypass="$(jq -r '.can_admins_bypass | tostring' <<< "$env_json")"
-  [[ "$admin_bypass" == false ]] || fail 'el Environment permite bypass administrativo o no declara esa regla'
-  required_reviewers="$(jq '[.protection_rules[]? | select(.type == "required_reviewers" and .prevent_self_review == true and (.reviewers | length > 0))] | length' <<< "$env_json")"
-  [[ "$required_reviewers" == 1 ]] || fail 'faltan required reviewers o prevención de autoaprobación'
-  branch_mode="$(jq -r 'if .deployment_branch_policy.custom_branch_policies == true and .deployment_branch_policy.protected_branches == false then "custom" else "invalid" end' <<< "$env_json")"
-  [[ "$branch_mode" == custom ]] || fail 'la política de ramas debe ser explícita y restringida a master'
-  branch_policies="$(gh api -H 'X-GitHub-Api-Version: 2022-11-28' "$branch_policies_path")" || fail 'no se pudieron consultar las ramas autorizadas'
-  [[ "$(jq -r '[.branch_policies[].name] | sort | join(",")' <<< "$branch_policies")" == master ]] || fail 'la única rama autorizada debe ser master'
-  [[ "$(jq -r '[.branch_policies[].type] | join(",")' <<< "$branch_policies")" == branch ]] || fail 'master debe ser una rama'
-else
+if [[ "$environment_name" == azure-h5-pilot-234 ]]; then
   required_reviewers="$(jq '[.protection_rules[]? | select(.type == "required_reviewers" and .prevent_self_review == false and (.reviewers | length == 1) and .reviewers[0].type == "User" and .reviewers[0].reviewer.id == 129343979)] | length' <<< "$env_json")"
   [[ "$required_reviewers" == 1 ]] || fail 'la excepción histórica del piloto no coincide'
   branch_mode="$(jq -r 'if .deployment_branch_policy.custom_branch_policies == true and .deployment_branch_policy.protected_branches == false then "custom" else "invalid" end' <<< "$env_json")"
   [[ "$branch_mode" == custom ]] || fail 'el piloto histórico debe restringir ramas a master'
   branch_policies="$(gh api -H 'X-GitHub-Api-Version: 2022-11-28' "$branch_policies_path")" || fail 'no se pudieron consultar las ramas autorizadas del piloto'
   [[ "$(jq -r '[.branch_policies[].name] | sort | join(",")' <<< "$branch_policies")" == master && "$(jq -r '[.branch_policies[].type] | join(",")' <<< "$branch_policies")" == branch ]] || fail 'el piloto histórico solo admite la rama master'
+elif [[ "$environment_name" == azure-h5-chile ]]; then
+  admin_bypass="$(jq -r '.can_admins_bypass | tostring' <<< "$env_json")"
+  [[ "$admin_bypass" == false ]] || fail 'el Environment Chile permite bypass administrativo o no declara esa regla'
+  required_reviewers="$(jq '[.protection_rules[]? | select(.type == "required_reviewers" and .prevent_self_review == false and (.reviewers | length == 1) and .reviewers[0].type == "User" and .reviewers[0].reviewer.id == 143348512)] | length' <<< "$env_json")"
+  [[ "$required_reviewers" == 1 ]] || fail 'Chile requiere solo a mrcastilla8 como reviewer y permite su autoaprobación explícita'
+  branch_mode="$(jq -r 'if .deployment_branch_policy.custom_branch_policies == true and .deployment_branch_policy.protected_branches == false then "custom" else "invalid" end' <<< "$env_json")"
+  [[ "$branch_mode" == custom ]] || fail 'la política Chile debe ser explícita y restringida a master'
+  branch_policies="$(gh api -H 'X-GitHub-Api-Version: 2022-11-28' "$branch_policies_path")" || fail 'no se pudieron consultar las ramas autorizadas de Chile'
+  [[ "$(jq -r '[.branch_policies[].name] | sort | join(",")' <<< "$branch_policies")" == master && "$(jq -r '[.branch_policies[].type] | join(",")' <<< "$branch_policies")" == branch ]] || fail 'Chile solo admite la rama master'
+else
+  admin_bypass="$(jq -r '.can_admins_bypass | tostring' <<< "$env_json")"
+  [[ "$admin_bypass" == false ]] || fail 'el Environment permite bypass administrativo o no declara esa regla'
+  required_reviewers="$(jq '[.protection_rules[]? | select(.type == "required_reviewers" and .prevent_self_review == true and (.reviewers | length > 0))] | length' <<< "$env_json")"
+  [[ "$required_reviewers" == 1 ]] || fail 'Brasil requiere reviewers y prevención de autoaprobación'
+  branch_mode="$(jq -r 'if .deployment_branch_policy.custom_branch_policies == true and .deployment_branch_policy.protected_branches == false then "custom" else "invalid" end' <<< "$env_json")"
+  [[ "$branch_mode" == custom ]] || fail 'la política Brasil debe ser explícita y restringida a master'
+  branch_policies="$(gh api -H 'X-GitHub-Api-Version: 2022-11-28' "$branch_policies_path")" || fail 'no se pudieron consultar las ramas autorizadas de Brasil'
+  [[ "$(jq -r '[.branch_policies[].name] | sort | join(",")' <<< "$branch_policies")" == master && "$(jq -r '[.branch_policies[].type] | join(",")' <<< "$branch_policies")" == branch ]] || fail 'Brasil solo admite la rama master'
 fi
 
 printf 'PASS: %s protege destino %s, modo %s; rama master y aprobaciones validadas.\n' "$environment_name" "$destination" "$mode"
