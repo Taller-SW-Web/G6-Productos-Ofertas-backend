@@ -215,6 +215,7 @@ integration(
       setFlag('BULK_AMQP_ENABLED', 'false');
 
       pool = new Pool({ connectionString: bulkDatabaseUrl, max: 6 });
+      pool.on('error', () => {});
       bulkDb = drizzle(pool, { schema: bulkSchema, logger: false });
       bulkRepo = new BulkPersistenceRepository(bulkDb);
 
@@ -240,6 +241,11 @@ integration(
     });
 
     afterAll(async () => {
+      await pool
+        ?.query(
+          'UPDATE bulk.outbox SET published_at = COALESCE(published_at, NOW())',
+        )
+        .catch(() => {});
       await catalogDb?.onModuleDestroy();
       await pool?.end();
       for (const [name, value] of restoreFlags) {
@@ -568,7 +574,9 @@ integration(
         'xl/worksheets/sheet1.xml',
         Buffer.from(editedSheetXml, 'utf8'),
       );
-      const roundtripXlsx = writeZipStored(tplEntries);
+      const roundtripXlsx = writeZipStored(
+        Array.from(tplEntries, ([name, content]) => ({ name, content })),
+      );
 
       const xlsxCorrelationId = randomUUID();
       const xlsxImportRes = await request(server)
@@ -838,10 +846,8 @@ integration(
       let roleLocked = false;
       try {
         await adminPool.query('ALTER ROLE bulk_app NOLOGIN');
+        await adminPool.query('REVOKE USAGE ON SCHEMA bulk FROM bulk_app');
         roleLocked = true;
-        await adminPool.query(
-          "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'bulk_app' AND pid <> pg_backend_pid()",
-        );
 
         const outageRes = await request(app.getHttpServer())
           .post('/api/v1/carga-masiva/productos/importaciones')
@@ -854,6 +860,7 @@ integration(
           });
         expect(outageRes.status).toBeGreaterThanOrEqual(500);
 
+        await adminPool.query('GRANT USAGE ON SCHEMA bulk TO bulk_app');
         await adminPool.query('ALTER ROLE bulk_app LOGIN');
         roleLocked = false;
 
@@ -876,6 +883,9 @@ integration(
         expect(rows).toHaveLength(1);
       } finally {
         if (roleLocked) {
+          await adminPool
+            .query('GRANT USAGE ON SCHEMA bulk TO bulk_app')
+            .catch(() => {});
           await adminPool.query('ALTER ROLE bulk_app LOGIN').catch(() => {});
         }
         await app.close();
