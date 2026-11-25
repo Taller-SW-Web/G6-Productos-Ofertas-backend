@@ -120,7 +120,7 @@ test('ARM contains no private credentials and isolates eight internal HTTPS apps
         app.properties.template.scale.minReplicas,
         app.properties.template.scale.maxReplicas,
       ],
-      [0, 1],
+      ['api-gateway', 'promotions-svc'].includes(app.name) ? [1, 1] : [0, 1],
     );
     assert.ok(app.properties.template.containers[0].image.includes('@sha256:'));
   }
@@ -242,7 +242,10 @@ test('G7 deployment renders with nine aligned trust configurations and no anonym
   const g5 = makeDeployment(stage);
   for (const app of g5.template.resources.slice(1)) {
     const identity = stage.serviceBusG5H5.identities[app.name];
-    assert.equal(app.properties.template.scale.minReplicas, identity ? 1 : 0);
+    assert.equal(
+      app.properties.template.scale.minReplicas,
+      ['api-gateway', 'promotions-svc'].includes(app.name) || identity ? 1 : 0,
+    );
     if (identity)
       assert.deepEqual(Object.keys(app.identity.userAssignedIdentities), [
         identity.resourceId,
@@ -287,7 +290,10 @@ test('G7 deployment renders with nine aligned trust configurations and no anonym
         input.serviceBusPilot.identities[app.name].resourceId,
       ]);
     } else {
-      assert.equal(app.properties.template.scale.minReplicas, 0);
+      assert.equal(
+        app.properties.template.scale.minReplicas,
+        ['api-gateway', 'promotions-svc'].includes(app.name) ? 1 : 0,
+      );
       assert.equal(app.identity, undefined);
     }
   }
