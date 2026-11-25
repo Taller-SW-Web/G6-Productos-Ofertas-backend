@@ -98,19 +98,21 @@ describe('Configured integration providers', () => {
         origen: 'PRODUCTO',
       },
     ];
-    const fetcher = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
-      const url = new URL(String(input));
-      expect(new Headers(init?.headers).get('authorization')).toBe(
-        'Bearer synthetic-service-token',
-      );
-      expect(new Headers(init?.headers).get('x-correlation-id')).toMatch(
-        /^[0-9a-f-]{36}$/i,
-      );
-      expect(url.pathname).toMatch(
-        /^\/api\/v1\/(productos\/skus\/S-P\/contexto|productos\/P|precios\/skus\/S-P)$/,
-      );
-      return Response.json(responses.shift());
-    });
+    const fetcher = vi.fn(
+      async (input: URL | RequestInfo, init?: RequestInit) => {
+        const url = new URL(String(input));
+        expect(new Headers(init?.headers).get('authorization')).toBe(
+          'Bearer synthetic-service-token',
+        );
+        expect(new Headers(init?.headers).get('x-correlation-id')).toMatch(
+          /^[0-9a-f-]{36}$/i,
+        );
+        expect(url.pathname).toMatch(
+          /^\/api\/v1\/(productos\/skus\/S-P\/contexto|productos\/P|precios\/skus\/S-P)$/,
+        );
+        return Response.json(responses.shift());
+      },
+    );
     vi.stubGlobal('fetch', fetcher);
     try {
       const commercial = commercialProvider(config, async (request) => {
@@ -179,6 +181,95 @@ describe('Configured integration providers', () => {
         ),
       ).rejects.toBeInstanceOf(CommercialDependencyError);
       expect(tokens).toHaveBeenCalledTimes(1);
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('keeps administrative Catalog reads authenticated with their own technical token', async () => {
+    const config = new PromotionsConfigService(
+      validatePromotionsConfiguration({
+        ...fixture.environment,
+        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+        PROMOTIONS_PUBLIC_OPERATION_IDS: 'evaluarPromociones',
+        GATEWAY_CATALOG_SVC_URL: 'http://catalog-svc:3001',
+        GATEWAY_TAXONOMY_SVC_URL: 'http://taxonomy-svc:3006',
+      }),
+    );
+    const tokenRequests: unknown[] = [];
+    const observed: Array<{ url: string; authorization: string | null }> = [];
+    const fetcher = vi.fn(
+      async (input: URL | RequestInfo, init?: RequestInit) => {
+        const url = new URL(String(input));
+        observed.push({
+          url: url.pathname + url.search,
+          authorization: new Headers(init?.headers).get('authorization'),
+        });
+        return Response.json({
+          product_id: 'P',
+          slug: 'p',
+          name: 'P',
+          categoria_id: 'C',
+          tipo_producto_id: 'T',
+          marca_id: 'M',
+          tiene_variantes: false,
+          marca: { marca_id: 'M', name: 'Marca' },
+          variants: [],
+        });
+      },
+    );
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      const provider = adminReferenceProvider(config, async (request) => {
+        tokenRequests.push(request);
+        return 'synthetic-admin-token';
+      });
+      await expect(
+        provider.verify(
+          { products: ['P'], skus: [], categories: [] },
+          new AbortController().signal,
+        ),
+      ).resolves.toMatchObject({ products: new Set(['P']) });
+      expect(tokenRequests).toEqual([
+        {
+          operationId: 'obtenerProducto',
+          audience: 'api-productos',
+          scope: 'catalogo:leer',
+        },
+      ]);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(observed).toEqual([
+        {
+          url: '/api/v1/productos/P?canal=MARKETPLACE',
+          authorization: 'Bearer synthetic-admin-token',
+        },
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('fails closed for administrative reads when its technical token is missing', async () => {
+    const config = new PromotionsConfigService(
+      validatePromotionsConfiguration({
+        ...fixture.environment,
+        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+        PROMOTIONS_PUBLIC_OPERATION_IDS: 'evaluarPromociones',
+        GATEWAY_CATALOG_SVC_URL: 'http://catalog-svc:3001',
+        GATEWAY_TAXONOMY_SVC_URL: 'http://taxonomy-svc:3006',
+      }),
+    );
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      const provider = adminReferenceProvider(config, async () => null);
+      await expect(
+        provider.verify(
+          { products: ['P'], skus: [], categories: [] },
+          new AbortController().signal,
+        ),
+      ).rejects.toBeInstanceOf(CommercialDependencyError);
       expect(fetcher).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();

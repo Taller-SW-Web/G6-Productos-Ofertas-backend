@@ -131,3 +131,41 @@ No incluir `customer_ref` en el primer control (es opcional); mantener el SKU co
 - Pruebas focalizadas, typecheck y lint reejecutados sobre el HEAD `feb1acc88d4e5fe058bbae6f570bf5a232a1e860`, sincronizado con `origin/master` actualizado: **PASS**.
 - `LIVE_HTTP_200`: las tres dependencias internas sí dieron 200 autenticadas; la evaluación promocional final aún no se ejecutó con Chatbot ni contra el código corregido desplegado.
 - Worktree: creado desde `origin/master` SHA `daf4882b7dc6895c6601a1f4af209ec92c8215b0` y sincronizado de forma segura con el `origin/master` actualizado; no se modificaron otros worktrees ni el PR #275.
+
+## Addendum de cierre técnico y preparación de rollout (2026-11-25)
+
+Este addendum supersede los pendientes operativos de autenticación inbound descritos arriba. No hubo nuevas consultas Azure, lecturas de SKU/precio/credenciales ni búsquedas del correlation ID histórico en esta continuación. La reproducción nueva descrita en la sección de evidencia conserva exclusivamente su CID nuevo `04c02b19-5419-4fea-9f21-1de95fd9766e`; el CID histórico `afa0459f-972e-44b9-90e3-4d00651313ac` no tiene logs retenidos y no se le atribuye esa reproducción.
+
+### Cierre de guards entrantes
+
+Revisión de código y pruebas efectivas confirma que Gateway omite la autenticación solo si no hay `Authorization`, el modo es `PUBLIC_READ_ONLY` y `evaluarPromociones` está en `GATEWAY_PUBLIC_OPERATION_IDS`; Promotions además compara método, ruta, `operationId` y `PROMOTIONS_PUBLIC_OPERATION_IDS`. El contrato de ambos declara `serviceBearer`, audiencia `api-productos`, scope `promociones:evaluar` y clientes permitidos que incluyen `modulo-chatbot`.
+
+Por tanto, basta retirar exclusivamente `evaluarPromociones` de `GATEWAY_PUBLIC_OPERATION_IDS` y `PROMOTIONS_PUBLIC_OPERATION_IDS`, manteniendo `G6_SECURITY_MODE=PUBLIC_READ_ONLY` y el resto de ambas allowlists. Sin esa excepción, ambos guards caen al validador JWT normal. Se probaron en Gateway y Promotions: JWT de servicio G3 válido aceptado; token ausente/expirado rechazado 401; scope incorrecto rechazado 403; otra operación GET permitida sigue pública. La prueba local usa un emisor/JWKS sintético firmado y no suplanta ni utiliza el token real de G3. No se cambiaron allowlists runtime.
+
+La prueba adicional de `adminReferenceProvider` en modo inbound público confirma que Catalog recibe `Authorization: Bearer` de su fuente técnica propia con `obtenerProducto`, `api-productos`, `catalogo:leer`. Si la fuente devuelve null, el provider falla cerrado y `fetch` no recibe solicitudes anónimas. Esto cubre el otro consumidor de `options()` que comparte la política de transporte corregida.
+
+### Validación local de esta revisión
+
+HEAD funcional auditado anteriormente: `6e04a3389a1b0c9c52dd62cc65c723ac6948b5ed`; este addendum y las pruebas se incorporan en commits posteriores del mismo PR #277. Ejecutar CI sobre el HEAD final publicado es requisito separado y se registra abajo cuando concluya.
+
+- Promotions: `integration-providers.spec.ts`, `promotions-identity.spec.ts`, `admin-references-http.spec.ts`, `commercial-http.spec.ts`.
+- Gateway: `gateway-identity.spec.ts`.
+- Resultado focalizado: 104 pruebas PASS en 5 archivos.
+- `npm run typecheck -- --pretty false`: PASS.
+- `npm run lint`: PASS (solo advertencias preexistentes en archivos fuera del cambio).
+- `git diff --check`: PASS.
+- Pruebas de identidad G3 válidas/ausentes/expiradas/scope incorrecto: PASS en ambos guards; `modulo-chatbot` tiene scope contractual permitido. No es una prueba bilateral live.
+- No se cambió configuración, escala, revisión, tráfico, ingress, secreto, imagen ni dato QA. No hubo deployment ni apertura de `AZURE_CHILE_DEPLOY_ENABLED`.
+
+### Secuencia de rollout coordinado Chile (pendiente de autorización; no ejecutar ahora)
+
+1. Registrar inmediatamente antes del rollout revisión activa, tráfico por revisión, image reference/digest, configuración de escalas y health de `api-gateway` y `promotions-svc`. Baseline observado en el diagnóstico: Gateway `api-gateway--mktrestore1124`, digest `sha256:2ec4f28ee02c222f5e407caf5ecbd2aae13a158ed3ab1b9509cc6dedb778eed3`; Promotions `promotions-svc--http-4c40b31b-mwgj2k1j`, digest `sha256:82c272907449ab290ff7d4239b0a5805e54ed04908bd756479ed899cbd61d143`. Las revisiones servían 100% del tráfico; health ACA Healthy; escalas `0–1`. Es una referencia histórica y se debe volver a capturar antes de actuar.
+2. Construir la imagen de Promotions desde el SHA exacto ya fusionado (el commit de merge de #277), registrar digest y comprobar que el artefacto procede de ese SHA. No reutilizar el digest anterior como si incluyera el fix.
+3. Mantener los modos actuales `PUBLIC_READ_ONLY`; retirar solo el ID `evaluarPromociones` de `GATEWAY_PUBLIC_OPERATION_IDS` y `PROMOTIONS_PUBLIC_OPERATION_IDS`. Conservar los demás IDs públicos y todos los secretos/configuración de client_credentials, issuer/JWKS y upstreams. La fuente interna de Promotions continúa siendo `modulo-productos` para `api-productos` con los scopes concedidos.
+4. Aplicar primero la revisión/configuración de Gateway con la allowlist acotada para que el borde rechace anónimos; después actualizar Promotions con la imagen construida del merge y su allowlist acotada. Esperar health/readiness y confirmar tráfico/revisión antes de continuar. Mantener Catalog, Pricing, Inventory, Marketplace, Retail y escalas sin cambios.
+5. Con correlation IDs nuevos, comprobar por el Gateway: petición anónima devuelve rechazo 401/403; JWT obtenido por el cliente legítimo G3 pasa autenticación; un único POST con `channel_id=CHATBOT`, instante UTC real, línea `ADI-RF3-GRI-38` cantidad 1 devuelve 200. No compartir ni registrar JWT. Sanitizar la respuesta y verificar que no se consumió cupón, no se creó pedido, no se reservó stock ni cambió estado comercial.
+6. Si falla, detener tráfico de prueba y volver a la imagen/revisión previa y a la configuración previa de cada recurso de forma coordinada. Como el baseline era anónimo, no restaurar `evaluarPromociones` en ninguna allowlist durante rollback: mantener la exclusión para que el endpoint no se reabra anónimamente. El rollback de imagen podría volver a fallar upstream 401/503; en ese caso mantener la operación cerrada a JWT y restaurar una imagen corregida/estable antes de admitir retests. Preservar Marketplace/Retail, otras rutas públicas y recursos/fixtures QA.
+
+### Estado PR/CI y bloqueos
+
+PR #277 permanece como único PR de este cambio; #275 no se tocó. Estado previo a publicar estos cambios: Draft y CI anterior `SKIPPED`, que no valida esta revisión. Tras subir los commits de este addendum y pruebas, el PR debe pasar a Ready solo si quedan verdes las validaciones locales; se verificarán los checks oficiales contra el SHA exacto y mergeabilidad antes del merge normal autorizado. Merge y despliegue son etapas distintas. No existe todavía `LIVE_HTTP_200` para la evaluación bilateral con la identidad real de Chatbot; queda para retest después del rollout.
