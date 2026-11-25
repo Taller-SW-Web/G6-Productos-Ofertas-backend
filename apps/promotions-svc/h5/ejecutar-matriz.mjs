@@ -4,9 +4,17 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { constanciaFirmada } from './evidencia-integracion.mjs';
 import { verificarDespliegue } from './verificar-despliegue.mjs';
-import { authorizeMutation, loadMutationAuthorization } from './autorizacion-mutaciones.mjs';
+import {
+  authorizeMutation,
+  loadMutationAuthorization,
+} from './autorizacion-mutaciones.mjs';
 
-const scenarios = JSON.parse(await readFile(resolve(dirname(fileURLToPath(import.meta.url)), 'escenarios.json'), 'utf8'));
+const scenarios = JSON.parse(
+  await readFile(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'escenarios.json'),
+    'utf8',
+  ),
+);
 const idOf = (index) => scenarios[index].id;
 const sha = /^[0-9a-f]{40}$/i;
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
@@ -183,7 +191,13 @@ function stageIdentifier(id, stage, plan) {
 const executeStage = (stage, plan, statePath, authorizationPath) =>
   spawnSync(
     process.execPath,
-    [runner, stage, plan, ...(statePath ? [statePath] : []), ...(authorizationPath ? [authorizationPath, 'true'] : [])],
+    [
+      runner,
+      stage,
+      plan,
+      ...(statePath ? [statePath] : []),
+      ...(authorizationPath ? [authorizationPath, 'true'] : []),
+    ],
     {
       encoding: 'utf8',
       timeout: 420_000,
@@ -269,13 +283,17 @@ export async function ejecutarMatriz(
         : 'AMBIENTE_SHA_O_PEDIDO_INVALIDO';
       continue;
     }
-    const ids = [...new Set([
-      plan.reservation_id,
-      plan.follow_operation_id,
-      ...(id === 'G5-H5-14' ? [plan.correlation_id] : []),
-      ...(id === 'G5-H5-20' ? (plan.message_ids ?? []) : []),
-      ...Object.values(plan.operations ?? {}),
-    ].filter((id) => uuid.test(id)))];
+    const ids = [
+      ...new Set(
+        [
+          plan.reservation_id,
+          plan.follow_operation_id,
+          ...(id === 'G5-H5-14' ? [plan.correlation_id] : []),
+          ...(id === 'G5-H5-20' ? (plan.message_ids ?? []) : []),
+          ...Object.values(plan.operations ?? {}),
+        ].filter((id) => uuid.test(id)),
+      ),
+    ];
     Object.assign(row, {
       environment: plan.environment,
       g6_sha: plan.g6_sha,
@@ -294,8 +312,15 @@ export async function ejecutarMatriz(
       try {
         if (typeof fixture.mutation_authorization !== 'string')
           throw new Error('MUTATION_AUTHORIZATION_FILE_REQUIRED');
-        const authorization = await loadAuthorization(fixture.mutation_authorization);
-        await authorize({ stage, plan, authorization, execute: fixture.execute === true });
+        const authorization = await loadAuthorization(
+          fixture.mutation_authorization,
+        );
+        await authorize({
+          stage,
+          plan,
+          authorization,
+          execute: fixture.execute === true,
+        });
       } catch (error) {
         row.reason = /^[A-Z0-9_-]{1,100}$/.test(error?.message ?? '')
           ? error.message
@@ -305,9 +330,18 @@ export async function ejecutarMatriz(
     }
     if (stage === null && !fixture.attestation) continue;
     try {
-      row.deployment = await verifyDeployment(plan);
+      row.deployment =
+        stage === null ? [] : await verifyDeployment(plan, stage);
     } catch {
       row.reason = 'DESPLIEGUE_OFICIAL_NO_VERIFICADO';
+      continue;
+    }
+    if (
+      row.deployment.some(
+        (service) => service.certification_status !== 'SUCCESS',
+      )
+    ) {
+      row.reason = 'CD_RUN_NOT_SUCCESS_CERTIFICATION_BLOCKED';
       continue;
     }
     let technicalPassed = false;
@@ -315,7 +349,12 @@ export async function ejecutarMatriz(
     const observe = observations.get(id);
     const needsRuntime = supervisedRuntimeCases.has(id);
     if (stage !== null) {
-      const run = execute(stage, fixture.plan, fixture.state, fixture.mutation_authorization);
+      const run = execute(
+        stage,
+        fixture.plan,
+        fixture.state,
+        fixture.mutation_authorization,
+      );
       row.technical_status = 'FAIL';
       const detail = /"code":"([A-Z0-9_]+)"/.exec(
         String(run.stderr ?? ''),
@@ -415,7 +454,7 @@ export async function ejecutarMatriz(
           (proof.status === 'PASS' && proof.observed !== expected)
         )
           throw new Error();
-        if (proof.status === 'PASS') {
+        if (proof.status === 'PASS' && row.deployment.length) {
           if (
             row.deployment.some(
               (entry) =>
@@ -456,7 +495,7 @@ export async function ejecutarMatriz(
     }
     if (technicalPassed) {
       try {
-        const current = await verifyDeployment(plan);
+        const current = await verifyDeployment(plan, stage);
         if (JSON.stringify(current) !== JSON.stringify(row.deployment))
           throw new Error();
       } catch {
@@ -492,7 +531,12 @@ async function main() {
             ...fixture,
             plan: resolve(manifestDirectory, fixture.plan),
             ...(typeof fixture.mutation_authorization === 'string'
-              ? { mutation_authorization: resolve(manifestDirectory, fixture.mutation_authorization) }
+              ? {
+                  mutation_authorization: resolve(
+                    manifestDirectory,
+                    fixture.mutation_authorization,
+                  ),
+                }
               : {}),
             ...(fixture.state
               ? { state: resolve(manifestDirectory, fixture.state) }

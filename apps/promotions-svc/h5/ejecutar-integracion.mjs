@@ -3,7 +3,10 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { constanciaComercial } from './evidencia-integracion.mjs';
-import { authorizeMutation, readMutationAuthorization } from './autorizacion-mutaciones.mjs';
+import {
+  authorizeMutation,
+  readMutationAuthorization,
+} from './autorizacion-mutaciones.mjs';
 import { verificarDespliegue } from './verificar-despliegue.mjs';
 import { pathToFileURL } from 'node:url';
 
@@ -27,12 +30,21 @@ const orderQuery = (order) => '?' + new URLSearchParams({ order_id: order });
 
 export function cancellationSteps(plan) {
   if (plan.cancel_mode === 'release-only') return ['release'];
-  if (plan.cancel_mode === 'restore-consumption' || plan.cancel_mode === 'reject-unbacked-restore')
+  if (
+    plan.cancel_mode === 'restore-consumption' ||
+    plan.cancel_mode === 'reject-unbacked-restore'
+  )
     return ['restore', 'release'];
   throw new Error('CANCEL_MODE_REQUIRED');
 }
 
-export async function executeCancellation(plan, cancellation, submit, operationId, reservationPath) {
+export async function executeCancellation(
+  plan,
+  cancellation,
+  submit,
+  operationId,
+  reservationPath,
+) {
   for (const step of cancellationSteps(plan)) {
     if (step === 'restore') {
       const restore = {
@@ -42,26 +54,51 @@ export async function executeCancellation(plan, cancellation, submit, operationI
         cancellation_reason: 'ANULACION',
         cancelled_at: cancellation.occurred_at,
       };
-      const restored = await submit('cupones', '/cupones/restauraciones', restore);
+      const restored = await submit(
+        'cupones',
+        '/cupones/restauraciones',
+        restore,
+      );
       if (plan.cancel_mode === 'reject-unbacked-restore')
-        ensure(restored.status === 'REJECTED' && restored.result?.result_code === 'COUPON_IDENTITY_MISMATCH', 'UNBACKED_RESTORE_WAS_NOT_REJECTED');
-      else ensure(restored.status === 'COMPLETED' && restored.result?.outcome === plan.expected_restore_outcome, 'RESTORE_RESULT_DIFFERED');
+        ensure(
+          restored.status === 'REJECTED' &&
+            restored.result?.result_code === 'COUPON_IDENTITY_MISMATCH',
+          'UNBACKED_RESTORE_WAS_NOT_REJECTED',
+        );
+      else
+        ensure(
+          restored.status === 'COMPLETED' &&
+            restored.result?.outcome === plan.expected_restore_outcome,
+          'RESTORE_RESULT_DIFFERED',
+        );
       continue;
     }
-    const released = await submit('inventario', reservationPath() + '/liberar', {
-      order_id: plan.order_id,
-      operation_id: operationId('release'),
-      reason: 'ANULACION',
-    });
+    const released = await submit(
+      'inventario',
+      reservationPath() + '/liberar',
+      {
+        order_id: plan.order_id,
+        operation_id: operationId('release'),
+        reason: 'ANULACION',
+      },
+    );
     ensure(released.status === 'COMPLETED', 'RELEASE_RESULT_DIFFERED');
   }
 }
 
 async function main() {
-  const [action, planPath, statePath = `${planPath}.runtime.json`, authorizationPath, executeFlag] =
-    process.argv.slice(2);
+  const [
+    action,
+    planPath,
+    statePath = `${planPath}.runtime.json`,
+    authorizationPath,
+    executeFlag,
+  ] = process.argv.slice(2);
   ensure(actions.includes(action) && planPath, 'USE_ACTION_AND_PLAN_FILE');
-  ensure(resolve(statePath) !== resolve(planPath), 'RUNTIME_STATE_PATH_MUST_DIFFER');
+  ensure(
+    resolve(statePath) !== resolve(planPath),
+    'RUNTIME_STATE_PATH_MUST_DIFFER',
+  );
   const plan = JSON.parse(await readFile(planPath, 'utf8'));
   if (['reserve', 'coupon', 'confirm', 'cancel'].includes(action)) {
     const authorization = await readMutationAuthorization(authorizationPath);
@@ -71,7 +108,11 @@ async function main() {
       authorization,
       execute: executeFlag === 'true',
     });
-    await verificarDespliegue(plan);
+    const deployment = await verificarDespliegue(plan, action);
+    ensure(
+      deployment.every((service) => service.certification_status === 'SUCCESS'),
+      'CD_CERTIFICATION_BLOCKED',
+    );
   }
   const runtimeState = await readFile(statePath, 'utf8')
     .then((text) => JSON.parse(text))
@@ -102,6 +143,22 @@ async function main() {
   );
   const token = process.env.G5_H5_VENTAS_JWT;
   ensure(token && !/\s/.test(token), 'G7_VENTAS_TOKEN_REQUIRED');
+  const pricingToken =
+    action === 'preflight' ? process.env.G5_H5_PRICING_READ_JWT : undefined;
+  const couponValidationToken =
+    action === 'preflight'
+      ? process.env.G5_H5_COUPON_VALIDATION_JWT
+      : undefined;
+  if (action === 'preflight') {
+    ensure(
+      pricingToken && !/\s/.test(pricingToken),
+      'G7_PRICING_READ_TOKEN_REQUIRED',
+    );
+    ensure(
+      couponValidationToken && !/\s/.test(couponValidationToken),
+      'G7_COUPON_VALIDATION_TOKEN_REQUIRED',
+    );
+  }
   const mutates = ['reserve', 'coupon', 'confirm', 'cancel'].includes(action);
   if (mutates) {
     ensure(
@@ -115,11 +172,16 @@ async function main() {
   if (['preflight', 'reserve', 'coupon'].includes(action))
     ensure(
       scenario &&
-        typeof scenario.sku === 'string' && scenario.sku.trim() &&
-        Number.isSafeInteger(scenario.quantity) && scenario.quantity > 0 &&
-        typeof scenario.channel_id === 'string' && scenario.channel_id.trim() &&
-        typeof scenario.coupon_code === 'string' && scenario.coupon_code.trim() &&
-        typeof scenario.currency === 'string' && scenario.currency.trim() &&
+        typeof scenario.sku === 'string' &&
+        scenario.sku.trim() &&
+        Number.isSafeInteger(scenario.quantity) &&
+        scenario.quantity > 0 &&
+        typeof scenario.channel_id === 'string' &&
+        scenario.channel_id.trim() &&
+        typeof scenario.coupon_code === 'string' &&
+        scenario.coupon_code.trim() &&
+        typeof scenario.currency === 'string' &&
+        scenario.currency.trim() &&
         (scenario.expected_regular_price === undefined ||
           (typeof scenario.expected_regular_price === 'string' &&
             /^\d+(?:\.\d{1,6})?$/.test(scenario.expected_regular_price) &&
@@ -168,21 +230,28 @@ async function main() {
         ? data.code
         : undefined;
     const route = path.split('?')[0];
-    const check = method === 'GET' && route === '/inventario/disponibilidad'
-      ? 'availability'
-      : method === 'GET' && route === '/precios/skus/' + segment(scenario?.sku ?? '')
-        ? 'price'
-        : method === 'POST' && route === '/cupones/validar'
-          ? 'coupon'
-          : undefined;
-    const query = Object.fromEntries(new URLSearchParams(path.split('?')[1] ?? ''));
-    const requestEvidence = method === 'GET'
-      ? query
-      : body ? {
-        channel_id: body.channel_id,
-        coupon_code: body.coupon_code,
-        lines: body.lines,
-      } : {};
+    const check =
+      method === 'GET' && route === '/inventario/disponibilidad'
+        ? 'availability'
+        : method === 'GET' &&
+            route === '/precios/skus/' + segment(scenario?.sku ?? '')
+          ? 'price'
+          : method === 'POST' && route === '/cupones/validar'
+            ? 'coupon'
+            : undefined;
+    const query = Object.fromEntries(
+      new URLSearchParams(path.split('?')[1] ?? ''),
+    );
+    const requestEvidence =
+      method === 'GET'
+        ? query
+        : body
+          ? {
+              channel_id: body.channel_id,
+              coupon_code: body.coupon_code,
+              lines: body.lines,
+            }
+          : {};
     report({
       event: 'http',
       method,
@@ -192,14 +261,16 @@ async function main() {
       check,
       request: requestEvidence,
       case_id: plan.case_id,
-      scenario: scenario ? {
-        sku: scenario.sku,
-        quantity: scenario.quantity,
-        channel_id: scenario.channel_id,
-        coupon_code: scenario.coupon_code,
-        currency: scenario.currency,
-        location_id: location,
-      } : undefined,
+      scenario: scenario
+        ? {
+            sku: scenario.sku,
+            quantity: scenario.quantity,
+            channel_id: scenario.channel_id,
+            coupon_code: scenario.coupon_code,
+            currency: scenario.currency,
+            location_id: location,
+          }
+        : undefined,
       operation_id: body?.operation_id,
     });
     return { status: response.status, data };
@@ -312,20 +383,25 @@ async function main() {
     const available = await inventoryAvailability();
     const pricing = await expectStatus(
       'GET',
-      '/precios/skus/' + segment(scenario.sku) +
-        '?canal=' + segment(scenario.channel_id),
+      '/precios/skus/' +
+        segment(scenario.sku) +
+        '?canal=' +
+        segment(scenario.channel_id),
       [200],
+      { bearer: pricingToken },
     );
     ensure(
       pricing?.sku === scenario.sku &&
         pricing.currency === scenario.currency &&
         Number(pricing.precio_regular) > 0 &&
         (scenario.expected_regular_price === undefined ||
-          Number(pricing.precio_regular) === Number(scenario.expected_regular_price)),
+          Number(pricing.precio_regular) ===
+            Number(scenario.expected_regular_price)),
       'INTEGRATION_PRICE_INVALID',
     );
     ensure(uuid.test(plan.customer_ref), 'TEST_CUSTOMER_REQUIRED');
     const coupon = await expectStatus('POST', '/cupones/validar', [200], {
+      bearer: couponValidationToken,
       body: {
         channel_id: scenario.channel_id,
         customer_ref: plan.customer_ref,
@@ -335,7 +411,8 @@ async function main() {
     });
     ensure(coupon?.valid === true, 'INTEGRATION_COUPON_NOT_ELIGIBLE');
     ensure(
-      coupon.currency === scenario.currency && Number(coupon.discount_amount) > 0,
+      coupon.currency === scenario.currency &&
+        Number(coupon.discount_amount) > 0,
       'INTEGRATION_DISCOUNT_INVALID',
     );
     report({
@@ -449,7 +526,9 @@ async function main() {
       );
       const foreignOrder = plan.auth.foreign_order_id;
       ensure(
-        typeof foreignOrder === 'string' && foreignOrder.trim() && foreignOrder !== order,
+        typeof foreignOrder === 'string' &&
+          foreignOrder.trim() &&
+          foreignOrder !== order,
         'FOREIGN_ORDER_REQUIRED',
       );
       const foreign = await expectStatus(
@@ -571,7 +650,13 @@ async function main() {
     kind: cancellation.event,
     evidence_id: cancellation.event_id,
   });
-  await executeCancellation(plan, cancellation, submit, operationId, reservationPath);
+  await executeCancellation(
+    plan,
+    cancellation,
+    submit,
+    operationId,
+    reservationPath,
+  );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
