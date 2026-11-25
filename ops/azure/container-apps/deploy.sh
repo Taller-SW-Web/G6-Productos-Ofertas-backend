@@ -155,7 +155,7 @@ verify_chile_served_revision() {
 }
 
 verify_chile_transition_traffic() {
-  local target_image="$1" previous_image="$2" previous_revision="$3" app_json mode expected_mode latest traffic served_revision served_weight revision_json="$work/transition-revision.json" revision_image active
+  local target_image="$1" previous_image="$2" previous_revision="$3" app_json mode latest traffic served_revision served_weight revision_json="$work/transition-revision.json" revision_image active
   app_json="$(read_app)" || return 1
   mode="$(jq -r '.properties.configuration.activeRevisionsMode // empty' <<< "$app_json")"
   latest="$(jq -r '.properties.latestRevisionName // empty' <<< "$app_json")"
@@ -174,11 +174,9 @@ verify_chile_transition_traffic() {
   active="$(jq -r '.properties.active // false' "$revision_json")"
   [[ "$active" == true ]] || return 1
   if [[ "$served_revision" == "$latest" && "$revision_image" == "$target_image" ]]; then
-    verified_chile_transition_state=target-revision
     return 0
   fi
   if [[ "$served_revision" == "$previous_revision" && "$revision_image" == "$previous_image" ]]; then
-    verified_chile_transition_state=previous-revision
     return 0
   fi
   return 1
