@@ -7,6 +7,7 @@ import {
   type ProcessErrorArgs,
   type ServiceBusReceivedMessage,
   type ServiceBusReceiver,
+  type ServiceBusReceiverOptions,
 } from '@azure/service-bus';
 
 export const combosServiceBusRoutes = {
@@ -118,10 +119,13 @@ export interface QueueRuntimeState {
   lastCheckedAt: string | null;
 }
 
-export type ServiceBusClientLike = Pick<
-  ServiceBusClient,
-  'createReceiver' | 'close'
->;
+export interface ServiceBusClientLike {
+  createReceiver(
+    queueName: string,
+    options?: ServiceBusReceiverOptions,
+  ): ServiceBusReceiver;
+  close(): Promise<void>;
+}
 
 type DeliveryHandler = (
   queue: CombosEventQueue,
@@ -219,6 +223,15 @@ export class CombosServiceBus {
   }
 
   private recomputeQueueReady(state: QueueRuntimeState): boolean {
+    if (!this.stopped && this.started && state.phase === 'SUBSCRIBED') {
+      const receiver = this.receivers.get(state.queue);
+      if (!receiver || receiver.isClosed) {
+        state.phase = 'DEGRADED';
+        state.linkReady = false;
+        state.subscribed = false;
+        state.lastErrorCode ??= 'RECEIVER_CLOSED';
+      }
+    }
     state.ready =
       !this.stopped &&
       this.started &&

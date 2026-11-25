@@ -657,10 +657,7 @@ describe.skipIf(!realAzureEnabled)(
             maxBackoffMs: 600,
             clientFactory: () => ({
               createReceiver: (queueName, options) => {
-                const rx = realClient.createReceiver(
-                  queueName,
-                  options as Parameters<ServiceBusClient['createReceiver']>[1],
-                );
+                const rx = realClient.createReceiver(queueName, options);
                 createdReceivers.set(queueName, rx);
                 return rx;
               },
@@ -678,11 +675,11 @@ describe.skipIf(!realAzureEnabled)(
           expect(ownedInventoryRx).toBeDefined();
           await ownedInventoryRx!.close();
 
-          const degradedDeadline = Date.now() + 5000;
-          while (Date.now() < degradedDeadline && bus.available) {
-            await new Promise((r) => setTimeout(r, 100));
-          }
           expect(bus.available).toBe(false);
+          expect(bus.getQueueStates()[lab.inventoryQueue]).toMatchObject({
+            phase: 'DEGRADED',
+            ready: false,
+          });
 
           const recoveredDeadline = Date.now() + 15_000;
           while (Date.now() < recoveredDeadline && !bus.available) {

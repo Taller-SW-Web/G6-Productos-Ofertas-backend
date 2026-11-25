@@ -261,6 +261,57 @@ describe('CombosServiceBus runtime (COM-SB-01 / COR-05 / T08 / T11)', () => {
     await bus.close();
   });
 
+  it('immediately reports NOT_READY when a receiver is closed directly, recovers without duplicate subscriptions, and closes cleanly (COM-AUD-19)', async () => {
+    const created: ReturnType<typeof makeFakeReceiver>[] = [];
+    const client: ServiceBusClientLike = {
+      createReceiver: vi.fn(() => {
+        const rx = makeFakeReceiver();
+        created.push(rx);
+        return rx as unknown as ServiceBusReceiver;
+      }),
+      close: vi.fn(async () => undefined),
+    };
+    const bus = new CombosServiceBus(
+      {
+        provider: 'AZURE_SERVICE_BUS',
+        enabled: true,
+        namespace: 'g6combosdev.servicebus.windows.net',
+        clientId: randomUUID(),
+      },
+      async () => undefined,
+      { clientFactory: () => client, probeIntervalMs: 30, maxBackoffMs: 60 },
+    );
+
+    await bus.start();
+    expect(bus.available).toBe(true);
+    expect(created).toHaveLength(2);
+    const inventoryRx = created[1]!;
+
+    // Close inventory receiver directly without processError or probe tick
+    await inventoryRx.close();
+    expect(bus.available).toBe(false);
+    expect(bus.getQueueStates()['g6.combos.from.inventory']).toMatchObject({
+      phase: 'DEGRADED',
+      linkReady: false,
+      subscribed: false,
+      ready: false,
+      lastErrorCode: 'RECEIVER_CLOSED',
+    });
+
+    // Wait for probe recovery
+    await new Promise((r) => setTimeout(r, 80));
+    expect(bus.available).toBe(true);
+    expect(created).toHaveLength(3);
+    expect(created[0]!.subscribe).toHaveBeenCalledTimes(1);
+    expect(created[2]!.subscribe).toHaveBeenCalledTimes(1);
+
+    await bus.close();
+    expect(bus.available).toBe(false);
+    expect(bus.getQueueStates()['g6.combos.from.catalog'].phase).toBe('STOPPED');
+    expect(bus.getQueueStates()['g6.combos.from.inventory'].phase).toBe('STOPPED');
+    expect(client.close).toHaveBeenCalledTimes(1);
+  });
+
   it('starts in degraded NOT_READY state when RBAC/link fails initially and recovers automatically without restart (COM-AUD-11)', async () => {
     const catalogRx = makeFakeReceiver();
     let inventoryAttempts = 0;
