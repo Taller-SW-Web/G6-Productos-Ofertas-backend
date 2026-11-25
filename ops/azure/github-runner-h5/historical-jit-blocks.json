@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "blocks": [
+    {
+      "destination": "brazil-isolated",
+      "resourceId": "/subscriptions/fef42188-accd-4470-ae88-78f583eb4906/resourceGroups/rg-g6-sb-h5-int-fork/providers/Microsoft.App/jobs/azure-h5-smoke",
+      "state": "HISTORICAL_LRO_UNVERIFIABLE",
+      "evidence": [
+        {
+          "correlationId": "f22d607f-842f-4147-aeac-2d817e13dc64",
+          "eventDataIds": ["85cbfb08-f7f1-46e0-8852-25e217c52d47", "3a451a66-e991-46dd-b5f5-574fe32ef4c8"],
+          "startedUtc": "2026-11-24T00:00:21.292604Z",
+          "acceptedUtc": "2026-11-24T00:00:24.0426133Z"
+        },
+        {
+          "correlationId": "706a114c-738d-43bb-a8b3-5f505514e3f8",
+          "eventDataIds": ["af38f8c3-0f4d-4270-a46a-befbc8f5c508", "e1cc87c1-85ae-4e0c-b707-48fca83d28d2"],
+          "startedUtc": "2026-11-24T00:00:29.6923187Z",
+          "acceptedUtc": "2026-11-24T00:00:30.3485694Z"
+        }
+      ],
+      "disposition": "Keep blocked until an authorized subscription owner documents terminal outcome or Azure Support determination for the exact Job resource."
+    }
+  ]
+}

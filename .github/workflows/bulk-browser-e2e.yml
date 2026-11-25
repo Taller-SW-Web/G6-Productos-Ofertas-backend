@@ -1,0 +1,213 @@
+name: MK-001 Bulk E2E Integral (Navegador Real + Recuperación + Performance)
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - '.github/workflows/bulk-browser-e2e.yml'
+      - 'apps/bulk-svc/**'
+      - 'apps/catalog-svc/**'
+      - 'apps/api-gateway/**'
+  workflow_dispatch:
+    inputs:
+      frontend_ref:
+        description: SHA completo (40 hex) de G6-Productos-Ofertas-frontend
+        required: false
+        type: string
+        default: f26864bb2b20c5abd693fb415f392ed6110e317b
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bulk-browser-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bulk_integral_e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: retry-fixture-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 24
+    steps:
+      - name: Checkout Backend
+        uses: actions/checkout@v4
+
+      - name: Validar formato SHA de Frontend
+        env:
+          FRONTEND_REF_INPUT: ${{ inputs.frontend_ref || 'f26864bb2b20c5abd693fb415f392ed6110e317b' }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$FRONTEND_REF_INPUT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "ERROR: frontend_ref debe ser un SHA completo de 40 caracteres hexadecimales (recibido: '$FRONTEND_REF_INPUT')" >&2
+            exit 1
+          fi
+          echo "EXPECTED_FRONTEND_SHA=$FRONTEND_REF_INPUT" >> "$GITHUB_ENV"
+
+      - name: Checkout Frontend (sin despliegue)
+        uses: actions/checkout@v4
+        with:
+          repository: Taller-SW-Web/G6-Productos-Ofertas-frontend
+          ref: ${{ env.EXPECTED_FRONTEND_SHA }}
+          path: _frontend
+
+      - name: Verificar SHA exacto de Frontend y registrar metadatos
+        run: |
+          set -euo pipefail
+          actual_frontend_sha="$(git -C _frontend rev-parse HEAD)"
+          if [[ "$actual_frontend_sha" != "$EXPECTED_FRONTEND_SHA" ]]; then
+            echo "ERROR: HEAD de _frontend ($actual_frontend_sha) no coincide con $EXPECTED_FRONTEND_SHA" >&2
+            exit 1
+          fi
+          mkdir -p .ci/evidence
+          cat > .ci/evidence/run-metadata.json <<EOF
+          {
+            "backend_sha": "${GITHUB_SHA}",
+            "frontend_sha": "${actual_frontend_sha}",
+            "workflow": "${GITHUB_WORKFLOW}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "event": "${GITHUB_EVENT_NAME}"
+          }
+          EOF
+          {
+            echo "### Trazabilidad de SHAs certificados (MK-001 Bulk E2E)"
+            echo "- **Backend SHA:** \`${GITHUB_SHA}\`"
+            echo "- **Frontend SHA:** \`${actual_frontend_sha}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+
+      - name: Instalar dependencias Backend
+        run: npm ci
+
+      - name: Instalar dependencias Frontend y Chromium
+        working-directory: _frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Preparar PostgreSQL 17 descartable y migraciones en orden
+        env:
+          ADMIN_URL: postgresql://postgres:retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          set -euo pipefail
+          apply_as() {
+            role="$1"; shift
+            { printf 'SET ROLE %s;\n' "$role"; for file in "$@"; do cat "$file"; printf '\n'; done; } \
+              | psql "$ADMIN_URL" -v ON_ERROR_STOP=1
+          }
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE po_catalog_owner NOLOGIN;
+          CREATE ROLE catalog_app LOGIN PASSWORD 'catalog-retry-fixture-only';
+          CREATE ROLE po_bulk_owner NOLOGIN;
+          CREATE ROLE bulk_app LOGIN PASSWORD 'bulk-retry-fixture-only';
+          CREATE SCHEMA catalog AUTHORIZATION po_catalog_owner;
+          CREATE SCHEMA bulk AUTHORIZATION po_bulk_owner;
+          REVOKE ALL ON SCHEMA catalog FROM PUBLIC;
+          REVOKE ALL ON SCHEMA bulk FROM PUBLIC;
+          SQL
+          apply_as po_catalog_owner \
+            apps/catalog-svc/test/fixtures/0001_create_catalog.sql \
+            apps/catalog-svc/migrations/0002_create_sku_barcodes.sql \
+            apps/catalog-svc/migrations-candidate/h5/0001_outbox_delivery.sql \
+            apps/catalog-svc/migrations-candidate/h5/0002_taxonomy_reply_transport.sql \
+            apps/catalog-svc/migrations-candidate/h5/0003_bulk_retry_receipts.sql \
+            apps/catalog-svc/migrations/0003_product_publication_history.sql \
+            apps/catalog-svc/migrations/0004_historical_preparation_requests.sql
+          apply_as po_bulk_owner \
+            apps/bulk-svc/test/fixtures/0001_create_bulk_persistence.sql \
+            apps/bulk-svc/migrations/0002_export_source_snapshot.sql \
+            apps/bulk-svc/migrations/0003_export_claim_lease.sql \
+            apps/bulk-svc/migrations/0004_catalog_claim_check_content.sql \
+            apps/bulk-svc/migrations/0005_actor_ownership.sql \
+            apps/bulk-svc/migrations/0006_owner_correlation_identity.sql \
+            apps/bulk-svc/migrations/0007_bulk_retry_v1.sql \
+            apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          GRANT USAGE ON SCHEMA catalog TO catalog_app;
+          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA catalog TO catalog_app;
+          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA catalog TO catalog_app;
+          GRANT USAGE ON SCHEMA bulk TO bulk_app;
+          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA bulk TO bulk_app;
+          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA bulk TO bulk_app;
+          SQL
+
+      - name: Iniciar Supabase Storage local aislado (CLI 3.4.0)
+        run: |
+          set -euo pipefail
+          supabase_dir="$RUNNER_TEMP/mk001-supabase-storage"
+          mkdir -p "$supabase_dir"
+          (
+            cd "$supabase_dir"
+            npx --yes supabase@3.4.0 init > "$RUNNER_TEMP/mk001-supabase-init.log" 2>&1
+            npx --yes supabase@3.4.0 start \
+              --exclude studio,edge-runtime,logflare,vector,mailpit,imgproxy,supavisor \
+              > "$RUNNER_TEMP/mk001-supabase-start.log" 2>&1
+            npx --yes supabase@3.4.0 status -o env > "$RUNNER_TEMP/mk001-supabase-status.env"
+          )
+          set -a
+          source "$RUNNER_TEMP/mk001-supabase-status.env"
+          set +a
+          storage_url="http://127.0.0.1:54321"
+          curl --fail --silent --show-error \
+            -X POST "$storage_url/storage/v1/bucket" \
+            -H "apikey: $SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+            -H 'Content-Type: application/json' \
+            --data '{"id":"bulk-retry-integration","name":"bulk-retry-integration","public":false}' \
+            > /dev/null
+          {
+            echo "BULK_RETRY_INTEGRATION_STORAGE_URL=$storage_url"
+            echo "BULK_RETRY_INTEGRATION_STORAGE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+          } >> "$GITHUB_ENV"
+
+      - name: Ejecutar E2E navegador real, recuperación P1, archivos/migraciones y performance
+        env:
+          NODE_ENV: test
+          BULK_REAL_FRONTEND_ROOT: ${{ github.workspace }}/_frontend
+          BULK_RETRY_INTEGRATION_BULK_DATABASE_URL: postgresql://bulk_app:bulk-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
+          BULK_RETRY_INTEGRATION_CATALOG_DATABASE_URL: postgresql://catalog_app:catalog-retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
+          BULK_MIGRATION_ADMIN_DATABASE_URL: postgresql://postgres:retry-fixture-only@127.0.0.1:5432/postgres?sslmode=disable
+          BULK_PERF_EVIDENCE_PATH: .ci/evidence/bulk-performance-suite.json
+        run: |
+          mkdir -p .ci/evidence
+          npm run test:e2e -- \
+            --no-file-parallelism \
+            apps/bulk-svc/test/bulk-browser-real.e2e-spec.ts \
+            apps/bulk-svc/test/bulk-recovery-files-migrations.e2e-spec.ts \
+            apps/bulk-svc/test/bulk-performance-suite.e2e-spec.ts \
+            --reporter=verbose --reporter=json --reporter=junit \
+            --outputFile.json=.ci/evidence/bulk-integral-e2e.json \
+            --outputFile.junit=.ci/evidence/bulk-integral-e2e.junit.xml
+
+      - name: Validar TypeScript y build de bulk-svc
+        run: |
+          npm run typecheck
+          npm run build:bulk-svc
+
+      - name: Conservar evidencias y trazas Playwright
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bulk-integral-e2e-${{ github.sha }}
+          path: |
+            .ci/evidence/
+            _frontend/tests/test-results/
+          if-no-files-found: ignore
+          retention-days: 14

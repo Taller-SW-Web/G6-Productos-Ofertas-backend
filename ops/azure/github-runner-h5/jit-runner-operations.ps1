@@ -1,5 +1,45 @@
 Set-StrictMode -Version Latest
 
+function Assert-H5EnvironmentApprovalPolicy {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Environment,
+        [Parameter(Mandatory)]$BranchPolicies,
+        [Parameter(Mandatory)][ValidateSet('brazil-isolated','chile-shared')][string]$Destination,
+        [Parameter(Mandatory)][string]$ExpectedEnvironment
+    )
+
+    $environmentByDestination=@{'brazil-isolated'='azure-h5';'chile-shared'='azure-h5-chile'}
+    $expected=[string]$environmentByDestination[$Destination]
+    if ($ExpectedEnvironment -cne $expected -or [string]$Environment.name -cne $expected) {
+        throw 'ENVIRONMENT_APPROVAL_DESTINATION_MISMATCH: Environment name does not match its exact destination.'
+    }
+    if ($Environment.can_admins_bypass -ne $false) {
+        throw 'ENVIRONMENT_ADMIN_BYPASS_REJECTED: administrators must not bypass the Environment protection.'
+    }
+    if ($Environment.deployment_branch_policy.custom_branch_policies -ne $true -or
+        $Environment.deployment_branch_policy.protected_branches -ne $false) {
+        throw 'ENVIRONMENT_BRANCH_POLICY_REJECTED: only the explicit custom master branch policy is allowed.'
+    }
+    $branchItems=@($BranchPolicies.branch_policies)
+    if ($BranchPolicies.total_count -ne 1 -or $branchItems.Count -ne 1 -or
+        [string]$branchItems[0].type -cne 'branch' -or [string]$branchItems[0].name -cne 'master') {
+        throw 'ENVIRONMENT_BRANCH_POLICY_REJECTED: exactly branch master must be allowed.'
+    }
+    $reviewRules=@($Environment.protection_rules | Where-Object { [string]$_.type -ceq 'required_reviewers' })
+    if ($reviewRules.Count -ne 1) { throw 'ENVIRONMENT_REVIEWER_REQUIRED: exactly one Required Reviewers rule must remain active.' }
+    $rule=$reviewRules[0]
+    $reviewers=@($rule.reviewers)
+    if ($Destination -ceq 'chile-shared') {
+        if ($rule.prevent_self_review -ne $false -or $reviewers.Count -ne 1 -or
+            [string]$reviewers[0].type -cne 'User' -or [long]$reviewers[0].reviewer.id -ne 143348512) {
+            throw 'CHILE_REVIEW_POLICY_REJECTED: require only User 143348512 and prevent_self_review=false.'
+        }
+    } elseif ($rule.prevent_self_review -ne $true -or $reviewers.Count -lt 1) {
+        throw 'BRAZIL_REVIEW_POLICY_REJECTED: Brazil requires reviewers and prevent_self_review=true.'
+    }
+}
+
 function Get-AcaExecutionState {
     [CmdletBinding()]
     param([AllowNull()][string]$Status)

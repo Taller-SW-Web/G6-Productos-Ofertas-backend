@@ -10,7 +10,9 @@ grep -Fq 'workflow_dispatch:' "$WORKFLOW" || { echo 'FAIL: CD must be manual onl
 if grep -Eq '^[[:space:]]+pull_request(_target)?:' "$WORKFLOW"; then
   echo 'FAIL: CD cannot trigger from pull requests' >&2; exit 1
 fi
-grep -Fq 'runs-on: [self-hosted, linux, azure-h5-smoke]' "$WORKFLOW" || { echo 'FAIL: required runner labels changed' >&2; exit 1; }
+grep -Fq 'runs-on: [self-hosted, linux, "${{ needs.prepare.outputs.runner_label }}"]' "$WORKFLOW" || { echo 'FAIL: smoke runner label must come from the verified destination map' >&2; exit 1; }
+grep -Fq '"smokeLabel": "azure-h5-smoke"' "$ROOT/ops/azure/container-apps/deployment-targets.json" || { echo 'FAIL: Brazil runner label mapping changed' >&2; exit 1; }
+grep -Fq '"smokeLabel": "azure-h5-smoke-chile"' "$ROOT/ops/azure/container-apps/deployment-targets.json" || { echo 'FAIL: Chile runner label mapping changed' >&2; exit 1; }
 grep -Fq 'uses: actions/checkout@v4' "$WORKFLOW" || { echo 'FAIL: smoke job no longer checks out code' >&2; exit 1; }
 
 smoke_section="$(sed -n '/^  smoke:/,/^  recover:/p' "$WORKFLOW")"

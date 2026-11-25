@@ -68,15 +68,45 @@ export class CombosDatabase implements OnModuleDestroy {
       client.release();
     }
   }
-  async ready(): Promise<boolean> {
+  async readyDetailed(): Promise<{
+    available: boolean;
+    permissionsOk: boolean;
+  }> {
     try {
-      await this.query(async (c) => {
-        await c.query('SELECT 1 FROM combos.combos LIMIT 0');
+      return await this.query(async (c) => {
+        await c.query('BEGIN READ ONLY');
+        try {
+          await c.query("SET LOCAL statement_timeout = '2000'");
+          await c.query('SELECT 1 FROM combos.combos LIMIT 0');
+          const { rows } = await c.query<{ ok: boolean }>(
+            `SELECT (
+              has_schema_privilege(current_user, 'combos', 'USAGE')
+              AND has_table_privilege(current_user, 'combos.combos', 'SELECT')
+              AND has_table_privilege(current_user, 'combos.combo_items', 'SELECT')
+              AND has_table_privilege(current_user, 'combos.component_projection', 'SELECT')
+              AND has_table_privilege(current_user, 'combos.component_projection', 'INSERT')
+              AND has_table_privilege(current_user, 'combos.component_projection', 'UPDATE')
+              AND has_table_privilege(current_user, 'combos.inbox', 'SELECT')
+              AND has_table_privilege(current_user, 'combos.inbox', 'INSERT')
+            ) AS ok`,
+          );
+          await c.query('COMMIT');
+          return {
+            available: true,
+            permissionsOk: rows[0]?.ok === true,
+          };
+        } catch (error) {
+          await c.query('ROLLBACK').catch(() => undefined);
+          throw error;
+        }
       });
-      return true;
     } catch {
-      return false;
+      return { available: false, permissionsOk: false };
     }
+  }
+  async ready(): Promise<boolean> {
+    const detailed = await this.readyDetailed();
+    return detailed.available && detailed.permissionsOk;
   }
   async onModuleDestroy(): Promise<void> {
     this.closed = true;
