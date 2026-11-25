@@ -4,6 +4,17 @@ import { randomUUID } from 'node:crypto';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from 'vitest';
 import { ApiGatewayModule } from '../src/api-gateway.module.js';
 import { CONTRACT_ROUTES } from '../src/routing/contract-routes.js';
 import { configureGatewayCors } from '../src/routing/gateway-cors.js';
@@ -21,11 +32,20 @@ describe('Gateway observability, correlation, and transport resilience (GW-C03, 
   let settings: GatewaySettings;
   let signed: ReturnType<typeof createSignedIdentity>;
   let logs: Record<string, unknown>[];
-  let stdoutSpy: jest.SpyInstance;
+  let stdoutSpy: MockInstance;
   let providerHandler: (
     req: import('node:http').IncomingMessage,
     res: import('node:http').ServerResponse,
   ) => void | Promise<void>;
+
+  function humanToken(roles: string[], sub = randomUUID()): string {
+    return signed.token({
+      tipo: 'acceso',
+      sub,
+      roles,
+      iss: 'https://isolated.test/issuer',
+    });
+  }
 
   beforeAll(async () => {
     provider = createServer((req, res) => {
@@ -71,25 +91,28 @@ describe('Gateway observability, correlation, and transport resilience (GW-C03, 
   beforeEach(() => {
     logs = [];
     const originalWrite = process.stdout.write.bind(process.stdout);
-    stdoutSpy = jest
-      .spyOn(process.stdout, 'write')
-      .mockImplementation((chunk: unknown, ...rest: unknown[]) => {
-        const text = typeof chunk === 'string' ? chunk : String(chunk);
-        for (const line of text.split('\n').filter(Boolean)) {
-          try {
-            const parsed = JSON.parse(line) as Record<string, unknown>;
-            if (parsed.event === 'gateway_request') {
-              logs.push(parsed);
-            }
-          } catch {
-            // Ignore non-JSON stdout lines
+    stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(((
+      chunk: string | Uint8Array,
+      encoding?: BufferEncoding | ((err?: Error | null) => void),
+      cb?: (err?: Error | null) => void,
+    ) => {
+      const text =
+        typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+      for (const line of text.split('\n').filter(Boolean)) {
+        try {
+          const parsed = JSON.parse(line) as Record<string, unknown>;
+          if (parsed.event === 'gateway_request') {
+            logs.push(parsed);
           }
+        } catch {
+          // Ignore non-JSON stdout lines
         }
-        return originalWrite(
-          chunk as string,
-          ...(rest as [BufferEncoding?, ((err?: Error | null) => void)?]),
-        );
-      });
+      }
+      if (typeof encoding === 'function') {
+        return originalWrite(chunk, encoding);
+      }
+      return originalWrite(chunk, encoding, cb);
+    }) as typeof process.stdout.write);
     providerHandler = async (req, res) => {
       for await (const _ of req) {
         // drain
@@ -115,7 +138,7 @@ describe('Gateway observability, correlation, and transport resilience (GW-C03, 
   });
 
   it('logs structured correlation and outcome without leaking tokens, cookies, or private URLs', async () => {
-    const token = signed.human({ roles: ['GESTOR_COMERCIAL'] });
+    const token = humanToken(['GESTOR_COMERCIAL']);
     const correlationId = randomUUID();
 
     const res = await request(app.getHttpServer())
@@ -150,7 +173,7 @@ describe('Gateway observability, correlation, and transport resilience (GW-C03, 
   });
 
   it('validates positive, generated, invalid, and duplicate X-Correlation-Id headers', async () => {
-    const token = signed.human({ roles: ['GESTOR_COMERCIAL'] });
+    const token = humanToken(['GESTOR_COMERCIAL']);
 
     const generated = await request(app.getHttpServer())
       .get('/api/v1/productos/administracion')
@@ -196,7 +219,7 @@ describe('Gateway observability, correlation, and transport resilience (GW-C03, 
     await request(app.getHttpServer())
       .get('/api/v1/inventario/alertas')
       .expect(401);
-    const badRoleToken = signed.human({ roles: ['CONSULTA'] });
+    const badRoleToken = humanToken(['CONSULTA']);
     await request(app.getHttpServer())
       .get('/api/v1/inventario/ubicaciones')
       .set('Authorization', `Bearer ${badRoleToken}`)
@@ -217,7 +240,7 @@ describe('Gateway observability, correlation, and transport resilience (GW-C03, 
   });
 
   it('handles multipart early 413, upstream 503, timeout, and client abort cleanly', async () => {
-    const token = signed.human({ roles: ['GESTOR_COMERCIAL'] });
+    const token = humanToken(['GESTOR_COMERCIAL']);
 
     // Early 413 multipart
     providerHandler = (_req, res) => {
@@ -300,7 +323,7 @@ describe('Gateway observability, correlation, and transport resilience (GW-C03, 
   });
 
   it('preserves Cache-Control: no-store for Bulk correlation and rejects disallowed redirects', async () => {
-    const token = signed.human({ roles: ['GESTOR_COMERCIAL'] });
+    const token = humanToken(['GESTOR_COMERCIAL']);
     const correlationId = randomUUID();
     await request(app.getHttpServer())
       .get(
@@ -326,7 +349,7 @@ describe('Gateway observability, correlation, and transport resilience (GW-C03, 
   });
 
   it('streams CSV exports and preserves committed 200 status in logs if stream fails mid-transfer', async () => {
-    const token = signed.human({ roles: ['GESTOR_COMERCIAL'] });
+    const token = humanToken(['GESTOR_COMERCIAL']);
     providerHandler = (_req, res) => {
       res.writeHead(200, {
         'content-type': 'text/csv; charset=utf-8',

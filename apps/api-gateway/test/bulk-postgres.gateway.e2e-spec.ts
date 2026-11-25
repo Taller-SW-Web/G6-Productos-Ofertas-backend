@@ -1,30 +1,78 @@
 import { createServer, type Server } from 'node:http';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { createServer as createNetServer } from 'node:net';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { Pool } from 'pg';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ApiGatewayModule } from '../src/api-gateway.module.js';
+import { GatewayIdentity } from '../src/routing/gateway-identity.js';
 import {
   GATEWAY_SETTINGS,
   type GatewaySettings,
 } from '../src/routing/gateway-settings.js';
-import { Phase1Postgres } from './support/phase1-postgres.js';
 import { createSignedIdentity } from './support/signed-identity.js';
 
 const enabled = process.env.G6_BULK_GATEWAY_POSTGRES_E2E === '1';
 const run = enabled ? describe : describe.skip;
 const issuer = 'https://isolated.test/issuer';
 
+const BULK_V2_TEMPLATE_HEADERS = [
+  'operacion',
+  'producto_id',
+  'catalog_version',
+  'sku_base',
+  'sku_variante',
+  'nombre',
+  'descripcion',
+  'categoria_id',
+  'marca_id',
+  'tipo_producto_id',
+  'tiene_variantes',
+  'precio_regular',
+  'atributos_producto',
+  'imagen_url',
+  'stock_inicial',
+  'precio_oferta',
+];
+
+function createValidBulkV2Csv(sku = 'GW-BULK-001'): Buffer {
+  const values = [
+    'ALTA',
+    '',
+    '',
+    sku,
+    '',
+    'Producto E2E Gateway',
+    'Descripción de prueba',
+    'cat-1',
+    'marca-1',
+    'tipo-1',
+    'false',
+    '10.50',
+    '[]',
+    '',
+    '0',
+    '',
+  ];
+  return Buffer.from(
+    `${BULK_V2_TEMPLATE_HEADERS.join(',')}\r\n${values.map((v) => `"${v.replace(/"/g, '""')}"`).join(',')}\r\n`,
+    'utf8',
+  );
+}
+
 async function unusedPort(): Promise<number> {
-  const server = createServer();
+  const server = createNetServer();
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const address = server.address();
   if (!address || typeof address === 'string') {
-    throw new Error('No local port available for Bulk');
+    throw new Error('No local port available');
   }
   await new Promise<void>((done, reject) =>
     server.close((err) => (err ? reject(err) : done())),
@@ -32,8 +80,39 @@ async function unusedPort(): Promise<number> {
   return address.port;
 }
 
+function docker(args: string[], input?: string): string {
+  const result = spawnSync('docker', args, {
+    encoding: 'utf8',
+    input,
+    timeout: 30_000,
+    windowsHide: true,
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  if (result.error || result.status !== 0) {
+    const code = result.error?.code ?? result.status ?? 'unknown';
+    throw new Error(`Docker disposable database command failed (${code}).`);
+  }
+  return result.stdout.trim();
+}
+
+async function waitForPostgresReady(connectionString: string): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const pool = new Pool({ connectionString, max: 1 });
+    try {
+      await pool.query('SELECT 1');
+      await pool.end();
+      return;
+    } catch {
+      await pool.end().catch(() => undefined);
+    }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  throw new Error('PostgreSQL descartable no quedó disponible a tiempo');
+}
+
 async function waitForHealth(child: ChildProcess, origin: string): Promise<void> {
-  const deadline = Date.now() + 30000;
+  const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
       throw new Error('bulk-svc terminó antes de /health');
@@ -58,87 +137,228 @@ async function stopProcess(child?: ChildProcess): Promise<void> {
   child.kill();
   await Promise.race([
     exited,
-    new Promise<void>((done) => setTimeout(() => {
-      child.kill('SIGKILL');
-      done();
-    }, 5000)),
+    new Promise<void>((done) =>
+      setTimeout(() => {
+        child.kill('SIGKILL');
+        done();
+      }, 5000),
+    ),
   ]);
 }
 
 /**
- * GW-T03 (AUD-P0-08): Integración real Gateway -> bulk-svc -> PostgreSQL descartable.
+ * GW-T03 (AUD-P0-08 / GW-R2-01..03): Integración real Gateway -> bulk-svc -> PostgreSQL descartable.
  * Sin G6_BULK_GATEWAY_POSTGRES_E2E=1 el caso queda omitido (nunca PASS).
  */
 run('Gateway -> Bulk real -> PostgreSQL descartable (GW-T03)', () => {
-  let postgres: Phase1Postgres;
+  const containerName = `g6-gw-bulk-pg-${process.pid}-${randomUUID().slice(0, 8)}`;
+  const databaseName = 'bulk_gw_e2e';
+  const adminPassword = randomBytes(18).toString('base64url');
+  const appPassword = randomBytes(18).toString('base64url');
+  const storageKey = 'bulk-storage-test-only-key';
+  const storageBucket = 'bulk-gw-e2e-private';
+  const storedObjects = new Map<string, Buffer>();
+
+  let containerCreated = false;
+  let adminPool: Pool | undefined;
   let bulkProcess: ChildProcess | undefined;
   let app: INestApplication | undefined;
   let jwksServer: Server | undefined;
+  let storageServer: Server | undefined;
   let signed: ReturnType<typeof createSignedIdentity>;
 
   beforeAll(async () => {
-    postgres = await Phase1Postgres.start('bulk-gw-e2e');
-    await postgres.migrate('bulk');
+    try {
+      const pgPort = await unusedPort();
+      containerCreated = true;
+      docker([
+        'run',
+        '--detach',
+        '--name',
+        containerName,
+        '--publish',
+        `127.0.0.1:${pgPort}:5432`,
+        '--env',
+        `POSTGRES_PASSWORD=${adminPassword}`,
+        '--env',
+        `POSTGRES_DB=${databaseName}`,
+        'postgres:17-alpine',
+        '-c',
+        'shared_buffers=32MB',
+        '-c',
+        'max_connections=20',
+      ]);
 
-    const bulkPort = await unusedPort();
-    const bulkOrigin = `http://127.0.0.1:${bulkPort}`;
+      const adminUrl = `postgresql://postgres:${adminPassword}@127.0.0.1:${pgPort}/${databaseName}?sslmode=disable`;
+      const appUrl = `postgresql://bulk_fixture_app:${appPassword}@127.0.0.1:${pgPort}/${databaseName}?sslmode=disable`;
+      await waitForPostgresReady(adminUrl);
 
-    const baseSettings: GatewaySettings = {
-      securityMode: 'G7_AUTHENTICATED',
-      upstreams: { 'bulk-svc': bulkOrigin },
-      timeoutMs: 10000,
-      maxBytes: 1024 * 1024,
-      publicOperations: [],
-      demoNoAuthEnabled: false,
-      g5H5Enabled: false,
-    };
-    signed = createSignedIdentity(baseSettings);
+      const sqlFiles = [
+        'apps/bulk-svc/test/fixtures/0001_create_bulk_persistence.sql',
+        'apps/bulk-svc/migrations/0002_export_source_snapshot.sql',
+        'apps/bulk-svc/migrations/0003_export_claim_lease.sql',
+        'apps/bulk-svc/migrations/0004_catalog_claim_check_content.sql',
+        'apps/bulk-svc/migrations/0005_actor_ownership.sql',
+        'apps/bulk-svc/migrations/0006_owner_correlation_identity.sql',
+        'apps/bulk-svc/migrations/0007_bulk_retry_v1.sql',
+        'apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql',
+      ].map((p) => readFileSync(resolve(process.cwd(), p), 'utf8'));
 
-    jwksServer = createServer((_req, res) => {
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ keys: signed.jwks }));
-    });
-    jwksServer.listen(0, '127.0.0.1');
-    await once(jwksServer, 'listening');
-    const jwksAddress = jwksServer.address();
-    if (!jwksAddress || typeof jwksAddress === 'string') {
-      throw new Error('No JWKS port');
+      docker(
+        [
+          'exec',
+          '-i',
+          containerName,
+          'psql',
+          '-v',
+          'ON_ERROR_STOP=1',
+          '-U',
+          'postgres',
+          '-d',
+          databaseName,
+        ],
+        `CREATE ROLE po_bulk_owner NOLOGIN;
+CREATE ROLE bulk_fixture_app LOGIN PASSWORD '${appPassword}';
+CREATE SCHEMA bulk AUTHORIZATION po_bulk_owner;
+SET ROLE po_bulk_owner;
+${sqlFiles.join('\n')}
+GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA bulk TO bulk_fixture_app;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
+      );
+      adminPool = new Pool({ connectionString: adminUrl, max: 2 });
+
+      const bulkPort = await unusedPort();
+      const bulkOrigin = `http://127.0.0.1:${bulkPort}`;
+
+      const baseSettings: GatewaySettings = {
+        securityMode: 'G7_AUTHENTICATED',
+        upstreams: { 'bulk-svc': bulkOrigin },
+        timeoutMs: 10000,
+        maxBytes: 1024 * 1024,
+        publicOperations: [],
+        demoNoAuthEnabled: false,
+        g5H5Enabled: false,
+      };
+      signed = createSignedIdentity(baseSettings);
+
+      jwksServer = createServer((_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ keys: [signed.key] }));
+      });
+      jwksServer.listen(0, '127.0.0.1');
+      await once(jwksServer, 'listening');
+      const jwksAddress = jwksServer.address();
+      if (!jwksAddress || typeof jwksAddress === 'string') {
+        throw new Error('No JWKS port');
+      }
+
+      storageServer = createServer(async (req, res) => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of req) chunks.push(Buffer.from(chunk));
+        const body = Buffer.concat(chunks);
+        const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+        const segments = url.pathname.split('/').map(decodeURIComponent);
+        if (
+          req.method === 'GET' &&
+          segments[1] === 'storage' &&
+          segments[2] === 'v1' &&
+          segments[3] === 'bucket' &&
+          segments[4] === storageBucket
+        ) {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ id: storageBucket, public: false }));
+          return;
+        }
+        if (
+          segments[1] === 'storage' &&
+          segments[2] === 'v1' &&
+          segments[3] === 'object' &&
+          segments[4] === storageBucket
+        ) {
+          const objectName = segments.slice(5).join('/');
+          if (req.method === 'POST' || req.method === 'PUT') {
+            storedObjects.set(objectName, body);
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ Key: `${storageBucket}/${objectName}` }));
+            return;
+          }
+          if (req.method === 'GET') {
+            const existing = storedObjects.get(objectName);
+            if (!existing) {
+              res.writeHead(404).end();
+              return;
+            }
+            res.writeHead(200, { 'content-type': 'application/octet-stream' });
+            res.end(existing);
+            return;
+          }
+        }
+        res.writeHead(404).end();
+      });
+      storageServer.listen(0, '127.0.0.1');
+      await once(storageServer, 'listening');
+      const storageAddress = storageServer.address();
+      if (!storageAddress || typeof storageAddress === 'string') {
+        throw new Error('No storage port');
+      }
+
+      const bulkEnv: NodeJS.ProcessEnv = {
+        ...process.env,
+        PORT: String(bulkPort),
+        NODE_ENV: 'test',
+        DATABASE_URL: appUrl,
+        BULK_AMQP_ENABLED: 'false',
+        GATEWAY_DEMO_NO_AUTH_ENABLED: 'false',
+        BULK_CORRELATION_RECONCILIATION_ENABLED: 'true',
+        G7_JWT_ISSUER: issuer,
+        G7_JWT_JWKS_URL: `http://127.0.0.1:${jwksAddress.port}/jwks.json`,
+        BULK_STORAGE_BUCKET: storageBucket,
+        SUPABASE_SERVICE_ROLE_KEY: storageKey,
+        SUPABASE_URL: `http://127.0.0.1:${storageAddress.port}`,
+      };
+      bulkProcess = spawn(
+        process.execPath,
+        [resolve(process.cwd(), 'dist/apps/bulk-svc/main.js')],
+        { env: bulkEnv, stdio: 'pipe' },
+      );
+      await waitForHealth(bulkProcess, bulkOrigin);
+
+      const module = await Test.createTestingModule({
+        imports: [ApiGatewayModule],
+      })
+        .overrideProvider(GATEWAY_SETTINGS)
+        .useValue(baseSettings)
+        .overrideProvider(GatewayIdentity)
+        .useValue(signed.identity)
+        .compile();
+      app = module.createNestApplication({ bodyParser: false });
+      await app.listen(0, '127.0.0.1');
+    } catch (error) {
+      await stopProcess(bulkProcess);
+      await adminPool?.end().catch(() => undefined);
+      if (containerCreated) {
+        spawnSync('docker', ['rm', '-f', containerName], { windowsHide: true });
+      }
+      throw error;
     }
-
-    const bulkEnv: NodeJS.ProcessEnv = {
-      ...process.env,
-      PORT: String(bulkPort),
-      NODE_ENV: 'test',
-      DATABASE_URL: postgres.databaseUrl,
-      AUTH_ISSUER: issuer,
-      AUTH_JWKS_URL: `http://127.0.0.1:${jwksAddress.port}/jwks.json`,
-      G6_SECURITY_MODE: 'G7_AUTHENTICATED',
-    };
-    bulkProcess = spawn(
-      process.execPath,
-      [resolve(process.cwd(), 'dist/apps/bulk-svc/main.js')],
-      { env: bulkEnv, stdio: 'pipe' },
-    );
-    await waitForHealth(bulkProcess, bulkOrigin);
-
-    const module = await Test.createTestingModule({
-      imports: [ApiGatewayModule],
-    })
-      .overrideProvider(GATEWAY_SETTINGS)
-      .useValue(baseSettings)
-      .compile();
-    app = module.createNestApplication({ bodyParser: false });
-    await app.listen(0, '127.0.0.1');
-  }, 90000);
+  }, 90_000);
 
   afterAll(async () => {
     await app?.close();
     await stopProcess(bulkProcess);
+    await adminPool?.end().catch(() => undefined);
     jwksServer?.closeAllConnections();
     if (jwksServer) {
       await new Promise<void>((done) => jwksServer!.close(() => done()));
     }
-    await postgres?.stop();
+    storageServer?.closeAllConnections();
+    if (storageServer) {
+      await new Promise<void>((done) => storageServer!.close(() => done()));
+    }
+    if (containerCreated) {
+      spawnSync('docker', ['rm', '-f', containerName], { windowsHide: true });
+    }
   });
 
   it('creates a real import, returns 200 + Cache-Control: no-store for owner, 404 for other actor, and performs pure read', async () => {
@@ -146,21 +366,20 @@ run('Gateway -> Bulk real -> PostgreSQL descartable (GW-T03)', () => {
     const otherActorId = randomUUID();
     const correlationId = randomUUID();
     const idempotencyKey = randomUUID();
-    const ownerToken = signed.human({
+    const ownerToken = signed.token({
+      tipo: 'acceso',
       sub: ownerActorId,
       roles: ['GESTOR_COMERCIAL'],
       iss: issuer,
     });
-    const otherToken = signed.human({
+    const otherToken = signed.token({
+      tipo: 'acceso',
       sub: otherActorId,
       roles: ['GESTOR_COMERCIAL'],
       iss: issuer,
     });
 
-    const csvPayload = Buffer.from(
-      'sku,nombre,categoriaCodigo,marcaCodigo,precioBase,moneda\nGW-BULK-001,Producto E2E,CAT-1,MAR-1,10.00,PEN\n',
-      'utf8',
-    );
+    const csvPayload = createValidBulkV2Csv();
     const importRes = await request(app!.getHttpServer())
       .post('/api/v1/carga-masiva/productos/importaciones')
       .set('Authorization', `Bearer ${ownerToken}`)
@@ -169,7 +388,7 @@ run('Gateway -> Bulk real -> PostgreSQL descartable (GW-T03)', () => {
       .attach('archivo', csvPayload, 'importacion.csv')
       .expect(202);
 
-    const batchId = importRes.body?.batchId;
+    const batchId = importRes.body?.batch_id;
     expect(typeof batchId).toBe('string');
 
     const ownerRead1 = await request(app!.getHttpServer())
@@ -179,7 +398,7 @@ run('Gateway -> Bulk real -> PostgreSQL descartable (GW-T03)', () => {
       .set('Authorization', `Bearer ${ownerToken}`)
       .expect(200);
     expect(ownerRead1.headers['cache-control']).toBe('no-store');
-    expect(ownerRead1.body.batchId).toBe(batchId);
+    expect(ownerRead1.body.batch_id).toBe(batchId);
 
     await request(app!.getHttpServer())
       .get(
@@ -188,13 +407,18 @@ run('Gateway -> Bulk real -> PostgreSQL descartable (GW-T03)', () => {
       .set('Authorization', `Bearer ${otherToken}`)
       .expect(404);
 
-    // Confirmar lectura pura: mismo batchId, sin duplicación
+    // Confirmar lectura pura: mismo batch_id y exactamente 1 lote en BD
     const ownerRead2 = await request(app!.getHttpServer())
       .get(
         `/api/v1/carga-masiva/productos/importaciones/por-correlacion/${correlationId}`,
       )
       .set('Authorization', `Bearer ${ownerToken}`)
       .expect(200);
-    expect(ownerRead2.body.batchId).toBe(batchId);
+    expect(ownerRead2.body.batch_id).toBe(batchId);
+
+    const countResult = await adminPool!.query<{ total: number }>(
+      'SELECT count(*)::int AS total FROM bulk.import_batches',
+    );
+    expect(countResult.rows[0]?.total).toBe(1);
   });
 });
