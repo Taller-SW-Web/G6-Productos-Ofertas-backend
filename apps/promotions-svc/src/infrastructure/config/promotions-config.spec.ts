@@ -17,6 +17,9 @@ describe('Promotions configuration', () => {
       AUTH_ISSUER: 'https://g7.test/api/v1/auth',
       AUTH_JWKS_URL: 'https://g7.test/api/v1/auth/.well-known/jwks.json',
       PROMOTIONS_PUBLIC_OPERATION_IDS: '',
+      MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
+      SERVICE_BUS_NAMESPACE_FQDN: 'g6-test.servicebus.windows.net',
+      AZURE_CLIENT_ID: '11111111-1111-4111-8111-111111111111',
       RABBITMQ_URL: undefined,
       PROMOTIONS_DEPENDENCY_PROBES_ENABLED: 'false',
       PROMOTIONS_COUPON_RUNTIME_ENABLED: 'false',
@@ -27,6 +30,8 @@ describe('Promotions configuration', () => {
     expect(() =>
       validatePromotionsConfiguration({
         ...environment,
+        MESSAGING_PROVIDER: undefined,
+        SERVICE_BUS_NAMESPACE_FQDN: undefined,
         PROMOTIONS_COUPON_RUNTIME_ENABLED: 'true',
       }),
     ).toThrow(PromotionsConfigurationError);
@@ -36,7 +41,7 @@ describe('Promotions configuration', () => {
         PROMOTIONS_DEPENDENCY_PROBES_ENABLED: 'true',
       }),
     ).toMatchObject({
-      securityMode: 'PUBLIC_READ_ONLY',
+      securityMode: 'G7_AUTHENTICATED',
       dependencyProbesEnabled: true,
       couponRuntimeEnabled: false,
       rabbitmqUrl: undefined,

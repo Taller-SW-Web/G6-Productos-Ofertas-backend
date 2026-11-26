@@ -154,7 +154,6 @@ export class Database implements OnModuleDestroy {
         component: 'postgres',
         state: 'unavailable',
         reason: 'POSTGRES_QUERY_FAILURE',
-        error: err instanceof Error ? err.message : String(err),
       });
       throw new ServiceUnavailableException(
         'Servicio temporalmente no disponible',

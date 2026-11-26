@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import { defineConfig } from 'vitest/config';
 import tsconfigPaths from 'vite-tsconfig-paths';
 
+process.env.NODE_ENV ??= 'test';
 const vitestRoot = dirname(realpathSync('node_modules/vitest/package.json'));
 
 export default defineConfig({

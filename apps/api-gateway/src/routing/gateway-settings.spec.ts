@@ -61,13 +61,7 @@ describe('Gateway route boundaries and configuration', () => {
     expect(() =>
       readGatewaySettings({ GATEWAY_PUBLIC_OPERATION_IDS: 'listarProductos' }),
     ).toThrow();
-    expect(
-      readGatewaySettings({
-        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
-        GATEWAY_PUBLIC_OPERATION_IDS: 'obtenerSeoPorSlug',
-      }).publicOperations,
-    ).toEqual(['obtenerSeoPorSlug']);
-    for (const mode of ['SIMULATED_AUTH', 'G7_AUTHENTICATED'])
+    for (const mode of ['PUBLIC_READ_ONLY', 'SIMULATED_AUTH', 'G7_AUTHENTICATED'])
       expect(() =>
         readGatewaySettings({
           G6_SECURITY_MODE: mode,
@@ -86,19 +80,18 @@ describe('Gateway route boundaries and configuration', () => {
       ).toThrow('Invalid Gateway configuration');
     },
   );
-  it('allows the G5 H5 route opt-in in PUBLIC_READ_ONLY only with G7 trust configured', () => {
+  it('allows the G5 H5 route opt-in in G7_AUTHENTICATED only with G7 trust configured', () => {
     const settings = readGatewaySettings({
-      G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+      G6_SECURITY_MODE: 'G7_AUTHENTICATED',
       GATEWAY_G5_H5_ENABLED: 'true',
       AUTH_ISSUER: 'https://g7.example.test/issuer',
       AUTH_JWKS_URL: 'https://g7.example.test/jwks',
-      GATEWAY_PUBLIC_OPERATION_IDS: 'listarProductos',
     });
 
     expect(settings).toMatchObject({
-      securityMode: 'PUBLIC_READ_ONLY',
+      securityMode: 'G7_AUTHENTICATED',
       g5H5Enabled: true,
-      publicOperations: ['listarProductos'],
+      publicOperations: [],
       issuer: 'https://g7.example.test/issuer',
       jwksUrl: 'https://g7.example.test/jwks',
     });

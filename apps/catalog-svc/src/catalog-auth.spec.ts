@@ -108,6 +108,7 @@ describe('Catalog JWT verification', () => {
     const simulatedIssuer = 'http://localhost:8080/simulated-auth';
     const simulated = new CatalogTokenVerifier(
       readCatalogSecurityConfig({
+        NODE_ENV: 'test',
         G6_SECURITY_MODE: 'SIMULATED_AUTH',
         SIMULATED_AUTH_ISSUER: simulatedIssuer,
         SIMULATED_AUTH_JWKS_URL: origin + '/.well-known/jwks.json',

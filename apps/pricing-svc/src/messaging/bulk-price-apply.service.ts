@@ -31,6 +31,15 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function safePositiveCents(value: string): bigint | null {
+  try {
+    const parsed = cents(value);
+    return parsed > 0n ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface BulkPriceApplyOutcome {
   status: 'APPLIED' | 'PARTIAL' | 'REJECTED' | 'DUPLICATE';
   resultEventName?:
@@ -172,25 +181,32 @@ export class BulkPriceApplyService {
               ? Date.parse(validUntilRaw)
               : NaN;
 
+        const regularCents =
+          isObject(item) &&
+          typeof item.precio_regular === 'string' &&
+          MONEY_RE.test(item.precio_regular)
+            ? safePositiveCents(item.precio_regular)
+            : null;
         const invalidRegular =
           !isObject(item) ||
           typeof item.sku !== 'string' ||
           !item.sku.trim() ||
-          typeof item.precio_regular !== 'string' ||
-          !MONEY_RE.test(item.precio_regular) ||
-          cents(item.precio_regular) <= 0n;
+          regularCents === null;
 
         const hasOffer =
           isObject(item) &&
           item.precio_oferta !== undefined &&
           item.precio_oferta !== null;
+        const offerCents =
+          hasOffer &&
+          typeof item.precio_oferta === 'string' &&
+          MONEY_RE.test(item.precio_oferta)
+            ? safePositiveCents(item.precio_oferta)
+            : null;
         const invalidOffer =
           hasOffer &&
-          (typeof item.precio_oferta !== 'string' ||
-            !MONEY_RE.test(item.precio_oferta) ||
-            cents(item.precio_oferta) <= 0n ||
-            (!invalidRegular &&
-              cents(item.precio_oferta) >= cents(item.precio_regular as string)));
+          (offerCents === null ||
+            (regularCents !== null && offerCents >= regularCents));
 
         const invalidChannel =
           isObject(item) &&

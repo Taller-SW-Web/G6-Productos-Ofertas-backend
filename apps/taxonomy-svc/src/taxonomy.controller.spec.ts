@@ -37,6 +37,7 @@ describe('configuración de Seguridad de Taxonomy', () => {
   it('separa issuer y JWKS simulados de la configuración G7', () => {
     expect(
       readTaxonomySecurityConfig({
+        NODE_ENV: 'test',
         G6_SECURITY_MODE: 'SIMULATED_AUTH',
         SIMULATED_AUTH_ISSUER: 'http://localhost:8080/simulated-auth',
         SIMULATED_AUTH_JWKS_URL: 'http://127.0.0.1:8081/jwks',
@@ -84,13 +85,18 @@ describe('configuración de Seguridad de Taxonomy', () => {
     });
   });
   it('no activa operaciones públicas automáticamente en PUBLIC_READ_ONLY ni concede acceso por IP privada', async () => {
-    // Requisito #3: sin TAXONOMY_PUBLIC_OPERATION_IDS, hay 0 operaciones públicas
+    expect(() =>
+      readTaxonomyPublicReadConfig({
+        NODE_ENV: 'production',
+        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+      }),
+    ).toThrow('Configuración de demo Taxonomy inválida');
     const emptyPhase1 = readTaxonomyPublicReadConfig({
       NODE_ENV: 'production',
-      G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+      G6_SECURITY_MODE: 'G7_AUTHENTICATED',
     });
     expect(emptyPhase1).toEqual({
-      securityMode: 'PUBLIC_READ_ONLY',
+      securityMode: 'G7_AUTHENTICATED',
       publicOperations: [],
     });
 
@@ -146,20 +152,14 @@ describe('configuración de Seguridad de Taxonomy', () => {
       status: 401,
     });
 
-    // Solo cuando la operación está explícitamente en TAXONOMY_PUBLIC_OPERATION_IDS en PUBLIC_READ_ONLY
-    const explicitPhase1 = readTaxonomyPublicReadConfig({
-      NODE_ENV: 'production',
-      G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
-      TAXONOMY_PUBLIC_OPERATION_IDS: 'listarCategorias',
-    });
-    const guardExplicito = new TaxonomyAuthGuard(
-      {} as TaxonomyTokenVerifier,
-      false,
-      explicitPhase1,
-    );
-    await expect(guardExplicito.canActivate(privatePeerCtx)).resolves.toBe(
-      true,
-    );
+    // H5: PUBLIC_READ_ONLY + TAXONOMY_PUBLIC_OPERATION_IDS falla cerrado incluso en production.
+    expect(() =>
+      readTaxonomyPublicReadConfig({
+        NODE_ENV: 'production',
+        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+        TAXONOMY_PUBLIC_OPERATION_IDS: 'listarCategorias',
+      }),
+    ).toThrow('Configuración de demo Taxonomy inválida');
     const unapprovedOpCtx = {
       getHandler: () => ({ name: 'listarMarcas' }),
       switchToHttp: () => ({
@@ -173,7 +173,7 @@ describe('configuración de Seguridad de Taxonomy', () => {
       }),
     } as unknown as import('@nestjs/common').ExecutionContext;
     await expect(
-      guardExplicito.canActivate(unapprovedOpCtx),
+      guardSinOperaciones.canActivate(unapprovedOpCtx),
     ).rejects.toMatchObject({
       status: 401,
     });

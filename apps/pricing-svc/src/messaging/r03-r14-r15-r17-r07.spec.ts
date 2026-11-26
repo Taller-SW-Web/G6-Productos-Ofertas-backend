@@ -236,7 +236,12 @@ describe('Pricing H5 Service Bus R03, R07, R14, R15, R16, R17 (ESCRITA_NO_EJECUT
                 { id: randomUUID(), productId: randomUUID(), priceVersion: 1n },
               ],
             }),
-            returning: async () => [{ id: randomUUID(), priceVersion: 1n }],
+            returning: async () =>
+              rows.map((r) => ({
+                id: randomUUID(),
+                priceVersion: 1n,
+                ...(typeof r === 'object' && r !== null ? r : {}),
+              })),
           };
         },
       })),

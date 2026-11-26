@@ -632,7 +632,8 @@ export class CatalogBulkService {
         priorCommand?.data.batch_operation_id !== request.batch_operation_id ||
         priorResult.schema_version !== 2 ||
         priorResult.causation_id !== retry.previous_command_message_id ||
-        priorResult.payload.command_attempt_id !== previous.commandAttemptId ||
+        (priorResult.payload.command_attempt_id ?? null) !==
+          previous.commandAttemptId ||
         priorResult.event_name !== 'catalog.bulk.upsert.completed' ||
         !object(priorRow) ||
         priorRow.status !== 'REJECTED' ||

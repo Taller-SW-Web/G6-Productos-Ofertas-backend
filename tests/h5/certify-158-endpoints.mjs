@@ -345,9 +345,10 @@ async function main() {
     const retryBulkRow = ["ALTA", "", "", retryBulkSku, "", "Prod Bulk Retry", "Desc Bulk Retry", catId, brandId, typeId, "false", "55.00", "[]", "", "https://example.test/br.png", "15"].join(",");
     const retryBulkForm = new FormData();
     retryBulkForm.append("archivo", new Blob([`${v2Headers}\r\n${retryBulkRow}\r\n`], { type: "text/csv" }), "retry.csv");
+    const retryBulkCorrId = randomUUID();
     const retryBulkUpload = await httpCall(`${gw}/api/v1/carga-masiva/productos/importaciones`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${gestorJwt}`, "Idempotency-Key": randomUUID(), "X-Correlation-Id": randomUUID() },
+      headers: { Authorization: `Bearer ${gestorJwt}`, "Idempotency-Key": randomUUID(), "X-Correlation-Id": retryBulkCorrId },
       body: retryBulkForm,
     });
     const retryBatchId = retryBulkUpload.json?.batch_id;
@@ -498,6 +499,25 @@ async function main() {
     });
     if (promoRes.status >= 400) console.error(`[certify] seed promoRes=${promoRes.status} ${promoRes.text}`);
     const promoId = promoRes.json?.promotionId;
+
+    const promoDeactRes = await httpCall(`${gw}/api/v1/promociones`, {
+      method: "POST",
+      headers: authH,
+      body: {
+        nombre: `Promo Deact ${randomUUID().slice(0, 6)}`,
+        tipoDescuento: "PORCENTAJE",
+        valor: 10,
+        modalidad: "CUPON",
+        estado: "ACTIVO",
+        prioridad: 2,
+        validFrom: new Date(Date.now() - 60_000).toISOString(),
+        validUntil: new Date(Date.now() + 86_400_000).toISOString(),
+        canalesHabilitados: ["MARKETPLACE"],
+        alcance: { productIds: [activeProd1] },
+        politicaCombinacion: { ofertaPricing: true, promocionAutomatica: true, cupon: true },
+      },
+    });
+    const promoIdDeact = promoDeactRes.json?.promotionId ?? promoId;
 
     const couponCode = `CRT${randomUUID().slice(0, 6).toUpperCase()}`;
     const couponRes = await httpCall(`${gw}/api/v1/cupones`, {
@@ -810,14 +830,14 @@ async function main() {
         .replace("{valorId}", (opId === "solicitarDesactivacionValorCaracteristica" || opId === "reactivarValorCaracteristica") ? (valIdDeact ?? randomUUID()) : (valId ?? randomUUID()))
         .replace("{variantId}", opId === "reintentarPreparacionVariante" ? (retryVarId ?? varId ?? randomUUID()) : (varId ?? randomUUID()))
         .replace("{slug}", opId === "obtenerProductoPorSlug" ? activeProd1Slug : catSlug)
-        .replace("{promocionId}", promoId ?? randomUUID())
+        .replace("{promocionId}", ["actualizarPromocion", "activarPromocion", "desactivarPromocion"].includes(opId) ? (promoIdDeact ?? promoId ?? randomUUID()) : (promoId ?? randomUUID()))
         .replace("{comboId}", opId === "desactivarCombo" ? (comboIdToDeactivate ?? randomUUID()) : (comboId ?? randomUUID()))
         .replace("{reservaId}", opId === "confirmarReserva" ? (reservationId2 ?? reservationId) : opId === "liberarReserva" ? (reservationId3 ?? reservationId) : reservationId)
         .replace("{operationId}", opId === "obtenerOperacionCuponH5" ? consumeOpId : opId === "obtenerOperacionMaestra" ? taxOpId : invOpId)
         .replace("{batchId}", opId.includes("ImportacionPrecios") ? (priceBatchId ?? randomUUID()) : opId === "reanudarImportacionGeneral" ? (retryBatchId ?? batchId ?? randomUUID()) : (batchId ?? randomUUID()))
         .replace("{exportId}", svc === "bulk-svc" ? (bulkExportId ?? randomUUID()) : (exportId ?? randomUUID()))
         .replace("{auditId}", auditId ?? randomUUID())
-        .replace("{cuponId}", couponId ?? randomUUID())
+        .replace("{cuponId}", ["actualizarCupon", "activarCupon", "desactivarCupon"].includes(opId) ? (couponIdDeact ?? couponId ?? randomUUID()) : (couponId ?? randomUUID()))
         .replace("{reglaId}", ruleId ?? randomUUID())
         .replace("{contentId}", bulkContentId)
         .replace("{slugAnterior}", catSlugPrev)
@@ -827,9 +847,6 @@ async function main() {
         .replace("{ruleId}", ruleId ?? randomUUID())
         .replace("{codigo}", couponCode);
 
-      if (path.includes("{cuponId}")) {
-        path = path.replace("{cuponId}", ["actualizarCupon", "activarCupon", "desactivarCupon"].includes(opId) ? (couponIdDeact ?? couponId) : couponId);
-      }
       if (path.startsWith("/interno/inventario/reservas/")) path = `/api/v1${path}`;
 
       if (path === "/api/v1/precios") {
@@ -946,6 +963,10 @@ async function main() {
           f.append("archivo", new Blob([`${v2Headers}\r\n${["ALTA", "", "", sku, "", "Prod Pos", "Desc Pos", catId, brandId, typeId, "false", "45.00", "[]", "", "https://example.test/p.png", "10"].join(",")}\r\n`], { type: "text/csv" }), "pos.csv");
           posBody = f;
         }
+      }
+
+      if (opId === "reanudarImportacionGeneral") {
+        posHeaders["X-Correlation-Id"] = retryBulkCorrId;
       }
 
       // C. Execute positive request
@@ -1072,7 +1093,7 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       const opUuid = safe(reqBody?.operation_id);
       const offId = safe(reqBody?.offline_sale_id);
       const rows = await pgSelect(g5SeedOrigin, `SELECT operation_id, offline_sale_id, status FROM inventory.offline_sale_reconciliations WHERE operation_id = '${opUuid}'::uuid AND offline_sale_id = '${offId}'`);
-      const kRows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM inventory.kardex WHERE reference_id = '${offId}' OR operation_id = '${opUuid}'::uuid`);
+      const kRows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM inventory.kardex WHERE operation_id = '${opUuid}'::uuid`);
       const ok = rows.length === 1 && Number(kRows[0]?.c ?? 0) >= 1;
       return { label: ok ? "PERSISTENCE_PASS" : "FAIL", ok };
     }
@@ -1096,7 +1117,8 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
     }
     if (opId === "actualizarUmbralGlobal") {
       const rows = await pgSelect(g5SeedOrigin, `SELECT key, value FROM inventory.inventory_config LIMIT 1`);
-      return rows.length === 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+      const ok = rows.length === 1 && JSON.stringify(rows[0]?.value ?? "").includes("5");
+      return { label: ok ? "PERSISTENCE_PASS" : "FAIL", ok };
     }
     if (opId === "establecerUmbralSku" || opId === "eliminarUmbralSku") {
       const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM inventory.stock_threshold_override WHERE sku_id = '${safe(ctx.activeSku1)}'`);
@@ -1125,7 +1147,8 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       return rows.length === 1 && Number(ob[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     if (opId === "admitirRestauracionCuponH5") {
-      const rows = await pgSelect(g5SeedOrigin, `SELECT operation_id, status FROM promotions.coupon_command_receipts WHERE order_id = '${safe(ctx.orderId)}'`);
+      const opUuid = safe(reqBody?.operation_id ?? posRes.json?.operation_id);
+      const rows = await pgSelect(g5SeedOrigin, `SELECT operation_id, intention, status FROM promotions.coupon_command_receipts WHERE operation_id = '${opUuid}'::uuid AND intention = 'RESTAURAR'`);
       return rows.length >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     if (["crearCombo", "crearComboAdministracion", "actualizarCombo", "desactivarCombo"].includes(opId)) {
@@ -1214,18 +1237,27 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
             negStatus = negRes.status;
             negativePass = [400, 404].includes(negRes.status);
             negativeLabel = negativePass ? "NEGATIVE_CONTRACT_PASS" : "FAIL";
-          } else if (posPath.includes(activeProd1) || posPath.includes(catId) || posPath.includes(brandId) || posPath.includes(comboId) || posPath.includes(batchId) || posPath.includes(exportId)) {
-            const negPath = posPath
-              .replace(activeProd1, randomUUID())
-              .replace(catId, randomUUID())
-              .replace(brandId, randomUUID())
-              .replace(comboId, randomUUID());
-            if (negPath !== posPath) {
-              const negRes = await httpCall(`${baseOrigin}${negPath}`, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
-              negStatus = negRes.status;
-              negativePass = [400, 404].includes(negRes.status);
-              negativeLabel = negativePass ? "NEGATIVE_CONTRACT_PASS" : "FAIL";
-            }
+          } else if (rawRoute.includes("{")) {
+            let negPath = rawRoute
+              .replace("{slug}", `slug-inexistente-${randomUUID().slice(0, 8)}`)
+              .replace("{slugAnterior}", `slug-inexistente-${randomUUID().slice(0, 8)}`)
+              .replace("{sku}", `SKU-INEXISTENTE-${randomUUID().slice(0, 8)}`)
+              .replace("{codigo}", `NOEXISTE${randomUUID().slice(0, 6).toUpperCase()}`)
+              .replace(/\{[^}]+\}/g, () => randomUUID());
+            if (negPath.startsWith("/interno/inventario/reservas/")) negPath = `/api/v1${negPath}`;
+            if (negPath.startsWith("/productos/skus/")) negPath = `/api/v1${negPath}`;
+            const negRes = await httpCall(`${baseOrigin}${negPath}`, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
+            negStatus = negRes.status;
+            negativePass = [400, 404].includes(negRes.status);
+            negativeLabel = negativePass ? "NEGATIVE_CONTRACT_PASS" : "FAIL";
+          } else if (posPath.includes("?")) {
+            const negPath = posPath.split("?")[0];
+            const negRes = await httpCall(`${baseOrigin}${negPath}`, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
+            negStatus = negRes.status;
+            negativePass = [400, 404].includes(negRes.status);
+            negativeLabel = negativePass ? "NEGATIVE_CONTRACT_PASS" : "FAIL";
+          } else {
+            negativeLabel = "NOT_APPLICABLE";
           }
         } else if (["activarProducto", "desactivarProducto", "reactivarProducto"].includes(opId)) {
           const negPath = posPath.replace(activeProd1, randomUUID());
@@ -1258,7 +1290,7 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
         }
       }
 
-      const overallPass = auth401 && auth403 && functionalPass && persistencePass && asyncTerminalPass && negativeLabel !== "FAIL";
+      const overallPass = auth401 && auth403 && functionalPass && persistencePass && asyncTerminalPass && negativeLabel !== "FAIL" && negativeLabel !== "NOT_RUN";
       if (!overallPass) {
         console.error(`[certify] FAIL [${i}/158] ${opId} (${svc} ${method} ${posPath}) -> http=${posRes.status} 401=${auth401} 403=${auth403} func=${functionalPass} pers=${persistenceCheck.label} async=${asyncTerminalPass} neg=${negativeLabel}(${negStatus}) body=${posRes.text.slice(0, 400)}`);
       }

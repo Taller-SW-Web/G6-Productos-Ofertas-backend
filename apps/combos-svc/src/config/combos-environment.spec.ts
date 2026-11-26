@@ -45,27 +45,17 @@ describe('readCombosEnvironment', () => {
       ssl: { rejectUnauthorized: true, servername: 'localhost', ca: cert },
     });
   });
-  it('only accepts explicit known public reads in Phase 1', () => {
-    const configured = {
-      ...base(),
-      G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
-      COMBOS_PUBLIC_READ_OPERATIONS:
-        'obtenerCombo,listarCombosAdmin,consultarDisponibilidadCombo',
-    };
-    expect(readCombosEnvironment(configured).securityMode).toBe(
-      'PUBLIC_READ_ONLY',
-    );
-    for (const mode of ['G7_AUTHENTICATED', 'SIMULATED_AUTH'])
-      expect(() =>
-        readCombosEnvironment({ ...configured, G6_SECURITY_MODE: mode }),
-      ).toThrow(/COMBOS_PUBLIC_READ_OPERATIONS/);
-    for (const value of ['*', 'crearCombo', 'unknown'])
+  it('rejects PUBLIC_READ_ONLY and public read allowlists in H5', () => {
+    for (const mode of ['PUBLIC_READ_ONLY', 'G7_AUTHENTICATED', 'SIMULATED_AUTH'])
       expect(() =>
         readCombosEnvironment({
-          ...configured,
-          COMBOS_PUBLIC_READ_OPERATIONS: value,
+          ...base(),
+          NODE_ENV: 'test',
+          G6_SECURITY_MODE: mode,
+          COMBOS_PUBLIC_READ_OPERATIONS:
+            'obtenerCombo,listarCombosAdmin,consultarDisponibilidadCombo',
         }),
-      ).toThrow(/COMBOS_PUBLIC_READ_OPERATIONS/);
+      ).toThrow(/COMBOS_PUBLIC_READ_OPERATIONS|G6_SECURITY_MODE/);
   });
   it('fails closed for missing or malformed configuration without echoing credentials', () => {
     const env = base();
@@ -100,32 +90,14 @@ describe('readCombosEnvironment', () => {
       }).securityMode,
     ).toBe('G7_AUTHENTICATED');
   });
-  it('keeps restricted demo off by default and requires explicit perimeter confirmation', () => {
+  it('keeps restricted demo off by default and rejects COMBOS_RESTRICTED_DEMO_ENABLED in H5', () => {
     expect(readCombosEnvironment(base()).demoEnabled).toBe(false);
     expect(() =>
       readCombosEnvironment({
         ...base(),
         COMBOS_RESTRICTED_DEMO_ENABLED: 'true',
       }),
-    ).toThrow(/COMBOS_RESTRICTED_DEMO_NETWORK_CONFIRMED/);
-    expect(() =>
-      readCombosEnvironment({
-        ...base(),
-        COMBOS_RESTRICTED_DEMO_ENABLED: 'true',
-        COMBOS_RESTRICTED_DEMO_NETWORK_CONFIRMED: 'true',
-      }),
-    ).toThrow(/COMBOS_RESTRICTED_DEMO_GATEWAY_IPS/);
-    expect(
-      readCombosEnvironment({
-        ...base(),
-        COMBOS_RESTRICTED_DEMO_ENABLED: 'true',
-        COMBOS_RESTRICTED_DEMO_NETWORK_CONFIRMED: 'true',
-        COMBOS_RESTRICTED_DEMO_GATEWAY_IPS: '127.0.0.1, ::1',
-      }),
-    ).toMatchObject({
-      demoEnabled: true,
-      demoGatewayIps: ['127.0.0.1', '::1'],
-    });
+    ).toThrow(/COMBOS_RESTRICTED_DEMO_ENABLED/);
     expect(() =>
       readCombosEnvironment({
         ...base(),
@@ -178,10 +150,15 @@ describe('readCombosEnvironment', () => {
       readCombosEnvironment({ ...base(), G6_SECURITY_MODE: 'DEMO' }),
     ).toThrow(/G6_SECURITY_MODE/);
     expect(() =>
-      readCombosEnvironment({ ...base(), G6_SECURITY_MODE: 'SIMULATED_AUTH' }),
+      readCombosEnvironment({
+        ...base(),
+        NODE_ENV: 'test',
+        G6_SECURITY_MODE: 'SIMULATED_AUTH',
+      }),
     ).toThrow(/COMBOS_SIMULATED_ISSUER/);
     const simulated = {
       ...base(),
+      NODE_ENV: 'test',
       G6_SECURITY_MODE: 'SIMULATED_AUTH',
       COMBOS_SIMULATED_ISSUER: 'https://demo.example',
       COMBOS_SIMULATED_DISCOVERY_URL:

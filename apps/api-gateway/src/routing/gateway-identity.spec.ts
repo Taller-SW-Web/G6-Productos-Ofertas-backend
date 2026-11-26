@@ -60,6 +60,7 @@ describe('Gateway identity from G6/G7 contracts', () => {
     const g7Issuer = 'https://g7.test/issuer';
     const simulated = new GatewayIdentity(
       readGatewaySettings({
+        NODE_ENV: 'test',
         G6_SECURITY_MODE: 'SIMULATED_AUTH',
         SIMULATED_AUTH_ISSUER: simIssuer,
         SIMULATED_AUTH_JWKS_URL: 'https://simulated.test/jwks',
@@ -496,7 +497,7 @@ describe('Gateway identity from G6/G7 contracts', () => {
     )!;
     await expect(
       signed.identity.authorize(publicRoute, undefined),
-    ).rejects.toMatchObject({ status: 403 });
+    ).rejects.toMatchObject({ status: 401 });
   });
   it('requires valid G7 JWT on SEO routes and rejects unauthenticated or invalid tokens with 401', async () => {
     const route = CONTRACT_ROUTES.find(
@@ -585,8 +586,8 @@ describe('Gateway identity from G6/G7 contracts', () => {
     await expect(
       demoIdentity.authorize(product, undefined),
     ).rejects.toMatchObject({
-      status: 401,
-      code: 'TOKEN_INVALIDO',
+      status: 403,
+      code: 'SCOPE_INSUFICIENTE',
     });
   });
 

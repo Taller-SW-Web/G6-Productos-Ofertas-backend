@@ -76,7 +76,7 @@ describe('Explicit internal read-only demo (HTTP provider, isolated repositories
       }),
     ).toThrow();
     expect(
-      readCatalogReadDemo({ G6_SECURITY_MODE: 'SIMULATED_AUTH' }),
+      readCatalogReadDemo({ NODE_ENV: 'test', G6_SECURITY_MODE: 'SIMULATED_AUTH' }),
     ).toMatchObject({ enabled: false, securityMode: 'SIMULATED_AUTH' });
     expect(
       readCatalogReadDemo({ G6_SECURITY_MODE: 'G7_AUTHENTICATED' }),
@@ -267,6 +267,7 @@ describe('Fase 1 y reversión al camino JWT (emisores y Taxonomy de prueba, sin 
     try {
       // 1) Fase 1 con lista vacía: 0 operaciones públicas automáticas
       const appPhase1Empty = await bootCatalog({
+        NODE_ENV: 'test',
         G6_SECURITY_MODE: 'SIMULATED_AUTH',
       });
       await request(appPhase1Empty.getHttpServer())
@@ -290,6 +291,7 @@ describe('Fase 1 y reversión al camino JWT (emisores y Taxonomy de prueba, sin 
       // through configuration while the exact same application build remains live.
       taxonomyPhase = 'AUTHENTICATED';
       const appPhase2 = await bootCatalog({
+        NODE_ENV: 'test',
         G6_SECURITY_MODE: 'SIMULATED_AUTH',
         SIMULATED_AUTH_ISSUER: simServer.issuer,
         SIMULATED_AUTH_JWKS_URL: simServer.jwksUrl,

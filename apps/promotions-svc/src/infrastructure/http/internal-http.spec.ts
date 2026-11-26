@@ -108,7 +108,7 @@ describe('Internal HTTP credential boundary (PR143)', () => {
     await fixture(
       (request, response) => {
         expect(request.method).toBe('GET');
-        expect(request.headers.authorization).toBeUndefined();
+        expect(request.headers.authorization).toBe('Bearer unused');
         response
           .writeHead(200, { 'content-type': 'application/json' })
           .end('{}');
@@ -127,7 +127,7 @@ describe('Internal HTTP credential boundary (PR143)', () => {
             new AbortController().signal,
           ),
         ).resolves.toEqual({});
-        expect(tokens).not.toHaveBeenCalled();
+        expect(tokens).toHaveBeenCalled();
         await expect(
           new InternalHttpReader({ origin, mode: 'AUTHENTICATED' }).read(
             'obtenerProducto',

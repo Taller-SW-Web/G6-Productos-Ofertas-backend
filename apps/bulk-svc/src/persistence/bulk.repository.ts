@@ -821,7 +821,9 @@ export class BulkPersistenceRepository {
             stepStatus = 'FAILED';
           else
             stepStatus =
-              skuIds.every((sku) => completedSkuIds.includes(sku)) &&
+              (completedSkuIds.length > 0
+                ? skuIds.every((sku) => completedSkuIds.includes(sku))
+                : adjustmentComplete) &&
               (!adjustmentRequired || adjustmentComplete)
                 ? 'COMPLETED'
                 : 'PROCESSING';

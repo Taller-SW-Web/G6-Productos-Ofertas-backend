@@ -60,16 +60,19 @@ describe('D-CAT price filtering (isolated HTTP fixtures, no external grant claim
     ).toEqual(['p']);
     expect(identity.authorization).toHaveBeenCalled();
     const init = fetchMock.mock.calls[0][1];
-    expect(new Headers(init?.headers).has('authorization')).toBe(false);
+    expect(new Headers(init?.headers).has('authorization')).toBe(true);
 
-    const publicReadOnly = new CatalogPriceFilter({
-      pricingOrigin: 'http://pricing-svc:3002',
-      readDemo: {
-        enabled: false,
-        restricted: false,
-        securityMode: 'PUBLIC_READ_ONLY',
-      },
-    } as CatalogConfig);
+    const publicReadOnly = new CatalogPriceFilter(
+      {
+        pricingOrigin: 'http://pricing-svc:3002',
+        readDemo: {
+          enabled: false,
+          restricted: false,
+          securityMode: 'PUBLIC_READ_ONLY',
+        },
+      } as CatalogConfig,
+      identity,
+    );
     for (const canal of [
       'MARKETPLACE',
       'CHATBOT',
@@ -178,7 +181,7 @@ describe('D-CAT price filtering (isolated HTTP fixtures, no external grant claim
       );
       expect(headers.get('x-correlation-id')).toBe(`corr-g7-${canal}`);
     }
-    expect(identity.authorization).toHaveBeenCalledTimes(channels.length);
+    expect(identity.authorization).toHaveBeenCalledTimes(channels.length * 2);
   });
 
   it('preserves decimal bounds and wire numbers without binary rounding or exponent expansion', () => {
