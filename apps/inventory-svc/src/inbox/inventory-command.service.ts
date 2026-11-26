@@ -288,6 +288,18 @@ export class InventoryCommandService {
         });
 
         if (adjustment.status !== 'APPLIED' && adjustment.code === 'SKU_LOCATION_NOT_FOUND') {
+          console.error(
+            JSON.stringify({
+              level: 'warn',
+              service: 'inventory-svc',
+              event: BULK_STOCK_ADJUST,
+              message_id: messageId,
+              correlation_id: correlationId,
+              sku,
+              location_id: locationId,
+              reason: 'SKU_LOCATION_NOT_INITIALIZED_YET',
+            }),
+          );
           throw new Error('SKU_LOCATION_NOT_INITIALIZED_YET');
         }
         if (adjustment.status === 'APPLIED') {

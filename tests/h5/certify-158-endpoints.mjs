@@ -557,6 +557,7 @@ async function main() {
     const effectiveAt = new Date().toISOString();
     const consumeOpId = randomUUID();
     const customerRef = randomUUID();
+    const customerRef4 = randomUUID();
     await httpCall(`${env.g5SeedOrigin}/__test/g5-snapshots`, {
       method: "POST",
       body: {
@@ -591,7 +592,7 @@ async function main() {
         order_id: orderId4,
         commercial_snapshot_ref: orderId4,
         channel_id: "MARKETPLACE",
-        customer_ref: customerRef,
+        customer_ref: customerRef4,
         coupon_code: couponCode,
         reservation_id: reservationId4,
         lines: [{ sku: activeSku1, product_id: activeProd1, quantity: 1, currency: "PEN", regular_price: "120.00", offer_price: null }],
@@ -910,7 +911,7 @@ async function main() {
         posBody = buildPositiveBody(opId, {
           catId, brandId, typeId, typeSchemaVersion, attrId, attrId2, attrName, valId, valName, valId2, valName2, activeProd1, activeProd2, activeSku1, activeSku2,
           draftProdId, varProdId, varId, promoId, couponId, couponCode, ruleId, comboId,
-          orderId, orderId2, orderId3, orderId4, reservationId, reservationId2, reservationId3, reservationId4, storeLocationId, barcode1, effectiveAt, opIdempotency, consumeOpId, customerRef,
+          orderId, orderId2, orderId3, orderId4, reservationId, reservationId2, reservationId3, reservationId4, storeLocationId, barcode1, effectiveAt, opIdempotency, consumeOpId, customerRef, customerRef4,
         });
         if (opId === "crearMarca" || opId === "actualizarMarca") {
           const f = makeBrandForm(`Marca ${opId === "crearMarca" ? "Pos" : "Upd"} ${randomUUID().slice(0, 6)}`);
@@ -946,15 +947,97 @@ async function main() {
         auditId = posRes.json.items[0].id_auditoria ?? posRes.json.items[0].auditId;
       }
 
+const READ_ONLY_POST_OPS = new Set([
+  "filtrarSkusVendiblesInterno",
+  "obtenerPreciosLote",
+  "obtenerContextosSkuLote",
+  "verificarCantidadComercial",
+  "simularCarritoPromociones",
+  "calcularDescuento",
+  "validarCupon",
+]);
+
+async function pgSelect(g5SeedOrigin, sql) {
+  const res = await httpCall(`${g5SeedOrigin}/__test/pg-query`, {
+    method: "POST",
+    body: { sql },
+  });
+  if (res.status !== 200 || !Array.isArray(res.json?.rows)) {
+    throw new Error(`PG_QUERY_FAILED status=${res.status} body=${res.text}`);
+  }
+  return res.json.rows;
+}
+
+async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOrigin) {
+  if (isHealth || method === "GET" || READ_ONLY_POST_OPS.has(opId)) {
+    return { label: "NOT_APPLICABLE", ok: true };
+  }
+  if (!(posRes.status >= 200 && posRes.status < 300)) {
+    return { label: "FAIL", ok: false };
+  }
+  const safe = (v) => String(v ?? "").replace(/[^a-zA-Z0-9_-]/g, "");
+  try {
+    if (["crearProducto", "actualizarProducto", "activarProducto", "desactivarProducto", "reactivarProducto", "reemplazarImagenesProducto", "definirAtributosProducto", "definirPerfilFisicoProducto", "reintentarPreparacionProducto"].includes(opId)) {
+      const id = safe(posRes.json?.productoId ?? posRes.json?.product_id ?? (opId === "reintentarPreparacionProducto" ? ctx.retryProdId : ctx.activeProd1));
+      const rows = await pgSelect(g5SeedOrigin, `SELECT id FROM catalog.products WHERE id = '${id}'::uuid`);
+      return rows.length === 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (["crearVariante", "actualizarVariante", "activarVariante", "desactivarVariante", "reactivarVariante", "reemplazarImagenesVariante", "definirAtributosVariante", "definirPerfilFisicoVariante", "reintentarPreparacionVariante"].includes(opId)) {
+      const id = safe(posRes.json?.varianteId ?? posRes.json?.variant_id ?? (opId === "reintentarPreparacionVariante" ? ctx.retryVarId : ctx.varId));
+      const rows = await pgSelect(g5SeedOrigin, `SELECT id FROM catalog.variants WHERE id = '${id}'::uuid`);
+      return rows.length === 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (["crearImportacionGeneralProductos", "reanudarImportacionGeneral"].includes(opId)) {
+      const bId = safe(posRes.json?.batch_id ?? posRes.json?.batchId ?? ctx.retryBatchId);
+      const rows = await pgSelect(g5SeedOrigin, `SELECT status, completed_rows, total_rows, needs_reconciliation FROM bulk.batch_jobs WHERE batch_id = '${bId}'::uuid`);
+      if (opId === "crearImportacionGeneralProductos") {
+        const invRows = await pgSelect(g5SeedOrigin, `SELECT status FROM bulk.row_domain_steps WHERE batch_row_id IN (SELECT id FROM bulk.batch_rows WHERE batch_job_id = (SELECT id FROM bulk.batch_jobs WHERE batch_id = '${bId}'::uuid)) AND domain = 'INVENTARIO'`);
+        const ok = rows[0]?.status === "COMPLETED" && rows[0]?.completed_rows === rows[0]?.total_rows && !rows[0]?.needs_reconciliation && invRows[0]?.status === "COMPLETED";
+        return { label: ok ? "PERSISTENCE_PASS" : "FAIL", ok };
+      }
+      return rows.length === 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (opId === "conciliarVentaOffline") {
+      const recId = safe(posRes.json?.reconciliation_id);
+      const rows = await pgSelect(g5SeedOrigin, `SELECT reconciliation_id, status FROM inventory.offline_sale_reconciliations WHERE reconciliation_id = '${recId}'::uuid`);
+      return rows.length === 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (["solicitarReserva", "confirmarReserva", "liberarReserva", "reportarIncidenciaInventario", "resolverIncidenciaInventario", "reintegrarInventario", "actualizarUmbralGlobal", "establecerUmbralSku", "registrarRecepcionTrasladoInventario"].includes(opId)) {
+      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM inventory.stock_balance WHERE sku = '${safe(ctx.activeSku1)}'`);
+      return Number(rows[0]?.c ?? 0) > 0 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (["crearPromocion", "actualizarPromocion", "activarPromocion", "desactivarPromocion", "crearCupon", "actualizarCupon", "admitirConsumoCuponH5", "admitirRestauracionCuponH5"].includes(opId)) {
+      if (opId === "admitirConsumoCuponH5") {
+        const rows = await pgSelect(g5SeedOrigin, `SELECT id FROM promotions.coupon_consumptions WHERE order_id = '${safe(ctx.orderId4)}'::uuid`);
+        return rows.length === 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+      }
+      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM promotions.coupons WHERE code = upper('${safe(ctx.couponCode)}')`);
+      return Number(rows[0]?.c ?? 0) > 0 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    return { label: "NOT_VERIFIED", ok: true };
+  } catch {
+    return { label: "FAIL", ok: false };
+  }
+}
+
       // D. Evaluate FUNCTIONAL_PASS + ASYNC_TERMINAL_PASS + PERSISTENCE_PASS
       const functionalPass = posRes.status >= 200 && posRes.status < 300;
       let asyncTerminalPass = true;
       if (posRes.status === 202) {
         asyncTerminalPass = await verifyAsyncTerminal(opId, posRes.json, { gw, gestorJwt, g5Token, orderId });
       }
-      const persistencePass = functionalPass && asyncTerminalPass;
+      const persistenceCheck = await verifyPgPersistence(
+        opId,
+        method,
+        isHealth,
+        posRes,
+        { activeProd1, varId, retryProdId, retryVarId, retryBatchId, activeSku1, orderId4, couponCode },
+        env.g5SeedOrigin,
+      );
+      const persistencePass = persistenceCheck.ok;
 
       // E. NEGATIVE_CONTRACT_PASS (independent negative test)
+      let negativeLabel = isHealth ? "NOT_APPLICABLE" : "NOT_RUN";
       let negativePass = true;
       let negStatus = 0;
       if (!isHealth) {
@@ -963,6 +1046,7 @@ async function main() {
             const negRes = await httpCall(`${baseOrigin}/api/v1/recomendaciones?canal=INVALIDO`, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
             negStatus = negRes.status;
             negativePass = [400, 404].includes(negRes.status);
+            negativeLabel = negativePass ? "NEGATIVE_CONTRACT_PASS" : "FAIL";
           } else if (posPath.includes(activeProd1) || posPath.includes(catId) || posPath.includes(brandId) || posPath.includes(comboId) || posPath.includes(batchId) || posPath.includes(exportId)) {
             const negPath = posPath
               .replace(activeProd1, randomUUID())
@@ -973,6 +1057,7 @@ async function main() {
               const negRes = await httpCall(`${baseOrigin}${negPath}`, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
               negStatus = negRes.status;
               negativePass = [400, 404].includes(negRes.status);
+              negativeLabel = negativePass ? "NEGATIVE_CONTRACT_PASS" : "FAIL";
             }
           }
         } else if (["activarProducto", "desactivarProducto", "reactivarProducto"].includes(opId)) {
@@ -980,6 +1065,7 @@ async function main() {
           const negRes = await httpCall(`${baseOrigin}${negPath}`, { method: posMethod, headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": randomUUID() }, body: {} });
           negStatus = negRes.status;
           negativePass = [400, 404, 409, 422].includes(negRes.status);
+          negativeLabel = negativePass ? "NEGATIVE_CONTRACT_PASS" : "FAIL";
         } else {
           const negBody =
             opId === "filtrarSkusVendiblesInterno" ? { tamanio: 999 } :
@@ -1000,12 +1086,13 @@ async function main() {
           });
           negStatus = negRes.status;
           negativePass = [400, 404, 409, 422].includes(negRes.status);
+          negativeLabel = negativePass ? "NEGATIVE_CONTRACT_PASS" : "FAIL";
         }
       }
 
-      const overallPass = auth401 && auth403 && functionalPass && persistencePass && asyncTerminalPass && negativePass;
+      const overallPass = auth401 && auth403 && functionalPass && persistencePass && asyncTerminalPass && negativeLabel !== "FAIL";
       if (!overallPass) {
-        console.error(`[certify] FAIL [${i}/158] ${opId} (${svc} ${method} ${posPath}) -> http=${posRes.status} 401=${auth401} 403=${auth403} func=${functionalPass} async=${asyncTerminalPass} neg=${negativePass}(${negStatus}) body=${posRes.text.slice(0, 400)}`);
+        console.error(`[certify] FAIL [${i}/158] ${opId} (${svc} ${method} ${posPath}) -> http=${posRes.status} 401=${auth401} 403=${auth403} func=${functionalPass} pers=${persistenceCheck.label} async=${asyncTerminalPass} neg=${negativeLabel}(${negStatus}) body=${posRes.text.slice(0, 400)}`);
       }
 
       results.push({
@@ -1018,10 +1105,10 @@ async function main() {
         status: overallPass ? "PASS" : "FAIL",
         httpStatus: posRes.status,
         routeSecurity: auth401 && auth403 ? "ROUTE_SECURITY_PASS" : "FAIL",
-        negativeContract: negativePass ? "NEGATIVE_CONTRACT_PASS" : "FAIL",
+        negativeContract: negativeLabel,
         functional: functionalPass ? "FUNCTIONAL_PASS" : "FAIL",
-        persistence: persistencePass ? "PERSISTENCE_PASS" : "FAIL",
-        asyncTerminal: posRes.status === 202 ? (asyncTerminalPass ? "ASYNC_TERMINAL_PASS" : "FAIL") : "NA",
+        persistence: persistenceCheck.label,
+        asyncTerminal: posRes.status === 202 ? (asyncTerminalPass ? "ASYNC_TERMINAL_PASS" : "FAIL") : "NOT_APPLICABLE",
         auth401,
         auth403,
       });
@@ -1230,7 +1317,7 @@ function buildPositiveBody(opId, ctx) {
     case "actualizarReglaRecomendacion":
       return { prioridad: 3 };
     case "admitirConsumoCuponH5":
-      return { operation_id: ctx.opIdempotency, order_id: ctx.orderId4, coupon_code: ctx.couponCode, customer_ref: ctx.customerRef, channel_id: "MARKETPLACE", effective_at: ctx.effectiveAt, reservation_id: ctx.reservationId4, commercial_snapshot_ref: ctx.orderId4 };
+      return { operation_id: ctx.opIdempotency, order_id: ctx.orderId4, coupon_code: ctx.couponCode, customer_ref: ctx.customerRef4, channel_id: "MARKETPLACE", effective_at: ctx.effectiveAt, reservation_id: ctx.reservationId4, commercial_snapshot_ref: ctx.orderId4 };
     case "admitirRestauracionCuponH5":
       return { operation_id: ctx.opIdempotency, order_id: ctx.orderId, consumption_operation_id: ctx.consumeOpId, cancellation_reason: "ANULACION", cancelled_at: new Date().toISOString() };
     case "crearCombo":

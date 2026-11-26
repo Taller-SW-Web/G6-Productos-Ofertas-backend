@@ -74,6 +74,7 @@ export class InventoryServiceBusHandler {
     private readonly commands: Pick<InventoryCommandService, 'process'>,
     private readonly receiver: InventoryBusSettlement,
     private readonly delay: DelayFn = defaultDelay,
+    private readonly queueName: string = 'g6.inventory',
   ) {}
 
   async handle(
@@ -170,6 +171,44 @@ export class InventoryServiceBusHandler {
         await this.receiver.deadLetterMessage(message, {
           deadLetterReason: error.reason,
           deadLetterErrorDescription: `Rechazado por InventoryCommandService: ${error.reason}`,
+        });
+        return 'dead-lettered';
+      }
+
+      const maxTransientDeliveries = Math.max(
+        1,
+        Number(process.env.INVENTORY_SB_MAX_TRANSIENT_DELIVERIES ?? 15),
+      );
+      const deliveryCount = message.deliveryCount ?? 1;
+      const bodyObj =
+        typeof payload === 'object' && payload !== null
+          ? (payload as Record<string, unknown>)
+          : {};
+      const dataObj =
+        typeof bodyObj.data === 'object' && bodyObj.data !== null
+          ? (bodyObj.data as Record<string, unknown>)
+          : {};
+      console.error(
+        JSON.stringify({
+          level: deliveryCount >= maxTransientDeliveries ? 'error' : 'warn',
+          service: 'inventory-svc',
+          queue: this.queueName,
+          event: bodyObj.name ?? message.subject ?? null,
+          message_id: bodyObj.message_id ?? message.messageId ?? null,
+          correlation_id: bodyObj.correlation_id ?? message.correlationId ?? null,
+          sku: dataObj.sku ?? null,
+          location_id: dataObj.location_id ?? dataObj.default_location_id ?? null,
+          delivery_count: deliveryCount,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      if (deliveryCount >= maxTransientDeliveries) {
+        await this.receiver.deadLetterMessage(message, {
+          deadLetterReason: 'TRANSIENT_RETRY_EXHAUSTED',
+          deadLetterErrorDescription:
+            error instanceof Error
+              ? error.message
+              : 'Se agotaron los reintentos transitorios en Inventory.',
         });
         return 'dead-lettered';
       }
@@ -375,10 +414,14 @@ export class InventoryServiceBusConsumerRuntime
       const handler = new InventoryServiceBusHandler(
         this.commands,
         this.receiver,
+        defaultDelay,
+        'g6.inventory.from.catalog',
       );
       const bulkHandler = new InventoryServiceBusHandler(
         this.commands,
         this.bulkReceiver,
+        defaultDelay,
+        'g6.inventory.from.bulk',
       );
 
       this.subscription = this.receiver.subscribe(
