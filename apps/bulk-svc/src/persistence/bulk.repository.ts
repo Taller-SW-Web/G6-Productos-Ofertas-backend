@@ -137,6 +137,7 @@ export interface DomainResultInput {
   action:
     | 'UPSERT'
     | 'PRICE_INITIALIZATION'
+    | 'PRICE_BULK_APPLY'
     | 'SKU_INITIALIZATION'
     | 'STOCK_ADJUSTMENT';
   skuId?: string;
@@ -626,17 +627,37 @@ export class BulkPersistenceRepository {
             'INVALID_INPUT',
             'Bulk row results must be adapted from catalog.bulk.upsert.completed; catalog.bulk.upsert.rejected rejects the command as a whole.',
           );
-        if (
-          input.domain === 'PRICING' &&
-          (input.action !== 'PRICE_INITIALIZATION' ||
-            input.causationId == null ||
-            (input.status === 'COMPLETED'
-              ? input.eventName !== 'pricing.product.initialization.completed'
-              : input.eventName !== 'pricing.product.initialization.rejected'))
-        )
-          inconsistent(
-            'Pricing ALTA results must preserve initialization event, operation_id and causation_id identities.',
-          );
+        if (input.domain === 'PRICING') {
+          if (
+            input.action === 'PRICE_INITIALIZATION' &&
+            (input.causationId == null ||
+              (input.status === 'COMPLETED'
+                ? input.eventName !== 'pricing.product.initialization.completed'
+                : input.eventName !== 'pricing.product.initialization.rejected'))
+          ) {
+            inconsistent(
+              'Pricing ALTA results must preserve initialization event, operation_id and causation_id identities.',
+            );
+          }
+          if (
+            input.action === 'PRICE_BULK_APPLY' &&
+            (input.causationId == null ||
+              Number(normalizedRow.precioRegular ?? 0) <= 0 ||
+              (input.status === 'COMPLETED'
+                ? input.eventName !== 'pricing.bulk.price.apply.completed'
+                : input.eventName !== 'pricing.bulk.price.apply.rejected'))
+          ) {
+            inconsistent(
+              'Pricing bulk apply results must preserve pricing.bulk.price.apply event, normalized price intent, operation_id and causation_id identities.',
+            );
+          }
+          if (
+            input.action !== 'PRICE_INITIALIZATION' &&
+            input.action !== 'PRICE_BULK_APPLY'
+          ) {
+            inconsistent('Pricing result action is invalid.');
+          }
+        }
         if (input.domain === 'INVENTARIO') {
           if (
             input.action === 'SKU_INITIALIZATION' &&

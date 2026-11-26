@@ -61,7 +61,7 @@ const EXPECTED_19_QUEUES = [
   'g6.promotions.commands',
 ] as const;
 
-describe('G6 H5 Azure Service Bus Basic 19-queue topology & messaging contracts', () => {
+describe('G6 H5 Azure Service Bus Basic 19-queue topology wiring & handler contracts (not full DB E2E)', () => {
   it('declares all 19 queues in ops/azure/service-bus/main.bicep with Basic SKU, Managed Identity RBAC, TTL and DLQ', () => {
     const bicep = readFileSync(
       resolve(process.cwd(), 'ops/azure/service-bus/main.bicep'),

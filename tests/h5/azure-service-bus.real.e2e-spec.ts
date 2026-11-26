@@ -33,7 +33,7 @@ const REAL_SB_ENABLED =
   Boolean(CLIENT_ID);
 
 describe.skipIf(!REAL_SB_ENABLED)(
-  'Azure Service Bus Basic real SDK 19-queue suite (ManagedIdentityCredential, lab namespace only, ESCRITA_NO_EJECUTADA)',
+  'Azure Service Bus Basic generic lab SDK transport probe across 19 queues (ManagedIdentityCredential, not business E2E, ESCRITA_NO_EJECUTADA)',
   () => {
     it.each(EXPECTED_19_QUEUES)(
       'sends, receives in peekLock, completes and isolates fixture on lab queue %s',

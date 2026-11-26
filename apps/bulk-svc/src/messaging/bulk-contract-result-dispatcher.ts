@@ -125,7 +125,7 @@ export class BulkContractResultDispatcherService
           eventName: itemCompleted
             ? 'pricing.bulk.price.apply.completed'
             : 'pricing.bulk.price.apply.rejected',
-          action: 'PRICE_INITIALIZATION',
+          action: 'PRICE_BULK_APPLY',
           skuId: typeof item.sku === 'string' ? item.sku : undefined,
           status: itemCompleted ? 'COMPLETED' : 'FAILED',
           errorCode: itemCompleted ? null : (errorCode ?? 'PRICING_REJECTED'),

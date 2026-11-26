@@ -29,7 +29,21 @@ describe('API Gateway H5 R2 transversal G7 authorization and correlation (simula
   }> = [];
 
   beforeAll(async () => {
+    const tempSettings = readGatewaySettings({
+      NODE_ENV: 'test',
+      G6_SECURITY_MODE: 'G7_AUTHENTICATED',
+      GATEWAY_G5_H5_ENABLED: 'true',
+      AUTH_ISSUER: 'https://isolated.test/issuer',
+      AUTH_JWKS_URL: 'https://isolated.test/jwks',
+    });
+    signed = createSignedIdentity(tempSettings);
+
     upstream = createServer((req, res) => {
+      if (req.url === '/jwks') {
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ keys: [signed.key] }));
+        return;
+      }
       receivedCalls.push({
         method: req.method ?? '',
         url: req.url ?? '',
@@ -53,8 +67,8 @@ describe('API Gateway H5 R2 transversal G7 authorization and correlation (simula
       NODE_ENV: 'test',
       G6_SECURITY_MODE: 'G7_AUTHENTICATED',
       GATEWAY_G5_H5_ENABLED: 'true',
-      AUTH_ISSUER: 'https://g7-fixture.test/auth',
-      AUTH_JWKS_URL: 'https://g7-fixture.test/jwks',
+      AUTH_ISSUER: 'https://isolated.test/issuer',
+      AUTH_JWKS_URL: `${origin}/jwks`,
       GATEWAY_CATALOG_SVC_URL: origin,
       GATEWAY_TAXONOMY_SVC_URL: origin,
       GATEWAY_PRICING_SVC_URL: origin,
@@ -72,7 +86,6 @@ describe('API Gateway H5 R2 transversal G7 authorization and correlation (simula
       GATEWAY_INVENTORY_SVC_READINESS_PATH: '/health/ready',
       GATEWAY_BULK_SVC_READINESS_PATH: '/health/ready',
     });
-    signed = createSignedIdentity(settings);
 
     const moduleRef = await Test.createTestingModule({
       imports: [ApiGatewayModule],
