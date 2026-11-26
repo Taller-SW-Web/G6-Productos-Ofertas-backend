@@ -1,5 +1,5 @@
 # Certificación 158 Endpoints G6 H5 R2
-- Fecha: 2026-11-26T23:04:37.336Z
+- Fecha: 2026-11-26T23:54:43.931Z
 - Total: 158 | PASS: 158 | FAIL: 0
 - N01 Consume: COMPLETED | Bulk Terminal: COMPLETED | AuthChecks: true
 
@@ -45,7 +45,7 @@
 | 38 | catalog-svc | `desactivarVariante` | POST | `/api/v1/productos/{productoId}/variantes/{variantId}/desactivar` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 39 | catalog-svc | `reactivarVariante` | POST | `/api/v1/productos/{productoId}/variantes/{variantId}/reactivar` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 40 | catalog-svc | `reintentarPreparacionVariante` | POST | `/api/v1/productos/{productoId}/variantes/{variantId}/preparacion/reintentar` | 202 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | ASYNC_TERMINAL_PASS | **PASS** |
-| 41 | combos-svc | `listarCombosAdmin` | GET | `/api/v1/combos` | 200 | ROUTE_SECURITY_PASS | NOT_APPLICABLE | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 41 | combos-svc | `listarCombosAdmin` | GET | `/api/v1/combos` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 42 | combos-svc | `crearCombo` | POST | `/api/v1/combos` | 201 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 43 | combos-svc | `desactivarCombo` | POST | `/api/v1/combos/{comboId}/desactivar` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 44 | combos-svc | `consultarDisponibilidadCombo` | GET | `/api/v1/combos/{comboId}/disponibilidad` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
@@ -59,7 +59,7 @@
 | 52 | promotions-svc | `actualizarPromocion` | PATCH | `/api/v1/promociones/{promocionId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 53 | promotions-svc | `activarPromocion` | POST | `/api/v1/promociones/{promocionId}/activar` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 54 | promotions-svc | `desactivarPromocion` | POST | `/api/v1/promociones/{promocionId}/desactivar` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
-| 55 | promotions-svc | `listarReglasRecomendacion` | GET | `/api/v1/recomendaciones/reglas` | 200 | ROUTE_SECURITY_PASS | NOT_APPLICABLE | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 55 | promotions-svc | `listarReglasRecomendacion` | GET | `/api/v1/recomendaciones/reglas` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 56 | promotions-svc | `crearReglaRecomendacion` | POST | `/api/v1/recomendaciones/reglas` | 201 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 57 | promotions-svc | `obtenerReglaRecomendacion` | GET | `/api/v1/recomendaciones/reglas/{reglaId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 58 | promotions-svc | `actualizarReglaRecomendacion` | PATCH | `/api/v1/recomendaciones/reglas/{reglaId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
@@ -70,7 +70,7 @@
 | 63 | taxonomy-svc | `actualizarCategoria` | PATCH | `/api/v1/categorias/{categoriaId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 64 | taxonomy-svc | `solicitarDesactivacionCategoria` | POST | `/api/v1/categorias/{categoriaId}/desactivar` | 202 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | ASYNC_TERMINAL_PASS | **PASS** |
 | 65 | taxonomy-svc | `reactivarCategoria` | POST | `/api/v1/categorias/{categoriaId}/reactivar` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
-| 66 | taxonomy-svc | `listarCaracteristicas` | GET | `/api/v1/caracteristicas` | 200 | ROUTE_SECURITY_PASS | NOT_APPLICABLE | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 66 | taxonomy-svc | `listarCaracteristicas` | GET | `/api/v1/caracteristicas` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 67 | taxonomy-svc | `crearCaracteristica` | POST | `/api/v1/caracteristicas` | 201 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 68 | taxonomy-svc | `obtenerCaracteristica` | GET | `/api/v1/caracteristicas/{caracteristicaId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 69 | taxonomy-svc | `actualizarCaracteristica` | PATCH | `/api/v1/caracteristicas/{caracteristicaId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
@@ -81,7 +81,7 @@
 | 74 | taxonomy-svc | `reactivarValorCaracteristica` | POST | `/api/v1/caracteristicas/{caracteristicaId}/valores/{valorId}/reactivar` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 75 | taxonomy-svc | `desactivarCaracteristica` | POST | `/api/v1/caracteristicas/{caracteristicaId}/desactivar` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 76 | taxonomy-svc | `reactivarCaracteristica` | POST | `/api/v1/caracteristicas/{caracteristicaId}/reactivar` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
-| 77 | taxonomy-svc | `listarTiposProducto` | GET | `/api/v1/tipos-producto` | 200 | ROUTE_SECURITY_PASS | NOT_APPLICABLE | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 77 | taxonomy-svc | `listarTiposProducto` | GET | `/api/v1/tipos-producto` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 78 | taxonomy-svc | `crearTipoProducto` | POST | `/api/v1/tipos-producto` | 201 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 79 | taxonomy-svc | `obtenerTipoProducto` | GET | `/api/v1/tipos-producto/{tipoProductoId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 80 | taxonomy-svc | `solicitarDesactivacionTipoProducto` | POST | `/api/v1/tipos-producto/{tipoProductoId}/desactivar` | 202 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | ASYNC_TERMINAL_PASS | **PASS** |
@@ -122,9 +122,9 @@
 | 115 | inventory-svc | `establecerUmbralSku` | PUT | `/api/v1/inventario/umbrales/skus/{sku}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 116 | inventory-svc | `eliminarUmbralSku` | DELETE | `/api/v1/inventario/umbrales/skus/{sku}` | 204 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 117 | inventory-svc | `obtenerDashboardInventario` | GET | `/api/v1/inventario/dashboard` | 200 | ROUTE_SECURITY_PASS | NOT_APPLICABLE | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
-| 118 | taxonomy-svc | `listarCategoriasAdmin` | GET | `/api/v1/categorias/administracion` | 200 | ROUTE_SECURITY_PASS | NOT_APPLICABLE | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
-| 119 | taxonomy-svc | `listarMarcasAdmin` | GET | `/api/v1/marcas/administracion` | 200 | ROUTE_SECURITY_PASS | NOT_APPLICABLE | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
-| 120 | promotions-svc | `listarPromocionesAdmin` | GET | `/api/v1/promociones/administracion` | 200 | ROUTE_SECURITY_PASS | NOT_APPLICABLE | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 118 | taxonomy-svc | `listarCategoriasAdmin` | GET | `/api/v1/categorias/administracion` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 119 | taxonomy-svc | `listarMarcasAdmin` | GET | `/api/v1/marcas/administracion` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 120 | promotions-svc | `listarPromocionesAdmin` | GET | `/api/v1/promociones/administracion` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 121 | pricing-svc | `obtenerPrecioBaseProducto` | GET | `/api/v1/precios/productos/{productoId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 122 | pricing-svc | `actualizarPrecioBaseProducto` | PATCH | `/api/v1/precios/productos/{productoId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 123 | pricing-svc | `listarProgramacionesPrecioProducto` | GET | `/api/v1/precios/productos/{productoId}/programaciones` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
@@ -133,25 +133,25 @@
 | 126 | inventory-svc | `resolverIncidenciaInventario` | POST | `/api/v1/inventario/incidencias/{incidenciaId}/resolver` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 127 | inventory-svc | `reintegrarInventario` | POST | `/api/v1/inventario/reintegros` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 128 | inventory-svc | `conciliarVentaOffline` | POST | `/api/v1/inventario/conciliaciones-offline` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
-| 129 | inventory-svc | `listarTrasladosInventario` | GET | `/api/v1/inventario/traslados` | 200 | ROUTE_SECURITY_PASS | NOT_APPLICABLE | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 129 | inventory-svc | `listarTrasladosInventario` | GET | `/api/v1/inventario/traslados` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 130 | inventory-svc | `obtenerTrasladoInventario` | GET | `/api/v1/inventario/traslados/{trasladoId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 131 | inventory-svc | `registrarRecepcionTrasladoInventario` | POST | `/api/v1/inventario/traslados/{trasladoId}/recepciones` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 132 | catalog-svc | `resolverCodigoBarras` | POST | `/api/v1/productos/codigos-barras/resolver` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 133 | inventory-svc | `consultarDisponibilidadComercial` | GET | `/api/v1/inventario/disponibilidad/comercial` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 134 | inventory-svc | `consultarOperacionInventario` | GET | `/api/v1/inventario/operaciones/{operationId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 135 | inventory-svc | `verificarCantidadComercial` | POST | `/api/v1/inventario/disponibilidad/comercial/verificar` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
-| 136 | catalog-svc | `listarProductosAdministracion` | GET | `/api/v1/productos/administracion` | 200 | ROUTE_SECURITY_PASS | NOT_APPLICABLE | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 136 | catalog-svc | `listarProductosAdministracion` | GET | `/api/v1/productos/administracion` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 137 | catalog-svc | `obtenerProductoAdministracion` | GET | `/api/v1/productos/administracion/{productoId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 138 | pricing-svc | `obtenerDefinicionPrecioProductoAdministracion` | GET | `/api/v1/precios/administracion/productos/{productoId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 139 | pricing-svc | `obtenerDefinicionPrecioSkuAdministracion` | GET | `/api/v1/precios/administracion/skus/{sku}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
-| 140 | inventory-svc | `listarSaldosFisicosAdministracion` | GET | `/api/v1/inventario/administracion/saldos` | 200 | ROUTE_SECURITY_PASS | NOT_APPLICABLE | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
-| 141 | price-audit-svc | `listarAuditoriaPreciosAdministracion` | GET | `/api/v1/auditoria-precios/administracion` | 200 | ROUTE_SECURITY_PASS | NOT_APPLICABLE | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 140 | inventory-svc | `listarSaldosFisicosAdministracion` | GET | `/api/v1/inventario/administracion/saldos` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 141 | price-audit-svc | `listarAuditoriaPreciosAdministracion` | GET | `/api/v1/auditoria-precios/administracion` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 142 | price-audit-svc | `obtenerAuditoriaPrecioAdministracion` | GET | `/api/v1/auditoria-precios/administracion/{auditId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 143 | combos-svc | `crearComboAdministracion` | POST | `/api/v1/combos/administracion` | 201 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 144 | catalog-svc | `resolverSkusAdministracion` | POST | `/api/v1/productos/administracion/skus/resolver` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 145 | bulk-svc | `conciliarImportacionGeneralPorCorrelacion` | GET | `/api/v1/carga-masiva/productos/importaciones/por-correlacion/{correlationId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
-| 146 | inventory-svc | `listarAlertasOperativasInventario` | GET | `/api/v1/inventario/alertas` | 200 | ROUTE_SECURITY_PASS | NOT_APPLICABLE | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
-| 147 | inventory-svc | `listarUbicacionesInventario` | GET | `/api/v1/inventario/ubicaciones` | 200 | ROUTE_SECURITY_PASS | NOT_APPLICABLE | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 146 | inventory-svc | `listarAlertasOperativasInventario` | GET | `/api/v1/inventario/alertas` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 147 | inventory-svc | `listarUbicacionesInventario` | GET | `/api/v1/inventario/ubicaciones` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 148 | promotions-svc | `admitirConsumoCuponH5` | POST | `/api/v1/cupones/consumos` | 202 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | ASYNC_TERMINAL_PASS | **PASS** |
 | 149 | promotions-svc | `admitirRestauracionCuponH5` | POST | `/api/v1/cupones/restauraciones` | 202 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | ASYNC_TERMINAL_PASS | **PASS** |
 | 150 | promotions-svc | `obtenerOperacionCuponH5` | GET | `/api/v1/cupones/operaciones/{operationId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |

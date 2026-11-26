@@ -6859,6 +6859,15 @@
             "SERVICIO_NO_DISPONIBLE"
           ],
           "headers": []
+        },
+        "400": {
+          "types": [
+            "application/problem+json"
+          ],
+          "codes": [
+            "VALIDACION"
+          ],
+          "headers": []
         }
       },
       "internal": false,
@@ -7271,6 +7280,15 @@
           ],
           "codes": [
             "SERVICIO_NO_DISPONIBLE"
+          ],
+          "headers": []
+        },
+        "400": {
+          "types": [
+            "application/problem+json"
+          ],
+          "codes": [
+            "VALIDACION"
           ],
           "headers": []
         }
@@ -7792,6 +7810,15 @@
             "SERVICIO_NO_DISPONIBLE"
           ],
           "headers": []
+        },
+        "400": {
+          "types": [
+            "application/problem+json"
+          ],
+          "codes": [
+            "VALIDACION"
+          ],
+          "headers": []
         }
       },
       "internal": false,
@@ -8112,6 +8139,15 @@
           ],
           "codes": [
             "SERVICIO_NO_DISPONIBLE"
+          ],
+          "headers": []
+        },
+        "400": {
+          "types": [
+            "application/problem+json"
+          ],
+          "codes": [
+            "VALIDACION"
           ],
           "headers": []
         }

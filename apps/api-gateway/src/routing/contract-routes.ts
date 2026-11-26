@@ -5221,6 +5221,11 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
       '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
@@ -5257,6 +5262,11 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
       '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
@@ -5290,6 +5300,11 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
       '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
@@ -5748,6 +5763,11 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     headers: [],
     requestTypes: [],
     responses: {
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
       '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],

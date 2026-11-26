@@ -50,6 +50,16 @@ describe('API Gateway H5 R2 transversal G7 authorization and correlation (simula
         correlationId: req.headers['x-correlation-id'] as string | undefined,
         authorization: req.headers.authorization,
       });
+      if (req.url?.endsWith('?pagina=0')) {
+        res.statusCode = 400;
+        res.setHeader('content-type', 'application/problem+json');
+        res.end(JSON.stringify({
+          type: '/errores/validacion', title: 'Paginación inválida',
+          status: 400, code: 'VALIDACION',
+          correlationId: req.headers['x-correlation-id'],
+        }));
+        return;
+      }
       res.setHeader('content-type', 'application/json');
       if (req.url === '/health/ready') {
         res.end(JSON.stringify({ status: 'ready' }));
@@ -70,6 +80,7 @@ describe('API Gateway H5 R2 transversal G7 authorization and correlation (simula
       AUTH_ISSUER: 'https://isolated.test/issuer',
       AUTH_JWKS_URL: `${origin}/jwks`,
       GATEWAY_CATALOG_SVC_URL: origin,
+      GATEWAY_INVENTORY_LOCAL_GRANTS_ENABLED: 'true',
       GATEWAY_TAXONOMY_SVC_URL: origin,
       GATEWAY_PRICING_SVC_URL: origin,
       GATEWAY_PRICE_AUDIT_SVC_URL: origin,
@@ -171,6 +182,24 @@ describe('API Gateway H5 R2 transversal G7 authorization and correlation (simula
       .get(`/api/v1/inventario/reservas/${randomUUID()}/estado?order_id=ORD-1`)
       .set('Authorization', `Bearer ${g5Token}`)
       .expect(200);
+  });
+
+  it.each([
+    '/api/v1/categorias/administracion',
+    '/api/v1/marcas/administracion',
+    '/api/v1/promociones/administracion',
+    '/api/v1/inventario/traslados',
+  ])('preserves contractual pagination errors from %s', async (path) => {
+    const token = signed.token({ tipo: 'acceso', sub: randomUUID(),
+      roles: ['GESTOR_COMERCIAL'], scope: '' });
+    const correlationId = randomUUID();
+    const response = await request(app.getHttpServer())
+      .get(`${path}?pagina=0`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Correlation-Id', correlationId)
+      .expect(400);
+    expect(response.body.code).toBe('VALIDACION');
+    expect(response.body.correlationId).toBe(correlationId);
   });
 
   it('reports complete readiness across all 8 services', async () => {

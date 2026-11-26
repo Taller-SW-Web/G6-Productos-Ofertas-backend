@@ -1145,8 +1145,13 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       return Number(opRows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     if (["reportarIncidenciaInventario", "resolverIncidenciaInventario"].includes(opId)) {
-      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM inventory.incidencias`);
-      return Number(rows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+      if (opId === "reportarIncidenciaInventario" && reqBody?.external_incident_id) {
+        const rows = await pgSelect(g5SeedOrigin, `SELECT id FROM inventory.incidencias WHERE external_incident_id = '${safe(reqBody.external_incident_id)}'`);
+        return rows.length === 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+      }
+      const incId = safe(posRes.json?.incidencia_id ?? posRes.json?.id ?? requestPath.split("/").slice(-2, -1)[0]);
+      const rows = await pgSelect(g5SeedOrigin, `SELECT incidencia_id, tipo_resolucion, estado FROM inventory.incidencias WHERE incidencia_id = '${incId}'::uuid`);
+      return rows.length === 1 && rows[0].tipo_resolucion === reqBody?.resolution && rows[0].estado === 'RESUELTA' ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     if (opId === "reintegrarInventario") {
       const opUuid = safe(reqBody?.operation_id);
@@ -1164,8 +1169,9 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       return (expectedZero ? Number(rows[0]?.c ?? 0) === 0 : Number(rows[0]?.c ?? 0) >= 1) ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     if (opId === "registrarRecepcionTrasladoInventario") {
-      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM inventory.traslado_recepciones`);
-      return Number(rows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+      const receiptId = safe(posRes.json?.receipt_id);
+      const rows = await pgSelect(g5SeedOrigin, `SELECT recepcion_id, cantidad_recibida, disposicion, es_recepcion_final FROM inventory.traslado_recepciones WHERE recepcion_id = '${receiptId}'::uuid`);
+      return rows.length === 1 && Number(rows[0].cantidad_recibida) === reqBody?.received_quantity && rows[0].disposicion === reqBody?.disposition && rows[0].es_recepcion_final === reqBody?.final_receipt ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     if (["crearPromocion", "actualizarPromocion", "activarPromocion", "desactivarPromocion"].includes(opId)) {
       const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM promotions.promotions`);
@@ -1271,10 +1277,26 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       let negStatus = 0;
       if (!isHealth) {
         if (method === "GET") {
-          if (["listarCupones", "listarAuditoriaPrecios"].includes(opId)) {
+          if ([
+            "listarCupones",
+            "listarAuditoriaPrecios",
+            "listarCombosAdmin",
+            "listarReglasRecomendacion",
+            "listarCaracteristicas",
+            "listarTiposProducto",
+            "listarProductosAdministracion",
+            "listarSaldosFisicosAdministracion",
+            "listarAuditoriaPreciosAdministracion",
+            "listarAlertasOperativasInventario",
+            "listarUbicacionesInventario",
+            "listarCategoriasAdmin",
+            "listarMarcasAdmin",
+            "listarPromocionesAdmin",
+            "listarTrasladosInventario",
+          ].includes(opId)) {
             const negRes = await httpCall(`${baseOrigin}${posPath.split("?")[0]}?pagina=0`, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
             negStatus = negRes.status;
-            negativePass = negRes.status === 400 && negRes.json?.code === "VALIDACION";
+            negativePass = negRes.status === 400 && negRes.json?.code === 'VALIDACION';
             negativeLabel = negativePass ? "NEGATIVE_CONTRACT_PASS" : "FAIL";
           } else if (opId === "obtenerRecomendaciones") {
             const negRes = await httpCall(`${baseOrigin}/api/v1/recomendaciones?canal=INVALIDO`, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
