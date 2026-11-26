@@ -11,11 +11,11 @@ import {
   PRICING_TO_BULK_QUEUE,
 } from '../../apps/bulk-svc/src/messaging/bulk-service-bus.js';
 import {
-  SERVICE_BUS_QUEUES as CATALOG_ROUTING,
+  catalogDestinations as CATALOG_ROUTING,
   bulkRequestQueue,
   taxonomyRequestQueue,
 } from '../../apps/catalog-svc/src/catalog-service-bus.js';
-import { COMBOS_SERVICE_BUS_QUEUES } from '../../apps/combos-svc/src/messaging/combos-service-bus.js';
+import { combosServiceBusRoutes } from '../../apps/combos-svc/src/messaging/combos-service-bus.js';
 import {
   QUEUE_BULK as INVENTORY_FROM_BULK,
   QUEUE_CATALOG as INVENTORY_FROM_CATALOG,
@@ -111,7 +111,7 @@ describe('G6 H5 Azure Service Bus Basic 19-queue topology wiring & handler contr
     expect(INVENTORY_DESTINATIONS.PROMOTIONS).toBe(
       'g6.promotions.from.inventory',
     );
-    expect(Object.keys(COMBOS_SERVICE_BUS_QUEUES).sort()).toEqual([
+    expect(Object.keys(combosServiceBusRoutes).sort()).toEqual([
       'g6.combos.from.catalog',
       'g6.combos.from.inventory',
     ]);

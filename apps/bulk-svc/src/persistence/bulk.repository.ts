@@ -552,6 +552,27 @@ export class BulkPersistenceRepository {
           row.status === 'COMPLETED' ||
           row.status === 'FAILED'
         ) {
+          if (
+            input.domain !== 'CATALOGO' &&
+            row.status === 'FAILED' &&
+            row.failedDomain === 'CATALOGO'
+          ) {
+            await tx.insert(inbox).values({
+              messageId: input.messageId,
+              handler: 'bulk.domain.result.late',
+              eventName: input.eventName,
+              correlationId: input.correlationId,
+              payload: {
+                batchId: input.batchId,
+                rowId: input.rowId,
+                domain: input.domain,
+                operationId: input.operationId,
+                status: input.status,
+              },
+              result: 'SUPERSEDED_BY_CATALOG_FAILURE',
+            });
+            return { processed: false, result: 'SUPERSEDED_BY_CATALOG_FAILURE' };
+          }
           domainFailure(
             'INVALID_TRANSITION',
             'A terminal result cannot reopen a row or batch without an explicit requeue',

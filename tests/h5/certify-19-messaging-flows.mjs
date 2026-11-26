@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
+import https from "node:https";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -9,8 +10,8 @@ const BACKEND_ROOT = resolve(process.cwd());
 const FRONTEND_ROOT = resolve(BACKEND_ROOT, "../frontend");
 const DOCS_ROOT = resolve(BACKEND_ROOT, "../docs");
 const MANIFEST_PATH = resolve(FRONTEND_ROOT, "tests/e2e-real/.runtime-stack.json");
-const REPORT_JSON_PATH = resolve(BACKEND_ROOT, "tests/h5/19_MESSAGING_FLOWS_REPORT.json");
-const REPORT_CSV_PATH = resolve(DOCS_ROOT, "hitos/h5/evidencias/r2-cierre-iteracion-2/MENSAJERIA_19_RECORRIDOS.csv");
+const REPORT_JSON_PATH = resolve(DOCS_ROOT, "hitos/h5/evidencias/r2-cierre-iteracion-4/MENSAJERIA_19_RECORRIDOS.json");
+const REPORT_CSV_PATH = resolve(DOCS_ROOT, "hitos/h5/evidencias/r2-cierre-iteracion-4/MENSAJERIA_19_RECORRIDOS.csv");
 
 async function waitForManifest(timeoutMs = 120_000) {
   const start = Date.now();
@@ -39,14 +40,16 @@ async function httpCall(url, { method = "GET", headers = {}, body } = {}) {
   }
   const payload = body === undefined ? undefined : (typeof body === "string" ? body : JSON.stringify(body));
   const u = new URL(url);
+  const transport = u.protocol === "https:" ? https : http;
   return await new Promise((resolveReq) => {
-    const req = http.request(
+    const req = transport.request(
       {
         hostname: u.hostname,
-        port: Number(u.port || 80),
+        port: Number(u.port || (u.protocol === "https:" ? 443 : 80)),
         path: `${u.pathname}${u.search}`,
         method,
         agent: false,
+        ...(u.protocol === "https:" ? { rejectUnauthorized: false } : {}),
         headers: {
           "X-Correlation-Id": randomUUID(),
           Connection: "close",
@@ -93,7 +96,7 @@ async function pollUntil(fn, pred, attempts = 50, intervalMs = 300) {
 async function loginG7(g7ApiBase, correo, contrasena) {
   const res = await httpCall(`${g7ApiBase}/auth/login`, {
     method: "POST",
-    body: { correo, contrasena },
+    body: { correo, contrasena, formatoAcceso: "JWS" },
   });
   return res.json?.accessToken;
 }
@@ -110,13 +113,16 @@ async function tokenM2M(g7ApiBase, clientId, clientSecret, scope) {
 
 async function main() {
   rmSync(MANIFEST_PATH, { force: true });
-  const stackProc = spawn("node", ["tests/e2e-real/startRealStackAndVite.mjs"], {
+  let stackLogs = "";
+  let stackExitCode = null;
+  const stackProc = spawn("node", ["tests/e2e-real/startRealStackAndVite.mjs", "--no-vite"], {
     cwd: FRONTEND_ROOT,
     env: { ...process.env, G6_REAL_STACK_SKIP_VITE: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  stackProc.stdout.on("data", () => {});
-  stackProc.stderr.on("data", () => {});
+  stackProc.stdout.on("data", (d) => { stackLogs += d.toString(); });
+  stackProc.stderr.on("data", (d) => { stackLogs += d.toString(); });
+  stackProc.on("close", (code) => { stackExitCode = code; });
 
   const stopStack = async () => {
     if (!stackProc.killed) {
@@ -130,7 +136,8 @@ async function main() {
   try {
     const env = await waitForManifest(120_000);
     const gw = env.gatewayUrl;
-    const gestorJwt = await loginG7(env.g7ApiBase, "gestor.e2e@g6.test", "G6-E2E-Secret-2026!");
+    const gestorJwt = await loginG7(env.g7ApiBase, "gestor@example.test", "isolated-g7-password");
+    if (!gestorJwt) throw new Error("G7_LOGIN_FAILED for gestor@example.test");
     const g5Token = await tokenM2M(env.g7ApiBase, "modulo-ventas", "e2e-ventas-secret", "cupones:consumir cupones:restaurar cupones:operaciones:leer inventario:reservar inventario:consumir inventario:liberar inventario:operaciones:leer inventario:reservas:estado:leer");
     const authH = { Authorization: `Bearer ${gestorJwt}` };
 
@@ -229,7 +236,7 @@ async function main() {
     const flows = [
       { id: "R01", cola: "g6.catalog.from.bulk", productor: "bulk-svc", consumidor: "catalog-svc", ok: stepOk("CATALOGO") && (await qCount(`SELECT count(*)::int AS c FROM catalog.outbox WHERE event_name = 'catalog.bulk.upsert.completed'`)) >= 1 },
       { id: "R02", cola: "g6.inventory.from.bulk", productor: "bulk-svc", consumidor: "inventory-svc", ok: stepOk("INVENTARIO") && (await qCount(`SELECT count(*)::int AS c FROM inventory.inbox WHERE message_type = 'inventory.bulk.stock.adjust.requested'`)) >= 1 },
-      { id: "R03", cola: "g6.pricing.from.bulk", productor: "bulk-svc", consumidor: "pricing-svc", ok: stepOk("PRICING") && (await qCount(`SELECT count(*)::int AS c FROM pricing.inbox WHERE handler LIKE '%bulk%' OR event_name LIKE '%bulk%'`)) >= 0 && (await qCount(`SELECT count(*)::int AS c FROM pricing.prices WHERE sku = '${bulkSku}'`)) >= 1 },
+      { id: "R03", cola: "g6.pricing.from.bulk", productor: "bulk-svc", consumidor: "pricing-svc", ok: stepOk("PRICING") && (await qCount(`SELECT count(*)::int AS c FROM pricing.bulk_price_jobs`)) >= 1 && (await qCount(`SELECT count(*)::int AS c FROM pricing.prices WHERE sku = '${bulkSku}'`)) >= 1 },
       { id: "R04", cola: "g6.bulk.from.catalog", productor: "catalog-svc", consumidor: "bulk-svc", ok: stepOk("CATALOGO") },
       { id: "R05", cola: "g6.combos.from.catalog", productor: "catalog-svc", consumidor: "combos-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM catalog.outbox WHERE event_name = 'catalog.product.deactivated'`)) >= 1 && (await qCount(`SELECT count(*)::int AS c FROM combos.inbox`)) >= 1 },
       { id: "R06", cola: "g6.inventory.from.catalog", productor: "catalog-svc", consumidor: "inventory-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM inventory.inbox WHERE message_type = 'inventory.sku.initialization.requested'`)) >= 1 },

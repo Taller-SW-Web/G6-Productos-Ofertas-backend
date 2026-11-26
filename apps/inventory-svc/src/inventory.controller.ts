@@ -431,7 +431,7 @@ export class InventoryController {
     }
     return this.offlineReconciliationService.reconcileFromAuthorizedRequest(
       req?.clientId,
-      req?.jwtPayload,
+      req?.jwtPayload ?? req?.user,
       dto,
       correlationId,
     );

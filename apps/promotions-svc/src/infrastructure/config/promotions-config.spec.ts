@@ -10,11 +10,13 @@ import {
 
 describe('Promotions configuration', () => {
   const fixture = createEnvironmentFixture();
-  it('permits PostgreSQL probes without a broker in read-only mode, but requires messaging for coupon runtime', () => {
+  it('permits PostgreSQL probes without a broker in G7_AUTHENTICATED mode, but requires messaging for coupon runtime', () => {
     const environment = {
       ...fixture.environment,
-      G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
-      PROMOTIONS_PUBLIC_OPERATION_IDS: 'listarPromociones',
+      G6_SECURITY_MODE: 'G7_AUTHENTICATED',
+      AUTH_ISSUER: 'https://g7.test/api/v1/auth',
+      AUTH_JWKS_URL: 'https://g7.test/api/v1/auth/.well-known/jwks.json',
+      PROMOTIONS_PUBLIC_OPERATION_IDS: '',
       RABBITMQ_URL: undefined,
       PROMOTIONS_DEPENDENCY_PROBES_ENABLED: 'false',
       PROMOTIONS_COUPON_RUNTIME_ENABLED: 'false',
@@ -99,11 +101,11 @@ describe('Promotions configuration', () => {
     }
   });
 
-  it('accepts a separate H5 technical credential in PUBLIC_READ_ONLY only with the secured Service Bus command path', () => {
+  it('accepts a separate H5 technical credential in G7_AUTHENTICATED only with the secured Service Bus command path', () => {
     const settings = validatePromotionsConfiguration({
       ...fixture.environment,
-      G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
-      PROMOTIONS_PUBLIC_OPERATION_IDS: 'listarPromociones',
+      G6_SECURITY_MODE: 'G7_AUTHENTICATED',
+      PROMOTIONS_PUBLIC_OPERATION_IDS: '',
       AUTH_ISSUER: 'https://g7.test/api/v1/auth',
       AUTH_JWKS_URL: 'https://g7.test/api/v1/auth/.well-known/jwks.json',
       PROMOTIONS_SERVICE_TOKEN_URL: 'https://g7.test/api/v1/auth/token',

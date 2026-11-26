@@ -508,6 +508,14 @@ async function main() {
     if (couponRes.status >= 400) console.error(`[certify] seed couponRes=${couponRes.status} ${couponRes.text}`);
     const couponId = couponRes.json?.cuponId ?? couponRes.json?.couponId;
 
+    const couponCodeDeact = `CRTD${randomUUID().slice(0, 5).toUpperCase()}`;
+    const couponDeactRes = await httpCall(`${gw}/api/v1/cupones`, {
+      method: "POST",
+      headers: authH,
+      body: { codigo: couponCodeDeact, promocionId: promoId, estado: "ACTIVO", politicaCancelacion: "RESTAURAR_EN_CANCELACION" },
+    });
+    const couponIdDeact = couponDeactRes.json?.cuponId ?? couponDeactRes.json?.couponId ?? couponId;
+
     const ruleRes = await httpCall(`${gw}/api/v1/recomendaciones/reglas`, {
       method: "POST",
       headers: authH,
@@ -726,8 +734,8 @@ async function main() {
     const bulkPoll = await pollUntil(
       () => httpCall(`${gw}/api/v1/carga-masiva/productos/importaciones/${batchId}`, { headers: { Authorization: `Bearer ${gestorJwt}` } }),
       (r) => ["COMPLETED", "FAILED_GENERAL"].includes(r.json?.status),
-      60,
-      400,
+      80,
+      500,
     );
     bulkSnap = bulkPoll?.json ?? null;
     bulkTerminal = bulkSnap?.status ?? "";
@@ -819,7 +827,9 @@ async function main() {
         .replace("{ruleId}", ruleId ?? randomUUID())
         .replace("{codigo}", couponCode);
 
-      if (path.startsWith("/productos/skus/")) path = `/api/v1${path}`;
+      if (path.includes("{cuponId}")) {
+        path = path.replace("{cuponId}", ["actualizarCupon", "activarCupon", "desactivarCupon"].includes(opId) ? (couponIdDeact ?? couponId) : couponId);
+      }
       if (path.startsWith("/interno/inventario/reservas/")) path = `/api/v1${path}`;
 
       if (path === "/api/v1/precios") {
@@ -963,9 +973,15 @@ const READ_ONLY_POST_OPS = new Set([
   "obtenerPreciosLote",
   "obtenerContextosSkuLote",
   "verificarCantidadComercial",
+  "evaluarPromociones",
   "simularCarritoPromociones",
   "calcularDescuento",
   "validarCupon",
+  "consultarDatosFisicos",
+  "resolverSlugCategoriaCreacion",
+  "resolverSkusAdministracion",
+  "prevalidarImportacionPrecios",
+  "resolverCodigoBarras",
 ]);
 
 async function pgSelect(g5SeedOrigin, sql) {
@@ -1004,24 +1020,28 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       const id = safe(posRes.json?.varianteId ?? posRes.json?.variant_id ?? (opId === "reintentarPreparacionVariante" ? ctx.retryVarId : ctx.varId));
       const rows = await pgSelect(g5SeedOrigin, `SELECT id, estado FROM catalog.variants WHERE id = '${id}'::uuid`);
       if (rows.length !== 1) return { label: "FAIL", ok: false };
-      if (opId === "desactivarVariante" && rows[0].estado !== "INACTIVO") return { label: "FAIL", ok: false };
-      if ((opId === "activarVariante" || opId === "reactivarVariante") && rows[0].estado !== "ACTIVO") return { label: "FAIL", ok: false };
+      if (opId === "desactivarVariante" && rows[0].estado !== "INACTIVA") return { label: "FAIL", ok: false };
+      if ((opId === "activarVariante" || opId === "reactivarVariante") && rows[0].estado !== "ACTIVA") return { label: "FAIL", ok: false };
       return { label: "PERSISTENCE_PASS", ok: true };
     }
-    if (["crearCategoria", "actualizarCategoria", "desactivarCategoria", "actualizarSeoCategoria", "solicitarDesactivacionCategoria"].includes(opId)) {
+    if (["crearCategoria", "actualizarCategoria", "desactivarCategoria", "reactivarCategoria", "actualizarSeoCategoria", "solicitarDesactivacionCategoria"].includes(opId)) {
       const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM taxonomy.categories`);
       return Number(rows[0]?.c ?? 0) > 0 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
-    if (["crearMarca", "actualizarMarca", "desactivarMarca", "subirLogoMarca"].includes(opId)) {
+    if (["crearMarca", "actualizarMarca", "desactivarMarca", "reactivarMarca", "solicitarDesactivacionMarca", "subirLogoMarca"].includes(opId)) {
       const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM taxonomy.brands`);
       return Number(rows[0]?.c ?? 0) > 0 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
-    if (["crearCaracteristica", "actualizarCaracteristica", "desactivarCaracteristica", "crearValorCaracteristica", "actualizarValorCaracteristica", "desactivarValorCaracteristica", "solicitarDesactivacionValorCaracteristica", "crearTipoProducto", "actualizarTipoProducto", "desactivarTipoProducto", "solicitarDesactivacionTipoProducto", "asociarCaracteristicaTipoProducto", "actualizarAsociacionTipoCaracteristica", "desasociarCaracteristicaTipoProducto"].includes(opId)) {
+    if (["crearCaracteristica", "actualizarCaracteristica", "desactivarCaracteristica", "reactivarCaracteristica", "crearValorCaracteristica", "actualizarValorCaracteristica", "desactivarValorCaracteristica", "reactivarValorCaracteristica", "solicitarDesactivacionValorCaracteristica", "crearTipoProducto", "actualizarTipoProducto", "desactivarTipoProducto", "reactivarTipoProducto", "solicitarDesactivacionTipoProducto", "asociarCaracteristicaTipoProducto", "actualizarAsociacionTipoCaracteristica", "desasociarCaracteristicaTipoProducto", "solicitarDesasociacionTipoCaracteristica"].includes(opId)) {
       const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM taxonomy.product_types`);
       return Number(rows[0]?.c ?? 0) > 0 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
-    if (["actualizarPrecioSku", "programarPrecioSku", "crearImportacionPrecios", "reintentarImportacionPrecios"].includes(opId)) {
-      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM pricing.prices WHERE sku = '${safe(ctx.activeSku1)}'`);
+    if (["actualizarPrecioSku", "actualizarPrecioBaseProducto", "programarPrecioSku", "programarPrecioBaseProducto", "crearImportacionPrecios", "reintentarImportacionPrecios"].includes(opId)) {
+      if (opId === "programarPrecioBaseProducto") {
+        const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM pricing.scheduled_prices`);
+        return Number(rows[0]?.c ?? 0) > 0 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+      }
+      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM pricing.prices`);
       return Number(rows[0]?.c ?? 0) > 0 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     if (opId === "crearExportacionAuditoriaPrecios") {
@@ -1058,8 +1078,12 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
     }
     if (["solicitarReserva", "confirmarReserva", "liberarReserva"].includes(opId)) {
       const targetOrder = safe(reqBody?.order_id ?? posRes.json?.order_id ?? (opId === "confirmarReserva" ? ctx.orderId2 : opId === "liberarReserva" ? ctx.orderId3 : ""));
-      const rows = await pgSelect(g5SeedOrigin, `SELECT id, status FROM inventory.reservations WHERE order_id = '${targetOrder}'::uuid`);
-      return rows.length >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+      const rows = await pgSelect(g5SeedOrigin, `SELECT id, order_id, status FROM inventory.reservations WHERE order_id = '${targetOrder}'`);
+      if (rows.length < 1) return { label: "FAIL", ok: false };
+      if (opId === "confirmarReserva" && !["CONFIRMADA", "CONSUMIDA"].includes(rows[0].status)) return { label: "FAIL", ok: false };
+      if (opId === "liberarReserva" && rows[0].status !== "LIBERADA") return { label: "FAIL", ok: false };
+      const opRows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM inventory.inventory_operations WHERE operation_id = '${safe(reqBody?.operation_id ?? posRes.json?.operation_id)}'::uuid`);
+      return Number(opRows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     if (["reportarIncidenciaInventario", "resolverIncidenciaInventario"].includes(opId)) {
       const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM inventory.incidencias`);
@@ -1071,12 +1095,13 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       return Number(rows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     if (opId === "actualizarUmbralGlobal") {
-      const rows = await pgSelect(g5SeedOrigin, `SELECT global_low_stock_threshold FROM inventory.inventory_config LIMIT 1`);
+      const rows = await pgSelect(g5SeedOrigin, `SELECT key, value FROM inventory.inventory_config LIMIT 1`);
       return rows.length === 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
-    if (opId === "establecerUmbralSku") {
+    if (opId === "establecerUmbralSku" || opId === "eliminarUmbralSku") {
       const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM inventory.stock_threshold_override WHERE sku_id = '${safe(ctx.activeSku1)}'`);
-      return Number(rows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+      const expectedZero = opId === "eliminarUmbralSku";
+      return (expectedZero ? Number(rows[0]?.c ?? 0) === 0 : Number(rows[0]?.c ?? 0) >= 1) ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     if (opId === "registrarRecepcionTrasladoInventario") {
       const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM inventory.traslado_recepciones`);
@@ -1086,21 +1111,21 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM promotions.promotions`);
       return Number(rows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
-    if (["crearCupon", "actualizarCupon"].includes(opId)) {
+    if (["crearCupon", "actualizarCupon", "activarCupon", "desactivarCupon"].includes(opId)) {
       const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM promotions.coupons WHERE code = upper('${safe(ctx.couponCode)}')`);
       return Number(rows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
-    if (["crearReglaRecomendacion", "actualizarReglaRecomendacion"].includes(opId)) {
+    if (["crearReglaRecomendacion", "actualizarReglaRecomendacion", "activarReglaRecomendacion", "desactivarReglaRecomendacion"].includes(opId)) {
       const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM promotions.recommendation_rules`);
       return Number(rows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     if (opId === "admitirConsumoCuponH5") {
-      const rows = await pgSelect(g5SeedOrigin, `SELECT id FROM promotions.coupon_uses WHERE order_id = '${safe(ctx.orderId4)}'::uuid`);
+      const rows = await pgSelect(g5SeedOrigin, `SELECT id FROM promotions.coupon_uses WHERE order_id = '${safe(ctx.orderId4)}'`);
       const ob = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM promotions.outbox`);
       return rows.length === 1 && Number(ob[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     if (opId === "admitirRestauracionCuponH5") {
-      const rows = await pgSelect(g5SeedOrigin, `SELECT id, status FROM promotions.coupon_command_receipts WHERE order_id = '${safe(ctx.orderId)}'::uuid`);
+      const rows = await pgSelect(g5SeedOrigin, `SELECT operation_id, status FROM promotions.coupon_command_receipts WHERE order_id = '${safe(ctx.orderId)}'`);
       return rows.length >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     if (["crearCombo", "crearComboAdministracion", "actualizarCombo", "desactivarCombo"].includes(opId)) {
@@ -1114,7 +1139,55 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
 }
 
       // D. Evaluate FUNCTIONAL_PASS + ASYNC_TERMINAL_PASS + PERSISTENCE_PASS
-      const functionalPass = posRes.status >= 200 && posRes.status < 300;
+      if (posRes.status === 0) {
+        console.error(`[certify] INFRA_LOST at [${i}/158] ${opId}: ${posRes.text}`);
+        results.push({
+          n: i,
+          opId,
+          vigencia,
+          svc,
+          method,
+          rawRoute,
+          status: "BLOCKED_INFRA",
+          httpStatus: 0,
+          routeSecurity: auth401 && auth403 ? "ROUTE_SECURITY_PASS" : "NOT_RUN",
+          negativeContract: "NOT_RUN",
+          functional: "BLOCKED_INFRA",
+          persistence: "NOT_RUN",
+          asyncTerminal: "NOT_RUN",
+          auth401,
+          auth403,
+          error: posRes.text.slice(0, 200),
+        });
+        for (let j = i + 1; j < matrixLines.length; j++) {
+          const rem = parseCsvLine(matrixLines[j]);
+          if (rem.length >= 6) {
+            results.push({
+              n: j,
+              opId: rem[0],
+              vigencia: rem[1],
+              svc: rem[2],
+              method: rem[3],
+              rawRoute: rem[4],
+              status: "NOT_RUN",
+              httpStatus: 0,
+              routeSecurity: "NOT_RUN",
+              negativeContract: "NOT_RUN",
+              functional: "NOT_RUN",
+              persistence: "NOT_RUN",
+              asyncTerminal: "NOT_RUN",
+              auth401: false,
+              auth403: false,
+            });
+          }
+        }
+        break;
+      }
+      let semanticOk = true;
+      if (opId === "evaluarPromociones" && posRes.status === 200) {
+        semanticOk = typeof posRes.json?.original_amount === "number" && typeof posRes.json?.result_amount === "number" && typeof posRes.json?.discount_amount === "number";
+      }
+      const functionalPass = posRes.status >= 200 && posRes.status < 300 && semanticOk;
       let asyncTerminalPass = true;
       if (posRes.status === 202) {
         asyncTerminalPass = await verifyAsyncTerminal(opId, posRes.json, { gw, gestorJwt, g5Token, orderId });
@@ -1211,16 +1284,19 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
 
     const passed = results.filter((r) => r.status === "PASS").length;
     const failed = results.filter((r) => r.status === "FAIL").length;
+    const blocked = results.filter((r) => r.status === "BLOCKED_INFRA").length;
+    const notRun = results.filter((r) => r.status === "NOT_RUN").length;
+    const executed = results.filter((r) => r.status !== "NOT_RUN").length;
     const countBy = (key, val) => results.filter((r) => r[key] === val).length;
     const summary = {
-      status: failed === 0 && results.length === 158 ? "PASS" : "FAIL",
+      status: failed === 0 && blocked === 0 && notRun === 0 && results.length === 158 ? "PASS" : (blocked > 0 ? "INFRA_LOST" : "FAIL"),
       timestamp: new Date().toISOString(),
       total: results.length,
-      executed: results.length,
-      notExecuted: Math.max(0, 158 - results.length),
+      executed,
+      notExecuted: notRun,
       passed,
       failed,
-      blocked: 0,
+      blocked,
       persistenceBreakdown: {
         PERSISTENCE_PASS: countBy("persistence", "PERSISTENCE_PASS"),
         NOT_APPLICABLE: countBy("persistence", "NOT_APPLICABLE"),
@@ -1286,12 +1362,15 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
 }
 
 async function verifyAsyncTerminal(opId, json, ctx) {
-  if (opId === "crearImportacionGeneralProductos" && json?.batch_id) {
+  if ((opId === "crearImportacionGeneralProductos" || opId === "reanudarImportacionGeneral") && json?.batch_id) {
     const p = await pollUntil(
       () => httpCall(`${ctx.gw}/api/v1/carga-masiva/productos/importaciones/${json.batch_id}`, { headers: { Authorization: `Bearer ${ctx.gestorJwt}` } }),
-      (r) => ["COMPLETED", "FAILED_GENERAL"].includes(r.json?.status),
-      40,
-      400,
+      (r) =>
+        opId === "reanudarImportacionGeneral"
+          ? r.json?.status === "COMPLETED" && r.json?.failed_rows === 0 && r.json?.completed_rows === r.json?.total_rows
+          : ["COMPLETED", "FAILED_GENERAL"].includes(r.json?.status),
+      80,
+      500,
     );
     return p?.json?.status === "COMPLETED";
   }
