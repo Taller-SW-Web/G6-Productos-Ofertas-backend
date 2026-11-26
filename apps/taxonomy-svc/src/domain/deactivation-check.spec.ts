@@ -34,6 +34,22 @@ describe('DEC-G6-INT-05: evaluación interna del check de baja', () => {
     expect(
       evaluarCheckBaja(identidad, { ...identidad, result: 'IN_USE' }),
     ).toBe('RECHAZAR_BAJA');
+    for (const cambio of [{ version: 1 }, { operationId: 'otra' }]) {
+      expect(
+        evaluarCheckBaja(identidad, {
+          ...identidad,
+          ...cambio,
+          result: 'CLEAR',
+        }),
+      ).toBe('IGNORAR');
+      expect(
+        evaluarCheckBaja(identidad, {
+          ...identidad,
+          ...cambio,
+          result: 'IN_USE',
+        }),
+      ).toBe('IGNORAR');
+    }
   });
 
   it.each([
