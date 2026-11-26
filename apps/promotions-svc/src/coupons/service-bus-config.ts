@@ -60,9 +60,7 @@ export function readPromotionsServiceBus(
     env.RABBITMQ_URL !== undefined ||
     env.PROMOTIONS_COUPON_RUNTIME_ENABLED === 'true' ||
     (couponCommands === 'true' &&
-      (!['G7_AUTHENTICATED', 'PUBLIC_READ_ONLY'].includes(
-        env.G6_SECURITY_MODE ?? '',
-      ) ||
+      (env.G6_SECURITY_MODE !== 'G7_AUTHENTICATED' ||
         !isSecureG7Issuer(env.AUTH_ISSUER) ||
         !isSecureG7Issuer(env.AUTH_JWKS_URL) ||
         !identity)) ||
@@ -71,9 +69,7 @@ export function readPromotionsServiceBus(
         /^0{8}-0{4}-0{4}-0{4}-0{12}$/.test(identity))) ||
     (env.NODE_ENV === 'production' &&
       (production !== 'true' ||
-        !['G7_AUTHENTICATED', 'PUBLIC_READ_ONLY'].includes(
-          env.G6_SECURITY_MODE ?? '',
-        ) ||
+        env.G6_SECURITY_MODE !== 'G7_AUTHENTICATED' ||
         !identity)) ||
     (env.NODE_ENV !== 'production' && production === 'true')
   )

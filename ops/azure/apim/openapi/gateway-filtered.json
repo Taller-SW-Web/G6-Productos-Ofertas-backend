@@ -30479,7 +30479,21 @@
         "x-source-spec": [
           "SPEC-012"
         ],
-        "security": [],
+        "security": [
+          {
+            "serviceBearer": []
+          },
+          {
+            "userBearer": []
+          }
+        ],
+        "x-required-scope": "catalogo:leer",
+        "x-service-audience": "api-productos",
+        "x-allowed-client-ids": [
+          "modulo-marketplace",
+          "modulo-chatbot",
+          "modulo-retail"
+        ],
         "parameters": [
           {
             "name": "slug",
@@ -30497,6 +30511,72 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SeoMetadata"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente o inv\u00e1lido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Problem"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "integer",
+                          "const": 401
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "TOKEN_INVALIDO"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "code"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sin rol, scope o cliente autorizado",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Problem"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "integer",
+                          "const": 403
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SCOPE_INSUFICIENTE"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "code"
+                      ]
+                    }
+                  ]
                 }
               }
             }
@@ -30590,14 +30670,56 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Servicio de identidad no disponible",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Problem"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "integer",
+                          "const": 503
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SERVICIO_NO_DISPONIBLE"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "code"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         "x-error-codes": {
+          "401": [
+            "TOKEN_INVALIDO"
+          ],
+          "403": [
+            "SCOPE_INSUFICIENTE"
+          ],
           "404": [
             "SLUG_NO_ENCONTRADO"
           ],
           "500": [
             "ERROR_INTERNO"
+          ],
+          "503": [
+            "SERVICIO_NO_DISPONIBLE"
           ]
         },
         "x-route-basis": "existing-contract"
@@ -36162,7 +36284,21 @@
         "x-source-spec": [
           "SPEC-012"
         ],
-        "security": [],
+        "security": [
+          {
+            "serviceBearer": []
+          },
+          {
+            "userBearer": []
+          }
+        ],
+        "x-required-scope": "catalogo:leer",
+        "x-service-audience": "api-productos",
+        "x-allowed-client-ids": [
+          "modulo-marketplace",
+          "modulo-chatbot",
+          "modulo-retail"
+        ],
         "parameters": [
           {
             "name": "slugAnterior",
@@ -36180,6 +36316,72 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SlugResolution"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token ausente o inv\u00e1lido",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Problem"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "integer",
+                          "const": 401
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "TOKEN_INVALIDO"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "code"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sin rol, scope o cliente autorizado",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Problem"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "integer",
+                          "const": 403
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SCOPE_INSUFICIENTE"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "code"
+                      ]
+                    }
+                  ]
                 }
               }
             }
@@ -36273,14 +36475,56 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Servicio de identidad no disponible",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Problem"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "integer",
+                          "const": 503
+                        },
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SERVICIO_NO_DISPONIBLE"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "code"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         "x-error-codes": {
+          "401": [
+            "TOKEN_INVALIDO"
+          ],
+          "403": [
+            "SCOPE_INSUFICIENTE"
+          ],
           "404": [
             "SLUG_NO_ENCONTRADO"
           ],
           "500": [
             "ERROR_INTERNO"
+          ],
+          "503": [
+            "SERVICIO_NO_DISPONIBLE"
           ]
         },
         "x-route-basis": "existing-contract"
@@ -46996,11 +47240,11 @@
     "forbidden_source": "service-token sub/client_id"
   },
   "x-apim-filter": {
-    "docsSha": "490172c11cb4b83ddd1996f8d5834d0402184cf8",
-    "gatewaySha": "1b90543dc39a8919fd94f0e059d10e1002b3b2a9",
+    "docsSha": "f785accbc7c290ba10f873c8f12061405bb2c622",
+    "gatewaySha": "6ea8bfbf41220cf3fc5ffab7c7847c8c522f9f96",
     "g5EnabledByDefault": false,
     "privateOperationCount": 5,
     "publicationMode": "candidate",
-    "operationSetSha256": "040544e1666747ff00c9eb77c6509b6831c83368dcba7b0ef29f3668ac7365fb"
+    "operationSetSha256": "ee7b318011ff845770f2baee07fda13808f0f60372420abc6d2eef222a274cc9"
   }
 }

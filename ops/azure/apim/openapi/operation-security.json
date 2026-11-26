@@ -1,8 +1,8 @@
 {
-  "docsSha": "490172c11cb4b83ddd1996f8d5834d0402184cf8",
-  "gatewaySha": "1b90543dc39a8919fd94f0e059d10e1002b3b2a9",
+  "docsSha": "f785accbc7c290ba10f873c8f12061405bb2c622",
+  "gatewaySha": "6ea8bfbf41220cf3fc5ffab7c7847c8c522f9f96",
   "publicationMode": "candidate",
-  "securityProfile": "UNSPECIFIED",
+  "securityProfile": "G7_AUTHENTICATED",
   "enabledProviders": [],
   "authorizedPublicAllowlist": [],
   "g5Flag": false,
@@ -47,7 +47,6 @@
     "authorized": false,
     "status": "BLOCKED_MISSING_ENV_CONFIG",
     "blockedReasons": [
-      "NO_SECURITY_PROFILE",
       "NO_ENABLED_PROVIDERS_OR_ALLOWLIST",
       "NO_AUTHORIZED_OPERATIONS"
     ],
@@ -55,247 +54,247 @@
     "excludedOperations": [
       {
         "operationId": "activarCupon",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "activarProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "activarPromocion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "activarReglaRecomendacion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "activarVariante",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "actualizarAsociacionTipoCaracteristica",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "actualizarCaracteristica",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "actualizarCategoria",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "actualizarCombo",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "actualizarCupon",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "actualizarMarca",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "actualizarPrecioBaseProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "actualizarPrecioSku",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "actualizarProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "actualizarPromocion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "actualizarReglaRecomendacion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "actualizarSeoCategoria",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "actualizarUmbralGlobal",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "actualizarValorCaracteristica",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "actualizarVariante",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "asociarCaracteristicaTipoProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "conciliarImportacionGeneralPorCorrelacion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "conciliarVentaOffline",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "confirmarReserva",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "consultarDatosFisicos",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "consultarDisponibilidad",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "consultarDisponibilidadCombo",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "consultarDisponibilidadComercial",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "consultarOperacionInventario",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "consultarPrecios",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "crearCaracteristica",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "crearCategoria",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "crearCombo",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "crearComboAdministracion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "crearCupon",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "crearExportacionAuditoriaPrecios",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "crearExportacionGeneralProductos",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "crearImportacionGeneralProductos",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "crearImportacionPrecios",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "crearMarca",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "crearProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "crearPromocion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "crearReglaRecomendacion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "crearTipoProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "crearValorCaracteristica",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "crearVariante",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "desactivarCaracteristica",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "desactivarCombo",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "desactivarCupon",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "desactivarProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "desactivarPromocion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "desactivarReglaRecomendacion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "desactivarVariante",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "descargarExportacionAuditoriaPrecios",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "descargarExportacionGeneralProductos",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "descargarPlantillaProductos",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "descargarReporteImportacionGeneral",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "descargarReporteImportacionPrecios",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "eliminarUmbralSku",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "establecerUmbralSku",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "evaluarPromociones",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "filtrarSkusVendiblesInterno",
@@ -303,127 +302,127 @@
       },
       {
         "operationId": "liberarReserva",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarAlertasOperativasInventario",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarAuditoriaPrecios",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarAuditoriaPreciosAdministracion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarCaracteristicas",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarCategorias",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarCategoriasAdmin",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarCombosAdmin",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarCupones",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarHistorialSlugCategoria",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarMarcas",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarMarcasAdmin",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarProductos",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarProductosAdministracion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarProgramacionesPrecioProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarProgramacionesPrecioSku",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarPromociones",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarPromocionesAdmin",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarReglasRecomendacion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarSaldosFisicosAdministracion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarTiposProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarTrasladosInventario",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarUbicacionesInventario",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarValoresCaracteristica",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "listarVariantesProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerArbolCategoriasAdmin",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerAuditoriaPrecio",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerAuditoriaPrecioAdministracion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerCaracteristica",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerCategoriaAdmin",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerCombo",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerContenidoCargaMasivaInternoH5",
@@ -439,11 +438,11 @@
       },
       {
         "operationId": "obtenerCuponAdmin",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerDashboardInventario",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerDefinicionPrecioProductoAdministracion",
@@ -455,7 +454,7 @@
       },
       {
         "operationId": "obtenerEsquemaTipoProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerEvidenciaReservaCuponInterno",
@@ -463,203 +462,203 @@
       },
       {
         "operationId": "obtenerExportacionAuditoriaPrecios",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerExportacionGeneralProductos",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerImportacionGeneralProductos",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerImportacionPrecios",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerMarcaAdmin",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerOperacionMaestra",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerPrecioBaseProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerPrecioSku",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerPreparacionProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerProductoAdministracion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerProductoPorSlug",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerPromocionAdmin",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerRecomendaciones",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerReglaRecomendacion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerSeoCategoriaAdmin",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerSeoPorSlug",
-        "reason": "PUBLIC_NOT_IN_ALLOWLIST"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerTipoProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerTrasladoInventario",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerUmbralesInventario",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "obtenerVariante",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "prevalidarImportacionPrecios",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "programarPrecioBaseProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "programarPrecioSku",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "reactivarCaracteristica",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "reactivarCategoria",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "reactivarMarca",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "reactivarProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "reactivarTipoProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "reactivarValorCaracteristica",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "reactivarVariante",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "reanudarImportacionGeneral",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "registrarRecepcionTrasladoInventario",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "reintegrarInventario",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "reintentarPreparacionProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "reintentarPreparacionVariante",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "reportarIncidenciaInventario",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "resolverCodigoBarras",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "resolverIncidenciaInventario",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "resolverSkusAdministracion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "resolverSlugAnterior",
-        "reason": "PUBLIC_NOT_IN_ALLOWLIST"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "resolverSlugCategoriaCreacion",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "solicitarDesactivacionCategoria",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "solicitarDesactivacionMarca",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "solicitarDesactivacionTipoProducto",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "solicitarDesactivacionValorCaracteristica",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "solicitarDesasociacionTipoCaracteristica",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "solicitarReserva",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "validarCupon",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       },
       {
         "operationId": "verificarCantidadComercial",
-        "reason": "NO_SECURITY_PROFILE"
+        "reason": "PROVIDER_NOT_ENABLED"
       }
     ]
   },
@@ -5775,20 +5774,63 @@
       "method": "GET",
       "path": "/seo/{slug}",
       "service": "taxonomy-svc",
-      "secured": false,
-      "authSchemes": [],
-      "identityType": "public",
-      "securityAlternatives": [],
-      "issuerRequired": false,
+      "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
+      "issuerRequired": true,
       "audienceRequired": false,
-      "audience": null,
-      "scopes": [],
-      "roles": [],
-      "allowedClients": [],
-      "clientAllowlistStatus": "NOT_APPLICABLE",
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-retail"
+      ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "m2mAlternativeExcludedReason": null,
       "introspectionRequired": false,
-      "exposureProfile": "public_read",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
       "environmentEnabled": false,
       "g5OptIn": false
@@ -6808,20 +6850,63 @@
       "method": "GET",
       "path": "/seo/resoluciones/{slugAnterior}",
       "service": "taxonomy-svc",
-      "secured": false,
-      "authSchemes": [],
-      "identityType": "public",
-      "securityAlternatives": [],
-      "issuerRequired": false,
+      "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
+      "issuerRequired": true,
       "audienceRequired": false,
-      "audience": null,
-      "scopes": [],
-      "roles": [],
-      "allowedClients": [],
-      "clientAllowlistStatus": "NOT_APPLICABLE",
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-retail"
+      ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "m2mAlternativeExcludedReason": null,
       "introspectionRequired": false,
-      "exposureProfile": "public_read",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
       "environmentEnabled": false,
       "g5OptIn": false
@@ -7228,6 +7313,6 @@
       "g5OptIn": false
     }
   ],
-  "operationSetSha256": "040544e1666747ff00c9eb77c6509b6831c83368dcba7b0ef29f3668ac7365fb",
-  "filteredOpenApiCanonicalSha256": "2393ebc7625a84300d23f556cb31eeccfd19ee5b39d5ee3fb8ab2e72abd07101"
+  "operationSetSha256": "ee7b318011ff845770f2baee07fda13808f0f60372420abc6d2eef222a274cc9",
+  "filteredOpenApiCanonicalSha256": "6a72b6f99c367ddff73ff2d70847e6a378dc1441ba85890726cac2f834b2b0d1"
 }

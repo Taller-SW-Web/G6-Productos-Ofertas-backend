@@ -44,7 +44,11 @@ test('PREPARED crea planes UUID estables aunque falten evidencias externas', asy
   );
 });
 
-function authorizationProfile(plans, keyPair) {
+function authorizationProfile(
+  plans,
+  keyPair,
+  gateway = 'https://gateway.integration.example.invalid',
+) {
   const cases = {};
   for (const scenario of escenarios) {
     const plan = plans.get(scenario.id);
@@ -125,7 +129,7 @@ function authorizationProfile(plans, keyPair) {
           event_id: `SIGNED-${id}`,
           occurred_at: '2026-11-22T16:00:00Z',
           environment: 'integration',
-          gateway: 'https://gateway.integration.example.invalid',
+          gateway,
           order_id: input.order_id,
           reservation_id: reservationId,
           coupon_operation_id: couponOperation,
@@ -157,7 +161,7 @@ function authorizationProfile(plans, keyPair) {
   }
   return {
     environment: 'integration',
-    gateway: 'https://gateway.integration.example.invalid',
+    gateway,
     g6_sha: sha('1'),
     g5_sha: sha('2'),
     g6_destination: 'chile-shared',
@@ -300,6 +304,50 @@ test('update es idempotente, no rota UUID y authorize nunca activa execute', asy
   }
   assert.equal(afterUpdate.get('G5-H5-04').cancel_mode, 'release-only');
   assert.equal(afterUpdate.get('G5-H5-06').cancel_mode, 'restore-consumption');
+  const labelledOutput = join(dir, 'labelled-plans');
+  const labelledGateway =
+    'https://api-gateway---g5-h5.env-g6-phase1-chile.chilecentral.azurecontainerapps.io';
+  await prepararPlanes({}, labelledOutput, scenarioFile, 'prepare');
+  const labelledManifest = JSON.parse(
+    await readFile(join(labelledOutput, 'manifiesto.azure.json'), 'utf8'),
+  );
+  const labelledPlans = new Map();
+  for (const [id, entry] of Object.entries(labelledManifest))
+    labelledPlans.set(
+      id,
+      JSON.parse(await readFile(join(labelledOutput, entry.plan), 'utf8')),
+    );
+  const labelledProfile = {
+    ...authorizationProfile(labelledPlans, keyPair, labelledGateway),
+    g6_cd_runs: { 'api-gateway': 501, 'inventory-svc': 503 },
+    gateway_route_profile: 'g5-labelled',
+  };
+  await assert.rejects(
+    prepararPlanes(
+      { ...labelledProfile, gateway: 'https://api-gateway.example.invalid' },
+      labelledOutput,
+      scenarioFile,
+      'authorize',
+      ['G5-H5-01'],
+    ),
+    /G5_LABELLED_GATEWAY_PROFILE_REQUIRES_CHILE_LABEL_URL/,
+  );
+  const labelled = await prepararPlanes(
+    labelledProfile,
+    labelledOutput,
+    scenarioFile,
+    'authorize',
+    ['G5-H5-01'],
+  );
+  assert.deepEqual(labelled.authorized, ['G5-H5-01']);
+  const labelledPlan = JSON.parse(
+    await readFile(
+      join(labelledOutput, labelledManifest['G5-H5-01'].plan),
+      'utf8',
+    ),
+  );
+  assert.equal(labelledPlan.gateway, labelledProfile.gateway);
+  assert.equal(labelledPlan.gateway_route_profile, 'g5-labelled');
 });
 
 test('authorize rechaza falta de firma auténtica y pedidos reutilizados', async (t) => {

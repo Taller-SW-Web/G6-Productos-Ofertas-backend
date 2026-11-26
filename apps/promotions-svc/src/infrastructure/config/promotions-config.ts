@@ -60,8 +60,7 @@ export class PromotionsConfigurationError extends Error {
 }
 
 export interface PromotionsConfiguration {
-  readonly securityMode:
-    'PUBLIC_READ_ONLY' | 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
+  readonly securityMode: 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
   readonly publicOperations: readonly string[];
   readonly environment: 'development' | 'test' | 'production';
   readonly port: number;
@@ -107,20 +106,17 @@ export function validatePromotionsConfiguration(
     ConfigurationVariable | (typeof upstreamVariables)[Upstream]
   >();
   const securityMode = environment.G6_SECURITY_MODE ?? 'G7_AUTHENTICATED';
+  const nodeEnvironmentRaw = environment.NODE_ENV ?? 'development';
   if (
-    !['PUBLIC_READ_ONLY', 'SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(
-      securityMode,
-    )
+    !['SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(securityMode) ||
+    (securityMode === 'SIMULATED_AUTH' && nodeEnvironmentRaw !== 'test')
   )
     invalid.add('G6_SECURITY_MODE');
   const publicOperations = (environment.PROMOTIONS_PUBLIC_OPERATION_IDS ?? '')
     .split(',')
     .map((id) => id.trim())
     .filter(Boolean);
-  if (
-    publicOperations.some((id) => !PHASE1_PUBLIC_OPERATION_IDS.has(id)) ||
-    (securityMode !== 'PUBLIC_READ_ONLY' && publicOperations.length)
-  )
+  if (publicOperations.length > 0)
     invalid.add('PROMOTIONS_PUBLIC_OPERATION_IDS');
   const selectedIssuer =
     securityMode === 'SIMULATED_AUTH'
@@ -211,11 +207,7 @@ export function validatePromotionsConfiguration(
   const h5Secret = environment.PROMOTIONS_H5_SERVICE_CLIENT_SECRET;
   if (h5Secret !== undefined) {
     if (
-      (securityMode !== 'G7_AUTHENTICATED' &&
-        !(
-          securityMode === 'PUBLIC_READ_ONLY' &&
-          serviceBus?.couponCommandsEnabled === true
-        )) ||
+      securityMode !== 'G7_AUTHENTICATED' ||
       !serviceCredentials ||
       !h5Secret.trim() ||
       /[\r\n\0]/.test(h5Secret) ||
@@ -242,7 +234,7 @@ export function validatePromotionsConfiguration(
       invalid.add(variable);
     }
   }
-  const httpOnly = securityMode === 'PUBLIC_READ_ONLY' && !couponRuntimeEnabled;
+  const httpOnly = false;
   const required = Object.fromEntries(
     requiredVariables.map((name) => {
       const value = environment[name] ?? '';

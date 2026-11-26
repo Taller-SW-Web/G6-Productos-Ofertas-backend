@@ -19,10 +19,7 @@ export class PricingReadiness {
   ) {}
 
   check(): Promise<boolean> {
-    const publicReadOnly =
-      this.config.securityMode === 'PUBLIC_READ_ONLY' &&
-      this.config.publicOperations.length > 0;
-    if (!this.config.auth && !publicReadOnly) return Promise.resolve(false);
+    if (!this.config.auth) return Promise.resolve(false);
     if (this.config.serviceBus && !this.serviceBus?.available)
       return Promise.resolve(false);
     if (

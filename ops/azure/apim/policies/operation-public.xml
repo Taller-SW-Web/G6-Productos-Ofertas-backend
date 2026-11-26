@@ -1,12 +1,16 @@
 <policies>
   <inbound>
     <base />
-    <set-variable name="rateIdentity" value="@(context.Request.IpAddress)" />
-    <rate-limit-by-key calls="{{burst-calls}}" renewal-period="{{burst-window-seconds}}" counter-key="@((string)context.Variables[&quot;rateIdentity&quot;] + &quot;:{{operation-id}}&quot;)" />
-    <quota-by-key calls="{{quota-calls}}" renewal-period="{{quota-window-seconds}}" counter-key="@((string)context.Variables[&quot;rateIdentity&quot;] + &quot;:{{operation-id}}&quot;)" />
+    <return-response>
+      <set-status code="403" reason="Forbidden" />
+      <set-header name="Content-Type" exists-action="override">
+        <value>application/problem+json</value>
+      </set-header>
+      <set-body>{"type":"/errores/scope-insuficiente","title":"Acceso anónimo deshabilitado","status":403,"code":"SCOPE_INSUFICIENTE"}</set-body>
+    </return-response>
   </inbound>
   <backend>
-    <forward-request buffer-request-body="false" buffer-response="false" />
+    <base />
   </backend>
   <outbound><base /></outbound>
   <on-error><base /></on-error>

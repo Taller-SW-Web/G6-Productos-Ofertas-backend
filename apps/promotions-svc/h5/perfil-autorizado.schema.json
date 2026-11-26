@@ -6,6 +6,7 @@
   "properties": {
     "environment": { "const": "integration" },
     "gateway": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "gateway_route_profile": { "enum": ["standard", "g5-labelled"] },
     "g6_sha": { "$ref": "#/$defs/sha" },
     "g6_destination": { "enum": ["brazil-isolated", "chile-shared"] },
     "g6_service_shas": {

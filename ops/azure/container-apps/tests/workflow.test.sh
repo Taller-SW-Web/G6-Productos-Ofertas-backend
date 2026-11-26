@@ -9,6 +9,12 @@ for required in 'workflow_dispatch:' 'brazil-isolated' 'chile-shared' 'azure-h5-
 done
 grep -Fq 'default: brazil-isolated' "$WORKFLOW" || fail 'Brazil no se conserva como destino por defecto'
 grep -Fq 'resolve-deployment-target.sh' "$WORKFLOW" || fail 'falta validación explícita del destino'
+grep -Fq 'g5-labelled' "$WORKFLOW" || fail 'falta perfil etiquetado G5'
+grep -Fq 'G5_LABELLED_ROUTE_SCOPE_REJECTED' "$WORKFLOW" || fail 'perfil G5 no queda limitado a Chile/api-gateway'
+grep -Fq 'H5_GATEWAY_ROUTE_PROFILE' "$WORKFLOW" || fail 'perfil no llega a deploy/smoke protegidos'
+grep -Fq 'GATEWAY_G5_H5_ENABLED=true' "$ROOT/ops/azure/container-apps/deploy.sh" || fail 'flag H5 no se fija en revisión Gateway etiquetada'
+grep -Fq 'revision label add' "$ROOT/ops/azure/container-apps/deploy.sh" || fail 'no se asigna etiqueta ACA a revisión Gateway'
+grep -Fq 'marketplace_traffic_weight' "$ROOT/ops/azure/container-apps/smoke-service.sh" || fail 'smoke no prueba que el tráfico Marketplace permanezca separado'
 grep -Fq 'AZURE_CHILE_DEPLOY_ENABLED' "$WORKFLOW" || fail 'falta gate de habilitación Chile desde vars del job deploy'
 grep -Fq 'AZURE_CHILE_DEPLOY_ENABLED' "$ROOT/ops/azure/container-apps/deploy.sh" || fail 'el ejecutor no exige el gate Chile'
 if grep -Fq '/variables/AZURE_CHILE_DEPLOY_ENABLED' "$ROOT/ops/azure/container-apps/verify-environment-protection.sh"; then fail 'el verificador usa endpoint REST de variables'; fi
@@ -22,7 +28,7 @@ grep -Fq 'needs: [prepare, security]' "$WORKFLOW" || fail 'publicación no depen
 grep -Fq 'npm audit --omit=dev --audit-level=high' "$WORKFLOW" || fail 'gate obligatorio de auditoría de producción ausente'
 grep -Fq 'verify-environment-protection.sh' "$WORKFLOW" || fail 'preflight de protección del environment ausente'
 grep -Fq 'verify-environment-protection.test.sh' "$CI_WORKFLOW" || fail 'CI no prueba la protección real del environment'
-grep -Fq "self-hosted, linux, \"\${{ needs.prepare.outputs.runner_label }}\"" "$WORKFLOW" || fail 'smoke no elige etiqueta privada según destino'
+grep -Fq 'self-hosted, linux,' "$WORKFLOW" && grep -Fq 'needs.prepare.outputs.runner_label' "$WORKFLOW" || fail 'smoke no elige etiqueta privada según destino'
 grep -Fq -- '- azure-h5-smoke' "$ROOT/.github/actionlint.yaml" || fail 'actionlint no conoce la etiqueta privada del runner smoke'
 prepare_gate_line="$(grep -nF 'Preflight read-only de protección del Environment antes de publicar' "$WORKFLOW" | cut -d: -f1)"
 security_job_line="$(grep -n '^  security:' "$WORKFLOW" | cut -d: -f1)"

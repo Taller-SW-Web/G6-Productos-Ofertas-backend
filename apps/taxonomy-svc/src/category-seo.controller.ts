@@ -10,6 +10,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import {
+  AllowTaxonomyServiceClients,
+  RequireTaxonomyCommercialUser,
   TaxonomyAuthGuard,
   TaxonomyCommercialGuard,
   TaxonomyUserGuard,
@@ -56,6 +58,12 @@ export class CategorySeoController {
 
   @Get('seo/:slug')
   @UseGuards(TaxonomyAuthGuard)
+  @AllowTaxonomyServiceClients(
+    'modulo-marketplace',
+    'modulo-chatbot',
+    'modulo-retail',
+  )
+  @RequireTaxonomyCommercialUser()
   async obtenerPublico(@Param('slug') slug: string) {
     const result = await this.seo.publico(slug);
     if (!result) throw problem(404, 'SLUG_NO_ENCONTRADO');
@@ -64,6 +72,12 @@ export class CategorySeoController {
 
   @Get('seo/resoluciones/:slugAnterior')
   @UseGuards(TaxonomyAuthGuard)
+  @AllowTaxonomyServiceClients(
+    'modulo-marketplace',
+    'modulo-chatbot',
+    'modulo-retail',
+  )
+  @RequireTaxonomyCommercialUser()
   async resolverAnterior(@Param('slugAnterior') slug: string) {
     const result = await this.seo.resolver(slug);
     if (!result) throw problem(404, 'SLUG_NO_ENCONTRADO');

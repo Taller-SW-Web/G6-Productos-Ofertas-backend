@@ -25,6 +25,85 @@ async function fixture(
 }
 
 describe('Internal HTTP credential boundary (PR143)', () => {
+  it('tracks concurrent dependency reads independently through timeout', async () => {
+    await fixture(
+      () => undefined,
+      async (origin) => {
+        const events: Array<Record<string, unknown>> = [];
+        const controller = new AbortController();
+        const correlationId = '77777777-7777-4777-8777-777777777777';
+        const context = {
+          correlationId,
+          at: '2026-11-25T00:00:00Z',
+          deadlineAt: performance.now() + 15,
+          deadlineMs: 2500,
+          pendingStages: new Map(),
+          observe: (event: Record<string, unknown>) => events.push(event),
+        };
+        const reader = new InternalHttpReader({
+          origin,
+          origins: { catalog: origin, pricing: origin },
+          getServiceAccessToken: async () => 'synthetic-own-service-token',
+        });
+        const abort = setTimeout(() => controller.abort(), 40);
+        try {
+          const outcomes = await Promise.allSettled([
+            reader.read(
+              'obtenerContextoSku',
+              '/productos/fixture/contexto-sku',
+              controller.signal,
+              false,
+              correlationId,
+              context,
+            ),
+            reader.read(
+              'obtenerPrecioSku',
+              '/precios/fixture',
+              controller.signal,
+              false,
+              correlationId,
+              context,
+            ),
+          ]);
+          expect(outcomes.every((result) => result.status === 'rejected')).toBe(
+            true,
+          );
+        } finally {
+          clearTimeout(abort);
+        }
+        expect(events).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              operation: 'obtenerContextoSku',
+              upstream: 'catalog',
+              stage: 'upstream_request',
+              outcome: 'timeout',
+            }),
+            expect.objectContaining({
+              operation: 'obtenerPrecioSku',
+              upstream: 'pricing',
+              stage: 'upstream_request',
+              outcome: 'timeout',
+            }),
+          ]),
+        );
+        expect(context.pendingStages.size).toBe(2);
+        expect([...context.pendingStages.values()]).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              operation: 'obtenerContextoSku',
+              upstream: 'catalog',
+            }),
+            expect.objectContaining({
+              operation: 'obtenerPrecioSku',
+              upstream: 'pricing',
+            }),
+          ]),
+        );
+      },
+    );
+  });
+
   it('uses anonymous GETs only with explicitly selected Phase 1 and never retries as anonymous', async () => {
     await fixture(
       (request, response) => {
@@ -93,6 +172,107 @@ describe('Internal HTTP credential boundary (PR143)', () => {
         ).rejects.toThrow('INVALID_COMMERCIAL_CORRELATION');
         expect(tokens).toHaveBeenCalledTimes(1);
       },
+    );
+  });
+  it('records sanitized token and upstream stages with the same correlation', async () => {
+    const trace = '33333333-3333-4333-8333-333333333333';
+    const events: Array<{
+      stage: string;
+      outcome: string;
+      upstream?: string;
+      status?: number;
+      errorCode?: string;
+      durationMs: number;
+    }> = [];
+    await fixture(
+      (request, response) => {
+        expect(request.headers['x-correlation-id']).toBe(trace);
+        response
+          .writeHead(200, { 'content-type': 'application/json' })
+          .end('{}');
+      },
+      async (origin) => {
+        const reader = new InternalHttpReader({
+          origin,
+          getServiceAccessToken: async (
+            _request,
+            _signal,
+            tokenCorrelation,
+          ) => {
+            expect(tokenCorrelation).toBe(trace);
+            return 'never-log-this-jwt';
+          },
+        });
+        await reader.read(
+          'obtenerProducto',
+          '/productos/sku-private?at=private-instant',
+          new AbortController().signal,
+          false,
+          trace,
+          {
+            correlationId: trace,
+            at: '2026-11-25T00:00:00Z',
+            deadlineAt: performance.now() + 2500,
+            observe: (event) => events.push(event),
+          },
+        );
+      },
+    );
+    expect(events.map((event) => event.stage)).toEqual([
+      'service_token',
+      'upstream_request',
+    ]);
+    expect(JSON.stringify(events)).not.toContain('never-log-this-jwt');
+    expect(JSON.stringify(events)).not.toContain('sku-private');
+    expect(JSON.stringify(events)).not.toContain('private-instant');
+    expect(events[0]).toMatchObject({
+      outcome: 'success',
+      upstream: 'catalog',
+    });
+    expect(events[1]).toMatchObject({ outcome: 'success', status: 200 });
+  });
+  it('classifies an exhausted token stage as a deadline without exposing its cause', async () => {
+    const trace = '44444444-4444-4444-8444-444444444444';
+    const events: Array<{
+      stage: string;
+      outcome: string;
+      errorCode?: string;
+      durationMs: number;
+    }> = [];
+    const controller = new AbortController();
+    const reader = new InternalHttpReader({
+      origin: 'https://catalog.invalid',
+      getServiceAccessToken: async (_request, signal) =>
+        new Promise((_resolve, reject) =>
+          signal.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          }),
+        ),
+    });
+    const context = {
+      correlationId: trace,
+      at: '2026-11-25T00:00:00Z',
+      deadlineAt: performance.now() + 10,
+      observe: (event) => events.push(event),
+    };
+    const timeout = setTimeout(() => controller.abort(), 20);
+    await expect(
+      reader.read(
+        'obtenerProducto',
+        '/productos/private',
+        controller.signal,
+        false,
+        trace,
+        context,
+      ),
+    ).rejects.toThrow('PROMOTIONS_DEPENDENCY_TIMEOUT');
+    clearTimeout(timeout);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        stage: 'service_token',
+        outcome: 'timeout',
+        errorCode: 'COMMERCIAL_DEADLINE_EXCEEDED',
+      }),
     );
   });
   it.each([

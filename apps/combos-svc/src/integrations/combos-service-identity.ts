@@ -54,11 +54,7 @@ export class CombosServiceIdentity {
   ) {}
 
   invalidate(scope: ServiceScope): void {
-    for (const phase of [
-      'PUBLIC_READ_ONLY',
-      'SIMULATED_AUTH',
-      'G7_AUTHENTICATED',
-    ])
+    for (const phase of ['SIMULATED_AUTH', 'G7_AUTHENTICATED'])
       this.cache.delete(phase + ':' + scope);
   }
 
@@ -96,7 +92,8 @@ export class CombosServiceIdentity {
       !tokenUrl ||
       !secret ||
       !verifier ||
-      !['PUBLIC_READ_ONLY', 'SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(mode)
+      !['SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(mode) ||
+      (simulated && process.env.NODE_ENV !== 'test')
     )
       throw new IntegrationFailure(
         scope === 'catalogo:leer' ? 'CATALOG' : 'PRICING',
