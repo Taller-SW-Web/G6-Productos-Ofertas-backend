@@ -246,26 +246,52 @@ describe('Inicialización SKU — Inbox/operación/Outbox atómicos (#102)', () 
     });
   });
 
-  it('procesa inventory.bulk.stock.adjust.requested de bulk-svc de forma idempotente y emite resultado R10 en Outbox', async () => {
-    const bulkMsg = {
+  it('procesa inventory.bulk.stock.adjust.requested de bulk-svc con contrato absoluto idempotente y emite resultado R10 en Outbox', async () => {
+    const sku = 'SKU-BULK-1';
+    await service.process({
       ...message(),
+      data: {
+        sku,
+        product_id: randomUUID(),
+        default_location_id: location,
+      },
+    });
+    const opId = randomUUID();
+    const bulkMsg = {
+      message_id: randomUUID(),
+      operation_id: opId,
+      correlation_id: randomUUID(),
+      schema_version: 1,
+      occurred_at: new Date().toISOString(),
+      kind: 'command',
       producer: 'bulk-svc',
       name: 'inventory.bulk.stock.adjust.requested',
       data: {
+        operation_id: opId,
         batch_id: randomUUID(),
-        batch_operation_id: randomUUID(),
-        items: [{ row_number: 2, sku: 'SKU-BULK-1', delta: 5 }],
+        row_operation_id: randomUUID(),
+        sku,
+        location_id: location,
+        target_on_hand: 5,
+        expected_stock_version: 0,
+        reason: 'BULK_INITIAL_STOCK',
+        requested_at: new Date().toISOString(),
       },
     };
     const first = await service.process(bulkMsg);
     expect(first).toEqual({ duplicate: false });
-    expect(db.inbox).toHaveLength(1);
-    expect(db.outbox).toHaveLength(1);
-    expect(db.outbox[0].event_name).toBe('inventory.bulk.stock.adjust.completed');
+    expect(db.inbox.some((i) => i.message_id === bulkMsg.message_id)).toBe(true);
+    expect(
+      db.outbox.some((o) => o.event_type === 'inventory.bulk.stock.adjust.completed'),
+    ).toBe(true);
+    expect(
+      db.stockBalance.find((r) => r.sku_id === sku && r.location_id === location),
+    ).toMatchObject({ on_hand: 5, stock_version: 1 });
 
+    const outboxCountBefore = db.outbox.length;
     const second = await service.process(bulkMsg);
     expect(second).toEqual({ duplicate: true });
-    expect(db.outbox).toHaveLength(1);
+    expect(db.outbox).toHaveLength(outboxCountBefore);
   });
 
   it('acepta el envelope de Catalog PR #185 y evita reservas y disponibilidad positiva tras la baja', async () => {

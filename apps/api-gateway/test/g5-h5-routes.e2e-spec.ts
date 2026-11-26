@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import type { INestApplication } from '@nestjs/common';
@@ -85,8 +86,8 @@ describe('G5 H5 routes behind authenticated Gateway opt-in', () => {
     expect(upstream.mock.calls[0][1].headers.authorization).toBe(`Bearer ${g1Token}`);
 
     const noRoleToken = signed.token({
-      sub: 'user-no-role',
-      tipo: 'humano',
+      sub: randomUUID(),
+      tipo: 'acceso',
       roles: [],
       scope: '',
     });

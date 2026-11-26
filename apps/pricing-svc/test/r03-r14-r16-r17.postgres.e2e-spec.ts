@@ -5,15 +5,17 @@ import { Test } from '@nestjs/testing';
 import { describe, afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { PricingSvcModule } from '../src/pricing-svc.module.js';
 import { BulkPriceApplyService } from '../src/messaging/bulk-price-apply.service.js';
-import { PricingServiceBusHandler } from '../src/messaging/service-bus-consumer.js';
+import {
+  PricingServiceBusConsumer,
+  PricingServiceBusHandler,
+} from '../src/messaging/service-bus-consumer.js';
+import { PricingServiceBusRuntime } from '../src/messaging/service-bus-relay.js';
 import {
   AUDIT_PILOT_QUEUE,
   BULK_PRICE_RESULT_QUEUE,
   BULK_TO_PRICING_QUEUE,
   PROMOTIONS_PRICE_QUEUE,
 } from '../src/messaging/service-bus-deliveries.js';
-import { PricingDatabase } from '../src/persistence/pricing.database.js';
-import { PRICING_CONFIG } from '../src/config/environment.js';
 import { IsolatedPostgres } from './isolated-postgres.js';
 
 describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
@@ -22,25 +24,37 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
     const postgres = new IsolatedPostgres();
     let app: INestApplication;
     let bulkApply: BulkPriceApplyService;
-    let database: PricingDatabase;
 
     beforeAll(async () => {
       await postgres.start();
       process.env.MESSAGING_PROVIDER = 'AZURE_SERVICE_BUS';
       const moduleRef = await Test.createTestingModule({
-        imports: [PricingSvcModule],
+        imports: [
+          PricingSvcModule.forRoot({
+            NODE_ENV: 'test',
+            PORT: '3002',
+            DATABASE_URL: postgres.runtimeUrl,
+            AUTH_ISSUER: 'https://isolated.test/issuer',
+            AUTH_JWKS_URL: 'https://isolated.test/jwks',
+            PRICING_SERVICE_TOKEN_URL: 'https://isolated.test/api/v1/auth/token',
+            PRICING_SERVICE_CLIENT_SECRET: 'fixture-secret',
+            PRICING_CATALOG_URL: 'https://isolated.test',
+            MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
+            G6_SERVICE_BUS_PILOT_ENABLED: 'true',
+            PRICING_PRICE_CHANGED_PUBLISH_ENABLED: 'true',
+            SERVICE_BUS_NAMESPACE_FQDN: 'fixture-pricing.servicebus.windows.net',
+          }),
+        ],
       })
-        .overrideProvider(PRICING_CONFIG)
-        .useValue({
-          databaseUrl: postgres.url,
-          serviceBus: { namespace: 'lab-r2.servicebus.windows.net' },
-          auth: { issuer: 'https://isolated.test/issuer', jwksUrl: 'https://isolated.test/jwks' },
-        })
+        .overrideProvider(PricingServiceBusRuntime)
+        .useValue({ available: true })
+        .overrideProvider(PricingServiceBusConsumer)
+        .useValue({ available: true })
         .compile();
+
       app = moduleRef.createNestApplication({ logger: false });
       await app.init();
       bulkApply = app.get(BulkPriceApplyService);
-      database = app.get(PricingDatabase);
     });
 
     afterAll(async () => {
@@ -96,6 +110,14 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
                   precio_regular: '0.00',
                   currency: 'PEN',
                 },
+                {
+                  row_number: 4,
+                  row_operation_id: randomUUID(),
+                  sku: 'PG-SKU-BAD-OFFER',
+                  precio_regular: '20.00',
+                  precio_oferta: '25.00',
+                  currency: 'PEN',
+                },
               ],
             },
           }),
@@ -105,8 +127,12 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
       expect(outcome).toBe('completed');
       expect(settlement.completeMessage).toHaveBeenCalledOnce();
 
-      const validities = await database.pool.query(
-        `SELECT pv.precio_regular, pv.precio_oferta, p.sku
+      const validities = await postgres.admin!.query<{
+        sku: string;
+        precio_regular: string;
+        precio_oferta: string | null;
+      }>(
+        `SELECT pv.precio_regular::text, pv.precio_oferta::text, p.sku
          FROM pricing.price_validities pv
          JOIN pricing.prices p ON p.id = pv.price_id
          WHERE pv.is_cancelled = false`,
@@ -119,7 +145,10 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
         }),
       ]);
 
-      const deliveries = await database.pool.query(
+      const deliveries = await postgres.admin!.query<{
+        destination: string;
+        event_name: string;
+      }>(
         `SELECT d.destination, o.event_name
          FROM pricing.outbox_delivery d
          JOIN pricing.outbox o ON o.message_id = d.message_id
@@ -130,6 +159,9 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
       expect(pairs).toContain(`pricing.price.changed->${AUDIT_PILOT_QUEUE}`);
       expect(pairs).toContain(`pricing.price.changed->${PROMOTIONS_PRICE_QUEUE}`);
       expect(pairs).toContain(`pricing.bulk.price.apply.completed->${BULK_PRICE_RESULT_QUEUE}`);
+      expect(
+        deliveries.rows.filter((r) => r.event_name === 'pricing.price.changed'),
+      ).toHaveLength(4);
     });
   },
 );
