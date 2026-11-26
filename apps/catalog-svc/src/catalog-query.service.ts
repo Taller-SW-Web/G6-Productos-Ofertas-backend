@@ -178,13 +178,18 @@ export class CatalogQueryService {
     return result;
   }
 
-  async variants(productId: string, input: Record<string, unknown>) {
+  async variants(
+    productId: string,
+    input: Record<string, unknown>,
+    commercialOnly = false,
+  ) {
     const page = parseVariantPage(input);
     const result = await this.repository.listVariants(
       productId,
       page.pagina,
       page.tamanio,
       page.estado,
+      commercialOnly,
     );
     if (!result)
       throw new HttpException({ code: 'PRODUCTO_NO_ENCONTRADO' }, 404);
@@ -210,5 +215,76 @@ export class CatalogQueryService {
       throw new BadRequestException();
     if (!this.barcode) throw new ServiceUnavailableException();
     return this.barcode.resolve((body as Record<string, string>).codigo_barras);
+  }
+
+  filterSellableSkus(body: unknown) {
+    if (!body || typeof body !== 'object' || Array.isArray(body))
+      throw new BadRequestException({ code: 'VALIDACION' });
+    const record = body as Record<string, unknown>;
+    const allowedKeys = new Set([
+      'productoId',
+      'categoriaId',
+      'marcaId',
+      'sku',
+      'cursor',
+      'tamanio',
+    ]);
+    if (Object.keys(record).some((key) => !allowedKeys.has(key)))
+      throw new BadRequestException({ code: 'VALIDACION' });
+
+    const parseOptionalString = (key: string): string | undefined => {
+      const value = record[key];
+      if (value === undefined) return undefined;
+      if (typeof value !== 'string' || value.length === 0 || value.includes('\0'))
+        throw new BadRequestException({ code: 'VALIDACION' });
+      return value;
+    };
+
+    const productoId = parseOptionalString('productoId');
+    const categoriaId = parseOptionalString('categoriaId');
+    const marcaId = parseOptionalString('marcaId');
+    const sku = parseOptionalString('sku');
+    const cursor = parseOptionalString('cursor');
+
+    let tamanio = 20;
+    if (record.tamanio !== undefined) {
+      if (
+        typeof record.tamanio !== 'number' ||
+        !Number.isInteger(record.tamanio) ||
+        record.tamanio < 1 ||
+        record.tamanio > 100
+      )
+        throw new BadRequestException({ code: 'VALIDACION' });
+      tamanio = record.tamanio;
+    }
+
+    let cursorSku: string | undefined;
+    if (cursor !== undefined) {
+      try {
+        const parsed = JSON.parse(
+          Buffer.from(cursor, 'base64url').toString('utf8'),
+        ) as unknown;
+        if (
+          !parsed ||
+          typeof parsed !== 'object' ||
+          Array.isArray(parsed) ||
+          typeof (parsed as Record<string, unknown>).sku !== 'string' ||
+          ((parsed as Record<string, unknown>).sku as string).length === 0
+        )
+          throw new Error('INVALID_CURSOR');
+        cursorSku = (parsed as Record<string, string>).sku;
+      } catch {
+        throw new BadRequestException({ code: 'VALIDACION' });
+      }
+    }
+
+    return this.repository.filterSellableSkus({
+      productoId,
+      categoriaId,
+      marcaId,
+      sku,
+      cursorSku,
+      tamanio,
+    });
   }
 }

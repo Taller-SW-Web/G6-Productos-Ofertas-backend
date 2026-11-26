@@ -70,11 +70,11 @@ function validPriceChanged(data: Record<string, unknown>): boolean {
       'actor',
     ].every((key) => Object.hasOwn(data, key)) &&
     (data.target_type === 'PRODUCTO' || data.target_type === 'SKU') &&
-    typeof data.product_id === 'string' &&
-    data.product_id.length > 0 &&
     (data.target_type === 'PRODUCTO'
-      ? data.sku === null
-      : typeof data.sku === 'string' && data.sku.length > 0) &&
+      ? typeof data.product_id === 'string' && data.product_id.length > 0 && data.sku === null
+      : (data.product_id === null || (typeof data.product_id === 'string' && data.product_id.length > 0)) &&
+        typeof data.sku === 'string' &&
+        data.sku.length > 0) &&
     (data.channel_id === null || typeof data.channel_id === 'string') &&
     typeof data.currency === 'string' &&
     data.currency.length === 3 &&
@@ -90,7 +90,8 @@ function validPriceChanged(data: Record<string, unknown>): boolean {
     Number(data.price_version) >= 1 &&
     typeof data.valid_from === 'string' &&
     Number.isFinite(Date.parse(data.valid_from)) &&
-    data.batch_id === null &&
+    (data.batch_id === null ||
+      (typeof data.batch_id === 'string' && data.batch_id.length > 0)) &&
     actor !== undefined &&
     (actor.user_id === null || typeof actor.user_id === 'string') &&
     (actor.email === null || typeof actor.email === 'string') &&
@@ -117,8 +118,10 @@ export function pricingEnvelope(row: typeof outbox.$inferSelect) {
   if (
     row.eventName === 'pricing.price.changed' &&
     !validPriceChanged(row.payload)
-  )
+  ) {
+    console.error('[outbox-relay] invalid pricing.price.changed payload:', JSON.stringify(row.payload));
     throw new Error('Hecho de cambio de precio incompatible.');
+  }
   if (
     row.kind === 'result' &&
     row.eventName.startsWith('pricing.product.initialization.') &&

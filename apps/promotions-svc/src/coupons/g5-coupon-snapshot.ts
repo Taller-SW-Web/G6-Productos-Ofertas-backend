@@ -123,7 +123,8 @@ export class G5CouponSnapshot implements CouponDurableFactsSource {
         snapshotDurable: true,
         basket: { lines },
       };
-    } catch {
+    } catch (err) {
+      console.error('[g5-coupon-snapshot] error:', err instanceof Error ? err.stack ?? err.message : String(err));
       throw new Error('COUPON_EVIDENCE_UNAVAILABLE');
     }
   }

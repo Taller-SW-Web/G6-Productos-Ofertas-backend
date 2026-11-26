@@ -338,7 +338,10 @@ export class SimulatedComboTokenVerifier extends ComboTokenVerifier {
   }
 }
 
-export type ComboActorRequest = Request & { comboActor?: string };
+export type ComboActorRequest = Request & {
+  comboActor?: string;
+  comboPrincipalKind?: 'user' | 'service';
+};
 
 @Injectable()
 export class CombosAuthGuard implements CanActivate {
@@ -396,12 +399,19 @@ export class CombosAuthGuard implements CanActivate {
     )
       throw new ForbiddenException({ code: 'SCOPE_INSUFICIENTE' });
     if (policy.identity === 'user_or_service' && principal.kind === 'service') {
-      const allowedClients = (
+      const defaultClients = policy.allowedClients ?? [
+        'modulo-marketplace',
+        'modulo-chatbot',
+        'modulo-retail',
+      ];
+      const configuredClients = (
         process.env.COMBOS_ALLOWED_CLIENTS_COMBOS_READ ?? ''
       )
         .split(',')
         .map((client) => client.trim())
         .filter(Boolean);
+      const allowedClients =
+        configuredClients.length > 0 ? configuredClients : defaultClients;
       if (
         !policy.scope ||
         !principal.scopes.includes(policy.scope) ||
@@ -409,6 +419,7 @@ export class CombosAuthGuard implements CanActivate {
       )
         throw new ForbiddenException({ code: 'SCOPE_INSUFICIENTE' });
     }
+    request.comboPrincipalKind = principal.kind;
     if (
       policy.scope &&
       principal.kind === 'service' &&

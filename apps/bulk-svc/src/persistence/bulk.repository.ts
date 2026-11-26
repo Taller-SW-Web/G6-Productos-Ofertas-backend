@@ -642,7 +642,12 @@ export class BulkPersistenceRepository {
           if (
             input.action === 'PRICE_BULK_APPLY' &&
             (input.causationId == null ||
-              Number(normalizedRow.precioRegular ?? 0) <= 0 ||
+              Number(
+                normalizedRow.precioRegular ??
+                  (normalizedRow.product as Record<string, unknown> | undefined)
+                    ?.precioBaseInicial ??
+                  0,
+              ) <= 0 ||
               (input.status === 'COMPLETED'
                 ? input.eventName !== 'pricing.bulk.price.apply.completed'
                 : input.eventName !== 'pricing.bulk.price.apply.rejected'))
@@ -736,7 +741,10 @@ export class BulkPersistenceRepository {
           const completedSkuIds = earlierSkuReceipts
             .filter((receipt) => receipt.payload.status === 'COMPLETED')
             .map((receipt) => receipt.payload.skuId);
-          if (skuIds.some((sku) => !completedSkuIds.includes(sku)))
+          if (
+            earlierSkuReceipts.length > 0 &&
+            skuIds.some((sku) => !completedSkuIds.includes(sku))
+          )
             domainFailure(
               'DEPENDENCY_PENDING',
               'Stock adjustment result cannot precede all SKU initialization confirmations',
@@ -903,6 +911,7 @@ export class BulkPersistenceRepository {
         return { processed: true, result: response };
       });
     } catch (error) {
+      console.error('[bulk-repo] recordDomainResult error:', error);
       if (error instanceof BulkDomainError) throw error;
       throw persistenceError(error);
     }
@@ -1010,12 +1019,15 @@ export class BulkPersistenceRepository {
               : null,
           ),
         );
-        const normalizedRows = admittedRows.filter(
-          (value) =>
-            typeof value === 'object' &&
-            value !== null &&
-            commandRowOperations.has(Reflect.get(value, 'rowOperationId')),
-        );
+        const hasInlineRows = Array.isArray(commandData?.rows);
+        const normalizedRows = hasInlineRows
+          ? admittedRows.filter(
+              (value) =>
+                typeof value === 'object' &&
+                value !== null &&
+                commandRowOperations.has(Reflect.get(value, 'rowOperationId')),
+            )
+          : admittedRows;
         const normalizedByOperationId = new Map<
           string,
           Record<string, unknown>
@@ -1310,6 +1322,7 @@ export class BulkPersistenceRepository {
         return { processed: true, result: outcome };
       });
     } catch (error) {
+      console.error('[bulk-repo] recordDomainResult error:', error);
       if (error instanceof BulkDomainError) throw error;
       throw persistenceError(error);
     }
@@ -2016,6 +2029,7 @@ export class BulkPersistenceRepository {
         return { processed: true, result: 'RESULTS_APPLIED' };
       });
     } catch (error) {
+      console.error('[bulk-repo] recordDomainResult error:', error);
       if (error instanceof BulkDomainError) throw error;
       throw persistenceError(error);
     }

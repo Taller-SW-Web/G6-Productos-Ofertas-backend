@@ -22,6 +22,7 @@ import { CatalogQueryRepository } from './catalog-query.repository.js';
 import { CatalogQueryService } from './catalog-query.service.js';
 import { CatalogQueryController } from './catalog-query.controller.js';
 import { CatalogSkuContextController } from './catalog-sku-context.controller.js';
+import { CatalogInternalSkuController } from './catalog-internal-sku.controller.js';
 import { CatalogMutationController } from './catalog-mutation.controller.js';
 import {
   CATALOG_PRODUCT_CREATION_POLICY,
@@ -84,6 +85,7 @@ import { CatalogServiceBusRuntime } from './catalog-service-bus.runtime.js';
     AppController,
     CommercialController,
     CatalogSkuContextController,
+    CatalogInternalSkuController,
     CatalogQueryController,
     CatalogMutationController,
     HistoricalRecoveryController,

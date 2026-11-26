@@ -51,13 +51,25 @@ export class BulkImportService {
     const batchId = input.batchId ?? randomUUID();
     const parsedFile =
       input.parsed ?? parseBulkTemplate(input.bytes, input.format);
+    const envDefaultLocation =
+      process.env.BULK_DEFAULT_LOCATION_ID &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        process.env.BULK_DEFAULT_LOCATION_ID,
+      )
+        ? process.env.BULK_DEFAULT_LOCATION_ID
+        : null;
     const parsed = {
       ...parsedFile,
       rows: parsedFile.rows.map((row) => {
         const rowId = stableUuid(
           `${batchId}:bulk-row:${row.rowNumber}:${row.rowId}`,
         );
-        return { ...row, rowId, rowOperationId: rowId };
+        return {
+          ...row,
+          rowId,
+          rowOperationId: rowId,
+          defaultLocationId: row.defaultLocationId ?? envDefaultLocation,
+        };
       }),
     };
     const commandV2 =

@@ -272,6 +272,7 @@ export class ConciliacionOfflineRequest {
   offline_sale_id!: string;
   channel_id!: 'RETAIL';
   occurred_at!: string;
+  store_ref?: string;
   lines!: LineaInventarioUbicada[];
 }
 

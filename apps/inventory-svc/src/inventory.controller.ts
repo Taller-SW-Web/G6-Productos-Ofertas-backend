@@ -9,6 +9,7 @@ import {
   Req,
   HttpCode,
   HttpStatus,
+  Optional,
   UseGuards,
 } from '@nestjs/common';
 import { ReservationsService } from './reservations/reservations.service.js';
@@ -16,6 +17,7 @@ import { OperationsService } from './operations/operations.service.js';
 import { DisponibilidadService } from './disponibilidad/disponibilidad.service.js';
 import { ReintegrosService } from './reintegros/reintegros.service.js';
 import { IncidenciasService } from './incidencias/incidencias.service.js';
+import { OfflineReconciliationService } from './conciliacion/offline-reconciliation.service.js';
 import {
   CrearReservaRequest,
   OperacionReservaRequest,
@@ -33,6 +35,8 @@ import {
   CrearIncidenciaInventarioRequest,
   IncidenciaInventarioResponse,
   ResolverIncidenciaInventarioRequest,
+  ConciliacionOfflineRequest,
+  ConciliacionOfflineResponse,
 } from './types/inventory.dto.js';
 import { ProblemDetailsException } from './errors/inventory.errors.js';
 import { InventoryAuthGuard } from './auth/inventory-auth.guard.js';
@@ -120,6 +124,8 @@ export class InventoryController {
     private readonly disponibilidadService: DisponibilidadService,
     private readonly reintegrosService: ReintegrosService,
     private readonly incidenciasService: IncidenciasService,
+    @Optional()
+    private readonly offlineReconciliationService?: OfflineReconciliationService,
   ) {}
 
   @Post('reservas')
@@ -402,6 +408,32 @@ export class InventoryController {
       correlationId,
       idempotencyKey,
       clientId,
+    );
+  }
+
+  @Post('conciliaciones-offline')
+  @HttpCode(HttpStatus.OK)
+  @RequireScope(INVENTORY_SCOPES.CONCILIAR_OFFLINE)
+  @AllowedClients([KNOWN_CLIENTS.VENTAS])
+  async conciliarVentaOffline(
+    @Body() dto: ConciliacionOfflineRequest,
+    @Req() req: any,
+    @Headers('x-correlation-id') correlationId?: string,
+  ): Promise<ConciliacionOfflineResponse> {
+    if (!this.offlineReconciliationService) {
+      throw new ProblemDetailsException({
+        type: '/errores/servicio-no-disponible',
+        title: 'Servicio no disponible',
+        status: HttpStatus.SERVICE_UNAVAILABLE,
+        code: 'SERVICIO_NO_DISPONIBLE',
+        correlationId,
+      });
+    }
+    return this.offlineReconciliationService.reconcileFromAuthorizedRequest(
+      req?.clientId,
+      req?.jwtPayload,
+      dto,
+      correlationId,
     );
   }
 }

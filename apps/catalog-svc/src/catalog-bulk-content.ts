@@ -103,6 +103,7 @@ export class CatalogBulkContentClient {
           throw new Error('temporary content service failure');
         }
         if (response.status !== 200) {
+          console.error(`[catalog-bulk-content] GET ${origin}/interno/carga-masiva/contenidos/${reference.content_id} -> status=${response.status}`);
           await response.body?.cancel();
           throw new ServiceUnavailableException();
         }

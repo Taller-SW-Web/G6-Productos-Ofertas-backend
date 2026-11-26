@@ -222,7 +222,10 @@ export class CouponH5DeliveryHandler {
           deadLetterReason: 'UNADMITTED_COUPON_H5_COMMAND',
           deadLetterErrorDescription: 'No matching durable admission',
         });
-      else await this.settlement.abandonMessage(message);
+      else {
+        console.error(`[coupon-h5-delivery] worker.process error:`, error instanceof Error ? error.stack ?? error.message : String(error));
+        await this.settlement.abandonMessage(message);
+      }
       return;
     }
     // Do not abandon/deadletter a committed business operation if settlement fails.

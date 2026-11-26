@@ -247,9 +247,11 @@ export class CouponH5Runtime {
         this.started = true;
       }
       const result = await this.relay!.publishOne();
+      if (result !== 'empty') console.error(`[coupon-h5-runtime] error=NONE publishOne=${result}`);
       if (result === 'pending') this.available = false;
       else delay = result === 'empty' ? 1000 : 200;
-    } catch {
+    } catch (err) {
+      console.error(`[coupon-h5-runtime] poll error:`, err instanceof Error ? err.stack ?? err.message : String(err));
       this.available = false;
     } finally {
       if (!this.stopping) {

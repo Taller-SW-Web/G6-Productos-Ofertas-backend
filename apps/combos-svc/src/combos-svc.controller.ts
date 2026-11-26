@@ -99,10 +99,11 @@ export class CombosSvcController {
     operationId: 'obtenerCombo',
     identity: 'user_or_service',
     scope: 'combos:leer',
+    allowedClients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
   })
   @Get('combos/:comboId')
-  async get(@Req() req: Request, @Param('comboId') id: string) {
-    return this.service.get(id);
+  async get(@Req() req: ComboActorRequest, @Param('comboId') id: string) {
+    return this.service.get(id, req.comboPrincipalKind === 'service');
   }
   @RequireComboAccess({ operationId: 'actualizarCombo', identity: 'user' })
   @Patch('combos/:comboId')
@@ -124,9 +125,10 @@ export class CombosSvcController {
     operationId: 'consultarDisponibilidadCombo',
     identity: 'user_or_service',
     scope: 'combos:leer',
+    allowedClients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
   })
   @Get('combos/:comboId/disponibilidad')
-  async availability(@Req() req: Request, @Param('comboId') id: string) {
-    return this.service.availability(id);
+  async availability(@Req() req: ComboActorRequest, @Param('comboId') id: string) {
+    return this.service.availability(id, req.comboPrincipalKind === 'service');
   }
 }

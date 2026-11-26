@@ -125,8 +125,13 @@ export class BulkServiceBus {
               contentType: received.contentType,
               body,
             });
-          } catch {
-            reportError();
+          } catch (error) {
+            if ((error as { name?: string })?.name !== 'BulkDomainError') {
+              console.error(`[bulk-sb-consumer] consume error on ${queue}:`, error);
+              reportError();
+            } else {
+              console.error(`[bulk-sb-consumer] BulkDomainError on ${queue}:`, (error as Error).message);
+            }
             await receiver.abandonMessage(received);
             return;
           }

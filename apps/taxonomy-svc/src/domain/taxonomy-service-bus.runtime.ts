@@ -162,6 +162,170 @@ export async function receiveTaxonomyDelivery(
   return true;
 }
 
+function createIsolatedTaxonomyServiceBusClient(
+  baseUrl: string,
+): ServiceBusClient {
+  const parsed = new URL(baseUrl);
+  if (
+    parsed.protocol !== 'http:' ||
+    !['127.0.0.1', 'localhost'].includes(parsed.hostname)
+  ) {
+    throw new Error('G6_ISOLATED_SERVICE_BUS_URL debe ser HTTP loopback.');
+  }
+  const origin = parsed.origin;
+  const timers = new Set<ReturnType<typeof setInterval>>();
+  return {
+    createSender(queue: string) {
+      return {
+        async createMessageBatch() {
+          const messages: Array<Record<string, unknown>> = [];
+          return {
+            tryAddMessage(msg: {
+              body: unknown;
+              contentType?: string;
+              messageId?: string;
+              correlationId?: string;
+              subject?: string;
+            }) {
+              const rawBody =
+                msg.body instanceof Uint8Array
+                  ? Buffer.from(msg.body).toString('utf8')
+                  : typeof msg.body === 'string'
+                    ? msg.body
+                    : JSON.stringify(msg.body);
+              messages.push({
+                body: rawBody,
+                contentType: msg.contentType,
+                messageId: msg.messageId,
+                correlationId: msg.correlationId,
+                subject: msg.subject,
+              });
+              return true;
+            },
+            _messages: messages,
+          } as never;
+        },
+        async sendMessages(batch: unknown) {
+          const items =
+            (batch as { _messages?: Array<Record<string, unknown>> })
+              ._messages ?? [];
+          for (const item of items) {
+            const res = await fetch(
+              `${origin}/queues/${encodeURIComponent(queue)}/messages`,
+              {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify(item),
+              },
+            );
+            if (!res.ok)
+              throw new Error(`ISOLATED_BUS_SEND_FAILED_${res.status}`);
+          }
+        },
+      } as never;
+    },
+    createReceiver(queue: string) {
+      return {
+        subscribe(handlers: {
+          processMessage: (msg: ServiceBusReceivedMessage) => Promise<void>;
+          processError: (args: { error: Error }) => Promise<void>;
+        }) {
+          let active = true;
+          const timer = setInterval(async () => {
+            if (!active) return;
+            try {
+              const res = await fetch(
+                `${origin}/queues/${encodeURIComponent(queue)}/receive`,
+                { method: 'POST' },
+              );
+              if (res.status === 204 || !res.ok) return;
+              const msg = (await res.json()) as {
+                deliveryId: string;
+                body: string;
+                contentType?: string;
+                messageId?: string;
+                correlationId?: string;
+                subject?: string;
+                deliveryCount?: number;
+              };
+              await handlers.processMessage({
+                body: Buffer.from(msg.body, 'utf8'),
+                contentType: msg.contentType,
+                messageId: msg.messageId,
+                correlationId: msg.correlationId,
+                subject: msg.subject,
+                deliveryCount: msg.deliveryCount ?? 1,
+                _deliveryId: msg.deliveryId,
+              } as unknown as ServiceBusReceivedMessage);
+            } catch (error) {
+              await handlers.processError({
+                error: error instanceof Error ? error : new Error(String(error)),
+              });
+            }
+          }, 250);
+          timer.unref();
+          timers.add(timer);
+          return {
+            async close() {
+              active = false;
+              clearInterval(timer);
+              timers.delete(timer);
+            },
+          };
+        },
+        async peekMessages() {
+          const res = await fetch(
+            `${origin}/queues/${encodeURIComponent(queue)}/peek`,
+          );
+          if (!res.ok) throw new Error(`ISOLATED_BUS_PEEK_FAILED_${res.status}`);
+          return (await res.json()) as ServiceBusReceivedMessage[];
+        },
+        async completeMessage(message: ServiceBusReceivedMessage) {
+          const deliveryId = (message as unknown as { _deliveryId?: string })
+            ._deliveryId;
+          if (!deliveryId) return;
+          await fetch(
+            `${origin}/queues/${encodeURIComponent(queue)}/complete/${encodeURIComponent(deliveryId)}`,
+            { method: 'POST' },
+          );
+        },
+        async abandonMessage(message: ServiceBusReceivedMessage) {
+          const deliveryId = (message as unknown as { _deliveryId?: string })
+            ._deliveryId;
+          if (!deliveryId) return;
+          await fetch(
+            `${origin}/queues/${encodeURIComponent(queue)}/abandon/${encodeURIComponent(deliveryId)}`,
+            { method: 'POST' },
+          );
+        },
+        async deadLetterMessage(
+          message: ServiceBusReceivedMessage,
+          options?: {
+            deadLetterReason?: string;
+            deadLetterErrorDescription?: string;
+          },
+        ) {
+          const deliveryId = (message as unknown as { _deliveryId?: string })
+            ._deliveryId;
+          if (!deliveryId) return;
+          await fetch(
+            `${origin}/queues/${encodeURIComponent(queue)}/deadletter/${encodeURIComponent(deliveryId)}`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(options ?? {}),
+            },
+          );
+        },
+      } as never;
+    },
+    async close() {
+      for (const timer of timers) clearInterval(timer);
+      timers.clear();
+    },
+  } as unknown as ServiceBusClient;
+}
+
 export class TaxonomyServiceBusRuntime {
   private client?: ServiceBusClient;
   private receiver?: ServiceBusReceiver;
@@ -186,13 +350,22 @@ export class TaxonomyServiceBusRuntime {
 
   start(): void {
     if (!this.config.enabled || this.client || this.stopped) return;
-    this.client = new ServiceBusClient(
-      this.config.namespace,
-      this.config.clientId
-        ? new ManagedIdentityCredential({ clientId: this.config.clientId })
-        : new DefaultAzureCredential(),
-      { retryOptions: { maxRetries: 0, timeoutInMs: 5000 } },
-    );
+    if (
+      process.env.NODE_ENV === 'test' &&
+      process.env.G6_ISOLATED_SERVICE_BUS_URL
+    ) {
+      this.client = createIsolatedTaxonomyServiceBusClient(
+        process.env.G6_ISOLATED_SERVICE_BUS_URL,
+      );
+    } else {
+      this.client = new ServiceBusClient(
+        this.config.namespace,
+        this.config.clientId
+          ? new ManagedIdentityCredential({ clientId: this.config.clientId })
+          : new DefaultAzureCredential(),
+        { retryOptions: { maxRetries: 0, timeoutInMs: 5000 } },
+      );
+    }
     const receiver = this.config.receiveEnabled
       ? this.client.createReceiver(catalogTaxonomyQueue, {
           receiveMode: 'peekLock',
@@ -262,7 +435,8 @@ export class TaxonomyServiceBusRuntime {
             ready && this.failures === failures && !this.stopped;
           this.available = this.storageAvailable && this.brokerAvailable;
         })
-        .catch(() => {
+        .catch((error) => {
+          console.error(`[taxonomy-sb] cycle error (${phase}):`, error);
           if (phase === 'postgres') this.storageAvailable = false;
           this.markUnavailable();
         })

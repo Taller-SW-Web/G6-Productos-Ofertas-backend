@@ -147,13 +147,14 @@ export class Database implements OnModuleDestroy {
       }
       this.db ??= drizzle(this.pool);
       return await query(this.db);
-    } catch {
+    } catch (err) {
       this.logger.error({
         event: 'taxonomy.database.query_failed',
         service: 'taxonomy-svc',
         component: 'postgres',
         state: 'unavailable',
         reason: 'POSTGRES_QUERY_FAILURE',
+        error: err instanceof Error ? err.message : String(err),
       });
       throw new ServiceUnavailableException(
         'Servicio temporalmente no disponible',

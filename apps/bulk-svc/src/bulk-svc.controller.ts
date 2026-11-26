@@ -80,6 +80,13 @@ export class BulkSvcController {
       });
   }
 
+  @Get('health/ready') async getReady(
+    @Req() request: Request,
+    @Res() response: Response,
+  ) {
+    return this.getReadiness(request, response);
+  }
+
   @Get('health/readiness/reads') async getReadReadiness(
     @Res() response: Response,
   ) {

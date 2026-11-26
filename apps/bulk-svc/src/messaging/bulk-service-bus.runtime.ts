@@ -92,6 +92,7 @@ export class BulkServiceBusRuntime implements OnModuleInit, OnModuleDestroy {
       );
       const pending =
         await this.repository.claimPendingServiceBusDeliveries(20);
+      if (pending.length > 0) console.error(`[bulk-sb-runtime] error=NONE claimed=${pending.length}`);
       for (const item of pending) {
         const leaseToken = item.delivery.leaseToken;
         if (!leaseToken) continue;
@@ -110,7 +111,8 @@ export class BulkServiceBusRuntime implements OnModuleInit, OnModuleDestroy {
             item.messageId,
             leaseToken,
           );
-        } catch {
+        } catch (error) {
+      console.error('[bulk-sb-runtime] flush error:', error);
           await this.repository.releaseServiceBusDelivery(
             item.messageId,
             leaseToken,
@@ -123,7 +125,8 @@ export class BulkServiceBusRuntime implements OnModuleInit, OnModuleDestroy {
       this.connected = true;
       this.failures = 0;
       this.retryAfter = 0;
-    } catch {
+    } catch (error) {
+      console.error('[bulk-sb-runtime] flush error:', error);
       this.connected = false;
       this.failures = Math.min(this.failures + 1, 8);
       this.retryAfter =

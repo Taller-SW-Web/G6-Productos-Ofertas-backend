@@ -153,6 +153,7 @@ export class CatalogServiceBus {
                     'Envelope or routing metadata failed validation.',
                 });
               } else {
+                console.error(`[catalog-service-bus] consume error on ${queue}:`, error instanceof Error ? error.stack ?? error.message : String(error));
                 reportError();
                 await receiver.abandonMessage(received);
               }

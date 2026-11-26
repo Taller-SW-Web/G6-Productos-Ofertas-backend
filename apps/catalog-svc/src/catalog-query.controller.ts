@@ -141,18 +141,31 @@ export class CatalogQueryController {
 
   @Get(':productoId/variantes')
   @RequireCatalogIdentity({
+    demoRead: true,
     restrictedDemo: true,
-    identity: 'user',
+    identity: 'either',
     roles: ['GESTOR_COMERCIAL'],
+    scope: 'catalogo:leer',
+    allowedClients: [
+      'modulo-marketplace',
+      'modulo-chatbot',
+      'modulo-retail',
+    ],
   })
   variants(
     @Param('productoId') productId: string,
     @Query() query: Record<string, unknown>,
     @Headers('x-correlation-id') correlationId?: string,
+    @Req()
+    request?: Request & {
+      catalogPrincipal?: CatalogPrincipal;
+      catalogRestrictedDemo?: boolean;
+    },
   ) {
     this.validateCorrelation(correlationId);
     if (!UUID.test(productId)) throw new BadRequestException();
-    return this.service.variants(productId, query);
+    const commercialOnly = request?.catalogPrincipal?.kind === 'service';
+    return this.service.variants(productId, query, commercialOnly);
   }
 
   @Get(':productoId/variantes/:variantId')

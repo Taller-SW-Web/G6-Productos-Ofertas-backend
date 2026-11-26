@@ -56,7 +56,9 @@ export class BulkExportService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly repository: BulkPersistenceRepository,
-    @Optional() private readonly storage: BulkStorageService | null = null,
+    @Optional()
+    @Inject(BulkStorageService)
+    private readonly storage?: BulkStorageService,
     @Optional()
     @Inject(BULK_EXPORT_SOURCE)
     private readonly source: BulkExportSource | null = null,
@@ -197,6 +199,7 @@ export class BulkExportService implements OnModuleInit, OnModuleDestroy {
     setImmediate(() => {
       void this.process(exportId)
         .catch((error: unknown) => {
+          console.error(`[bulk-export] process error for ${exportId}:`, error);
           if (error instanceof ExportCompletionOutcomeUncertainError) {
             this.logger.warn(
               `La exportación ${exportId} queda sin reintento hasta que venza su lease; el objeto permanece para conciliación.`,
@@ -210,6 +213,7 @@ export class BulkExportService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async process(exportId: string): Promise<void> {
+    console.error(`[bulk-export] error=NONE process(${exportId}) source=${Boolean(this.source)} storage=${Boolean(this.storage)}`);
     let fence = this.failureFences.get(exportId);
     if (
       fence &&

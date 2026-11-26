@@ -287,6 +287,9 @@ export class InventoryCommandService {
           correlation_id: correlationId,
         });
 
+        if (adjustment.status !== 'APPLIED' && adjustment.code === 'SKU_LOCATION_NOT_FOUND') {
+          throw new Error('SKU_LOCATION_NOT_INITIALIZED_YET');
+        }
         if (adjustment.status === 'APPLIED') {
           resultEvent = 'inventory.bulk.stock.adjust.completed';
           resultData = {
@@ -313,6 +316,9 @@ export class InventoryCommandService {
           };
         }
       } catch (error) {
+        if (error instanceof Error && error.message === 'SKU_LOCATION_NOT_INITIALIZED_YET') {
+          throw error;
+        }
         resultEvent = 'inventory.bulk.stock.adjust.rejected';
         resultData = {
           operation_id: dataOperationId,

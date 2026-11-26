@@ -67,7 +67,8 @@ export class PricingServiceBusRelay {
         abortSignal: AbortSignal.timeout(10_000),
       });
       confirmed = true;
-    } catch {
+    } catch (err) {
+      console.error('[pricing-publishOne] error for dest=' + claim.destination + ':', err instanceof Error ? err.message : String(err));
       // A timeout can occur after the broker accepted the batch; retain its ID.
     }
     const updated = await this.store.finish(claim, confirmed);
@@ -182,7 +183,8 @@ export class PricingServiceBusRuntime
         const result = await relay.publishOne();
         this.available = result === 'empty' || result === 'sent';
       })()
-        .catch(() => {
+        .catch((err) => {
+          console.error('[pricing-service-bus-relay] tick error:', err instanceof Error ? err.message : String(err));
           this.available = false;
         })
         .finally(() => {

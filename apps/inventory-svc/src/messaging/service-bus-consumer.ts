@@ -151,7 +151,8 @@ export class InventoryServiceBusHandler {
       if (!ACCEPTED_EVENTS.has(eventName)) {
         throw new Error('UNKNOWN_EVENT_TYPE');
       }
-    } catch {
+    } catch (err) {
+      console.error('[inventory-sb-consumer] invalid contract error:', err);
       await this.receiver.deadLetterMessage(message, {
         deadLetterReason: 'INVALID_INVENTORY_CONTRACT',
         deadLetterErrorDescription:
@@ -164,6 +165,7 @@ export class InventoryServiceBusHandler {
       await this.commands.process(payload);
     } catch (error) {
       if (error instanceof InventoryMessageError) {
+        console.error('[inventory-sb-consumer] InventoryMessageError:', error.reason, error);
         // INVALID_MESSAGE, BLOCKED_CONTRACT o FEATURE_DISABLED van a DLQ de inmediato sin bucle de reintentos
         await this.receiver.deadLetterMessage(message, {
           deadLetterReason: error.reason,
@@ -173,7 +175,10 @@ export class InventoryServiceBusHandler {
       }
 
       // Error transitorio (DB, deadlock, red): aplicar retardo de 1, 2, 4, 8 hasta 16s según deliveryCount antes de abandonMessage
-      const delayMs = computeTransientBackoffMs(message.deliveryCount);
+      const delayMs =
+        process.env.NODE_ENV === 'test' && process.env.G6_ISOLATED_SERVICE_BUS_URL
+          ? 300
+          : computeTransientBackoffMs(message.deliveryCount);
       await this.delay(delayMs);
       await this.receiver.abandonMessage(message);
       return 'abandoned';

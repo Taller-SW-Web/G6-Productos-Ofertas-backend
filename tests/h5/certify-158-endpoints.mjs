@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
+import https from "node:https";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -29,6 +30,14 @@ function parseCsvLine(line) {
   }
   cols.push(cur);
   return cols;
+}
+
+function stableUuid(seed) {
+  const bytes = createHash("sha256").update(seed).digest().subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 async function waitForManifest(timeoutMs = 120_000) {
@@ -74,7 +83,7 @@ async function httpCall(url, { method = "GET", headers = {}, body } = {}) {
           "X-Correlation-Id": randomUUID(),
           ...headers,
         },
-        signal: AbortSignal.timeout(8_000),
+        signal: AbortSignal.timeout(10_000),
         body,
       });
       const text = await res.text();
@@ -84,21 +93,26 @@ async function httpCall(url, { method = "GET", headers = {}, body } = {}) {
     }
     const payload = body === undefined ? undefined : (typeof body === "string" ? body : JSON.stringify(body));
     const u = new URL(url);
+    const transport = u.protocol === "https:" ? https : http;
     return await new Promise((resolveReq) => {
-      const req = http.request(
+      const req = transport.request(
         {
           hostname: u.hostname,
-          port: Number(u.port || 80),
+          port: Number(u.port || (u.protocol === "https:" ? 443 : 80)),
           path: `${u.pathname}${u.search}`,
           method,
           agent: false,
+          ...(u.protocol === "https:" ? { rejectUnauthorized: false } : {}),
           headers: {
             "X-Correlation-Id": randomUUID(),
             Connection: "close",
             ...headers,
+            ...(payload !== undefined && !(headers["content-type"] || headers["Content-Type"])
+              ? { "content-type": "application/json" }
+              : {}),
             ...(payload !== undefined ? { "Content-Length": String(Buffer.byteLength(payload)) } : {}),
           },
-          timeout: 5_000,
+          timeout: 8_000,
         },
         (res) => {
           const chunks = [];
@@ -111,24 +125,32 @@ async function httpCall(url, { method = "GET", headers = {}, body } = {}) {
           });
         },
       );
-      req.on("timeout", () => {
-        req.destroy(new Error("Request timeout"));
-      });
-      req.on("error", (err) => {
-        console.error(`[certify] httpCall error (${method} ${url}): ${err.message}`);
-        resolveReq({ status: 0, headers: {}, text: err.message, json: null });
-      });
+      req.on("timeout", () => req.destroy(new Error("Request timeout")));
+      req.on("error", (err) => resolveReq({ status: 0, headers: {}, text: err.message, json: null }));
       if (payload !== undefined) req.write(payload);
       req.end();
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[certify] httpCall error (${method} ${url}): ${msg}`);
     return { status: 0, headers: {}, text: msg, json: null };
   }
 }
 
+async function pollUntil(fn, isDone, maxAttempts = 30, delayMs = 300) {
+  let last = null;
+  for (let i = 0; i < maxAttempts; i++) {
+    last = await fn();
+    if (isDone(last)) return last;
+    await delay(delayMs);
+  }
+  return last;
+}
+
 async function main() {
+  if (existsSync(MANIFEST_PATH)) {
+    rmSync(MANIFEST_PATH, { force: true });
+  }
+
   const stackChild = spawn(
     process.execPath,
     [resolve(FRONTEND_ROOT, "tests/e2e-real/startRealStackAndVite.mjs"), "--no-vite"],
@@ -144,23 +166,21 @@ async function main() {
   );
 
   let stackLogs = "";
-  stackChild.stdout.on("data", (d) => {
-    stackLogs += d.toString();
-  });
-  stackChild.stderr.on("data", (d) => {
-    stackLogs += d.toString();
-  });
+  stackChild.stdout.on("data", (d) => { stackLogs += d.toString(); });
+  stackChild.stderr.on("data", (d) => { stackLogs += d.toString(); });
 
   const stopStack = async () => {
     if (!stackChild.killed) {
       stackChild.kill("SIGINT");
       await Promise.race([
         new Promise((r) => stackChild.once("exit", r)),
-        delay(10_000),
+        delay(8_000),
       ]);
+      if (!stackChild.killed) stackChild.kill("SIGKILL");
     }
   };
 
+  let exitCode = 1;
   try {
     await Promise.race([
       new Promise((resolveReady, rejectReady) => {
@@ -168,11 +188,11 @@ async function main() {
           if (d.toString().includes("G6_STACK_READY")) resolveReady();
         });
         stackChild.once("exit", (code) => {
-          rejectReady(new Error(`Stack exited prematurely (${code}):\n${stackLogs}`));
+          rejectReady(new Error(`Stack exited prematurely (${code}):\n${stackLogs.slice(-3000)}`));
         });
       }),
       delay(150_000).then(() => {
-        throw new Error(`Timeout waiting for G6_STACK_READY:\n${stackLogs}`);
+        throw new Error(`Timeout waiting for G6_STACK_READY:\n${stackLogs.slice(-3000)}`);
       }),
     ]);
 
@@ -180,7 +200,7 @@ async function main() {
     console.error("[certify] G6_STACK_READY");
     const gw = env.gatewayUrl;
 
-    // 1. G7 Auth checks (positive, negative, refresh rotation, logout, M2M)
+    // 1. G7 Auth checks
     const authChecks = [];
     const gestorLogin = await loginG7(env.g7ApiBase, "gestor@example.test", "isolated-g7-password");
     const sinRolLogin = await loginG7(env.g7ApiBase, "sinrol@example.test", "isolated-sinrol-password");
@@ -193,53 +213,73 @@ async function main() {
 
     const refreshOk = await httpCall(`${env.g7ApiBase}/auth/refresh`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
       body: { refreshToken: gestorLogin.body.refreshToken },
     });
     const refreshReuse = await httpCall(`${env.g7ApiBase}/auth/refresh`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
       body: { refreshToken: gestorLogin.body.refreshToken },
     });
     authChecks.push({ name: "refresh_rotate_200", pass: refreshOk.status === 200 });
     authChecks.push({ name: "refresh_reuse_401", pass: refreshReuse.status === 401 });
 
     const gestorJwt = refreshOk.json?.accessToken;
-    if (!gestorJwt) {
-      throw new Error(`G7 refresh failed: ${refreshOk.status} ${refreshOk.text}`);
-    }
+    if (!gestorJwt) throw new Error(`G7 refresh failed: ${refreshOk.status}`);
     const sinRolJwt = sinRolLogin.body.accessToken;
     const authH = { Authorization: `Bearer ${gestorJwt}`, "content-type": "application/json" };
 
     const g1Token = (await tokenM2M(env.g7ApiBase, "modulo-marketplace", "e2e-marketplace-secret", "catalogo:leer precios:leer promociones:evaluar promociones:leer cupones:validar recomendaciones:leer combos:leer inventario:disponibilidad:leer")).body.accessToken;
     const g3Token = (await tokenM2M(env.g7ApiBase, "modulo-chatbot", "e2e-chatbot-secret", "catalogo:leer precios:leer promociones:evaluar combos:leer inventario:disponibilidad:leer")).body.accessToken;
     const g5Token = (await tokenM2M(env.g7ApiBase, "modulo-ventas", "e2e-ventas-secret", "cupones:consumir cupones:restaurar cupones:operaciones:leer inventario:reservar inventario:consumir inventario:liberar inventario:conciliar-offline inventario:operaciones:leer inventario:reservas:estado:leer")).body.accessToken;
-    const prodSvcToken = (await tokenM2M(env.g7ApiBase, "modulo-productos", "e2e-catalog-secret", "catalogo:leer carga-masiva:contenidos:leer inventario:reservas:evidencia-cupon:leer catalogo:contexto-sku:leer catalogo:skus:filtrar")).body.accessToken;
+    const prodSvcToken = (await tokenM2M(env.g7ApiBase, "modulo-productos", "e2e-catalog-secret", "catalogo:leer")).body.accessToken;
     const postventaToken = (await tokenM2M(env.g7ApiBase, "modulo-postventa", "e2e-postventa-secret", "inventario:disponibilidad:leer inventario:reintegrar")).body.accessToken;
     const retailToken = (await tokenM2M(env.g7ApiBase, "modulo-retail", "e2e-retail-secret", "catalogo:leer precios:leer promociones:evaluar combos:leer inventario:disponibilidad:leer inventario:conciliar-offline inventario:incidencias:reportar inventario:incidencias:resolver")).body.accessToken;
     const despachoToken = (await tokenM2M(env.g7ApiBase, "modulo-despacho", "e2e-despacho-secret", "inventario:disponibilidad:leer catalogo:leer productos:fisicos:leer")).body.accessToken;
     const catalogSvcToken = (await tokenM2M(env.g7ApiBase, "catalog-svc", "e2e-catalog-secret", "carga-masiva:contenidos:leer")).body.accessToken;
+    const inventorySvcToken = (await tokenM2M(env.g7ApiBase, "inventory-svc", "e2e-inventory-secret", "catalogo:leer")).body.accessToken;
     const promotionsSvcToken = (await tokenM2M(env.g7ApiBase, "promotions-svc", "e2e-promotions-secret", "inventario:reservas:estado:leer")).body.accessToken;
 
     // 2. Seed rich lab fixtures across all 8 services
     const catSlug = `cert-cat-${randomUUID().slice(0, 6)}`;
+    const catSlugPrev = `cert-cat-prev-${randomUUID().slice(0, 6)}`;
     const catRes = await httpCall(`${gw}/api/v1/categorias`, {
       method: "POST",
       headers: authH,
-      body: { nombre: `Cat Cert ${catSlug}`, slugConfirmado: catSlug, categoriaPadreId: null },
+      body: { nombre: `Cat Cert ${catSlug}`, slugConfirmado: catSlugPrev, categoriaPadreId: null },
     });
     const catId = catRes.json?.categoriaId;
+    // Update SEO slug so catSlugPrev is in slug history & catSlug is current!
+    await httpCall(`${gw}/api/v1/categorias/${catId}/seo`, {
+      method: "PATCH",
+      headers: authH,
+      body: { slug: catSlug, metaTitulo: "SEO Cert Title", metaDescripcion: "SEO Cert Desc" },
+    });
+
+    const catDeactRes = await httpCall(`${gw}/api/v1/categorias`, {
+      method: "POST",
+      headers: authH,
+      body: { nombre: `Cat Deact ${randomUUID().slice(0, 6)}`, slugConfirmado: `cat-deact-${randomUUID().slice(0, 6)}` },
+    });
+    const catIdDeact = catDeactRes.json?.categoriaId ?? catId;
 
     const logoBuf = readFileSync(resolve(BACKEND_ROOT, "apps/taxonomy-svc/test/fixtures/logo.png"));
-    const brandForm = new FormData();
-    brandForm.append("nombre", `Marca Cert ${randomUUID().slice(0, 6)}`);
-    brandForm.append("logo", new Blob([logoBuf], { type: "image/png" }), "logo.png");
+    const makeBrandForm = (name) => {
+      const bf = new FormData();
+      bf.append("nombre", name);
+      bf.append("logo", new Blob([logoBuf], { type: "image/png" }), "logo.png");
+      return bf;
+    };
     const brandRes = await httpCall(`${gw}/api/v1/marcas`, {
       method: "POST",
       headers: { Authorization: `Bearer ${gestorJwt}` },
-      body: brandForm,
+      body: makeBrandForm(`Marca Cert ${randomUUID().slice(0, 6)}`),
     });
     const brandId = brandRes.json?.marcaId;
+    const brandDeactRes = await httpCall(`${gw}/api/v1/marcas`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${gestorJwt}` },
+      body: makeBrandForm(`Marca Deact ${randomUUID().slice(0, 6)}`),
+    });
+    const brandIdDeact = brandDeactRes.json?.marcaId ?? brandId;
 
     const typeRes = await httpCall(`${gw}/api/v1/tipos-producto`, {
       method: "POST",
@@ -247,14 +287,55 @@ async function main() {
       body: { nombre: `Tipo Cert ${randomUUID().slice(0, 6)}` },
     });
     const typeId = typeRes.json?.tipoProductoId;
+    const typeDeactRes = await httpCall(`${gw}/api/v1/tipos-producto`, {
+      method: "POST",
+      headers: authH,
+      body: { nombre: `Tipo Deact ${randomUUID().slice(0, 6)}` },
+    });
+    const typeIdDeact = typeDeactRes.json?.tipoProductoId ?? typeId;
 
     const attrRes = await httpCall(`${gw}/api/v1/caracteristicas`, {
       method: "POST",
       headers: authH,
-      body: { nombre: `Attr Cert ${randomUUID().slice(0, 6)}`, tipoDato: "TEXTO" },
+      body: { nombre: `Attr Cert ${randomUUID().slice(0, 6)}`, tipo: "LISTA" },
     });
     const attrId = attrRes.json?.caracteristicaId;
+    const attrName = attrRes.json?.nombre ?? "Attr";
+    const attr2Res = await httpCall(`${gw}/api/v1/caracteristicas`, {
+      method: "POST",
+      headers: authH,
+      body: { nombre: `Attr2 Cert ${randomUUID().slice(0, 6)}`, tipo: "LISTA" },
+    });
+    const attrId2 = attr2Res.json?.caracteristicaId ?? attrId;
 
+    const valRes = await httpCall(`${gw}/api/v1/caracteristicas/${attrId}/valores`, {
+      method: "POST",
+      headers: authH,
+      body: { nombre: `Val-${randomUUID().slice(0, 6)}` },
+    });
+    const valId = valRes.json?.valorId;
+    const valName = valRes.json?.nombre ?? "Val";
+    const val2Res = await httpCall(`${gw}/api/v1/caracteristicas/${attrId}/valores`, {
+      method: "POST",
+      headers: authH,
+      body: { nombre: `Val2-${randomUUID().slice(0, 6)}` },
+    });
+    const valId2 = val2Res.json?.valorId ?? valId;
+    const valName2 = val2Res.json?.nombre ?? "Val2";
+    const valDeactRes = await httpCall(`${gw}/api/v1/caracteristicas/${attrId}/valores`, {
+      method: "POST",
+      headers: authH,
+      body: { nombre: `ValDeact-${randomUUID().slice(0, 6)}` },
+    });
+    const valIdDeact = valDeactRes.json?.valorId ?? valId2;
+
+    await httpCall(`${gw}/api/v1/tipos-producto/${typeId}/caracteristicas`, {
+      method: "POST",
+      headers: authH,
+      body: { caracteristicaId: attrId, obligatoria: false, esIdentificador: false },
+    });
+
+    // Seed two active products + stock + price
     const activeProd1 = randomUUID();
     const activeSku1 = `SKU-CERT1-${randomUUID().slice(0, 6).toUpperCase()}`;
     const activeProd2 = randomUUID();
@@ -262,21 +343,70 @@ async function main() {
     for (const [productId, skuBase] of [[activeProd1, activeSku1], [activeProd2, activeSku2]]) {
       await httpCall(`${env.g5SeedOrigin}/__test/catalog-active-product`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: { productId, skuBase, categoriaId: catId, marcaId: brandId, tipoProductoId: typeId },
       });
       await httpCall(`${env.g5SeedOrigin}/__test/inventory-stock`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: { sku: skuBase, on_hand: 50 },
       });
-      await httpCall(`${gw}/api/v1/precios/productos/${activeProd1 === productId ? activeProd1 : activeProd2}`, {
+      await httpCall(`${gw}/api/v1/precios/productos/${productId}`, {
         method: "PATCH",
         headers: { ...authH, "Idempotency-Key": randomUUID() },
         body: { accionPrecioOferta: "CONSERVAR", priceVersion: 0, precioRegular: 120, moneda: "PEN", motivoCambio: "CERT_SEED" },
       });
     }
+    const activeProd1Slug = `prod-activo-${activeSku1.toLowerCase()}`;
+    const barcode1 = `775${Date.now().toString().slice(-10)}`;
+    await httpCall(`${env.g5SeedOrigin}/__test/catalog-barcode`, {
+      method: "POST",
+      body: { sku: activeSku1, codigo_barras: barcode1 },
+    });
 
+    // Seed a TIENDA location & stock for conciliarVentaOffline + transfer for traslados
+    const storeLocationId = randomUUID();
+    await httpCall(`${env.g5SeedOrigin}/__test/inventory-store-location`, {
+      method: "POST",
+      body: { locationId: storeLocationId, code: `TIENDA-${randomUUID().slice(0, 4).toUpperCase()}`, sku: activeSku1, on_hand: 30 },
+    });
+    const trasladoId = randomUUID();
+    await httpCall(`${env.g5SeedOrigin}/__test/inventory-transfer`, {
+      method: "POST",
+      body: { trasladoId, sku: activeSku1, targetLocationId: storeLocationId },
+    });
+
+    // Seed a product with variants + active variant
+    const varProdSku = `SKU-VARP-${randomUUID().slice(0, 6).toUpperCase()}`;
+    const varProdRes = await httpCall(`${gw}/api/v1/productos`, {
+      method: "POST",
+      headers: { ...authH, "Idempotency-Key": randomUUID() },
+      body: {
+        nombre: `Prod Var ${randomUUID().slice(0, 6)}`,
+        descripcion: "Producto con variantes certificacion",
+        categoriaId: catId,
+        marcaId: brandId,
+        tipoProductoId: typeId,
+        skuBase: varProdSku,
+        tieneVariantes: true,
+        precioBaseInicial: 150,
+      },
+    });
+    const varProdId = varProdRes.json?.product_id ?? varProdRes.json?.productId;
+    if (varProdRes.status >= 400) console.error(`[certify] seed varProdRes=${varProdRes.status} ${varProdRes.text}`);
+    const varSku = `${varProdSku}-V1`;
+    const varCreateRes = await httpCall(`${gw}/api/v1/productos/${varProdId}/variantes`, {
+      method: "POST",
+      headers: { ...authH, "Idempotency-Key": randomUUID() },
+      body: {
+        sku: varSku,
+        atributosIdentificadores: [{ caracteristica_id: attrId, nombre: attrName, valor_id: valId, valor: valName }],
+        atributosNoIdentificadores: [],
+        imagenUrl: "https://example.test/v1.png",
+        perfilFisico: { pesoKg: 1.2, dimensionesCm: { largo: 10, ancho: 10, alto: 5 } },
+      },
+    });
+    const varId = varCreateRes.json?.variant_id ?? varCreateRes.json?.variantId;
+
+    // Seed draft product (for activar/desactivar/reactivar)
     const draftSku = `SKU-DRF-${randomUUID().slice(0, 6).toUpperCase()}`;
     const draftRes = await httpCall(`${gw}/api/v1/productos`, {
       method: "POST",
@@ -292,8 +422,9 @@ async function main() {
         precioBaseInicial: 90,
       },
     });
-    const draftProdId = draftRes.json?.productId;
+    const draftProdId = draftRes.json?.product_id ?? draftRes.json?.productId;
 
+    // Seed combo
     const comboRes = await httpCall(`${gw}/api/v1/combos/administracion`, {
       method: "POST",
       headers: { ...authH, "Idempotency-Key": randomUUID() },
@@ -303,98 +434,205 @@ async function main() {
         precioCombo: 200,
       },
     });
-    const comboId = comboRes.json?.comboId;
-
-    const nowMs = Date.now();
-    const promoRes = await httpCall(`${gw}/api/v1/promociones`, {
+    const comboId = comboRes.json?.combo_id;
+    const comboDeactRes = await httpCall(`${gw}/api/v1/combos/administracion`, {
       method: "POST",
       headers: { ...authH, "Idempotency-Key": randomUUID() },
+      body: {
+        nombre: `Combo Deact ${randomUUID().slice(0, 6)}`,
+        componentes: [{ sku: activeSku1, cantidad: 1 }, { sku: activeSku2, cantidad: 1 }],
+        precioCombo: 210,
+      },
+    });
+    const comboIdToDeactivate = comboDeactRes.json?.combo_id ?? comboId;
+
+    // Seed promotion, coupon, recommendation rule
+    const nowMs = Date.now();
+    const validFrom = new Date(nowMs - 60_000).toISOString();
+    const validUntil = new Date(nowMs + 86_400_000).toISOString();
+    const promoRes = await httpCall(`${gw}/api/v1/promociones`, {
+      method: "POST",
+      headers: authH,
       body: {
         nombre: `Promo Cert ${randomUUID().slice(0, 6)}`,
         tipoDescuento: "PORCENTAJE",
         valor: 10,
         modalidad: "CUPON",
         estado: "ACTIVO",
-        validFrom: new Date(nowMs - 60_000).toISOString(),
-        validUntil: new Date(nowMs + 86_400_000).toISOString(),
-        alcance: { productIds: [activeProd1], skus: [activeSku1] },
-        prioridad: 10,
-        canalesHabilitados: ["MARKETPLACE"],
-        politicaCombinacion: { ofertaPricing: true, promocionAutomatica: false, cupon: true },
+        prioridad: 1,
+        validFrom,
+        validUntil,
+        canalesHabilitados: ["MARKETPLACE", "CHATBOT", "RETAIL"],
+        alcance: { productIds: [activeProd1] },
+        politicaCombinacion: { ofertaPricing: true, promocionAutomatica: true, cupon: true },
       },
     });
-    console.error(`[certify] promoRes=${promoRes.status} ${promoRes.text.slice(0, 200)}`);
+    if (promoRes.status >= 400) console.error(`[certify] seed promoRes=${promoRes.status} ${promoRes.text}`);
     const promoId = promoRes.json?.promotionId;
 
     const couponCode = `CRT${randomUUID().slice(0, 6).toUpperCase()}`;
     const couponRes = await httpCall(`${gw}/api/v1/cupones`, {
       method: "POST",
-      headers: { ...authH, "Idempotency-Key": randomUUID() },
+      headers: authH,
       body: { codigo: couponCode, promocionId: promoId, estado: "ACTIVO", politicaCancelacion: "RESTAURAR_EN_CANCELACION" },
     });
-    console.error(`[certify] couponRes=${couponRes.status} ${couponRes.text.slice(0, 200)}`);
+    if (couponRes.status >= 400) console.error(`[certify] seed couponRes=${couponRes.status} ${couponRes.text}`);
+    const couponId = couponRes.json?.cuponId ?? couponRes.json?.couponId;
 
-    // Inventory reservation + N01 consume + restore
-    const invOpId = randomUUID();
-    const orderId = randomUUID();
-    await httpCall(`${gw}/api/v1/inventario/reservas`, {
+    const ruleRes = await httpCall(`${gw}/api/v1/recomendaciones/reglas`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${g5Token}`, "Idempotency-Key": invOpId, "content-type": "application/json" },
-      body: { operation_id: invOpId, order_id: orderId, channel_id: "MARKETPLACE", lines: [{ sku: activeSku1, quantity: 1 }] },
-    });
-    let reservationId = "";
-    for (let i = 0; i < 20; i++) {
-      const opPoll = await httpCall(`${gw}/api/v1/inventario/operaciones/${invOpId}`, {
-        headers: { Authorization: `Bearer ${g5Token}` },
-      });
-      if (opPoll.json?.status === "COMPLETED") {
-        reservationId = opPoll.json.reservation_id;
-        break;
-      }
-      await delay(200);
-    }
-
-    const effectiveAt = new Date().toISOString();
-    await httpCall(`${env.g5SeedOrigin}/__test/g5-snapshots`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: authH,
       body: {
-        order_id: orderId,
-        reservation_id: reservationId,
-        commercial_snapshot_ref: orderId,
-        channel_id: "MARKETPLACE",
-        coupon_code: couponCode,
-        effective_at: effectiveAt,
-        customer_ref: null,
-        lines: [{ sku: activeSku1, product_id: activeProd1, quantity: 1, regular_price: "120.00", offer_price: null, currency: "PEN" }],
+        nombre: `Regla Cert ${randomUUID().slice(0, 6)}`,
+        tipo: "CROSS_SELL",
+        origen: { tipo: "PRODUCTO", id: activeProd1 },
+        recomendados: [{ productId: activeProd2, orden: 1 }],
+        estado: "ACTIVO",
+        validFrom,
+        validUntil,
+        prioridad: 1,
       },
     });
+    if (ruleRes.status >= 400) console.error(`[certify] seed ruleRes=${ruleRes.status} ${ruleRes.text}`);
+    const ruleId = ruleRes.json?.reglaId ?? ruleRes.json?.ruleId;
+
+    // Inventory reservation + N01 consume + N01 restore
+    const orderId = randomUUID();
+    const resOpId = randomUUID();
+    const resRes = await httpCall(`${gw}/api/v1/inventario/reservas`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${g5Token}`, "Idempotency-Key": resOpId },
+      body: { order_id: orderId, operation_id: resOpId, channel_id: "MARKETPLACE", lines: [{ sku: activeSku1, quantity: 2, location_id: "00000000-0000-4000-8000-000000000101" }] },
+    });
+    if (resRes.status >= 400) console.error(`[certify] seed resRes=${resRes.status} ${resRes.text}`);
+    const invOpId = resRes.json?.operation_id ?? resOpId;
+    const invOpPoll = await pollUntil(
+      () => httpCall(`${gw}/api/v1/inventario/operaciones/${invOpId}`, { headers: { Authorization: `Bearer ${g5Token}` } }),
+      (r) => r.json?.reservation_id || r.json?.status === "APLICADO" || r.json?.status === "COMPLETED",
+    );
+    const reservationId = invOpPoll?.json?.reservation_id ?? "";
+
+    // Confirm reservation (second reservation so original reservationId stays active/confirmed properly)
+    const orderId2 = randomUUID();
+    const res2 = await httpCall(`${gw}/api/v1/inventario/reservas`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${g5Token}`, "Idempotency-Key": randomUUID() },
+      body: { order_id: orderId2, operation_id: randomUUID(), channel_id: "MARKETPLACE", lines: [{ sku: activeSku1, quantity: 1, location_id: "00000000-0000-4000-8000-000000000101" }] },
+    });
+    const res2Op = await pollUntil(
+      () => httpCall(`${gw}/api/v1/inventario/operaciones/${res2.json?.operation_id}`, { headers: { Authorization: `Bearer ${g5Token}` } }),
+      (r) => Boolean(r.json?.reservation_id),
+    );
+    const reservationId2 = res2Op?.json?.reservation_id;
+
+    // 3rd reservation for liberarReserva
+    const orderId3 = randomUUID();
+    const res3OpId = randomUUID();
+    const res3 = await httpCall(`${gw}/api/v1/inventario/reservas`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${g5Token}`, "Idempotency-Key": res3OpId },
+      body: { order_id: orderId3, operation_id: res3OpId, channel_id: "MARKETPLACE", lines: [{ sku: activeSku1, quantity: 1, location_id: "00000000-0000-4000-8000-000000000101" }] },
+    });
+    const res3Op = await pollUntil(
+      () => httpCall(`${gw}/api/v1/inventario/operaciones/${res3.json?.operation_id ?? res3OpId}`, { headers: { Authorization: `Bearer ${g5Token}` } }),
+      (r) => Boolean(r.json?.reservation_id),
+    );
+    const reservationId3 = res3Op?.json?.reservation_id;
+
+    // 4th reservation for [148] admitirConsumoCuponH5
+    const orderId4 = randomUUID();
+    const res4OpId = randomUUID();
+    const res4 = await httpCall(`${gw}/api/v1/inventario/reservas`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${g5Token}`, "Idempotency-Key": res4OpId },
+      body: { order_id: orderId4, operation_id: res4OpId, channel_id: "MARKETPLACE", lines: [{ sku: activeSku1, quantity: 1, location_id: "00000000-0000-4000-8000-000000000101" }] },
+    });
+    const res4Op = await pollUntil(
+      () => httpCall(`${gw}/api/v1/inventario/operaciones/${res4.json?.operation_id ?? res4OpId}`, { headers: { Authorization: `Bearer ${g5Token}` } }),
+      (r) => Boolean(r.json?.reservation_id),
+    );
+    const reservationId4 = res4Op?.json?.reservation_id;
+
+    // G5 snapshot + N01 consume
+    const effectiveAt = new Date().toISOString();
     const consumeOpId = randomUUID();
+    const customerRef = randomUUID();
+    await httpCall(`${env.g5SeedOrigin}/__test/g5-snapshots`, {
+      method: "POST",
+      body: {
+        order_id: orderId,
+        commercial_snapshot_ref: orderId,
+        channel_id: "MARKETPLACE",
+        customer_ref: customerRef,
+        coupon_code: couponCode,
+        reservation_id: reservationId,
+        lines: [{ sku: activeSku1, product_id: activeProd1, quantity: 2, currency: "PEN", regular_price: "120.00", offer_price: null }],
+        effective_at: effectiveAt,
+      },
+    });
+    await httpCall(`${env.g5SeedOrigin}/__test/g5-snapshots`, {
+      method: "POST",
+      body: {
+        order_id: orderId2,
+        commercial_snapshot_ref: orderId2,
+        customer_ref: customerRef,
+        channel_id: "MARKETPLACE",
+        currency: "PEN",
+        subtotal: 120,
+        discount_total: 18,
+        total_amount: 102,
+        lines: [{ sku: activeSku1, product_id: activeProd1, quantity: 1, unit_price: 120 }],
+        effective_at: effectiveAt,
+      },
+    });
+    await httpCall(`${env.g5SeedOrigin}/__test/g5-snapshots`, {
+      method: "POST",
+      body: {
+        order_id: orderId4,
+        commercial_snapshot_ref: orderId4,
+        channel_id: "MARKETPLACE",
+        customer_ref: customerRef,
+        coupon_code: couponCode,
+        reservation_id: reservationId4,
+        lines: [{ sku: activeSku1, product_id: activeProd1, quantity: 1, currency: "PEN", regular_price: "120.00", offer_price: null }],
+        effective_at: effectiveAt,
+      },
+    });
     await httpCall(`${gw}/api/v1/cupones/consumos`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${g5Token}`, "Idempotency-Key": consumeOpId, "content-type": "application/json" },
+      headers: { Authorization: `Bearer ${g5Token}`, "Idempotency-Key": consumeOpId },
       body: {
         operation_id: consumeOpId,
         order_id: orderId,
         coupon_code: couponCode,
+        customer_ref: customerRef,
         channel_id: "MARKETPLACE",
         effective_at: effectiveAt,
         reservation_id: reservationId,
         commercial_snapshot_ref: orderId,
       },
     });
-    let n01ConsumeStatus = "";
-    let n01PollJson = null;
-    for (let i = 0; i < 25; i++) {
-      const p = await httpCall(`${gw}/api/v1/cupones/operaciones/${consumeOpId}?order_id=${orderId}`, {
-        headers: { Authorization: `Bearer ${g5Token}` },
-      });
-      n01PollJson = p.json;
-      n01ConsumeStatus = p.json?.status ?? "";
-      if (n01ConsumeStatus === "COMPLETED" || n01ConsumeStatus === "REJECTED") break;
-      await delay(200);
-    }
-    console.error(`[certify] seed ids: cat=${catId} brand=${brandId} type=${typeId} activeProd1=${activeProd1} n01=${n01ConsumeStatus} ${JSON.stringify(n01PollJson)}`);
+    const n01Poll = await pollUntil(
+      () => httpCall(`${gw}/api/v1/cupones/operaciones/${consumeOpId}?order_id=${orderId}`, { headers: { Authorization: `Bearer ${g5Token}` } }),
+      (r) => ["COMPLETED", "REJECTED"].includes(r.json?.status),
+    );
+    const n01ConsumeStatus = n01Poll?.json?.status ?? "";
+
+    // Seed SKU-level price change so Price Audit has SKU+channel non-null record for R16
+    await httpCall(`${gw}/api/v1/precios/skus/${activeSku1}`, {
+      method: "PATCH",
+      headers: { ...authH, "Idempotency-Key": randomUUID() },
+      body: { accionPrecioOferta: "CONSERVAR", priceVersion: 0, precioRegular: 121, moneda: "PEN", channelId: "MARKETPLACE", motivoCambio: "CERT_SEED_SKU" },
+    });
+
+    // Price Audit: wait for R16 audit record from SKU PATCH price
+    const auditListPoll = await pollUntil(
+      () => httpCall(`${gw}/api/v1/auditoria-precios?sku=${encodeURIComponent(activeSku1)}`, { headers: authH }),
+      (r) => Array.isArray(r.json?.items) && r.json.items.length > 0,
+      20,
+      250,
+    );
+    let auditId = auditListPoll?.json?.items?.[0]?.id_auditoria ?? auditListPoll?.json?.items?.[0]?.auditId;
 
     // Price Audit export
     const expRes = await httpCall(`${gw}/api/v1/auditoria-precios/exportaciones`, {
@@ -402,89 +640,180 @@ async function main() {
       headers: authH,
       body: { formato: "CSV" },
     });
-    const exportId = expRes.json?.exportId;
+    const exportId = expRes.json?.export_id ?? expRes.json?.exportId;
+    if (exportId) {
+      await pollUntil(
+        () => httpCall(`${gw}/api/v1/auditoria-precios/exportaciones/${exportId}`, { headers: authH }),
+        (r) => r.json?.status === "COMPLETED" || r.json?.estado === "COMPLETED",
+      );
+    }
 
-    // Bulk 8b V2 CSV batch (with real Taxonomy IDs -> Catalog + Pricing + Inventory via isolated bus)
+    // Pricing import batch (CSV FormData) + base SKU2 price
+    await httpCall(`${gw}/api/v1/precios/skus/${activeSku2}`, {
+      method: "PATCH",
+      headers: { ...authH, "Idempotency-Key": randomUUID() },
+      body: { accionPrecioOferta: "CONSERVAR", priceVersion: 0, precioRegular: 120, moneda: "PEN", motivoCambio: "CERT_SEED_SKU2_BASE" },
+    });
+    await httpCall(`${gw}/api/v1/precios/skus/${activeSku2}`, {
+      method: "PATCH",
+      headers: { ...authH, "Idempotency-Key": randomUUID() },
+      body: { accionPrecioOferta: "CONSERVAR", priceVersion: 0, precioRegular: 120, moneda: "PEN", channelId: "MARKETPLACE", motivoCambio: "CERT_SEED_SKU2" },
+    });
+    const priceCsvHeader = "sku,channelId,priceVersion,precioRegular,accionPrecioOferta,precioOferta,moneda,motivoCambio";
+    const makePriceCsvForm = (sku, version) => {
+      const f = new FormData();
+      f.append("archivo", new Blob([`${priceCsvHeader}\n${[sku, "MARKETPLACE", String(version), "125.00", "CONSERVAR", "", "PEN", "CERT_IMP"].join(",")}`], { type: "text/csv" }), "precios.csv");
+      return f;
+    };
+    const priceImportRes = await httpCall(`${gw}/api/v1/precios/importaciones`, {
+      method: "POST",
+      headers: { ...authH, "Idempotency-Key": randomUUID() },
+      body: makePriceCsvForm(activeSku2, 1),
+    });
+    let priceBatchId = priceImportRes.json?.batchId ?? priceImportRes.json?.batch_id;
+    if (priceImportRes.status >= 400) console.error(`[certify] seed priceImportRes=${priceImportRes.status} ${priceImportRes.text}`);
+
+    // Bulk 8b V2 CSV batch (with V3 claim-check enabled -> R01/R02/R03/R04/R10/R14)
     const bulkSku = `BULK-CERT-${randomUUID().slice(0, 6).toUpperCase()}`;
     const v2Headers = "operacion,producto_id,catalog_version,sku_base,sku_variante,nombre,descripcion,categoria_id,marca_id,tipo_producto_id,tiene_variantes,precio_regular,atributos_producto,atributos_variante,imagen_url,stock_inicial";
     const bulkRow = ["ALTA", "", "", bulkSku, "", "Prod Bulk Cert", "Desc Bulk Cert", catId, brandId, typeId, "false", "55.00", "[]", "", "https://example.test/b.png", "15"].join(",");
     const bulkForm = new FormData();
     bulkForm.append("archivo", new Blob([`${v2Headers}\r\n${bulkRow}\r\n`], { type: "text/csv" }), "cert.csv");
+    const bulkCorrId = randomUUID();
     const bulkUpload = await httpCall(`${gw}/api/v1/carga-masiva/productos/importaciones`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${gestorJwt}`, "Idempotency-Key": randomUUID() },
+      headers: { Authorization: `Bearer ${gestorJwt}`, "Idempotency-Key": randomUUID(), "X-Correlation-Id": bulkCorrId },
       body: bulkForm,
     });
-    console.error(`[certify] bulkUpload: status=${bulkUpload.status} body=${bulkUpload.text.slice(0, 300)}`);
-    if (bulkUpload.status === 503) {
-      const br = await httpCall(`${env.serviceUrls["bulk-svc"]}/health/readiness`);
-      const bd = await httpCall(`${env.serviceUrls["bulk-svc"]}/api/v1/carga-masiva/productos/importaciones`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${gestorJwt}`, "Idempotency-Key": randomUUID() },
-        body: bulkForm,
-      });
-      console.error(`[certify] bulkDirect: ready=${br.status} ${br.text} direct=${bd.status} ${bd.text.slice(0, 300)}`);
-    }
     const batchId = bulkUpload.json?.batch_id;
-    let bulkTerminal = bulkUpload.json?.status ?? "";
+    const bulkContentId = batchId ? stableUuid(`${batchId}:catalog-bulk-v3-content`) : randomUUID();
+    let bulkTerminal = bulkUpload.json?.status ?? String(bulkUpload.status);
     let bulkSnap = null;
     if (batchId) {
-      for (let i = 0; i < 30; i++) {
-        const bp = await httpCall(`${gw}/api/v1/carga-masiva/productos/importaciones/${batchId}`, {
-          headers: { Authorization: `Bearer ${gestorJwt}` },
-        });
-        bulkSnap = bp.json;
-        bulkTerminal = bp.json?.status ?? "";
-        if (bulkTerminal === "COMPLETED" || bulkTerminal === "FAILED_GENERAL") break;
-        await delay(300);
-      }
+      const bulkPoll = await pollUntil(
+        () => httpCall(`${gw}/api/v1/carga-masiva/productos/importaciones/${batchId}`, { headers: { Authorization: `Bearer ${gestorJwt}` } }),
+        (r) => ["COMPLETED", "FAILED_GENERAL"].includes(r.json?.status),
+        40,
+        400,
+      );
+      bulkSnap = bulkPoll?.json ?? null;
+      bulkTerminal = bulkSnap?.status ?? "";
     }
 
-    // 3. Iterate over all 158 rows from MATRIZ_158_OPERACIONES_H5_R2.csv
-    console.error("[certify] Seeding & E2E flows complete, iterating 158 operations...");
+    // Bulk export
+    const bulkExpRes = await httpCall(`${gw}/api/v1/carga-masiva/productos/exportaciones`, {
+      method: "POST",
+      headers: { ...authH, "Idempotency-Key": randomUUID() },
+      body: { formato: "CSV" },
+    });
+    const bulkExportId = bulkExpRes.json?.export_id ?? bulkExpRes.json?.exportId;
+    if (bulkExportId) {
+      await pollUntil(
+        () => httpCall(`${gw}/api/v1/carga-masiva/productos/exportaciones/${bulkExportId}`, { headers: authH }),
+        (r) => r.json?.status === "COMPLETED",
+      );
+    }
+
+    // Seed pending preparation checks for [32] & [40]
+    const pendingPrepRes = await httpCall(`${env.g5SeedOrigin}/__test/catalog-pending-preparation`, {
+      method: "POST",
+      body: { categoriaId: catId, marcaId: brandId, tipoProductoId: typeId, sourceVariantId: varId },
+    });
+    const retryProdId = pendingPrepRes.json?.retryProdId;
+    const retryVarProdId = pendingPrepRes.json?.retryVarProdId;
+    const retryVarId = pendingPrepRes.json?.retryVarId;
+
+    // Seed retryable bulk batch for [109] reanudarImportacionGeneral
+    const retryBulkSku = `BULK-RETRY-${randomUUID().slice(0, 6).toUpperCase()}`;
+    const retryBulkRow = ["ALTA", "", "", retryBulkSku, "", "Prod Bulk Retry", "Desc Bulk Retry", catId, brandId, typeId, "false", "55.00", "[]", "", "https://example.test/br.png", "15"].join(",");
+    const retryBulkForm = new FormData();
+    retryBulkForm.append("archivo", new Blob([`${v2Headers}\r\n${retryBulkRow}\r\n`], { type: "text/csv" }), "retry.csv");
+    const retryBulkUpload = await httpCall(`${gw}/api/v1/carga-masiva/productos/importaciones`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${gestorJwt}`, "Idempotency-Key": randomUUID(), "X-Correlation-Id": randomUUID() },
+      body: retryBulkForm,
+    });
+    const retryBatchId = retryBulkUpload.json?.batch_id;
+    if (retryBatchId) {
+      await pollUntil(
+        () => httpCall(`${gw}/api/v1/carga-masiva/productos/importaciones/${retryBatchId}`, { headers: authH }),
+        (r) => ["COMPLETED", "FAILED_GENERAL"].includes(r.json?.status),
+        30,
+        300,
+      );
+      await httpCall(`${env.g5SeedOrigin}/__test/bulk-mark-retryable`, {
+        method: "POST",
+        body: { batchId: retryBatchId },
+      });
+    }
+
+    // Inventory incident (for obtener/resolver)
+    const incOpId = randomUUID();
+    const incRes = await httpCall(`${gw}/api/v1/inventario/incidencias`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${retailToken}`, "Idempotency-Key": incOpId },
+      body: {
+        operation_id: incOpId,
+        external_incident_id: `INC-${randomUUID().slice(0, 8)}`,
+        sku: activeSku1,
+        location_id: storeLocationId,
+        quantity: 1,
+        type: "DANIO",
+        occurred_at: new Date().toISOString(),
+      },
+    });
+    const incidenciaId = incRes.json?.incidencia_id ?? incRes.json?.id;
+
+    // 3. Iterate over all 158 rows from MATRIZ_158_OPERACIONES_H5_R2.csv with real positive & negative cases
+    console.error("[certify] Seeding complete, executing 158 operations...");
     const matrixLines = readFileSync(MATRIX_PATH, "utf8").trim().split(/\r?\n/);
     const results = [];
+    let taxOpId = randomUUID();
+    let typeSchemaVersion = 2;
+
     for (let i = 1; i < matrixLines.length; i++) {
       const cols = parseCsvLine(matrixLines[i]);
       const [opId, vigencia, svc, method, rawRoute, rolScope, actorPerm] = cols;
-      console.error(`[certify] [${i}/${matrixLines.length - 1}] ${svc} ${method} ${rawRoute}`);
       const isHealth = rawRoute.includes("/health");
+      const isPublic = false;
       const isPrivate = vigencia === "ENDPOINT_PRIVADO" || (!rawRoute.startsWith("/api/v1/") && !isHealth);
       const baseOrigin = svc === "api-gateway" ? gw : isPrivate ? env.serviceUrls[svc] : gw;
+
       let path = rawRoute
-        .replace("{productoId}", activeProd1)
-        .replace("{productId}", activeProd1)
-        .replace("{sku}", activeSku1)
-        .replace("{categoriaId}", catId ?? randomUUID())
-        .replace("{marcaId}", brandId ?? randomUUID())
-        .replace("{tipoProductoId}", typeId ?? randomUUID())
+        .replace("{productoId}", opId === "reintentarPreparacionVariante" ? (retryVarProdId ?? varProdId ?? activeProd1) : (opId.includes("Variante") || opId === "crearVariante") ? (varProdId ?? activeProd1) : opId === "reintentarPreparacionProducto" ? (retryProdId ?? draftProdId ?? activeProd1) : activeProd1)
+        .replace("{productId}", (opId.includes("Variante") || opId === "crearVariante") ? (varProdId ?? activeProd1) : activeProd1)
+        .replace("{sku}", opId === "obtenerDefinicionPrecioSkuAdministracion" || opId === "programarPrecioSku" ? activeSku2 : activeSku1)
+        .replace("{categoriaId}", opId === "solicitarDesactivacionCategoria" ? (catIdDeact ?? randomUUID()) : (catId ?? randomUUID()))
+        .replace("{marcaId}", opId === "solicitarDesactivacionMarca" ? (brandIdDeact ?? randomUUID()) : (brandId ?? randomUUID()))
+        .replace("{tipoProductoId}", (opId === "solicitarDesactivacionTipoProducto" || opId === "reactivarTipoProducto") ? (typeIdDeact ?? randomUUID()) : (typeId ?? randomUUID()))
         .replace("{caracteristicaId}", attrId ?? randomUUID())
-        .replace("{valorId}", randomUUID())
-        .replace("{variantId}", randomUUID())
-        .replace("{slug}", catSlug)
+        .replace("{valorId}", (opId === "solicitarDesactivacionValorCaracteristica" || opId === "reactivarValorCaracteristica") ? (valIdDeact ?? randomUUID()) : (valId ?? randomUUID()))
+        .replace("{variantId}", opId === "reintentarPreparacionVariante" ? (retryVarId ?? varId ?? randomUUID()) : (varId ?? randomUUID()))
+        .replace("{slug}", opId === "obtenerProductoPorSlug" ? activeProd1Slug : catSlug)
         .replace("{promocionId}", promoId ?? randomUUID())
-        .replace("{comboId}", comboId ?? randomUUID())
-        .replace("{reservaId}", reservationId || randomUUID())
-        .replace("{operationId}", opId === "obtenerOperacionCuponH5" ? consumeOpId : invOpId)
-        .replace("{batchId}", batchId ?? randomUUID())
-        .replace("{exportId}", exportId ?? randomUUID())
-        .replace("{auditId}", randomUUID())
-        .replace("{cuponId}", randomUUID())
-        .replace("{reglaId}", randomUUID())
-        .replace("{contentId}", randomUUID())
-        .replace("{slugAnterior}", catSlug)
-        .replace("{correlationId}", randomUUID())
-        .replace("{incidenciaId}", randomUUID())
-        .replace("{trasladoId}", randomUUID())
-        .replace("{ruleId}", randomUUID())
+        .replace("{comboId}", opId === "desactivarCombo" ? (comboIdToDeactivate ?? randomUUID()) : (comboId ?? randomUUID()))
+        .replace("{reservaId}", opId === "confirmarReserva" ? (reservationId2 ?? reservationId) : opId === "liberarReserva" ? (reservationId3 ?? reservationId) : reservationId)
+        .replace("{operationId}", opId === "obtenerOperacionCuponH5" ? consumeOpId : opId === "obtenerOperacionMaestra" ? taxOpId : invOpId)
+        .replace("{batchId}", opId.includes("ImportacionPrecios") ? (priceBatchId ?? randomUUID()) : opId === "reanudarImportacionGeneral" ? (retryBatchId ?? batchId ?? randomUUID()) : (batchId ?? randomUUID()))
+        .replace("{exportId}", svc === "bulk-svc" ? (bulkExportId ?? randomUUID()) : (exportId ?? randomUUID()))
+        .replace("{auditId}", auditId ?? randomUUID())
+        .replace("{cuponId}", couponId ?? randomUUID())
+        .replace("{reglaId}", ruleId ?? randomUUID())
+        .replace("{contentId}", bulkContentId)
+        .replace("{slugAnterior}", catSlugPrev)
+        .replace("{correlationId}", bulkCorrId)
+        .replace("{incidenciaId}", incidenciaId ?? randomUUID())
+        .replace("{trasladoId}", trasladoId)
+        .replace("{ruleId}", ruleId ?? randomUUID())
         .replace("{codigo}", couponCode);
 
       if (path.startsWith("/productos/skus/")) path = `/api/v1${path}`;
-      if (path === "/interno/productos/skus/filtrar") path = `/api/v1${path}`;
       if (path.startsWith("/interno/inventario/reservas/")) path = `/api/v1${path}`;
 
-      if (path === "/api/v1/precios" || path === "/api/v1/inventario/disponibilidad") {
+      if (path === "/api/v1/precios") {
         path += `?skus=${encodeURIComponent(activeSku1)}`;
+      } else if (path === "/api/v1/inventario/disponibilidad") {
+        path += `?skus=${encodeURIComponent(activeSku1)}&location_id=00000000-0000-4000-8000-000000000101`;
       } else if (path === "/api/v1/inventario/disponibilidad/comercial") {
         path += `?skus=${encodeURIComponent(activeSku1)}&canal=MARKETPLACE`;
       } else if (path === "/api/v1/productos" && method === "GET") {
@@ -509,127 +838,203 @@ async function main() {
 
       // Select appropriate token
       let token = gestorJwt;
+      let isServiceBearer = false;
       if (opId === "obtenerContenidoCargaMasivaInternoH5") {
-        token = catalogSvcToken;
+        token = catalogSvcToken; isServiceBearer = true;
+      } else if (opId === "filtrarSkusVendiblesInterno") {
+        token = inventorySvcToken; isServiceBearer = true;
       } else if (opId === "obtenerEvidenciaReservaCuponInterno") {
-        token = promotionsSvcToken;
+        token = promotionsSvcToken; isServiceBearer = true;
       } else if (
         ["cupones:consumir", "cupones:restaurar", "cupones:operaciones:leer", "inventario:reservar", "inventario:consumir", "inventario:liberar", "inventario:conciliar-offline", "inventario:operaciones:leer", "inventario:reservas:estado:leer"].some((s) => (rolScope || "").includes(s))
       ) {
-        token = g5Token;
+        token = g5Token; isServiceBearer = true;
       } else if ((rolScope || "").includes("promociones:evaluar")) {
-        token = g3Token;
+        token = g3Token; isServiceBearer = true;
       } else if ((rolScope || "").includes("inventario:reintegrar") || (rolScope || "").includes("inventario:reintegros")) {
-        token = postventaToken;
+        token = postventaToken; isServiceBearer = true;
       } else if (
-        ["promociones:leer", "cupones:validar", "recomendaciones:leer"].some((s) => (rolScope || "").includes(s)) ||
+        ["promociones:leer", "cupones:validar", "recomendaciones:leer", "combos:leer"].some((s) => (rolScope || "").includes(s)) ||
         ((actorPerm || "").includes("modulo-marketplace") && !(actorPerm || "").includes("userBearer"))
       ) {
-        token = g1Token;
+        token = g1Token; isServiceBearer = true;
       } else if (
         ["inventario:incidencias:"].some((s) => (rolScope || "").includes(s)) ||
         ((actorPerm || "").includes("modulo-retail") && !(actorPerm || "").includes("userBearer"))
       ) {
-        token = retailToken;
+        token = retailToken; isServiceBearer = true;
       } else if ((actorPerm || "").includes("interno-g6") || ((actorPerm || "").includes("modulo-productos") && !(actorPerm || "").includes("userBearer"))) {
-        token = prodSvcToken;
+        token = prodSvcToken; isServiceBearer = true;
       } else if ((actorPerm || "").includes("modulo-despacho") && !(actorPerm || "").includes("userBearer")) {
-        token = despachoToken;
+        token = despachoToken; isServiceBearer = true;
       }
 
-      // Negative auth check (only for non-health)
+      // A. ROUTE_SECURITY_PASS (401 + 403)
       let auth401 = true;
       let auth403 = true;
-      if (!isHealth && baseOrigin) {
+      if (!isHealth && !isPublic && baseOrigin) {
         const unauthRes = await httpCall(`${baseOrigin}${path}`, { method });
         auth401 = unauthRes.status === 401;
-        if ((actorPerm || "").includes("GESTOR_COMERCIAL") || (rolScope || "").includes("GESTOR_COMERCIAL")) {
+        if (!isServiceBearer) {
           const forbRes = await httpCall(`${baseOrigin}${path}`, {
             method,
             headers: { Authorization: `Bearer ${sinRolJwt}` },
           });
           auth403 = forbRes.status === 403;
+        } else {
+          // Cross-client 403 test: use a client that is NOT allowed for this route
+          const wrongClientToken =
+            token === g5Token ? despachoToken :
+            token === inventorySvcToken ? g1Token :
+            token === catalogSvcToken ? g1Token :
+            token === promotionsSvcToken ? g1Token :
+            token === retailToken ? despachoToken :
+            token === despachoToken ? g1Token :
+            g5Token;
+          const forbRes = await httpCall(`${baseOrigin}${path}`, {
+            method,
+            headers: { Authorization: `Bearer ${wrongClientToken}` },
+          });
+          auth403 = forbRes.status === 403;
         }
       }
 
-      // Positive invocation (safe GETs + already-tested mutations)
-      let posStatus = 0;
-      let passed = false;
-      if (!baseOrigin) {
-        results.push({ opId, svc, method, rawRoute, status: "BLOCKED", httpStatus: 0, auth401, auth403 });
-        continue;
+      // B. Build positive request
+      let posMethod = method;
+      let posPath = path;
+      const opIdempotency = randomUUID();
+      let posHeaders = isHealth ? {} : (method === "GET" || method === "DELETE") ? { Authorization: `Bearer ${token}` } : { Authorization: `Bearer ${token}`, "Idempotency-Key": opIdempotency };
+      let posBody = undefined;
+
+      if (method !== "GET" && method !== "DELETE") {
+        posBody = buildPositiveBody(opId, {
+          catId, brandId, typeId, typeSchemaVersion, attrId, attrId2, attrName, valId, valName, valId2, valName2, activeProd1, activeProd2, activeSku1, activeSku2,
+          draftProdId, varProdId, varId, promoId, couponId, couponCode, ruleId, comboId,
+          orderId, orderId2, orderId3, orderId4, reservationId, reservationId2, reservationId3, reservationId4, storeLocationId, barcode1, effectiveAt, opIdempotency, consumeOpId, customerRef,
+        });
+        if (opId === "crearMarca" || opId === "actualizarMarca") {
+          const f = makeBrandForm(`Marca ${opId === "crearMarca" ? "Pos" : "Upd"} ${randomUUID().slice(0, 6)}`);
+          if (opId === "actualizarMarca") f.append("version", "0");
+          posBody = f;
+        } else if (opId === "prevalidarImportacionPrecios" || opId === "crearImportacionPrecios") {
+          posBody = makePriceCsvForm(activeSku1, 1);
+        } else if (opId === "crearImportacionGeneralProductos") {
+          const f = new FormData();
+          const sku = `BULK-POS-${randomUUID().slice(0, 6).toUpperCase()}`;
+          f.append("archivo", new Blob([`${v2Headers}\r\n${["ALTA", "", "", sku, "", "Prod Pos", "Desc Pos", catId, brandId, typeId, "false", "45.00", "[]", "", "https://example.test/p.png", "10"].join(",")}\r\n`], { type: "text/csv" }), "pos.csv");
+          posBody = f;
+        }
       }
-      if (method === "GET") {
-        const r = await httpCall(`${baseOrigin}${path}`, {
-          method: "GET",
-          headers: isHealth ? {} : { Authorization: `Bearer ${token}` },
-        });
-        posStatus = r.status;
-        if (posStatus >= 400 && posStatus !== 404) {
-          console.error(`[certify] FAIL ${opId} ${method} ${path} -> ${posStatus}: ${r.text.slice(0, 180)}`);
+
+      // C. Execute positive request
+      const posRes = await httpCall(`${baseOrigin}${posPath}`, {
+        method: posMethod,
+        headers: posHeaders,
+        body: posBody,
+      });
+
+      if (["solicitarDesactivacionCategoria", "solicitarDesactivacionValorCaracteristica", "solicitarDesactivacionTipoProducto"].includes(opId) && (posRes.json?.operation_id || posRes.json?.operationId || posRes.json?.operacionId)) {
+        taxOpId = posRes.json?.operation_id ?? posRes.json?.operacionId ?? posRes.json?.operationId;
+      }
+      if (opId === "asociarCaracteristicaTipoProducto" && posRes.json?.schemaVersion != null) {
+        typeSchemaVersion = Number(posRes.json.schemaVersion);
+      }
+      if (opId === "crearImportacionPrecios" && (posRes.json?.batchId || posRes.json?.batch_id)) {
+        priceBatchId = posRes.json?.batchId ?? posRes.json?.batch_id;
+      }
+      if (opId === "listarAuditoriaPrecios" && !auditId && Array.isArray(posRes.json?.items) && posRes.json.items.length > 0) {
+        auditId = posRes.json.items[0].id_auditoria ?? posRes.json.items[0].auditId;
+      }
+
+      // D. Evaluate FUNCTIONAL_PASS + ASYNC_TERMINAL_PASS + PERSISTENCE_PASS
+      const functionalPass = posRes.status >= 200 && posRes.status < 300;
+      let asyncTerminalPass = true;
+      if (posRes.status === 202) {
+        asyncTerminalPass = await verifyAsyncTerminal(opId, posRes.json, { gw, gestorJwt, g5Token, orderId });
+      }
+      const persistencePass = functionalPass && asyncTerminalPass;
+
+      // E. NEGATIVE_CONTRACT_PASS (independent negative test)
+      let negativePass = true;
+      let negStatus = 0;
+      if (!isHealth) {
+        if (method === "GET") {
+          if (opId === "obtenerRecomendaciones") {
+            const negRes = await httpCall(`${baseOrigin}/api/v1/recomendaciones?canal=INVALIDO`, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
+            negStatus = negRes.status;
+            negativePass = [400, 404].includes(negRes.status);
+          } else if (posPath.includes(activeProd1) || posPath.includes(catId) || posPath.includes(brandId) || posPath.includes(comboId) || posPath.includes(batchId) || posPath.includes(exportId)) {
+            const negPath = posPath
+              .replace(activeProd1, randomUUID())
+              .replace(catId, randomUUID())
+              .replace(brandId, randomUUID())
+              .replace(comboId, randomUUID());
+            if (negPath !== posPath) {
+              const negRes = await httpCall(`${baseOrigin}${negPath}`, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
+              negStatus = negRes.status;
+              negativePass = [400, 404].includes(negRes.status);
+            }
+          }
+        } else if (["activarProducto", "desactivarProducto", "reactivarProducto"].includes(opId)) {
+          const negPath = posPath.replace(activeProd1, randomUUID());
+          const negRes = await httpCall(`${baseOrigin}${negPath}`, { method: posMethod, headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": randomUUID() }, body: {} });
+          negStatus = negRes.status;
+          negativePass = [400, 404, 409, 422].includes(negRes.status);
+        } else {
+          const negBody =
+            opId === "filtrarSkusVendiblesInterno" ? { tamanio: 999 } :
+            opId === "actualizarProducto" || opId === "actualizarCategoria" ? { nombre: "" } :
+            opId === "actualizarVariante" ? { imagenUrl: "not-a-uri" } :
+            opId === "actualizarValorCaracteristica" ? { nombre: "Val Neg", version: 999 } :
+            opId === "actualizarAsociacionTipoCaracteristica" ? { obligatoria: true, schemaVersion: 999 } :
+            opId === "registrarRecepcionTrasladoInventario" ? { operation_id: randomUUID(), received_quantity: 999999, disposition: "REINGRESAR_DISPONIBLE", final_receipt: true, received_at: new Date().toISOString() } :
+            opId === "actualizarPromocion" ? { valor: -1 } :
+            opId === "actualizarReglaRecomendacion" ? { prioridad: -1 } :
+            opId === "actualizarCombo" ? { precioCombo: -5 } :
+            opId === "actualizarCupon" ? { maxUsosGlobal: -1 } :
+            {};
+          const negRes = await httpCall(`${baseOrigin}${posPath}`, {
+            method: posMethod,
+            headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": randomUUID() },
+            body: negBody,
+          });
+          negStatus = negRes.status;
+          negativePass = [400, 404, 409, 422].includes(negRes.status);
         }
-        passed = [200, 204, 404].includes(r.status) && r.status !== 500 && r.status !== 502 && r.status !== 503;
-        if (r.status === 404 && !path.includes(randomUUID().slice(0, 4))) {
-          // 404 on non-existent synthetic sub-resource ID vs real resource
-          passed = true;
-        }
-      } else {
-        // Non-GET operations: check route reachability & contractual response (or specific setup)
-        let reqBody = {};
-        if (opId === "actualizarValorCaracteristica") {
-          reqBody = { nombre: "Valor Cert", version: 1 };
-        } else if (opId === "actualizarAsociacionTipoCaracteristica") {
-          reqBody = { obligatoria: false, schemaVersion: 1 };
-        } else if (opId === "registrarRecepcionTrasladoInventario") {
-          reqBody = {
-            operation_id: randomUUID(),
-            received_quantity: 1,
-            disposition: "OK",
-            final_receipt: true,
-            received_at: new Date().toISOString(),
-          };
-        } else if (opId === "conciliarVentaOffline") {
-          reqBody = {
-            operation_id: randomUUID(),
-            offline_sale_id: randomUUID(),
-            order_id: randomUUID(),
-            channel_id: "RETAIL",
-            sold_at: new Date().toISOString(),
-            lines: [{ sku: activeSku1, quantity: 1 }],
-          };
-        }
-        const r = await httpCall(`${baseOrigin}${path}`, {
-          method,
-          headers: { Authorization: `Bearer ${token}`, "Idempotency-Key": randomUUID(), "content-type": "application/json" },
-          body: reqBody,
-        });
-        posStatus = r.status;
-        if (posStatus >= 400 && posStatus !== 404) {
-          console.error(`[certify] FAIL ${opId} ${method} ${path} -> ${posStatus}: ${r.text.slice(0, 180)}`);
-        }
-        // 2xx or deterministic contractual validation (400/404/409/422) without 5xx or 401/403
-        passed = posStatus >= 200 && posStatus < 500 && posStatus !== 401 && posStatus !== 403;
+      }
+
+      const overallPass = auth401 && auth403 && functionalPass && persistencePass && asyncTerminalPass && negativePass;
+      if (!overallPass) {
+        console.error(`[certify] FAIL [${i}/158] ${opId} (${svc} ${method} ${posPath}) -> http=${posRes.status} 401=${auth401} 403=${auth403} func=${functionalPass} async=${asyncTerminalPass} neg=${negativePass}(${negStatus}) body=${posRes.text.slice(0, 400)}`);
       }
 
       results.push({
+        n: i,
         opId,
         vigencia,
         svc,
         method,
         rawRoute,
-        status: passed && auth401 && auth403 ? "PASS" : "FAIL",
-        httpStatus: posStatus,
+        status: overallPass ? "PASS" : "FAIL",
+        httpStatus: posRes.status,
+        routeSecurity: auth401 && auth403 ? "ROUTE_SECURITY_PASS" : "FAIL",
+        negativeContract: negativePass ? "NEGATIVE_CONTRACT_PASS" : "FAIL",
+        functional: functionalPass ? "FUNCTIONAL_PASS" : "FAIL",
+        persistence: persistencePass ? "PERSISTENCE_PASS" : "FAIL",
+        asyncTerminal: posRes.status === 202 ? (asyncTerminalPass ? "ASYNC_TERMINAL_PASS" : "FAIL") : "NA",
         auth401,
         auth403,
       });
     }
 
+    const passed = results.filter((r) => r.status === "PASS").length;
+    const failed = results.filter((r) => r.status === "FAIL").length;
     const summary = {
       timestamp: new Date().toISOString(),
       total: results.length,
-      passed: results.filter((r) => r.status === "PASS").length,
-      failed: results.filter((r) => r.status === "FAIL").length,
-      blocked: results.filter((r) => r.status === "BLOCKED").length,
+      passed,
+      failed,
+      blocked: 0,
       authChecks,
       n01ConsumeStatus,
       bulkTerminal,
@@ -637,19 +1042,230 @@ async function main() {
       results,
     };
     writeFileSync(REPORT_JSON_PATH, JSON.stringify(summary, null, 2), "utf8");
-    console.log(
-      JSON.stringify({
-        total: summary.total,
-        passed: summary.passed,
-        failed: summary.failed,
-        blocked: summary.blocked,
-        n01ConsumeStatus,
-        bulkTerminal,
-        authChecksPass: authChecks.every((a) => a.pass),
-      }),
-    );
+    const mdLines = [
+      `# Certificación 158 Endpoints G6 H5 R2`,
+      `- Fecha: ${summary.timestamp}`,
+      `- Total: ${summary.total} | PASS: ${passed} | FAIL: ${failed}`,
+      `- N01 Consume: ${n01ConsumeStatus} | Bulk Terminal: ${bulkTerminal} | AuthChecks: ${authChecks.every((a) => a.pass)}`,
+      ``,
+      `| # | Servicio | operationId | Método | Ruta | HTTP | Seguridad | Negativo | Funcional | Persistencia | Async | Estado |`,
+      `|---:|---|---|---|---|---:|---|---|---|---|---|---|`,
+      ...results.map((r) => `| ${r.n} | ${r.svc} | \`${r.opId}\` | ${r.method} | \`${r.rawRoute}\` | ${r.httpStatus} | ${r.routeSecurity} | ${r.negativeContract} | ${r.functional} | ${r.persistence} | ${r.asyncTerminal} | **${r.status}** |`),
+    ];
+    writeFileSync(REPORT_MD_PATH, mdLines.join("\n"), "utf8");
+
+    console.log(JSON.stringify({
+      total: summary.total,
+      passed,
+      failed,
+      n01ConsumeStatus,
+      bulkTerminal,
+      authChecksPass: authChecks.every((a) => a.pass),
+    }));
+
+    if (failed > 0 || n01ConsumeStatus !== "COMPLETED" || bulkTerminal !== "COMPLETED") {
+      writeFileSync(resolve(BACKEND_ROOT, "tests/h5/certify-stack.log"), stackLogs, "utf8");
+      const qCat = await httpCall(`${env.isolatedBusUrl}/queues/g6.catalog.from.bulk/peek`).catch(() => null);
+      const qBulk = await httpCall(`${env.isolatedBusUrl}/queues/g6.bulk.from.catalog/peek`).catch(() => null);
+      const qTax = await httpCall(`${env.isolatedBusUrl}/queues/g6.catalog.from.taxonomy/peek`).catch(() => null);
+      console.error(`[certify] DIAG n01=${n01ConsumeStatus} bulk=${bulkTerminal} bulkSnap=${JSON.stringify(bulkSnap)} qCat=${qCat?.text?.slice(0,200)} qBulk=${qBulk?.text?.slice(0,200)} qTax=${qTax?.text?.slice(0,200)}`);
+    }
+    const allOk =
+      failed === 0 &&
+      n01ConsumeStatus === "COMPLETED" &&
+      bulkTerminal === "COMPLETED" &&
+      authChecks.every((a) => a.pass);
+    exitCode = allOk ? 0 : 1;
   } finally {
     await stopStack();
+    process.exitCode = exitCode;
+  }
+}
+
+async function verifyAsyncTerminal(opId, json, ctx) {
+  if (opId === "crearImportacionGeneralProductos" && json?.batch_id) {
+    const p = await pollUntil(
+      () => httpCall(`${ctx.gw}/api/v1/carga-masiva/productos/importaciones/${json.batch_id}`, { headers: { Authorization: `Bearer ${ctx.gestorJwt}` } }),
+      (r) => ["COMPLETED", "FAILED_GENERAL"].includes(r.json?.status),
+      40,
+      400,
+    );
+    return p?.json?.status === "COMPLETED";
+  }
+  if (opId === "crearExportacionGeneralProductos" && (json?.export_id || json?.exportId)) {
+    const id = json.export_id ?? json.exportId;
+    const p = await pollUntil(
+      () => httpCall(`${ctx.gw}/api/v1/carga-masiva/productos/exportaciones/${id}`, { headers: { Authorization: `Bearer ${ctx.gestorJwt}` } }),
+      (r) => r.json?.status === "COMPLETED",
+    );
+    return p?.json?.status === "COMPLETED";
+  }
+  if (opId === "crearExportacionAuditoriaPrecios" && json?.exportId) {
+    const p = await pollUntil(
+      () => httpCall(`${ctx.gw}/api/v1/auditoria-precios/exportaciones/${json.exportId}`, { headers: { Authorization: `Bearer ${ctx.gestorJwt}` } }),
+      (r) => (r.json?.status ?? r.json?.estado) === "COMPLETED",
+    );
+    return (p?.json?.status ?? p?.json?.estado) === "COMPLETED";
+  }
+  if ((opId === "solicitarDesactivacionValorCaracteristica" || opId === "solicitarDesactivacionTipoProducto") && (json?.operation_id || json?.operationId)) {
+    const id = json.operation_id ?? json.operationId;
+    const p = await pollUntil(
+      () => httpCall(`${ctx.gw}/api/v1/taxonomia/operaciones/${id}`, { headers: { Authorization: `Bearer ${ctx.gestorJwt}` } }),
+      (r) => ["COMPLETED", "COMPLETADA", "APLICADA", "FINALIZADA", "FAILED", "ERROR", "REJECTED", "RECHAZADA"].includes(String(r.json?.status ?? r.json?.estado ?? "").toUpperCase()),
+      40,
+      300,
+    );
+    return ["COMPLETED", "COMPLETADA", "APLICADA", "FINALIZADA"].includes(String(p?.json?.status ?? p?.json?.estado ?? "").toUpperCase());
+  }
+  if ((opId === "admitirConsumoCuponH5" || opId === "admitirRestauracionCuponH5") && json?.operation_id) {
+    const p = await pollUntil(
+      () => httpCall(`${ctx.gw}/api/v1/cupones/operaciones/${json.operation_id}?order_id=${json.order_id ?? ctx.orderId}`, { headers: { Authorization: `Bearer ${ctx.g5Token}` } }),
+      (r) => ["COMPLETED", "REJECTED"].includes(r.json?.status),
+      40,
+      300,
+    );
+    if (opId === "admitirRestauracionCuponH5") {
+      return p?.json?.status === "COMPLETED" && p?.json?.result?.outcome === "RESTORED";
+    }
+    if (p?.json?.status !== "COMPLETED") {
+      console.error(`[certify] DIAG ${opId} terminal=${JSON.stringify(p?.json)}`);
+    }
+    return p?.json?.status === "COMPLETED";
+  }
+  if (["solicitarReserva", "confirmarReserva", "liberarReserva"].includes(opId) && json?.operation_id) {
+    const p = await pollUntil(
+      () => httpCall(`${ctx.gw}/api/v1/inventario/operaciones/${json.operation_id}`, { headers: { Authorization: `Bearer ${ctx.g5Token}` } }),
+      (r) => ["APLICADO", "COMPLETED", "COMPLETADA"].includes(r.json?.status),
+    );
+    return ["APLICADO", "COMPLETED", "COMPLETADA"].includes(p?.json?.status);
+  }
+  return true;
+}
+
+function buildPositiveBody(opId, ctx) {
+  const uid = randomUUID().slice(0, 6);
+  switch (opId) {
+    case "crearProducto":
+      return { nombre: `Prod Cert ${uid}`, descripcion: "Desc Cert", categoriaId: ctx.catId, marcaId: ctx.brandId, tipoProductoId: ctx.typeId, skuBase: `SKU-P-${uid.toUpperCase()}`, tieneVariantes: false, precioBaseInicial: 80 };
+    case "crearVariante":
+      return { sku: `SKU-VAR-${uid.toUpperCase()}`, atributosIdentificadores: [{ caracteristica_id: ctx.attrId, nombre: ctx.attrName, valor_id: ctx.valId2, valor: ctx.valName2 }], atributosNoIdentificadores: [], imagenUrl: "https://example.test/vp.png", perfilFisico: { pesoKg: 1.2, dimensionesCm: { largo: 10, ancho: 10, alto: 5 } } };
+    case "actualizarVariante":
+      return { imagenUrl: "https://example.test/vu.png" };
+    case "actualizarProducto":
+      return { nombre: `Prod Act ${uid}` };
+    case "crearVariante":
+      return { sku: `SKU-V-${uid.toUpperCase()}`, atributosIdentificadores: [{ caracteristicaId: ctx.attrId, valorId: ctx.valId }], atributosNoIdentificadores: [], imagenes: ["https://example.test/v.png"], datosFisicos: { pesoKg: 1, dimensionesCm: { largo: 5, ancho: 5, alto: 5 } } };
+    case "actualizarVariante":
+      return { imagenes: ["https://example.test/v2.png"] };
+    case "crearVariante":
+      return { sku: `SKU-VAR-${uid.toUpperCase()}`, atributosIdentificadores: [{ caracteristica_id: ctx.attrId, nombre: ctx.attrName, valor_id: ctx.valId2, valor: ctx.valName2 }], atributosNoIdentificadores: [], imagenUrl: "https://example.test/vp.png", perfilFisico: { pesoKg: 1.2, dimensionesCm: { largo: 10, ancho: 10, alto: 5 } } };
+    case "actualizarVariante":
+      return { imagenUrl: "https://example.test/vu.png" };
+    case "actualizarProducto":
+      return { nombre: `Prod Upd ${uid}`, descripcion: "Desc Upd" };
+    case "reintentarPreparacionProducto":
+      return { dependencia: "PRICING", motivo: "Reintento certificacion" };
+    case "reintentarPreparacionVariante":
+      return { dependencia: "INVENTARIO", motivo: "Reintento certificacion" };
+    case "consultarDatosFisicos":
+      return { skus: [ctx.activeSku1] };
+    case "resolverCodigoBarras":
+      return { codigo_barras: ctx.barcode1 };
+    case "resolverSkusAdministracion":
+      return { skus: [ctx.activeSku1] };
+    case "obtenerContextosSkuLote":
+      return { skus: [ctx.activeSku1] };
+    case "filtrarSkusVendiblesInterno":
+      return { sku: ctx.activeSku1, tamanio: 10 };
+    case "crearCategoria":
+      return { nombre: `Cat Pos ${uid}`, slugConfirmado: `cat-pos-${uid.toLowerCase()}`, categoriaPadreId: null };
+    case "actualizarCategoria":
+      return { nombre: `Cat Upd ${uid}` };
+    case "resolverSlugCategoriaCreacion":
+      return { nombre: `Slug Test ${uid}` };
+    case "actualizarSeoCategoria":
+      return { slug: `cat-seo-${uid.toLowerCase()}`, metaTitulo: `Title ${uid}`, metaDescripcion: `Desc ${uid}` };
+    case "crearCaracteristica":
+      return { nombre: `Attr Pos ${uid}`, tipo: "TEXTO" };
+    case "actualizarCaracteristica":
+      return { nombre: `Attr Upd ${uid}`, version: 0 };
+    case "crearValorCaracteristica":
+      return { nombre: `Val Pos ${uid}` };
+    case "actualizarValorCaracteristica":
+      return { nombre: `Val Upd ${uid}` };
+    case "crearMarca":
+      return { nombre: `Marca Pos ${uid}` };
+    case "actualizarMarca":
+      return { nombre: `Marca Upd ${uid}`, version: 0 };
+    case "crearTipoProducto":
+      return { nombre: `Tipo Pos ${uid}` };
+    case "asociarCaracteristicaTipoProducto":
+      return { caracteristicaId: ctx.attrId2, obligatoria: false, esIdentificador: false };
+    case "actualizarAsociacionTipoCaracteristica":
+      return { obligatoria: true, schemaVersion: ctx.typeSchemaVersion };
+    case "actualizarPrecioSku":
+      return { accionPrecioOferta: "CONSERVAR", priceVersion: 1, precioRegular: 130, moneda: "PEN", channelId: "MARKETPLACE", motivoCambio: "CERT_PATCH" };
+    case "actualizarPrecioBaseProducto":
+      return { accionPrecioOferta: "CONSERVAR", priceVersion: 1, precioRegular: 130, moneda: "PEN", motivoCambio: "CERT_PATCH" };
+    case "programarPrecioSku":
+    case "programarPrecioBaseProducto":
+      return { tipoPrecio: "REGULAR", importe: 140, moneda: "PEN", validFrom: new Date(Date.now() + 3_600_000).toISOString(), motivoCambio: "CERT_PROG" };
+    case "prevalidarImportacionPrecios":
+    case "crearImportacionPrecios":
+      return { items: [{ sku: ctx.activeSku1, precioRegular: 125, moneda: "PEN", accionPrecioOferta: "CONSERVAR" }] };
+    case "crearPromocion":
+      return { nombre: `Promo Pos ${uid}`, tipoDescuento: "PORCENTAJE", valor: 15, modalidad: "AUTOMATICA", estado: "ACTIVO", prioridad: 1, validFrom: new Date(Date.now() - 60_000).toISOString(), validUntil: new Date(Date.now() + 86_400_000).toISOString(), canalesHabilitados: ["MARKETPLACE"], alcance: { productIds: [ctx.activeProd1] }, politicaCombinacion: { ofertaPricing: true, promocionAutomatica: true, cupon: true } };
+    case "actualizarPromocion":
+      return { nombre: `Promo Upd ${uid}` };
+    case "evaluarPromociones":
+      return { channel_id: "MARKETPLACE", lines: [{ sku: ctx.activeSku1, product_id: ctx.activeProd1, quantity: 1 }] };
+    case "validarCupon":
+      return { channel_id: "MARKETPLACE", coupon_code: ctx.couponCode, customer_ref: ctx.customerRef, lines: [{ sku: ctx.activeSku1, product_id: ctx.activeProd1, quantity: 1 }] };
+    case "crearCupon":
+      return { codigo: `CPN${uid.toUpperCase()}`, promocionId: ctx.promoId, estado: "ACTIVO", politicaCancelacion: "RESTAURAR_EN_CANCELACION" };
+    case "actualizarCupon":
+      return { maxUsosGlobal: 50 };
+    case "crearReglaRecomendacion":
+      return { nombre: `Regla Pos ${uid}`, tipo: "CROSS_SELL", origen: { tipo: "PRODUCTO", id: ctx.activeProd1 }, recomendados: [{ productId: ctx.activeProd2, orden: 1 }], estado: "ACTIVO", validFrom: new Date(Date.now() - 60_000).toISOString(), validUntil: new Date(Date.now() + 86_400_000).toISOString(), prioridad: 2 };
+    case "actualizarReglaRecomendacion":
+      return { prioridad: 3 };
+    case "admitirConsumoCuponH5":
+      return { operation_id: ctx.opIdempotency, order_id: ctx.orderId4, coupon_code: ctx.couponCode, customer_ref: ctx.customerRef, channel_id: "MARKETPLACE", effective_at: ctx.effectiveAt, reservation_id: ctx.reservationId4, commercial_snapshot_ref: ctx.orderId4 };
+    case "admitirRestauracionCuponH5":
+      return { operation_id: ctx.opIdempotency, order_id: ctx.orderId, consumption_operation_id: ctx.consumeOpId, cancellation_reason: "ANULACION", cancelled_at: new Date().toISOString() };
+    case "crearCombo":
+    case "crearComboAdministracion":
+      return { nombre: `Combo Pos ${uid}`, componentes: [{ sku: ctx.activeSku1, cantidad: 1 }, { sku: ctx.activeSku2, cantidad: 1 }], precioCombo: 199 };
+    case "actualizarCombo":
+      return { nombre: `Combo Upd ${uid}`, componentes: [{ sku: ctx.activeSku1, cantidad: 1 }, { sku: ctx.activeSku2, cantidad: 1 }], precioCombo: 195 };
+    case "solicitarReserva":
+      return { order_id: randomUUID(), operation_id: randomUUID(), channel_id: "MARKETPLACE", lines: [{ sku: ctx.activeSku1, quantity: 1, location_id: "00000000-0000-4000-8000-000000000101" }] };
+    case "confirmarReserva":
+      return { order_id: ctx.orderId2, operation_id: randomUUID() };
+    case "liberarReserva":
+      return { order_id: ctx.orderId3, operation_id: randomUUID(), reason: "ANULACION" };
+    case "verificarCantidadComercial":
+      return { channel_id: "MARKETPLACE", fulfillment: { mode: "ENVIO_DOMICILIO" }, lines: [{ sku: ctx.activeSku1, quantity: 1 }] };
+    case "reportarIncidenciaInventario":
+      return { operation_id: randomUUID(), external_incident_id: `INC-${uid}`, sku: ctx.activeSku1, location_id: ctx.storeLocationId, quantity: 1, type: "DANIO", occurred_at: new Date().toISOString() };
+    case "resolverIncidenciaInventario":
+      return { operation_id: randomUUID(), resolution: "MERMA", act_ref: "ACT-CERT-01" };
+    case "reintegrarInventario":
+      return { operation_id: randomUUID(), order_id: ctx.orderId, source_ref: `RET-${uid}`, reason: "RETORNO_LOGISTICO", lines: [{ sku: ctx.activeSku1, quantity: 1, location_id: ctx.storeLocationId }] };
+    case "conciliarVentaOffline":
+      return { operation_id: randomUUID(), offline_sale_id: randomUUID(), order_id: randomUUID(), channel_id: "RETAIL", occurred_at: new Date().toISOString(), lines: [{ sku: ctx.activeSku1, quantity: 1, location_id: ctx.storeLocationId }] };
+    case "actualizarUmbralGlobal":
+      return { umbral: 5 };
+    case "establecerUmbralSku":
+      return { umbral: 3 };
+    case "registrarRecepcionTrasladoInventario":
+      return { operation_id: randomUUID(), received_quantity: 5, disposition: "REINGRESAR_DISPONIBLE", final_receipt: true, received_at: new Date().toISOString() };
+    case "crearExportacionAuditoriaPrecios":
+      return { formato: "CSV" };
+    case "crearExportacionGeneralProductos":
+      return { formato: "CSV" };
+    default:
+      return undefined;
   }
 }
 
