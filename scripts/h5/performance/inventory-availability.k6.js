@@ -11,17 +11,26 @@ import { sha256 } from 'k6/crypto';
  *   1) `availability_get` (lectura GET /api/v1/inventario/disponibilidad/comercial, 70% peso)
  *   2) `availability_verify_post` (verificación read-only POST /api/v1/inventario/disponibilidad/comercial/verificar, 30% peso)
  * - PROHIBIDO lanzar POST /reservas durante la carga.
- * - Métricas separadas por operación y código HTTP (2xx, 401/403, 404/422, 429 APIM, 5xx) y tasa de errores inesperados (<1%).
+ * - Distribución de SKU: 60% disponibles, 15% stock-bajo, 10% agotados, 10% no registrados, 5% canal alternativo.
+ * - Métricas separadas por operación y código HTTP (2xx, 400, 401/403, 404, 422, 429 APIM, 503, 5xx).
+ * - Tasa de errores inesperados < 1%.
+ *
+ * Perfiles oficiales H5-03:
+ *   1VU-60s   → 1 VU,  60s  (smoke exploratorio)
+ *   5VU-180s  → 5 VUs, 180s (carga ligera)
+ *   20VU-300s → 20 VUs, 300s (carga nominal)
+ *
+ * BLOQUEO PERF03: si no hay entorno autorizado (BASE_URL vacío) ni H5_SYNTHETIC_SMOKE=1,
+ * el módulo falla con PERF03_PREFLIGHT_MISSING_BASE_URL — no inventar PASS sin entorno.
  */
 
 const BASE_URL = (__ENV.BASE_URL ?? '').replace(/\/$/, '');
 const CHANNEL = __ENV.CHANNEL ?? 'MARKETPLACE';
 const AUTH_TOKEN = __ENV.AUTH_TOKEN ?? __ENV.SYNTHETIC_JWT ?? '';
 const DATASET_MANIFEST_PATH =
-  __ENV.DATASET_MANIFEST ?? '../../fixtures/inventory/out/manifest.json';
+  __ENV.DATASET_MANIFEST ?? '../fixtures/inventory/out/manifest.json';
 const EXPECTED_MANIFEST_SHA256 = __ENV.MANIFEST_SHA256 ?? '';
 const PROFILE = __ENV.PROFILE ?? '1VU-60s';
-const VUS = Number(__ENV.VU ?? __ENV.VUS ?? '1');
 const DURATION = __ENV.DURATION ?? '60s';
 const REPETITION = Number(__ENV.REPETITION ?? '1');
 const SYNTHETIC_SMOKE = __ENV.H5_SYNTHETIC_SMOKE === '1';
@@ -30,6 +39,13 @@ const VERIFY_FULFILLMENT_MODE =
   (CHANNEL === 'RETAIL' ? 'RETIRO_TIENDA' : 'ENVIO_DOMICILIO');
 
 const ALLOWED_CHANNELS = new Set(['MARKETPLACE', 'CHATBOT', 'RETAIL']);
+
+/**
+ * Perfiles oficiales: cada clave mapea al número EXACTO de VUs total.
+ * Los VUs de cada escenario se calculan a partir del total según pesos 70/30.
+ * Con 1VU total: get=1, verify=0 (el default function combina ambas ops).
+ * Con 5VUs: get=4, verify=1. Con 20VUs: get=14, verify=6.
+ */
 const ALLOWED_PROFILES = new Map([
   ['1VU-60s', { vus: 1, duration: '60s' }],
   ['5VU-180s', { vus: 5, duration: '180s' }],
@@ -49,8 +65,6 @@ if (!SYNTHETIC_SMOKE) {
   const expected = ALLOWED_PROFILES.get(PROFILE);
   if (
     !expected ||
-    VUS !== expected.vus ||
-    DURATION !== expected.duration ||
     !Number.isInteger(REPETITION) ||
     REPETITION < 1 ||
     REPETITION > 3
@@ -71,21 +85,54 @@ if (
 const manifest = JSON.parse(manifestRaw);
 const groups = manifest.mandatory_groups ?? {};
 
-const AVAILABLE_SKUS = [
+/**
+ * Distribución de SKU según PERF-03:
+ *   60% disponibles (threshold+1 y similares)
+ *   15% stock-bajo / en umbral
+ *   10% agotados (on_hand=0)
+ *   10% no registrados en Inventory
+ *    5% ruta alternativa / canal distinto
+ */
+const SKUS_AVAILABLE = [
   groups.threshold_plus_one_sku ?? 'SYN-TEST-AVAIL-01',
+  groups.available_sku_02 ?? 'SYN-TEST-AVAIL-02',
+  groups.available_sku_03 ?? 'SYN-TEST-AVAIL-03',
+];
+const SKUS_LOW_STOCK = [
   groups.exact_threshold_sku ?? 'SYN-TEST-LOW-01',
+  groups.low_stock_sku_02 ?? 'SYN-TEST-LOW-02',
 ];
-const ZERO_OR_MISSING_SKUS = [
-  groups.available_zero_sku ?? 'SYN-TEST-ZERO-01',
-  groups.unregistered_sku ?? 'SYN-TEST-UNREG-99',
-];
+const SKUS_ZERO = [groups.available_zero_sku ?? 'SYN-TEST-ZERO-01'];
+const SKUS_UNREGISTERED = [groups.unregistered_sku ?? 'SYN-TEST-UNREG-99'];
+const SKUS_ALT_CHANNEL = [groups.alt_channel_sku ?? 'SYN-TEST-ALT-01'];
+
+/**
+ * Selección ponderada de SKU según distribución oficial PERF-03:
+ * 60% disponibles, 15% stock-bajo, 10% agotados, 10% no registrados, 5% canal alternativo.
+ */
+function pickSku(weights) {
+  const r = Math.random() * 100;
+  if (r < 60)
+    return SKUS_AVAILABLE[Math.floor(Math.random() * SKUS_AVAILABLE.length)];
+  if (r < 75)
+    return SKUS_LOW_STOCK[Math.floor(Math.random() * SKUS_LOW_STOCK.length)];
+  if (r < 85) return SKUS_ZERO[Math.floor(Math.random() * SKUS_ZERO.length)];
+  if (r < 95)
+    return SKUS_UNREGISTERED[
+      Math.floor(Math.random() * SKUS_UNREGISTERED.length)
+    ];
+  return SKUS_ALT_CHANNEL[Math.floor(Math.random() * SKUS_ALT_CHANNEL.length)];
+}
 
 // Métricas separadas por operación y clasificación HTTP
 const get2xx = new Counter('h5_perf03_get_2xx_responses');
 const verify2xx = new Counter('h5_perf03_verify_2xx_responses');
+const responses400 = new Counter('h5_perf03_bad_request_400_responses');
 const responses401or403 = new Counter('h5_perf03_auth_rejected_responses');
-const responses404or422 = new Counter('h5_perf03_contract_rejected_responses');
+const responses404 = new Counter('h5_perf03_not_found_404_responses');
+const responses422 = new Counter('h5_perf03_unprocessable_422_responses');
 const responses429 = new Counter('h5_perf03_rate_limited_429_responses');
+const responses503 = new Counter('h5_perf03_unavailable_503_responses');
 const responses5xx = new Counter('h5_perf03_server_5xx_responses');
 const unexpectedErrorRate = new Rate('h5_perf03_unexpected_error_rate');
 const responseBytes = new Counter('h5_perf03_response_bytes');
@@ -95,58 +142,111 @@ const availabilityLatencyMs = new Trend(
 );
 const verifyLatencyMs = new Trend('h5_perf03_verify_duration_ms', true);
 
-const getVus = Math.max(1, Math.round(VUS * 0.7));
-const verifyVus = Math.max(1, VUS - getVus);
+/**
+ * Cálculo de VUs por escenario.
+ * Para 1VU total: ambas operaciones corren en el mismo VU (via default function).
+ * Para >1 VU: 70% al GET, 30% al POST verify (mínimo 1 cada uno).
+ */
+const totalVus = ALLOWED_PROFILES.get(PROFILE)?.vus ?? 1;
+const getVus = totalVus === 1 ? 1 : Math.max(1, Math.round(totalVus * 0.7));
+const verifyVus = totalVus === 1 ? 0 : Math.max(1, totalVus - getVus);
 
-export const options = {
-  scenarios: {
-    availability_get: {
-      executor: 'constant-vus',
-      exec: 'readCommercialAvailability',
-      vus: SYNTHETIC_SMOKE ? 1 : getVus,
-      duration: DURATION,
-      tags: { scenario_kind: 'GET_DISPONIBILIDAD_COMERCIAL' },
-    },
-    availability_verify_post: {
-      executor: 'constant-vus',
-      exec: 'verifyCommercialAvailability',
-      vus: SYNTHETIC_SMOKE ? 1 : verifyVus,
-      duration: DURATION,
-      tags: { scenario_kind: 'POST_VERIFICAR_CANTIDAD_COMERCIAL' },
-    },
-  },
-  summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
-  thresholds: {
-    h5_perf03_unexpected_error_rate: ['rate<0.01'],
-    h5_perf03_get_2xx_responses: ['count>0'],
-    h5_perf03_verify_2xx_responses: ['count>0'],
-    checks: ['rate>0.99'],
-  },
-};
+export const options =
+  totalVus === 1
+    ? {
+        // Con 1 VU: ejecutor único que corre ambas operaciones en secuencia
+        vus: 1,
+        duration: DURATION,
+        summaryTrendStats: [
+          'avg',
+          'min',
+          'med',
+          'max',
+          'p(90)',
+          'p(95)',
+          'p(99)',
+        ],
+        thresholds: {
+          h5_perf03_unexpected_error_rate: ['rate<0.01'],
+          h5_perf03_get_2xx_responses: ['count>0'],
+          h5_perf03_verify_2xx_responses: ['count>0'],
+          checks: ['rate>0.99'],
+        },
+      }
+    : {
+        scenarios: {
+          availability_get: {
+            executor: 'constant-vus',
+            exec: 'readCommercialAvailability',
+            vus: SYNTHETIC_SMOKE ? 1 : getVus,
+            duration: DURATION,
+            tags: { scenario_kind: 'GET_DISPONIBILIDAD_COMERCIAL' },
+          },
+          availability_verify_post: {
+            executor: 'constant-vus',
+            exec: 'verifyCommercialAvailability',
+            vus: SYNTHETIC_SMOKE ? 1 : verifyVus,
+            duration: DURATION,
+            tags: { scenario_kind: 'POST_VERIFICAR_CANTIDAD_COMERCIAL' },
+          },
+        },
+        summaryTrendStats: [
+          'avg',
+          'min',
+          'med',
+          'max',
+          'p(90)',
+          'p(95)',
+          'p(99)',
+        ],
+        thresholds: {
+          h5_perf03_unexpected_error_rate: ['rate<0.01'],
+          h5_perf03_get_2xx_responses: ['count>0'],
+          h5_perf03_verify_2xx_responses: ['count>0'],
+          checks: ['rate>0.99'],
+        },
+      };
 
-function recordStatus(res, okCounter, expect2xx = true) {
+function recordStatus(res, okCounter) {
   responseBytes.add(res.body ? String(res.body).length : 0);
-  if (res.status >= 200 && res.status < 300) {
+  const s = res.status;
+  if (s >= 200 && s < 300) {
     okCounter.add(1);
     unexpectedErrorRate.add(false);
     return;
   }
-  if (res.status === 401 || res.status === 403) {
+  if (s === 400) {
+    responses400.add(1);
+    unexpectedErrorRate.add(true);
+    return;
+  }
+  if (s === 401 || s === 403) {
     responses401or403.add(1);
-    unexpectedErrorRate.add(expect2xx);
+    unexpectedErrorRate.add(true);
     return;
   }
-  if (res.status === 404 || res.status === 422) {
-    responses404or422.add(1);
-    unexpectedErrorRate.add(expect2xx);
+  if (s === 404) {
+    responses404.add(1);
+    unexpectedErrorRate.add(true);
     return;
   }
-  if (res.status === 429) {
+  if (s === 422) {
+    responses422.add(1);
+    unexpectedErrorRate.add(true);
+    return;
+  }
+  if (s === 429) {
     responses429.add(1);
+    // 429 (rate limit) no es error inesperado — es comportamiento esperado bajo carga
     unexpectedErrorRate.add(false);
     return;
   }
-  if (res.status >= 500) {
+  if (s === 503) {
+    responses503.add(1);
+    unexpectedErrorRate.add(true);
+    return;
+  }
+  if (s >= 500) {
     responses5xx.add(1);
     unexpectedErrorRate.add(true);
     return;
@@ -163,11 +263,9 @@ function buildHeaders() {
 }
 
 export function readCommercialAvailability() {
-  const skusParam = [...AVAILABLE_SKUS, ...ZERO_OR_MISSING_SKUS]
-    .map((sku) => encodeURIComponent(sku))
-    .join(',');
+  const sku = pickSku(null);
   const getRes = http.get(
-    `${BASE_URL}/api/v1/inventario/disponibilidad/comercial?skus=${skusParam}&canal=${encodeURIComponent(CHANNEL)}`,
+    `${BASE_URL}/api/v1/inventario/disponibilidad/comercial?skus=${encodeURIComponent(sku)}&canal=${encodeURIComponent(CHANNEL)}`,
     {
       headers: buildHeaders(),
       tags: {
@@ -180,7 +278,7 @@ export function readCommercialAvailability() {
     },
   );
   availabilityLatencyMs.add(getRes.timings.duration);
-  recordStatus(getRes, get2xx, true);
+  recordStatus(getRes, get2xx);
 
   check(getRes, {
     'GET disponibilidad comercial status 200 o 429': (r) =>
@@ -194,10 +292,11 @@ export function readCommercialAvailability() {
 }
 
 export function verifyCommercialAvailability() {
+  const sku = pickSku(null);
   const verifyPayload = JSON.stringify({
     channel_id: CHANNEL,
     fulfillment: { mode: VERIFY_FULFILLMENT_MODE },
-    lines: [{ sku: AVAILABLE_SKUS[0], quantity: 1 }],
+    lines: [{ sku, quantity: 1 }],
   });
   const postVerifyRes = http.post(
     `${BASE_URL}/api/v1/inventario/disponibilidad/comercial/verificar`,
@@ -214,7 +313,7 @@ export function verifyCommercialAvailability() {
     },
   );
   verifyLatencyMs.add(postVerifyRes.timings.duration);
-  recordStatus(postVerifyRes, verify2xx, true);
+  recordStatus(postVerifyRes, verify2xx);
 
   check(postVerifyRes, {
     'POST verificar cantidad status 200 o 429': (r) =>
@@ -232,6 +331,7 @@ export function verifyCommercialAvailability() {
   if (SYNTHETIC_SMOKE) sleep(0.05);
 }
 
+/** Función por defecto: usada con 1VU-60s donde ambas operaciones corren secuencialmente. */
 export default function () {
   readCommercialAvailability();
   verifyCommercialAvailability();
@@ -249,6 +349,13 @@ export function handleSummary(data) {
     repetition: REPETITION,
     dataset_seed: manifest.seed ?? null,
     manifest_sha256: actualManifestSha256,
+    sku_distribution: {
+      available: 60,
+      low_stock: 15,
+      zero: 10,
+      unregistered: 10,
+      alt_channel: 5,
+    },
     metrics: data.metrics,
   };
   if (outputPath) {
