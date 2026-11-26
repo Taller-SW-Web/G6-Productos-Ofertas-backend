@@ -10,7 +10,7 @@ from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_DOCS_SHA = "490172c11cb4b83ddd1996f8d5834d0402184cf8"
-EXPECTED_GATEWAY_SHA = "05f6b929f8aebfd745acd2e70959e36967c96d09"
+EXPECTED_GATEWAY_SHA = "1b90543dc39a8919fd94f0e059d10e1002b3b2a9"
 SPEC = importlib.util.spec_from_file_location("filter_openapi", ROOT / "filter-openapi.py")
 FILTER = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -36,7 +36,7 @@ class FilterOpenApiTests(unittest.TestCase):
         self.source = {
             "openapi": "3.0.3",
             "info": {"title": "test", "version": "1"},
-            "security": [{"bearerAuth": []}],
+            "security": [{"userBearer": []}],
             "paths": {
                 **{f"/{path}": item for path, item in self.private.items()},
                 "/publica": {
@@ -77,6 +77,7 @@ class FilterOpenApiTests(unittest.TestCase):
             True,
             "docs-sha",
             "gateway-sha",
+            g5_authorized=True,
         )
         by_id = {operation["operationId"]: operation for operation in manifest["operations"]}
         self.assertTrue(by_id["g5-operacion"]["g5OptIn"])
@@ -161,9 +162,90 @@ class FilterOpenApiTests(unittest.TestCase):
 
 class ApimPolicyTests(unittest.TestCase):
     def setUp(self):
+        from datetime import datetime, timezone
+
+        self.temp_dir = tempfile.TemporaryDirectory(prefix="apim-preflight-")
+        self.cli_evidence_path = Path(self.temp_dir.name) / "az-cli-evidence.json"
+        self.cli_evidence_path.write_text(
+            json.dumps(
+                {
+                    "subscriptionId": "sub-test",
+                    "resourceGroup": "rg-lab",
+                    "environment": "lab",
+                    "capturedAtUtc": datetime.now(timezone.utc).isoformat(),
+                    "sourceCommand": "az containerapp show -n api-gateway -g rg-lab",
+                    "acaEnvironment": {"vnetConfiguration": {"infrastructureSubnetId": "/subscriptions/sub-test/resourceGroups/rg-lab/providers/Microsoft.Network/virtualNetworks/vnet/subnets/aca"}},
+                    "gatewayApp": {
+                        "resourceId": "/subscriptions/sub-test/resourceGroups/rg-lab/providers/Microsoft.App/containerApps/api-gateway",
+                        "external": False,
+                        "directRoutesBlocked": True,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.filtered = {
+            "openapi": "3.0.3",
+            "info": {"title": "t", "version": "0.7.0-rc.3"},
+            "servers": [{"url": "/api/v1"}],
+            "paths": {
+                "/productos": {
+                    "get": {
+                        "operationId": "listarProductos",
+                        "security": [{"userBearer": []}],
+                    }
+                }
+            },
+        }
+        records = FILTER.operation_records(self.filtered)
+        operation_set_hash = FILTER.canonical_sha256(records)
+        self.filtered["x-apim-filter"] = {"operationSetSha256": operation_set_hash}
+        filtered_hash = FILTER.canonical_sha256(self.filtered)
+        self.manifest = {
+            "docsSha": EXPECTED_DOCS_SHA,
+            "gatewaySha": EXPECTED_GATEWAY_SHA,
+            "publicationMode": "effective",
+            "effectivePublication": {
+                "authorized": True,
+                "status": "AUTHORIZED",
+                "publishedOperationIds": ["listarProductos"],
+                "excludedOperations": [],
+            },
+            "operations": [
+                {
+                    "operationId": "listarProductos",
+                    "apimOperationId": FILTER.normalize_apim_operation_id("listarProductos"),
+                    "method": "GET",
+                    "path": "/productos",
+                    "secured": True,
+                    "authSchemes": ["userBearer"],
+                    "identityType": "human",
+                    "securityAlternatives": [{"scheme": "userBearer", "identityType": "human", "roles": ["GESTOR_COMERCIAL"]}],
+                    "rateProfile": "commercial_read",
+                    "environmentEnabled": True,
+                }
+            ],
+            "operationSetSha256": operation_set_hash,
+            "filteredOpenApiCanonicalSha256": filtered_hash,
+        }
+        rate_profile = {
+            "burstCalls": 20,
+            "burstWindowSeconds": 30,
+            "quotaCalls": 1000,
+            "quotaWindowSeconds": 86400,
+            "maxConcurrency": 0,
+        }
         self.parameters = {
-            "apimSubnetResourceId": "/subscriptions/test/resourceGroups/lab/providers/Microsoft.Network/virtualNetworks/vnet/subnets/apim",
+            "environmentTier": "lab",
+            "expectedSubscriptionId": "sub-test",
+            "expectedResourceGroup": "rg-lab",
+            "expectedEnvironment": "lab",
+            "expectedGatewayResourceId": "/subscriptions/sub-test/resourceGroups/rg-lab/providers/Microsoft.App/containerApps/api-gateway",
+            "expectedApimOriginCidrs": ["20.10.20.30/32"],
+            "apimSubnetResourceId": "/subscriptions/sub-test/resourceGroups/rg-lab/providers/Microsoft.Network/virtualNetworks/vnet/subnets/apim",
             "gatewayBackendUrl": "https://gateway.internal.test/api/v1",
+            "azureCliEvidencePath": str(self.cli_evidence_path),
+            "operationalApprovalRef": "CASTILLA-TEST-001",
             "g7Issuer": "https://g7.test/issuer",
             "g7OpenIdConfigurationUrl": "https://g7.test/.well-known/openid-configuration",
             "g7Audience": "g6-gateway",
@@ -172,22 +254,55 @@ class ApimPolicyTests(unittest.TestCase):
             "burstWindowSeconds": 30,
             "quotaCalls": 1000,
             "quotaWindowSeconds": 86400,
-            "applicationInsightsResourceId": "/subscriptions/test/resourceGroups/lab/providers/Microsoft.Insights/components/g6-h5-test",
+            "rateProfiles": {name: dict(rate_profile) for name in FILTER.KNOWN_RATE_PROFILES},
+            "applicationInsightsResourceId": "/subscriptions/sub-test/resourceGroups/rg-lab/providers/Microsoft.Insights/components/g6-h5-test",
             "applicationInsightsConnectionString": "test-placeholder-not-a-real-secret",
-            "filteredOpenApi": "{}",
+            "expectedOperationSetSha256": operation_set_hash,
+            "expectedFilteredOpenApiSha256": filtered_hash,
         }
-        self.filtered = {"paths": {}}
-        operation_set_hash = FILTER.canonical_sha256([])
-        self.filtered["x-apim-filter"] = {"operationSetSha256": operation_set_hash}
-        self.manifest = {
-            "operations": [],
-            "operationSetSha256": operation_set_hash,
-            "filteredOpenApiCanonicalSha256": FILTER.canonical_sha256(self.filtered),
-        }
-        self.parameters["filteredOpenApi"] = json.dumps(self.filtered)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
 
     def test_parameter_preflight_requires_https_explicit_origins_and_valid_windows(self):
-        PARAMS.validate(self.parameters, self.filtered, self.manifest)
+        PARAMS.validate(
+            self.parameters,
+            self.filtered,
+            self.manifest,
+            expected_docs_sha=EXPECTED_DOCS_SHA,
+            expected_gateway_sha=EXPECTED_GATEWAY_SHA,
+        )
+        # Integración completa de preflight con Modalidad B (external=true Allow-only, vnetConfiguration=None)
+        from datetime import datetime, timezone
+
+        mode_b_evidence = Path(self.temp_dir.name) / "az-mode-b.json"
+        mode_b_evidence.write_text(
+            json.dumps(
+                {
+                    "subscriptionId": "sub-test",
+                    "resourceGroup": "rg-lab",
+                    "environment": "lab",
+                    "capturedAtUtc": datetime.now(timezone.utc).isoformat(),
+                    "sourceCommand": "az containerapp show -n api-gateway -g rg-lab",
+                    "acaEnvironment": {"vnetConfiguration": None},
+                    "gatewayApp": {
+                        "resourceId": "/subscriptions/sub-test/resourceGroups/rg-lab/providers/Microsoft.App/containerApps/api-gateway",
+                        "external": True,
+                        "ipSecurityRestrictions": [{"action": "Allow", "ipAddressRange": "20.10.20.30/32"}],
+                        "directRoutesBlocked": True,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        PARAMS.validate(
+            self.parameters | {"azureCliEvidencePath": str(mode_b_evidence)},
+            self.filtered,
+            self.manifest,
+            expected_docs_sha=EXPECTED_DOCS_SHA,
+            expected_gateway_sha=EXPECTED_GATEWAY_SHA,
+        )
+
         for change in (
             {"corsAllowedOrigins": ["*"]},
             {"corsAllowedOrigins": ["https://*.example.test"]},
@@ -201,12 +316,20 @@ class ApimPolicyTests(unittest.TestCase):
             {"applicationInsightsResourceId": "/subscriptions/test/resourceGroups/lab/providers/Microsoft.ApiManagement/service/apim/loggers/logger"},
         ):
             with self.subTest(change=change), self.assertRaises(ValueError):
-                PARAMS.validate(self.parameters | change, self.filtered, self.manifest)
+                PARAMS.validate(
+                    self.parameters | change,
+                    self.filtered,
+                    self.manifest,
+                    expected_docs_sha=EXPECTED_DOCS_SHA,
+                    expected_gateway_sha=EXPECTED_GATEWAY_SHA,
+                )
         with self.assertRaisesRegex(ValueError, "no coincide"):
             PARAMS.validate(
-                self.parameters | {"filteredOpenApi": '{"paths":{"/sustituido":{}}}'},
+                self.parameters | {"expectedFilteredOpenApiSha256": "0" * 64},
                 self.filtered,
                 self.manifest,
+                expected_docs_sha=EXPECTED_DOCS_SHA,
+                expected_gateway_sha=EXPECTED_GATEWAY_SHA,
             )
 
     def test_policies_are_valid_xml_and_keep_security_and_retry_controls(self):
@@ -235,7 +358,10 @@ class ApimPolicyTests(unittest.TestCase):
     def test_application_insights_logger_uses_secure_connection_and_system_identity(self):
         bicep = (ROOT / "main.bicep").read_text(encoding="utf-8")
         self.assertIn("Microsoft.ApiManagement/service/loggers@2022-08-01", bicep)
-        self.assertIn("parent: apim", bicep)
+        logger_block = bicep.split("resource applicationInsightsLogger", 1)[1].split("resource apiDiagnostics", 1)[0]
+        self.assertIn("name: '${apimName}/applicationinsights'", logger_block)
+        self.assertIn("apim", logger_block)
+        self.assertIn("existingApim", logger_block)
         self.assertIn("loggerType: 'applicationInsights'", bicep)
         self.assertIn("resourceId: applicationInsightsResourceId", bicep)
         self.assertIn("connectionString: applicationInsightsConnectionString", bicep)
@@ -305,7 +431,8 @@ class ApimPolicyTests(unittest.TestCase):
             self.assertEqual(item["apimOperationId"], FILTER.normalize_apim_operation_id(item["operationId"]))
             self.assertIn(item["operationId"], str(filtered["paths"][item["path"]][item["method"].lower()]))
         bicep = (ROOT / "main.bicep").read_text(encoding="utf-8")
-        self.assertIn("[for operation in operationsManifest.operations", bicep)
+        self.assertIn("var publicationGatePassed", bicep)
+        self.assertIn("[for operation in authorizedOperations", bicep)
         self.assertIn("${operation.apimOperationId}/policy", bicep)
 
     def test_final_manifest_keeps_h5_operation_count_and_exclusions(self):
@@ -408,6 +535,7 @@ class CompiledArmTests(unittest.TestCase):
                 manifest,
                 EXPECTED_DOCS_SHA,
                 EXPECTED_GATEWAY_SHA,
+                mode="candidate",
             )
             filtered["paths"]["/productos"]["get"]["summary"] = "Documento obsoleto"
             with self.assertRaisesRegex(ValueError, "no se regeneran exactamente"):
@@ -419,6 +547,7 @@ class CompiledArmTests(unittest.TestCase):
                     manifest,
                     EXPECTED_DOCS_SHA,
                     EXPECTED_GATEWAY_SHA,
+                    mode="candidate",
                 )
 
     def test_compiled_arm_has_exact_hierarchical_policy_set_and_exclusions(self):
@@ -484,6 +613,421 @@ class CompiledArmTests(unittest.TestCase):
                     EXPECTED_DOCS_SHA,
                     EXPECTED_GATEWAY_SHA,
                 )
+
+
+class ApimClosureRequirementsTests(unittest.TestCase):
+    def test_enriched_manifest_and_fail_closed_effective_publication(self):
+        manifest = json.loads((ROOT / "openapi/operation-security.json").read_text(encoding="utf-8"))
+        self.assertIn("contractInventory", manifest)
+        self.assertIn("gatewayStaticRegistry", manifest)
+        self.assertIn("candidateCatalog", manifest)
+        self.assertIn("effectivePublication", manifest)
+        self.assertFalse(manifest["effectivePublication"]["authorized"])
+        self.assertFalse(manifest["g5EnabledByDefault"])
+
+        by_id = {op["operationId"]: op for op in manifest["operations"]}
+        for dual_id in ("obtenerCombo", "consultarDisponibilidadCombo"):
+            self.assertEqual(by_id[dual_id]["identityType"], "human_or_m2m")
+            schemes = {alt["scheme"]: alt for alt in by_id[dual_id]["securityAlternatives"]}
+            self.assertEqual(set(schemes.keys()), {"userBearer", "serviceBearer"})
+            self.assertFalse(schemes["userBearer"]["audienceRequired"])
+            self.assertTrue(schemes["serviceBearer"]["audienceRequired"])
+
+        for op in manifest["operations"]:
+            self.assertFalse(op["environmentEnabled"])
+            for key in (
+                "authSchemes",
+                "identityType",
+                "securityAlternatives",
+                "issuerRequired",
+                "audienceRequired",
+                "scopes",
+                "roles",
+                "allowedClients",
+                "clientAllowlistStatus",
+                "introspectionRequired",
+                "exposureProfile",
+                "rateProfile",
+                "environmentEnabled",
+            ):
+                self.assertIn(key, op)
+
+    def test_effective_publish_blocks_without_providers_or_pending_allowlist(self):
+        private = {
+            f"interna{i}": {"get": {"operationId": f"interna{i}", "x-internal": True}}
+            for i in range(1, 6)
+        }
+        spec = {
+            "openapi": "3.0.3",
+            "info": {"title": "t", "version": "1"},
+            "paths": {
+                **{f"/{p}": item for p, item in private.items()},
+                "/combo": {
+                    "get": {
+                        "operationId": "obtenerCombo",
+                        "security": [{"userBearer": []}, {"serviceBearer": []}],
+                        "x-service-audience": "api-productos",
+                        "x-required-scope": "combos:leer",
+                    }
+                },
+                "/m2m-pending": {
+                    "get": {
+                        "operationId": "consultarDisponibilidadCombo",
+                        "security": [{"serviceBearer": []}],
+                        "x-service-audience": "api-productos",
+                        "x-required-scope": "combos:leer",
+                    }
+                },
+            },
+            "servers": [{"url": "/api/v1"}],
+        }
+        routes = [
+            {"method": "GET", "path": "/api/v1/combo", "operationId": "obtenerCombo", "service": "combos-svc"},
+            {"method": "GET", "path": "/api/v1/m2m-pending", "operationId": "consultarDisponibilidadCombo", "service": "combos-svc"},
+        ]
+        with self.assertRaisesRegex(ValueError, "Publicación efectiva bloqueada"):
+            FILTER.filter_spec(spec, routes, [], False, "d", "g", effective_publish=True)
+
+        # APIM-R3-01: human_or_m2m con M2M pendiente se bloquea por defecto (sin allow_human_only_when_m2m_pending)
+        with self.assertRaisesRegex(ValueError, "Publicación efectiva bloqueada"):
+            FILTER.filter_spec(
+                spec,
+                routes,
+                [],
+                False,
+                "d",
+                "g",
+                security_profile="G7_AUTHENTICATED",
+                enabled_providers=["combos-svc"],
+                effective_publish=True,
+            )
+
+        # APIM-R3-01: con allow_human_only_when_m2m_pending=True publica solo alternativa humana explícita
+        filtered, manifest = FILTER.filter_spec(
+            spec,
+            routes,
+            [],
+            False,
+            "d",
+            "g",
+            security_profile="G7_AUTHENTICATED",
+            enabled_providers=["combos-svc"],
+            effective_publish=True,
+            allow_human_only_when_m2m_pending=True,
+        )
+        self.assertTrue(manifest["effectivePublication"]["authorized"])
+        self.assertEqual(manifest["effectivePublication"]["publishedOperationIds"], ["obtenerCombo"])
+        self.assertEqual(manifest["operations"][0]["identityType"], "human")
+        self.assertEqual(manifest["operations"][0]["roles"], ["GESTOR_COMERCIAL"])
+        self.assertEqual(manifest["operations"][0]["m2mAlternativeExcludedReason"], "PENDING_G7_ALLOWLIST")
+        self.assertEqual(set(filtered["paths"].keys()), {"/combo"})
+        self.assertEqual(filtered["paths"]["/combo"]["get"]["security"], [{"userBearer": []}])
+        self.assertNotIn("x-service-audience", filtered["paths"]["/combo"]["get"])
+        self.assertNotIn("x-required-scope", filtered["paths"]["/combo"]["get"])
+        self.assertIn(
+            {"operationId": "consultarDisponibilidadCombo", "reason": "PENDING_G7_ALLOWLIST"},
+            manifest["effectivePublication"]["excludedOperations"],
+        )
+
+        # APIM-R4-01 negativo: OpenAPI que anuncia serviceBearer cuando manifiesto permite solo userBearer
+        tampered = copy.deepcopy(filtered)
+        tampered["paths"]["/combo"]["get"]["security"] = [{"userBearer": []}, {"serviceBearer": []}]
+        tampered_manifest = copy.deepcopy(manifest)
+        tampered_manifest["filteredOpenApiCanonicalSha256"] = FILTER.canonical_sha256(tampered)
+        with self.assertRaisesRegex(ValueError, "Inconsistencia entre security"):
+            FILTER.validate_artifact_pair(tampered, tampered_manifest)
+
+    def test_human_role_parity_default_explicit_and_mismatch(self):
+        private = {
+            f"interna{i}": {"get": {"operationId": f"interna{i}", "x-internal": True}}
+            for i in range(1, 6)
+        }
+        spec = {
+            "openapi": "3.0.3",
+            "info": {"title": "t", "version": "1"},
+            "paths": {
+                **{f"/{p}": item for p, item in private.items()},
+                "/sin-rol": {"get": {"operationId": "opSinRol", "security": [{"userBearer": []}]}},
+                "/con-rol": {
+                    "get": {
+                        "operationId": "opConRol",
+                        "security": [{"userBearer": []}],
+                        "x-required-role": "ADMIN_SISTEMA",
+                    }
+                },
+            },
+            "servers": [{"url": "/api/v1"}],
+        }
+        routes = [
+            {"method": "GET", "path": "/api/v1/sin-rol", "operationId": "opSinRol", "service": "catalog-svc"},
+            {"method": "GET", "path": "/api/v1/con-rol", "operationId": "opConRol", "service": "catalog-svc"},
+        ]
+        _, manifest = FILTER.filter_spec(
+            spec, routes, [], False, "d", "g",
+            security_profile="G7_AUTHENTICATED", enabled_providers=["catalog-svc"], effective_publish=True,
+        )
+        by_id = {op["operationId"]: op for op in manifest["operations"]}
+        self.assertEqual(by_id["opSinRol"]["roles"], ["GESTOR_COMERCIAL"])
+        self.assertEqual(by_id["opConRol"]["roles"], ["ADMIN_SISTEMA"])
+
+        # Discrepancia explícita entre rol Docs y Gateway bloquea generación
+        bad_routes = [
+            {"method": "GET", "path": "/api/v1/sin-rol", "operationId": "opSinRol", "service": "catalog-svc"},
+            {
+                "method": "GET",
+                "path": "/api/v1/con-rol",
+                "operationId": "opConRol",
+                "service": "catalog-svc",
+                "role": "OTRO_ROL",
+            },
+        ]
+        with self.assertRaisesRegex(ValueError, "Discrepancia explícita de rol"):
+            FILTER.filter_spec(spec, bad_routes, [], False, "d", "g")
+
+    def test_effective_g5_opt_in_reproducibility_and_arm_fixed_openapi(self):
+        private = {
+            f"interna{i}": {"get": {"operationId": f"interna{i}", "x-internal": True}}
+            for i in range(1, 6)
+        }
+        g5_paths = {
+            f"/g5/{i}": {
+                "post": {
+                    "operationId": f"operacionG5{i}",
+                    "security": [{"serviceBearer": []}],
+                    "x-service-audience": "api-productos",
+                    "x-required-scope": "cupones:consumir",
+                    "x-allowed-client-ids": ["modulo-ventas"],
+                }
+            }
+            for i in range(1, 5)
+        }
+        spec = {
+            "openapi": "3.1.0",
+            "info": {"title": "fixture", "version": "0.7.0-rc.3"},
+            "servers": [{"url": "/api/v1"}],
+            "paths": {
+                **{f"/{p}": item for p, item in private.items()},
+                "/productos": {
+                    "get": {"operationId": "listarProductos", "security": [{"userBearer": []}]}
+                },
+                **g5_paths,
+            },
+        }
+        with tempfile.TemporaryDirectory(prefix="apim-effective-g5-") as tmp:
+            d = Path(tmp)
+            src = d / "openapi.yaml"
+            gw = d / "contract-routes.ts"
+            g5 = d / "g5-h5-routes.ts"
+            src.write_text(json.dumps(spec), encoding="utf-8")
+            gw.write_text(
+                "[\n"
+                "{ method: 'GET', path: '/api/v1/productos', operationId: 'listarProductos', service: 'catalog-svc' },\n"
+                "{ method: 'GET', path: '/api/v1/legacy-a', operationId: 'obtenerDefinicionPrecioProductoAdministracion', service: 'pricing-svc' },\n"
+                "{ method: 'GET', path: '/api/v1/legacy-b', operationId: 'obtenerDefinicionPrecioSkuAdministracion', service: 'pricing-svc' }\n"
+                "]",
+                encoding="utf-8",
+            )
+            g5.write_text("[\n" + ",\n".join(f"{{ method: 'POST', path: '/api/v1/g5/{i}', operationId: 'operacionG5{i}', service: 'promotions-svc' }}" for i in range(1, 5)) + "\n]", encoding="utf-8")
+            filtered, manifest = FILTER.filter_spec(
+                spec,
+                FILTER.read_registry(gw),
+                FILTER.read_registry(g5),
+                True,
+                EXPECTED_DOCS_SHA,
+                EXPECTED_GATEWAY_SHA,
+                g5_authorized=True,
+                security_profile="G7_AUTHENTICATED",
+                enabled_providers=["catalog-svc", "promotions-svc"],
+                effective_publish=True,
+            )
+            ARM.validate_source_artifacts(
+                src, gw, g5, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA,
+                mode="effective",
+                security_profile="G7_AUTHENTICATED",
+                enabled_providers=["catalog-svc", "promotions-svc"],
+                enable_g5=True,
+                g5_authorized=True,
+            )
+            fake_arm = {
+                "variables": {
+                    "operationsManifest": "[variables('compiled')]",
+                    "compiled": manifest,
+                    "fixedFilteredOpenApi": "[string(variables('fixedFilteredOpenApiObject'))]",
+                    "fixedFilteredOpenApiObject": filtered,
+                },
+                "resources": {
+                    "api": {"properties": {"value": "[variables('fixedFilteredOpenApi')]"}},
+                    "operationPolicies": {
+                        "type": "Microsoft.ApiManagement/service/apis/operations/policies",
+                        "copy": {"count": "[length(variables('authorizedOperations'))]"},
+                        "name": "[format('{0}/{1}/{2}/policy', parameters('apimName'), variables('apiName'), variables('authorizedOperations')[copyIndex()].apimOperationId)]",
+                        "dependsOn": ["api", "openIdNamedValue", "issuerNamedValue", "audienceNamedValue"],
+                    },
+                },
+            }
+            ARM.validate(fake_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=True)
+            # Negativo: G5 presente sin autorización
+            with self.assertRaisesRegex(ValueError, "sin opt-in autorizado"):
+                ARM.validate(fake_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=False)
+            # Negativo: OpenAPI embebido en ARM sustituido con ruta extra
+            tampered_arm = copy.deepcopy(fake_arm)
+            tampered_arm["variables"]["fixedFilteredOpenApiObject"]["paths"]["/extra"] = {"get": {"operationId": "extra"}}
+            with self.assertRaisesRegex(ValueError, "SHA canónico"):
+                ARM.validate(tampered_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=True)
+            # Negativo: OpenAPI intercambiado en ARM por parámetro
+            fake_arm["resources"]["api"]["properties"]["value"] = "[parameters('filteredOpenApi')]"
+            with self.assertRaisesRegex(ValueError, "fixedFilteredOpenApi"):
+                ARM.validate(fake_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=True)
+
+            # R6-03: alias indirectos $fxv#0, ciclos, faltantes y expresiones no permitidas
+            indirect_arm = copy.deepcopy(fake_arm)
+            indirect_arm["resources"]["api"]["properties"]["value"] = "[variables('fixedFilteredOpenApi')]"
+            indirect_arm["variables"]["fixedFilteredOpenApiObject"] = "[variables('$fxv#0')]"
+            indirect_arm["variables"]["$fxv#0"] = filtered
+            ARM.validate(indirect_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=True)
+
+            cyclic_arm = copy.deepcopy(indirect_arm)
+            cyclic_arm["variables"]["$fxv#0"] = "[variables('fixedFilteredOpenApiObject')]"
+            with self.assertRaisesRegex(ValueError, "Referencia circular"):
+                ARM.validate(cyclic_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=True)
+
+            missing_arm = copy.deepcopy(indirect_arm)
+            missing_arm["variables"]["fixedFilteredOpenApiObject"] = "[variables('$fxv#999')]"
+            with self.assertRaisesRegex(ValueError, "Variable ARM inexistente"):
+                ARM.validate(missing_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=True)
+
+            param_arm = copy.deepcopy(indirect_arm)
+            param_arm["variables"]["fixedFilteredOpenApiObject"] = "[parameters('evilParam')]"
+            with self.assertRaisesRegex(ValueError, "Expresión ARM no permitida"):
+                ARM.validate(param_arm, filtered, manifest, EXPECTED_DOCS_SHA, EXPECTED_GATEWAY_SHA, g5_authorized=True)
+
+    def test_rejects_unknown_security_profile_and_public_without_enabled_provider(self):
+        private = {
+            f"interna{i}": {"get": {"operationId": f"interna{i}", "x-internal": True}}
+            for i in range(1, 6)
+        }
+        spec = {
+            "openapi": "3.0.3",
+            "info": {"title": "t", "version": "1"},
+            "paths": {
+                **{f"/{p}": item for p, item in private.items()},
+                "/seo": {"get": {"operationId": "seoPublico", "security": []}},
+            },
+            "servers": [{"url": "/api/v1"}],
+        }
+        routes = [{"method": "GET", "path": "/api/v1/seo", "operationId": "seoPublico", "service": "taxonomy-svc"}]
+        with self.assertRaisesRegex(ValueError, "securityProfile no reconocido"):
+            FILTER.filter_spec(spec, routes, [], False, "d", "g", security_profile="INVENTADO")
+        with self.assertRaisesRegex(ValueError, "Publicación efectiva bloqueada"):
+            FILTER.filter_spec(
+                spec,
+                routes,
+                [],
+                False,
+                "d",
+                "g",
+                security_profile="PUBLIC_READ_ONLY",
+                authorized_public_allowlist=["seoPublico"],
+                effective_publish=True,
+            )
+
+    def test_policies_and_bicep_enforce_canonical_uuid_dual_auth_and_profiles(self):
+        api_xml = (ROOT / "policies/api.xml").read_text(encoding="utf-8")
+        self.assertIn("System.Text.RegularExpressions.Regex.IsMatch", api_xml)
+        self.assertNotIn("Guid.TryParse", api_xml)
+        self.assertIn("<header>Content-Disposition</header>", api_xml)
+        self.assertIn("<header>Location</header>", api_xml)
+        self.assertIn('buffer-request-body="false"', api_xml)
+        self.assertIn('buffer-response="false"', api_xml)
+        self.assertIn("<on-error>", api_xml)
+
+        secured_xml = (ROOT / "policies/operation-secured.xml").read_text(encoding="utf-8")
+        self.assertIn("{{audience-check-element}}", secured_xml)
+        self.assertIn("human_or_m2m", secured_xml)
+        self.assertIn("SCOPE_INSUFICIENTE", secured_xml)
+        self.assertIn("{{concurrency-limit-open}}", secured_xml)
+        self.assertIn('buffer-response="false"', secured_xml)
+
+        public_xml = (ROOT / "policies/operation-public.xml").read_text(encoding="utf-8")
+        self.assertIn("context.Request.IpAddress", public_xml)
+        self.assertIn('buffer-response="false"', public_xml)
+        self.assertNotIn("X-Forwarded-For", public_xml)
+        self.assertNotIn("X-Real-IP", public_xml)
+
+        bicep_text = (ROOT / "main.bicep").read_text(encoding="utf-8")
+        self.assertIn("param reuseExistingApim bool", bicep_text)
+        self.assertIn("param environmentTier string", bicep_text)
+        self.assertIn("param rateProfiles object\n", bicep_text)
+        self.assertIn("var fixedFilteredOpenApiObject = loadJsonContent('./openapi/gateway-filtered.compact.json')", bicep_text)
+        self.assertIn("var fixedFilteredOpenApi = string(fixedFilteredOpenApiObject)", bicep_text)
+        self.assertNotIn("loadTextContent('./openapi/gateway-filtered.json')", bicep_text)
+        self.assertNotIn("param filteredOpenApi string", bicep_text)
+        self.assertIn("var publicationGatePassed", bicep_text)
+        self.assertIn("var authorizedOperations", bicep_text)
+        self.assertNotIn("requireEffectivePublication", bicep_text)
+        self.assertIn("bytes: 0", bicep_text)
+
+        compact_text = (ROOT / "openapi/gateway-filtered.compact.json").read_text(encoding="utf-8")
+        self.assertLessEqual(len(compact_text), FILTER.BICEP_LOAD_JSON_MAX_CHARS)
+        self.assertEqual(
+            FILTER.canonical_sha256(json.loads(compact_text)),
+            FILTER.canonical_sha256(json.loads((ROOT / "openapi/gateway-filtered.json").read_text(encoding="utf-8"))),
+        )
+
+    def test_aca_network_evidence_allow_only_and_internal_modes(self):
+        expected_cidrs = ["20.10.20.30/32"]
+        # Modalidad A: external=false con vnetConfiguration
+        PARAMS.validate_aca_network_evidence(
+            {"external": False, "directRoutesBlocked": True},
+            {"vnetConfiguration": {"infrastructureSubnetId": "/subscriptions/s/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/v/subnets/s"}},
+            expected_cidrs,
+        )
+        # Modalidad B: external=true con reglas exclusivamente Allow hacia APIM
+        PARAMS.validate_aca_network_evidence(
+            {
+                "external": True,
+                "ipSecurityRestrictions": [{"action": "Allow", "ipAddressRange": "20.10.20.30/32"}],
+                "directRoutesBlocked": True,
+            },
+            {"vnetConfiguration": None},
+            expected_cidrs,
+        )
+        # Negativo: mezcla Allow y Deny (inválida en ACA)
+        with self.assertRaisesRegex(ValueError, "mezclar reglas Allow y Deny"):
+            PARAMS.validate_aca_network_evidence(
+                {
+                    "external": True,
+                    "ipSecurityRestrictions": [
+                        {"action": "Allow", "ipAddressRange": "20.10.20.30/32"},
+                        {"action": "Deny", "ipAddressRange": "0.0.0.0/0"},
+                    ],
+                    "directRoutesBlocked": True,
+                },
+                {"vnetConfiguration": None},
+                expected_cidrs,
+            )
+        # Negativo: wildcard 0.0.0.0/0 en Allow
+        with self.assertRaisesRegex(ValueError, "abiertos"):
+            PARAMS.validate_aca_network_evidence(
+                {
+                    "external": True,
+                    "ipSecurityRestrictions": [{"action": "Allow", "ipAddressRange": "0.0.0.0/0"}],
+                    "directRoutesBlocked": True,
+                },
+                {"vnetConfiguration": None},
+                expected_cidrs,
+            )
+        # Negativo: CIDR fuera de APIM autorizado
+        with self.assertRaisesRegex(ValueError, "expectedApimOriginCidrs"):
+            PARAMS.validate_aca_network_evidence(
+                {
+                    "external": True,
+                    "ipSecurityRestrictions": [{"action": "Allow", "ipAddressRange": "198.51.100.10/32"}],
+                    "directRoutesBlocked": True,
+                },
+                {"vnetConfiguration": None},
+                expected_cidrs,
+            )
 
 
 if __name__ == "__main__":

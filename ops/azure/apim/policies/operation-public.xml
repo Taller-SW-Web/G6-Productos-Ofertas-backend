@@ -5,7 +5,9 @@
     <rate-limit-by-key calls="{{burst-calls}}" renewal-period="{{burst-window-seconds}}" counter-key="@((string)context.Variables[&quot;rateIdentity&quot;] + &quot;:{{operation-id}}&quot;)" />
     <quota-by-key calls="{{quota-calls}}" renewal-period="{{quota-window-seconds}}" counter-key="@((string)context.Variables[&quot;rateIdentity&quot;] + &quot;:{{operation-id}}&quot;)" />
   </inbound>
-  <backend><base /></backend>
+  <backend>
+    <forward-request buffer-request-body="false" buffer-response="false" />
+  </backend>
   <outbound><base /></outbound>
   <on-error><base /></on-error>
 </policies>
