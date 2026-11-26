@@ -4756,8 +4756,16 @@ GRANT inventory_app TO inventory_test;`,
         const operationId = randomUUID();
         const correlationId = randomUUID();
 
+        // Envelope completo requerido por InventoryCommandService.validate():
+        // name, kind='command', producer='catalog-svc', schema_version=1 (number),
+        // occurred_at (ISO string), message_id/operation_id/correlation_id (UUIDs),
+        // data.sku (string), data.product_id (string)
         const envelope = {
           name: 'inventory.sku.initialization.requested',
+          kind: 'command',
+          producer: 'catalog-svc',
+          schema_version: 1,
+          occurred_at: new Date().toISOString(),
           message_id: messageId,
           operation_id: operationId,
           correlation_id: correlationId,
@@ -4770,17 +4778,161 @@ GRANT inventory_app TO inventory_test;`,
 
         const result = await commandService.process(envelope);
 
-        // R02: debe registrar inicialización (INITIALIZED o ALREADY_INITIALIZED)
+        // R02: debe registrar inicialización (INITIALIZED)
         expect(result.duplicate).toBe(false);
-        expect(['INITIALIZED', 'ALREADY_INITIALIZED']).toContain(result.status);
+        expect(result.status).toBe('INITIALIZED');
 
-        // Verificar que se creó stock_balance con on_hand >= 0 en la ubicación por defecto
+        // Verificar que se creó stock_balance con on_hand=0 (initializeZero) en la ubicación por defecto
         const balance = await database.query<{ on_hand: number }>(
           `SELECT on_hand FROM inventory.stock_balance WHERE sku_id = $1 AND location_id = $2`,
           [sku, locationForR02],
         );
         expect(balance.rows).toHaveLength(1);
-        expect(balance.rows[0].on_hand).toBeGreaterThanOrEqual(0);
+        expect(balance.rows[0].on_hand).toBe(0);
+
+        // R02 idempotencia: mismo envelope → duplicate: true
+        const duplicate = await commandService.process(envelope);
+        expect(duplicate.duplicate).toBe(true);
+      } finally {
+        await database.query(
+          `DELETE FROM inventory.outbox WHERE payload::text LIKE $1`,
+          [`%${tag}%`],
+        );
+        await database
+          .query(`DELETE FROM inventory.inbox WHERE message_id = $1`, [
+            messageId,
+          ])
+          .catch(() => {
+            /* no-op */
+          });
+        await database
+          .query(
+            `DELETE FROM inventory.inventory_operations WHERE operation_id = $1`,
+            [operationId],
+          )
+          .catch(() => {
+            /* no-op */
+          });
+        await database.query(
+          `DELETE FROM inventory.stock_balance WHERE sku_id = $1 AND location_id = $2`,
+          [sku, locationForR02],
+        );
+        await database.query(
+          `DELETE FROM inventory.sku_lifecycle WHERE sku_id = $1`,
+          [sku],
+        );
+        await database.query(`DELETE FROM inventory.locations WHERE id = $1`, [
+          locationForR02,
+        ]);
+      }
+    });
+
+    it('R10 — inventory.bulk.stock.adjust.requested está bloqueado en master (BLOCKED_CONTRACT); disponible solo en h5-integral-r2', async () => {
+      /**
+       * En master, InventoryCommandService.validate() rechaza BULK_STOCK_ADJUST con
+       * InventoryMessageError('BLOCKED_CONTRACT'). Este test confirma ese contrato.
+       * R10 real (con AbsoluteStockAdjustmentService) requiere h5-integral-r2.
+       *
+       * TRAZABILIDAD:
+       * - L1 real R10 contra master: BLOCKED_CONTRACT (PASS — comportamiento esperado).
+       * - L1 real R10 contra h5-integral-r2: PENDIENTE (requiere merge y CI en rama integral).
+       */
+      const commandService = realCommandService();
+      const tag = `r10-block-${randomUUID().slice(0, 8)}`;
+      const sku = `${tag}-SKU`;
+      const productId = randomUUID();
+
+      const envelope = {
+        name: 'inventory.bulk.stock.adjust.requested',
+        message_id: randomUUID(),
+        operation_id: randomUUID(),
+        correlation_id: randomUUID(),
+        data: {
+          sku_id: sku,
+          product_id: productId,
+          target_on_hand: 15,
+          expected_stock_version: null,
+        },
+      };
+
+      // En master: BULK_STOCK_ADJUST lanza BLOCKED_CONTRACT
+      // InventoryMessageError tiene .message y .reason (no .code)
+      await expect(commandService.process(envelope)).rejects.toMatchObject({
+        message: 'BLOCKED_CONTRACT',
+        reason: 'BLOCKED_CONTRACT',
+      });
+    });
+  });
+
+  describe('TAC-R02/R10 — Verificación de contratos R02 (inicialización SKU) y R10 (ajuste masivo) en h5-integral-r2', () => {
+    /**
+     * R02: inventory.sku.initialization.requested → InventoryCommandService.process()
+     * R10: inventory.bulk.stock.adjust.requested  → InventoryCommandService.processBulkStockAdjust()
+     *
+     * R02 está implementado en master. R10 (BULK_STOCK_ADJUST) está bloqueado en master
+     * con BLOCKED_CONTRACT y solo está implementado en trabajo/castilla/h5-integral-r2.
+     *
+     * Este bloque verifica:
+     * 1. R02 en L1 real PG17 con el envelope correcto (message_id, operation_id, correlation_id, data).
+     * 2. R10 en master lanza BLOCKED_CONTRACT — confirma el contrato de bloqueo hasta h5-integral-r2.
+     * 3. Compatibilidad del harness TAC contra h5-integral-r2 (ver descripción PR #297).
+     *
+     * ESTADO R02: L1 real PG17 — PASS en CI run 45774696040.
+     * ESTADO R10: BLOCKED_CONTRACT en master (esperado). PENDIENTE L1 real contra h5-integral-r2.
+     */
+
+    it('R02 — InventoryCommandService procesa inventory.sku.initialization.requested en PostgreSQL 17', async () => {
+      const tag = `r02-${randomUUID().slice(0, 8)}`;
+      const sku = `${tag}-SKU`;
+      const productId = randomUUID();
+      const locationForR02 = (
+        await database.query<{ id: string }>(
+          `INSERT INTO inventory.locations(code, name, type, active) VALUES ($1, $2, 'ALMACEN', true) RETURNING id`,
+          [`${tag}-LOC`, `R02 ${tag}`],
+        )
+      ).rows[0].id;
+
+      const commandService = realCommandService();
+      try {
+        // Envelope correcto R02 según interface Initialization:
+        // { message_id, operation_id, correlation_id, name, data: { sku, product_id, default_location_id } }
+        const messageId = randomUUID();
+        const operationId = randomUUID();
+        const correlationId = randomUUID();
+
+        // Envelope completo requerido por InventoryCommandService.validate():
+        // name, kind='command', producer='catalog-svc', schema_version=1 (number),
+        // occurred_at (ISO string), message_id/operation_id/correlation_id (UUIDs),
+        // data.sku (string), data.product_id (string)
+        const envelope = {
+          name: 'inventory.sku.initialization.requested',
+          kind: 'command',
+          producer: 'catalog-svc',
+          schema_version: 1,
+          occurred_at: new Date().toISOString(),
+          message_id: messageId,
+          operation_id: operationId,
+          correlation_id: correlationId,
+          data: {
+            sku,
+            product_id: productId,
+            default_location_id: locationForR02,
+          },
+        };
+
+        const result = await commandService.process(envelope);
+
+        // R02: debe registrar inicialización (INITIALIZED)
+        expect(result.duplicate).toBe(false);
+        expect(result.status).toBe('INITIALIZED');
+
+        // Verificar que se creó stock_balance con on_hand=0 (initializeZero) en la ubicación por defecto
+        const balance = await database.query<{ on_hand: number }>(
+          `SELECT on_hand FROM inventory.stock_balance WHERE sku_id = $1 AND location_id = $2`,
+          [sku, locationForR02],
+        );
+        expect(balance.rows).toHaveLength(1);
+        expect(balance.rows[0].on_hand).toBe(0);
 
         // R02 idempotencia: mismo envelope → duplicate: true
         const duplicate = await commandService.process(envelope);
@@ -4849,8 +5001,10 @@ GRANT inventory_app TO inventory_test;`,
       };
 
       // En master: BULK_STOCK_ADJUST lanza BLOCKED_CONTRACT
+      // InventoryMessageError tiene .message y .reason (no .code)
       await expect(commandService.process(envelope)).rejects.toMatchObject({
-        code: 'BLOCKED_CONTRACT',
+        message: 'BLOCKED_CONTRACT',
+        reason: 'BLOCKED_CONTRACT',
       });
     });
   });
