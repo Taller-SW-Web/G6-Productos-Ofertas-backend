@@ -10,8 +10,8 @@ const BACKEND_ROOT = resolve(process.cwd());
 const FRONTEND_ROOT = resolve(BACKEND_ROOT, "../frontend");
 const DOCS_ROOT = resolve(BACKEND_ROOT, "../docs");
 const MANIFEST_PATH = resolve(FRONTEND_ROOT, "tests/e2e-real/.runtime-stack.json");
-const REPORT_JSON_PATH = resolve(DOCS_ROOT, "hitos/h5/evidencias/r2-cierre-iteracion-6/MENSAJERIA_19_RECORRIDOS.json");
-const REPORT_CSV_PATH = resolve(DOCS_ROOT, "hitos/h5/evidencias/r2-cierre-iteracion-6/MENSAJERIA_19_RECORRIDOS.csv");
+const REPORT_JSON_PATH = resolve(DOCS_ROOT, "hitos/h5/evidencias/r2-cierre-iteracion-7/MENSAJERIA_19_RECORRIDOS.json");
+const REPORT_CSV_PATH = resolve(DOCS_ROOT, "hitos/h5/evidencias/r2-cierre-iteracion-7/MENSAJERIA_19_RECORRIDOS.csv");
 const VALID_PNG_BYTES = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=",
   "base64",
@@ -128,18 +128,18 @@ async function main() {
   let stackExitCode = null;
   const stackProc = spawn("node", ["tests/e2e-real/startRealStackAndVite.mjs", "--no-vite"], {
     cwd: FRONTEND_ROOT,
-    env: { ...process.env, G6_REAL_STACK_SKIP_VITE: "1" },
-    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, G6_BACKEND_ROOT: BACKEND_ROOT, G6_DOCS_ROOT: DOCS_ROOT, G6_REAL_STACK_SKIP_VITE: "1" },
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
   stackProc.stdout.on("data", (d) => { stackLogs += d.toString(); });
   stackProc.stderr.on("data", (d) => { stackLogs += d.toString(); });
   stackProc.on("close", (code) => { stackExitCode = code; });
 
   const stopStack = async () => {
-    if (!stackProc.killed) {
-      stackProc.kill("SIGTERM");
-      await delay(500);
-      if (!stackProc.killed) stackProc.kill("SIGKILL");
+    if (stackProc.exitCode === null && stackProc.signalCode === null) {
+      stackProc.send({ type: "G6_STACK_STOP" });
+      await Promise.race([new Promise((r) => stackProc.once("exit", r)), delay(8000)]);
+      if (stackProc.exitCode === null && stackProc.signalCode === null) stackProc.kill("SIGKILL");
     }
   };
 
@@ -176,13 +176,17 @@ async function main() {
     const bulkProdRows = await pgSelect(env.g5SeedOrigin, `SELECT id::text AS id FROM catalog.products WHERE sku_base = '${bulkSku}'`);
     const bulkProdId = bulkProdRows[0]?.id;
     if (!bulkProdId) throw new Error(`BULK_PRODUCT_NOT_FOUND for ${bulkSku}`);
+    requireSeedResult("completarPerfilBulk", await httpCall(`${gw}/api/v1/productos/${bulkProdId}`, { method: "PATCH", headers: authH, body: { perfilFisico: { pesoKg: 0.2, dimensionesCm: { alto: 5, ancho: 5, largo: 5 } } } }));
+    const bulkReady = await pollUntil(() => pgSelect(env.g5SeedOrigin, `SELECT count(*)::int AS c FROM catalog.activation_checks WHERE product_id = '${bulkProdId}'::uuid AND state = 'COMPLETED'`), (rows) => Number(rows[0]?.c) === 2);
+    if (!bulkReady) throw new Error("BULK_PREPARATION_NOT_COMPLETED");
+    requireSeedResult("activarProductoBulk", await httpCall(`${gw}/api/v1/productos/${bulkProdId}/activar`, { method: "POST", headers: { ...authH, "Idempotency-Key": randomUUID() }, body: {} }));
 
     // 2. Trigger R06/R07/R11/R15 via administrative product creation + activation
     const admSku = `ADM-MSG-${randomUUID().slice(0, 6).toUpperCase()}`;
     const prodRes = requireSeedResult("crearProducto", await httpCall(`${gw}/api/v1/productos`, {
       method: "POST",
       headers: { ...authH, "Idempotency-Key": randomUUID() },
-      body: { nombre: `Prod Adm ${admSku}`, descripcion: "Desc", categoriaId: catId, tipoProductoId: typeId, marcaId: brandId, tieneVariantes: false, skuBase: admSku, precioBaseInicial: 90, moneda: "PEN", imagenPrincipalUrl: "https://example.test/a.png", perfilFisico: { pesoGramos: 200, altoCm: 5, anchoCm: 5, largoCm: 5 } },
+      body: { nombre: `Prod Adm ${admSku}`, descripcion: "Desc", categoriaId: catId, tipoProductoId: typeId, marcaId: brandId, tieneVariantes: false, skuBase: admSku, precioBaseInicial: 90, imagenes: [{ url: "https://example.test/a.png", principal: true }], perfilFisico: { pesoKg: 0.2, dimensionesCm: { alto: 5, ancho: 5, largo: 5 } } },
     }));
     const admProdId = prodRes.json?.product_id;
     const checksReady = await pollUntil(
@@ -191,8 +195,23 @@ async function main() {
       40,
       300,
     );
-    if (Number(checksReady?.[0]?.c ?? 0) !== 2) throw new Error(`ACTIVATION_CHECKS_NOT_COMPLETED for ${admProdId}`);
+    if (Number(checksReady?.[0]?.c ?? 0) !== 2) {
+      const checks = await pgSelect(env.g5SeedOrigin, `SELECT dependency, state, result_payload FROM catalog.activation_checks WHERE product_id = '${admProdId}'::uuid`);
+      const diagnostic = {
+        checks,
+        catalogOutbox: await pgSelect(env.g5SeedOrigin, `SELECT event_name, payload, published_at FROM catalog.outbox WHERE payload::text LIKE '%${admProdId}%'`),
+        pricingInbox: await pgSelect(env.g5SeedOrigin, `SELECT payload, result FROM pricing.inbox WHERE payload::text LIKE '%${admProdId}%'`),
+        pricingOutbox: await pgSelect(env.g5SeedOrigin, `SELECT event_name, payload FROM pricing.outbox WHERE payload::text LIKE '%${admProdId}%'`),
+        queues: await Promise.all(["g6.pricing.from.catalog", "g6.catalog.from.pricing"].map(async (q) => ({ queue: q, pending: (await httpCall(`${env.isolatedBusUrl}/queues/${q}/peek`)).json, dlq: (await httpCall(`${env.isolatedBusUrl}/queues/${q}/dlq`)).json }))),
+      };
+      throw new Error(`ACTIVATION_CHECKS_NOT_COMPLETED for ${admProdId}: ${JSON.stringify(diagnostic)}`);
+    }
     requireSeedResult("activarProducto", await httpCall(`${gw}/api/v1/productos/${admProdId}/activar`, { method: "POST", headers: { ...authH, "Idempotency-Key": randomUUID() }, body: {} }));
+    // R06 initializes identity with zero balance. Stock for the reservation is
+    // explicit disposable fixture data, not evidence of a receiving operation.
+    requireSeedResult("stockFixtureAdministrativo", await httpCall(`${env.g5SeedOrigin}/__test/inventory-stock`, { method: "POST", body: { sku: admSku, on_hand: 20 } }));
+    const combo = requireSeedResult("crearCombo", await httpCall(`${gw}/api/v1/combos/administracion`, { method: "POST", headers: { ...authH, "Idempotency-Key": randomUUID() }, body: { nombre: `Combo ${admSku}`, componentes: [{ sku: admSku, cantidad: 1 }, { sku: bulkSku, cantidad: 1 }], precioCombo: 150 } }));
+    const comboId = combo.json?.combo_id;
 
     // 3. Trigger R16/R17 via PATCH precio SKU
     requireSeedResult("actualizarPrecioSku", await httpCall(`${gw}/api/v1/precios/skus/${admSku}`, {
@@ -218,7 +237,7 @@ async function main() {
     // 6. Trigger R18/R09 via Taxonomy deactivation request
     const catDeact = requireSeedResult("crearCategoriaDeact", await httpCall(`${gw}/api/v1/categorias`, { method: "POST", headers: authH, body: { nombre: `CatD-${randomUUID().slice(0, 6)}`, slugConfirmado: `catd-${randomUUID().slice(0, 6)}`, categoriaPadreId: null } }));
     const catDeactId = catDeact.json?.categoriaId;
-    const taxOp = requireSeedResult("solicitarDesactivacionCategoria", await httpCall(`${gw}/api/v1/categorias/${catDeactId}/desactivar`, { method: "POST", headers: authH, body: { version: 0 } }));
+    const taxOp = requireSeedResult("solicitarDesactivacionCategoria", await httpCall(`${gw}/api/v1/categorias/${catDeactId}/desactivar`, { method: "POST", headers: authH }));
     const taxOpId = taxOp.json?.operation_id ?? taxOp.json?.operacionId;
     if (taxOpId) {
       await pollUntil(() => httpCall(`${gw}/api/v1/taxonomia/operaciones/${taxOpId}`, { headers: authH }), (r) => ["COMPLETADA", "COMPLETED", "RECHAZADA", "REJECTED"].includes(r.json?.estado ?? r.json?.status), 40, 300);
@@ -264,34 +283,113 @@ async function main() {
     await delay(1000);
 
     // Check DB Inbox/Outbox evidence per flow linked to actual operation/product/sku
-    const qCount = async (sql) => Number((await pgSelect(env.g5SeedOrigin, sql))[0]?.c ?? 0);
+    const queryEvidence = [];
+    const qCount = async (sql) => {
+      try {
+        const rows = await pgSelect(env.g5SeedOrigin, sql);
+        queryEvidence.push({ sql, rows });
+        return Number(rows[0]?.c ?? 0);
+      } catch (error) {
+        queryEvidence.push({ sql, error: error.message });
+        return Number.NaN;
+      }
+    };
     const bulkSteps = bulkDone?.json?.rows?.[0]?.steps ?? [];
     const stepOk = (dom) => bulkSteps.some((s) => s.dominio === dom && s.status === "COMPLETED");
 
     const flows = [
       { id: "R01", cola: "g6.catalog.from.bulk", productor: "bulk-svc", consumidor: "catalog-svc", ok: stepOk("CATALOGO") && (await qCount(`SELECT count(*)::int AS c FROM catalog.outbox WHERE event_name = 'catalog.bulk.upsert.completed' AND payload::text LIKE '%${batchId}%'`)) >= 1 },
       { id: "R02", cola: "g6.inventory.from.bulk", productor: "bulk-svc", consumidor: "inventory-svc", ok: stepOk("INVENTARIO") && (await qCount(`SELECT count(*)::int AS c FROM inventory.inbox WHERE message_type = 'inventory.bulk.stock.adjust.requested' AND payload::text LIKE '%${bulkSku}%'`)) >= 1 },
-      { id: "R03", cola: "g6.pricing.from.bulk", productor: "bulk-svc", consumidor: "pricing-svc", ok: stepOk("PRICING") && (await qCount(`SELECT count(*)::int AS c FROM pricing.bulk_price_jobs WHERE batch_id = '${batchId}'::uuid`)) >= 1 && (await qCount(`SELECT count(*)::int AS c FROM pricing.prices WHERE sku = '${bulkSku}'`)) >= 1 },
-      { id: "R04", cola: "g6.bulk.from.catalog", productor: "catalog-svc", consumidor: "bulk-svc", ok: stepOk("CATALOGO") && (await qCount(`SELECT count(*)::int AS c FROM catalog.outbox WHERE event_name = 'catalog.bulk.upsert.completed' AND status = 'DISPATCHED'`)) >= 1 },
-      { id: "R05", cola: "g6.combos.from.catalog", productor: "catalog-svc", consumidor: "combos-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM catalog.outbox WHERE event_name = 'catalog.product.deactivated' AND payload::text LIKE '%${admProdId}%'`)) >= 1 && (await qCount(`SELECT count(*)::int AS c FROM combos.inbox WHERE payload::text LIKE '%${admProdId}%'`)) >= 1 },
+      { id: "R03", cola: "g6.pricing.from.bulk", productor: "bulk-svc", consumidor: "pricing-svc", ok: stepOk("PRICING") && (await qCount(`SELECT count(*)::int AS c FROM pricing.inbox WHERE event_name = 'pricing.bulk.price.apply.requested' AND payload->'data'->>'batch_id' = '${batchId}'`)) >= 1 && (await qCount(`SELECT count(*)::int AS c FROM pricing.prices p JOIN pricing.price_validities v ON v.price_id = p.id WHERE p.sku = '${bulkSku}' AND v.precio_regular = 75 AND v.is_cancelled = false`)) === 1 },
+      { id: "R04", cola: "g6.bulk.from.catalog", productor: "catalog-svc", consumidor: "bulk-svc", ok: stepOk("CATALOGO") && (await qCount(`SELECT count(*)::int AS c FROM catalog.outbox o JOIN catalog.outbox_delivery d USING (message_id) WHERE o.event_name = 'catalog.bulk.upsert.completed' AND d.destination = 'g6.bulk.from.catalog' AND d.published_at IS NOT NULL AND o.payload::text LIKE '%${batchId}%'`)) >= 1 },
+      { id: "R05", cola: "g6.combos.from.catalog", productor: "catalog-svc", consumidor: "combos-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM combos.inbox WHERE payload::text LIKE '%${admProdId}%' AND result = 'PROCESSED'`)) >= 1 && (await qCount(`SELECT count(*)::int AS c FROM combos.component_projection p JOIN combos.combo_items i ON i.id = p.combo_item_id WHERE i.combo_id = '${comboId}'::uuid AND i.sku = '${admSku}' AND p.catalog_deactivated = true`)) === 1 },
       { id: "R06", cola: "g6.inventory.from.catalog", productor: "catalog-svc", consumidor: "inventory-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM inventory.inbox WHERE message_type = 'inventory.sku.initialization.requested' AND payload::text LIKE '%${admSku}%'`)) >= 1 },
-      { id: "R07", cola: "g6.pricing.from.catalog", productor: "catalog-svc", consumidor: "pricing-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM catalog.outbox WHERE event_name = 'pricing.product.initialization.requested' AND payload::text LIKE '%${admProdId}%'`)) >= 1 && (await qCount(`SELECT count(*)::int AS c FROM pricing.prices WHERE sku = '${admSku}'`)) >= 1 },
-      { id: "R08", cola: "g6.promotions.from.catalog", productor: "catalog-svc", consumidor: "promotions-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM catalog.outbox WHERE event_name = 'catalog.product.deactivated' AND payload::text LIKE '%${admProdId}%'`)) >= 1 && (await qCount(`SELECT count(*)::int AS c FROM promotions.inbox WHERE payload::text LIKE '%${admProdId}%'`)) >= 1 },
+      { id: "R07", cola: "g6.pricing.from.catalog", productor: "catalog-svc", consumidor: "pricing-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM pricing.inbox WHERE event_name = 'pricing.product.initialization.requested' AND payload::text LIKE '%${admProdId}%' AND result = 'APPLIED'`)) === 1 && (await qCount(`SELECT count(*)::int AS c FROM pricing.prices WHERE product_id = '${admProdId}' AND sku IS NULL`)) === 1 },
+      { id: "R08", cola: "g6.promotions.from.catalog", productor: "catalog-svc", consumidor: "promotions-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM promotions.inbox WHERE envelope::text LIKE '%${admProdId}%' AND completed_at IS NOT NULL`)) >= 1 && (await qCount(`SELECT count(*)::int AS c FROM promotions.catalog_projection WHERE reference_type = 'PRODUCTO' AND reference_id = '${admProdId}' AND active = false`)) === 1 },
       { id: "R09", cola: "g6.taxonomy.from.catalog", productor: "catalog-svc", consumidor: "taxonomy-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM catalog.outbox WHERE event_name = 'catalog.master.deactivation.checked' AND payload::text LIKE '%${catDeactId}%'`)) >= 1 && (await qCount(`SELECT count(*)::int AS c FROM taxonomy.inbox WHERE payload::text LIKE '%${catDeactId}%'`)) >= 1 },
-      { id: "R10", cola: "g6.bulk.from.inventory", productor: "inventory-svc", consumidor: "bulk-svc", ok: stepOk("INVENTARIO") && (await qCount(`SELECT count(*)::int AS c FROM inventory.outbox WHERE event_name = 'inventory.bulk.stock.adjust.completed' AND payload::text LIKE '%${batchId}%'`)) >= 1 },
+      { id: "R10", cola: "g6.bulk.from.inventory", productor: "inventory-svc", consumidor: "bulk-svc", ok: stepOk("INVENTARIO") && (await qCount(`SELECT count(*)::int AS c FROM inventory.outbox WHERE event_type = 'inventory.bulk.stock.adjust.completed' AND payload::text LIKE '%${batchId}%'`)) >= 1 },
       { id: "R11", cola: "g6.catalog.from.inventory", productor: "inventory-svc", consumidor: "catalog-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM catalog.activation_checks WHERE product_id = '${admProdId}'::uuid AND dependency = 'INVENTORY' AND state = 'COMPLETED'`)) >= 1 },
-      { id: "R12", cola: "g6.combos.from.inventory", productor: "inventory-svc", consumidor: "combos-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM inventory.outbox WHERE event_name = 'inventory.stock.changed' AND payload::text LIKE '%${admSku}%'`)) >= 1 && (await qCount(`SELECT count(*)::int AS c FROM combos.inbox WHERE payload::text LIKE '%${admSku}%'`)) >= 1 },
-      { id: "R13", cola: "g6.promotions.from.inventory", productor: "inventory-svc", consumidor: "promotions-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM inventory.outbox WHERE event_name = 'inventory.stock.changed' AND payload::text LIKE '%${admSku}%'`)) >= 1 && (await qCount(`SELECT count(*)::int AS c FROM promotions.inbox WHERE payload::text LIKE '%${admSku}%'`)) >= 1 },
-      { id: "R14", cola: "g6.bulk.from.pricing", productor: "pricing-svc", consumidor: "bulk-svc", ok: stepOk("PRICING") },
+      { id: "R12", cola: "g6.combos.from.inventory", productor: "inventory-svc", consumidor: "combos-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM combos.inbox WHERE event_name = 'inventory.stock.changed' AND payload::text LIKE '%${admSku}%' AND result = 'PROCESSED'`)) >= 1 && (await qCount(`SELECT count(*)::int AS c FROM combos.component_projection p JOIN combos.combo_items i ON i.id = p.combo_item_id WHERE i.combo_id = '${comboId}'::uuid AND i.sku = '${admSku}' AND p.inventory_observed_at IS NOT NULL`)) === 1 },
+      { id: "R13", cola: "g6.promotions.from.inventory", productor: "inventory-svc", consumidor: "promotions-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM promotions.inbox WHERE envelope->>'name' = 'inventory.stock.changed' AND envelope->'data'->>'sku' = '${admSku}' AND completed_at IS NOT NULL AND result->>'handled' = 'true' AND result->'invalidation'->>'domain' = 'stock' AND result->'invalidation'->>'targetId' = '${admSku}' AND result->'invalidation'->>'sourceVersion' = envelope->'data'->>'stock_version' AND result->'invalidation'->>'locationId' = envelope->'data'->>'location_id'`)) >= 1 },
+      { id: "R14", cola: "g6.bulk.from.pricing", productor: "pricing-svc", consumidor: "bulk-svc", ok: stepOk("PRICING") && (await qCount(`SELECT count(*)::int AS c FROM pricing.outbox o JOIN pricing.outbox_delivery d USING (message_id) WHERE o.payload::text LIKE '%${batchId}%' AND d.destination = 'g6.bulk.from.pricing' AND d.sent_at IS NOT NULL`)) >= 1 },
       { id: "R15", cola: "g6.catalog.from.pricing", productor: "pricing-svc", consumidor: "catalog-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM catalog.activation_checks WHERE product_id = '${admProdId}'::uuid AND dependency = 'PRICING' AND state = 'COMPLETED'`)) >= 1 },
       { id: "R16", cola: "g6.price-audit.from.pricing", productor: "pricing-svc", consumidor: "price-audit-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM price_audit.price_audit_log WHERE sku = '${admSku}'`)) >= 1 },
-      { id: "R17", cola: "g6.promotions.from.pricing", productor: "pricing-svc", consumidor: "promotions-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM pricing.outbox WHERE event_name = 'pricing.price.changed' AND payload::text LIKE '%${admSku}%'`)) >= 1 && (await qCount(`SELECT count(*)::int AS c FROM promotions.inbox WHERE payload::text LIKE '%${admSku}%'`)) >= 1 },
-      { id: "R18", cola: "g6.catalog.from.taxonomy", productor: "taxonomy-svc", consumidor: "catalog-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM taxonomy.outbox WHERE event_name = 'taxonomy.master.deactivation.requested' AND payload::text LIKE '%${catDeactId}%'`)) >= 1 && (await qCount(`SELECT count(*)::int AS c FROM catalog.inbox WHERE payload::text LIKE '%${catDeactId}%'`)) >= 1 },
+      { id: "R17", cola: "g6.promotions.from.pricing", productor: "pricing-svc", consumidor: "promotions-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM promotions.inbox WHERE envelope->>'name' = 'pricing.price.changed' AND envelope->'data'->>'sku' = '${admSku}' AND envelope->'data'->>'new_price' = '95.00' AND completed_at IS NOT NULL AND result->>'handled' = 'true' AND result->'invalidation'->>'domain' = 'price' AND result->'invalidation'->>'targetId' = '${admSku}' AND result->'invalidation'->>'sourceVersion' = envelope->'data'->>'price_version'`)) === 1 },
+      { id: "R18", cola: "g6.catalog.from.taxonomy", productor: "taxonomy-svc", consumidor: "catalog-svc", ok: (await qCount(`SELECT count(*)::int AS c FROM taxonomy.outbox WHERE event_name = 'taxonomy.master.deactivation.check.requested' AND payload::text LIKE '%${catDeactId}%'`)) >= 1 && (await qCount(`SELECT count(*)::int AS c FROM catalog.inbox WHERE payload::text LIKE '%${catDeactId}%'`)) >= 1 },
       { id: "N01", cola: "g6.promotions.commands", productor: "promotions-svc(http)", consumidor: "promotions-svc(worker)", ok: n01ConsumePoll?.json?.status === "COMPLETED" && n01RestorePoll?.json?.status === "COMPLETED" && (await qCount(`SELECT count(*)::int AS c FROM promotions.coupon_uses WHERE order_id = '${n01Order}'`)) === 1 && (await qCount(`SELECT count(*)::int AS c FROM promotions.coupon_command_receipts WHERE operation_id = '${n01RestoreOp}'::uuid AND status = 'COMPLETED'`)) === 1 },
     ];
 
+    const beforeReplay = requireSeedResult("brokerEvidence", await httpCall(`${env.isolatedBusUrl}/__test/broker-evidence`)).json;
+    const businessTables = ['catalog.products', 'catalog.variants', 'catalog.activation_checks',
+      'inventory.stock_balance', 'inventory.kardex', 'inventory.reservations',
+      'pricing.prices', 'pricing.price_validities', 'combos.component_projection',
+      'price_audit.price_audit_log', 'promotions.coupon_uses', 'promotions.catalog_projection'];
+    const snapshot = async () => Object.fromEntries(await Promise.all(businessTables.map(async (table) => {
+      const rows = await pgSelect(env.g5SeedOrigin,
+        `SELECT count(*)::int AS count, md5(coalesce(string_agg(row_to_json(t)::text, '' ORDER BY row_to_json(t)::text), '')) AS digest FROM ${table} t`);
+      return [table, rows[0]];
+    })));
+    const replayBefore = await snapshot();
+    requireSeedResult('receive unavailable fault', await httpCall(`${env.isolatedBusUrl}/__test/broker-receive-unavailable`, {
+      method: 'POST', body: { queue: 'g6.pricing.from.bulk', durationMs: 1500 },
+    }));
+    const replays = [];
+    for (const flow of flows) {
+      const publication = beforeReplay.evidence.find((event) => event.queue === flow.cola &&
+        event.stage === 'PUBLISHED' && event.envelope && beforeReplay.evidence.some((settled) =>
+          settled.queue === flow.cola && settled.messageId === event.messageId && settled.stage === 'COMPLETED'));
+      if (!publication) throw new Error(`NO_COMPLETED_MESSAGE_FOR_REPLAY ${flow.id}`);
+      const completedBefore = beforeReplay.evidence.filter((event) => event.queue === flow.cola &&
+        event.messageId === publication.messageId && event.stage === 'COMPLETED').length;
+      requireSeedResult(`replay ${flow.id}`, await httpCall(`${env.isolatedBusUrl}/queues/${encodeURIComponent(flow.cola)}/messages`, {
+        method: 'POST', body: { body: JSON.stringify(publication.envelope), messageId: publication.messageId,
+          correlationId: publication.correlationId, subject: publication.subject, contentType: publication.contentType,
+          applicationProperties: publication.applicationProperties },
+      }));
+      replays.push({ flow: flow.id, queue: flow.cola, messageId: publication.messageId, completedBefore });
+    }
+    const unavailableEvidence = requireSeedResult('pending during receive outage', await httpCall(`${env.isolatedBusUrl}/__test/broker-evidence`)).json;
+    const replayPoll = await pollUntil(() => httpCall(`${env.isolatedBusUrl}/__test/broker-evidence`),
+      (r) => replays.every((replay) => r.json?.evidence.filter((event) => event.queue === replay.queue &&
+        event.messageId === replay.messageId && event.stage === 'COMPLETED').length > replay.completedBefore));
+    const replayAfter = await snapshot();
+    const duplicateEvidence = { replays, before: replayBefore, after: replayAfter,
+      recovery: { kind: 'LAB_RECEIVE_503_NOT_CONSUMER_PROCESS_STOP', queue: 'g6.pricing.from.bulk',
+        queuedWhileUnavailable: unavailableEvidence.active['g6.pricing.from.bulk'] >= 1 },
+      allSettled: replays.every((replay) => replayPoll?.json?.evidence.filter((event) => event.queue === replay.queue &&
+        event.messageId === replay.messageId && event.stage === 'COMPLETED').length > replay.completedBefore),
+      unchanged: JSON.stringify(replayBefore) === JSON.stringify(replayAfter) };
+    const invalidId = randomUUID();
+    const validCatalogEvent = beforeReplay.evidence.find((event) => event.stage === 'PUBLISHED' && event.queue === 'g6.promotions.from.catalog');
+    requireSeedResult('invalid producer injection', await httpCall(`${env.isolatedBusUrl}/queues/g6.promotions.from.catalog/messages`, {
+      method: 'POST', body: { body: JSON.stringify({ ...validCatalogEvent.envelope, message_id: invalidId, producer: 'untrusted-producer' }),
+        messageId: invalidId, correlationId: randomUUID(), subject: validCatalogEvent.subject, contentType: validCatalogEvent.contentType,
+        applicationProperties: { ...validCatalogEvent.applicationProperties, producer: 'untrusted-producer' } },
+    }));
+    const invalidPoll = await pollUntil(() => httpCall(`${env.isolatedBusUrl}/__test/broker-evidence`),
+      (r) => r.json?.evidence.some((event) => event.messageId === invalidId && event.stage === 'DEADLETTERED'));
+    const negativeEvidence = { messageId: invalidId, rejected: invalidPoll?.json?.evidence.some((event) =>
+      event.messageId === invalidId && event.stage === 'DEADLETTERED'), unchanged: JSON.stringify(replayAfter) === JSON.stringify(await snapshot()) };
+    const broker = requireSeedResult("brokerEvidence", await httpCall(`${env.isolatedBusUrl}/__test/broker-evidence`)).json;
+    const identifiers = [batchId, admProdId, admSku, catDeactId, n01ConsumeOp, n01RestoreOp];
+    for (const flow of flows) {
+      const queueEvents = broker.evidence.filter((event) => event.queue === flow.cola);
+      const publications = queueEvents.filter((event) => event.stage === "PUBLISHED" &&
+        event.envelope?.producer === flow.productor.split("(")[0] &&
+        identifiers.some((id) => JSON.stringify(event.envelope).includes(id)));
+      flow.messages = publications.map((event) => ({
+        messageId: event.messageId, correlationId: event.correlationId,
+        name: event.envelope.name, schemaVersion: event.envelope.schema_version,
+        publishedAt: event.at,
+        received: queueEvents.some((item) => item.stage === "RECEIVED" && item.messageId === event.messageId),
+        completed: queueEvents.some((item) => item.stage === "COMPLETED" && item.messageId === event.messageId),
+      }));
+      flow.chainPass = flow.messages.some((message) => message.received && message.completed);
+      flow.invalidMessages = queueEvents.filter((event) => event.stage === "DEADLETTERED" && event.messageId !== invalidId);
+      flow.ok = flow.ok && flow.chainPass && flow.invalidMessages.length === 0;
+    }
     const passed = flows.filter((f) => f.ok).length;
-    const summary = { timestamp: new Date().toISOString(), environment: "local-isolated-service-bus-and-postgres", total: flows.length, passed, failed: flows.length - passed, flows };
+    const summary = { timestamp: new Date().toISOString(), environment: "local-isolated-service-bus-and-postgres", transport: "HTTP_IN_MEMORY_NOT_AZURE", total: flows.length, passed, failed: flows.length - passed, fixture: { batchId, bulkProdId, bulkSku, admProdId, admSku, comboId, catDeactId, n01Order, n01ConsumeOp, n01RestoreOp }, flows, queryEvidence, duplicateEvidence, negativeEvidence, broker };
     mkdirSync(dirname(REPORT_JSON_PATH), { recursive: true });
     writeFileSync(REPORT_JSON_PATH, JSON.stringify(summary, null, 2), "utf8");
     const csvLines = [
@@ -300,8 +398,10 @@ async function main() {
     ];
     writeFileSync(REPORT_CSV_PATH, csvLines.join("\n"), "utf8");
     console.log(JSON.stringify({ total: flows.length, passed, failed: flows.length - passed }));
-    exitCode = passed === flows.length ? 0 : 1;
+    exitCode = passed === flows.length && duplicateEvidence.recovery.queuedWhileUnavailable && duplicateEvidence.allSettled && duplicateEvidence.unchanged &&
+      negativeEvidence.rejected && negativeEvidence.unchanged ? 0 : 1;
   } finally {
+    writeFileSync(resolve(BACKEND_ROOT, "tests/h5/messaging-stack.log"), stackLogs, "utf8");
     await stopStack();
     process.exitCode = exitCode;
   }
@@ -309,5 +409,7 @@ async function main() {
 
 void main().catch((err) => {
   console.error(err);
+  mkdirSync(dirname(REPORT_JSON_PATH), { recursive: true });
+  writeFileSync(REPORT_JSON_PATH, JSON.stringify({ status: "SETUP_FAILED", timestamp: new Date().toISOString(), transport: "HTTP_IN_MEMORY_NOT_AZURE", total: 19, executed: 0, notExecuted: 19, error: err.message }, null, 2));
   process.exit(1);
 });

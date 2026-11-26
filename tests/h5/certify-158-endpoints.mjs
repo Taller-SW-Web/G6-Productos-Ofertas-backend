@@ -11,8 +11,9 @@ const FRONTEND_ROOT = resolve(BACKEND_ROOT, "../frontend");
 const DOCS_ROOT = resolve(BACKEND_ROOT, "../docs");
 const MANIFEST_PATH = resolve(FRONTEND_ROOT, "tests/e2e-real/.runtime-stack.json");
 const MATRIX_PATH = resolve(DOCS_ROOT, "hitos/h5/MATRIZ_158_OPERACIONES_H5_R2.csv");
-const REPORT_JSON_PATH = resolve(BACKEND_ROOT, "tests/h5/158_ENDPOINTS_CERTIFICATION_REPORT.json");
-const REPORT_MD_PATH = resolve(BACKEND_ROOT, "tests/h5/158_ENDPOINTS_CERTIFICATION_REPORT.md");
+const RETRY_ONLY = process.argv.includes("--retry-only");
+const REPORT_JSON_PATH = resolve(BACKEND_ROOT, `tests/h5/158_ENDPOINTS_CERTIFICATION_REPORT${RETRY_ONLY ? "_RETRY_ONLY" : ""}.json`);
+const REPORT_MD_PATH = resolve(BACKEND_ROOT, `tests/h5/158_ENDPOINTS_CERTIFICATION_REPORT${RETRY_ONLY ? "_RETRY_ONLY" : ""}.md`);
 
 function parseCsvLine(line) {
   const cols = [];
@@ -164,7 +165,7 @@ async function main() {
         G6_BACKEND_ROOT: BACKEND_ROOT,
         G6_DOCS_ROOT: DOCS_ROOT,
       },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
     },
   );
 
@@ -173,13 +174,13 @@ async function main() {
   stackChild.stderr.on("data", (d) => { stackLogs += d.toString(); });
 
   const stopStack = async () => {
-    if (!stackChild.killed) {
-      stackChild.kill("SIGINT");
+    if (stackChild.exitCode === null && stackChild.signalCode === null) {
+      stackChild.send({ type: "G6_STACK_STOP" });
       await Promise.race([
         new Promise((r) => stackChild.once("exit", r)),
         delay(8_000),
       ]);
-      if (!stackChild.killed) stackChild.kill("SIGKILL");
+      if (stackChild.exitCode === null && stackChild.signalCode === null) stackChild.kill("SIGKILL");
     }
   };
 
@@ -814,6 +815,7 @@ async function main() {
     for (let i = 1; i < matrixLines.length; i++) {
       const cols = parseCsvLine(matrixLines[i]);
       const [opId, vigencia, svc, method, rawRoute, rolScope, actorPerm] = cols;
+      if (RETRY_ONLY && opId !== "reanudarImportacionGeneral") continue;
       const isHealth = rawRoute.includes("/health");
       const isPublic = false;
       const isPrivate = vigencia === "ENDPOINT_PRIVADO" || (!rawRoute.startsWith("/api/v1/") && !isHealth);
@@ -1016,7 +1018,7 @@ async function pgSelect(g5SeedOrigin, sql) {
   return res.json.rows;
 }
 
-async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOrigin, reqBody) {
+async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOrigin, reqBody, requestPath) {
   if (isHealth || method === "GET" || READ_ONLY_POST_OPS.has(opId)) {
     return { label: "NOT_APPLICABLE", ok: true };
   }
@@ -1025,6 +1027,42 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
   }
   const safe = (v) => String(v ?? "").replace(/[^a-zA-Z0-9_-]/g, "");
   try {
+    // A pre-existing row elsewhere in a table cannot prove this mutation.
+    // Match the actual target/returned ID and requested value before legacy checks.
+    const targetMappings = [
+      [/Categoria/, 'taxonomy.categories', 'categoriaId', 'categorias', 'nombre', 'estado'],
+      [/Marca/, 'taxonomy.brands', 'marcaId', 'marcas', 'nombre', 'estado'],
+      [/ValorCaracteristica/, 'taxonomy.characteristic_values', 'valorId', 'valores', 'nombre', 'estado'],
+      [/Caracteristica$/, 'taxonomy.characteristics', 'caracteristicaId', 'caracteristicas', 'nombre', 'estado'],
+      [/TipoProducto$/, 'taxonomy.product_types', 'tipoProductoId', 'tipos-producto', 'nombre', 'estado'],
+      [/Promocion$/, 'promotions.promotions', 'promocionId', 'promociones', 'name', 'state'],
+      [/Cupon$/, 'promotions.coupons', 'cuponId', 'cupones', null, 'state'],
+      [/ReglaRecomendacion$/, 'promotions.recommendation_rules', 'reglaId', 'reglas', 'name', 'state'],
+      [/Combo(?:Administracion)?$/, 'combos.combos', 'comboId', 'combos', 'name', 'status'],
+    ];
+    const mapping = targetMappings.find(([pattern]) => pattern.test(opId));
+    if (mapping && !opId.startsWith('solicitar') && !opId.includes('Asociacion') && !opId.includes('asociar')) {
+      const [, table, idField, segment, nameColumn, stateColumn] = mapping;
+      const parts = requestPath.split('?')[0].split('/');
+      const pathId = parts[parts.indexOf(segment) + 1];
+      const responseId = { promocionId: 'promotionId', cuponId: 'couponId', reglaId: 'ruleId', comboId: 'combo_id' }[idField];
+      const id = safe(posRes.json?.[idField] ?? posRes.json?.[responseId] ?? posRes.json?.id ?? posRes.json?.data?.[idField] ?? pathId);
+      const targetRows = await pgSelect(g5SeedOrigin, `SELECT * FROM ${table} WHERE id = '${id}'::uuid`);
+      if (targetRows.length !== 1) return { label: 'FAIL', ok: false, detail: `TARGET_NOT_PERSISTED ${table} ${id}` };
+      const target = targetRows[0];
+      if (nameColumn && reqBody?.nombre !== undefined && target[nameColumn] !== reqBody.nombre)
+        return { label: 'FAIL', ok: false, detail: `REQUESTED_VALUE_NOT_PERSISTED ${nameColumn}` };
+      if (/^(desactivar|reactivar|activar)/.test(opId)) {
+        const expected = opId.startsWith('desactivar') ? 'INACTIVO' : 'ACTIVO';
+        if (target[stateColumn] !== expected) return { label: 'FAIL', ok: false, detail: `STATE_NOT_PERSISTED ${expected}` };
+      }
+      if (opId === 'actualizarCupon' && Number(target.max_global_uses) !== reqBody.maxUsosGlobal)
+        return { label: 'FAIL', ok: false, detail: 'COUPON_LIMIT_NOT_PERSISTED' };
+      if (opId === 'actualizarReglaRecomendacion' && Number(target.priority) !== reqBody.prioridad)
+        return { label: 'FAIL', ok: false, detail: 'RULE_PRIORITY_NOT_PERSISTED' };
+      if (reqBody?.precioCombo !== undefined && Number(target.combo_price) !== reqBody.precioCombo)
+        return { label: 'FAIL', ok: false, detail: 'COMBO_PRICE_NOT_PERSISTED' };
+    }
     if (["crearProducto", "actualizarProducto", "activarProducto", "desactivarProducto", "reactivarProducto", "reemplazarImagenesProducto", "definirAtributosProducto", "definirPerfilFisicoProducto", "reintentarPreparacionProducto"].includes(opId)) {
       const id = safe(posRes.json?.productoId ?? posRes.json?.product_id ?? (opId === "reintentarPreparacionProducto" ? ctx.retryProdId : ctx.activeProd1));
       const rows = await pgSelect(g5SeedOrigin, `SELECT id, estado, catalog_version FROM catalog.products WHERE id = '${id}'::uuid`);
@@ -1116,8 +1154,8 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       return Number(rows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     if (opId === "actualizarUmbralGlobal") {
-      const rows = await pgSelect(g5SeedOrigin, `SELECT key, value FROM inventory.inventory_config LIMIT 1`);
-      const ok = rows.length === 1 && JSON.stringify(rows[0]?.value ?? "").includes("5");
+      const rows = await pgSelect(g5SeedOrigin, `SELECT umbral_efectivo FROM inventory.stock_threshold_override WHERE sku_id IS NULL AND location_id IS NULL`);
+      const ok = rows.length === 1 && Number(rows[0].umbral_efectivo) === reqBody?.umbral;
       return { label: ok ? "PERSISTENCE_PASS" : "FAIL", ok };
     }
     if (opId === "establecerUmbralSku" || opId === "eliminarUmbralSku") {
@@ -1223,6 +1261,7 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
         { activeProd1, varId, retryProdId, retryVarId, retryBatchId, activeSku1, orderId, orderId2, orderId3, orderId4, couponCode },
         env.g5SeedOrigin,
         posBody,
+        posPath,
       );
       const persistencePass = persistenceCheck.ok;
 
@@ -1232,7 +1271,12 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       let negStatus = 0;
       if (!isHealth) {
         if (method === "GET") {
-          if (opId === "obtenerRecomendaciones") {
+          if (["listarCupones", "listarAuditoriaPrecios"].includes(opId)) {
+            const negRes = await httpCall(`${baseOrigin}${posPath.split("?")[0]}?pagina=0`, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
+            negStatus = negRes.status;
+            negativePass = negRes.status === 400 && negRes.json?.code === "VALIDACION";
+            negativeLabel = negativePass ? "NEGATIVE_CONTRACT_PASS" : "FAIL";
+          } else if (opId === "obtenerRecomendaciones") {
             const negRes = await httpCall(`${baseOrigin}/api/v1/recomendaciones?canal=INVALIDO`, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
             negStatus = negRes.status;
             negativePass = [400, 404].includes(negRes.status);
@@ -1246,6 +1290,7 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
               .replace(/\{[^}]+\}/g, () => randomUUID());
             if (negPath.startsWith("/interno/inventario/reservas/")) negPath = `/api/v1${negPath}`;
             if (negPath.startsWith("/productos/skus/")) negPath = `/api/v1${negPath}`;
+            if (opId === "obtenerProductoPorSlug") negPath += "?canal=MARKETPLACE";
             const negRes = await httpCall(`${baseOrigin}${negPath}`, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
             negStatus = negRes.status;
             negativePass = [400, 404].includes(negRes.status);
@@ -1293,6 +1338,10 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       const overallPass = auth401 && auth403 && functionalPass && persistencePass && asyncTerminalPass && negativeLabel !== "FAIL" && negativeLabel !== "NOT_RUN";
       if (!overallPass) {
         console.error(`[certify] FAIL [${i}/158] ${opId} (${svc} ${method} ${posPath}) -> http=${posRes.status} 401=${auth401} 403=${auth403} func=${functionalPass} pers=${persistenceCheck.label} async=${asyncTerminalPass} neg=${negativeLabel}(${negStatus}) body=${posRes.text.slice(0, 400)}`);
+        if (opId === "reanudarImportacionGeneral") {
+          console.error("[certify] retry snapshot=" + (await httpCall(`${gw}/api/v1/carga-masiva/productos/importaciones/${retryBatchId}`, { headers: { Authorization: `Bearer ${gestorJwt}` } })).text);
+          console.error("[certify] retry inbox=" + JSON.stringify(await pgSelect(env.g5SeedOrigin, `SELECT handler, payload, result FROM bulk.inbox WHERE payload::text LIKE '%${retryBatchId}%'`)));
+        }
       }
 
       results.push({
@@ -1321,7 +1370,7 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
     const executed = results.filter((r) => r.status !== "NOT_RUN").length;
     const countBy = (key, val) => results.filter((r) => r[key] === val).length;
     const summary = {
-      status: failed === 0 && blocked === 0 && notRun === 0 && results.length === 158 ? "PASS" : (blocked > 0 ? "INFRA_LOST" : "FAIL"),
+      status: failed === 0 && blocked === 0 && notRun === 0 && results.length === (RETRY_ONLY ? 1 : 158) ? (RETRY_ONLY ? "FOCUSED_PASS" : "PASS") : (blocked > 0 ? "INFRA_LOST" : "FAIL"),
       timestamp: new Date().toISOString(),
       total: results.length,
       executed,
