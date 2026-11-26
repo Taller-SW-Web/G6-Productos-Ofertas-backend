@@ -46,6 +46,19 @@ for route in runtime:
 rows = []
 for number, row in enumerate(supplied, 1):
     record = {'sourceRow': number, **row, 'grant_verified_now': False}
+    # Preserve the 80 source records; approved decisions resolve stale proposals
+    # without inventing grants or additional client-operation rows.
+    effective = dict(row)
+    if number in (75, 76):
+        effective['client_id'] = 'modulo-marketplace;modulo-chatbot;modulo-retail'
+        record['decision'] = 'DEC-G6-H5-02'
+    elif number in (77, 78, 79):
+        effective['tipo_jwt'] = 'serviceBearer'
+        record['decision'] = 'DEC-G6-H5-01'
+    elif number == 74:
+        effective['scope_requerido'] = 'carga-masiva:contenidos:leer'
+        record['decision'] = 'DEC-G6-H5-04'
+    record['effective_under_approved_decision'] = effective
     if row['api_duena'] != 'G6':
         record['reconciliation'] = 'EXTERNAL_CONTRACT_CONTROLLED_NOT_AUTHORITATIVE'
     elif row['tipo_jwt'] == 'userBearer' or row['estado_acceso'] == 'OPERACIONES_USER_BEARER':
@@ -54,13 +67,13 @@ for number, row in enumerate(supplied, 1):
         route = next((entry for entry in runtime if entry['method'] == row['metodo'] and entry['path'] == row['endpoint']), None)
         if route:
             failures = []
-            if row['tipo_jwt'] not in route['security']:
+            if effective['tipo_jwt'] not in route['security']:
                 failures.append('security')
             if row['audiencia_requerida'] != route.get('audience'):
                 failures.append('audience')
-            if row['scope_requerido'] != route.get('scope'):
+            if effective['scope_requerido'] != route.get('scope'):
                 failures.append('scope')
-            if route.get('clients') and row['client_id'] not in route['clients']:
+            if route.get('clients') and any(client not in route['clients'] for client in effective['client_id'].split(';')):
                 failures.append('client')
             record.update(runtime_scope=route.get('scope'), runtime_clients=route.get('clients'),
                           reconciliation='RUNTIME_MATCH' if not failures else 'RUNTIME_DIFFERENCE', differences=failures)
@@ -69,13 +82,24 @@ for number, row in enumerate(supplied, 1):
             record['reconciliation'] = 'PRIVATE_ABSENT_FROM_GATEWAY' if operation and operation.get('x-internal') else 'NO_GATEWAY_ROUTE'
             if operation:
                 record.update(contract_scope=operation.get('x-required-scope'), contract_clients=operation.get('x-allowed-client-ids'))
+                private_failures = []
+                if effective['scope_requerido'] != operation.get('x-required-scope'):
+                    private_failures.append('scope')
+                if effective['audiencia_requerida'] != operation.get('x-service-audience'):
+                    private_failures.append('audience')
+                if effective['client_id'] not in (operation.get('x-allowed-client-ids') or []):
+                    private_failures.append('client')
+                record['differences'] = private_failures
+                if private_failures:
+                    record['reconciliation'] = 'PRIVATE_CONTRACT_DIFFERENCE'
     rows.append(record)
 
 result = {'source': source.name, 'actualRows': len(rows), 'claimedRowsInMD': 84,
           'openApiVersion': contract['info']['version'], 'gatewayRoutesIncludingEnabledG5': len(runtime),
           'contractOperations': len(operations), 'parity': parity, 'rows': rows,
           'note': 'Static code/contract parity; not G7 grant, external homologation, frontend E2E or Azure deployment evidence.'}
-output = docs / 'hitos/h5/evidencias/r2-cierre-iteracion-7/PARIDAD_ACCESOS_80.json'
+output = docs / 'hitos/h5/evidencias/r2-cierre-gemini/PARIDAD_ACCESOS_80.json'
+output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 print(json.dumps({'actualRows': len(rows), 'parityDifferences': [entry for entry in parity if entry['differences']],
                   'accessDifferences': [entry for entry in rows if entry['reconciliation'] in ('RUNTIME_DIFFERENCE', 'NO_GATEWAY_ROUTE')]}))
