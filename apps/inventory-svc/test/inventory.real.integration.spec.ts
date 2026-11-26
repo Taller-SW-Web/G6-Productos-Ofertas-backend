@@ -4453,6 +4453,24 @@ GRANT inventory_app TO inventory_test;`,
   });
 
   describe('TAC-A01/A02 — INV-03 (small + baseline) e INT-02 L1 real en PostgreSQL 17 descartable', () => {
+    const execSqlScript = async (script: string) => {
+      const statements = script
+        .split(/;\r?\n/)
+        .map((s) =>
+          s
+            .split(/\r?\n/)
+            .filter((line) => !line.trim().startsWith('--'))
+            .join('\n')
+            .trim(),
+        )
+        .filter((s) => s && s !== 'BEGIN' && s !== 'COMMIT');
+      await database.transaction(async (tx) => {
+        for (const stmt of statements) {
+          await tx.query(stmt);
+        }
+      });
+    };
+
     it('INV-03 carga perfiles small y baseline en PostgreSQL 17, verifica aggregate/FKs y limpia sin residuos', async () => {
       for (const profile of ['small', 'baseline'] as const) {
         const fx = generateInventoryFixtureData({
@@ -4461,7 +4479,7 @@ GRANT inventory_app TO inventory_test;`,
         });
         const locIds = fx.locations.map((l: { id: string }) => l.id);
         try {
-          await database.query(fx.sql);
+          await execSqlScript(fx.sql);
 
           const counts = await database.query<{
             balances: number;
@@ -4502,7 +4520,7 @@ GRANT inventory_app TO inventory_test;`,
           );
           expect(lineCheck.rows[0].cnt).toBe(1);
         } finally {
-          await database.query(fx.cleanupSql);
+          await execSqlScript(fx.cleanupSql);
         }
 
         const remaining = await database.query<{ cnt: number }>(
@@ -4598,14 +4616,20 @@ GRANT inventory_app TO inventory_test;`,
         // 2. INV-INT09 real: MARKETPLACE SUFICIENTE vs RETAIL INSUFICIENTE (ruta existe con saldo 0)
         const mktVerify = await availability.verificarCantidadComercial({
           channel_id: 'MARKETPLACE',
-          fulfillment: { mode: 'ENVIO_DOMICILIO' },
+          fulfillment: {
+            mode: 'ENVIO_DOMICILIO',
+            fulfillment_ref: `${tag}-ref-mkt`,
+          },
           lines: [{ sku: skuSplit, quantity: 5 }],
         });
         expect(mktVerify.items[0].result).toBe('SUFICIENTE');
 
         const retVerify = await availability.verificarCantidadComercial({
           channel_id: 'RETAIL',
-          fulfillment: { mode: 'RETIRO_TIENDA' },
+          fulfillment: {
+            mode: 'RETIRO_TIENDA',
+            fulfillment_ref: `${tag}-ref-ret`,
+          },
           lines: [{ sku: skuSplit, quantity: 5 }],
         });
         expect(retVerify.items[0].result).toBe('INSUFICIENTE');
@@ -4655,235 +4679,6 @@ GRANT inventory_app TO inventory_test;`,
           reserved: number;
           available: number;
         }>(
-          `SELECT reserved, available FROM inventory.stock_balance WHERE sku_id = $1 AND location_id = $2`,
-          [skuRollback, locMkt],
-        );
-        expect(balAfterRetry.rows[0]).toEqual({ reserved: 3, available: 7 });
-      } finally {
-        await database.query(
-          `DELETE FROM inventory.reservation_lines WHERE location_id IN ($1, $2)`,
-          [locMkt, locRet],
-        );
-        await database.query(
-          `DELETE FROM inventory.reservations WHERE order_id LIKE $1`,
-          [`${tag}%`],
-        );
-        await database.query(
-          `DELETE FROM inventory.kardex WHERE location_id IN ($1, $2)`,
-          [locMkt, locRet],
-        );
-        await database.query(
-          `DELETE FROM inventory.inventory_operations WHERE location_id IN ($1, $2) OR order_id LIKE $3`,
-          [locMkt, locRet, `${tag}%`],
-        );
-        await database.query(
-          `DELETE FROM inventory.outbox WHERE payload::text LIKE $1`,
-          [`%${tag}%`],
-        );
-        await database.query(
-          `DELETE FROM inventory.commercial_fulfillment_routes WHERE location_id IN ($1, $2)`,
-          [locMkt, locRet],
-        );
-        await database.query(
-          `DELETE FROM inventory.stock_balance WHERE location_id IN ($1, $2)`,
-          [locMkt, locRet],
-        );
-        await database.query(
-          `DELETE FROM inventory.locations WHERE id IN ($1, $2)`,
-          [locMkt, locRet],
-        );
-      }
-    });
-  });
-
-  describe('TAC-A01/A02 — INV-03 (small + baseline) e INT-02 L1 real en PostgreSQL 17 descartable', () => {
-    it('INV-03 carga perfiles small y baseline en PostgreSQL 17, verifica aggregate/FKs y limpia sin residuos', async () => {
-      for (const profile of ['small', 'baseline'] as const) {
-        const fx = generateInventoryFixtureData({
-          seed: `pg17-${profile}-20261126`,
-          profile,
-        });
-        const locIds = fx.locations.map((l: { id: string }) => l.id);
-        try {
-          await database.query(fx.sql);
-
-          const counts = await database.query<{
-            balances: number;
-            on_hand: number;
-            reserved: number;
-            blocked: number;
-            available: number;
-          }>(
-            `SELECT COUNT(*)::int AS balances,
-                    COALESCE(SUM(on_hand), 0)::int AS on_hand,
-                    COALESCE(SUM(reserved), 0)::int AS reserved,
-                    COALESCE(SUM(blocked), 0)::int AS blocked,
-                    COALESCE(SUM(available), 0)::int AS available
-             FROM inventory.stock_balance
-             WHERE location_id = ANY($1::uuid[])`,
-            [locIds],
-          );
-          expect(counts.rows[0]).toEqual({
-            balances: fx.manifest.counts.balances,
-            on_hand: fx.manifest.aggregate.totalOnHand,
-            reserved: fx.manifest.aggregate.totalReserved,
-            blocked: fx.manifest.aggregate.totalBlocked,
-            available: fx.manifest.aggregate.totalAvailable,
-          });
-
-          const routesRes = await database.query<{ channel_id: string }>(
-            `SELECT channel_id FROM inventory.commercial_fulfillment_routes WHERE location_id = ANY($1::uuid[]) ORDER BY channel_id`,
-            [locIds],
-          );
-          expect(routesRes.rows.map((r) => r.channel_id)).toEqual([
-            'MARKETPLACE',
-            'RETAIL',
-          ]);
-
-          const lineCheck = await database.query<{ cnt: number }>(
-            `SELECT COUNT(*)::int AS cnt FROM inventory.reservation_lines WHERE reservation_id = $1`,
-            [fx.expiredReservation.id],
-          );
-          expect(lineCheck.rows[0].cnt).toBe(1);
-        } finally {
-          await database.query(fx.cleanupSql);
-        }
-
-        const remaining = await database.query<{ cnt: number }>(
-          `SELECT COUNT(*)::int AS cnt FROM inventory.locations WHERE id = ANY($1::uuid[])`,
-          [locIds],
-        );
-        expect(remaining.rows[0].cnt).toBe(0);
-      }
-    });
-
-    it('INT-02 L1 real en PostgreSQL 17: concurrencia sin sobreventa, idempotencia, rollback y ruta RETAIL vs MARKETPLACE', async () => {
-      const tag = `int02-l1-${randomUUID().slice(0, 8)}`;
-      const skuConc = `${tag}-CONC`;
-      const skuSplit = `${tag}-SPLIT`;
-      const skuRollback = `${tag}-ROLLBACK`;
-      const locMkt = (
-        await database.query<{ id: string }>(
-          `INSERT INTO inventory.locations(code, name, type, active) VALUES ($1, $2, 'ALMACEN', true) RETURNING id`,
-          [`${tag}-MKT`, `MKT ${tag}`],
-        )
-      ).rows[0].id;
-      const locRet = (
-        await database.query<{ id: string }>(
-          `INSERT INTO inventory.locations(code, name, type, active) VALUES ($1, $2, 'TIENDA', true) RETURNING id`,
-          [`${tag}-RET`, `RET ${tag}`],
-        )
-      ).rows[0].id;
-
-      try {
-        await database.query(
-          `INSERT INTO inventory.commercial_fulfillment_routes(channel_id, mode, fulfillment_ref, location_id, active)
-           VALUES ('MARKETPLACE', 'ENVIO_DOMICILIO', $1, $2, true),
-                  ('RETAIL', 'RETIRO_TIENDA', $3, $4, true)`,
-          [`${tag}-ref-mkt`, locMkt, `${tag}-ref-ret`, locRet],
-        );
-        await database.query(
-          `INSERT INTO inventory.stock_balance(sku_id, location_id, on_hand, reserved, blocked)
-           VALUES ($1, $4, 5, 0, 0),
-                  ($2, $4, 10, 0, 0),
-                  ($2, $5, 0, 0, 0),
-                  ($3, $4, 10, 0, 0)`,
-          [skuConc, skuSplit, skuRollback, locMkt, locRet],
-        );
-
-        // 1. Concurrencia real PostgreSQL (5 disponibles, 2 reservas simultáneas de 4)
-        const opA = randomUUID();
-        const opB = randomUUID();
-        await Promise.all([
-          reservations.solicitarReserva(
-            {
-              order_id: `${tag}-ORD-A`,
-              operation_id: opA,
-              channel_id: 'MARKETPLACE',
-              lines: [{ sku: skuConc, quantity: 4, location_id: locMkt }],
-            },
-            undefined,
-            `${tag}-key-a`,
-            'modulo-ventas',
-          ),
-          reservations.solicitarReserva(
-            {
-              order_id: `${tag}-ORD-B`,
-              operation_id: opB,
-              channel_id: 'MARKETPLACE',
-              lines: [{ sku: skuConc, quantity: 4, location_id: locMkt }],
-            },
-            undefined,
-            `${tag}-key-b`,
-            'modulo-ventas',
-          ),
-        ]);
-
-        const ops = await database.query<{ status: string; result_code: string | null }>(
-          `SELECT status::text, result_code FROM inventory.inventory_operations WHERE operation_id IN ($1, $2) ORDER BY status`,
-          [opA, opB],
-        );
-        expect(ops.rows.map((r) => r.status)).toEqual(['APLICADO', 'RECHAZADO']);
-        const balConc = await database.query<{ reserved: number; available: number }>(
-          `SELECT reserved, available FROM inventory.stock_balance WHERE sku_id = $1 AND location_id = $2`,
-          [skuConc, locMkt],
-        );
-        expect(balConc.rows[0]).toEqual({ reserved: 4, available: 1 });
-
-        // 2. INV-INT09 real: MARKETPLACE SUFICIENTE vs RETAIL INSUFICIENTE (ruta existe con saldo 0)
-        const mktVerify = await availability.verificarCantidadComercial({
-          channel_id: 'MARKETPLACE',
-          fulfillment: { mode: 'ENVIO_DOMICILIO' },
-          lines: [{ sku: skuSplit, quantity: 5 }],
-        });
-        expect(mktVerify.items[0].result).toBe('SUFICIENTE');
-
-        const retVerify = await availability.verificarCantidadComercial({
-          channel_id: 'RETAIL',
-          fulfillment: { mode: 'RETIRO_TIENDA' },
-          lines: [{ sku: skuSplit, quantity: 5 }],
-        });
-        expect(retVerify.items[0].result).toBe('INSUFICIENTE');
-
-        // 3. Rollback íntegro en PostgreSQL ante fallo previo a outbox y retry idempotente
-        const outboxSpy = vi
-          .spyOn(outboxService, 'enqueue')
-          .mockRejectedValueOnce(new Error('PG17_ABORT_OUTBOX'));
-        const opRb = randomUUID();
-        const keyRb = `${tag}-key-rb`;
-        await expect(
-          reservations.solicitarReserva(
-            {
-              order_id: `${tag}-ORD-RB`,
-              operation_id: opRb,
-              channel_id: 'MARKETPLACE',
-              lines: [{ sku: skuRollback, quantity: 3, location_id: locMkt }],
-            },
-            undefined,
-            keyRb,
-            'modulo-ventas',
-          ),
-        ).rejects.toThrow();
-        outboxSpy.mockRestore();
-
-        const balAfterRb = await database.query<{ reserved: number; available: number }>(
-          `SELECT reserved, available FROM inventory.stock_balance WHERE sku_id = $1 AND location_id = $2`,
-          [skuRollback, locMkt],
-        );
-        expect(balAfterRb.rows[0]).toEqual({ reserved: 0, available: 10 });
-
-        await reservations.solicitarReserva(
-          {
-            order_id: `${tag}-ORD-RB`,
-            operation_id: opRb,
-            channel_id: 'MARKETPLACE',
-            lines: [{ sku: skuRollback, quantity: 3, location_id: locMkt }],
-          },
-          undefined,
-          keyRb,
-          'modulo-ventas',
-        );
-        const balAfterRetry = await database.query<{ reserved: number; available: number }>(
           `SELECT reserved, available FROM inventory.stock_balance WHERE sku_id = $1 AND location_id = $2`,
           [skuRollback, locMkt],
         );
