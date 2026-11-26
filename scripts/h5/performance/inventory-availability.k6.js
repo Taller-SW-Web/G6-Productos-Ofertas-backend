@@ -11,7 +11,8 @@ import { sha256 } from 'k6/crypto';
  *   1) `availability_get` (lectura GET /api/v1/inventario/disponibilidad/comercial, 70% peso)
  *   2) `availability_verify_post` (verificación read-only POST /api/v1/inventario/disponibilidad/comercial/verificar, 30% peso)
  * - PROHIBIDO lanzar POST /reservas durante la carga.
- * - Distribución de SKU: 60% disponibles, 15% stock-bajo, 10% agotados, 10% no registrados, 5% canal alternativo.
+ * - Distribución de SKU sobre grupos reales de manifest.json:
+ *   60% disponibles, 15% stock-bajo/en umbral, 10% agotados, 10% no registrados, 5% sin identidad vendible (desactivado en catálogo).
  * - Métricas separadas por operación y código HTTP (2xx, 400, 401/403, 404, 422, 429 APIM, 503, 5xx).
  * - Tasa de errores inesperados < 1%.
  *
@@ -20,9 +21,20 @@ import { sha256 } from 'k6/crypto';
  *   5VU-180s  → 5 VUs, 180s (carga ligera)
  *   20VU-300s → 20 VUs, 300s (carga nominal)
  *
- * BLOQUEO PERF03: si no hay entorno autorizado (BASE_URL vacío) ni H5_SYNTHETIC_SMOKE=1,
- * el módulo falla con PERF03_PREFLIGHT_MISSING_BASE_URL — no inventar PASS sin entorno.
+ * BLOQUEO PERF03: si no hay entorno autorizado (BASE_URL vacío), el módulo falla
+ * con PERF03_PREFLIGHT_MISSING_BASE_URL — no inventar PASS sin entorno.
  */
+
+const ALLOWED_CHANNELS = new Set(['MARKETPLACE', 'CHATBOT', 'RETAIL']);
+
+/**
+ * Perfiles oficiales: cada clave mapea al número EXACTO de VUs total y duración.
+ */
+const ALLOWED_PROFILES = new Map([
+  ['1VU-60s', { vus: 1, duration: '60s' }],
+  ['5VU-180s', { vus: 5, duration: '180s' }],
+  ['20VU-300s', { vus: 20, duration: '300s' }],
+]);
 
 const BASE_URL = (__ENV.BASE_URL ?? '').replace(/\/$/, '');
 const CHANNEL = __ENV.CHANNEL ?? 'MARKETPLACE';
@@ -31,26 +43,14 @@ const DATASET_MANIFEST_PATH =
   __ENV.DATASET_MANIFEST ?? '../fixtures/inventory/out/manifest.json';
 const EXPECTED_MANIFEST_SHA256 = __ENV.MANIFEST_SHA256 ?? '';
 const PROFILE = __ENV.PROFILE ?? '1VU-60s';
-const DURATION = __ENV.DURATION ?? '60s';
+const profileSpec = ALLOWED_PROFILES.get(PROFILE);
+const VUS = Number(__ENV.VU ?? __ENV.VUS ?? String(profileSpec?.vus ?? 1));
+const DURATION = __ENV.DURATION ?? profileSpec?.duration ?? '60s';
 const REPETITION = Number(__ENV.REPETITION ?? '1');
 const SYNTHETIC_SMOKE = __ENV.H5_SYNTHETIC_SMOKE === '1';
 const VERIFY_FULFILLMENT_MODE =
   __ENV.FULFILLMENT_MODE ??
   (CHANNEL === 'RETAIL' ? 'RETIRO_TIENDA' : 'ENVIO_DOMICILIO');
-
-const ALLOWED_CHANNELS = new Set(['MARKETPLACE', 'CHATBOT', 'RETAIL']);
-
-/**
- * Perfiles oficiales: cada clave mapea al número EXACTO de VUs total.
- * Los VUs de cada escenario se calculan a partir del total según pesos 70/30.
- * Con 1VU total: get=1, verify=0 (el default function combina ambas ops).
- * Con 5VUs: get=4, verify=1. Con 20VUs: get=14, verify=6.
- */
-const ALLOWED_PROFILES = new Map([
-  ['1VU-60s', { vus: 1, duration: '60s' }],
-  ['5VU-180s', { vus: 5, duration: '180s' }],
-  ['20VU-300s', { vus: 20, duration: '300s' }],
-]);
 
 if (!BASE_URL) {
   fail('PERF03_PREFLIGHT_MISSING_BASE_URL');
@@ -65,6 +65,8 @@ if (!SYNTHETIC_SMOKE) {
   const expected = ALLOWED_PROFILES.get(PROFILE);
   if (
     !expected ||
+    VUS !== expected.vus ||
+    DURATION !== expected.duration ||
     !Number.isInteger(REPETITION) ||
     REPETITION < 1 ||
     REPETITION > 3
@@ -86,42 +88,70 @@ const manifest = JSON.parse(manifestRaw);
 const groups = manifest.mandatory_groups ?? {};
 
 /**
- * Distribución de SKU según PERF-03:
- *   60% disponibles (threshold+1 y similares)
- *   15% stock-bajo / en umbral
- *   10% agotados (on_hand=0)
- *   10% no registrados en Inventory
- *    5% ruta alternativa / canal distinto
+ * Distribución de SKU según PERF-03 usando exclusivamente claves reales de manifest.json:
+ *   60% disponibles (threshold_plus_one_sku, partial_reserved_sku)
+ *   15% stock-bajo / en umbral (exact_threshold_sku, with_blocked_sku)
+ *   10% agotados (available_zero_sku, reserved_zero_available_sku)
+ *   10% no registrados en Inventory (unregistered_sku)
+ *    5% sin identidad vendible / desactivado en catálogo (deactivated_catalog_sku)
  */
 const SKUS_AVAILABLE = [
-  groups.threshold_plus_one_sku ?? 'SYN-TEST-AVAIL-01',
-  groups.available_sku_02 ?? 'SYN-TEST-AVAIL-02',
-  groups.available_sku_03 ?? 'SYN-TEST-AVAIL-03',
-];
+  groups.threshold_plus_one_sku,
+  groups.partial_reserved_sku,
+].filter(Boolean);
+if (SKUS_AVAILABLE.length === 0) {
+  SKUS_AVAILABLE.push('SYN-TEST-AVAIL-01');
+}
+
 const SKUS_LOW_STOCK = [
-  groups.exact_threshold_sku ?? 'SYN-TEST-LOW-01',
-  groups.low_stock_sku_02 ?? 'SYN-TEST-LOW-02',
-];
-const SKUS_ZERO = [groups.available_zero_sku ?? 'SYN-TEST-ZERO-01'];
-const SKUS_UNREGISTERED = [groups.unregistered_sku ?? 'SYN-TEST-UNREG-99'];
-const SKUS_ALT_CHANNEL = [groups.alt_channel_sku ?? 'SYN-TEST-ALT-01'];
+  groups.exact_threshold_sku,
+  groups.with_blocked_sku,
+].filter(Boolean);
+if (SKUS_LOW_STOCK.length === 0) {
+  SKUS_LOW_STOCK.push('SYN-TEST-LOW-01');
+}
+
+const SKUS_ZERO = [
+  groups.available_zero_sku,
+  groups.reserved_zero_available_sku,
+].filter(Boolean);
+if (SKUS_ZERO.length === 0) {
+  SKUS_ZERO.push('SYN-TEST-ZERO-01');
+}
+
+const SKUS_UNREGISTERED = [groups.unregistered_sku].filter(Boolean);
+if (SKUS_UNREGISTERED.length === 0) {
+  SKUS_UNREGISTERED.push('SYN-TEST-UNREG-99');
+}
+
+const SKUS_NON_SELLABLE = [groups.deactivated_catalog_sku].filter(Boolean);
+if (SKUS_NON_SELLABLE.length === 0) {
+  SKUS_NON_SELLABLE.push('SYN-TEST-DEACT-01');
+}
 
 /**
  * Selección ponderada de SKU según distribución oficial PERF-03:
- * 60% disponibles, 15% stock-bajo, 10% agotados, 10% no registrados, 5% canal alternativo.
+ * 60% disponibles, 15% stock-bajo, 10% agotados, 10% no registrados, 5% sin identidad vendible.
  */
-function pickSku(weights) {
+function pickSku() {
   const r = Math.random() * 100;
-  if (r < 60)
+  if (r < 60) {
     return SKUS_AVAILABLE[Math.floor(Math.random() * SKUS_AVAILABLE.length)];
-  if (r < 75)
+  }
+  if (r < 75) {
     return SKUS_LOW_STOCK[Math.floor(Math.random() * SKUS_LOW_STOCK.length)];
-  if (r < 85) return SKUS_ZERO[Math.floor(Math.random() * SKUS_ZERO.length)];
-  if (r < 95)
+  }
+  if (r < 85) {
+    return SKUS_ZERO[Math.floor(Math.random() * SKUS_ZERO.length)];
+  }
+  if (r < 95) {
     return SKUS_UNREGISTERED[
       Math.floor(Math.random() * SKUS_UNREGISTERED.length)
     ];
-  return SKUS_ALT_CHANNEL[Math.floor(Math.random() * SKUS_ALT_CHANNEL.length)];
+  }
+  return SKUS_NON_SELLABLE[
+    Math.floor(Math.random() * SKUS_NON_SELLABLE.length)
+  ];
 }
 
 // Métricas separadas por operación y clasificación HTTP
@@ -147,7 +177,7 @@ const verifyLatencyMs = new Trend('h5_perf03_verify_duration_ms', true);
  * Para 1VU total: ambas operaciones corren en el mismo VU (via default function).
  * Para >1 VU: 70% al GET, 30% al POST verify (mínimo 1 cada uno).
  */
-const totalVus = ALLOWED_PROFILES.get(PROFILE)?.vus ?? 1;
+const totalVus = SYNTHETIC_SMOKE ? 1 : VUS;
 const getVus = totalVus === 1 ? 1 : Math.max(1, Math.round(totalVus * 0.7));
 const verifyVus = totalVus === 1 ? 0 : Math.max(1, totalVus - getVus);
 
@@ -178,14 +208,14 @@ export const options =
           availability_get: {
             executor: 'constant-vus',
             exec: 'readCommercialAvailability',
-            vus: SYNTHETIC_SMOKE ? 1 : getVus,
+            vus: getVus,
             duration: DURATION,
             tags: { scenario_kind: 'GET_DISPONIBILIDAD_COMERCIAL' },
           },
           availability_verify_post: {
             executor: 'constant-vus',
             exec: 'verifyCommercialAvailability',
-            vus: SYNTHETIC_SMOKE ? 1 : verifyVus,
+            vus: verifyVus,
             duration: DURATION,
             tags: { scenario_kind: 'POST_VERIFICAR_CANTIDAD_COMERCIAL' },
           },
@@ -263,7 +293,7 @@ function buildHeaders() {
 }
 
 export function readCommercialAvailability() {
-  const sku = pickSku(null);
+  const sku = pickSku();
   const getRes = http.get(
     `${BASE_URL}/api/v1/inventario/disponibilidad/comercial?skus=${encodeURIComponent(sku)}&canal=${encodeURIComponent(CHANNEL)}`,
     {
@@ -292,7 +322,7 @@ export function readCommercialAvailability() {
 }
 
 export function verifyCommercialAvailability() {
-  const sku = pickSku(null);
+  const sku = pickSku();
   const verifyPayload = JSON.stringify({
     channel_id: CHANNEL,
     fulfillment: { mode: VERIFY_FULFILLMENT_MODE },
@@ -354,7 +384,7 @@ export function handleSummary(data) {
       low_stock: 15,
       zero: 10,
       unregistered: 10,
-      alt_channel: 5,
+      non_sellable: 5,
     },
     metrics: data.metrics,
   };

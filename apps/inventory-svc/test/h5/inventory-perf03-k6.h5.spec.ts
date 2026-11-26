@@ -21,10 +21,12 @@ describe('TAC-A03 / PERF-03 — Validación contractual del módulo k6 de dispon
     expect(source).toContain('PROFILE');
     expect(source).toContain('DURATION');
 
-    // Perfiles oficiales H5-03 (1VU-60s, 5VU-180s, 20VU-300s)
+    // Perfiles oficiales H5-03 (1VU-60s, 5VU-180s, 20VU-300s) y validación estricta de VUs y duración
     expect(source).toContain('1VU-60s');
     expect(source).toContain('5VU-180s');
     expect(source).toContain('20VU-300s');
+    expect(source).toContain('VUS !== expected.vus');
+    expect(source).toContain('DURATION !== expected.duration');
 
     // Segregación de escenarios y métricas por operación
     expect(source).toContain('availability_get');
@@ -43,25 +45,27 @@ describe('TAC-A03 / PERF-03 — Validación contractual del módulo k6 de dispon
     expect(source).toContain('h5_perf03_unavailable_503_responses');
     expect(source).toContain('h5_perf03_server_5xx_responses');
 
-    // Distribución de SKU 60/15/10/10/5 según PERF-03
-    expect(source).toContain('60'); // disponibles
-    expect(source).toContain('75'); // límite disponibles + low_stock (60+15)
-    expect(source).toContain('85'); // límite + agotados (75+10)
-    expect(source).toContain('95'); // límite + no registrados (85+10)
-    // Resto 5% → canal alternativo
+    // Distribución de SKU 60/15/10/10/5 sobre grupos reales (sin claves inexistentes ni canal alternativo)
+    expect(source).toContain('60');
+    expect(source).toContain('75');
+    expect(source).toContain('85');
+    expect(source).toContain('95');
     expect(source).toContain('SKUS_AVAILABLE');
     expect(source).toContain('SKUS_LOW_STOCK');
     expect(source).toContain('SKUS_ZERO');
     expect(source).toContain('SKUS_UNREGISTERED');
-    expect(source).toContain('SKUS_ALT_CHANNEL');
+    expect(source).toContain('SKUS_NON_SELLABLE');
+
+    expect(source).not.toContain('available_sku_02');
+    expect(source).not.toContain('available_sku_03');
+    expect(source).not.toContain('low_stock_sku_02');
+    expect(source).not.toContain('alt_channel_sku');
 
     // Ruta correcta del manifest desde scripts/h5/performance/ hacia scripts/h5/fixtures/inventory/out/
     expect(source).toContain('../fixtures/inventory/out/manifest.json');
-    // No debe usar la ruta incorrecta (../../ que saldría del directorio h5)
     expect(source).not.toContain('../../fixtures/inventory/out/manifest.json');
 
-    // 1VU-60s no configura 2 VUs: el perfil de un VU debe ejecutar ambas operaciones en secuencia
-    // La variable verifyVus solo se usa cuando totalVus > 1
+    // 1VU-60s no configura 2 VUs
     expect(source).toContain('totalVus === 1');
 
     // Endpoints de lectura exclusivamente
@@ -92,25 +96,39 @@ describe('TAC-A03 / PERF-03 — Validación contractual del módulo k6 de dispon
     expect(parsed.counts.balances).toBe(110);
   });
 
-  it('verifica que la distribución de SKU sigue pesos 60/15/10/10/5 en el módulo k6', async () => {
-    // Verificación estructural: los grupos de SKU del manifest son reconocidos en el k6
+  it('verifica que la distribución de SKU 60/15/10/10/5 usa exclusivamente claves existentes en manifest.json', async () => {
+    const outDir = resolve(repoRoot, 'scripts/h5/fixtures/inventory/out');
+    const manifest = JSON.parse(
+      await readFile(resolve(outDir, 'manifest.json'), 'utf8'),
+    );
+    const mandatoryKeys = Object.keys(manifest.mandatory_groups);
+
     const k6Path = resolve(
       repoRoot,
       'scripts/h5/performance/inventory-availability.k6.js',
     );
     const source = await readFile(k6Path, 'utf8');
 
-    // Claves del manifest que el k6 usa para categorizar SKUs
-    expect(source).toContain('threshold_plus_one_sku');
-    expect(source).toContain('exact_threshold_sku');
-    expect(source).toContain('available_zero_sku');
-    expect(source).toContain('unregistered_sku');
+    const referencedKeys = [
+      'threshold_plus_one_sku',
+      'partial_reserved_sku',
+      'exact_threshold_sku',
+      'with_blocked_sku',
+      'available_zero_sku',
+      'reserved_zero_available_sku',
+      'unregistered_sku',
+      'deactivated_catalog_sku',
+    ];
+    for (const key of referencedKeys) {
+      expect(mandatoryKeys).toContain(key);
+      expect(source).toContain(key);
+    }
 
-    // La distribución del summary incluye los porcentajes explícitos
+    // La distribución del summary incluye los porcentajes explícitos (5% = non_sellable)
     expect(source).toContain('available: 60');
     expect(source).toContain('low_stock: 15');
     expect(source).toContain('zero: 10');
     expect(source).toContain('unregistered: 10');
-    expect(source).toContain('alt_channel: 5');
+    expect(source).toContain('non_sellable: 5');
   });
 });
