@@ -363,8 +363,7 @@ describe('Catalog JWT verification', () => {
         getClass: () => class Target {},
         switchToHttp: () => ({
           getRequest: () => ({
-            headers:
-              authorization === undefined ? {} : { authorization },
+            headers: authorization === undefined ? {} : { authorization },
           }),
         }),
       }) as never;
