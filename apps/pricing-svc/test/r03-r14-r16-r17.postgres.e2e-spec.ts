@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import type { INestApplication } from '@nestjs/common';
 import type { ServiceBusReceivedMessage } from '@azure/service-bus';
 import { Test } from '@nestjs/testing';
@@ -27,6 +28,27 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
 
     beforeAll(async () => {
       await postgres.start();
+      const outboxDeliverySql = await readFile(
+        new URL(
+          '../migrations-candidate/h5/0001_outbox_delivery.sql',
+          import.meta.url,
+        ),
+        'utf8',
+      );
+      const h5RoutesSql = await readFile(
+        new URL('../migrations/0003_service_bus_h5_routes_r2.sql', import.meta.url),
+        'utf8',
+      );
+      await postgres.admin!.query('BEGIN');
+      try {
+        await postgres.admin!.query('SET LOCAL ROLE po_pricing_owner');
+        await postgres.admin!.query(outboxDeliverySql);
+        await postgres.admin!.query(h5RoutesSql);
+        await postgres.admin!.query('COMMIT');
+      } catch (err) {
+        await postgres.admin!.query('ROLLBACK');
+        throw err;
+      }
       process.env.MESSAGING_PROVIDER = 'AZURE_SERVICE_BUS';
       const moduleRef = await Test.createTestingModule({
         imports: [
