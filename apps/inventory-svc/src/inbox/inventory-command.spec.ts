@@ -99,6 +99,9 @@ describe('Inicialización SKU — Inbox/operación/Outbox atómicos (#102)', () 
       data: { status: 'INITIALIZED', code: null },
     });
     expect(db.kardex).toHaveLength(0); // No movimiento artificial de cantidad cero.
+    expect(
+      db.outbox.filter((row) => row.event_type === 'inventory.stock.changed'),
+    ).toHaveLength(0);
   });
 
   it('el mismo message_id no repite efectos ni resultados', async () => {
@@ -131,7 +134,7 @@ describe('Inicialización SKU — Inbox/operación/Outbox atómicos (#102)', () 
     expect(results[1].payload.data).toEqual(results[0].payload.data);
     expect(
       db.outbox.filter((row) => row.event_type === 'inventory.stock.changed'),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
   });
 
   it('no reinicia un saldo existente aunque reciba otra operación de inicialización', async () => {
@@ -280,12 +283,18 @@ describe('Inicialización SKU — Inbox/operación/Outbox atómicos (#102)', () 
     };
     const first = await service.process(bulkMsg);
     expect(first).toEqual({ duplicate: false });
-    expect(db.inbox.some((i) => i.message_id === bulkMsg.message_id)).toBe(true);
+    expect(db.inbox.some((i) => i.message_id === bulkMsg.message_id)).toBe(
+      true,
+    );
     expect(
-      db.outbox.some((o) => o.event_type === 'inventory.bulk.stock.adjust.completed'),
+      db.outbox.some(
+        (o) => o.event_type === 'inventory.bulk.stock.adjust.completed',
+      ),
     ).toBe(true);
     expect(
-      db.stockBalance.find((r) => r.sku_id === sku && r.location_id === location),
+      db.stockBalance.find(
+        (r) => r.sku_id === sku && r.location_id === location,
+      ),
     ).toMatchObject({ on_hand: 5, stock_version: 1 });
 
     const outboxCountBefore = db.outbox.length;
@@ -608,14 +617,16 @@ describe('Inicialización SKU — Inbox/operación/Outbox atómicos (#102)', () 
     });
     expect(
       db.kardex.some(
-        (k) => k.sku_id === sku && k.operation_id === adjustOpId && k.quantity === 15,
+        (k) =>
+          k.sku_id === sku &&
+          k.operation_id === adjustOpId &&
+          k.quantity === 15,
       ),
     ).toBe(true);
     expect(
       db.outbox.some(
         (o) =>
-          o.event_type === 'inventory.stock.changed' &&
-          o.aggregate_id === sku,
+          o.event_type === 'inventory.stock.changed' && o.aggregate_id === sku,
       ),
     ).toBe(true);
     const r10 = db.outbox.find(
@@ -656,12 +667,14 @@ describe('Inicialización SKU — Inbox/operación/Outbox atómicos (#102)', () 
       db.outbox.some(
         (o) =>
           o.event_type === 'inventory.bulk.stock.adjust.rejected' &&
-          (o.payload as { data?: { code?: string } }).data?.code === 'VERSION_STALE',
+          (o.payload as { data?: { code?: string } }).data?.code ===
+            'VERSION_STALE',
       ),
     ).toBe(true);
     expect(
-      db.stockBalance.find((r) => r.sku_id === sku && r.location_id === location)
-        ?.on_hand,
+      db.stockBalance.find(
+        (r) => r.sku_id === sku && r.location_id === location,
+      )?.on_hand,
     ).toBe(15);
   });
 });

@@ -159,23 +159,11 @@ export class InventoryCommandService {
         } else if (!active.some((candidate) => candidate.id === locationId)) {
           result = this.result(message, 'REJECTED', 'UBICACION_NO_ENCONTRADA');
         } else {
-          const created = await this.stock.initializeZero(
-            client,
-            message.data.sku,
-            locationId,
-          );
+          await this.stock.initializeZero(client, message.data.sku, locationId);
           result = this.result(message, 'INITIALIZED', null);
-          if (created)
-            await this.outbox.stockChanged(client, {
-              sku: message.data.sku,
-              location_id: locationId,
-              on_hand: 0,
-              reserved: 0,
-              blocked: 0,
-              stock_version: 0,
-              operationId: message.operation_id,
-              correlationId: message.correlation_id,
-            });
+          // SPEC-015 §26 starts at version 0 without a stock movement.
+          // StockChanged requires version >= 1; emit it on the first actual
+          // adjustment/reservation, not for the zero-balance initialization.
         }
         await this.operations.create(client, {
           operation_type: 'INICIALIZACION_SKU',
@@ -239,7 +227,9 @@ export class InventoryCommandService {
       throw new InventoryMessageError('INVALID_MESSAGE');
     }
     if (!this.absoluteStockAdjustment) {
-      throw new Error('AbsoluteStockAdjustmentService no disponible en InventoryCommandService');
+      throw new Error(
+        'AbsoluteStockAdjustmentService no disponible en InventoryCommandService',
+      );
     }
 
     const messageId = payload.message_id;
@@ -287,7 +277,10 @@ export class InventoryCommandService {
           correlation_id: correlationId,
         });
 
-        if (adjustment.status !== 'APPLIED' && adjustment.code === 'SKU_LOCATION_NOT_FOUND') {
+        if (
+          adjustment.status !== 'APPLIED' &&
+          adjustment.code === 'SKU_LOCATION_NOT_FOUND'
+        ) {
           console.error(
             JSON.stringify({
               level: 'warn',
@@ -328,7 +321,10 @@ export class InventoryCommandService {
           };
         }
       } catch (error) {
-        if (error instanceof Error && error.message === 'SKU_LOCATION_NOT_INITIALIZED_YET') {
+        if (
+          error instanceof Error &&
+          error.message === 'SKU_LOCATION_NOT_INITIALIZED_YET'
+        ) {
           throw error;
         }
         resultEvent = 'inventory.bulk.stock.adjust.rejected';

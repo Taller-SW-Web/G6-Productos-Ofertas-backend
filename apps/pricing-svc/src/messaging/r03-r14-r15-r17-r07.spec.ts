@@ -130,7 +130,9 @@ describe('Pricing H5 Service Bus R03, R07, R14, R15, R16, R17 (ESCRITA_NO_EJECUT
           producer: 'bulk-svc',
           kind: 'command',
           name: 'pricing.bulk.price.apply.requested',
-          data: { items: [{ sku: 'SKU-1', precio_regular: '10.00', currency: 'PEN' }] },
+          data: {
+            items: [{ sku: 'SKU-1', precio_regular: '10.00', currency: 'PEN' }],
+          },
         }),
       ),
     } as unknown as ServiceBusReceivedMessage;
@@ -197,7 +199,10 @@ describe('Pricing H5 Service Bus R03, R07, R14, R15, R16, R17 (ESCRITA_NO_EJECUT
   });
 
   it('executes real BulkPriceApplyService via PricingServiceBusHandler: rejects 0.00/invalid offer and emits pricing.price.changed + R14 for applied rows', async () => {
-    const insertedOutbox: Array<{ eventName: string; payload: Record<string, unknown> }> = [];
+    const insertedOutbox: Array<{
+      eventName: string;
+      payload: Record<string, unknown>;
+    }> = [];
     const insertedDeliveries: Array<{ destination: string }> = [];
     const tx = {
       execute: vi.fn().mockResolvedValue(undefined),
@@ -214,15 +219,26 @@ describe('Pricing H5 Service Bus R03, R07, R14, R15, R16, R17 (ESCRITA_NO_EJECUT
           const rows = Array.isArray(vals) ? vals : [vals];
           const tableObj = table as Record<symbol, string>;
           const tableName = String(Object.values(tableObj)[0] ?? '');
-          if (rows[0] && typeof rows[0] === 'object' && 'eventName' in rows[0]) {
+          if (
+            rows[0] &&
+            typeof rows[0] === 'object' &&
+            'eventName' in rows[0]
+          ) {
             for (const r of rows) {
               insertedOutbox.push({
                 eventName: String((r as Record<string, unknown>).eventName),
-                payload: (r as Record<string, unknown>).payload as Record<string, unknown>,
+                payload: (r as Record<string, unknown>).payload as Record<
+                  string,
+                  unknown
+                >,
               });
             }
           }
-          if (rows[0] && typeof rows[0] === 'object' && 'destination' in rows[0]) {
+          if (
+            rows[0] &&
+            typeof rows[0] === 'object' &&
+            'destination' in rows[0]
+          ) {
             for (const r of rows) {
               insertedDeliveries.push({
                 destination: String((r as Record<string, unknown>).destination),
@@ -252,11 +268,25 @@ describe('Pricing H5 Service Bus R03, R07, R14, R15, R16, R17 (ESCRITA_NO_EJECUT
       })),
     };
     const repo = {
-      transaction: vi.fn(async (fn: (t: unknown) => Promise<unknown>) => fn(tx)),
+      transaction: vi.fn(async (fn: (t: unknown) => Promise<unknown>) =>
+        fn(tx),
+      ),
     };
-    const service = new BulkPriceApplyService(repo as never, {
-      serviceBus: { namespace: 'lab.servicebus.windows.net' },
-    } as never);
+    const service = new BulkPriceApplyService(
+      repo as never,
+      {
+        serviceBus: { namespace: 'lab.servicebus.windows.net' },
+      } as never,
+      {
+        resolve: async (sku) => ({
+          sku,
+          productId: 'contract-product',
+          isVariant: false,
+          active: false,
+          eligible: false,
+        }),
+      },
+    );
     const handler = new PricingServiceBusHandler(
       BULK_TO_PRICING_QUEUE,
       {
@@ -320,6 +350,9 @@ describe('Pricing H5 Service Bus R03, R07, R14, R15, R16, R17 (ESCRITA_NO_EJECUT
     );
     expect(changedFacts).toHaveLength(2);
     expect(changedFacts.every((f) => f.payload.sku === 'SKU-OK')).toBe(true);
+    expect(
+      changedFacts.every((f) => f.payload.product_id === 'contract-product'),
+    ).toBe(true);
     expect(
       insertedOutbox.some(
         (f) => f.eventName === 'pricing.bulk.price.apply.completed',

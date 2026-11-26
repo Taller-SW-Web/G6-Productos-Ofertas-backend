@@ -5,7 +5,7 @@ import { setTimeout } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   batchJobs,
@@ -52,7 +52,8 @@ class IsolatedBulkPostgres {
     this.created = true;
     const { stdout } = await exec('docker', ['port', this.name, '5432/tcp']);
     const port = /^127\.0\.0\.1:(\d+)\s*$/.exec(stdout)?.[1];
-    if (!port) throw new Error('Puerto de PostgreSQL descartable Bulk inválido.');
+    if (!port)
+      throw new Error('Puerto de PostgreSQL descartable Bulk inválido.');
     const url = `postgresql://postgres:${password}@127.0.0.1:${port}/bulk_test`;
     this.pool = new Pool({ connectionString: url, ssl: false });
 
@@ -67,6 +68,7 @@ class IsolatedBulkPostgres {
       }
     }
     if (!ready) throw new Error('PostgreSQL descartable Bulk no disponible.');
+    await this.pool.query('CREATE SCHEMA bulk');
 
     const sqlFiles = [
       '../test/fixtures/0001_create_bulk_persistence.sql',
@@ -77,6 +79,7 @@ class IsolatedBulkPostgres {
       '../migrations/0006_owner_correlation_identity.sql',
       '../migrations/0007_bulk_retry_v1.sql',
       '../migrations/0008_h5_outbox_delivery.sql',
+      '../migrations/0009_h5_outbox_delivery_all_destinations.sql',
     ];
     for (const rel of sqlFiles) {
       const sql = await readFile(new URL(rel, import.meta.url), 'utf8');
@@ -119,6 +122,111 @@ describe.skipIf(!RUN_POSTGRES)(
       await postgres.stop();
     });
 
+    it('holds downstream commands until Catalog confirms their family and releases original IDs after recovery', async () => {
+      const batchId = randomUUID();
+      const rows = [0, 1].map((index) => ({
+        rowId: randomUUID(),
+        mode: 'ALTA' as const,
+        productId: null,
+        skuBase: `DEPENDENCY-${batchId}-${index}`,
+        skuIdentityRequired: true,
+        variantSkus: [],
+        precioRegular: 25,
+        stockInicial: 10,
+        defaultLocationId: randomUUID(),
+      }));
+      await importService.createImport({
+        batchId,
+        ownerSub: randomUUID(),
+        correlationId: randomUUID(),
+        contentRef: `bulk/test/${batchId}.csv`,
+        format: 'CSV',
+        templateVersion: 2,
+        rows,
+        intentRows: rows.map((row, index) => ({
+          ...row,
+          rowNumber: index + 2,
+          rowOperationId: row.rowId,
+          product: { nombre: `Dependency ${index}` },
+          variant: null,
+        })),
+      });
+      const stored = await repository.findImportAdmissionIntent(
+        batchId,
+        (await repository.findBatchByBatchId(batchId))!.ownerSub,
+      );
+      const commands = stored!.pricingCommands as Array<{
+        message_id: string;
+        data: { items: Array<{ row_operation_id: string }> };
+      }>;
+      expect(commands).toHaveLength(2);
+      expect(
+        commands.map((c) => c.data.items.map((i) => i.row_operation_id)),
+      ).toEqual(rows.map((r) => [r.rowId]));
+      const ownClaims = async () =>
+        (await repository.claimPendingServiceBusDeliveries(100)).filter(
+          (claim) =>
+            (claim.payload.data as Record<string, unknown>).batch_id ===
+            batchId,
+        );
+      const first = await ownClaims();
+      expect(first.length).toBeGreaterThan(0);
+      expect(
+        first.every(
+          (claim) => claim.delivery.destination === 'g6.catalog.from.bulk',
+        ),
+      ).toBe(true);
+      const persistedRows = await db
+        .select()
+        .from(batchRows)
+        .where(
+          eq(
+            batchRows.batchJobId,
+            (await repository.findBatchByBatchId(batchId))!.id,
+          ),
+        );
+      const setCatalog = async (
+        rowId: string,
+        status: 'COMPLETED' | 'FAILED' | 'PENDING',
+      ) => {
+        await db
+          .update(rowDomainSteps)
+          .set({ status })
+          .where(
+            and(
+              eq(
+                rowDomainSteps.batchRowId,
+                persistedRows.find((r) => r.rowId === rowId)!.id,
+              ),
+              eq(rowDomainSteps.domain, 'CATALOGO'),
+            ),
+          );
+      };
+      await setCatalog(rows[0]!.rowId, 'COMPLETED');
+      await setCatalog(rows[1]!.rowId, 'FAILED');
+      const ready = await ownClaims();
+      expect(ready.map((c) => c.delivery.destination).sort()).toEqual([
+        'g6.inventory.from.bulk',
+        'g6.pricing.from.bulk',
+      ]);
+      expect(
+        ready.find((c) => c.delivery.destination === 'g6.pricing.from.bulk')
+          ?.messageId,
+      ).toBe(commands[0]!.message_id);
+      await setCatalog(rows[1]!.rowId, 'PENDING');
+      expect(await ownClaims()).toEqual([]);
+      await setCatalog(rows[1]!.rowId, 'COMPLETED');
+      const recovered = await ownClaims();
+      expect(recovered.map((c) => c.delivery.destination).sort()).toEqual([
+        'g6.inventory.from.bulk',
+        'g6.pricing.from.bulk',
+      ]);
+      expect(
+        recovered.find((c) => c.delivery.destination === 'g6.pricing.from.bulk')
+          ?.messageId,
+      ).toBe(commands[1]!.message_id);
+    });
+
     it('Escenario 1 (fuera de orden): rechaza R14 con DEPENDENCY_PENDING antes de Catalog y persiste PENDING_REPLAY en inbox', async () => {
       const batchId = randomUUID();
       const correlationId = randomUUID();
@@ -138,6 +246,7 @@ describe.skipIf(!RUN_POSTGRES)(
             productId: null,
             mode: 'ALTA',
             skuBase: 'BULK-OOO-1',
+            variantSkus: [],
             precioRegular: 25,
           },
         ],
@@ -145,6 +254,7 @@ describe.skipIf(!RUN_POSTGRES)(
           {
             rowNumber: 2,
             rowOperationId: rowId,
+            rowId,
             skuBase: 'BULK-OOO-1',
             precioRegular: 25,
             product: { nombre: 'Prod OOO' },
@@ -229,6 +339,7 @@ describe.skipIf(!RUN_POSTGRES)(
             productId: null,
             mode: 'ALTA',
             skuBase: 'BULK-R14-OK',
+            variantSkus: [],
             precioRegular: 25,
           },
           {
@@ -236,6 +347,7 @@ describe.skipIf(!RUN_POSTGRES)(
             productId: null,
             mode: 'ALTA',
             skuBase: 'BULK-R14-FAIL',
+            variantSkus: [],
             precioRegular: 15,
           },
         ],
@@ -243,6 +355,7 @@ describe.skipIf(!RUN_POSTGRES)(
           {
             rowNumber: 2,
             rowOperationId: rowOk,
+            rowId: rowOk,
             skuBase: 'BULK-R14-OK',
             precioRegular: 25,
             product: { nombre: 'Prod OK' },
@@ -251,6 +364,7 @@ describe.skipIf(!RUN_POSTGRES)(
           {
             rowNumber: 3,
             rowOperationId: rowFail,
+            rowId: rowFail,
             skuBase: 'BULK-R14-FAIL',
             precioRegular: 15,
             product: { nombre: 'Prod Fail' },

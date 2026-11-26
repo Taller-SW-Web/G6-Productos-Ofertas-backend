@@ -571,7 +571,10 @@ export class BulkPersistenceRepository {
               },
               result: 'SUPERSEDED_BY_CATALOG_FAILURE',
             });
-            return { processed: false, result: 'SUPERSEDED_BY_CATALOG_FAILURE' };
+            return {
+              processed: false,
+              result: 'SUPERSEDED_BY_CATALOG_FAILURE',
+            };
           }
           domainFailure(
             'INVALID_TRANSITION',
@@ -654,7 +657,8 @@ export class BulkPersistenceRepository {
             (input.causationId == null ||
               (input.status === 'COMPLETED'
                 ? input.eventName !== 'pricing.product.initialization.completed'
-                : input.eventName !== 'pricing.product.initialization.rejected'))
+                : input.eventName !==
+                  'pricing.product.initialization.rejected'))
           ) {
             inconsistent(
               'Pricing ALTA results must preserve initialization event, operation_id and causation_id identities.',
@@ -3340,6 +3344,25 @@ export class BulkPersistenceRepository {
               inArray(outboxDeliveries.destination, bulkDestinations),
               sql`${outboxDeliveries.publishedAt} IS NULL`,
               sql`${outboxDeliveries.availableAt} <= now()`,
+              // Downstream business commands stay durable and unpublished
+              // until Catalog has confirmed every referenced row. A Catalog
+              // retry then releases the original commands with unchanged IDs.
+              sql`(${outboxDeliveries.destination} = 'g6.catalog.from.bulk' OR NOT EXISTS (
+                SELECT 1
+                FROM jsonb_array_elements(COALESCE(
+                  ${outbox.payload}->'data'->'items',
+                  jsonb_build_array(${outbox.payload}->'data')
+                )) AS requested(item)
+                LEFT JOIN bulk.batch_jobs j
+                  ON j.batch_id::text = ${outbox.payload}->'data'->>'batch_id'
+                LEFT JOIN bulk.batch_rows r
+                  ON r.batch_job_id = j.id AND r.row_id::text = item->>'row_operation_id'
+                LEFT JOIN bulk.row_domain_steps s
+                  ON s.batch_row_id = r.id AND s.domain = 'CATALOGO'
+                WHERE r.id IS NULL OR (
+                  'CATALOGO' = ANY(r.required_domains) AND s.status IS DISTINCT FROM 'COMPLETED'
+                )
+              ))`,
             ),
           )
           .orderBy(asc(outboxDeliveries.availableAt), asc(outbox.createdAt))

@@ -5,6 +5,7 @@ export interface PromotionsServiceBusConfig {
   couponCommandsEnabled?: boolean;
   couponAdmissionPaused?: boolean;
   isolatedBus?: boolean;
+  isolatedBusUrl?: string;
 }
 
 function isSecureG7Issuer(value: string | undefined): boolean {
@@ -60,18 +61,30 @@ export function readPromotionsServiceBus(
       env.PROMOTIONS_COUPON_RUNTIME_ENABLED === 'true' ||
       production === 'true' ||
       !(isSecureG7Issuer(env.AUTH_ISSUER) || isLocalHttpUrl(env.AUTH_ISSUER)) ||
-      !(isSecureG7Issuer(env.AUTH_JWKS_URL) || isLocalHttpUrl(env.AUTH_JWKS_URL))
+      !(
+        isSecureG7Issuer(env.AUTH_JWKS_URL) || isLocalHttpUrl(env.AUTH_JWKS_URL)
+      )
     ) {
       throw new Error('PROMOTIONS_SERVICE_BUS_CONFIGURATION_INVALID');
     }
+    const origin = env.G6_ISOLATED_SERVICE_BUS_URL;
+    if (
+      origin !== undefined &&
+      (!isLocalHttpUrl(origin) || new URL(origin).pathname !== '/')
+    )
+      throw new Error('PROMOTIONS_SERVICE_BUS_CONFIGURATION_INVALID');
     return Object.freeze({
       namespace: 'isolated-lab.local',
       eventsEnabled: flag === 'true',
       ...(couponCommands === 'true' ? { couponCommandsEnabled: true } : {}),
       ...(pauseAdmission === 'true' ? { couponAdmissionPaused: true } : {}),
       isolatedBus: true,
+      ...(origin ? { isolatedBusUrl: new URL(origin).origin } : {}),
     });
   }
+
+  if (env.G6_ISOLATED_SERVICE_BUS_URL !== undefined)
+    throw new Error('PROMOTIONS_SERVICE_BUS_CONFIGURATION_INVALID');
 
   if (!azure) {
     if (

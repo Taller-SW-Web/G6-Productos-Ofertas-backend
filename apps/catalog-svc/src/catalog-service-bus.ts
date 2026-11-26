@@ -92,6 +92,11 @@ export class CatalogServiceBus {
       messageId: envelope.message_id,
       correlationId: envelope.correlation_id,
       subject: envelope.name,
+      applicationProperties: {
+        producer: 'catalog-svc',
+        schema_version: envelope.schema_version,
+        route_version: 1,
+      },
     };
     const batch = await sender.createMessageBatch({
       maxSizeInBytes: maximumMessageBytes,
@@ -153,7 +158,12 @@ export class CatalogServiceBus {
                     'Envelope or routing metadata failed validation.',
                 });
               } else {
-                console.error(`[catalog-service-bus] consume error on ${queue}:`, error instanceof Error ? error.stack ?? error.message : String(error));
+                console.error(
+                  `[catalog-service-bus] consume error on ${queue}:`,
+                  error instanceof Error
+                    ? (error.stack ?? error.message)
+                    : String(error),
+                );
                 reportError();
                 await receiver.abandonMessage(received);
               }
@@ -232,6 +242,7 @@ function createIsolatedHttpCatalogBusClient(baseUrl: string) {
               messageId?: string;
               correlationId?: string;
               subject?: string;
+              applicationProperties?: Record<string, unknown>;
             }) {
               const rawBody =
                 msg.body instanceof Uint8Array
@@ -245,6 +256,7 @@ function createIsolatedHttpCatalogBusClient(baseUrl: string) {
                 messageId: msg.messageId,
                 correlationId: msg.correlationId,
                 subject: msg.subject,
+                applicationProperties: msg.applicationProperties,
               });
               return true;
             },
@@ -264,7 +276,8 @@ function createIsolatedHttpCatalogBusClient(baseUrl: string) {
                 body: JSON.stringify(item),
               },
             );
-            if (!res.ok) throw new Error(`ISOLATED_BUS_SEND_FAILED_${res.status}`);
+            if (!res.ok)
+              throw new Error(`ISOLATED_BUS_SEND_FAILED_${res.status}`);
           }
         },
       } as never;
@@ -304,7 +317,8 @@ function createIsolatedHttpCatalogBusClient(baseUrl: string) {
               } as unknown as ServiceBusReceivedMessage);
             } catch (error) {
               await handlers.processError({
-                error: error instanceof Error ? error : new Error(String(error)),
+                error:
+                  error instanceof Error ? error : new Error(String(error)),
               });
             }
           }, 250);
@@ -322,7 +336,8 @@ function createIsolatedHttpCatalogBusClient(baseUrl: string) {
           const res = await fetch(
             `${origin}/queues/${encodeURIComponent(queue)}/peek`,
           );
-          if (!res.ok) throw new Error(`ISOLATED_BUS_PEEK_FAILED_${res.status}`);
+          if (!res.ok)
+            throw new Error(`ISOLATED_BUS_PEEK_FAILED_${res.status}`);
           return (await res.json()) as ServiceBusReceivedMessage[];
         },
         async completeMessage(message: ServiceBusReceivedMessage) {
@@ -345,7 +360,10 @@ function createIsolatedHttpCatalogBusClient(baseUrl: string) {
         },
         async deadLetterMessage(
           message: ServiceBusReceivedMessage,
-          options?: { deadLetterReason?: string; deadLetterErrorDescription?: string },
+          options?: {
+            deadLetterReason?: string;
+            deadLetterErrorDescription?: string;
+          },
         ) {
           const deliveryId = (message as unknown as { _deliveryId?: string })
             ._deliveryId;
@@ -388,7 +406,9 @@ export function createCatalogServiceBus(
     );
   if (env.NODE_ENV === 'test' && env.G6_ISOLATED_SERVICE_BUS_URL) {
     return new CatalogServiceBus(
-      createIsolatedHttpCatalogBusClient(env.G6_ISOLATED_SERVICE_BUS_URL) as never,
+      createIsolatedHttpCatalogBusClient(
+        env.G6_ISOLATED_SERVICE_BUS_URL,
+      ) as never,
     );
   }
   const clientId = env.AZURE_CLIENT_ID;

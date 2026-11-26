@@ -6,6 +6,8 @@ import { Test } from '@nestjs/testing';
 import { describe, afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { PricingSvcModule } from '../src/pricing-svc.module.js';
 import { BulkPriceApplyService } from '../src/messaging/bulk-price-apply.service.js';
+import { PricingProductInitialization } from '../src/messaging/pricing-initialization.js';
+import { PRICING_CATALOG_CONTEXT } from '../src/http/commercial-prices.js';
 import {
   PricingServiceBusConsumer,
   PricingServiceBusHandler,
@@ -15,6 +17,7 @@ import {
   AUDIT_PILOT_QUEUE,
   BULK_PRICE_RESULT_QUEUE,
   BULK_TO_PRICING_QUEUE,
+  CATALOG_INIT_QUEUE,
   PROMOTIONS_PRICE_QUEUE,
 } from '../src/messaging/service-bus-deliveries.js';
 import { IsolatedPostgres } from './isolated-postgres.js';
@@ -36,7 +39,10 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
         'utf8',
       );
       const h5RoutesSql = await readFile(
-        new URL('../migrations/0003_service_bus_h5_routes_r2.sql', import.meta.url),
+        new URL(
+          '../migrations/0003_service_bus_h5_routes_r2.sql',
+          import.meta.url,
+        ),
         'utf8',
       );
       await postgres.admin!.query('BEGIN');
@@ -58,16 +64,28 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
             DATABASE_URL: postgres.runtimeUrl,
             AUTH_ISSUER: 'https://isolated.test/issuer',
             AUTH_JWKS_URL: 'https://isolated.test/jwks',
-            PRICING_SERVICE_TOKEN_URL: 'https://isolated.test/api/v1/auth/token',
+            PRICING_SERVICE_TOKEN_URL:
+              'https://isolated.test/api/v1/auth/token',
             PRICING_SERVICE_CLIENT_SECRET: 'fixture-secret',
             PRICING_CATALOG_URL: 'https://isolated.test',
             MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
             G6_SERVICE_BUS_PILOT_ENABLED: 'true',
             PRICING_PRICE_CHANGED_PUBLISH_ENABLED: 'true',
-            SERVICE_BUS_NAMESPACE_FQDN: 'fixture-pricing.servicebus.windows.net',
+            SERVICE_BUS_NAMESPACE_FQDN:
+              'fixture-pricing.servicebus.windows.net',
           }),
         ],
       })
+        .overrideProvider(PRICING_CATALOG_CONTEXT)
+        .useValue({
+          resolve: async (sku: string) => ({
+            sku,
+            productId: 'contract-product',
+            isVariant: false,
+            active: false,
+            eligible: false,
+          }),
+        })
         .overrideProvider(PricingServiceBusRuntime)
         .useValue({ available: true })
         .overrideProvider(PricingServiceBusConsumer)
@@ -177,13 +195,69 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
          WHERE o.correlation_id = $1`,
         [correlationId],
       );
-      const pairs = deliveries.rows.map((r) => `${r.event_name}->${r.destination}`);
+      const pairs = deliveries.rows.map(
+        (r) => `${r.event_name}->${r.destination}`,
+      );
       expect(pairs).toContain(`pricing.price.changed->${AUDIT_PILOT_QUEUE}`);
-      expect(pairs).toContain(`pricing.price.changed->${PROMOTIONS_PRICE_QUEUE}`);
-      expect(pairs).toContain(`pricing.bulk.price.apply.completed->${BULK_PRICE_RESULT_QUEUE}`);
+      expect(pairs).toContain(
+        `pricing.price.changed->${PROMOTIONS_PRICE_QUEUE}`,
+      );
+      expect(pairs).toContain(
+        `pricing.bulk.price.apply.completed->${BULK_PRICE_RESULT_QUEUE}`,
+      );
       expect(
         deliveries.rows.filter((r) => r.event_name === 'pricing.price.changed'),
       ).toHaveLength(4);
     });
+
+    it.each([
+      [90, 'APPLIED', 'completed'],
+      [0, 'REJECTED', 'rejected'],
+    ] as const)(
+      'persists the R15 delivery atomically for initial price %i and deduplicates redelivery',
+      async (amount, outcome, suffix) => {
+        const initialization = app.get(PricingProductInitialization);
+        const messageId = randomUUID();
+        const operationId = randomUUID();
+        const raw = Buffer.from(
+          JSON.stringify({
+            message_id: messageId,
+            schema_version: 1,
+            occurred_at: new Date().toISOString(),
+            correlation_id: randomUUID(),
+            causation_id: null,
+            operation_id: operationId,
+            producer: 'catalog-svc',
+            kind: 'command',
+            name: 'pricing.product.initialization.requested',
+            data: {
+              product_id: randomUUID(),
+              sku_base: `R15-${randomUUID()}`,
+              precio_regular: amount,
+              moneda: 'PEN',
+              channel_id: null,
+              motivo_cambio: 'ALTA_PRODUCTO',
+            },
+          }),
+        );
+        expect(await initialization.consume(raw)).toBe(outcome);
+        const deliveries = () =>
+          postgres.admin!.query(
+            `SELECT o.event_name, o.causation_id, d.destination
+         FROM pricing.outbox o JOIN pricing.outbox_delivery d USING (message_id)
+         WHERE o.operation_id = $1 AND o.kind = 'result'`,
+            [operationId],
+          );
+        expect((await deliveries()).rows).toEqual([
+          {
+            event_name: `pricing.product.initialization.${suffix}`,
+            causation_id: messageId,
+            destination: CATALOG_INIT_QUEUE,
+          },
+        ]);
+        await initialization.consume(raw);
+        expect((await deliveries()).rows).toHaveLength(1);
+      },
+    );
   },
 );

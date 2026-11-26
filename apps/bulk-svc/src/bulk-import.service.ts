@@ -385,33 +385,41 @@ export class BulkImportService {
         motivo_cambio: 'BULK_PRICE_APPLY',
       }));
     });
+    // Keep a Catalog family independent: a rejected family must not delay the
+    // price command of another family, nor publish prices before its own upsert.
+    const pricingFamilies = new Map<string, typeof pricingItems>();
+    const pricingFamilyByRow = new Map(
+      normalized.map((row) => [row.rowId, row.skuBase]),
+    );
+    for (const item of pricingItems) {
+      const family = pricingFamilyByRow.get(item.row_operation_id)!;
+      const items = pricingFamilies.get(family) ?? [];
+      items.push(item);
+      pricingFamilies.set(family, items);
+    }
     const pricingCommands: Array<Record<string, unknown>> =
       persistedPricingCommands ??
-      (pricingItems.length > 0
-        ? [
-            {
-              message_id: stableUuid(
-                `${input.batchId}:pricing-bulk-apply:0:message`,
-              ),
-              schema_version: 1,
-              occurred_at: nowIso,
-              correlation_id: input.correlationId,
-              operation_id: stableUuid(
-                `${input.batchId}:pricing-bulk-apply:0:operation`,
-              ),
-              producer: 'bulk-svc',
-              kind: 'command',
-              name: 'pricing.bulk.price.apply.requested',
-              data: {
-                batch_id: input.batchId,
-                batch_operation_id: stableUuid(
-                  `${input.batchId}:pricing-bulk-apply:0:batch-operation`,
-                ),
-                items: pricingItems,
-              },
-            },
-          ]
-        : []);
+      [...pricingFamilies.values()].map((items, index) => ({
+        message_id: stableUuid(
+          `${input.batchId}:pricing-bulk-apply:${index}:message`,
+        ),
+        schema_version: 1,
+        occurred_at: nowIso,
+        correlation_id: input.correlationId,
+        operation_id: stableUuid(
+          `${input.batchId}:pricing-bulk-apply:${index}:operation`,
+        ),
+        producer: 'bulk-svc',
+        kind: 'command',
+        name: 'pricing.bulk.price.apply.requested',
+        data: {
+          batch_id: input.batchId,
+          batch_operation_id: stableUuid(
+            `${input.batchId}:pricing-bulk-apply:${index}:batch-operation`,
+          ),
+          items,
+        },
+      }));
 
     const allOutboxCommands = [
       ...commands.map(({ envelope }) => ({

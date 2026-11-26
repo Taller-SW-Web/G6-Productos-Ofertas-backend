@@ -622,19 +622,25 @@ export class PricingProductInitialization {
       code,
       completed_at: typeof at === 'string' ? at : at.toISOString(),
     };
-    return tx.insert(outbox).values({
-      messageId: deterministicUuid(
-        `${message.message_id}:initialization-result`,
-      ),
-      eventName: `pricing.product.initialization.${status === 'READY' ? 'completed' : 'rejected'}`,
-      kind: 'result',
-      schemaVersion: 1,
-      correlationId: message.correlation_id,
-      causationId: message.message_id,
-      operationId: message.operation_id,
-      occurredAt: typeof at === 'string' ? sql`${at}::timestamptz` : at,
-      payload,
-    });
+    return insertPricingFacts(
+      tx,
+      [
+        {
+          messageId: deterministicUuid(
+            `${message.message_id}:initialization-result`,
+          ),
+          eventName: `pricing.product.initialization.${status === 'READY' ? 'completed' : 'rejected'}`,
+          kind: 'result',
+          schemaVersion: 1,
+          correlationId: message.correlation_id,
+          causationId: message.message_id,
+          operationId: message.operation_id,
+          occurredAt: typeof at === 'string' ? sql`${at}::timestamptz` : at,
+          payload,
+        },
+      ],
+      this.config?.serviceBus !== undefined,
+    );
   }
 }
 

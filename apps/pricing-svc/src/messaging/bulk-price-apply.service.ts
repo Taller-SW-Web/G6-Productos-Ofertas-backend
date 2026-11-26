@@ -11,6 +11,10 @@ import {
   priceValidities,
 } from '../persistence/pricing.schema.js';
 import { insertPricingFacts } from './service-bus-deliveries.js';
+import {
+  PRICING_CATALOG_CONTEXT,
+  type PricingCatalogContext,
+} from '../http/commercial-prices.js';
 
 const HANDLER = 'pricing.bulk.price.apply.v1';
 const UUID_RE =
@@ -43,8 +47,7 @@ function safePositiveCents(value: string): bigint | null {
 export interface BulkPriceApplyOutcome {
   status: 'APPLIED' | 'PARTIAL' | 'REJECTED' | 'DUPLICATE';
   resultEventName?:
-    | 'pricing.bulk.price.apply.completed'
-    | 'pricing.bulk.price.apply.rejected';
+    'pricing.bulk.price.apply.completed' | 'pricing.bulk.price.apply.rejected';
 }
 
 @Injectable()
@@ -52,6 +55,8 @@ export class BulkPriceApplyService {
   constructor(
     @Inject(PricingRepository) private readonly repository: PricingRepository,
     @Inject(PRICING_CONFIG) private readonly config: PricingConfig,
+    @Inject(PRICING_CATALOG_CONTEXT)
+    private readonly catalog: PricingCatalogContext,
   ) {}
 
   async process(
@@ -117,7 +122,9 @@ export class BulkPriceApplyService {
             eventName: 'pricing.bulk.price.apply.requested',
             correlationId,
             payload: message,
-            result: sameIntent ? 'DUPLICATE_OPERATION' : 'OPERATION_ID_CONFLICT',
+            result: sameIntent
+              ? 'DUPLICATE_OPERATION'
+              : 'OPERATION_ID_CONFLICT',
           })
           .onConflictDoNothing();
         if (!sameIntent) {
@@ -152,20 +159,56 @@ export class BulkPriceApplyService {
       }
 
       const items = Array.isArray(data.items) ? data.items : [];
+      // Resolve identity through Catalog's authenticated contract before writes.
+      // The SKU price row intentionally has product_id NULL (XOR target), but
+      // PricingPriceChangedData requires the authoritative parent product ID.
+      const productIds = new Map<string, string | null>();
+      const skus = [
+        ...new Set(
+          items
+            .filter(isObject)
+            .filter((item) => typeof item.sku === 'string' && item.sku.trim())
+            .map((item) => String(item.sku).trim()),
+        ),
+      ];
+      const resolveBatch =
+        this.catalog.batchMode === 'G7_AUTHENTICATED'
+          ? this.catalog.resolveBatch?.bind(this.catalog)
+          : undefined;
+      const chunkSize = resolveBatch ? 100 : 8;
+      for (let offset = 0; offset < skus.length; offset += chunkSize) {
+        const chunk = skus.slice(offset, offset + chunkSize);
+        const contexts = resolveBatch
+          ? await resolveBatch(chunk, correlationId)
+          : await Promise.all(
+              chunk.map((sku) => this.catalog.resolve(sku, correlationId)),
+            );
+        if (contexts.length !== chunk.length)
+          throw new Error('PRICING_CATALOG_CONTEXT_INVALID');
+        chunk.forEach((sku, index) => {
+          const context = contexts[index];
+          if (context && (context.sku !== sku || !context.productId.trim()))
+            throw new Error('PRICING_CATALOG_CONTEXT_INVALID');
+          productIds.set(sku, context?.productId ?? null);
+        });
+      }
       const rowResults: Array<Record<string, unknown>> = [];
       const priceChangedFacts: Array<typeof outbox.$inferInsert> = [];
-      const batchId =
-        typeof data.batch_id === 'string' ? data.batch_id : null;
+      const batchId = typeof data.batch_id === 'string' ? data.batch_id : null;
       let appliedCount = 0;
 
       for (let i = 0; i < items.length; i += 1) {
         const item = items[i];
         const validFromRaw =
-          isObject(item) && item.valid_from !== undefined && item.valid_from !== null
+          isObject(item) &&
+          item.valid_from !== undefined &&
+          item.valid_from !== null
             ? item.valid_from
             : null;
         const validUntilRaw =
-          isObject(item) && item.valid_until !== undefined && item.valid_until !== null
+          isObject(item) &&
+          item.valid_until !== undefined &&
+          item.valid_until !== null
             ? item.valid_until
             : null;
         const validFromMs =
@@ -244,6 +287,17 @@ export class BulkPriceApplyService {
         }
 
         const sku = (item.sku as string).trim();
+        const productId = productIds.get(sku);
+        if (!productId) {
+          rowResults.push({
+            row_number: item.row_number ?? i + 2,
+            row_operation_id: item.row_operation_id ?? null,
+            sku,
+            status: 'REJECTED',
+            code: 'SKU_NO_ENCONTRADO',
+          });
+          continue;
+        }
         const channelId =
           typeof item.channel_id === 'string' && item.channel_id.trim()
             ? item.channel_id.trim()
@@ -319,11 +373,6 @@ export class BulkPriceApplyService {
           typeof item.row_operation_id === 'string'
             ? item.row_operation_id
             : randomUUID();
-        const productId =
-          priceRow.productId ??
-          (typeof item.product_id === 'string' && item.product_id.trim()
-            ? item.product_id.trim()
-            : null);
         const previousRegular = previousValidity?.precioRegular ?? null;
         const previousOffer = previousValidity?.precioOferta ?? null;
         const priceVersionNum = Number(priceRow.priceVersion);

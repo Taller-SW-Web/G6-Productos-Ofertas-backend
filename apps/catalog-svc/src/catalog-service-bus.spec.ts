@@ -175,6 +175,13 @@ describe('Catalog Service Bus candidate', () => {
         sent.correlationId,
       ]),
     ).toEqual(Array(2).fill([event.message_id, event.correlation_id]));
+    for (const [sent] of tryAddMessage.mock.calls) {
+      expect(sent.applicationProperties).toEqual({
+        producer: 'catalog-svc',
+        schema_version: event.schema_version,
+        route_version: 1,
+      });
+    }
     await expect(
       bridge.publish('g6.inventory.from.catalog', event),
     ).rejects.toThrow('INVALID_CATALOG_MESSAGE');

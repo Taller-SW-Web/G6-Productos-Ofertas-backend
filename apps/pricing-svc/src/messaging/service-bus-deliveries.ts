@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
 import {
   pgSchema,
   text,
@@ -99,7 +99,9 @@ export const outboxDeliveries = schema.table(
 // Must be called with the same transaction that inserts the business fact.
 export async function insertPricingFacts(
   tx: PricingTransaction,
-  facts: (typeof outbox.$inferInsert)[],
+  facts: (Omit<typeof outbox.$inferInsert, 'occurredAt'> & {
+    occurredAt: Date | SQL;
+  })[],
   serviceBusEnabled = false,
 ): Promise<void> {
   if (!facts.length) return;

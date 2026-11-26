@@ -11,6 +11,7 @@ import {
 import { couponH5Queue, type CouponH5Worker } from './coupon-h5-operations.js';
 import type { PromotionsServiceBusConfig } from './service-bus-config.js';
 import type { EventReceiver } from './service-bus-events.js';
+import { createHttpPromotionsLabBus } from './http-lab-bus.js';
 
 interface CouponBus {
   sender: Pick<
@@ -121,12 +122,18 @@ export function isolatedCouponH5Bus(): IsolatedCouponH5Bus {
             : '';
         settled.abandoned.push(id);
       },
-      deadLetterMessage: async (msg: unknown, options?: { deadLetterReason?: string }) => {
+      deadLetterMessage: async (
+        msg: unknown,
+        options?: { deadLetterReason?: string },
+      ) => {
         const id =
           msg && typeof msg === 'object' && 'messageId' in msg
             ? String((msg as { messageId: unknown }).messageId)
             : '';
-        settled.deadLettered.push({ messageId: id, reason: options?.deadLetterReason });
+        settled.deadLettered.push({
+          messageId: id,
+          reason: options?.deadLetterReason,
+        });
       },
       peekMessages: async () => pendingQueue.slice(0, 10) as never[],
       close: async () => {
@@ -144,6 +151,14 @@ export function nativeCouponH5Bus(
   config: PromotionsServiceBusConfig,
 ): CouponBus {
   if (config.isolatedBus) {
+    if (config.isolatedBusUrl) {
+      const bus = createHttpPromotionsLabBus(config.isolatedBusUrl);
+      return {
+        sender: bus.sender(couponH5Queue),
+        receiver: bus.receiver(couponH5Queue),
+        close: () => bus.close(),
+      };
+    }
     return isolatedCouponH5Bus();
   }
   const identity = config.managedIdentityClientId
@@ -247,11 +262,15 @@ export class CouponH5Runtime {
         this.started = true;
       }
       const result = await this.relay!.publishOne();
-      if (result !== 'empty') console.error(`[coupon-h5-runtime] error=NONE publishOne=${result}`);
+      if (result !== 'empty')
+        console.error(`[coupon-h5-runtime] error=NONE publishOne=${result}`);
       if (result === 'pending') this.available = false;
       else delay = result === 'empty' ? 1000 : 200;
     } catch (err) {
-      console.error(`[coupon-h5-runtime] poll error:`, err instanceof Error ? err.stack ?? err.message : String(err));
+      console.error(
+        `[coupon-h5-runtime] poll error:`,
+        err instanceof Error ? (err.stack ?? err.message) : String(err),
+      );
       this.available = false;
     } finally {
       if (!this.stopping) {
