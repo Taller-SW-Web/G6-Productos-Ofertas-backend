@@ -4,7 +4,11 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
   BULK_TO_CATALOG_QUEUE,
+  BULK_TO_INVENTORY_QUEUE,
+  BULK_TO_PRICING_QUEUE,
   CATALOG_TO_BULK_QUEUE,
+  INVENTORY_TO_BULK_QUEUE,
+  PRICING_TO_BULK_QUEUE,
 } from '../../apps/bulk-svc/src/messaging/bulk-service-bus.js';
 import {
   SERVICE_BUS_QUEUES as CATALOG_ROUTING,
@@ -12,9 +16,21 @@ import {
   taxonomyRequestQueue,
 } from '../../apps/catalog-svc/src/catalog-service-bus.js';
 import { COMBOS_SERVICE_BUS_QUEUES } from '../../apps/combos-svc/src/messaging/combos-service-bus.js';
-import { QUEUE_CATALOG as INVENTORY_FROM_CATALOG } from '../../apps/inventory-svc/src/messaging/service-bus-consumer.js';
-import { SERVICE_BUS_DESTINATIONS as INVENTORY_DESTINATIONS } from '../../apps/inventory-svc/src/messaging/service-bus-deliveries.js';
-import { AUDIT_PILOT_QUEUE } from '../../apps/pricing-svc/src/messaging/service-bus-deliveries.js';
+import {
+  QUEUE_BULK as INVENTORY_FROM_BULK,
+  QUEUE_CATALOG as INVENTORY_FROM_CATALOG,
+} from '../../apps/inventory-svc/src/messaging/service-bus-consumer.js';
+import { INVENTORY_QUEUES as INVENTORY_DESTINATIONS } from '../../apps/inventory-svc/src/messaging/service-bus-deliveries.js';
+import {
+  AUDIT_PILOT_QUEUE,
+  BULK_PRICE_RESULT_QUEUE,
+  BULK_TO_PRICING_QUEUE as PRICING_FROM_BULK,
+  CATALOG_INIT_QUEUE,
+  CATALOG_TO_PRICING_QUEUE as PRICING_FROM_CATALOG,
+  PROMOTIONS_PRICE_QUEUE,
+  pricingDestinationsForFact,
+} from '../../apps/pricing-svc/src/messaging/service-bus-deliveries.js';
+import { promotionsEventRoutes } from '../../apps/promotions-svc/src/coupons/service-bus-events.js';
 import {
   catalogTaxonomyQueue,
   taxonomyCatalogQueue,
@@ -56,8 +72,30 @@ describe('G6 H5 Azure Service Bus Basic 19-queue topology & messaging contracts'
     }
   });
 
-  it('wires the 12 active H5 queues across producers and consumers without RabbitMQ fallback', () => {
+  it('wires all 19 H5 queues across producers and consumers without RabbitMQ fallback', () => {
     expect(AUDIT_PILOT_QUEUE).toBe('g6.price-audit.from.pricing');
+    expect(PROMOTIONS_PRICE_QUEUE).toBe('g6.promotions.from.pricing');
+    expect(CATALOG_INIT_QUEUE).toBe('g6.catalog.from.pricing');
+    expect(BULK_PRICE_RESULT_QUEUE).toBe('g6.bulk.from.pricing');
+    expect(PRICING_FROM_CATALOG).toBe('g6.pricing.from.catalog');
+    expect(PRICING_FROM_BULK).toBe('g6.pricing.from.bulk');
+    expect(BULK_TO_PRICING_QUEUE).toBe('g6.pricing.from.bulk');
+    expect(PRICING_TO_BULK_QUEUE).toBe('g6.bulk.from.pricing');
+    expect(BULK_TO_INVENTORY_QUEUE).toBe('g6.inventory.from.bulk');
+    expect(INVENTORY_TO_BULK_QUEUE).toBe('g6.bulk.from.inventory');
+    expect(INVENTORY_FROM_BULK).toBe('g6.inventory.from.bulk');
+    expect(INVENTORY_DESTINATIONS.BULK).toBe('g6.bulk.from.inventory');
+    expect(
+      pricingDestinationsForFact({
+        kind: 'event',
+        eventName: 'pricing.price.changed',
+      }),
+    ).toEqual(['g6.price-audit.from.pricing', 'g6.promotions.from.pricing']);
+    expect(promotionsEventRoutes.map((r) => r.queue).sort()).toEqual([
+      'g6.promotions.from.catalog',
+      'g6.promotions.from.inventory',
+      'g6.promotions.from.pricing',
+    ]);
     expect(taxonomyCatalogQueue).toBe('g6.catalog.from.taxonomy');
     expect(catalogTaxonomyQueue).toBe('g6.taxonomy.from.catalog');
     expect(BULK_TO_CATALOG_QUEUE).toBe('g6.catalog.from.bulk');

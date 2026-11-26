@@ -7,7 +7,19 @@ import type { CatalogBulkResultConsumer } from './catalog-bulk-result-consumer.j
 
 export const BULK_TO_CATALOG_QUEUE = 'g6.catalog.from.bulk';
 export const CATALOG_TO_BULK_QUEUE = 'g6.bulk.from.catalog';
+export const BULK_TO_PRICING_QUEUE = 'g6.pricing.from.bulk';
+export const PRICING_TO_BULK_QUEUE = 'g6.bulk.from.pricing';
+export const BULK_TO_INVENTORY_QUEUE = 'g6.inventory.from.bulk';
+export const INVENTORY_TO_BULK_QUEUE = 'g6.bulk.from.inventory';
 export const SERVICE_BUS_MAX_MESSAGE_BYTES = 256 * 1024;
+
+export function bulkCommandQueueForEvent(eventName: string): string {
+  if (eventName === 'pricing.bulk.price.apply.requested')
+    return BULK_TO_PRICING_QUEUE;
+  if (eventName === 'inventory.bulk.stock.adjust.requested')
+    return BULK_TO_INVENTORY_QUEUE;
+  return BULK_TO_CATALOG_QUEUE;
+}
 
 type ServiceBusClientLike = Pick<
   ServiceBusClient,
@@ -23,7 +35,8 @@ function decodeEnvelopeBody(body: unknown): Uint8Array | undefined {
 export class BulkServiceBus {
   constructor(private readonly client: ServiceBusClientLike) {}
 
-  async publishCatalogCommand(
+  async publishCommand(
+    queue: string,
     input: {
       messageId: string;
       correlationId: string;
@@ -32,7 +45,7 @@ export class BulkServiceBus {
     },
     abortSignal?: AbortSignal,
   ): Promise<void> {
-    const sender = this.client.createSender(BULK_TO_CATALOG_QUEUE);
+    const sender = this.client.createSender(queue);
     const batch = await sender.createMessageBatch({
       maxSizeInBytes: SERVICE_BUS_MAX_MESSAGE_BYTES,
       abortSignal,
@@ -48,11 +61,48 @@ export class BulkServiceBus {
     await sender.sendMessages(batch, { abortSignal });
   }
 
-  subscribeCatalogResults(
+  publishCatalogCommand(
+    input: {
+      messageId: string;
+      correlationId: string;
+      eventName: string;
+      payload: Record<string, unknown>;
+    },
+    abortSignal?: AbortSignal,
+  ): Promise<void> {
+    return this.publishCommand(BULK_TO_CATALOG_QUEUE, input, abortSignal);
+  }
+
+  publishPricingCommand(
+    input: {
+      messageId: string;
+      correlationId: string;
+      eventName: string;
+      payload: Record<string, unknown>;
+    },
+    abortSignal?: AbortSignal,
+  ): Promise<void> {
+    return this.publishCommand(BULK_TO_PRICING_QUEUE, input, abortSignal);
+  }
+
+  publishInventoryCommand(
+    input: {
+      messageId: string;
+      correlationId: string;
+      eventName: string;
+      payload: Record<string, unknown>;
+    },
+    abortSignal?: AbortSignal,
+  ): Promise<void> {
+    return this.publishCommand(BULK_TO_INVENTORY_QUEUE, input, abortSignal);
+  }
+
+  subscribeQueueResults(
+    queue: string,
     consumer: Pick<CatalogBulkResultConsumer, 'consumeServiceBusMessage'>,
     reportError: () => void,
   ) {
-    const receiver = this.client.createReceiver(CATALOG_TO_BULK_QUEUE, {
+    const receiver = this.client.createReceiver(queue, {
       receiveMode: 'peekLock',
       skipParsingBodyAsJson: true,
     });
@@ -98,6 +148,39 @@ export class BulkServiceBus {
         }
       },
     };
+  }
+
+  subscribeCatalogResults(
+    consumer: Pick<CatalogBulkResultConsumer, 'consumeServiceBusMessage'>,
+    reportError: () => void,
+  ) {
+    return this.subscribeQueueResults(
+      CATALOG_TO_BULK_QUEUE,
+      consumer,
+      reportError,
+    );
+  }
+
+  subscribePricingResults(
+    consumer: Pick<CatalogBulkResultConsumer, 'consumeServiceBusMessage'>,
+    reportError: () => void,
+  ) {
+    return this.subscribeQueueResults(
+      PRICING_TO_BULK_QUEUE,
+      consumer,
+      reportError,
+    );
+  }
+
+  subscribeInventoryResults(
+    consumer: Pick<CatalogBulkResultConsumer, 'consumeServiceBusMessage'>,
+    reportError: () => void,
+  ) {
+    return this.subscribeQueueResults(
+      INVENTORY_TO_BULK_QUEUE,
+      consumer,
+      reportError,
+    );
   }
 
   async verifySender(abortSignal: AbortSignal): Promise<void> {

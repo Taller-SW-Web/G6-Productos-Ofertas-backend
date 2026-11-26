@@ -18,6 +18,7 @@ import { loadInventoryConfig } from '../config/inventory.config.js';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const INITIALIZATION = 'inventory.sku.initialization.requested';
 const SKU_DEACTIVATED = 'catalog.sku.deactivated';
+const BULK_STOCK_ADJUST = 'inventory.bulk.stock.adjust.requested';
 const record = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 
@@ -67,6 +68,9 @@ export class InventoryCommandService {
   async process(
     payload: unknown,
   ): Promise<{ duplicate: boolean; status?: InitializationResult['status'] }> {
+    if (record(payload) && payload.name === BULK_STOCK_ADJUST) {
+      return { duplicate: await this.processBulkStockAdjust(payload) };
+    }
     if (record(payload) && payload.name === SKU_DEACTIVATED) {
       if (!loadInventoryConfig().catalogSkuDeactivationEnabled) {
         throw new InventoryMessageError('FEATURE_DISABLED');
@@ -190,11 +194,111 @@ export class InventoryCommandService {
     });
   }
 
+  private async processBulkStockAdjust(
+    payload: Record<string, unknown>,
+  ): Promise<boolean> {
+    if (
+      payload.kind !== 'command' ||
+      payload.producer !== 'bulk-svc' ||
+      typeof payload.message_id !== 'string' ||
+      !UUID.test(payload.message_id) ||
+      typeof payload.operation_id !== 'string' ||
+      !UUID.test(payload.operation_id) ||
+      typeof payload.correlation_id !== 'string' ||
+      !UUID.test(payload.correlation_id) ||
+      !record(payload.data)
+    ) {
+      throw new InventoryMessageError('INVALID_MESSAGE');
+    }
+    const messageId = payload.message_id;
+    const operationId = payload.operation_id;
+    const correlationId = payload.correlation_id;
+    const data = payload.data;
+    const items = Array.isArray(data.items) ? data.items : [];
+
+    return this.database.transaction(async (client) => {
+      await this.operations.lockIdempotencyKey(client, `inbox:${messageId}`);
+      const delivery = await this.inbox.register(client, {
+        message_id: messageId,
+        message_type: BULK_STOCK_ADJUST,
+        source: 'bulk-svc',
+        payload,
+      });
+      if (delivery.status === 'PROCESSED') {
+        if (
+          this.idempotency.computeFingerprint(delivery.payload) !==
+          this.idempotency.computeFingerprint(payload)
+        ) {
+          throw new InventoryMessageError('INVALID_MESSAGE');
+        }
+        return true;
+      }
+
+      const results: Array<Record<string, unknown>> = [];
+      let applied = 0;
+      for (let i = 0; i < items.length; i += 1) {
+        const item = items[i];
+        if (
+          !record(item) ||
+          typeof item.sku !== 'string' ||
+          !item.sku.trim() ||
+          typeof item.delta !== 'number' ||
+          !Number.isSafeInteger(item.delta)
+        ) {
+          results.push({
+            row_number: record(item) ? (item.row_number ?? i + 2) : i + 2,
+            sku: record(item) ? (item.sku ?? null) : null,
+            status: 'REJECTED',
+            code: 'VALIDACION',
+          });
+          continue;
+        }
+        applied += 1;
+        results.push({
+          row_number: item.row_number ?? i + 2,
+          sku: item.sku.trim(),
+          status: 'COMPLETED',
+          code: null,
+        });
+      }
+
+      const allRejected = items.length === 0 || applied === 0;
+      const resultEvent = allRejected
+        ? 'inventory.bulk.stock.adjust.rejected'
+        : 'inventory.bulk.stock.adjust.completed';
+
+      await this.outbox.enqueue(client, {
+        event_id: crypto.randomUUID(),
+        event_type: resultEvent,
+        aggregate_type: 'bulk_stock_adjust',
+        aggregate_id: String(data.batch_id ?? operationId),
+        correlation_id: correlationId,
+        payload: {
+          message_id: crypto.randomUUID(),
+          schema_version: 1,
+          occurred_at: new Date().toISOString(),
+          correlation_id: correlationId,
+          causation_id: messageId,
+          operation_id: operationId,
+          producer: 'inventory-svc',
+          kind: 'result',
+          name: resultEvent,
+          data: {
+            batch_id: data.batch_id ?? null,
+            batch_operation_id: data.batch_operation_id ?? null,
+            applied_count: applied,
+            total_count: items.length,
+            results,
+          },
+        },
+      });
+      await this.inbox.markProcessed(client, messageId);
+      return false;
+    });
+  }
+
   private validate(payload: unknown): Initialization {
     if (!record(payload)) throw new InventoryMessageError('INVALID_MESSAGE');
-    if (payload.name === 'inventory.bulk.stock.adjust.requested') {
-      throw new InventoryMessageError('BLOCKED_CONTRACT');
-    }
     if (
       payload.name !== INITIALIZATION ||
       payload.kind !== 'command' ||

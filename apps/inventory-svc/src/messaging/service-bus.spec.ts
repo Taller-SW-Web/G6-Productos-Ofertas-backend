@@ -556,20 +556,19 @@ describe('Inventory Service Bus Consumer — Recepción en PeekLock e Idempotenc
     expect(mockCommands.process).not.toHaveBeenCalled();
   });
 
-  it('bloquea por contrato inventory.bulk.stock.adjust.requested y lo envía a DLQ con BLOCKED_CONTRACT', async () => {
+  it('procesa inventory.bulk.stock.adjust.requested de bulk-svc y completa el mensaje tras commit', async () => {
     const msg = createReceivedMessage('inventory.bulk.stock.adjust.requested', {
-      items: [],
+      producer: 'bulk-svc',
+      data: {
+        batch_id: 'batch-1',
+        items: [{ row_number: 2, sku: 'SKU-1', delta: 3 }],
+      },
     });
     const result = await handler.handle(msg);
-    expect(result).toBe('dead-lettered');
-    expect(mockCommands.process).not.toHaveBeenCalled();
-    expect(settlement.deadLetterMessage).toHaveBeenCalledWith(
-      msg,
-      expect.objectContaining({
-        deadLetterReason: 'BLOCKED_CONTRACT',
-      }),
-    );
-    expect(settlement.completeMessage).not.toHaveBeenCalled();
+    expect(result).toBe('completed');
+    expect(mockCommands.process).toHaveBeenCalledOnce();
+    expect(settlement.completeMessage).toHaveBeenCalledWith(msg);
+    expect(settlement.deadLetterMessage).not.toHaveBeenCalled();
   });
 
   it('envía a DLQ sin bucle de reintentos cuando ocurre FEATURE_DISABLED', async () => {

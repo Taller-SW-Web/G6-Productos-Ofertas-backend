@@ -40,10 +40,12 @@ import {
 import { loadInventoryConfig } from '../config/inventory.config.js';
 
 export const QUEUE_CATALOG = 'g6.inventory.from.catalog';
+export const QUEUE_BULK = 'g6.inventory.from.bulk';
 
 const ACCEPTED_EVENTS = new Set([
   'inventory.sku.initialization.requested',
   'catalog.sku.deactivated',
+  'inventory.bulk.stock.adjust.requested',
 ]);
 
 const UUID_REGEX =
@@ -136,19 +138,13 @@ export class InventoryServiceBusHandler {
         throw new Error('MESSAGE_ID_MISMATCH');
       }
 
-      // Validación de emisor legítimo para R06
-      if (p.producer !== 'catalog-svc') {
+      // Validación de emisor legítimo: R06 (catalog-svc) o R02 (bulk-svc)
+      const expectedProducer =
+        eventName === 'inventory.bulk.stock.adjust.requested'
+          ? 'bulk-svc'
+          : 'catalog-svc';
+      if (p.producer !== expectedProducer) {
         throw new Error('PRODUCER_MISMATCH');
-      }
-
-      // Bloqueo estricto para operaciones de Bulk (R02)
-      if (eventName === 'inventory.bulk.stock.adjust.requested') {
-        await this.receiver.deadLetterMessage(message, {
-          deadLetterReason: 'BLOCKED_CONTRACT',
-          deadLetterErrorDescription:
-            'inventory.bulk.stock.adjust.requested está bloqueado por contrato pendiente (R02).',
-        });
-        return 'dead-lettered';
       }
 
       if (!ACCEPTED_EVENTS.has(eventName)) {
@@ -195,7 +191,9 @@ export class InventoryServiceBusConsumerRuntime
   available = false;
   private client?: ServiceBusClient;
   private receiver?: ServiceBusReceiver;
+  private bulkReceiver?: ServiceBusReceiver;
   private subscription?: { close(): Promise<void> };
+  private bulkSubscription?: { close(): Promise<void> };
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private isOpening = false;
   private stopped = false;
@@ -252,13 +250,23 @@ export class InventoryServiceBusConsumerRuntime
         skipParsingBodyAsJson: true,
         maxAutoLockRenewalDurationInMs: 60_000,
       });
+      this.bulkReceiver ??= this.client.createReceiver(QUEUE_BULK, {
+        receiveMode: 'peekLock',
+        skipParsingBodyAsJson: true,
+        maxAutoLockRenewalDurationInMs: 60_000,
+      });
 
       await this.receiver.peekMessages(1);
+      await this.bulkReceiver.peekMessages(1);
       if (this.stopped) return;
 
       const handler = new InventoryServiceBusHandler(
         this.commands,
         this.receiver,
+      );
+      const bulkHandler = new InventoryServiceBusHandler(
+        this.commands,
+        this.bulkReceiver,
       );
 
       this.subscription = this.receiver.subscribe(
@@ -280,6 +288,32 @@ export class InventoryServiceBusConsumerRuntime
             this.available = false;
             this.logger.warn(
               `SERVICE_BUS_INVENTORY_CONSUMER_RECOVERY_PENDING [${QUEUE_CATALOG}]`,
+            );
+            this.scheduleReconnect();
+          },
+        },
+        { autoCompleteMessages: false, maxConcurrentCalls: 1 },
+      );
+
+      this.bulkSubscription = this.bulkReceiver.subscribe(
+        {
+          processMessage: async (msg) => {
+            const task = bulkHandler.handle(msg);
+            this.active.add(task);
+            try {
+              await task;
+              this.available = true;
+            } catch (error) {
+              this.available = false;
+              throw error;
+            } finally {
+              this.active.delete(task);
+            }
+          },
+          processError: async () => {
+            this.available = false;
+            this.logger.warn(
+              `SERVICE_BUS_INVENTORY_CONSUMER_RECOVERY_PENDING [${QUEUE_BULK}]`,
             );
             this.scheduleReconnect();
           },
@@ -316,13 +350,21 @@ export class InventoryServiceBusConsumerRuntime
         await Promise.resolve(this.subscription.close()).catch(() => undefined);
         this.subscription = undefined;
       }
+      if (this.bulkSubscription) {
+        await Promise.resolve(this.bulkSubscription.close()).catch(
+          () => undefined,
+        );
+        this.bulkSubscription = undefined;
+      }
       await Promise.allSettled(this.active);
     } finally {
       this.available = false;
       try {
         await Promise.resolve(this.receiver?.close()).catch(() => undefined);
+        await Promise.resolve(this.bulkReceiver?.close()).catch(() => undefined);
       } finally {
         this.receiver = undefined;
+        this.bulkReceiver = undefined;
         await Promise.resolve(this.client?.close()).catch(() => undefined);
         this.client = undefined;
       }

@@ -16,6 +16,8 @@ const EVENT_NAMES = new Set(['pricing.price.changed']);
 const RESULT_NAMES = new Set([
   'pricing.product.initialization.completed',
   'pricing.product.initialization.rejected',
+  'pricing.bulk.price.apply.completed',
+  'pricing.bulk.price.apply.rejected',
 ]);
 
 function validResult(name: string, data: Record<string, unknown>): boolean {

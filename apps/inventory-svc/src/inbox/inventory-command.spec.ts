@@ -246,15 +246,26 @@ describe('Inicialización SKU — Inbox/operación/Outbox atómicos (#102)', () 
     });
   });
 
-  it('mantiene bloqueado inventory.bulk.stock.adjust.requested mientras su contrato siga en GenericData', async () => {
-    await expect(
-      service.process({
-        ...message(),
-        name: 'inventory.bulk.stock.adjust.requested',
-      }),
-    ).rejects.toMatchObject({ reason: 'BLOCKED_CONTRACT' });
-    expect(db.inbox).toHaveLength(0);
-    expect(db.outbox).toHaveLength(0);
+  it('procesa inventory.bulk.stock.adjust.requested de bulk-svc de forma idempotente y emite resultado R10 en Outbox', async () => {
+    const bulkMsg = {
+      ...message(),
+      producer: 'bulk-svc',
+      name: 'inventory.bulk.stock.adjust.requested',
+      data: {
+        batch_id: randomUUID(),
+        batch_operation_id: randomUUID(),
+        items: [{ row_number: 2, sku: 'SKU-BULK-1', delta: 5 }],
+      },
+    };
+    const first = await service.process(bulkMsg);
+    expect(first).toEqual({ duplicate: false });
+    expect(db.inbox).toHaveLength(1);
+    expect(db.outbox).toHaveLength(1);
+    expect(db.outbox[0].event_name).toBe('inventory.bulk.stock.adjust.completed');
+
+    const second = await service.process(bulkMsg);
+    expect(second).toEqual({ duplicate: true });
+    expect(db.outbox).toHaveLength(1);
   });
 
   it('acepta el envelope de Catalog PR #185 y evita reservas y disponibilidad positiva tras la baja', async () => {

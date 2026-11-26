@@ -14,31 +14,38 @@ import { PRICING_CONFIG, type PricingConfig } from '../config/environment.js';
 import { PricingRepository } from '../persistence/pricing.repository.js';
 import {
   PricingDeliveryStore,
-  AUDIT_PILOT_QUEUE,
+  PRICING_APPROVED_DESTINATIONS,
 } from './service-bus-deliveries.js';
 import { pricingEnvelope } from './outbox-relay.js';
 
+type SenderLike = Pick<ServiceBusSender, 'createMessageBatch' | 'sendMessages'>;
+
 export class PricingServiceBusRelay {
+  private readonly resolveSender: (destination: string) => SenderLike;
+
   constructor(
     private readonly store: Pick<PricingDeliveryStore, 'claim' | 'finish'>,
-    private readonly sender: Pick<
-      ServiceBusSender,
-      'createMessageBatch' | 'sendMessages'
-    >,
-  ) {}
+    senderOrResolver: SenderLike | ((destination: string) => SenderLike),
+  ) {
+    this.resolveSender =
+      typeof senderOrResolver === 'function'
+        ? senderOrResolver
+        : () => senderOrResolver;
+  }
 
   async publishOne(): Promise<'empty' | 'sent' | 'pending' | 'lease-lost'> {
     const claim = await this.store.claim();
     if (!claim) return 'empty';
     let confirmed = false;
     try {
-      if (claim.destination !== AUDIT_PILOT_QUEUE)
-        throw new Error('SERVICE_BUS_PILOT_ROUTE_NOT_APPROVED');
+      if (!PRICING_APPROVED_DESTINATIONS.has(claim.destination))
+        throw new Error('SERVICE_BUS_ROUTE_NOT_APPROVED');
+      const sender = this.resolveSender(claim.destination);
       // The SDK JSON-serializes non-binary bodies. Send canonical UTF-8 bytes
       // to avoid wrapping the envelope in a second JSON string.
       const body = pricingEnvelope(claim.row);
       // tryAddMessage accounts for AMQP properties/encoding, not only JSON bytes.
-      const batch = await this.sender.createMessageBatch({
+      const batch = await sender.createMessageBatch({
         maxSizeInBytes: 256 * 1024,
       });
       if (
@@ -46,17 +53,17 @@ export class PricingServiceBusRelay {
           body,
           messageId: claim.row.messageId,
           correlationId: claim.row.correlationId,
-          subject: 'pricing.price.changed',
+          subject: claim.row.eventName,
           contentType: 'application/json',
           applicationProperties: {
             producer: 'pricing-svc',
-            schema_version: 1,
+            schema_version: claim.row.schemaVersion,
             route_version: 1,
           },
         })
       )
         throw new Error('SERVICE_BUS_MESSAGE_TOO_LARGE');
-      await this.sender.sendMessages(batch, {
+      await sender.sendMessages(batch, {
         abortSignal: AbortSignal.timeout(10_000),
       });
       confirmed = true;
@@ -74,7 +81,7 @@ export class PricingServiceBusRuntime
 {
   available = false;
   private client?: ServiceBusClient;
-  private sender?: ServiceBusSender;
+  private senders = new Map<string, ServiceBusSender>();
   private timer?: ReturnType<typeof setTimeout>;
   private active?: Promise<void>;
   private stopped = false;
@@ -98,16 +105,24 @@ export class PricingServiceBusRuntime
         retryOptions: { maxRetries: 0, timeoutInMs: 5000 },
       },
     );
-    this.sender = this.client.createSender(AUDIT_PILOT_QUEUE);
-    const sender = this.sender;
+    const client = this.client;
+    for (const destination of PRICING_APPROVED_DESTINATIONS) {
+      this.senders.set(destination, client.createSender(destination));
+    }
     const relay = new PricingServiceBusRelay(
       new PricingDeliveryStore(this.repository),
-      sender,
+      (destination) => {
+        const sender = this.senders.get(destination);
+        if (!sender) throw new Error('SERVICE_BUS_ROUTE_NOT_APPROVED');
+        return sender;
+      },
     );
     const tick = () => {
       this.active = (async () => {
-        // Establish the link and check sender authorization even with no pending rows.
-        await sender.createMessageBatch({ maxSizeInBytes: 256 * 1024 });
+        // Establish links and check sender authorization even with no pending rows.
+        for (const sender of this.senders.values()) {
+          await sender.createMessageBatch({ maxSizeInBytes: 256 * 1024 });
+        }
         const result = await relay.publishOne();
         this.available = result === 'empty' || result === 'sent';
       })()
@@ -128,7 +143,12 @@ export class PricingServiceBusRuntime
     await this.active;
     this.available = false;
     try {
-      await this.sender?.close();
+      await Promise.all(
+        [...this.senders.values()].map((sender) =>
+          sender.close().catch(() => undefined),
+        ),
+      );
+      this.senders.clear();
     } finally {
       await this.client?.close();
     }

@@ -289,10 +289,30 @@ export class CatalogBulkResultConsumer
       await this.persistInvalidMessage(input, content, 'INVALID_JSON');
       return;
     }
-    let envelope: Envelope;
+    let envelope: Envelope | undefined;
     try {
       envelope = validateEnvelope(decoded, message);
     } catch {
+      const other = record(decoded) ? OTHER_BULK_ROUTES.get(String(decoded.name)) : undefined;
+      if (
+        other &&
+        record(decoded) &&
+        decoded.producer === other.producer &&
+        decoded.kind === other.kind &&
+        typeof decoded.message_id === 'string' &&
+        decoded.message_id === input.messageId &&
+        typeof decoded.correlation_id === 'string' &&
+        decoded.correlation_id.length > 0 &&
+        record(decoded.data)
+      ) {
+        await this.repository.persistPendingContractResult({
+          messageId: decoded.message_id,
+          eventName: String(decoded.name),
+          correlationId: decoded.correlation_id,
+          payload: decoded,
+        });
+        return;
+      }
       await this.persistInvalidMessage(
         input,
         content,
