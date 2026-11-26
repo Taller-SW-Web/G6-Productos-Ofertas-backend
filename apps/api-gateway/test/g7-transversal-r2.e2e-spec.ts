@@ -151,13 +151,15 @@ describe('API Gateway H5 R2 transversal G7 authorization and correlation (simula
       .send({ channel_id: 'CHATBOT', items: [{ sku: 'SKU-1', quantity: 1 }] })
       .expect(200);
 
-    // G3 must be denied (403) on G5 coupon consumption
+    // G3 must be denied (403) on G5 coupon consumption without calling upstream
+    const callsBeforeDenied = receivedCalls.length;
     await request(app.getHttpServer())
-      .post('/api/v1/cupones/consumir')
+      .post('/api/v1/cupones/consumos')
       .set('Authorization', `Bearer ${g3Token}`)
       .set('Idempotency-Key', randomUUID())
       .send({})
       .expect(403);
+    expect(receivedCalls.length).toBe(callsBeforeDenied);
 
     const g5Token = signed.token({
       tipo: 'servicio',
