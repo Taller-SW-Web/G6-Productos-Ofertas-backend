@@ -21,10 +21,42 @@ interface CouponBus {
   close(): Promise<void>;
 }
 
-export function isolatedCouponH5Bus(): CouponBus {
+export interface IsolatedCouponH5Bus extends CouponBus {
+  readonly pendingQueue: unknown[];
+  readonly settled: {
+    completed: string[];
+    abandoned: string[];
+    deadLettered: Array<{ messageId: string; reason?: string }>;
+  };
+}
+
+export function isolatedCouponH5Bus(): IsolatedCouponH5Bus {
   let handlers: Parameters<EventReceiver['subscribe']>[0] | undefined;
   let closed = false;
+  const pendingQueue: unknown[] = [];
+  const settled: IsolatedCouponH5Bus['settled'] = {
+    completed: [],
+    abandoned: [],
+    deadLettered: [],
+  };
+  let draining = false;
+
+  async function drain(): Promise<void> {
+    if (draining || closed || !handlers) return;
+    draining = true;
+    try {
+      while (!closed && handlers && pendingQueue.length > 0) {
+        const nextMsg = pendingQueue.shift();
+        await handlers.processMessage(nextMsg as never);
+      }
+    } finally {
+      draining = false;
+    }
+  }
+
   return {
+    pendingQueue,
+    settled,
     sender: {
       createMessageBatch: async () => {
         const items: unknown[] = [];
@@ -46,7 +78,9 @@ export function isolatedCouponH5Bus(): CouponBus {
         } as never;
       },
       sendMessages: async (batch: unknown) => {
-        if (closed || !handlers) return;
+        if (closed) {
+          throw new Error('ISOLATED_COUPON_BUS_CLOSED');
+        }
         const list =
           batch &&
           typeof batch === 'object' &&
@@ -56,9 +90,8 @@ export function isolatedCouponH5Bus(): CouponBus {
             : Array.isArray(batch)
               ? batch
               : [batch];
-        for (const msg of list) {
-          await handlers.processMessage(msg as never);
-        }
+        pendingQueue.push(...list);
+        await drain();
       },
       close: async () => {
         closed = true;
@@ -67,16 +100,35 @@ export function isolatedCouponH5Bus(): CouponBus {
     receiver: {
       subscribe: (nextHandlers) => {
         handlers = nextHandlers;
+        void drain();
         return {
           close: async () => {
             handlers = undefined;
           },
         };
       },
-      completeMessage: async () => undefined,
-      abandonMessage: async () => undefined,
-      deadLetterMessage: async () => undefined,
-      peekMessages: async () => [],
+      completeMessage: async (msg: unknown) => {
+        const id =
+          msg && typeof msg === 'object' && 'messageId' in msg
+            ? String((msg as { messageId: unknown }).messageId)
+            : '';
+        settled.completed.push(id);
+      },
+      abandonMessage: async (msg: unknown) => {
+        const id =
+          msg && typeof msg === 'object' && 'messageId' in msg
+            ? String((msg as { messageId: unknown }).messageId)
+            : '';
+        settled.abandoned.push(id);
+      },
+      deadLetterMessage: async (msg: unknown, options?: { deadLetterReason?: string }) => {
+        const id =
+          msg && typeof msg === 'object' && 'messageId' in msg
+            ? String((msg as { messageId: unknown }).messageId)
+            : '';
+        settled.deadLettered.push({ messageId: id, reason: options?.deadLetterReason });
+      },
+      peekMessages: async () => pendingQueue.slice(0, 10) as never[],
       close: async () => {
         handlers = undefined;
       },
@@ -91,10 +143,7 @@ export function isolatedCouponH5Bus(): CouponBus {
 export function nativeCouponH5Bus(
   config: PromotionsServiceBusConfig,
 ): CouponBus {
-  if (
-    process.env.NODE_ENV === 'test' &&
-    process.env.PROMOTIONS_H5_ISOLATED_BUS === '1'
-  ) {
+  if (config.isolatedBus) {
     return isolatedCouponH5Bus();
   }
   const identity = config.managedIdentityClientId

@@ -177,7 +177,12 @@ export function validatePromotionsConfiguration(
       if (
         !auth ||
         url.origin !== new URL(auth.issuer).origin ||
-        url.protocol !== 'https:' ||
+        (url.protocol !== 'https:' &&
+          !(
+            environment.NODE_ENV === 'test' &&
+            url.protocol === 'http:' &&
+            ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+          )) ||
         url.pathname !== '/api/v1/auth/token' ||
         url.username ||
         url.password ||

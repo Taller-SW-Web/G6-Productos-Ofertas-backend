@@ -4,6 +4,7 @@ export interface PromotionsServiceBusConfig {
   eventsEnabled: boolean;
   couponCommandsEnabled?: boolean;
   couponAdmissionPaused?: boolean;
+  isolatedBus?: boolean;
 }
 
 function isSecureG7Issuer(value: string | undefined): boolean {
@@ -11,6 +12,23 @@ function isSecureG7Issuer(value: string | undefined): boolean {
     const url = new URL(value ?? '');
     return (
       url.protocol === 'https:' &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      value?.trim() === value
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isLocalHttpUrl(value: string | undefined): boolean {
+  try {
+    const url = new URL(value ?? '');
+    return (
+      url.protocol === 'http:' &&
+      ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) &&
       !url.username &&
       !url.password &&
       !url.search &&
@@ -31,6 +49,30 @@ export function readPromotionsServiceBus(
   const couponCommands = env.PROMOTIONS_H5_COUPON_COMMANDS_ENABLED;
   const pauseAdmission = env.PROMOTIONS_H5_COUPON_ADMISSION_PAUSED;
   const production = env.G6_SERVICE_BUS_PRODUCTION_ENABLED;
+  const isolatedBus = env.PROMOTIONS_H5_ISOLATED_BUS === '1';
+
+  if (isolatedBus) {
+    if (
+      env.NODE_ENV !== 'test' ||
+      !azure ||
+      env.G6_SECURITY_MODE !== 'G7_AUTHENTICATED' ||
+      env.RABBITMQ_URL !== undefined ||
+      env.PROMOTIONS_COUPON_RUNTIME_ENABLED === 'true' ||
+      production === 'true' ||
+      !(isSecureG7Issuer(env.AUTH_ISSUER) || isLocalHttpUrl(env.AUTH_ISSUER)) ||
+      !(isSecureG7Issuer(env.AUTH_JWKS_URL) || isLocalHttpUrl(env.AUTH_JWKS_URL))
+    ) {
+      throw new Error('PROMOTIONS_SERVICE_BUS_CONFIGURATION_INVALID');
+    }
+    return Object.freeze({
+      namespace: 'isolated-lab.local',
+      eventsEnabled: flag === 'true',
+      ...(couponCommands === 'true' ? { couponCommandsEnabled: true } : {}),
+      ...(pauseAdmission === 'true' ? { couponAdmissionPaused: true } : {}),
+      isolatedBus: true,
+    });
+  }
+
   if (!azure) {
     if (
       (env.MESSAGING_PROVIDER !== undefined &&
