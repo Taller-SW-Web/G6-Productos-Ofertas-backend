@@ -7,66 +7,66 @@ INSERT INTO inventory.locations (id, code, name, type, active) VALUES ('761f40b3
 INSERT INTO inventory.locations (id, code, name, type, active) VALUES ('9a4f2583-f99c-4498-a07b-0d57946427af', 'SYN-232104-LOC-INACT', 'Ubicacion Inactiva Sintetica (232104)', 'TIENDA', false) ON CONFLICT (id) DO NOTHING;
 INSERT INTO inventory.locations (id, code, name, type, active) VALUES ('42360b86-0cb2-458b-a0f7-ccf2f83f1dee', 'SYN-232104-LOC-EMPTY', 'Ubicacion Sin Stock Sintetica (232104)', 'ALMACEN', true) ON CONFLICT (id) DO NOTHING;
 
--- 2. Ciclo de vida SKU (Catalog)
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0001', true, 1) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0002', true, 2) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0003', true, 3) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0004', true, 4) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0005', true, 5) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0006', true, 6) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0007', true, 7) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0008', false, 8) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0009', true, 9) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0010', true, 10) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0011', true, 11) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0012', true, 12) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0013', true, 13) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0014', true, 14) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0015', true, 15) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0016', true, 16) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0017', true, 17) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0018', true, 18) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0019', true, 19) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0020', true, 20) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0021', true, 21) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0022', true, 22) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0023', true, 23) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0024', true, 24) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0025', true, 25) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0026', true, 26) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0027', true, 27) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0028', true, 28) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0029', true, 29) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0030', true, 30) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0031', true, 31) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0032', true, 32) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0033', true, 33) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0034', true, 34) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0035', true, 35) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0036', true, 36) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0037', true, 37) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0038', true, 38) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0039', true, 39) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0040', true, 40) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0041', true, 41) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0042', true, 42) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0043', true, 43) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0044', true, 44) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0045', true, 45) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0046', true, 46) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0047', true, 47) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0048', true, 48) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0049', true, 49) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0050', true, 50) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0051', true, 51) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0052', true, 52) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0053', true, 53) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-VAR-0054', true, 54) ON CONFLICT (sku_id) DO NOTHING;
-INSERT INTO inventory.sku_lifecycle (sku_id, active, catalog_version) VALUES ('SYN-232104-SMP-0055', true, 55) ON CONFLICT (sku_id) DO NOTHING;
+-- 2. Ciclo de vida SKU (sku_lifecycle schema real)
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0001', 'd7ecb092-42c6-4337-adf2-7ec66c81d1cd', 1, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0002', '2d9c89e1-408f-4c35-bf4e-1cb5208c1e9c', 2, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0003', '937305b9-f356-4225-a45f-a2999226a141', 3, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0004', 'e7734f07-f1cd-412e-9c0f-a64348495754', 4, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0005', '3cbc0066-48cb-499a-8b98-9d1c0bcc59a6', 5, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0006', 'fa98b8c9-7140-4232-af5b-8227e152a55f', 6, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0007', '7c6e4350-5d06-41e5-a9b7-1862d5d8d905', 7, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0008', 'd89d4719-1c4a-460c-b638-27a9c2589937', 8, false, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0009', '1686525d-a1ad-4e0d-afcd-5495fdd32967', 9, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0010', '7ba0fd23-eed7-44cb-92c9-db882bdba4e3', 10, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0011', '8798cb03-b853-4bd5-be54-1a945739444b', 11, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0012', '5e4a676b-051e-4344-b2b0-2dc83e203ecf', 12, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0013', '86319bc6-0b83-4a7f-9221-b197be322645', 13, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0014', 'cc8c505f-6d36-437c-964b-a01299035710', 14, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0015', 'efdd8d58-5d56-43b5-be61-ba73c16d07f5', 15, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0016', '39ad88bd-a47f-4bbf-96eb-aeac20045b11', 16, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0017', 'f6687683-1301-4363-8f6a-482ade24719b', 17, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0018', 'e0a0864a-1d10-4b0b-8e21-f6955ea62154', 18, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0019', '345d5c53-f470-47a8-aaea-851e0b39a5c4', 19, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0020', 'a6716288-2c6b-4a47-9258-6cf1d230ca82', 20, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0021', '0d523811-d58d-4625-8d56-b3b79b30b99a', 21, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0022', '2443a8cf-d9ce-433b-941f-50b5063208cb', 22, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0023', 'b86a0697-7cdf-4c24-82c1-828e256ece26', 23, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0024', '7de07389-0c13-4d49-821a-55491dc2fcc4', 24, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0025', '4a6d0136-8a1a-4ff2-981d-626fbfe55fbc', 25, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0026', 'c9ee5a05-5953-412c-af72-460ee8917f6e', 26, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0027', 'e5daccc0-30eb-4163-9564-71ff1fde5f6c', 27, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0028', 'bc93cc4f-ca6d-4903-bb8f-3e308d7dd31b', 28, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0029', '732ab53d-0af7-49df-85ce-d37ccb475e1b', 29, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0030', '93fa2bb6-c656-4d35-88e9-5ff4ce125976', 30, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0031', 'c46a352e-0948-49ce-9215-c2325d9f15cc', 31, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0032', 'e497898f-ac03-4317-a354-8422df27e4bb', 32, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0033', '41b69865-c1d2-4abe-9f04-c9f7b2de5b5a', 33, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0034', 'c7095a72-9249-4385-84d9-60ba187c8db9', 34, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0035', 'b28f2c02-ae82-434a-b317-940b8f26f9ed', 35, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0036', '7174778a-5105-4325-b3c5-a9ea25487c0d', 36, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0037', 'bef47dae-3a97-478e-ace9-2b6eb7b08a40', 37, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0038', 'f41e85a5-5f66-49b9-a594-7ebcafe7d4ec', 38, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0039', '69670941-40ca-467d-9a1e-c8c08f072490', 39, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0040', '26f49d5f-5a35-4ea6-8609-95f435060b78', 40, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0041', 'd53e1687-f781-43ab-9993-3be80d888232', 41, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0042', 'f01a7cc6-bd20-4a04-a656-a488a22bc42f', 42, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0043', 'c10f0d18-51c7-4570-bb51-c90598e463ed', 43, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0044', '80fb17e2-f64f-4621-8f27-0b293dd37eda', 44, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0045', '21b0d908-3c27-4b4c-9166-a10ad6bd9736', 45, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0046', '591be6c8-2e50-4709-861b-c20e3111bfb3', 46, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0047', '1785fa0b-5d32-4b72-99ea-9ab0627fc80d', 47, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0048', 'eefcb481-a49f-4f8f-99b0-678c0603a700', 48, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0049', 'abfe27ef-8ba4-4fb0-83cf-c1046a7ebc0c', 49, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0050', '44a8df16-2b4e-40a8-8134-963248ccc709', 50, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0051', '4bb14b31-2fd2-4381-a322-fe85b79c23ab', 51, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0052', 'dd1057ab-80dc-46f6-9c63-f8d9e4c56679', 52, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0053', '68b475a2-adc5-4610-a075-77d64eb8d9b5', 53, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-VAR-0054', 'ba8273f0-fc44-4741-bec5-67eaeac068e2', 54, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
+INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at) VALUES ('SYN-232104-SMP-0055', '117c175b-70e2-4677-99a5-db12637b371a', 55, true, '2026-11-26T00:00:00.000Z') ON CONFLICT (sku_id) DO NOTHING;
 
 -- 3. Umbrales
-INSERT INTO inventory.stock_threshold_override (id, sku_id, location_id, umbral_efectivo) VALUES ('4e25a27d-7a6a-4ba5-8c55-e44b19bfb2eb', NULL, NULL, 5) ON CONFLICT (id) DO NOTHING;
-INSERT INTO inventory.stock_threshold_override (id, sku_id, location_id, umbral_efectivo) VALUES ('b1be1411-eff1-4262-ac3e-29ecacf7d382', 'SYN-232104-VAR-0003', NULL, 4) ON CONFLICT (id) DO NOTHING;
+INSERT INTO inventory.stock_threshold_override (id, sku_id, location_id, umbral_efectivo) VALUES ('4e25a27d-7a6a-4ba5-8c55-e44b19bfb2eb', NULL, NULL, 5) ON CONFLICT DO NOTHING;
+INSERT INTO inventory.stock_threshold_override (id, sku_id, location_id, umbral_efectivo) VALUES ('b1be1411-eff1-4262-ac3e-29ecacf7d382', 'SYN-232104-VAR-0003', NULL, 4) ON CONFLICT DO NOTHING;
 
 -- 4. Saldos físicos (sin insertar columna generada available)
 INSERT INTO inventory.stock_balance (sku_id, location_id, on_hand, reserved, blocked) VALUES ('SYN-232104-SMP-0001', 'aaaf9bd8-7a86-4765-b2ce-187d9cfd70c1', 0, 0, 0) ON CONFLICT (sku_id, location_id) DO NOTHING;
@@ -182,12 +182,14 @@ INSERT INTO inventory.stock_balance (sku_id, location_id, on_hand, reserved, blo
 
 -- 5. Rutas comerciales por canal y fulfillment
 INSERT INTO inventory.commercial_fulfillment_routes (id, channel_id, mode, fulfillment_ref, location_id, active) VALUES ('888fad86-6e9b-424a-a41a-e65f087fd06b', 'MARKETPLACE', 'ENVIO_DOMICILIO', 'SYN-ROUTE-MKT-232104', 'aaaf9bd8-7a86-4765-b2ce-187d9cfd70c1', true) ON CONFLICT (id) DO NOTHING;
-INSERT INTO inventory.commercial_fulfillment_routes (id, channel_id, mode, fulfillment_ref, location_id, active) VALUES ('fdbd6a19-cdb2-41d8-a831-f4672f88ee1c', 'RETAIL_APP', 'RETIRO_TIENDA', 'SYN-ROUTE-RET-232104', '761f40b3-8a85-45e8-a3a7-e8aaa6175c78', true) ON CONFLICT (id) DO NOTHING;
+INSERT INTO inventory.commercial_fulfillment_routes (id, channel_id, mode, fulfillment_ref, location_id, active) VALUES ('fdbd6a19-cdb2-41d8-a831-f4672f88ee1c', 'RETAIL', 'RETIRO_TIENDA', 'SYN-ROUTE-RET-232104', '761f40b3-8a85-45e8-a3a7-e8aaa6175c78', true) ON CONFLICT (id) DO NOTHING;
 
--- 6. Operaciones y reserva vencida sintética
-INSERT INTO inventory.inventory_operations (operation_id, operation_type, idempotency_key, client_id, status) VALUES ('886ad6a0-490c-4d10-babb-4ba4ca319c6b', 'RESERVA', 'syn-exp-886ad6a0-490c-4d10-babb-4ba4ca319c6b', 'modulo-ventas', 'COMPLETED') ON CONFLICT (operation_id) DO NOTHING;
-INSERT INTO inventory.inventory_operations (operation_id, operation_type, idempotency_key, client_id, status) VALUES ('5bfc8bb8-cad1-466b-a3d6-b7c228a6b62c', 'RESERVA', 'syn-idem-232104-retry', 'modulo-ventas', 'COMPLETED') ON CONFLICT (operation_id) DO NOTHING;
-INSERT INTO inventory.reservations (reservation_id, order_id, operation_id, channel_id, status, expires_at) VALUES ('a08bc3bf-efa2-47a0-b105-ea1a72de6dd1', 'SYN-ORD-EXP-232104', '886ad6a0-490c-4d10-babb-4ba4ca319c6b', 'MARKETPLACE', 'ACTIVA', '2026-01-01T00:00:00.000Z') ON CONFLICT (reservation_id) DO NOTHING;
-INSERT INTO inventory.reservation_lines (reservation_id, sku_id, location_id, quantity) VALUES ('a08bc3bf-efa2-47a0-b105-ea1a72de6dd1', 'SYN-232104-SMP-0007', 'aaaf9bd8-7a86-4765-b2ce-187d9cfd70c1', 3) ON CONFLICT DO NOTHING;
+-- 6. Operaciones durables (intention NOT NULL, status operation_status enum)
+INSERT INTO inventory.inventory_operations (id, operation_type, idempotency_key, intention, status, order_id, reservation_id, operation_id, client_id) VALUES ('413e14c7-fbda-477d-abae-550aeaf04a8b', 'RESERVA', 'syn-op-exp-232104', 'reservar', 'APLICADO', 'SYN-ORD-EXP-232104', 'a08bc3bf-efa2-47a0-b105-ea1a72de6dd1', '886ad6a0-490c-4d10-babb-4ba4ca319c6b', 'modulo-ventas') ON CONFLICT (idempotency_key) DO NOTHING;
+INSERT INTO inventory.inventory_operations (id, operation_type, idempotency_key, intention, status, sku_id, location_id, operation_id, client_id) VALUES ('6dd7aa5a-2d3d-4a2d-a4b0-7a8990678c66', 'RESERVA', 'syn-idem-232104-retry', 'reservar', 'APLICADO', 'SYN-232104-VAR-0009', 'aaaf9bd8-7a86-4765-b2ce-187d9cfd70c1', '5bfc8bb8-cad1-466b-a3d6-b7c228a6b62c', 'modulo-ventas') ON CONFLICT (idempotency_key) DO NOTHING;
+
+-- 7. Reserva vencida sintética y líneas (reservation_lines.reservation_id -> reservations.id)
+INSERT INTO inventory.reservations (id, reservation_id, status, expires_at, idempotency_key, intention, order_id, operation_id) VALUES ('cb60221b-8bc1-44c7-8980-eb15f3861c8a', 'a08bc3bf-efa2-47a0-b105-ea1a72de6dd1', 'ACTIVA', '2026-01-01T00:00:00.000Z', 'syn-res-exp-232104', 'reservar', 'SYN-ORD-EXP-232104', '886ad6a0-490c-4d10-babb-4ba4ca319c6b') ON CONFLICT (reservation_id) DO NOTHING;
+INSERT INTO inventory.reservation_lines (id, reservation_id, sku_id, location_id, quantity) VALUES ('720d9ec3-8e24-4909-a863-b65fe02392d2', 'cb60221b-8bc1-44c7-8980-eb15f3861c8a', 'SYN-232104-SMP-0007', 'aaaf9bd8-7a86-4765-b2ce-187d9cfd70c1', 3) ON CONFLICT (reservation_id, sku_id, location_id) DO NOTHING;
 
 COMMIT;

@@ -7,11 +7,11 @@ import { sha256 } from 'k6/crypto';
  * PERF-03 — Escenario modular k6 de disponibilidad comercial de Inventory.
  * Owner: Miguel Taco | Plataforma e integración sistémica: Vera (performance-g6.yml).
  *
- * Reglas vinculantes:
- * - Solo lecturas comerciales (GET /api/v1/inventario/disponibilidad/comercial) y verificación
- *   puramente verificatoria (POST /api/v1/inventario/disponibilidad/comercial/verificar, binding: false).
- * - PROHIBIDO lanzar POST /reservas repetidos como benchmark de disponibilidad.
- * - Segrega 2xx, 401/403, 404/422, 429 (APIM rate limiting) y 503 de errores inesperados (<1%).
+ * - Distribución por escenarios separados:
+ *   1) `availability_get` (lectura GET /api/v1/inventario/disponibilidad/comercial, 70% peso)
+ *   2) `availability_verify_post` (verificación read-only POST /api/v1/inventario/disponibilidad/comercial/verificar, 30% peso)
+ * - PROHIBIDO lanzar POST /reservas durante la carga.
+ * - Métricas separadas por operación y código HTTP (2xx, 401/403, 404/422, 429 APIM, 5xx) y tasa de errores inesperados (<1%).
  */
 
 const BASE_URL = (__ENV.BASE_URL ?? '').replace(/\/$/, '');
@@ -71,7 +71,6 @@ if (
 const manifest = JSON.parse(manifestRaw);
 const groups = manifest.mandatory_groups ?? {};
 
-// Lista acotada de SKUs sintéticos cubriendo disponible, umbral exacto, agotado e inexistente
 const AVAILABLE_SKUS = [
   groups.threshold_plus_one_sku ?? 'SYN-TEST-AVAIL-01',
   groups.exact_threshold_sku ?? 'SYN-TEST-LOW-01',
@@ -81,11 +80,13 @@ const ZERO_OR_MISSING_SKUS = [
   groups.unregistered_sku ?? 'SYN-TEST-UNREG-99',
 ];
 
-const responses2xx = new Counter('h5_perf03_2xx_responses');
+// Métricas separadas por operación y clasificación HTTP
+const get2xx = new Counter('h5_perf03_get_2xx_responses');
+const verify2xx = new Counter('h5_perf03_verify_2xx_responses');
 const responses401or403 = new Counter('h5_perf03_auth_rejected_responses');
 const responses404or422 = new Counter('h5_perf03_contract_rejected_responses');
 const responses429 = new Counter('h5_perf03_rate_limited_429_responses');
-const responses503 = new Counter('h5_perf03_service_unavailable_503_responses');
+const responses5xx = new Counter('h5_perf03_server_5xx_responses');
 const unexpectedErrorRate = new Rate('h5_perf03_unexpected_error_rate');
 const responseBytes = new Counter('h5_perf03_response_bytes');
 const availabilityLatencyMs = new Trend(
@@ -94,21 +95,39 @@ const availabilityLatencyMs = new Trend(
 );
 const verifyLatencyMs = new Trend('h5_perf03_verify_duration_ms', true);
 
+const getVus = Math.max(1, Math.round(VUS * 0.7));
+const verifyVus = Math.max(1, VUS - getVus);
+
 export const options = {
-  vus: VUS,
-  duration: DURATION,
+  scenarios: {
+    availability_get: {
+      executor: 'constant-vus',
+      exec: 'readCommercialAvailability',
+      vus: SYNTHETIC_SMOKE ? 1 : getVus,
+      duration: DURATION,
+      tags: { scenario_kind: 'GET_DISPONIBILIDAD_COMERCIAL' },
+    },
+    availability_verify_post: {
+      executor: 'constant-vus',
+      exec: 'verifyCommercialAvailability',
+      vus: SYNTHETIC_SMOKE ? 1 : verifyVus,
+      duration: DURATION,
+      tags: { scenario_kind: 'POST_VERIFICAR_CANTIDAD_COMERCIAL' },
+    },
+  },
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
   thresholds: {
     h5_perf03_unexpected_error_rate: ['rate<0.01'],
-    h5_perf03_2xx_responses: ['count>0'],
+    h5_perf03_get_2xx_responses: ['count>0'],
+    h5_perf03_verify_2xx_responses: ['count>0'],
     checks: ['rate>0.99'],
   },
 };
 
-function recordStatus(res, expect2xx = true) {
+function recordStatus(res, okCounter, expect2xx = true) {
   responseBytes.add(res.body ? String(res.body).length : 0);
   if (res.status >= 200 && res.status < 300) {
-    responses2xx.add(1);
+    okCounter.add(1);
     unexpectedErrorRate.add(false);
     return;
   }
@@ -124,33 +143,33 @@ function recordStatus(res, expect2xx = true) {
   }
   if (res.status === 429) {
     responses429.add(1);
-    // 429 esperado si APIM aplica cuota: no se mezcla con fallos inesperados 5xx
     unexpectedErrorRate.add(false);
     return;
   }
-  if (res.status === 503) {
-    responses503.add(1);
+  if (res.status >= 500) {
+    responses5xx.add(1);
     unexpectedErrorRate.add(true);
     return;
   }
   unexpectedErrorRate.add(true);
 }
 
-export default function () {
-  const headers = {
+function buildHeaders() {
+  return {
     Authorization: `Bearer ${AUTH_TOKEN}`,
     Accept: 'application/json',
     'Content-Type': 'application/json',
   };
+}
 
-  // 1. Lectura comercial GET por lote de SKUs (disponible + agotado + inexistente)
+export function readCommercialAvailability() {
   const skusParam = [...AVAILABLE_SKUS, ...ZERO_OR_MISSING_SKUS]
     .map((sku) => encodeURIComponent(sku))
     .join(',');
   const getRes = http.get(
     `${BASE_URL}/api/v1/inventario/disponibilidad/comercial?skus=${skusParam}&canal=${encodeURIComponent(CHANNEL)}`,
     {
-      headers,
+      headers: buildHeaders(),
       tags: {
         h5_case: 'PERF-03',
         operation: 'GET_DISPONIBILIDAD_COMERCIAL',
@@ -161,7 +180,7 @@ export default function () {
     },
   );
   availabilityLatencyMs.add(getRes.timings.duration);
-  recordStatus(getRes, true);
+  recordStatus(getRes, get2xx, true);
 
   check(getRes, {
     'GET disponibilidad comercial status 200 o 429': (r) =>
@@ -171,7 +190,10 @@ export default function () {
       !/on_hand|reserved|blocked|stock_version/.test(String(r.body)),
   });
 
-  // 2. Verificación comercial puramente read-only (binding: false, sin mutar stock ni reservar)
+  if (SYNTHETIC_SMOKE) sleep(0.05);
+}
+
+export function verifyCommercialAvailability() {
   const verifyPayload = JSON.stringify({
     channel_id: CHANNEL,
     fulfillment: { mode: VERIFY_FULFILLMENT_MODE },
@@ -181,7 +203,7 @@ export default function () {
     `${BASE_URL}/api/v1/inventario/disponibilidad/comercial/verificar`,
     verifyPayload,
     {
-      headers,
+      headers: buildHeaders(),
       tags: {
         h5_case: 'PERF-03',
         operation: 'POST_VERIFICAR_CANTIDAD_COMERCIAL',
@@ -192,7 +214,7 @@ export default function () {
     },
   );
   verifyLatencyMs.add(postVerifyRes.timings.duration);
-  recordStatus(postVerifyRes, true);
+  recordStatus(postVerifyRes, verify2xx, true);
 
   check(postVerifyRes, {
     'POST verificar cantidad status 200 o 429': (r) =>
@@ -208,6 +230,11 @@ export default function () {
   });
 
   if (SYNTHETIC_SMOKE) sleep(0.05);
+}
+
+export default function () {
+  readCommercialAvailability();
+  verifyCommercialAvailability();
 }
 
 export function handleSummary(data) {

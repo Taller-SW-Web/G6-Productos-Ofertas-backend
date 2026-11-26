@@ -26,7 +26,7 @@ import {
 } from '../crypto-test-token.helper.js';
 import { generateInventoryFixtureData } from '../../../../scripts/h5/fixtures/inventory/generate-inventory-fixture.mjs';
 
-describe('TAC-A02 / INT-02 — Matriz completa de reservas, operaciones durables, concurrencia y recuperación (INV-INT01 a INV-INT12)', () => {
+describe('TAC-A02 / INT-02 [InMemoryDatabaseMock] — Pruebas contractuales HTTP rápidas (NO sustituyen L1 PostgreSQL 17)', () => {
   let app: INestApplication;
   let db: InMemoryDatabaseMock;
 
@@ -473,7 +473,8 @@ describe('TAC-A02 / INT-02 — Matriz completa de reservas, operaciones durables
       .expect(200);
     expect(mktVerify.body.items[0].result).toBe('SUFICIENTE');
 
-    // En RETAIL (locB = 0) pedir 5 no debe sumar los 10 de MARKETPLACE (locA)
+    // En RETAIL (locB = 0, ruta existente RETIRO_TIENDA) pedir 5 debe devolver INSUFICIENTE,
+    // nunca INDETERMINADO (que ocultaría ruta ausente) ni sumar los 10 de MARKETPLACE (locA).
     const retVerify = await http
       .post('/api/v1/inventario/disponibilidad/comercial/verificar')
       .set('Authorization', `Bearer ${channelToken('modulo-retail')}`)
@@ -483,7 +484,7 @@ describe('TAC-A02 / INT-02 — Matriz completa de reservas, operaciones durables
         lines: [{ sku: skuDiff, quantity: 5 }],
       })
       .expect(200);
-    expect(retVerify.body.items[0].result).toBe('INDETERMINADO');
+    expect(retVerify.body.items[0].result).toBe('INSUFICIENTE');
   });
 
   it('INV-INT10: fallo de BD tras actualizar stock revierte toda la transacción y retry conserva identidad', async () => {

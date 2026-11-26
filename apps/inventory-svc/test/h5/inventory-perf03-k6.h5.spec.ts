@@ -26,7 +26,11 @@ describe('TAC-A03 / PERF-03 — Validación contractual del módulo k6 de dispon
     expect(source).toContain('5VU-180s');
     expect(source).toContain('20VU-300s');
 
-    // Segregación de 429 y umbral de error inesperado < 1%
+    // Segregación de escenarios, métricas por operación, 429 y umbral < 1%
+    expect(source).toContain('availability_get');
+    expect(source).toContain('availability_verify_post');
+    expect(source).toContain('h5_perf03_get_2xx_responses');
+    expect(source).toContain('h5_perf03_verify_2xx_responses');
     expect(source).toContain('h5_perf03_rate_limited_429_responses');
     expect(source).toContain('h5_perf03_unexpected_error_rate');
     expect(source).toContain("['rate<0.01']");

@@ -1,7 +1,9 @@
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   assertIsolatedDatabaseUrl,
   generateInventoryFixtureData,
+  verifyGeneratedArtifacts,
 } from '../../../../scripts/h5/fixtures/inventory/generate-inventory-fixture.mjs';
 
 describe('INV-03 / TAC-A01 — Generador determinista de fixtures sintéticos de Inventory', () => {
@@ -107,9 +109,44 @@ describe('INV-03 / TAC-A01 — Generador determinista de fixtures sintéticos de
     expect(
       new Set(result.commercialRoutes.map((r) => r.channel_id)).size,
     ).toBeGreaterThanOrEqual(2);
+    expect(result.commercialRoutes.map((r) => r.channel_id).sort()).toEqual([
+      'MARKETPLACE',
+      'RETAIL',
+    ]);
     expect(
       new Set(result.commercialRoutes.map((r) => r.location_id)).size,
     ).toBeGreaterThanOrEqual(2);
+    // Verifica columnas reales del esquema PostgreSQL de Inventory
+    expect(result.sql).toContain(
+      'INSERT INTO inventory.sku_lifecycle (sku_id, product_id, sku_version, active, changed_at)',
+    );
+    expect(result.sql).toContain(
+      'INSERT INTO inventory.inventory_operations (id, operation_type, idempotency_key, intention, status',
+    );
+    expect(result.sql).toContain("'APLICADO'");
+    expect(result.sql).toContain(
+      'INSERT INTO inventory.reservations (id, reservation_id, status, expires_at, idempotency_key, intention, order_id, operation_id)',
+    );
+    expect(result.sql).toContain(
+      `VALUES ('${result.expiredReservation.line_id}', '${result.expiredReservation.id}'`,
+    );
+    expect(result.cleanupSql).toContain(
+      'DELETE FROM inventory.reservation_lines',
+    );
+    expect(result.cleanupSql).toContain('DELETE FROM inventory.locations');
+  });
+
+  it('verifica la integridad SHA-256 de los artefactos baseline versionados (verify)', async () => {
+    const outDir = resolve(
+      import.meta.dirname,
+      '../../../../scripts/h5/fixtures/inventory/out',
+    );
+    const verified = await verifyGeneratedArtifacts(outDir, {
+      seed: '20261126',
+      profile: 'baseline',
+    });
+    expect(verified.manifest.profile).toBe('baseline');
+    expect(verified.manifest.counts.balances).toBe(110);
   });
 
   it('impide cadenas de conexión hacia Supabase o entornos productivos/compartidos', () => {
