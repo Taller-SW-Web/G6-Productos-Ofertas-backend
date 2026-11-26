@@ -272,7 +272,7 @@ for bad_state in "RunningAtMaxScale:Unhealthy:1:Provisioned" "RunningAtMaxScale:
     '.revision.properties.runningState=$rs | .revision.properties.healthState=$rh | .revision.properties.replicas=$rr | .revision.properties.provisioningState=$rp' \
     "$TEMP/bad-state.json" > "$TEMP/bad-state.tmp" && mv "$TEMP/bad-state.tmp" "$TEMP/bad-state.json"
   if MOCK_SERVICE=catalog-svc MOCK_STATE="$TEMP/bad-state.json" H5_DEPLOY_ENVIRONMENT=azure-h5-chile H5_DEPLOY_DESTINATION=chile-shared H5_PILOT_SELF_REVIEW=false \
-    bash "$DEPLOY" catalog-svc 'ghcr.io/taller-sw-web/g6-productos-ofertas-backend/catalog-svc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' > "$TEMP/bad-state.log" 2>&1; then
+    bash "$DEPLOY" catalog-svc "$CAT_TARGET" > "$TEMP/bad-state.log" 2>&1; then
     fail "Estado inválido $bad_state fue aceptado"
   fi
 done
