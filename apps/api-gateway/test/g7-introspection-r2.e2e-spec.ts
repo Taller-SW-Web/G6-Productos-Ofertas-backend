@@ -27,6 +27,8 @@ describe('API Gateway P0-AUTH-03 G7 introspection scenarios (ESCRITA_NO_EJECUTAD
   };
   let nextTokenResponse: { status: number; body: Record<string, unknown> } | null = null;
   let upstreamPricingCalls = 0;
+  let tokenCalls = 0;
+  let introspectionCalls = 0;
 
   beforeAll(async () => {
     const tempSettings = readGatewaySettings({
@@ -45,6 +47,7 @@ describe('API Gateway P0-AUTH-03 G7 introspection scenarios (ESCRITA_NO_EJECUTAD
         return;
       }
       if (req.url === '/api/v1/auth/token' && req.method === 'POST') {
+        tokenCalls += 1;
         if (nextTokenResponse) {
           res.statusCode = nextTokenResponse.status;
           res.setHeader('content-type', 'application/json');
@@ -52,6 +55,7 @@ describe('API Gateway P0-AUTH-03 G7 introspection scenarios (ESCRITA_NO_EJECUTAD
           return;
         }
         const accessToken = signed.token({
+          iss: `${origin}/issuer`,
           tipo: 'servicio',
           sub: 'modulo-productos',
           aud: ['api-seguridad'],
@@ -69,6 +73,7 @@ describe('API Gateway P0-AUTH-03 G7 introspection scenarios (ESCRITA_NO_EJECUTAD
         return;
       }
       if (req.url === '/api/v1/auth/introspeccion' && req.method === 'POST') {
+        introspectionCalls += 1;
         res.statusCode = nextIntrospectionResponse.status;
         res.setHeader('content-type', 'application/json');
         res.end(JSON.stringify(nextIntrospectionResponse.body));
@@ -115,6 +120,8 @@ describe('API Gateway P0-AUTH-03 G7 introspection scenarios (ESCRITA_NO_EJECUTAD
   beforeEach(() => {
     nextTokenResponse = null;
     upstreamPricingCalls = 0;
+    tokenCalls = 0;
+    introspectionCalls = 0;
   });
 
   afterAll(async () => {
@@ -136,7 +143,15 @@ describe('API Gateway P0-AUTH-03 G7 introspection scenarios (ESCRITA_NO_EJECUTAD
     };
   }
 
-  it('permits Pricing sensitive write when introspection returns active matching user', async () => {
+  const validPricingPatchBody = {
+    accionPrecioOferta: 'CONSERVAR',
+    priceVersion: 0,
+    precioRegular: 99.5,
+    moneda: 'PEN',
+    motivoCambio: 'E2E_INTROSPECTION',
+  };
+
+  it('permits Pricing sensitive PATCH when introspection returns active matching user', async () => {
     const { sub, jwt } = userToken();
     nextIntrospectionResponse = {
       status: 200,
@@ -149,11 +164,12 @@ describe('API Gateway P0-AUTH-03 G7 introspection scenarios (ESCRITA_NO_EJECUTAD
       },
     };
     await request(app.getHttpServer())
-      .put(`/api/v1/precios/productos/${randomUUID()}`)
+      .patch(`/api/v1/precios/productos/${randomUUID()}`)
       .set('Authorization', `Bearer ${jwt}`)
       .set('Idempotency-Key', randomUUID())
-      .send({ precioRegular: '99.50', currency: 'PEN' })
+      .send(validPricingPatchBody)
       .expect(200);
+    expect(introspectionCalls).toBe(1);
     expect(upstreamPricingCalls).toBe(1);
   });
 
@@ -169,11 +185,12 @@ describe('API Gateway P0-AUTH-03 G7 introspection scenarios (ESCRITA_NO_EJECUTAD
       body: { activo: false, motivo },
     };
     await request(app.getHttpServer())
-      .put(`/api/v1/precios/productos/${randomUUID()}`)
+      .patch(`/api/v1/precios/productos/${randomUUID()}`)
       .set('Authorization', `Bearer ${jwt}`)
       .set('Idempotency-Key', randomUUID())
-      .send({ precioRegular: '99.50', currency: 'PEN' })
+      .send(validPricingPatchBody)
       .expect(401);
+    expect(introspectionCalls).toBe(1);
     expect(upstreamPricingCalls).toBe(0);
   });
 
@@ -190,25 +207,51 @@ describe('API Gateway P0-AUTH-03 G7 introspection scenarios (ESCRITA_NO_EJECUTAD
       },
     };
     await request(app.getHttpServer())
-      .put(`/api/v1/precios/productos/${randomUUID()}`)
+      .patch(`/api/v1/precios/productos/${randomUUID()}`)
       .set('Authorization', `Bearer ${jwt}`)
       .set('Idempotency-Key', randomUUID())
-      .send({ precioRegular: '99.50', currency: 'PEN' })
+      .send(validPricingPatchBody)
       .expect(401);
+    expect(introspectionCalls).toBe(1);
     expect(upstreamPricingCalls).toBe(0);
   });
 
-  it('fails closed (503) when G7 provider fails temporarily, technical client is unauthorized, or scope is wrong', async () => {
+  it('fails closed (503) when G7 provider fails temporarily, and isolated instance rejects wrong client/scope without cache reuse', async () => {
     const { jwt } = userToken();
 
     nextIntrospectionResponse = { status: 503, body: { code: 'UNAVAILABLE' } };
     await request(app.getHttpServer())
-      .put(`/api/v1/precios/productos/${randomUUID()}`)
+      .patch(`/api/v1/precios/productos/${randomUUID()}`)
       .set('Authorization', `Bearer ${jwt}`)
       .set('Idempotency-Key', randomUUID())
-      .send({ precioRegular: '99.50', currency: 'PEN' })
+      .send(validPricingPatchBody)
       .expect(503);
+    expect(introspectionCalls).toBe(1);
+    expect(upstreamPricingCalls).toBe(0);
 
+    // Instancia Gateway aislada (sin caché previa de serviceTokenCache)
+    const isolatedSettings = readGatewaySettings({
+      NODE_ENV: 'test',
+      G6_SECURITY_MODE: 'G7_AUTHENTICATED',
+      GATEWAY_G5_H5_ENABLED: 'true',
+      AUTH_ISSUER: `${origin}/issuer`,
+      AUTH_JWKS_URL: `${origin}/jwks`,
+      GATEWAY_SERVICE_TOKEN_URL: `${origin}/api/v1/auth/token`,
+      GATEWAY_SERVICE_CLIENT_SECRET: 'e2e-gateway-secret',
+      GATEWAY_PRICING_SVC_URL: origin,
+      GATEWAY_PRICING_SVC_READINESS_PATH: '/health/ready',
+    });
+    const isolatedModule = await Test.createTestingModule({
+      imports: [ApiGatewayModule],
+    })
+      .overrideProvider(GATEWAY_SETTINGS)
+      .useValue(isolatedSettings)
+      .compile();
+    const isolatedApp = isolatedModule.createNestApplication({ logger: false });
+    await isolatedApp.init();
+
+    tokenCalls = 0;
+    introspectionCalls = 0;
     nextTokenResponse = {
       status: 200,
       body: {
@@ -224,12 +267,18 @@ describe('API Gateway P0-AUTH-03 G7 introspection scenarios (ESCRITA_NO_EJECUTAD
         scopes: ['catalogo:leer'],
       },
     };
-    await request(app.getHttpServer())
-      .put(`/api/v1/precios/productos/${randomUUID()}`)
-      .set('Authorization', `Bearer ${jwt}`)
-      .set('Idempotency-Key', randomUUID())
-      .send({ precioRegular: '99.50', currency: 'PEN' })
-      .expect(503);
-    expect(upstreamPricingCalls).toBe(0);
+    try {
+      await request(isolatedApp.getHttpServer())
+        .patch(`/api/v1/precios/productos/${randomUUID()}`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .set('Idempotency-Key', randomUUID())
+        .send(validPricingPatchBody)
+        .expect(503);
+      expect(tokenCalls).toBe(1);
+      expect(introspectionCalls).toBe(0);
+      expect(upstreamPricingCalls).toBe(0);
+    } finally {
+      await isolatedApp.close();
+    }
   });
 });

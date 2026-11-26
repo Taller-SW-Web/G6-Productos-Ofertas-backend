@@ -342,13 +342,20 @@ function createIsolatedHttpCatalogBusClient(baseUrl: string) {
             { method: 'POST' },
           );
         },
-        async deadLetterMessage(message: ServiceBusReceivedMessage) {
+        async deadLetterMessage(
+          message: ServiceBusReceivedMessage,
+          options?: { deadLetterReason?: string; deadLetterErrorDescription?: string },
+        ) {
           const deliveryId = (message as unknown as { _deliveryId?: string })
             ._deliveryId;
           if (!deliveryId) return;
           await fetch(
-            `${origin}/queues/${encodeURIComponent(queue)}/complete/${encodeURIComponent(deliveryId)}`,
-            { method: 'POST' },
+            `${origin}/queues/${encodeURIComponent(queue)}/deadletter/${encodeURIComponent(deliveryId)}`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(options ?? {}),
+            },
           );
         },
         async close() {

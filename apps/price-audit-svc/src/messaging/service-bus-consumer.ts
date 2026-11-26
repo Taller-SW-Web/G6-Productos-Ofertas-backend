@@ -108,22 +108,106 @@ export class AuditServiceBusRuntime
 
   onApplicationBootstrap(): void {
     if (!this.config.serviceBus) return;
-    this.client = new ServiceBusClient(
-      this.config.serviceBus.namespace,
-      this.config.serviceBus.managedIdentityClientId
-        ? new ManagedIdentityCredential({
-            clientId: this.config.serviceBus.managedIdentityClientId,
-          })
-        : new DefaultAzureCredential(),
-      {
-        retryOptions: { maxRetries: 0, timeoutInMs: 5000 },
-      },
-    );
-    this.receiver = this.client.createReceiver(QUEUE, {
-      receiveMode: 'peekLock',
-      skipParsingBodyAsJson: true,
-      maxAutoLockRenewalDurationInMs: 60_000,
-    });
+    if (this.config.serviceBus.isolatedBusUrl) {
+      const origin = this.config.serviceBus.isolatedBusUrl;
+      const timers = new Set<ReturnType<typeof setInterval>>();
+      this.receiver = {
+        async peekMessages() {
+          const res = await fetch(`${origin}/queues/${encodeURIComponent(QUEUE)}/peek`);
+          if (!res.ok) throw new Error(`ISOLATED_BUS_PEEK_FAILED_${res.status}`);
+          return (await res.json()) as ServiceBusReceivedMessage[];
+        },
+        subscribe(handlers: {
+          processMessage: (msg: ServiceBusReceivedMessage) => Promise<void>;
+          processError: (args: { error: Error }) => Promise<void>;
+        }) {
+          let active = true;
+          const timer = setInterval(async () => {
+            if (!active) return;
+            try {
+              const res = await fetch(`${origin}/queues/${encodeURIComponent(QUEUE)}/receive`, { method: 'POST' });
+              if (res.status === 204 || !res.ok) return;
+              const msg = (await res.json()) as {
+                deliveryId: string;
+                body: string;
+                contentType?: string;
+                messageId?: string;
+                correlationId?: string;
+                subject?: string;
+                applicationProperties?: Record<string, unknown>;
+                deliveryCount?: number;
+              };
+              await handlers.processMessage({
+                body: Buffer.from(msg.body, 'utf8'),
+                contentType: msg.contentType,
+                messageId: msg.messageId,
+                correlationId: msg.correlationId,
+                subject: msg.subject,
+                applicationProperties: msg.applicationProperties,
+                deliveryCount: msg.deliveryCount ?? 1,
+                _deliveryId: msg.deliveryId,
+              } as unknown as ServiceBusReceivedMessage);
+            } catch (error) {
+              await handlers.processError({
+                error: error instanceof Error ? error : new Error(String(error)),
+              });
+            }
+          }, 250);
+          timer.unref();
+          timers.add(timer);
+          return {
+            async close() {
+              active = false;
+              clearInterval(timer);
+              timers.delete(timer);
+            },
+          };
+        },
+        async completeMessage(message: ServiceBusReceivedMessage) {
+          const id = (message as unknown as { _deliveryId?: string })._deliveryId;
+          if (!id) return;
+          await fetch(`${origin}/queues/${encodeURIComponent(QUEUE)}/complete/${encodeURIComponent(id)}`, { method: 'POST' });
+        },
+        async abandonMessage(message: ServiceBusReceivedMessage) {
+          const id = (message as unknown as { _deliveryId?: string })._deliveryId;
+          if (!id) return;
+          await fetch(`${origin}/queues/${encodeURIComponent(QUEUE)}/abandon/${encodeURIComponent(id)}`, { method: 'POST' });
+        },
+        async deadLetterMessage(
+          message: ServiceBusReceivedMessage,
+          options?: { deadLetterReason?: string; deadLetterErrorDescription?: string },
+        ) {
+          const id = (message as unknown as { _deliveryId?: string })._deliveryId;
+          if (!id) return;
+          await fetch(`${origin}/queues/${encodeURIComponent(QUEUE)}/deadletter/${encodeURIComponent(id)}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(options ?? {}),
+          });
+        },
+        async close() {
+          for (const t of timers) clearInterval(t);
+          timers.clear();
+        },
+      } as unknown as ServiceBusReceiver;
+    } else {
+      this.client = new ServiceBusClient(
+        this.config.serviceBus.namespace,
+        this.config.serviceBus.managedIdentityClientId
+          ? new ManagedIdentityCredential({
+              clientId: this.config.serviceBus.managedIdentityClientId,
+            })
+          : new DefaultAzureCredential(),
+        {
+          retryOptions: { maxRetries: 0, timeoutInMs: 5000 },
+        },
+      );
+      this.receiver = this.client.createReceiver(QUEUE, {
+        receiveMode: 'peekLock',
+        skipParsingBodyAsJson: true,
+        maxAutoLockRenewalDurationInMs: 60_000,
+      });
+    }
     const receiver = this.receiver;
     const handler = new AuditServiceBusHandler(this.repository, receiver);
     const open = () => {

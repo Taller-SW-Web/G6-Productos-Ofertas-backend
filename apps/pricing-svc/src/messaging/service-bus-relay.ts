@@ -94,20 +94,76 @@ export class PricingServiceBusRuntime
 
   onApplicationBootstrap(): void {
     if (!this.config.serviceBus) return;
-    this.client = new ServiceBusClient(
-      this.config.serviceBus.namespace,
-      this.config.serviceBus.managedIdentityClientId
-        ? new ManagedIdentityCredential({
-            clientId: this.config.serviceBus.managedIdentityClientId,
-          })
-        : new DefaultAzureCredential(),
-      {
-        retryOptions: { maxRetries: 0, timeoutInMs: 5000 },
-      },
-    );
-    const client = this.client;
-    for (const destination of PRICING_APPROVED_DESTINATIONS) {
-      this.senders.set(destination, client.createSender(destination));
+    if (this.config.serviceBus.isolatedBusUrl) {
+      const origin = this.config.serviceBus.isolatedBusUrl;
+      for (const destination of PRICING_APPROVED_DESTINATIONS) {
+        const sender = {
+          async createMessageBatch() {
+            const messages: Array<Record<string, unknown>> = [];
+            return {
+              tryAddMessage(msg: {
+                body: unknown;
+                contentType?: string;
+                messageId?: string;
+                correlationId?: string;
+                subject?: string;
+                applicationProperties?: Record<string, unknown>;
+              }) {
+                const rawBody =
+                  msg.body instanceof Uint8Array
+                    ? Buffer.from(msg.body).toString('utf8')
+                    : typeof msg.body === 'string'
+                      ? msg.body
+                      : JSON.stringify(msg.body);
+                messages.push({
+                  body: rawBody,
+                  contentType: msg.contentType,
+                  messageId: msg.messageId,
+                  correlationId: msg.correlationId,
+                  subject: msg.subject,
+                  applicationProperties: msg.applicationProperties,
+                });
+                return true;
+              },
+              _messages: messages,
+            } as never;
+          },
+          async sendMessages(batch: unknown) {
+            const items =
+              (batch as { _messages?: Array<Record<string, unknown>> })
+                ._messages ?? [];
+            for (const item of items) {
+              const res = await fetch(
+                `${origin}/queues/${encodeURIComponent(destination)}/messages`,
+                {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify(item),
+                },
+              );
+              if (!res.ok) throw new Error(`ISOLATED_BUS_SEND_FAILED_${res.status}`);
+            }
+          },
+          async close() {},
+        } as unknown as ServiceBusSender;
+        this.senders.set(destination, sender);
+      }
+    } else {
+      this.client = new ServiceBusClient(
+        this.config.serviceBus.namespace,
+        this.config.serviceBus.managedIdentityClientId
+          ? new ManagedIdentityCredential({
+              clientId: this.config.serviceBus.managedIdentityClientId,
+            })
+          : new DefaultAzureCredential(),
+        {
+          retryOptions: { maxRetries: 0, timeoutInMs: 5000 },
+        },
+      );
+      const client = this.client;
+      for (const destination of PRICING_APPROVED_DESTINATIONS) {
+        this.senders.set(destination, client.createSender(destination));
+      }
     }
     const relay = new PricingServiceBusRelay(
       new PricingDeliveryStore(this.repository),
