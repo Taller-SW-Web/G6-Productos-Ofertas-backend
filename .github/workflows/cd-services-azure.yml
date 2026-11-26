@@ -158,6 +158,13 @@ jobs:
           npm audit --omit=dev --audit-level=high --json > h5-security-evidence/npm-audit.json 2> h5-security-evidence/npm-audit.stderr
           audit_status=$?
           set -e
+          if (( audit_status == 0 )) && ! jq -es '
+            length == 1 and (.[0] | type == "object" and (has("error") | not) and
+              (.metadata.vulnerabilities | .high == 0 and .critical == 0))
+          ' h5-security-evidence/npm-audit.json >/dev/null; then
+            echo 'FALLO: npm audit no produjo un informe válido sin vulnerabilidades altas o críticas.' >&2
+            audit_status=1
+          fi
           printf 'Auditoría H5 del SHA %s: exit=%s; lockfile SHA-256 %s\n' \
             "$CANDIDATE_SHA" "$audit_status" "$(sha256sum package-lock.json | awk '{print $1}')" >> "$GITHUB_STEP_SUMMARY"
           cat h5-security-evidence/npm-audit.json

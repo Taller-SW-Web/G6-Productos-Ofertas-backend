@@ -223,6 +223,9 @@ describe.skipIf(process.env.PROMOTIONS_H5_POSTGRES_TESTS !== '1')(
         }),
       );
       await worker.process(restore.command);
+      for (let redelivery = 0; redelivery < 10; redelivery++) {
+        await worker.process(restore.command);
+      }
       const operation = await operations.get(
         restore.command.operation_id,
         restore.command.data.order_id,
@@ -271,6 +274,9 @@ describe.skipIf(process.env.PROMOTIONS_H5_POSTGRES_TESTS !== '1')(
       );
       await operations.admit(restore);
       await worker.process(restore.command);
+      for (let redelivery = 0; redelivery < 10; redelivery++) {
+        await worker.process(restore.command);
+      }
       const result = await operations.get(
         restore.command.operation_id,
         restore.command.data.order_id,
@@ -292,6 +298,11 @@ describe.skipIf(process.env.PROMOTIONS_H5_POSTGRES_TESTS !== '1')(
           )
         ).rows[0].n,
       ).toBe(1);
+      const { rows } = await pool.query(
+        "SELECT count(*)::int AS count FROM promotions.coupon_command_receipts WHERE operation_id=$1 AND intention='RESTAURAR'",
+        [restore.command.operation_id],
+      );
+      expect(rows[0].count).toBe(1);
     });
 
     it('rejects an oversized envelope before inserting an operation or intent', async () => {
@@ -592,12 +603,13 @@ describe.skipIf(process.env.PROMOTIONS_H5_POSTGRES_TESTS !== '1')(
       await expect(h5.handle(message)).rejects.toThrow(
         'synthetic settlement lock lost',
       );
-      await handle(couponH5EvidenceTimeoutMs).handle(
-        sent[1] as unknown as ServiceBusReceivedMessage,
-      );
+      const restarted = handle(couponH5EvidenceTimeoutMs);
+      for (let redelivery = 0; redelivery < 10; redelivery++) {
+        await restarted.handle(sent[1] as unknown as ServiceBusReceivedMessage);
+      }
       expect(verify).toHaveBeenCalledTimes(3);
       expect(verify.mock.calls[2][1].aborted).toBe(false);
-      expect(completeMessage).toHaveBeenCalledTimes(2);
+      expect(completeMessage).toHaveBeenCalledTimes(11);
       expect(settlement.deadLetterMessage).not.toHaveBeenCalled();
       expect(await effects()).toEqual({ inbox: 1, receipts: 1, uses: 1 });
 

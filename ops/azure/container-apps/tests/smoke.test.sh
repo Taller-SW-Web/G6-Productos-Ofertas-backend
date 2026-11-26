@@ -19,27 +19,34 @@ while (($#)); do
   shift
 done
 [[ -z "${CURL_LOG:-}" ]] || printf '%s\n' "$url" >> "$CURL_LOG"
-if [[ -n "$output" && "$output" != /dev/null ]]; then printf '{"status":"ready"}' > "$output"; fi
+if [[ -n "$output" && "$output" != /dev/null ]]; then
+  base_service="${MOCK_HEALTH_SERVICE:-catalog-svc}"
+  if [[ "$url" == */health/ready || "$url" == */health/readiness ]]; then
+    body_service="${MOCK_READINESS_SERVICE:-$base_service}"
+    body_status="${MOCK_READINESS_STATUS:-ready}"
+    if [[ -n "${MOCK_READINESS_EXTRA:-}" ]]; then
+      printf '{"status":"%s","service":"%s",%s}' "$body_status" "$body_service" "$MOCK_READINESS_EXTRA" > "$output"
+    else
+      printf '{"status":"%s","service":"%s"}' "$body_status" "$body_service" > "$output"
+    fi
+  else
+    body_service="${MOCK_LIVENESS_SERVICE:-$base_service}"
+    body_status="${MOCK_LIVENESS_STATUS:-ok}"
+    printf '{"status":"%s","service":"%s"}' "$body_status" "$body_service" > "$output"
+  fi
+fi
 if [[ "$url" == *'/private/read' || "$url" == *'/api/v1/promociones/evaluar' ]]; then
   if [[ "$method" == POST ]]; then printf '%s' "${MOCK_POST_STATUS:-401}"; else printf '401'; fi
   exit 0
 fi
-if [[ "${MOCK_READINESS_FAILURE:-false}" == true && "$url" == */health/ready || "${MOCK_READINESS_FAILURE:-false}" == true && "$url" == */health/readiness ]]; then printf '503'; else printf '200'; fi
+if [[ "${MOCK_READINESS_FAILURE:-false}" == true && ( "$url" == */health/ready || "$url" == */health/readiness ) ]]; then
+  printf '503'
+else
+  printf '200'
+fi
 MOCK
 chmod +x "$TEMP/curl"
-if ! command -v jq >/dev/null 2>&1; then
-  cat > "$TEMP/jq" <<'MOCK'
-#!/usr/bin/env bash
-set -Eeuo pipefail
-file="${@: -1}"
-node - "$file" <<'NODE'
-const fs = require('node:fs');
-const value = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-process.exit(value !== null && typeof value === 'object' ? 0 : 1);
-NODE
-MOCK
-  chmod +x "$TEMP/jq"
-fi
+command -v jq >/dev/null || { echo 'FAIL: las pruebas de smoke requieren jq' >&2; exit 1; }
 
 export CURL_ARGS_LOG="$TEMP/default-get-args.log"
 PATH="$TEMP:$PATH" SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH='/private/read' \
@@ -52,8 +59,38 @@ if grep -q -- '--request POST' "$CURL_ARGS_LOG"; then
 fi
 echo 'PASS: liveness, readiness y rechazo 401 sin token'
 
+# Verify contract compatibility across all nine applications (8 microservices + API Gateway).
+for spec in \
+  'api-gateway||GET|/private/read|' \
+  'bulk-svc|/health/readiness|GET|/private/read|"reason":"ok"' \
+  'catalog-svc|/health/ready|GET|/private/read|' \
+  'combos-svc|/health/ready|GET|/private/read|"dependencies":{"postgres":"ok"}' \
+  'inventory-svc|/health/readiness|GET|/private/read|' \
+  'price-audit-svc|/health/ready|GET|/private/read|' \
+  'pricing-svc|/health/ready|GET|/private/read|' \
+  'promotions-svc|/health/ready|POST|/api/v1/promociones/evaluar|"dependencies":{"database":"up","broker":"disabled"}' \
+  'taxonomy-svc|/health/ready|GET|/private/read|'; do
+  IFS='|' read -r app_service expected_ready_path app_method app_protected app_extra <<< "$spec"
+  app_urls="$TEMP/urls-${app_service}.log"
+  rm -f "$app_urls"
+  PATH="$TEMP:$PATH" CURL_LOG="$app_urls" MOCK_HEALTH_SERVICE="$app_service" MOCK_READINESS_EXTRA="$app_extra" \
+    SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH="$app_protected" SMOKE_PROTECTED_METHOD="$app_method" \
+    SMOKE_MAX_ATTEMPTS=1 bash "$ROOT/ops/azure/container-apps/smoke-service.sh" "$app_service" > "$TEMP/matrix-${app_service}.log"
+  grep -Fxq 'https://example.invalid/health' "$app_urls"
+  if [[ -n "$expected_ready_path" ]]; then
+    grep -Fxq "https://example.invalid${expected_ready_path}" "$app_urls"
+  else
+    if grep -Eq '/health/(ready|readiness)$' "$app_urls"; then
+      echo "FAIL: $app_service consultó readiness inexistente" >&2; exit 1
+    fi
+  fi
+  grep -Fxq "https://example.invalid${app_protected}" "$app_urls"
+done
+echo 'PASS: compatibilidad de salud e identidad verificada para las nueve aplicaciones'
+
 # Existing services keep GET by default; Promotions uses a bodyless-auth-free POST guard probe.
 export CURL_ARGS_LOG="$TEMP/curl-args.log"
+export MOCK_HEALTH_SERVICE=promotions-svc
 PATH="$TEMP:$PATH" SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH='/api/v1/promociones/evaluar' \
   SMOKE_PROTECTED_METHOD=POST SMOKE_MAX_ATTEMPTS=1 bash "$ROOT/ops/azure/container-apps/smoke-service.sh" promotions-svc > "$TEMP/post-pass.log"
 grep -Fq 'PASS ruta protegida sin credenciales: HTTP 401' "$TEMP/post-pass.log"
@@ -83,8 +120,45 @@ if PATH="$TEMP:$PATH" SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH='
 fi
 grep -Fq 'Método protegido no admitido' "$TEMP/invalid-method.log"
 echo 'PASS: POST fuera de la única ruta autorizada y métodos inválidos son rechazados'
+unset MOCK_HEALTH_SERVICE
 
-if PATH="$TEMP:$PATH" SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH='/private/read' SMOKE_MAX_ATTEMPTS=1 MOCK_READINESS_FAILURE=true \
+# Negative CD-07 cases: HTTP 200 with healthy status and wrong service identity.
+if PATH="$TEMP:$PATH" SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH='/private/read' \
+  SMOKE_MAX_ATTEMPTS=1 MOCK_LIVENESS_STATUS=ok MOCK_LIVENESS_SERVICE=pricing-svc \
+  bash "$ROOT/ops/azure/container-apps/smoke-service.sh" catalog-svc > "$TEMP/wrong-live-service.log" 2>&1; then
+  echo 'FAIL: liveness 200 ok de otro servicio fue aceptado' >&2; exit 1
+fi
+grep -Fq 'FALLO de liveness: catalog-svc' "$TEMP/wrong-live-service.log"
+
+if PATH="$TEMP:$PATH" SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH='/private/read' \
+  SMOKE_MAX_ATTEMPTS=1 MOCK_READINESS_STATUS=ready MOCK_READINESS_SERVICE=pricing-svc \
+  bash "$ROOT/ops/azure/container-apps/smoke-service.sh" catalog-svc > "$TEMP/wrong-ready.log" 2>&1; then
+  echo 'FAIL: readiness 200 ready de otro servicio fue aceptado' >&2; exit 1
+fi
+grep -Fq 'FALLO de readiness: catalog-svc' "$TEMP/wrong-ready.log"
+echo 'PASS: HTTP 200 saludable con identidad de otro servicio bloquea liveness y readiness'
+
+# Negative CD-07 cases: HTTP 200 with correct service identity and wrong status.
+for bad_live_status in not_ready error ready degraded; do
+  if PATH="$TEMP:$PATH" SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH='/private/read' \
+    SMOKE_MAX_ATTEMPTS=1 MOCK_HEALTH_SERVICE=catalog-svc MOCK_LIVENESS_STATUS="$bad_live_status" \
+    bash "$ROOT/ops/azure/container-apps/smoke-service.sh" catalog-svc > "$TEMP/bad-live-${bad_live_status}.log" 2>&1; then
+    echo "FAIL: liveness 200 con status=$bad_live_status e identidad correcta fue aceptado" >&2; exit 1
+  fi
+  grep -Fq 'FALLO de liveness: catalog-svc' "$TEMP/bad-live-${bad_live_status}.log"
+done
+
+for bad_ready_status in not_ready error ok degraded; do
+  if PATH="$TEMP:$PATH" SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH='/private/read' \
+    SMOKE_MAX_ATTEMPTS=1 MOCK_HEALTH_SERVICE=inventory-svc MOCK_READINESS_STATUS="$bad_ready_status" \
+    bash "$ROOT/ops/azure/container-apps/smoke-service.sh" inventory-svc > "$TEMP/bad-ready-${bad_ready_status}.log" 2>&1; then
+    echo "FAIL: readiness 200 con status=$bad_ready_status e identidad correcta fue aceptado" >&2; exit 1
+  fi
+  grep -Fq 'FALLO de readiness: inventory-svc' "$TEMP/bad-ready-${bad_ready_status}.log"
+done
+echo 'PASS: HTTP 200 con identidad correcta y estado incorrecto bloquea liveness y readiness'
+
+if PATH="$TEMP:$PATH" SMOKE_URL='https://example.invalid' SMOKE_PROTECTED_PATH='/private/read' SMOKE_MAX_ATTEMPTS=1 MOCK_READINESS_FAILURE=true MOCK_HEALTH_SERVICE=inventory-svc \
   bash "$ROOT/ops/azure/container-apps/smoke-service.sh" inventory-svc > "$TEMP/fail.log" 2>&1; then
   echo 'FAIL: el servicio con readiness 503 debe bloquear smoke' >&2; exit 1
 fi
