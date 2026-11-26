@@ -1,77 +1,66 @@
 # Preparación APIM H5 (sin aprovisionamiento)
 
-Este paquete prepara la importación y las políticas de APIM Developer clásico. No crea recursos: el despliegue requiere aprobación y parámetros de red, identidad, observabilidad y cuotas que aún no están acreditados.
+Este paquete prepara la importación, el manifiesto de seguridad enriquecido, perfiles de protección parametrizados y las políticas de Azure API Management (`Developer` clásico para laboratorio o reutilización de instancia compatible mediante `reuseExistingApim`). No crea ni muta recursos Azure: el despliegue requiere aprobación operativa y parámetros de red, identidad, observabilidad y cuotas acreditados.
 
-## Contrato filtrado
+## Contrato filtrado y manifiesto enriquecido (`APIM-C01`, `APIM-C03`)
 
-El filtro importa exclusivamente operaciones del registro `CONTRACT_ROUTES`. Comprueba método+ruta contra el OpenAPI y no acepta las cinco operaciones `x-internal`; mantiene las cuatro G5 fuera del documento salvo `--enable-g5`. Cada operación conserva `operationId` y registra `apimOperationId` calculado con la normalización oficial APIM (minúsculas, secuencias no alfanuméricas a guion, recorte, truncado a 76). Colisiones o nombres incompatibles fallan sin sufijos automáticos. El manifiesto conserva los SHA Docs/Gateway y liga el conjunto método/ruta/IDs al contenido filtrado mediante hashes canónicos.
+`filter-openapi.py` separa explícitamente:
+1. `contractInventory` (154 operaciones de OpenAPI `0.7.0-rc.3`).
+2. `gatewayStaticRegistry` (registro base y overlay G5).
+3. `candidateCatalog` (`operations` candidatos APIM).
+4. `effectivePublication` (importación efectiva **fail-closed**: `environmentEnabled=false` por defecto hasta recibir `--enabled-providers`, `--security-profile`, allowlist pública autorizada y resolución de allowlists M2M).
+
+Excluye las cinco operaciones `x-internal`, mantiene fuera de importación contractual las dos operaciones legacy de Pricing y deja las cuatro rutas G5 fuera del artefacto predeterminado.
+
+El uso de `--enable-g5` por sí solo no autoriza publicación operativa: requiere además `--g5-authorized` explícito. Para operaciones M2M, la falta de `x-service-audience` o `x-required-scope` bloquea el catálogo; la falta de `x-allowed-client-ids` (ej. `consultarDisponibilidadCombo`) se registra como `clientAllowlistStatus: "PENDING_G7_ALLOWLIST"` sin inventar clientes y bloquea `effectivePublication` (`--effective-publish`). Operaciones con seguridad alternativa (`obtenerCombo`, `consultarDisponibilidadCombo`) conservan ambas modalidades en `securityAlternatives` (`identityType: "human_or_m2m"`).
+
+Cada entrada de `operations` incluye:
+- `operationId`, `apimOperationId`, `method`, `path`, `secured`
+- `authSchemes`, `identityType` (`public`, `human`, `m2m`), `issuerRequired`, `audienceRequired`, `audience`
+- `scopes`, `roles`, `allowedClients`, `introspectionRequired`
+- `exposureProfile`, `rateProfile`, `environmentEnabled`, `g5OptIn`
 
 ```powershell
 python ops/azure/apim/filter-openapi.py `
-  --openapi <openapi-0.7.0-rc.3.yaml> `
+  --openapi ..\docs\contratos\http\openapi.yaml `
   --gateway-routes apps/api-gateway/src/routing/contract-routes.ts `
   --g5-routes apps/api-gateway/src/routing/g5-h5-routes.ts `
-  --docs-sha <sha-docs> --gateway-sha <sha-gateway> `
+  --docs-sha 490172c11cb4b83ddd1996f8d5834d0402184cf8 --gateway-sha 1b90543dc39a8919fd94f0e059d10e1002b3b2a9 `
   --output ops/azure/apim/openapi/gateway-filtered.json `
+  --compact-output ops/azure/apim/openapi/gateway-filtered.compact.json `
   --manifest ops/azure/apim/openapi/operation-security.json
 ```
 
-G5 queda desactivado si no se usa `--enable-g5`. No se incluye valor de ejemplo con datos de producción.
+## Orden de políticas, perfiles y correlación (`APIM-C02`, `APIM-C04`, `APIM-C05`)
 
-### Procedencia de esta revisión
+1. **Correlación (`api.xml`):** valida `X-Correlation-Id` como UUID (genera uno nuevo si falta; rechaza con `400 VALIDACION` si es inválido o duplicado) y lo propaga en solicitud, respuesta exitosa, rechazos 401/403/429 y `<on-error>`.
+2. **CORS (`api.xml`):** orígenes explícitos sin wildcard, `allow-credentials="false"`, exponiendo `Content-Disposition`, `Location`, `Retry-After` y `X-Correlation-Id`.
+3. **Identidad (`operation-secured.xml`):** `validate-jwt` contra `g7-openid-config-url` y `g7-issuer`. Solo las operaciones M2M (o con `audienceRequired=true`) exigen audiencia técnica (`g7-audience`), sin imponerla a tokens humanos cuando el contrato G7 no la establece. Rechazos sin identidad válida devuelven `401 TOKEN_INVALIDO`.
+4. **Autorización en borde (`operation-secured.xml`):** valida `tipo` (`acceso` vs `servicio`), rol, scope y allowlist de clientes declarados por el contrato, devolviendo `403 SCOPE_INSUFICIENTE`. Gateway y provider mantienen sus propias barreras e introspección.
+5. **Clave de tasa confiable:** `sub` del JWT ya validado para rutas protegidas; `context.Request.IpAddress` para lecturas públicas (nunca `X-Forwarded-For` ni `X-Real-IP`).
+6. **Perfiles de protección (`main.bicep`):** parámetros separados para `commercial_read`, `admin_read`, `business_write`, `multipart_import`, `expensive_export` y `g5_protected`, cubriendo ráfaga (`rate-limit-by-key`), cuota por ventana (`quota-by-key`) y concurrencia (`limit-concurrency` en operaciones costosas/multipart/G5). Los valores por defecto son fixtures de laboratorio, no límites productivos aprobados.
+7. **Transporte y diagnóstico:** `<forward-request buffer-request-body="false" />` preserva streaming multipart y descargas; `apiDiagnostics` registra únicamente `x-correlation-id` con `body.bytes = 0`, sin tokens ni cuerpos en Application Insights.
 
-Los artefactos versionados en este PR se regeneraron desde Docs `490172c11cb4b83ddd1996f8d5834d0402184cf8` y Gateway `05f6b929f8aebfd745acd2e70959e36967c96d09` (merge commit integrado en `master`). El manifiesto contiene 145 operaciones importables: 143 protegidas y dos públicas. Excluye las cinco operaciones internas, mantiene G5 deshabilitado por defecto y deja fuera las dos operaciones legacy de Pricing sin contrato. El CI fija ambas procedencias y valida que OpenAPI filtrado, manifiesto y políticas ARM correspondan exactamente.
+## Infraestructura, red privada y anti-bypass (`APIM-C06`)
 
-## Infraestructura
-
-`main.bicep` define APIM Developer clásico con inyección VNet externa para HTTPS de clientes y conectividad saliente a Gateway. La URL de origen del Gateway debe ser privada y resolverse desde la subred dedicada. La plantilla parametriza IDs de subred, URL/DNS, issuer/JWKS/audience, orígenes CORS, límites y el Resource ID del componente Application Insights autorizado. Declara el logger hijo de APIM con `loggerType: applicationInsights`; `apiDiagnostics.loggerId` usa el `.id` de ese recurso, no el Resource ID del componente Application Insights. La referencia Bicep declara la dependencia de diagnóstico hacia logger.
-
-La cadena de conexión se recibe únicamente mediante el parámetro Bicep `@secure()` `applicationInsightsConnectionString`; no se versiona ni se imprime. El logger usa `identityClientId: systemAssigned` y el APIM conserva su identidad administrada `SystemAssigned`. Antes de desplegar, Infra debe conceder a esa identidad el rol `Monitoring Metrics Publisher` sobre el recurso Application Insights aprobado. La plantilla no asigna roles.
-
-Las policies validan JWT antes de limitar operaciones protegidas; el sujeto se toma de `Jwt.Subject` del token que valida `validate-jwt`, rechazando subject vacío con una respuesta Problem 401 (`TOKEN_INVALIDO`), y la clave combina sujeto+`operationId` contractual. La policy pública mantiene su comportamiento IP+operación. El Gateway conserva autoridad de roles, scopes, clientes e introspección. La policy de burst admite una ventana de hasta 300 segundos; APIM devuelve 429 con `Retry-After`. La cuota por clave admite ventanas desde 300 segundos y, al agotarse, responde 403 con `Retry-After`. La observabilidad captura solo cabeceras de correlación, nunca cuerpos. No se registran tokens.
-
-La prevención de bypass requiere que el owner de infraestructura de Gateway permita tráfico de entrada únicamente desde la subred/egress aprobada de APIM y que la ruta del backend APIM resuelva a un destino privado. Esta plantilla no cambia el ingress actual del Gateway ni el tráfico.
-
-## Validación local sin Azure
-
-```powershell
-az bicep build --file ops/azure/apim/main.bicep --outfile $env:TEMP/apim-h5.json
-$env:APIM_ARM_TEMPLATE = "$env:TEMP\apim-h5.json"
-python -m unittest discover ops/azure/apim/tests -v
-python ops/azure/apim/validate-parameters.py <parametros-revisados.json> --openapi ops/azure/apim/openapi/gateway-filtered.json --manifest ops/azure/apim/openapi/operation-security.json
-python ops/azure/apim/verify-arm-template.py --template $env:TEMP/apim-h5.json --source-openapi <openapi-integrado.yaml> --gateway-routes <contract-routes-integrado.ts> --g5-routes <g5-routes-integrado.ts> --expected-docs-sha <sha-docs-integrado> --expected-gateway-sha <sha-gateway-integrado>
-Remove-Item Env:APIM_ARM_TEMPLATE
-```
-
-No ejecutar `az deployment`, `what-if`, importaciones APIM ni comandos que creen o modifiquen recursos.
-
-El preflight verifica que el parámetro `filteredOpenApi`, el archivo filtrado y el manifiesto coincidan exactamente en SHA canónico y en operationId/método/ruta; un manifiesto viejo o una sustitución del parámetro falla antes de cualquier ejecución de Azure. El verificador del ARM liga el bucle de políticas al manifiesto compilado, exige correspondencia con los SHA Docs/Gateway aprobados para esta revisión y deriva el número de políticas del conjunto generado, sin un conteo fijo de operaciones. La importación mantiene `servers=/api/v1`, el sufijo público APIM `api/v1` y `gatewayBackendUrl=https://<hostname-privado-aprobado>/api/v1`; una operación pública `/api/v1/productos` llega al Gateway como `/api/v1/productos`. No se añade `rewrite-uri`.
+- `main.bicep` permite aprovisionar el candidato `Developer` clásico de laboratorio (`reuseExistingApim = false`) o reutilizar una instancia compatible existente (`reuseExistingApim = true`).
+- La comunicación APIM → Gateway admite dos modalidades válidas en ACA (`validate-parameters.py` / `apim-live-acceptance.mjs`):
+  - **Modalidad A (Gateway interno):** `external = false`, `vnetConfiguration != null`, DNS privado y conectividad privada verificada.
+  - **Modalidad B (Gateway externo con allowlist):** `external = true`, reglas `ipSecurityRestrictions` exclusivamente `Allow` (sin mezclar `Allow`/`Deny` ni usar `0.0.0.0/0`), restringidas a `expectedApimOriginCidrs` y con bloqueo real desde orígenes no autorizados.
+- Los ocho microservicios permanecen sin ingress público (`external: false`).
+- Rollback reversible mediante exportación previa de revisión, `operationSetSha256` y hashes SHA256 calculados sobre el XML real de políticas obtenido vía `az apim` / `az rest --method get`.
+- Las pruebas k6 (`apim-rl-k6.js`) exigen explícitamente un manifiesto efectivo autorizado (`APIM_EFFECTIVE_MANIFEST_PATH` con `publicationMode="effective"` y `effectivePublication.authorized=true`, nunca el catálogo candidate).
 
 ## Plan de aceptación APIM-T01–T08 / RL-01–RL-06
 
-| Caso | Criterio verificable | Estado |
+| Caso | Criterio canónico | Estado |
 |---|---|---|
-| APIM-T01 | Importar solo operationIds en `operation-security.json`; comparación automática de operaciones | `BLOCKED_INFRA` |
-| APIM-T02 | Confirmar que las cinco operaciones `x-internal` no se importan ni responden | Estático PASS; instancia `BLOCKED_INFRA` |
-| APIM-T03 | Las cuatro rutas G5 no existen con el manifiesto predeterminado | Estático PASS; instancia `BLOCKED_INFRA` |
-| APIM-T04 | Rechazo de issuer, firma o audience incorrectos; JWT válido pasa al Gateway | `BLOCKED_INFRA` |
-| APIM-T05 | CORS permite solo orígenes explícitos y rechaza wildcard/otros orígenes | Estático PASS; instancia `BLOCKED_INFRA` |
-| APIM-T06 | Cliente no puede alcanzar Gateway evitando APIM | `BLOCKED_INFRA`: control de ingress del Gateway pendiente |
-| APIM-T07 | Correlación W3C viaja a Gateway y aparece en logs sin token/cuerpo | Estático PASS; instancia/logger `BLOCKED_INFRA` |
-| APIM-T08 | Reversión restaura route/policy versionada y deja el ingress actual del Gateway intacto; cualquier DNS/traffic switch necesita aprobación | `BLOCKED_INFRA`: procedimiento y ventana requieren aprobación |
-| RL-01 | Identidad validada y operationId forman la llave de burst | Estático PASS |
-| RL-02 | Umbral excedido devuelve 429 con `Retry-After` | `BLOCKED_INFRA` |
-| RL-03 | Reinicio de ventana restablece el burst según APIM | `BLOCKED_INFRA` |
-| RL-04 | Cuota por identidad y operación se aplica en el período configurado | Estático PASS; instancia `BLOCKED_INFRA` |
-| RL-05 | Operación pública usa IP + operationId como llave | Estático PASS |
-| RL-06 | Una identidad no consume la cuota de otra identidad/operación | `BLOCKED_INFRA` |
-
-## Aprobaciones externas exactas
-
-- **Owner de red/Azure:** resource IDs de VNet/subred dedicada APIM, NSG/UDR, DNS privado, hostname del Gateway y conectividad privada probada.
-- **Owner de Gateway/Backend:** ingreso restringido a APIM y prueba negativa de acceso directo; no se toca el ingress en este PR.
-- **Owner G7:** valores oficiales de issuer, OpenID/JWKS y audience, y aceptación del perfil JWT.
-- **Owner plataforma/APIM:** orígenes CORS, cuotas y límites acordados, logger APIM, modelo de reversión y aprobación de laboratorio.
-- **Owner Docs + Backend:** fusionar y homologar el contrato y Gateway candidatos antes de importar un paquete definitivo.
-
-Ningún test que necesite una instancia APIM real puede reportarse PASS hasta disponer de esos recursos y aprobaciones.
+| APIM-T01 | HTTPS hacia operación autorizada y owner esperado | Estático preparado; instancia `BLOCKED_INFRA` |
+| APIM-T02 | JWT válido e inválido (`401`, sin exposición de token) | Estático preparado; instancia `BLOCKED_INFRA` |
+| APIM-T03 | Scope y cliente incorrectos (`403`, sin llamada upstream) | Estático preparado; instancia `BLOCKED_INFRA` |
+| APIM-T04 | CORS (orígenes explícitos, `Content-Disposition`, `Location`, sin wildcard) | Estático preparado; instancia `BLOCKED_INFRA` |
+| APIM-T05 | Antiabuso integral, burst `429`, cuota, aislamiento, concurrencia y anti-bypass | Estático preparado; instancia `BLOCKED_INFRA` |
+| APIM-T06 | Ruta desconocida o las 5 privadas `404` sin llegar al provider | Estático preparado; instancia `BLOCKED_INFRA` |
+| APIM-T07 | Correlación `X-Correlation-Id` UUID preservada/generada en todo flujo | Estático preparado; instancia `BLOCKED_INFRA` |
+| APIM-T08 | Comparación privada y rollback de revisión/políticas | Estático preparado; instancia `BLOCKED_INFRA` |
+| RL-01..RL-06 | Perfiles burst, cuota, concurrencia, aislamiento y anti-bypass según Docs | Estático preparado; instancia `BLOCKED_INFRA` |

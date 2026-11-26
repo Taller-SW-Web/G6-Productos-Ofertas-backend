@@ -2,6 +2,7 @@
 """Preflight for an explicitly reviewed APIM parameter document."""
 
 import argparse
+from datetime import datetime, timezone
 import importlib.util
 import json
 import re
@@ -58,10 +59,64 @@ def gateway_path_for_public_request(gateway_backend_url: str, public_path: str) 
     return backend_path + public_path[len(api_prefix) :]
 
 
-def validate(parameters: dict, filtered_openapi: dict, manifest: dict) -> None:
+OPEN_WILDCARD_CIDRS = {"0.0.0.0/0", "*", "::/0"}
+
+
+def validate_aca_network_evidence(gateway_app: dict, aca_env: dict, expected_cidrs: list[str]) -> None:
+    """Valida reglas ACA válidas: Modalidad A (external=false) o Modalidad B (external=true Allow-only)."""
+    external = gateway_app.get("external")
+    if external is False:
+        if aca_env.get("vnetConfiguration") is None:
+            raise ValueError("Modalidad A (external=false) requiere vnetConfiguration != null en acaEnvironment")
+    elif external is True:
+        restrictions = gateway_app.get("ipSecurityRestrictions") or []
+        if not restrictions:
+            raise ValueError("Modalidad B (external=true) requiere ipSecurityRestrictions Allow-only hacia APIM")
+        actions = {r.get("action") for r in restrictions}
+        if actions != {"Allow"}:
+            raise ValueError(
+                "ACA no permite mezclar reglas Allow y Deny: ipSecurityRestrictions debe contener exclusivamente reglas Allow"
+            )
+        allow_cidrs = [r.get("ipAddressRange") for r in restrictions]
+        if any(not c or c in OPEN_WILDCARD_CIDRS for c in allow_cidrs):
+            raise ValueError("ipSecurityRestrictions no admite CIDRs vacíos ni abiertos (0.0.0.0/0, *, ::/0)")
+        if not set(allow_cidrs).issubset(set(expected_cidrs)):
+            raise ValueError("ipSecurityRestrictions contiene CIDRs fuera de expectedApimOriginCidrs")
+    else:
+        raise ValueError("gatewayApp.external debe ser booleano explícito (true o false)")
+
+    if gateway_app.get("directRoutesBlocked") is not True:
+        raise ValueError("Evidencia Azure CLI no acredita bloqueo de rutas directas alternativas")
+
+
+def validate(
+    parameters: dict,
+    filtered_openapi: dict,
+    manifest: dict,
+    *,
+    expected_docs_sha: str,
+    expected_gateway_sha: str,
+    max_evidence_age_hours: int = 24,
+) -> None:
+    if not expected_docs_sha or not expected_gateway_sha:
+        raise ValueError("expected_docs_sha y expected_gateway_sha son obligatorios")
+    if manifest.get("publicationMode") != "effective" or manifest.get("effectivePublication", {}).get("authorized") is not True:
+        raise ValueError(
+            "Publicación efectiva bloqueada: se requiere publicationMode='effective' y effectivePublication.authorized=true "
+            f"({manifest.get('effectivePublication', {}).get('blockedReasons', [])})"
+        )
+
     for key in (
+        "environmentTier",
+        "expectedSubscriptionId",
+        "expectedResourceGroup",
+        "expectedEnvironment",
+        "expectedGatewayResourceId",
+        "expectedApimOriginCidrs",
         "apimSubnetResourceId",
         "gatewayBackendUrl",
+        "azureCliEvidencePath",
+        "operationalApprovalRef",
         "g7Issuer",
         "g7OpenIdConfigurationUrl",
         "g7Audience",
@@ -70,12 +125,61 @@ def validate(parameters: dict, filtered_openapi: dict, manifest: dict) -> None:
         "burstWindowSeconds",
         "quotaCalls",
         "quotaWindowSeconds",
+        "rateProfiles",
         "applicationInsightsResourceId",
         "applicationInsightsConnectionString",
-        "filteredOpenApi",
+        "expectedOperationSetSha256",
+        "expectedFilteredOpenApiSha256",
     ):
         if key not in parameters:
             raise ValueError(f"Falta parámetro obligatorio: {key}")
+
+    tier = parameters["environmentTier"]
+    if tier not in {"lab", "production"}:
+        raise ValueError("environmentTier debe ser 'lab' o 'production'")
+
+    if not isinstance(parameters["operationalApprovalRef"], str) or not parameters["operationalApprovalRef"].strip():
+        raise ValueError("Falta operationalApprovalRef aprobado por Castilla/Infra")
+
+    expected_cidrs = parameters["expectedApimOriginCidrs"]
+    if not isinstance(expected_cidrs, list) or not expected_cidrs or any(not isinstance(c, str) or not c.strip() for c in expected_cidrs):
+        raise ValueError("expectedApimOriginCidrs debe ser una lista no vacía de CIDRs APIM autorizados")
+
+    cli_evidence_path = Path(str(parameters["azureCliEvidencePath"]))
+    if not cli_evidence_path.exists() or cli_evidence_path.stat().st_size == 0:
+        raise ValueError(
+            "Deployment bloqueado: falta evidencia verificable de Azure CLI en azureCliEvidencePath"
+        )
+    cli_evidence = json.loads(cli_evidence_path.read_text(encoding="utf-8"))
+    for req_field in ("subscriptionId", "resourceGroup", "environment", "capturedAtUtc", "sourceCommand", "acaEnvironment", "gatewayApp"):
+        if not cli_evidence.get(req_field):
+            raise ValueError(f"Evidencia Azure CLI incompleta: falta {req_field}")
+    if cli_evidence["subscriptionId"] != parameters["expectedSubscriptionId"]:
+        raise ValueError("subscriptionId de evidencia Azure CLI no coincide con expectedSubscriptionId")
+    if cli_evidence["resourceGroup"] != parameters["expectedResourceGroup"]:
+        raise ValueError("resourceGroup de evidencia Azure CLI no coincide con expectedResourceGroup")
+    if cli_evidence["environment"] != parameters["expectedEnvironment"]:
+        raise ValueError("environment de evidencia Azure CLI no coincide con expectedEnvironment")
+    if not str(cli_evidence["sourceCommand"]).strip().startswith("az "):
+        raise ValueError("Evidencia Azure CLI debe registrar comando az de solo lectura")
+    captured_at = datetime.fromisoformat(str(cli_evidence["capturedAtUtc"]).replace("Z", "+00:00"))
+    age_hours = (datetime.now(timezone.utc) - captured_at).total_seconds() / 3600.0
+    if age_hours < 0 or age_hours > max_evidence_age_hours:
+        raise ValueError("Evidencia Azure CLI caducada o con fecha inválida")
+    gateway_app = cli_evidence["gatewayApp"]
+    if gateway_app.get("resourceId") != parameters["expectedGatewayResourceId"]:
+        raise ValueError("gatewayApp.resourceId de evidencia Azure CLI no coincide con expectedGatewayResourceId")
+    validate_aca_network_evidence(gateway_app, cli_evidence["acaEnvironment"], expected_cidrs)
+
+    if manifest.get("docsSha") != expected_docs_sha:
+        raise ValueError("docsSha del manifiesto no coincide con el SHA aprobado")
+    if manifest.get("gatewaySha") != expected_gateway_sha:
+        raise ValueError("gatewaySha del manifiesto no coincide con el SHA aprobado")
+
+    if parameters["expectedOperationSetSha256"] != manifest.get("operationSetSha256"):
+        raise ValueError("expectedOperationSetSha256 no coincide con el manifiesto efectivo")
+    if parameters["expectedFilteredOpenApiSha256"] != manifest.get("filteredOpenApiCanonicalSha256"):
+        raise ValueError("expectedFilteredOpenApiSha256 no coincide con el OpenAPI filtrado")
 
     if not APPLICATION_INSIGHTS_RESOURCE_ID.fullmatch(
         parameters["applicationInsightsResourceId"]
@@ -126,14 +230,29 @@ def validate(parameters: dict, filtered_openapi: dict, manifest: dict) -> None:
         raise ValueError("burstWindowSeconds no puede exceder 300 segundos")
     if parameters["quotaWindowSeconds"] < 300:
         raise ValueError("quotaWindowSeconds debe ser de al menos 300 segundos")
-    if not isinstance(parameters["filteredOpenApi"], str) or not parameters["filteredOpenApi"].strip():
-        raise ValueError("filteredOpenApi debe contener el contrato JSON filtrado")
-    try:
-        supplied_spec = json.loads(parameters["filteredOpenApi"])
-    except json.JSONDecodeError as error:
-        raise ValueError("filteredOpenApi no contiene JSON válido") from error
-    if FILTER.canonical_sha256(supplied_spec) != FILTER.canonical_sha256(filtered_openapi):
-        raise ValueError("filteredOpenApi no coincide con el artefacto validado")
+    if "rateProfiles" in parameters:
+        profiles = parameters["rateProfiles"]
+        if not isinstance(profiles, dict):
+            raise ValueError("rateProfiles debe ser un objeto")
+        missing_profiles = FILTER.KNOWN_RATE_PROFILES - profiles.keys()
+        if missing_profiles:
+            raise ValueError(f"Faltan perfiles de límites obligatorios: {sorted(missing_profiles)}")
+        for profile_name, profile in profiles.items():
+            if not isinstance(profile, dict):
+                raise ValueError(f"Perfil inválido: {profile_name}")
+            for metric in ("burstCalls", "burstWindowSeconds", "quotaCalls", "quotaWindowSeconds"):
+                val = profile.get(metric)
+                if not isinstance(val, int) or isinstance(val, bool) or val < 1:
+                    raise ValueError(f"Valor inválido {metric} en perfil {profile_name}")
+            if profile["burstWindowSeconds"] > 300:
+                raise ValueError(f"burstWindowSeconds > 300 en perfil {profile_name}")
+            if profile["quotaWindowSeconds"] < 300:
+                raise ValueError(f"quotaWindowSeconds < 300 en perfil {profile_name}")
+            concurrency = profile.get("maxConcurrency", 0)
+            if not isinstance(concurrency, int) or isinstance(concurrency, bool) or concurrency < 0:
+                raise ValueError(f"maxConcurrency inválido en perfil {profile_name}")
+    if parameters["expectedFilteredOpenApiSha256"] != FILTER.canonical_sha256(filtered_openapi):
+        raise ValueError("expectedFilteredOpenApiSha256 no coincide con el contenido de gateway-filtered.json")
     FILTER.validate_artifact_pair(filtered_openapi, manifest)
 
 
@@ -141,12 +260,27 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("parameters", type=Path, help="JSON local entregado para revisión")
     parser.add_argument("--openapi", type=Path, required=True, help="OpenAPI JSON filtrado")
+    parser.add_argument("--compact-openapi", type=Path, required=False, help="OpenAPI compacto para Bicep loadJsonContent")
     parser.add_argument("--manifest", type=Path, required=True, help="Manifiesto generado junto al OpenAPI")
+    parser.add_argument("--expected-docs-sha", required=True, help="SHA aprobado de Docs")
+    parser.add_argument("--expected-gateway-sha", required=True, help="SHA aprobado de Backend Gateway")
     args = parser.parse_args()
+    filtered_openapi = json.loads(args.openapi.read_text(encoding="utf-8"))
+    compact_path = args.compact_openapi or args.openapi.with_name(f"{args.openapi.stem}.compact.json")
+    if not compact_path.exists():
+        raise ValueError(f"Falta artefacto compacto de despliegue: {compact_path}")
+    compact_text = compact_path.read_text(encoding="utf-8")
+    if len(compact_text) > FILTER.BICEP_LOAD_JSON_MAX_CHARS:
+        raise ValueError(f"OpenAPI compacto excede el límite de Bicep loadJsonContent ({FILTER.BICEP_LOAD_JSON_MAX_CHARS})")
+    compact_openapi = json.loads(compact_text)
+    if FILTER.canonical_sha256(compact_openapi) != FILTER.canonical_sha256(filtered_openapi):
+        raise ValueError("El OpenAPI compacto de despliegue no coincide con el OpenAPI filtrado aprobado")
     validate(
         json.loads(args.parameters.read_text(encoding="utf-8")),
-        json.loads(args.openapi.read_text(encoding="utf-8")),
+        filtered_openapi,
         json.loads(args.manifest.read_text(encoding="utf-8")),
+        expected_docs_sha=args.expected_docs_sha,
+        expected_gateway_sha=args.expected_gateway_sha,
     )
     print("Parámetros APIM: PASS (validación local, sin acceso a Azure)")
 
