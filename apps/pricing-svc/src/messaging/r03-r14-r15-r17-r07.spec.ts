@@ -12,6 +12,7 @@ import {
 } from './service-bus-deliveries.js';
 import { PricingServiceBusHandler } from './service-bus-consumer.js';
 import { PricingServiceBusRelay } from './service-bus-relay.js';
+import { BulkPriceApplyService } from './bulk-price-apply.service.js';
 import { BulkServiceBus } from '../../../bulk-svc/src/messaging/bulk-service-bus.js';
 
 describe('Pricing H5 Service Bus R03, R07, R14, R15, R16, R17 (ESCRITA_NO_EJECUTADA)', () => {
@@ -193,5 +194,140 @@ describe('Pricing H5 Service Bus R03, R07, R14, R15, R16, R17 (ESCRITA_NO_EJECUT
     const relay = new PricingServiceBusRelay(store as never, () => sender);
     expect(await relay.publishOne()).toBe('pending');
     expect(store.finish).toHaveBeenCalledWith(expect.anything(), false);
+  });
+
+  it('executes real BulkPriceApplyService via PricingServiceBusHandler: rejects 0.00/invalid offer and emits pricing.price.changed + R14 for applied rows', async () => {
+    const insertedOutbox: Array<{ eventName: string; payload: Record<string, unknown> }> = [];
+    const insertedDeliveries: Array<{ destination: string }> = [];
+    const tx = {
+      execute: vi.fn().mockResolvedValue(undefined),
+      select: vi.fn().mockImplementation(() => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => [],
+            then: (resolve: (v: unknown[]) => void) => resolve([]),
+          }),
+        }),
+      })),
+      insert: vi.fn().mockImplementation((table: unknown) => ({
+        values: (vals: unknown) => {
+          const rows = Array.isArray(vals) ? vals : [vals];
+          const tableObj = table as Record<symbol, string>;
+          const tableName = String(Object.values(tableObj)[0] ?? '');
+          if (rows[0] && typeof rows[0] === 'object' && 'eventName' in rows[0]) {
+            for (const r of rows) {
+              insertedOutbox.push({
+                eventName: String((r as Record<string, unknown>).eventName),
+                payload: (r as Record<string, unknown>).payload as Record<string, unknown>,
+              });
+            }
+          }
+          if (rows[0] && typeof rows[0] === 'object' && 'destination' in rows[0]) {
+            for (const r of rows) {
+              insertedDeliveries.push({
+                destination: String((r as Record<string, unknown>).destination),
+              });
+            }
+          }
+          return {
+            onConflictDoNothing: async () => undefined,
+            onConflictDoUpdate: () => ({
+              returning: async () => [
+                { id: randomUUID(), productId: randomUUID(), priceVersion: 1n },
+              ],
+            }),
+            returning: async () => [{ id: randomUUID(), priceVersion: 1n }],
+          };
+        },
+      })),
+      update: vi.fn().mockImplementation(() => ({
+        set: () => ({
+          where: async () => undefined,
+        }),
+      })),
+    };
+    const repo = {
+      transaction: vi.fn(async (fn: (t: unknown) => Promise<unknown>) => fn(tx)),
+    };
+    const service = new BulkPriceApplyService(repo as never, {
+      serviceBus: { namespace: 'lab.servicebus.windows.net' },
+    } as never);
+    const handler = new PricingServiceBusHandler(
+      BULK_TO_PRICING_QUEUE,
+      {
+        completeMessage: vi.fn().mockResolvedValue(undefined),
+        abandonMessage: vi.fn().mockResolvedValue(undefined),
+        deadLetterMessage: vi.fn().mockResolvedValue(undefined),
+      },
+      { consume: vi.fn() },
+      { consume: vi.fn() },
+      service,
+    );
+
+    const messageId = randomUUID();
+    const outcome = await handler.handle({
+      messageId,
+      subject: 'pricing.bulk.price.apply.requested',
+      body: Buffer.from(
+        JSON.stringify({
+          message_id: messageId,
+          operation_id: randomUUID(),
+          correlation_id: randomUUID(),
+          producer: 'bulk-svc',
+          kind: 'command',
+          name: 'pricing.bulk.price.apply.requested',
+          data: {
+            batch_id: randomUUID(),
+            batch_operation_id: randomUUID(),
+            items: [
+              {
+                row_number: 2,
+                row_operation_id: randomUUID(),
+                sku: 'SKU-OK',
+                precio_regular: '25.00',
+                precio_oferta: '19.90',
+                currency: 'PEN',
+              },
+              {
+                row_number: 3,
+                row_operation_id: randomUUID(),
+                sku: 'SKU-ZERO',
+                precio_regular: '0.00',
+                currency: 'PEN',
+              },
+              {
+                row_number: 4,
+                row_operation_id: randomUUID(),
+                sku: 'SKU-BAD-OFFER',
+                precio_regular: '10.00',
+                precio_oferta: '12.00',
+                currency: 'PEN',
+              },
+            ],
+          },
+        }),
+      ),
+    } as unknown as ServiceBusReceivedMessage);
+
+    expect(outcome).toBe('completed');
+    const changedFacts = insertedOutbox.filter(
+      (f) => f.eventName === 'pricing.price.changed',
+    );
+    expect(changedFacts).toHaveLength(2);
+    expect(changedFacts.every((f) => f.payload.sku === 'SKU-OK')).toBe(true);
+    expect(
+      insertedOutbox.some(
+        (f) => f.eventName === 'pricing.bulk.price.apply.completed',
+      ),
+    ).toBe(true);
+    expect(insertedDeliveries.map((d) => d.destination)).toContain(
+      AUDIT_PILOT_QUEUE,
+    );
+    expect(insertedDeliveries.map((d) => d.destination)).toContain(
+      PROMOTIONS_PRICE_QUEUE,
+    );
+    expect(insertedDeliveries.map((d) => d.destination)).toContain(
+      BULK_PRICE_RESULT_QUEUE,
+    );
   });
 });

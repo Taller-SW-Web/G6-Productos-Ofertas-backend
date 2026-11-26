@@ -35,6 +35,9 @@ import {
   catalogTaxonomyQueue,
   taxonomyCatalogQueue,
 } from '../../apps/taxonomy-svc/src/config/service-bus.js';
+import { PricingServiceBusHandler } from '../../apps/pricing-svc/src/messaging/service-bus-consumer.js';
+import { BulkContractResultDispatcherService } from '../../apps/bulk-svc/src/messaging/bulk-contract-result-dispatcher.js';
+import { PricingReadiness } from '../../apps/pricing-svc/src/health/pricing-readiness.js';
 
 const EXPECTED_19_QUEUES = [
   'g6.price-audit.from.pricing',
@@ -120,7 +123,7 @@ describe('G6 H5 Azure Service Bus Basic 19-queue topology & messaging contracts'
     );
   });
 
-  it('enforces 256 KB Service Bus Basic payload limit and DLQ on malformed envelopes', async () => {
+  it('enforces 256 KB limit and DLQ in real handlers, reconciles R10/R14 in BulkContractResultDispatcherService, and gates PricingReadiness on consumer health', async () => {
     const maxBytes = 256 * 1024;
     const oversizedPayload = JSON.stringify({
       message_id: randomUUID(),
@@ -134,15 +137,61 @@ describe('G6 H5 Azure Service Bus Basic 19-queue topology & messaging contracts'
 
     const deadLetterMessage = vi.fn(async () => undefined);
     const completeMessage = vi.fn(async () => undefined);
-    const receiver = { completeMessage, deadLetterMessage };
-    const invalidEnvelope = { body: { invalid: true }, messageId: randomUUID() };
-    // Invalid envelope must never be completed; it must be dead-lettered.
-    if (!('name' in invalidEnvelope.body)) {
-      await receiver.deadLetterMessage(invalidEnvelope, {
-        deadLetterReason: 'INVALID_ENVELOPE',
-      });
-    }
+    const abandonMessage = vi.fn(async () => undefined);
+    const pricingHandler = new PricingServiceBusHandler(
+      PRICING_FROM_BULK,
+      { completeMessage, abandonMessage, deadLetterMessage },
+      { consume: vi.fn() },
+      { consume: vi.fn() },
+      { process: vi.fn() },
+    );
+
+    const oversizedOutcome = await pricingHandler.handle({
+      messageId: randomUUID(),
+      body: Buffer.from(oversizedPayload, 'utf8'),
+    } as never);
+    expect(oversizedOutcome).toBe('dead-lettered');
     expect(deadLetterMessage).toHaveBeenCalledOnce();
     expect(completeMessage).not.toHaveBeenCalled();
+
+    const applyDomainResult = vi.fn(async () => ({ processed: true, result: 'APPLIED' }));
+    const dispatcher = new BulkContractResultDispatcherService({
+      applyDomainResult,
+    } as never);
+    const batchId = randomUUID();
+    const rowId = randomUUID();
+    await dispatcher.dispatch({
+      eventName: 'inventory.bulk.stock.adjust.completed',
+      messageId: randomUUID(),
+      correlationId: randomUUID(),
+      payload: {
+        operation_id: randomUUID(),
+        causation_id: randomUUID(),
+        data: {
+          batch_id: batchId,
+          row_operation_id: rowId,
+          operation_id: randomUUID(),
+          sku: 'SKU-19',
+        },
+      },
+    });
+    expect(applyDomainResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        batchId,
+        rowId,
+        domain: 'INVENTARIO',
+        status: 'COMPLETED',
+      }),
+    );
+
+    const readiness = new PricingReadiness(
+      { check: async () => true } as never,
+      { auth: { issuer: 'https://g7.test' }, serviceBus: { namespace: 'lab.servicebus.windows.net' } } as never,
+      undefined,
+      undefined,
+      { available: true } as never,
+      { available: false } as never,
+    );
+    expect(await readiness.check()).toBe(false);
   });
 });

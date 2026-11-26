@@ -394,10 +394,18 @@ export class BulkPersistenceRepository {
             occurredAt: command.occurredAt,
             payload: command.payload,
           });
-          if (command.eventName === 'catalog.bulk.upsert.requested')
+          const bulkDeliveryDestination =
+            command.eventName === 'catalog.bulk.upsert.requested'
+              ? 'g6.catalog.from.bulk'
+              : command.eventName === 'inventory.bulk.stock.adjust.requested'
+                ? 'g6.inventory.from.bulk'
+                : command.eventName === 'pricing.bulk.price.apply.requested'
+                  ? 'g6.pricing.from.bulk'
+                  : null;
+          if (bulkDeliveryDestination)
             await tx.insert(outboxDeliveries).values({
               messageId: command.messageId,
-              destination: 'g6.catalog.from.bulk',
+              destination: bulkDeliveryDestination,
             });
         }
         return { manifest, batch, rows: createdRows };
@@ -3260,13 +3268,18 @@ export class BulkPersistenceRepository {
   async claimPendingServiceBusDeliveries(limit = 20) {
     try {
       return await this.db.transaction(async (tx) => {
+        const bulkDestinations = [
+          'g6.catalog.from.bulk',
+          'g6.inventory.from.bulk',
+          'g6.pricing.from.bulk',
+        ];
         const due = await tx
           .select({ delivery: outboxDeliveries, message: outbox })
           .from(outboxDeliveries)
           .innerJoin(outbox, eq(outbox.messageId, outboxDeliveries.messageId))
           .where(
             and(
-              eq(outboxDeliveries.destination, 'g6.catalog.from.bulk'),
+              inArray(outboxDeliveries.destination, bulkDestinations),
               sql`${outboxDeliveries.publishedAt} IS NULL`,
               sql`${outboxDeliveries.availableAt} <= now()`,
             ),
@@ -3311,7 +3324,11 @@ export class BulkPersistenceRepository {
         .where(
           and(
             eq(outboxDeliveries.messageId, messageId),
-            eq(outboxDeliveries.destination, 'g6.catalog.from.bulk'),
+            inArray(outboxDeliveries.destination, [
+              'g6.catalog.from.bulk',
+              'g6.inventory.from.bulk',
+              'g6.pricing.from.bulk',
+            ]),
             eq(outboxDeliveries.leaseToken, leaseToken),
             sql`${outboxDeliveries.publishedAt} IS NULL`,
           ),
@@ -3342,7 +3359,11 @@ export class BulkPersistenceRepository {
         .where(
           and(
             eq(outboxDeliveries.messageId, messageId),
-            eq(outboxDeliveries.destination, 'g6.catalog.from.bulk'),
+            inArray(outboxDeliveries.destination, [
+              'g6.catalog.from.bulk',
+              'g6.inventory.from.bulk',
+              'g6.pricing.from.bulk',
+            ]),
             eq(outboxDeliveries.leaseToken, leaseToken),
             sql`${outboxDeliveries.publishedAt} IS NULL`,
           ),

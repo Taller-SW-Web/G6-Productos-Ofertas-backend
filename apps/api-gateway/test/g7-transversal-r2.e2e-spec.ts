@@ -13,11 +13,11 @@ import {
 import { createSignedIdentity } from './support/signed-identity.js';
 
 /**
- * Transversal G7-only Gateway -> 8 services + G1/G3/G5 contract fixture suite.
- * Uses local cryptographic JWT fixtures (not real G7, G5, or Azure).
+ * Gateway integration suite with simulated HTTP upstreams and local cryptographic JWT fixtures.
+ * Does NOT execute real G7, G5, Azure, or microservice database persistence.
  * ESCRITA_NO_EJECUTADA in R2 pre-test phase.
  */
-describe('G6 H5 R2 transversal G7 authorization, correlation and G1/G3/G5 flows', () => {
+describe('API Gateway H5 R2 transversal G7 authorization and correlation (simulated HTTP upstreams)', () => {
   let app: INestApplication;
   let upstream: Server;
   let signed: ReturnType<typeof createSignedIdentity>;

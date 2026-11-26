@@ -26,8 +26,7 @@ export class PricingReadiness {
     if (!this.config.auth) return Promise.resolve(false);
     if (
       this.config.serviceBus &&
-      (!this.serviceBus?.available ||
-        (this.serviceBusConsumer && !this.serviceBusConsumer.available))
+      (!this.serviceBus?.available || !this.serviceBusConsumer?.available)
     )
       return Promise.resolve(false);
     if (

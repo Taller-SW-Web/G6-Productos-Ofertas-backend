@@ -95,7 +95,11 @@ export class PricingServiceBusHandler {
     try {
       if (this.queue === BULK_TO_PRICING_QUEUE) {
         if (payload.name !== 'pricing.bulk.price.apply.requested') {
-          throw new Error('UNEXPECTED_EVENT_NAME');
+          await this.receiver.deadLetterMessage(message, {
+            deadLetterReason: 'UNEXPECTED_EVENT_NAME',
+            deadLetterErrorDescription: `Unexpected event ${String(payload.name)}`,
+          });
+          return 'dead-lettered';
         }
         await this.bulkApply.process(payload);
       } else if (payload.name === 'pricing.product.initialization.requested') {
@@ -140,8 +144,12 @@ export class PricingServiceBusConsumer
 {
   available = false;
   private client?: ServiceBusClient;
-  private readonly receivers: ServiceBusReceiver[] = [];
-  private readonly subscriptions: Array<{ close(): Promise<void> }> = [];
+  private stopped = false;
+  private readonly queues = [CATALOG_TO_PRICING_QUEUE, BULK_TO_PRICING_QUEUE];
+  private readonly receivers = new Map<string, ServiceBusReceiver>();
+  private readonly subscriptions = new Map<string, { close(): Promise<void> }>();
+  private readonly queueReady = new Map<string, boolean>();
+  private readonly recoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly logger = new Logger(PricingServiceBusConsumer.name);
 
   constructor(
@@ -150,6 +158,12 @@ export class PricingServiceBusConsumer
     private readonly deactivation: CatalogSkuDeactivated,
     @Optional() private readonly bulkApply?: BulkPriceApplyService,
   ) {}
+
+  private recomputeAvailable(): void {
+    this.available =
+      !this.stopped &&
+      this.queues.every((queue) => this.queueReady.get(queue) === true);
+  }
 
   onApplicationBootstrap(): void {
     if (!this.config.serviceBus || !this.bulkApply) return;
@@ -163,11 +177,36 @@ export class PricingServiceBusConsumer
       { retryOptions: { maxRetries: 0, timeoutInMs: 5000 } },
     );
 
-    for (const queue of [CATALOG_TO_PRICING_QUEUE, BULK_TO_PRICING_QUEUE]) {
+    for (const queue of this.queues) {
+      this.queueReady.set(queue, false);
+      void this.openQueue(queue);
+    }
+  }
+
+  private async openQueue(queue: string): Promise<void> {
+    if (this.stopped || !this.client || !this.bulkApply) return;
+    try {
+      const existingSub = this.subscriptions.get(queue);
+      if (existingSub) {
+        await existingSub.close().catch(() => undefined);
+        this.subscriptions.delete(queue);
+      }
+      const existingReceiver = this.receivers.get(queue);
+      if (existingReceiver) {
+        await existingReceiver.close().catch(() => undefined);
+        this.receivers.delete(queue);
+      }
+
       const receiver = this.client.createReceiver(queue, {
         receiveMode: 'peekLock',
         skipParsingBodyAsJson: true,
       });
+      await receiver.peekMessages(1);
+      if (this.stopped) {
+        await receiver.close().catch(() => undefined);
+        return;
+      }
+
       const handler = new PricingServiceBusHandler(
         queue,
         receiver,
@@ -181,26 +220,48 @@ export class PricingServiceBusConsumer
             await handler.handle(msg);
           },
           processError: async () => {
-            this.available = false;
+            this.queueReady.set(queue, false);
+            this.recomputeAvailable();
             this.logger.warn(`Service Bus consumer error on ${queue}`);
+            this.scheduleQueueRecovery(queue);
           },
         },
         { autoCompleteMessages: false },
       );
-      this.receivers.push(receiver);
-      this.subscriptions.push(sub);
+      this.receivers.set(queue, receiver);
+      this.subscriptions.set(queue, sub);
+      this.queueReady.set(queue, true);
+      this.recomputeAvailable();
+    } catch {
+      this.queueReady.set(queue, false);
+      this.recomputeAvailable();
+      this.scheduleQueueRecovery(queue);
     }
-    this.available = true;
+  }
+
+  private scheduleQueueRecovery(queue: string): void {
+    if (this.stopped || this.recoveryTimers.has(queue)) return;
+    const timer = setTimeout(() => {
+      this.recoveryTimers.delete(queue);
+      void this.openQueue(queue);
+    }, 2000);
+    timer.unref();
+    this.recoveryTimers.set(queue, timer);
   }
 
   async onModuleDestroy(): Promise<void> {
+    this.stopped = true;
     this.available = false;
+    for (const timer of this.recoveryTimers.values()) clearTimeout(timer);
+    this.recoveryTimers.clear();
     await Promise.all(
-      this.subscriptions.map((sub) => sub.close().catch(() => undefined)),
+      [...this.subscriptions.values()].map((sub) => sub.close().catch(() => undefined)),
     );
+    this.subscriptions.clear();
     await Promise.all(
-      this.receivers.map((rec) => rec.close().catch(() => undefined)),
+      [...this.receivers.values()].map((rec) => rec.close().catch(() => undefined)),
     );
+    this.receivers.clear();
     await this.client?.close().catch(() => undefined);
   }
 }

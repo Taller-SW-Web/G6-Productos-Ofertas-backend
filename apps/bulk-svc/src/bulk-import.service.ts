@@ -224,6 +224,8 @@ export class BulkImportService {
         byteLength: documentBytes.length,
       };
     }
+    const now = new Date();
+    const nowIso = now.toISOString();
     const commands: CatalogBulkCommand[] = persistedCommands
       ? persistedCommands.map((value) => {
           const envelope = value as CatalogBulkCommand['envelope'];
@@ -245,9 +247,193 @@ export class BulkImportService {
                   },
                 }
               : {}),
-            occurredAt: new Date(),
+            occurredAt: now,
           })
         : [];
+
+    const persistedInventoryCommands = Array.isArray(
+      priorAdmission?.inventoryCommands,
+    )
+      ? (priorAdmission.inventoryCommands as Array<Record<string, unknown>>)
+      : null;
+    const inventoryCommands: Array<Record<string, unknown>> =
+      persistedInventoryCommands ??
+      normalized.flatMap((row, rowIndex) => {
+        if (
+          !row.requiredDomains.includes('INVENTARIO') ||
+          row.inventoryAdjustment !== 'REQUIRED' ||
+          !row.defaultLocationId ||
+          row.stockInicial === null ||
+          row.stockInicial === undefined ||
+          row.vendibleSkus.length === 0
+        ) {
+          return [];
+        }
+        const intentRow = Array.isArray(input.intentRows)
+          ? (input.intentRows[rowIndex] as Record<string, unknown> | undefined)
+          : undefined;
+        const expectedStockVersion =
+          intentRow &&
+          typeof intentRow.expectedStockVersion === 'number' &&
+          Number.isSafeInteger(intentRow.expectedStockVersion) &&
+          intentRow.expectedStockVersion >= 0
+            ? intentRow.expectedStockVersion
+            : 0;
+        return row.vendibleSkus.map((sku) => {
+          const operationId = stableUuid(
+            `${input.batchId}:inventory-bulk-adjust:${row.rowId}:${sku}:operation`,
+          );
+          return {
+            message_id: stableUuid(
+              `${input.batchId}:inventory-bulk-adjust:${row.rowId}:${sku}:message`,
+            ),
+            schema_version: 1,
+            occurred_at: nowIso,
+            correlation_id: input.correlationId,
+            operation_id: operationId,
+            producer: 'bulk-svc',
+            kind: 'command',
+            name: 'inventory.bulk.stock.adjust.requested',
+            data: {
+              operation_id: operationId,
+              batch_id: input.batchId,
+              row_operation_id: row.rowId,
+              sku,
+              location_id: row.defaultLocationId,
+              target_on_hand: row.stockInicial,
+              expected_stock_version: expectedStockVersion,
+              reason: 'BULK_INITIAL_STOCK',
+              requested_at: nowIso,
+            },
+          };
+        });
+      });
+
+    const persistedPricingCommands = Array.isArray(
+      priorAdmission?.pricingCommands,
+    )
+      ? (priorAdmission.pricingCommands as Array<Record<string, unknown>>)
+      : null;
+    const pricingItems = normalized.flatMap((row, rowIndex) => {
+      if (
+        !row.requiredDomains.includes('PRICING') ||
+        row.precioRegular === null ||
+        row.precioRegular === undefined ||
+        row.precioRegular <= 0 ||
+        row.vendibleSkus.length === 0
+      ) {
+        return [];
+      }
+      const intentRow = Array.isArray(input.intentRows)
+        ? (input.intentRows[rowIndex] as Record<string, unknown> | undefined)
+        : undefined;
+      const rowNumber =
+        intentRow &&
+        typeof intentRow.rowNumber === 'number' &&
+        Number.isSafeInteger(intentRow.rowNumber)
+          ? intentRow.rowNumber
+          : rowIndex + 2;
+      const channelId =
+        intentRow &&
+        typeof intentRow.channelId === 'string' &&
+        intentRow.channelId.trim()
+          ? intentRow.channelId.trim()
+          : null;
+      const precioOferta =
+        intentRow &&
+        typeof intentRow.precioOferta === 'number' &&
+        Number.isFinite(intentRow.precioOferta) &&
+        intentRow.precioOferta > 0
+          ? intentRow.precioOferta.toFixed(2)
+          : null;
+      const currency =
+        intentRow &&
+        typeof intentRow.currency === 'string' &&
+        /^[A-Z]{3}$/.test(intentRow.currency)
+          ? intentRow.currency
+          : 'PEN';
+      const validFrom =
+        intentRow && typeof intentRow.validFrom === 'string'
+          ? intentRow.validFrom
+          : null;
+      const validUntil =
+        intentRow && typeof intentRow.validUntil === 'string'
+          ? intentRow.validUntil
+          : null;
+      return row.vendibleSkus.map((sku) => ({
+        row_number: rowNumber,
+        row_operation_id: row.rowId,
+        sku,
+        channel_id: channelId,
+        precio_regular: row.precioRegular!.toFixed(2),
+        precio_oferta: precioOferta,
+        currency,
+        valid_from: validFrom,
+        valid_until: validUntil,
+        motivo_cambio: 'BULK_PRICE_APPLY',
+      }));
+    });
+    const pricingCommands: Array<Record<string, unknown>> =
+      persistedPricingCommands ??
+      (pricingItems.length > 0
+        ? [
+            {
+              message_id: stableUuid(
+                `${input.batchId}:pricing-bulk-apply:0:message`,
+              ),
+              schema_version: 1,
+              occurred_at: nowIso,
+              correlation_id: input.correlationId,
+              operation_id: stableUuid(
+                `${input.batchId}:pricing-bulk-apply:0:operation`,
+              ),
+              producer: 'bulk-svc',
+              kind: 'command',
+              name: 'pricing.bulk.price.apply.requested',
+              data: {
+                batch_id: input.batchId,
+                batch_operation_id: stableUuid(
+                  `${input.batchId}:pricing-bulk-apply:0:batch-operation`,
+                ),
+                items: pricingItems,
+              },
+            },
+          ]
+        : []);
+
+    const allOutboxCommands = [
+      ...commands.map(({ envelope }) => ({
+        messageId: envelope.message_id,
+        eventName: envelope.name,
+        kind: envelope.kind,
+        schemaVersion: envelope.schema_version,
+        correlationId: envelope.correlation_id,
+        operationId: envelope.operation_id,
+        occurredAt: new Date(envelope.occurred_at),
+        payload: envelope as unknown as Record<string, unknown>,
+      })),
+      ...inventoryCommands.map((envelope) => ({
+        messageId: String(envelope.message_id),
+        eventName: String(envelope.name),
+        kind: 'command' as const,
+        schemaVersion: Number(envelope.schema_version ?? 1),
+        correlationId: String(envelope.correlation_id),
+        operationId: String(envelope.operation_id),
+        occurredAt: new Date(String(envelope.occurred_at)),
+        payload: envelope,
+      })),
+      ...pricingCommands.map((envelope) => ({
+        messageId: String(envelope.message_id),
+        eventName: String(envelope.name),
+        kind: 'command' as const,
+        schemaVersion: Number(envelope.schema_version ?? 1),
+        correlationId: String(envelope.correlation_id),
+        operationId: String(envelope.operation_id),
+        occurredAt: new Date(String(envelope.occurred_at)),
+        payload: envelope,
+      })),
+    ];
+
     try {
       return await this.repository.createImportBatch({
         batchId: input.batchId,
@@ -259,16 +445,7 @@ export class BulkImportService {
           contentRef: input.contentRef,
         },
         rows: persistedRows,
-        catalogCommands: commands.map(({ envelope }) => ({
-          messageId: envelope.message_id,
-          eventName: envelope.name,
-          kind: envelope.kind,
-          schemaVersion: envelope.schema_version,
-          correlationId: envelope.correlation_id,
-          operationId: envelope.operation_id,
-          occurredAt: new Date(envelope.occurred_at),
-          payload: envelope as unknown as Record<string, unknown>,
-        })),
+        catalogCommands: allOutboxCommands,
         ...(contentDocument ? { contentDocument } : {}),
         admissionIntent: {
           format: input.format,
@@ -276,6 +453,8 @@ export class BulkImportService {
           contentRef: input.contentRef,
           rows: input.intentRows ?? normalized,
           catalogCommands: commands.map(({ envelope }) => envelope),
+          inventoryCommands,
+          pricingCommands,
         },
       });
     } catch (error) {

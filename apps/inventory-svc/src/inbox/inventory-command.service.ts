@@ -1,7 +1,8 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service.js';
 import { IdempotencyService } from '../idempotency/idempotency.service.js';
 import { OutboxService } from '../outbox/outbox.service.js';
+import { AbsoluteStockAdjustmentService } from '../bulk/absolute-stock-adjustment.service.js';
 import {
   INBOX_REPOSITORY,
   LOCATIONS_REPOSITORY,
@@ -63,6 +64,8 @@ export class InventoryCommandService {
     private readonly locations: ILocationsRepository,
     @Inject(STOCK_BALANCE_REPOSITORY)
     private readonly stock: IStockBalanceRepository,
+    @Optional()
+    private readonly absoluteStockAdjustment?: AbsoluteStockAdjustmentService,
   ) {}
 
   async process(
@@ -197,24 +200,59 @@ export class InventoryCommandService {
   private async processBulkStockAdjust(
     payload: Record<string, unknown>,
   ): Promise<boolean> {
+    const data = record(payload.data) ? payload.data : null;
     if (
       payload.kind !== 'command' ||
       payload.producer !== 'bulk-svc' ||
+      payload.name !== BULK_STOCK_ADJUST ||
+      ![1, 2].includes(Number(payload.schema_version)) ||
+      typeof payload.schema_version !== 'number' ||
       typeof payload.message_id !== 'string' ||
       !UUID.test(payload.message_id) ||
       typeof payload.operation_id !== 'string' ||
       !UUID.test(payload.operation_id) ||
       typeof payload.correlation_id !== 'string' ||
       !UUID.test(payload.correlation_id) ||
-      !record(payload.data)
+      typeof payload.occurred_at !== 'string' ||
+      !Number.isFinite(Date.parse(payload.occurred_at)) ||
+      !data ||
+      typeof data.operation_id !== 'string' ||
+      !UUID.test(data.operation_id) ||
+      typeof data.batch_id !== 'string' ||
+      !UUID.test(data.batch_id) ||
+      typeof data.row_operation_id !== 'string' ||
+      !UUID.test(data.row_operation_id) ||
+      typeof data.sku !== 'string' ||
+      !data.sku.trim() ||
+      typeof data.location_id !== 'string' ||
+      !UUID.test(data.location_id) ||
+      typeof data.target_on_hand !== 'number' ||
+      !Number.isSafeInteger(data.target_on_hand) ||
+      data.target_on_hand < 0 ||
+      typeof data.expected_stock_version !== 'number' ||
+      !Number.isSafeInteger(data.expected_stock_version) ||
+      data.expected_stock_version < 0 ||
+      data.reason !== 'BULK_INITIAL_STOCK' ||
+      typeof data.requested_at !== 'string' ||
+      !Number.isFinite(Date.parse(data.requested_at))
     ) {
       throw new InventoryMessageError('INVALID_MESSAGE');
     }
+    if (!this.absoluteStockAdjustment) {
+      throw new Error('AbsoluteStockAdjustmentService no disponible en InventoryCommandService');
+    }
+
     const messageId = payload.message_id;
     const operationId = payload.operation_id;
     const correlationId = payload.correlation_id;
-    const data = payload.data;
-    const items = Array.isArray(data.items) ? data.items : [];
+    const sku = data.sku.trim();
+    const locationId = data.location_id;
+    const dataOperationId = data.operation_id;
+    const batchId = data.batch_id;
+    const rowOperationId = data.row_operation_id;
+    const targetOnHand = data.target_on_hand;
+    const expectedStockVersion = data.expected_stock_version;
+    const adjustmentService = this.absoluteStockAdjustment;
 
     return this.database.transaction(async (client) => {
       await this.operations.lockIdempotencyKey(client, `inbox:${messageId}`);
@@ -234,44 +272,68 @@ export class InventoryCommandService {
         return true;
       }
 
-      const results: Array<Record<string, unknown>> = [];
-      let applied = 0;
-      for (let i = 0; i < items.length; i += 1) {
-        const item = items[i];
-        if (
-          !record(item) ||
-          typeof item.sku !== 'string' ||
-          !item.sku.trim() ||
-          typeof item.delta !== 'number' ||
-          !Number.isSafeInteger(item.delta)
-        ) {
-          results.push({
-            row_number: record(item) ? (item.row_number ?? i + 2) : i + 2,
-            sku: record(item) ? (item.sku ?? null) : null,
-            status: 'REJECTED',
-            code: 'VALIDACION',
-          });
-          continue;
-        }
-        applied += 1;
-        results.push({
-          row_number: item.row_number ?? i + 2,
-          sku: item.sku.trim(),
-          status: 'COMPLETED',
-          code: null,
-        });
-      }
+      let resultEvent:
+        | 'inventory.bulk.stock.adjust.completed'
+        | 'inventory.bulk.stock.adjust.rejected';
+      let resultData: Record<string, unknown>;
 
-      const allRejected = items.length === 0 || applied === 0;
-      const resultEvent = allRejected
-        ? 'inventory.bulk.stock.adjust.rejected'
-        : 'inventory.bulk.stock.adjust.completed';
+      try {
+        const adjustment = await adjustmentService.applyInTransaction(client, {
+          operation_id: dataOperationId,
+          sku,
+          location_id: locationId,
+          expected_stock_version: expectedStockVersion,
+          target_on_hand: targetOnHand,
+          correlation_id: correlationId,
+        });
+
+        if (adjustment.status === 'APPLIED') {
+          resultEvent = 'inventory.bulk.stock.adjust.completed';
+          resultData = {
+            operation_id: dataOperationId,
+            batch_id: batchId,
+            row_operation_id: rowOperationId,
+            sku: adjustment.sku,
+            location_id: adjustment.location_id,
+            applied_on_hand: adjustment.on_hand,
+            stock_version: adjustment.stock_version,
+            completed_at: new Date().toISOString(),
+          };
+        } else {
+          resultEvent = 'inventory.bulk.stock.adjust.rejected';
+          resultData = {
+            operation_id: dataOperationId,
+            batch_id: batchId,
+            row_operation_id: rowOperationId,
+            sku: adjustment.sku,
+            location_id: adjustment.location_id,
+            code: adjustment.code ?? 'REJECTED',
+            detail: `Ajuste absoluto rechazado: ${adjustment.code ?? 'REJECTED'}`,
+            rejected_at: new Date().toISOString(),
+          };
+        }
+      } catch (error) {
+        resultEvent = 'inventory.bulk.stock.adjust.rejected';
+        resultData = {
+          operation_id: dataOperationId,
+          batch_id: batchId,
+          row_operation_id: rowOperationId,
+          sku,
+          location_id: locationId,
+          code: 'IDEMPOTENCY_CONFLICT',
+          detail:
+            error instanceof Error
+              ? error.message
+              : 'Conflicto de idempotencia en ajuste absoluto',
+          rejected_at: new Date().toISOString(),
+        };
+      }
 
       await this.outbox.enqueue(client, {
         event_id: crypto.randomUUID(),
         event_type: resultEvent,
         aggregate_type: 'bulk_stock_adjust',
-        aggregate_id: String(data.batch_id ?? operationId),
+        aggregate_id: batchId,
         correlation_id: correlationId,
         payload: {
           message_id: crypto.randomUUID(),
@@ -283,13 +345,7 @@ export class InventoryCommandService {
           producer: 'inventory-svc',
           kind: 'result',
           name: resultEvent,
-          data: {
-            batch_id: data.batch_id ?? null,
-            batch_operation_id: data.batch_operation_id ?? null,
-            applied_count: applied,
-            total_count: items.length,
-            results,
-          },
+          data: resultData,
         },
       });
       await this.inbox.markProcessed(client, messageId);

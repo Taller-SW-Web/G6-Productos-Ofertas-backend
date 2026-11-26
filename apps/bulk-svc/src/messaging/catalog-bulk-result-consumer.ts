@@ -305,6 +305,21 @@ export class CatalogBulkResultConsumer
         decoded.correlation_id.length > 0 &&
         record(decoded.data)
       ) {
+        if (
+          this.contractResultDispatcher &&
+          (decoded.name === 'inventory.bulk.stock.adjust.completed' ||
+            decoded.name === 'inventory.bulk.stock.adjust.rejected' ||
+            decoded.name === 'pricing.bulk.price.apply.completed' ||
+            decoded.name === 'pricing.bulk.price.apply.rejected')
+        ) {
+          await this.contractResultDispatcher.dispatch({
+            eventName: String(decoded.name),
+            messageId: decoded.message_id,
+            correlationId: decoded.correlation_id,
+            payload: decoded,
+          });
+          return;
+        }
         await this.repository.persistPendingContractResult({
           messageId: decoded.message_id,
           eventName: String(decoded.name),

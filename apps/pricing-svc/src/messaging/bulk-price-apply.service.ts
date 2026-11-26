@@ -2,9 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import { PRICING_CONFIG, type PricingConfig } from '../config/environment.js';
+import { cents } from '../domain/price.js';
 import { PricingRepository } from '../persistence/pricing.repository.js';
 import {
   inbox,
+  outbox,
   prices,
   priceValidities,
 } from '../persistence/pricing.schema.js';
@@ -142,22 +144,76 @@ export class BulkPriceApplyService {
 
       const items = Array.isArray(data.items) ? data.items : [];
       const rowResults: Array<Record<string, unknown>> = [];
+      const priceChangedFacts: Array<typeof outbox.$inferInsert> = [];
+      const batchId =
+        typeof data.batch_id === 'string' ? data.batch_id : null;
       let appliedCount = 0;
 
       for (let i = 0; i < items.length; i += 1) {
         const item = items[i];
-        if (
+        const validFromRaw =
+          isObject(item) && item.valid_from !== undefined && item.valid_from !== null
+            ? item.valid_from
+            : null;
+        const validUntilRaw =
+          isObject(item) && item.valid_until !== undefined && item.valid_until !== null
+            ? item.valid_until
+            : null;
+        const validFromMs =
+          validFromRaw === null
+            ? Date.now()
+            : typeof validFromRaw === 'string'
+              ? Date.parse(validFromRaw)
+              : NaN;
+        const validUntilMs =
+          validUntilRaw === null
+            ? null
+            : typeof validUntilRaw === 'string'
+              ? Date.parse(validUntilRaw)
+              : NaN;
+
+        const invalidRegular =
           !isObject(item) ||
           typeof item.sku !== 'string' ||
           !item.sku.trim() ||
           typeof item.precio_regular !== 'string' ||
           !MONEY_RE.test(item.precio_regular) ||
-          (item.precio_oferta !== undefined &&
-            item.precio_oferta !== null &&
-            (typeof item.precio_oferta !== 'string' ||
-              !MONEY_RE.test(item.precio_oferta))) ||
+          cents(item.precio_regular) <= 0n;
+
+        const hasOffer =
+          isObject(item) &&
+          item.precio_oferta !== undefined &&
+          item.precio_oferta !== null;
+        const invalidOffer =
+          hasOffer &&
+          (typeof item.precio_oferta !== 'string' ||
+            !MONEY_RE.test(item.precio_oferta) ||
+            cents(item.precio_oferta) <= 0n ||
+            (!invalidRegular &&
+              cents(item.precio_oferta) >= cents(item.precio_regular as string)));
+
+        const invalidChannel =
+          isObject(item) &&
+          item.channel_id !== undefined &&
+          item.channel_id !== null &&
+          (typeof item.channel_id !== 'string' || !item.channel_id.trim());
+
+        const invalidCurrency =
+          !isObject(item) ||
           typeof item.currency !== 'string' ||
-          !/^[A-Z]{3}$/.test(item.currency)
+          !/^[A-Z]{3}$/.test(item.currency);
+
+        const invalidDates =
+          !Number.isFinite(validFromMs) ||
+          (validUntilMs !== null &&
+            (!Number.isFinite(validUntilMs) || validUntilMs <= validFromMs));
+
+        if (
+          invalidRegular ||
+          invalidOffer ||
+          invalidChannel ||
+          invalidCurrency ||
+          invalidDates
         ) {
           rowResults.push({
             row_number: isObject(item) ? (item.row_number ?? i + 2) : i + 2,
@@ -171,11 +227,22 @@ export class BulkPriceApplyService {
           continue;
         }
 
-        const sku = item.sku.trim();
+        const sku = (item.sku as string).trim();
         const channelId =
           typeof item.channel_id === 'string' && item.channel_id.trim()
             ? item.channel_id.trim()
             : null;
+        const nextRegular = item.precio_regular as string;
+        const nextOffer =
+          typeof item.precio_oferta === 'string' ? item.precio_oferta : null;
+        const validFromDate = new Date(validFromMs);
+        const validUntilDate =
+          validUntilMs !== null ? new Date(validUntilMs) : null;
+        const reason =
+          typeof item.motivo_cambio === 'string' && item.motivo_cambio.trim()
+            ? item.motivo_cambio.trim()
+            : 'BULK_PRICE_APPLY';
+
         const [priceRow] = await tx
           .insert(prices)
           .values({
@@ -190,7 +257,25 @@ export class BulkPriceApplyService {
               updatedAt: sql`now()`,
             },
           })
-          .returning({ id: prices.id, priceVersion: prices.priceVersion });
+          .returning({
+            id: prices.id,
+            productId: prices.productId,
+            priceVersion: prices.priceVersion,
+          });
+
+        const [previousValidity] = await tx
+          .select({
+            precioRegular: priceValidities.precioRegular,
+            precioOferta: priceValidities.precioOferta,
+          })
+          .from(priceValidities)
+          .where(
+            and(
+              eq(priceValidities.priceId, priceRow.id),
+              eq(priceValidities.isCancelled, false),
+            ),
+          )
+          .limit(1);
 
         await tx
           .update(priceValidities)
@@ -205,23 +290,100 @@ export class BulkPriceApplyService {
         await tx.insert(priceValidities).values({
           priceId: priceRow.id,
           priceVersion: priceRow.priceVersion,
-          precioRegular: item.precio_regular,
-          precioOferta:
-            typeof item.precio_oferta === 'string' ? item.precio_oferta : null,
-          currency: item.currency,
-          validFrom: new Date(),
-          motivoCambio: 'BULK_PRICE_APPLY',
+          precioRegular: nextRegular,
+          precioOferta: nextOffer,
+          currency: item.currency as string,
+          validFrom: validFromDate,
+          validUntil: validUntilDate,
+          motivoCambio: reason,
           isCancelled: false,
         });
+
+        const rowOpId =
+          typeof item.row_operation_id === 'string'
+            ? item.row_operation_id
+            : randomUUID();
+        const productId =
+          priceRow.productId ??
+          (typeof item.product_id === 'string' && item.product_id.trim()
+            ? item.product_id.trim()
+            : null);
+        const previousRegular = previousValidity?.precioRegular ?? null;
+        const previousOffer = previousValidity?.precioOferta ?? null;
+        const priceVersionNum = Number(priceRow.priceVersion);
+        const now = new Date();
+
+        if (previousRegular !== nextRegular) {
+          priceChangedFacts.push({
+            messageId: randomUUID(),
+            schemaVersion: 1,
+            occurredAt: now,
+            correlationId,
+            causationId: messageId,
+            operationId: rowOpId,
+            kind: 'event',
+            eventName: 'pricing.price.changed',
+            payload: {
+              target_type: 'SKU',
+              product_id: productId,
+              sku,
+              channel_id: channelId,
+              currency: item.currency,
+              price_type: 'REGULAR',
+              previous_price: previousRegular,
+              new_price: nextRegular,
+              operation: previousRegular === null ? 'CREACION' : 'MODIFICACION',
+              reason,
+              price_version: priceVersionNum,
+              valid_from: validFromDate.toISOString(),
+              batch_id: batchId,
+              actor: { user_id: null, email: null, ip: null },
+            },
+          });
+        }
+
+        if (previousOffer !== nextOffer) {
+          priceChangedFacts.push({
+            messageId: randomUUID(),
+            schemaVersion: 1,
+            occurredAt: now,
+            correlationId,
+            causationId: messageId,
+            operationId: rowOpId,
+            kind: 'event',
+            eventName: 'pricing.price.changed',
+            payload: {
+              target_type: 'SKU',
+              product_id: productId,
+              sku,
+              channel_id: channelId,
+              currency: item.currency,
+              price_type: 'OFERTA',
+              previous_price: previousOffer,
+              new_price: nextOffer,
+              operation:
+                nextOffer === null
+                  ? 'RETIRO_OFERTA'
+                  : previousOffer === null
+                    ? 'CREACION'
+                    : 'MODIFICACION',
+              reason,
+              price_version: priceVersionNum,
+              valid_from: validFromDate.toISOString(),
+              batch_id: batchId,
+              actor: { user_id: null, email: null, ip: null },
+            },
+          });
+        }
 
         appliedCount += 1;
         rowResults.push({
           row_number: item.row_number ?? i + 2,
-          row_operation_id: item.row_operation_id ?? randomUUID(),
+          row_operation_id: rowOpId,
           sku,
           status: 'COMPLETED',
           code: null,
-          price_version: Number(priceRow.priceVersion),
+          price_version: priceVersionNum,
         });
       }
 
@@ -246,6 +408,7 @@ export class BulkPriceApplyService {
       await insertPricingFacts(
         tx,
         [
+          ...priceChangedFacts,
           {
             messageId: randomUUID(),
             schemaVersion: 1,
@@ -256,7 +419,7 @@ export class BulkPriceApplyService {
             kind: 'result',
             eventName: resultEventName,
             payload: {
-              batch_id: data.batch_id ?? null,
+              batch_id: batchId,
               batch_operation_id: data.batch_operation_id ?? null,
               applied_count: appliedCount,
               total_count: items.length,

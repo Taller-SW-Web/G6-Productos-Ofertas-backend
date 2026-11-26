@@ -245,6 +245,20 @@ export class InventoryServiceBusConsumerRuntime
         }
       }
 
+      if (this.bulkSubscription) {
+        try {
+          await this.bulkSubscription.close();
+          this.bulkSubscription = undefined;
+        } catch (closeErr) {
+          if (this.bulkReceiver) {
+            await this.bulkReceiver.close();
+            this.bulkReceiver = undefined;
+          }
+          this.bulkSubscription = undefined;
+          throw closeErr;
+        }
+      }
+
       this.receiver ??= this.client.createReceiver(QUEUE_CATALOG, {
         receiveMode: 'peekLock',
         skipParsingBodyAsJson: true,

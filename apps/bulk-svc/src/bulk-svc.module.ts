@@ -23,7 +23,11 @@ import {
   BULK_AMQP_URL,
   configuredBulkAmqpUrl,
 } from './messaging/bulk-rabbitmq.js';
-import { CatalogBulkResultConsumer } from './messaging/catalog-bulk-result-consumer.js';
+import {
+  BULK_CONTRACT_RESULT_DISPATCHER,
+  CatalogBulkResultConsumer,
+} from './messaging/catalog-bulk-result-consumer.js';
+import { BulkContractResultDispatcherService } from './messaging/bulk-contract-result-dispatcher.js';
 import { BulkServiceBusRuntime } from './messaging/bulk-service-bus.runtime.js';
 import { BULK_EXPORT_SOURCE } from './export/bulk-export-source.js';
 
@@ -40,6 +44,11 @@ import { BULK_EXPORT_SOURCE } from './export/bulk-export-source.js';
     BulkUserBearerGuard,
     BulkServiceBearerGuard,
     BulkOutboxRelay,
+    BulkContractResultDispatcherService,
+    {
+      provide: BULK_CONTRACT_RESULT_DISPATCHER,
+      useExisting: BulkContractResultDispatcherService,
+    },
     CatalogBulkResultConsumer,
     BulkServiceBusRuntime,
     BulkReadinessService,
