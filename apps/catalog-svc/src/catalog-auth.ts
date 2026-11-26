@@ -480,7 +480,7 @@ export class CatalogAuthGuard implements CanActivate {
     const authorization = request.headers.authorization;
     const match =
       typeof authorization === 'string' &&
-      /^Bearer ([A-Za-z0-9._~-]+)$/.exec(authorization);
+      /^Bearer ([A-Za-z0-9._~-]+)$/i.exec(authorization);
     if (!match) throw new UnauthorizedException({ code: 'TOKEN_INVALIDO' });
 
     let principal: CatalogPrincipal;
