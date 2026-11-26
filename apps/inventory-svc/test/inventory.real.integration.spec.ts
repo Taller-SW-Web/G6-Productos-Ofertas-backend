@@ -584,7 +584,7 @@ GRANT inventory_app TO inventory_test;`,
     cleanupOwnedResources();
   }, 30_000);
 
-  it('PUBLIC_READ_ONLY sirve disponibilidad comercial sin filtrar stock ni mutar y protege POST', async () => {
+  it('rechaza PUBLIC_READ_ONLY, exige JWT G7 en disponibilidad comercial sin filtrar stock ni mutar y protege POST', async () => {
     const previousMode = process.env.G6_SECURITY_MODE;
     const previousPublicOperations = process.env.INVENTORY_PUBLIC_OPERATION_IDS;
     let app: INestApplication | undefined;
@@ -609,9 +609,8 @@ GRANT inventory_app TO inventory_test;`,
       );
       return result.rows[0]?.value;
     };
-    process.env.G6_SECURITY_MODE = 'PUBLIC_READ_ONLY';
-    process.env.INVENTORY_PUBLIC_OPERATION_IDS =
-      'consultarDisponibilidadComercial';
+    process.env.G6_SECURITY_MODE = 'G7_AUTHENTICATED';
+    delete process.env.INVENTORY_PUBLIC_OPERATION_IDS;
     try {
       const module = await Test.createTestingModule({
         imports: [InventorySvcModule],
@@ -624,9 +623,22 @@ GRANT inventory_app TO inventory_test;`,
       await app.listen(0, '127.0.0.1');
       const origin = await app.getUrl();
       const before = await snapshot();
+      await request(origin)
+        .get(
+          `/api/v1/inventario/disponibilidad/comercial?skus=${sku}&canal=MARKETPLACE`,
+        )
+        .expect(401);
       const read = await request(origin)
         .get(
           `/api/v1/inventario/disponibilidad/comercial?skus=${sku}&canal=MARKETPLACE`,
+        )
+        .set(
+          'Authorization',
+          'Bearer ' +
+            createCryptographicJwt({
+              clientId: 'modulo-marketplace',
+              scope: 'inventario:disponibilidad:leer',
+            }),
         )
         .expect(200);
       expect(read.body).toEqual({
