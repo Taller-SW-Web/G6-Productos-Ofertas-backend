@@ -21,9 +21,82 @@ interface CouponBus {
   close(): Promise<void>;
 }
 
+export function isolatedCouponH5Bus(): CouponBus {
+  let handlers: Parameters<EventReceiver['subscribe']>[0] | undefined;
+  let closed = false;
+  return {
+    sender: {
+      createMessageBatch: async () => {
+        const items: unknown[] = [];
+        return {
+          tryAddMessage: (msg: unknown) => {
+            items.push(msg);
+            return true;
+          },
+          get count() {
+            return items.length;
+          },
+          get sizeInBytes() {
+            return JSON.stringify(items).length;
+          },
+          get maxSizeInBytes() {
+            return 256 * 1024;
+          },
+          _messages: items,
+        } as never;
+      },
+      sendMessages: async (batch: unknown) => {
+        if (closed || !handlers) return;
+        const list =
+          batch &&
+          typeof batch === 'object' &&
+          '_messages' in batch &&
+          Array.isArray((batch as { _messages: unknown[] })._messages)
+            ? (batch as { _messages: unknown[] })._messages
+            : Array.isArray(batch)
+              ? batch
+              : [batch];
+        for (const msg of list) {
+          await handlers.processMessage(msg as never);
+        }
+      },
+      close: async () => {
+        closed = true;
+      },
+    },
+    receiver: {
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        return {
+          close: async () => {
+            handlers = undefined;
+          },
+        };
+      },
+      completeMessage: async () => undefined,
+      abandonMessage: async () => undefined,
+      deadLetterMessage: async () => undefined,
+      peekMessages: async () => [],
+      close: async () => {
+        handlers = undefined;
+      },
+    },
+    close: async () => {
+      closed = true;
+      handlers = undefined;
+    },
+  };
+}
+
 export function nativeCouponH5Bus(
   config: PromotionsServiceBusConfig,
 ): CouponBus {
+  if (
+    process.env.NODE_ENV === 'test' &&
+    process.env.PROMOTIONS_H5_ISOLATED_BUS === '1'
+  ) {
+    return isolatedCouponH5Bus();
+  }
   const identity = config.managedIdentityClientId
     ? new ManagedIdentityCredential({
         clientId: config.managedIdentityClientId,
