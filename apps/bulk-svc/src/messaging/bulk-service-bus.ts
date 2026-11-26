@@ -126,11 +126,19 @@ export class BulkServiceBus {
               body,
             });
           } catch (error) {
+            const errCode = (error as { code?: string })?.code;
             if ((error as { name?: string })?.name !== 'BulkDomainError') {
               console.error(`[bulk-sb-consumer] consume error on ${queue}:`, error);
               reportError();
             } else {
-              console.error(`[bulk-sb-consumer] BulkDomainError on ${queue}:`, (error as Error).message);
+              console.error(`[bulk-sb-consumer] BulkDomainError(${errCode}) on ${queue}:`, (error as Error).message);
+              if (errCode === 'INVALID_TRANSITION') {
+                await receiver.deadLetterMessage(received, {
+                  deadLetterReason: 'INVALID_TRANSITION',
+                  deadLetterErrorDescription: (error as Error).message,
+                });
+                return;
+              }
             }
             await receiver.abandonMessage(received);
             return;

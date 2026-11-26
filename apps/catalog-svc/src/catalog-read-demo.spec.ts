@@ -65,24 +65,16 @@ describe('Explicit internal read-only demo (HTTP provider, isolated repositories
     expect(() =>
       readCatalogReadDemo({ G6_READ_ONLY_DEMO_ENABLED: 'true' }),
     ).toThrow();
-    // Requisito #3: sin CATALOG_PUBLIC_OPERATION_IDS explícito, PUBLIC_READ_ONLY mantiene enabled: false y 0 operaciones
-    expect(
+    // H5: PUBLIC_READ_ONLY no es un modo de seguridad permitido; exige G7_AUTHENTICATED o SIMULATED_AUTH en test
+    expect(() =>
       readCatalogReadDemo({ G6_SECURITY_MODE: 'PUBLIC_READ_ONLY' }),
-    ).toEqual({
-      enabled: false,
-      securityMode: 'PUBLIC_READ_ONLY',
-      publicOperations: [],
-    });
-    expect(
+    ).toThrow();
+    expect(() =>
       readCatalogReadDemo({
         G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
         CATALOG_PUBLIC_OPERATION_IDS: 'listarProductos',
       }),
-    ).toEqual({
-      enabled: false,
-      securityMode: 'PUBLIC_READ_ONLY',
-      publicOperations: ['listarProductos'],
-    });
+    ).toThrow();
     expect(
       readCatalogReadDemo({ G6_SECURITY_MODE: 'SIMULATED_AUTH' }),
     ).toMatchObject({ enabled: false, securityMode: 'SIMULATED_AUTH' });
@@ -275,7 +267,7 @@ describe('Fase 1 y reversión al camino JWT (emisores y Taxonomy de prueba, sin 
     try {
       // 1) Fase 1 con lista vacía: 0 operaciones públicas automáticas
       const appPhase1Empty = await bootCatalog({
-        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+        G6_SECURITY_MODE: 'SIMULATED_AUTH',
       });
       await request(appPhase1Empty.getHttpServer())
         .get('/api/v1/productos/por-slug/zapatilla-marathon?canal=MARKETPLACE')
@@ -286,37 +278,13 @@ describe('Fase 1 y reversión al camino JWT (emisores y Taxonomy de prueba, sin 
         .expect(401);
       await appPhase1Empty.close();
 
-      // 2) Fase 1 con lista explícita (obtenerProductoPorSlug): lectura pública aprobada + Catalog->Taxonomy sin JWT
-      observedTaxonomyCalls.length = 0;
-      taxonomyPhase = 'PUBLIC_READ_ONLY';
-      const appPhase1Explicit = await bootCatalog({
-        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
-        CATALOG_PUBLIC_OPERATION_IDS: 'obtenerProductoPorSlug',
-      });
-      await request(appPhase1Explicit.getHttpServer())
-        .get('/api/v1/productos/por-slug/zapatilla-marathon?canal=MARKETPLACE')
-        .expect(200);
-      expect(observedTaxonomyCalls).toEqual([
-        { url: '/api/v1/marcas', authorization: undefined },
-      ]);
-      expect(repoFixture.findCandidateBySlug).toHaveBeenCalledWith(
-        'zapatilla-marathon',
-        'MARKETPLACE',
-      );
-      await request(appPhase1Explicit.getHttpServer())
-        .get('/api/v1/productos/por-slug/zapatilla-marathon?canal=MARKETPLACE')
-        .set('Authorization', 'Bearer invalid')
-        .expect(401);
-      // Operación GET no incluida en CATALOG_PUBLIC_OPERATION_IDS (listarProductos) sigue protegida (401)
-      await request(appPhase1Explicit.getHttpServer())
-        .get('/api/v1/productos?canal=MARKETPLACE')
-        .expect(401);
-      // Anonymous writes retain their ordinary authentication requirement.
-      await request(appPhase1Explicit.getHttpServer())
-        .post('/api/v1/productos')
-        .send({})
-        .expect(401);
-      await appPhase1Explicit.close();
+      // 2) H5: PUBLIC_READ_ONLY ya no es un modo de seguridad permitido incluso con CATALOG_PUBLIC_OPERATION_IDS
+      await expect(
+        bootCatalog({
+          G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+          CATALOG_PUBLIC_OPERATION_IDS: 'obtenerProductoPorSlug',
+        }),
+      ).rejects.toThrow();
 
       // Phase 2 uses its own fixture issuer and JWKS; credentials are changed
       // through configuration while the exact same application build remains live.

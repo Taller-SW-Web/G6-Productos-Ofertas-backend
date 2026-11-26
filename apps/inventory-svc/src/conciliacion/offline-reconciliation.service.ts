@@ -115,42 +115,32 @@ export class OfflineReconciliationService {
       request.store_ref.trim().length > 0
         ? request.store_ref.trim()
         : undefined;
-    if (claimStoreRef && bodyStoreRef && claimStoreRef !== bodyStoreRef) {
+    if (!claimStoreRef) {
+      throw ProblemDetailsException.scopeInsuficiente(
+        'El token de modulo-ventas debe incluir un claim store_ref autorizado',
+        correlationId,
+      );
+    }
+    if (bodyStoreRef && claimStoreRef !== bodyStoreRef) {
       throw ProblemDetailsException.scopeInsuficiente(
         'store_ref del request no coincide con el claim autorizado',
         correlationId,
       );
     }
-    const effectiveStoreRef = claimStoreRef ?? bodyStoreRef;
 
-    const locationResult = effectiveStoreRef
-      ? await this.database.query<{
-          id: string;
-          code: string;
-          type: string;
-          external_ref: string | null;
-        }>(
-          `SELECT id, code, type, external_ref
-             FROM inventory.locations
-            WHERE active = true
-              AND (external_ref = $1 OR code = $1)
-            LIMIT 1`,
-          [effectiveStoreRef],
-        )
-      : await this.database.query<{
-          id: string;
-          code: string;
-          type: string;
-          external_ref: string | null;
-        }>(
-          `SELECT id, code, type, external_ref
-             FROM inventory.locations
-            WHERE id = $1
-              AND active = true
-              AND (type = 'TIENDA' OR (external_ref IS NOT NULL AND length(trim(external_ref)) > 0))
-            LIMIT 1`,
-          [requestedLocationId],
-        );
+    const locationResult = await this.database.query<{
+      id: string;
+      code: string;
+      type: string;
+      external_ref: string | null;
+    }>(
+      `SELECT id, code, type, external_ref
+         FROM inventory.locations
+        WHERE active = true
+          AND (external_ref = $1 OR code = $1)
+        LIMIT 1`,
+      [claimStoreRef],
+    );
 
     const resolvedLocation = locationResult.rows[0];
     if (!resolvedLocation) {
@@ -175,7 +165,7 @@ export class OfflineReconciliationService {
       client_id: 'modulo-ventas',
       actor_ref: actorRef,
       store_ref:
-        effectiveStoreRef ??
+        claimStoreRef ??
         resolvedLocation.external_ref ??
         resolvedLocation.code,
       location_id: resolvedLocation.id,

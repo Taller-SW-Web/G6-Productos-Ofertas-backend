@@ -175,10 +175,13 @@ export class InventoryServiceBusHandler {
         return 'dead-lettered';
       }
 
-      const maxTransientDeliveries = Math.max(
-        1,
-        Number(process.env.INVENTORY_SB_MAX_TRANSIENT_DELIVERIES ?? 15),
+      const rawMaxDeliveries = Number(
+        process.env.INVENTORY_SB_MAX_TRANSIENT_DELIVERIES ?? 15,
       );
+      const maxTransientDeliveries =
+        Number.isSafeInteger(rawMaxDeliveries) && rawMaxDeliveries > 0
+          ? rawMaxDeliveries
+          : 15;
       const deliveryCount = message.deliveryCount ?? 1;
       const bodyObj =
         typeof payload === 'object' && payload !== null

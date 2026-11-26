@@ -411,7 +411,11 @@ export class CombosAuthGuard implements CanActivate {
         .map((client) => client.trim())
         .filter(Boolean);
       const allowedClients =
-        configuredClients.length > 0 ? configuredClients : defaultClients;
+        configuredClients.length > 0
+          ? defaultClients.filter((client) =>
+              configuredClients.includes(client),
+            )
+          : defaultClients;
       if (
         !policy.scope ||
         !principal.scopes.includes(policy.scope) ||

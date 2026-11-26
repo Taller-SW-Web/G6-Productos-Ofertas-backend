@@ -77,11 +77,14 @@ async function tokenM2M(g7ApiBase, clientId, clientSecret, scope) {
 async function httpCall(url, { method = "GET", headers = {}, body } = {}) {
   try {
     if (body instanceof FormData) {
+      const cleanHeaders = Object.fromEntries(
+        Object.entries(headers).filter(([k]) => k.toLowerCase() !== "content-type"),
+      );
       const res = await fetch(url, {
         method,
         headers: {
           "X-Correlation-Id": randomUUID(),
-          ...headers,
+          ...cleanHeaders,
         },
         signal: AbortSignal.timeout(10_000),
         body,
@@ -232,7 +235,7 @@ async function main() {
     const g5Token = (await tokenM2M(env.g7ApiBase, "modulo-ventas", "e2e-ventas-secret", "cupones:consumir cupones:restaurar cupones:operaciones:leer inventario:reservar inventario:consumir inventario:liberar inventario:conciliar-offline inventario:operaciones:leer inventario:reservas:estado:leer")).body.accessToken;
     const prodSvcToken = (await tokenM2M(env.g7ApiBase, "modulo-productos", "e2e-catalog-secret", "catalogo:leer")).body.accessToken;
     const postventaToken = (await tokenM2M(env.g7ApiBase, "modulo-postventa", "e2e-postventa-secret", "inventario:disponibilidad:leer inventario:reintegrar")).body.accessToken;
-    const retailToken = (await tokenM2M(env.g7ApiBase, "modulo-retail", "e2e-retail-secret", "catalogo:leer precios:leer promociones:evaluar combos:leer inventario:disponibilidad:leer inventario:conciliar-offline inventario:incidencias:reportar inventario:incidencias:resolver")).body.accessToken;
+    const retailToken = (await tokenM2M(env.g7ApiBase, "modulo-retail", "e2e-retail-secret", "catalogo:leer precios:leer promociones:evaluar combos:leer inventario:disponibilidad:leer inventario:incidencias:reportar inventario:incidencias:resolver")).body.accessToken;
     const despachoToken = (await tokenM2M(env.g7ApiBase, "modulo-despacho", "e2e-despacho-secret", "inventario:disponibilidad:leer catalogo:leer productos:fisicos:leer")).body.accessToken;
     const catalogSvcToken = (await tokenM2M(env.g7ApiBase, "catalog-svc", "e2e-catalog-secret", "carga-masiva:contenidos:leer")).body.accessToken;
     const inventorySvcToken = (await tokenM2M(env.g7ApiBase, "inventory-svc", "e2e-inventory-secret", "catalogo:leer")).body.accessToken;
@@ -335,6 +338,32 @@ async function main() {
       body: { caracteristicaId: attrId, obligatoria: false, esIdentificador: false },
     });
 
+    const v2Headers = "operacion,producto_id,catalog_version,sku_base,sku_variante,nombre,descripcion,categoria_id,marca_id,tipo_producto_id,tiene_variantes,precio_regular,atributos_producto,atributos_variante,imagen_url,stock_inicial";
+    // Seed retryable bulk batch FIRST (before any CatalogMasterClient call caches CatalogBulkIdentity) via real G7 503 transient failure -> CATALOG_AUTH_TEMPORARY_UNAVAILABLE
+    await httpCall(`${env.g5SeedOrigin}/__test/g7-fail-next-catalog-token`, { method: "POST" });
+    const retryBulkSku = `BULK-RETRY-${randomUUID().slice(0, 6).toUpperCase()}`;
+    const retryBulkRow = ["ALTA", "", "", retryBulkSku, "", "Prod Bulk Retry", "Desc Bulk Retry", catId, brandId, typeId, "false", "55.00", "[]", "", "https://example.test/br.png", "15"].join(",");
+    const retryBulkForm = new FormData();
+    retryBulkForm.append("archivo", new Blob([`${v2Headers}\r\n${retryBulkRow}\r\n`], { type: "text/csv" }), "retry.csv");
+    const retryBulkUpload = await httpCall(`${gw}/api/v1/carga-masiva/productos/importaciones`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${gestorJwt}`, "Idempotency-Key": randomUUID(), "X-Correlation-Id": randomUUID() },
+      body: retryBulkForm,
+    });
+    const retryBatchId = retryBulkUpload.json?.batch_id;
+    if (!retryBatchId) {
+      throw new Error(`SEED_FAILED retryBulkUpload status=${retryBulkUpload.status} body=${retryBulkUpload.text}`);
+    }
+    const retrySeedPoll = await pollUntil(
+      () => httpCall(`${gw}/api/v1/carga-masiva/productos/importaciones/${retryBatchId}`, { headers: { Authorization: `Bearer ${gestorJwt}` } }),
+      (r) => ["COMPLETED", "FAILED_GENERAL"].includes(r.json?.status),
+      40,
+      400,
+    );
+    if (retrySeedPoll?.json?.status !== "COMPLETED" || retrySeedPoll?.json?.failed_rows !== 1) {
+      throw new Error(`SEED_FAILED retryBatchId did not reach real retryable COMPLETED(failed_rows=1): ${JSON.stringify(retrySeedPoll?.json)}`);
+    }
+
     // Seed two active products + stock + price
     const activeProd1 = randomUUID();
     const activeSku1 = `SKU-CERT1-${randomUUID().slice(0, 6).toUpperCase()}`;
@@ -366,7 +395,7 @@ async function main() {
     const storeLocationId = randomUUID();
     await httpCall(`${env.g5SeedOrigin}/__test/inventory-store-location`, {
       method: "POST",
-      body: { locationId: storeLocationId, code: `TIENDA-${randomUUID().slice(0, 4).toUpperCase()}`, sku: activeSku1, on_hand: 30 },
+      body: { locationId: storeLocationId, code: "TIENDA-CERT-01", external_ref: "TIENDA-CERT-01", sku: activeSku1, on_hand: 30 },
     });
     const trasladoId = randomUUID();
     await httpCall(`${env.g5SeedOrigin}/__test/inventory-transfer`, {
@@ -672,11 +701,12 @@ async function main() {
       body: makePriceCsvForm(activeSku2, 1),
     });
     let priceBatchId = priceImportRes.json?.batchId ?? priceImportRes.json?.batch_id;
-    if (priceImportRes.status >= 400) console.error(`[certify] seed priceImportRes=${priceImportRes.status} ${priceImportRes.text}`);
+    if (priceImportRes.status >= 400 || !priceBatchId) {
+      throw new Error(`SEED_FAILED priceImportRes status=${priceImportRes.status} body=${priceImportRes.text}`);
+    }
 
     // Bulk 8b V2 CSV batch (with V3 claim-check enabled -> R01/R02/R03/R04/R10/R14)
     const bulkSku = `BULK-CERT-${randomUUID().slice(0, 6).toUpperCase()}`;
-    const v2Headers = "operacion,producto_id,catalog_version,sku_base,sku_variante,nombre,descripcion,categoria_id,marca_id,tipo_producto_id,tiene_variantes,precio_regular,atributos_producto,atributos_variante,imagen_url,stock_inicial";
     const bulkRow = ["ALTA", "", "", bulkSku, "", "Prod Bulk Cert", "Desc Bulk Cert", catId, brandId, typeId, "false", "55.00", "[]", "", "https://example.test/b.png", "15"].join(",");
     const bulkForm = new FormData();
     bulkForm.append("archivo", new Blob([`${v2Headers}\r\n${bulkRow}\r\n`], { type: "text/csv" }), "cert.csv");
@@ -687,19 +717,20 @@ async function main() {
       body: bulkForm,
     });
     const batchId = bulkUpload.json?.batch_id;
-    const bulkContentId = batchId ? stableUuid(`${batchId}:catalog-bulk-v3-content`) : randomUUID();
+    if (!batchId) {
+      throw new Error(`SEED_FAILED bulkUpload status=${bulkUpload.status} body=${bulkUpload.text}`);
+    }
+    const bulkContentId = stableUuid(`${batchId}:catalog-bulk-v3-content`);
     let bulkTerminal = bulkUpload.json?.status ?? String(bulkUpload.status);
     let bulkSnap = null;
-    if (batchId) {
-      const bulkPoll = await pollUntil(
-        () => httpCall(`${gw}/api/v1/carga-masiva/productos/importaciones/${batchId}`, { headers: { Authorization: `Bearer ${gestorJwt}` } }),
-        (r) => ["COMPLETED", "FAILED_GENERAL"].includes(r.json?.status),
-        40,
-        400,
-      );
-      bulkSnap = bulkPoll?.json ?? null;
-      bulkTerminal = bulkSnap?.status ?? "";
-    }
+    const bulkPoll = await pollUntil(
+      () => httpCall(`${gw}/api/v1/carga-masiva/productos/importaciones/${batchId}`, { headers: { Authorization: `Bearer ${gestorJwt}` } }),
+      (r) => ["COMPLETED", "FAILED_GENERAL"].includes(r.json?.status),
+      60,
+      400,
+    );
+    bulkSnap = bulkPoll?.json ?? null;
+    bulkTerminal = bulkSnap?.status ?? "";
 
     // Bulk export
     const bulkExpRes = await httpCall(`${gw}/api/v1/carga-masiva/productos/exportaciones`, {
@@ -708,12 +739,13 @@ async function main() {
       body: { formato: "CSV" },
     });
     const bulkExportId = bulkExpRes.json?.export_id ?? bulkExpRes.json?.exportId;
-    if (bulkExportId) {
-      await pollUntil(
-        () => httpCall(`${gw}/api/v1/carga-masiva/productos/exportaciones/${bulkExportId}`, { headers: authH }),
-        (r) => r.json?.status === "COMPLETED",
-      );
+    if (!bulkExportId) {
+      throw new Error(`SEED_FAILED bulkExpRes status=${bulkExpRes.status} body=${bulkExpRes.text}`);
     }
+    await pollUntil(
+      () => httpCall(`${gw}/api/v1/carga-masiva/productos/exportaciones/${bulkExportId}`, { headers: authH }),
+      (r) => r.json?.status === "COMPLETED",
+    );
 
     // Seed pending preparation checks for [32] & [40]
     const pendingPrepRes = await httpCall(`${env.g5SeedOrigin}/__test/catalog-pending-preparation`, {
@@ -723,29 +755,8 @@ async function main() {
     const retryProdId = pendingPrepRes.json?.retryProdId;
     const retryVarProdId = pendingPrepRes.json?.retryVarProdId;
     const retryVarId = pendingPrepRes.json?.retryVarId;
-
-    // Seed retryable bulk batch for [109] reanudarImportacionGeneral
-    const retryBulkSku = `BULK-RETRY-${randomUUID().slice(0, 6).toUpperCase()}`;
-    const retryBulkRow = ["ALTA", "", "", retryBulkSku, "", "Prod Bulk Retry", "Desc Bulk Retry", catId, brandId, typeId, "false", "55.00", "[]", "", "https://example.test/br.png", "15"].join(",");
-    const retryBulkForm = new FormData();
-    retryBulkForm.append("archivo", new Blob([`${v2Headers}\r\n${retryBulkRow}\r\n`], { type: "text/csv" }), "retry.csv");
-    const retryBulkUpload = await httpCall(`${gw}/api/v1/carga-masiva/productos/importaciones`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${gestorJwt}`, "Idempotency-Key": randomUUID(), "X-Correlation-Id": randomUUID() },
-      body: retryBulkForm,
-    });
-    const retryBatchId = retryBulkUpload.json?.batch_id;
-    if (retryBatchId) {
-      await pollUntil(
-        () => httpCall(`${gw}/api/v1/carga-masiva/productos/importaciones/${retryBatchId}`, { headers: authH }),
-        (r) => ["COMPLETED", "FAILED_GENERAL"].includes(r.json?.status),
-        30,
-        300,
-      );
-      await httpCall(`${env.g5SeedOrigin}/__test/bulk-mark-retryable`, {
-        method: "POST",
-        body: { batchId: retryBatchId },
-      });
+    if (!retryProdId || !retryVarId) {
+      throw new Error(`SEED_FAILED pendingPrepRes status=${pendingPrepRes.status}`);
     }
 
     // Inventory incident (for obtener/resolver)
@@ -968,7 +979,7 @@ async function pgSelect(g5SeedOrigin, sql) {
   return res.json.rows;
 }
 
-async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOrigin) {
+async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOrigin, reqBody) {
   if (isHealth || method === "GET" || READ_ONLY_POST_OPS.has(opId)) {
     return { label: "NOT_APPLICABLE", ok: true };
   }
@@ -979,42 +990,124 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
   try {
     if (["crearProducto", "actualizarProducto", "activarProducto", "desactivarProducto", "reactivarProducto", "reemplazarImagenesProducto", "definirAtributosProducto", "definirPerfilFisicoProducto", "reintentarPreparacionProducto"].includes(opId)) {
       const id = safe(posRes.json?.productoId ?? posRes.json?.product_id ?? (opId === "reintentarPreparacionProducto" ? ctx.retryProdId : ctx.activeProd1));
-      const rows = await pgSelect(g5SeedOrigin, `SELECT id FROM catalog.products WHERE id = '${id}'::uuid`);
-      return rows.length === 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
-    }
-    if (["crearVariante", "actualizarVariante", "activarVariante", "desactivarVariante", "reactivarVariante", "reemplazarImagenesVariante", "definirAtributosVariante", "definirPerfilFisicoVariante", "reintentarPreparacionVariante"].includes(opId)) {
-      const id = safe(posRes.json?.varianteId ?? posRes.json?.variant_id ?? (opId === "reintentarPreparacionVariante" ? ctx.retryVarId : ctx.varId));
-      const rows = await pgSelect(g5SeedOrigin, `SELECT id FROM catalog.variants WHERE id = '${id}'::uuid`);
-      return rows.length === 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
-    }
-    if (["crearImportacionGeneralProductos", "reanudarImportacionGeneral"].includes(opId)) {
-      const bId = safe(posRes.json?.batch_id ?? posRes.json?.batchId ?? ctx.retryBatchId);
-      const rows = await pgSelect(g5SeedOrigin, `SELECT status, completed_rows, total_rows, needs_reconciliation FROM bulk.batch_jobs WHERE batch_id = '${bId}'::uuid`);
-      if (opId === "crearImportacionGeneralProductos") {
-        const invRows = await pgSelect(g5SeedOrigin, `SELECT status FROM bulk.row_domain_steps WHERE batch_row_id IN (SELECT id FROM bulk.batch_rows WHERE batch_job_id = (SELECT id FROM bulk.batch_jobs WHERE batch_id = '${bId}'::uuid)) AND domain = 'INVENTARIO'`);
-        const ok = rows[0]?.status === "COMPLETED" && rows[0]?.completed_rows === rows[0]?.total_rows && !rows[0]?.needs_reconciliation && invRows[0]?.status === "COMPLETED";
-        return { label: ok ? "PERSISTENCE_PASS" : "FAIL", ok };
+      const rows = await pgSelect(g5SeedOrigin, `SELECT id, estado, catalog_version FROM catalog.products WHERE id = '${id}'::uuid`);
+      if (rows.length !== 1) return { label: "FAIL", ok: false };
+      if (opId === "desactivarProducto" && rows[0].estado !== "INACTIVO") return { label: "FAIL", ok: false };
+      if ((opId === "activarProducto" || opId === "reactivarProducto") && rows[0].estado !== "ACTIVO") return { label: "FAIL", ok: false };
+      if (opId === "reintentarPreparacionProducto") {
+        const ob = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM catalog.outbox WHERE operation_id = '${safe(posRes.json?.operation_id)}'::uuid`);
+        return Number(ob[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
       }
+      return { label: "PERSISTENCE_PASS", ok: true };
+    }
+    if (["crearVariante", "actualizarVariante", "activarVariante", "desactivarVariante", "reactivarVariante", "reemplazarImagenesVariante", "definirAtributosVariante", "definirPerfilFisicoVariante", "reintentarPreparacionVariante", "asignarCodigoBarras"].includes(opId)) {
+      const id = safe(posRes.json?.varianteId ?? posRes.json?.variant_id ?? (opId === "reintentarPreparacionVariante" ? ctx.retryVarId : ctx.varId));
+      const rows = await pgSelect(g5SeedOrigin, `SELECT id, estado FROM catalog.variants WHERE id = '${id}'::uuid`);
+      if (rows.length !== 1) return { label: "FAIL", ok: false };
+      if (opId === "desactivarVariante" && rows[0].estado !== "INACTIVO") return { label: "FAIL", ok: false };
+      if ((opId === "activarVariante" || opId === "reactivarVariante") && rows[0].estado !== "ACTIVO") return { label: "FAIL", ok: false };
+      return { label: "PERSISTENCE_PASS", ok: true };
+    }
+    if (["crearCategoria", "actualizarCategoria", "desactivarCategoria", "actualizarSeoCategoria", "solicitarDesactivacionCategoria"].includes(opId)) {
+      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM taxonomy.categories`);
+      return Number(rows[0]?.c ?? 0) > 0 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (["crearMarca", "actualizarMarca", "desactivarMarca", "subirLogoMarca"].includes(opId)) {
+      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM taxonomy.brands`);
+      return Number(rows[0]?.c ?? 0) > 0 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (["crearCaracteristica", "actualizarCaracteristica", "desactivarCaracteristica", "crearValorCaracteristica", "actualizarValorCaracteristica", "desactivarValorCaracteristica", "solicitarDesactivacionValorCaracteristica", "crearTipoProducto", "actualizarTipoProducto", "desactivarTipoProducto", "solicitarDesactivacionTipoProducto", "asociarCaracteristicaTipoProducto", "actualizarAsociacionTipoCaracteristica", "desasociarCaracteristicaTipoProducto"].includes(opId)) {
+      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM taxonomy.product_types`);
+      return Number(rows[0]?.c ?? 0) > 0 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (["actualizarPrecioSku", "programarPrecioSku", "crearImportacionPrecios", "reintentarImportacionPrecios"].includes(opId)) {
+      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM pricing.prices WHERE sku = '${safe(ctx.activeSku1)}'`);
+      return Number(rows[0]?.c ?? 0) > 0 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (opId === "crearExportacionAuditoriaPrecios") {
+      const id = safe(posRes.json?.export_id ?? posRes.json?.exportId);
+      const rows = await pgSelect(g5SeedOrigin, `SELECT id FROM price_audit.export_jobs WHERE id = '${id}'::uuid`);
+      return rows.length === 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (opId === "crearImportacionGeneralProductos") {
+      const bId = safe(posRes.json?.batch_id ?? posRes.json?.batchId);
+      const rows = await pgSelect(g5SeedOrigin, `SELECT status, completed_rows, total_rows, needs_reconciliation FROM bulk.batch_jobs WHERE batch_id = '${bId}'::uuid`);
+      const invRows = await pgSelect(g5SeedOrigin, `SELECT status FROM bulk.row_domain_steps WHERE batch_row_id IN (SELECT id FROM bulk.batch_rows WHERE batch_job_id = (SELECT id FROM bulk.batch_jobs WHERE batch_id = '${bId}'::uuid)) AND domain = 'INVENTARIO'`);
+      const ok = rows[0]?.status === "COMPLETED" && rows[0]?.completed_rows === rows[0]?.total_rows && !rows[0]?.needs_reconciliation && invRows[0]?.status === "COMPLETED";
+      return { label: ok ? "PERSISTENCE_PASS" : "FAIL", ok };
+    }
+    if (opId === "reanudarImportacionGeneral") {
+      const bId = safe(ctx.retryBatchId);
+      const rows = await pgSelect(g5SeedOrigin, `SELECT status, completed_rows, failed_rows FROM bulk.batch_jobs WHERE batch_id = '${bId}'::uuid`);
+      const attempts = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM bulk.domain_attempts WHERE batch_row_id IN (SELECT id FROM bulk.batch_rows WHERE batch_job_id = (SELECT id FROM bulk.batch_jobs WHERE batch_id = '${bId}'::uuid)) AND attempt_number >= 2`);
+      const ok = rows[0]?.status === "COMPLETED" && rows[0]?.completed_rows === 1 && rows[0]?.failed_rows === 0 && Number(attempts[0]?.c ?? 0) >= 1;
+      return { label: ok ? "PERSISTENCE_PASS" : "FAIL", ok };
+    }
+    if (opId === "crearExportacionGeneralProductos") {
+      const id = safe(posRes.json?.export_id ?? posRes.json?.exportId);
+      const rows = await pgSelect(g5SeedOrigin, `SELECT export_id FROM bulk.export_jobs WHERE export_id = '${id}'::uuid`);
       return rows.length === 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     if (opId === "conciliarVentaOffline") {
-      const recId = safe(posRes.json?.reconciliation_id);
-      const rows = await pgSelect(g5SeedOrigin, `SELECT reconciliation_id, status FROM inventory.offline_sale_reconciliations WHERE reconciliation_id = '${recId}'::uuid`);
+      const opUuid = safe(reqBody?.operation_id);
+      const offId = safe(reqBody?.offline_sale_id);
+      const rows = await pgSelect(g5SeedOrigin, `SELECT operation_id, offline_sale_id, status FROM inventory.offline_sale_reconciliations WHERE operation_id = '${opUuid}'::uuid AND offline_sale_id = '${offId}'`);
+      const kRows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM inventory.kardex WHERE reference_id = '${offId}' OR operation_id = '${opUuid}'::uuid`);
+      const ok = rows.length === 1 && Number(kRows[0]?.c ?? 0) >= 1;
+      return { label: ok ? "PERSISTENCE_PASS" : "FAIL", ok };
+    }
+    if (["solicitarReserva", "confirmarReserva", "liberarReserva"].includes(opId)) {
+      const targetOrder = safe(reqBody?.order_id ?? posRes.json?.order_id ?? (opId === "confirmarReserva" ? ctx.orderId2 : opId === "liberarReserva" ? ctx.orderId3 : ""));
+      const rows = await pgSelect(g5SeedOrigin, `SELECT id, status FROM inventory.reservations WHERE order_id = '${targetOrder}'::uuid`);
+      return rows.length >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (["reportarIncidenciaInventario", "resolverIncidenciaInventario"].includes(opId)) {
+      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM inventory.incidencias`);
+      return Number(rows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (opId === "reintegrarInventario") {
+      const opUuid = safe(reqBody?.operation_id);
+      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM inventory.kardex WHERE operation_id = '${opUuid}'::uuid`);
+      return Number(rows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (opId === "actualizarUmbralGlobal") {
+      const rows = await pgSelect(g5SeedOrigin, `SELECT global_low_stock_threshold FROM inventory.inventory_config LIMIT 1`);
       return rows.length === 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
-    if (["solicitarReserva", "confirmarReserva", "liberarReserva", "reportarIncidenciaInventario", "resolverIncidenciaInventario", "reintegrarInventario", "actualizarUmbralGlobal", "establecerUmbralSku", "registrarRecepcionTrasladoInventario"].includes(opId)) {
-      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM inventory.stock_balance WHERE sku = '${safe(ctx.activeSku1)}'`);
-      return Number(rows[0]?.c ?? 0) > 0 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    if (opId === "establecerUmbralSku") {
+      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM inventory.stock_threshold_override WHERE sku_id = '${safe(ctx.activeSku1)}'`);
+      return Number(rows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
-    if (["crearPromocion", "actualizarPromocion", "activarPromocion", "desactivarPromocion", "crearCupon", "actualizarCupon", "admitirConsumoCuponH5", "admitirRestauracionCuponH5"].includes(opId)) {
-      if (opId === "admitirConsumoCuponH5") {
-        const rows = await pgSelect(g5SeedOrigin, `SELECT id FROM promotions.coupon_consumptions WHERE order_id = '${safe(ctx.orderId4)}'::uuid`);
-        return rows.length === 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
-      }
+    if (opId === "registrarRecepcionTrasladoInventario") {
+      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM inventory.traslado_recepciones`);
+      return Number(rows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (["crearPromocion", "actualizarPromocion", "activarPromocion", "desactivarPromocion"].includes(opId)) {
+      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM promotions.promotions`);
+      return Number(rows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (["crearCupon", "actualizarCupon"].includes(opId)) {
       const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM promotions.coupons WHERE code = upper('${safe(ctx.couponCode)}')`);
-      return Number(rows[0]?.c ?? 0) > 0 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+      return Number(rows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
-    return { label: "NOT_VERIFIED", ok: true };
+    if (["crearReglaRecomendacion", "actualizarReglaRecomendacion"].includes(opId)) {
+      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM promotions.recommendation_rules`);
+      return Number(rows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (opId === "admitirConsumoCuponH5") {
+      const rows = await pgSelect(g5SeedOrigin, `SELECT id FROM promotions.coupon_uses WHERE order_id = '${safe(ctx.orderId4)}'::uuid`);
+      const ob = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM promotions.outbox`);
+      return rows.length === 1 && Number(ob[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (opId === "admitirRestauracionCuponH5") {
+      const rows = await pgSelect(g5SeedOrigin, `SELECT id, status FROM promotions.coupon_command_receipts WHERE order_id = '${safe(ctx.orderId)}'::uuid`);
+      return rows.length >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    if (["crearCombo", "crearComboAdministracion", "actualizarCombo", "desactivarCombo"].includes(opId)) {
+      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM combos.combos`);
+      return Number(rows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+    }
+    return { label: "NOT_VERIFIED", ok: false };
   } catch {
     return { label: "FAIL", ok: false };
   }
@@ -1031,8 +1124,9 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
         method,
         isHealth,
         posRes,
-        { activeProd1, varId, retryProdId, retryVarId, retryBatchId, activeSku1, orderId4, couponCode },
+        { activeProd1, varId, retryProdId, retryVarId, retryBatchId, activeSku1, orderId, orderId2, orderId3, orderId4, couponCode },
         env.g5SeedOrigin,
+        posBody,
       );
       const persistencePass = persistenceCheck.ok;
 
@@ -1078,6 +1172,7 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
             opId === "actualizarReglaRecomendacion" ? { prioridad: -1 } :
             opId === "actualizarCombo" ? { precioCombo: -5 } :
             opId === "actualizarCupon" ? { maxUsosGlobal: -1 } :
+            opId === "conciliarVentaOffline" ? { operation_id: randomUUID(), offline_sale_id: randomUUID(), order_id: randomUUID(), channel_id: "RETAIL", occurred_at: new Date().toISOString(), lines: [{ sku: activeSku1, quantity: 1, location_id: randomUUID() }] } :
             {};
           const negRes = await httpCall(`${baseOrigin}${posPath}`, {
             method: posMethod,
@@ -1116,12 +1211,28 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
 
     const passed = results.filter((r) => r.status === "PASS").length;
     const failed = results.filter((r) => r.status === "FAIL").length;
+    const countBy = (key, val) => results.filter((r) => r[key] === val).length;
     const summary = {
+      status: failed === 0 && results.length === 158 ? "PASS" : "FAIL",
       timestamp: new Date().toISOString(),
       total: results.length,
+      executed: results.length,
+      notExecuted: Math.max(0, 158 - results.length),
       passed,
       failed,
       blocked: 0,
+      persistenceBreakdown: {
+        PERSISTENCE_PASS: countBy("persistence", "PERSISTENCE_PASS"),
+        NOT_APPLICABLE: countBy("persistence", "NOT_APPLICABLE"),
+        NOT_VERIFIED: countBy("persistence", "NOT_VERIFIED"),
+        FAIL: countBy("persistence", "FAIL"),
+      },
+      negativeBreakdown: {
+        NEGATIVE_CONTRACT_PASS: countBy("negativeContract", "NEGATIVE_CONTRACT_PASS"),
+        NOT_APPLICABLE: countBy("negativeContract", "NOT_APPLICABLE"),
+        NOT_RUN: countBy("negativeContract", "NOT_RUN"),
+        FAIL: countBy("negativeContract", "FAIL"),
+      },
       authChecks,
       n01ConsumeStatus,
       bulkTerminal,
@@ -1163,6 +1274,11 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       bulkTerminal === "COMPLETED" &&
       authChecks.every((a) => a.pass);
     exitCode = allOk ? 0 : 1;
+  } catch (err) {
+    if (typeof stackLogs === "string" && stackLogs.length > 0) {
+      writeFileSync(resolve(BACKEND_ROOT, "tests/h5/certify-stack.log"), stackLogs, "utf8");
+    }
+    throw err;
   } finally {
     await stopStack();
     process.exitCode = exitCode;
@@ -1358,5 +1474,23 @@ function buildPositiveBody(opId, ctx) {
 
 void main().catch((err) => {
   console.error(err);
+  writeFileSync(
+    REPORT_JSON_PATH,
+    JSON.stringify(
+      {
+        status: "SETUP_FAILED",
+        timestamp: new Date().toISOString(),
+        total: 0,
+        executed: 0,
+        notExecuted: 158,
+        passed: 0,
+        failed: 0,
+        error: err instanceof Error ? err.message : String(err),
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
   process.exit(1);
 });

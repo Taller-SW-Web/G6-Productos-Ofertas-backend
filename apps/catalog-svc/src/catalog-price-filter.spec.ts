@@ -58,7 +58,7 @@ describe('D-CAT price filtering (isolated HTTP fixtures, no external grant claim
     expect(
       await demo.matchingProducts([{ productId: 'p', sku: 'sku' }], query),
     ).toEqual(['p']);
-    expect(identity.authorization).not.toHaveBeenCalled();
+    expect(identity.authorization).toHaveBeenCalled();
     const init = fetchMock.mock.calls[0][1];
     expect(new Headers(init?.headers).has('authorization')).toBe(false);
 
@@ -86,7 +86,7 @@ describe('D-CAT price filtering (isolated HTTP fixtures, no external grant claim
         ),
       ).toEqual(['p']);
     }
-    expect(identity.authorization).not.toHaveBeenCalled();
+    expect(identity.authorization).toHaveBeenCalled();
   });
 
   it('filters monetary bounds over the Azure Container Apps private HTTPS Pricing origin for all four allowed channels in PUBLIC_READ_ONLY and G7_AUTHENTICATED', async () => {
@@ -134,10 +134,10 @@ describe('D-CAT price filtering (isolated HTTP fixtures, no external grant claim
       expect(parsed.pathname).toBe('/api/v1/precios');
       expect(parsed.searchParams.get('canal')).toBe(canal);
       const headers = new Headers(calledInit?.headers);
-      expect(headers.has('authorization')).toBe(false);
+      expect(headers.has('authorization')).toBe(true);
       expect(headers.get('x-correlation-id')).toBe(`corr-public-${canal}`);
     }
-    expect(identity.authorization).not.toHaveBeenCalled();
+    expect(identity.authorization).toHaveBeenCalled();
 
     const g7Filter = new CatalogPriceFilter(
       {

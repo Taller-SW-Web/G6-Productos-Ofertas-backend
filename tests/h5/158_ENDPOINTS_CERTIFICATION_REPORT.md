@@ -1,30 +1,30 @@
 # Certificación 158 Endpoints G6 H5 R2
-- Fecha: 2026-11-26T18:50:25.268Z
-- Total: 158 | PASS: 0 | FAIL: 158
+- Fecha: 2026-11-26T19:57:15.264Z
+- Total: 158 | PASS: 18 | FAIL: 140
 - N01 Consume: COMPLETED | Bulk Terminal: PROCESSING | AuthChecks: true
 
 | # | Servicio | operationId | Método | Ruta | HTTP | Seguridad | Negativo | Funcional | Persistencia | Async | Estado |
 |---:|---|---|---|---|---:|---|---|---|---|---|---|
-| 1 | catalog-svc | `listarProductos` | GET | `/api/v1/productos` | 0 | FAIL | NOT_RUN | FAIL | NOT_APPLICABLE | NOT_APPLICABLE | **FAIL** |
-| 2 | catalog-svc | `crearProducto` | POST | `/api/v1/productos` | 0 | FAIL | FAIL | FAIL | FAIL | NOT_APPLICABLE | **FAIL** |
-| 3 | catalog-svc | `obtenerProducto` | GET | `/api/v1/productos/{productoId}` | 0 | FAIL | FAIL | FAIL | NOT_APPLICABLE | NOT_APPLICABLE | **FAIL** |
-| 4 | catalog-svc | `actualizarProducto` | PATCH | `/api/v1/productos/{productoId}` | 0 | FAIL | FAIL | FAIL | FAIL | NOT_APPLICABLE | **FAIL** |
-| 5 | taxonomy-svc | `listarCategorias` | GET | `/api/v1/categorias` | 0 | FAIL | NOT_RUN | FAIL | NOT_APPLICABLE | NOT_APPLICABLE | **FAIL** |
-| 6 | taxonomy-svc | `crearCategoria` | POST | `/api/v1/categorias` | 0 | FAIL | FAIL | FAIL | FAIL | NOT_APPLICABLE | **FAIL** |
-| 7 | taxonomy-svc | `listarMarcas` | GET | `/api/v1/marcas` | 0 | FAIL | NOT_RUN | FAIL | NOT_APPLICABLE | NOT_APPLICABLE | **FAIL** |
-| 8 | taxonomy-svc | `crearMarca` | POST | `/api/v1/marcas` | 0 | FAIL | FAIL | FAIL | FAIL | NOT_APPLICABLE | **FAIL** |
-| 9 | pricing-svc | `consultarPrecios` | GET | `/api/v1/precios` | 0 | FAIL | NOT_RUN | FAIL | NOT_APPLICABLE | NOT_APPLICABLE | **FAIL** |
-| 10 | pricing-svc | `obtenerPrecioSku` | GET | `/api/v1/precios/skus/{sku}` | 0 | FAIL | NOT_RUN | FAIL | NOT_APPLICABLE | NOT_APPLICABLE | **FAIL** |
-| 11 | pricing-svc | `actualizarPrecioSku` | PATCH | `/api/v1/precios/skus/{sku}` | 0 | FAIL | FAIL | FAIL | FAIL | NOT_APPLICABLE | **FAIL** |
-| 12 | promotions-svc | `listarPromociones` | GET | `/api/v1/promociones` | 0 | FAIL | NOT_RUN | FAIL | NOT_APPLICABLE | NOT_APPLICABLE | **FAIL** |
-| 13 | promotions-svc | `crearPromocion` | POST | `/api/v1/promociones` | 0 | FAIL | FAIL | FAIL | FAIL | NOT_APPLICABLE | **FAIL** |
-| 14 | promotions-svc | `evaluarPromociones` | POST | `/api/v1/promociones/evaluar` | 0 | FAIL | FAIL | FAIL | FAIL | NOT_APPLICABLE | **FAIL** |
-| 15 | promotions-svc | `validarCupon` | POST | `/api/v1/cupones/validar` | 0 | FAIL | FAIL | FAIL | NOT_APPLICABLE | NOT_APPLICABLE | **FAIL** |
-| 16 | promotions-svc | `obtenerRecomendaciones` | GET | `/api/v1/recomendaciones` | 0 | FAIL | FAIL | FAIL | NOT_APPLICABLE | NOT_APPLICABLE | **FAIL** |
-| 17 | combos-svc | `obtenerCombo` | GET | `/api/v1/combos/{comboId}` | 0 | FAIL | FAIL | FAIL | NOT_APPLICABLE | NOT_APPLICABLE | **FAIL** |
-| 18 | combos-svc | `actualizarCombo` | PATCH | `/api/v1/combos/{comboId}` | 0 | FAIL | FAIL | FAIL | FAIL | NOT_APPLICABLE | **FAIL** |
-| 19 | inventory-svc | `consultarDisponibilidad` | GET | `/api/v1/inventario/disponibilidad` | 0 | FAIL | NOT_RUN | FAIL | NOT_APPLICABLE | NOT_APPLICABLE | **FAIL** |
-| 20 | inventory-svc | `solicitarReserva` | POST | `/api/v1/inventario/reservas` | 0 | FAIL | FAIL | FAIL | FAIL | NOT_APPLICABLE | **FAIL** |
+| 1 | catalog-svc | `listarProductos` | GET | `/api/v1/productos` | 200 | ROUTE_SECURITY_PASS | NOT_RUN | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 2 | catalog-svc | `crearProducto` | POST | `/api/v1/productos` | 201 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
+| 3 | catalog-svc | `obtenerProducto` | GET | `/api/v1/productos/{productoId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 4 | catalog-svc | `actualizarProducto` | PATCH | `/api/v1/productos/{productoId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
+| 5 | taxonomy-svc | `listarCategorias` | GET | `/api/v1/categorias` | 200 | ROUTE_SECURITY_PASS | NOT_RUN | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 6 | taxonomy-svc | `crearCategoria` | POST | `/api/v1/categorias` | 201 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
+| 7 | taxonomy-svc | `listarMarcas` | GET | `/api/v1/marcas` | 200 | ROUTE_SECURITY_PASS | NOT_RUN | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 8 | taxonomy-svc | `crearMarca` | POST | `/api/v1/marcas` | 201 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
+| 9 | pricing-svc | `consultarPrecios` | GET | `/api/v1/precios` | 200 | ROUTE_SECURITY_PASS | NOT_RUN | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 10 | pricing-svc | `obtenerPrecioSku` | GET | `/api/v1/precios/skus/{sku}` | 200 | ROUTE_SECURITY_PASS | NOT_RUN | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 11 | pricing-svc | `actualizarPrecioSku` | PATCH | `/api/v1/precios/skus/{sku}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
+| 12 | promotions-svc | `listarPromociones` | GET | `/api/v1/promociones` | 200 | ROUTE_SECURITY_PASS | NOT_RUN | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 13 | promotions-svc | `crearPromocion` | POST | `/api/v1/promociones` | 201 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
+| 14 | promotions-svc | `evaluarPromociones` | POST | `/api/v1/promociones/evaluar` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_VERIFIED | NOT_APPLICABLE | **FAIL** |
+| 15 | promotions-svc | `validarCupon` | POST | `/api/v1/cupones/validar` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 16 | promotions-svc | `obtenerRecomendaciones` | GET | `/api/v1/recomendaciones` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 17 | combos-svc | `obtenerCombo` | GET | `/api/v1/combos/{comboId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 18 | combos-svc | `actualizarCombo` | PATCH | `/api/v1/combos/{comboId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
+| 19 | inventory-svc | `consultarDisponibilidad` | GET | `/api/v1/inventario/disponibilidad` | 200 | ROUTE_SECURITY_PASS | NOT_RUN | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
+| 20 | inventory-svc | `solicitarReserva` | POST | `/api/v1/inventario/reservas` | 202 | ROUTE_SECURITY_PASS | FAIL | FUNCTIONAL_PASS | FAIL | ASYNC_TERMINAL_PASS | **FAIL** |
 | 21 | inventory-svc | `confirmarReserva` | POST | `/api/v1/inventario/reservas/{reservaId}/confirmar` | 0 | FAIL | FAIL | FAIL | FAIL | NOT_APPLICABLE | **FAIL** |
 | 22 | inventory-svc | `liberarReserva` | POST | `/api/v1/inventario/reservas/{reservaId}/liberar` | 0 | FAIL | FAIL | FAIL | FAIL | NOT_APPLICABLE | **FAIL** |
 | 23 | catalog-svc | `consultarDatosFisicos` | POST | `/api/v1/productos/datos-fisicos/consulta` | 0 | FAIL | FAIL | FAIL | FAIL | NOT_APPLICABLE | **FAIL** |
