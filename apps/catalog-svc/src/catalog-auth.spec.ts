@@ -342,4 +342,88 @@ describe('Catalog JWT verification', () => {
       ),
     ).resolves.toBe(true);
   });
+
+  it('accepts Bearer case-insensitively while rejecting invalid, missing, wrong-audience, insufficient-scope and unauthorized-client tokens', async () => {
+    const handler = () => undefined;
+    RequireCatalogIdentity({
+      identity: 'either',
+      roles: ['GESTOR_COMERCIAL'],
+      scope: 'catalogo:leer',
+      allowedClients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
+    })({}, 'list', {
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: handler,
+    });
+    const guard = new CatalogAuthGuard(new Reflector(), verifier);
+    const context = (authorization?: string) =>
+      ({
+        getHandler: () => handler,
+        getClass: () => class Target {},
+        switchToHttp: () => ({
+          getRequest: () => ({
+            headers:
+              authorization === undefined ? {} : { authorization },
+          }),
+        }),
+      }) as never;
+    const validMarketplace = token({
+      tipo: 'servicio',
+      sub: 'modulo-marketplace',
+      aud: 'api-productos',
+      scope: 'catalogo:leer',
+      roles: undefined,
+    });
+
+    await expect(
+      guard.canActivate(context('Bearer ' + validMarketplace)),
+    ).resolves.toBe(true);
+    await expect(
+      guard.canActivate(context('bearer ' + validMarketplace)),
+    ).resolves.toBe(true);
+    await expect(
+      guard.canActivate(context('BEARER ' + validMarketplace)),
+    ).resolves.toBe(true);
+
+    await expect(
+      guard.canActivate(context('Bearer invalid.jwt.token')),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(guard.canActivate(context(undefined))).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+
+    const wrongAudience = token({
+      tipo: 'servicio',
+      sub: 'modulo-marketplace',
+      aud: 'api-seguridad',
+      scope: 'catalogo:leer',
+      roles: undefined,
+    });
+    await expect(
+      guard.canActivate(context('Bearer ' + wrongAudience)),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    const insufficientScope = token({
+      tipo: 'servicio',
+      sub: 'modulo-marketplace',
+      aud: 'api-productos',
+      scope: 'catalogo:escribir',
+      roles: undefined,
+    });
+    await expect(
+      guard.canActivate(context('Bearer ' + insufficientScope)),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    const unauthorizedClient = token({
+      tipo: 'servicio',
+      sub: 'modulo-desconocido',
+      aud: 'api-productos',
+      scope: 'catalogo:leer',
+      roles: undefined,
+    });
+    await expect(
+      guard.canActivate(context('Bearer ' + unauthorizedClient)),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
 });
