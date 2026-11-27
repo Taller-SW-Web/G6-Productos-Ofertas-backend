@@ -145,7 +145,8 @@ describe('taxonomy PostgreSQL configuration and lifecycle', () => {
       MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
       TAXONOMY_SERVICE_BUS_ENABLED: 'true',
       TAXONOMY_SERVICE_BUS_RECEIVE_ENABLED: 'true',
-      SERVICE_BUS_NAMESPACE_FQDN: 'g6-sb-h5-chile-261127.servicebus.windows.net',
+      SERVICE_BUS_NAMESPACE_FQDN:
+        'g6-sb-h5-chile-261127.servicebus.windows.net',
     })) {
       vi.stubEnv(key, value);
     }
@@ -158,8 +159,8 @@ describe('taxonomy PostgreSQL configuration and lifecycle', () => {
       }),
     };
     const dbMock = {
-      transaction: vi.fn(async (fn: (tx: typeof txMock) => Promise<unknown>) =>
-        fn(txMock),
+      transaction: vi.fn(
+        async (fn: (tx: typeof txMock) => Promise<unknown>) => fn(txMock),
       ),
     };
     (database as unknown as { pool: unknown; db: unknown }).pool = {
