@@ -747,7 +747,7 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
         payload: { data: { content_ref: Record<string, unknown> } };
       }>(
         `SELECT schema_version,payload FROM bulk.outbox
-         WHERE payload->'data'->>'batch_id'=$1`,
+         WHERE payload->'data'->>'batch_id'=$1 AND event_name='catalog.bulk.upsert.requested'`,
         [batchId],
       );
       expect(delivery.rows).toHaveLength(1);

@@ -871,7 +871,7 @@ describe.skipIf(!isolatedHarnessEnabled)(
           `Bearer ${makeToken('acceso', undefined, { roles: ['combos:admin'] })}`,
         )
         .expect(201);
-      const activeComboId = createdCombo.body.id as string;
+      const activeComboId = createdCombo.body.combo_id as string;
       await calls[2]!()
         .set(
           'Authorization',
