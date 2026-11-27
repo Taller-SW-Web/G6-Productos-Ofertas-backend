@@ -8,8 +8,8 @@ describe('Combos readiness prefix exclusion (R2-09)', () => {
       resolve(process.cwd(), 'apps/combos-svc/src/main.ts'),
       'utf8',
     );
-    expect(mainSource).toContain(
-      "app.setGlobalPrefix('api/v1', { exclude: ['health', 'ready', 'health/ready'] })",
+    expect(mainSource).toMatch(
+      /app\.setGlobalPrefix\(\s*'api\/v1'\s*,\s*\{\s*exclude:\s*\[\s*'health'\s*,\s*'ready'\s*,\s*'health\/ready'\s*,?\s*\]\s*,?\s*\}\s*,?\s*\)/,
     );
   });
 });

@@ -439,8 +439,8 @@ class ApimPolicyTests(unittest.TestCase):
         manifest = json.loads((ROOT / "openapi" / "operation-security.json").read_text(encoding="utf-8"))
         operations = manifest["operations"]
         self.assertEqual(len(operations), 145)
-        self.assertEqual(sum(operation["secured"] for operation in operations), 143)
-        self.assertEqual(sum(not operation["secured"] for operation in operations), 2)
+        self.assertEqual(sum(operation["secured"] for operation in operations), 145)
+        self.assertEqual(sum(not operation["secured"] for operation in operations), 0)
         self.assertEqual(len(manifest["privateOperationIds"]), 5)
         self.assertFalse(manifest["g5EnabledByDefault"])
         self.assertEqual(sum(operation["g5OptIn"] for operation in operations), 0)
@@ -689,7 +689,7 @@ class ApimClosureRequirementsTests(unittest.TestCase):
             FILTER.filter_spec(spec, routes, [], False, "d", "g", effective_publish=True)
 
         # APIM-R3-01: human_or_m2m con M2M pendiente se bloquea por defecto (sin allow_human_only_when_m2m_pending)
-        with self.assertRaisesRegex(ValueError, "Publicación efectiva bloqueada"):
+        with self.assertRaisesRegex(ValueError, "PUBLIC_READ_ONLY retirado bajo política universal G7"):
             FILTER.filter_spec(
                 spec,
                 routes,
@@ -918,7 +918,7 @@ class ApimClosureRequirementsTests(unittest.TestCase):
         routes = [{"method": "GET", "path": "/api/v1/seo", "operationId": "seoPublico", "service": "taxonomy-svc"}]
         with self.assertRaisesRegex(ValueError, "securityProfile no reconocido"):
             FILTER.filter_spec(spec, routes, [], False, "d", "g", security_profile="INVENTADO")
-        with self.assertRaisesRegex(ValueError, "Publicación efectiva bloqueada"):
+        with self.assertRaisesRegex(ValueError, "PUBLIC_READ_ONLY retirado bajo política universal G7"):
             FILTER.filter_spec(
                 spec,
                 routes,
@@ -949,8 +949,9 @@ class ApimClosureRequirementsTests(unittest.TestCase):
         self.assertIn('buffer-response="false"', secured_xml)
 
         public_xml = (ROOT / "policies/operation-public.xml").read_text(encoding="utf-8")
-        self.assertIn("context.Request.IpAddress", public_xml)
-        self.assertIn('buffer-response="false"', public_xml)
+        self.assertIn("Acceso anónimo deshabilitado", public_xml)
+        self.assertIn("SCOPE_INSUFICIENTE", public_xml)
+        self.assertNotIn("context.Request.IpAddress", public_xml)
         self.assertNotIn("X-Forwarded-For", public_xml)
         self.assertNotIn("X-Real-IP", public_xml)
 

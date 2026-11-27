@@ -13,6 +13,7 @@ import type {
   ServiceBusReceivedMessage,
 } from '@azure/service-bus';
 import type { Database } from '../../apps/taxonomy-svc/src/database.js';
+import { CategorySeoService } from '../../apps/taxonomy-svc/src/domain/category-seo.service.js';
 import { DeactivationIntentService } from '../../apps/taxonomy-svc/src/domain/deactivation-intent.service.js';
 import { Database as CatalogDatabase } from '../../apps/catalog-svc/src/database.js';
 import { CatalogMessageService } from '../../apps/catalog-svc/src/catalog-message.service.js';
@@ -20,7 +21,10 @@ import type { CatalogEnvelope } from '../../apps/catalog-svc/src/catalog-message
 import { createCatalogTaxonomyConsumer } from '../../apps/catalog-svc/src/catalog-service-bus.runtime.js';
 import { relayCatalogDelivery } from '../../apps/catalog-svc/src/catalog-service-bus-relay.js';
 import { taxonomyReplyQueue } from '../../apps/catalog-svc/src/catalog-service-bus.js';
-import { TaxonomyMessageStore } from '../../apps/taxonomy-svc/src/persistence/taxonomy-message.store.js';
+import {
+  parseChecked,
+  TaxonomyMessageStore,
+} from '../../apps/taxonomy-svc/src/persistence/taxonomy-message.store.js';
 import {
   publishTaxonomyDelivery,
   receiveTaxonomyDelivery,

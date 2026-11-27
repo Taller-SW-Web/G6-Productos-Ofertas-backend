@@ -3136,6 +3136,11 @@
         ],
         "x-service-audience": "api-productos",
         "x-required-scope": "combos:leer",
+        "x-allowed-client-ids": [
+          "modulo-marketplace",
+          "modulo-chatbot",
+          "modulo-retail"
+        ],
         "x-scope-registration-status": "pending-security-registration",
         "security": [
           {
@@ -3460,8 +3465,7 @@
             "SERVICIO_NO_DISPONIBLE"
           ]
         },
-        "x-route-basis": "existing-contract",
-        "x-allowed-client-ids": []
+        "x-route-basis": "existing-contract"
       }
     },
     "/cupones/{cuponId}": {
@@ -11566,6 +11570,11 @@
         "x-route-basis": "derived-from-capability",
         "x-service-audience": "api-productos",
         "x-required-scope": "combos:leer",
+        "x-allowed-client-ids": [
+          "modulo-marketplace",
+          "modulo-chatbot",
+          "modulo-retail"
+        ],
         "x-scope-registration-status": "pending-security-registration",
         "security": [
           {
@@ -11776,8 +11785,7 @@
           "404": [
             "COMBO_NO_ENCONTRADO"
           ]
-        },
-        "x-allowed-client-ids": []
+        }
       }
     },
     "/inventario/disponibilidad/comercial": {
@@ -19963,9 +19971,19 @@
           "SPEC-004"
         ],
         "x-route-basis": "derived-from-capability",
+        "x-service-audience": "api-productos",
+        "x-required-scope": "catalogo:leer",
+        "x-allowed-client-ids": [
+          "modulo-marketplace",
+          "modulo-chatbot",
+          "modulo-retail"
+        ],
         "security": [
           {
             "userBearer": []
+          },
+          {
+            "serviceBearer": []
           }
         ],
         "parameters": [
@@ -24964,6 +24982,37 @@
           }
         ],
         "responses": {
+          "400": {
+            "description": "Par\u00e1metros de consulta inv\u00e1lidos",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Problem"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "integer",
+                          "const": 400
+                        },
+                        "code": {
+                          "type": "string",
+                          "const": "VALIDACION"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "code"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "200": {
             "description": "Listado administrativo",
             "content": {
@@ -25108,6 +25157,9 @@
           }
         },
         "x-error-codes": {
+          "400": [
+            "VALIDACION"
+          ],
           "401": [
             "TOKEN_INVALIDO"
           ],
@@ -25396,6 +25448,37 @@
           }
         ],
         "responses": {
+          "400": {
+            "description": "Par\u00e1metros de consulta inv\u00e1lidos",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Problem"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "integer",
+                          "const": 400
+                        },
+                        "code": {
+                          "type": "string",
+                          "const": "VALIDACION"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "code"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "200": {
             "description": "Listado administrativo",
             "content": {
@@ -25540,6 +25623,9 @@
           }
         },
         "x-error-codes": {
+          "400": [
+            "VALIDACION"
+          ],
           "401": [
             "TOKEN_INVALIDO"
           ],
@@ -26935,6 +27021,37 @@
           }
         ],
         "responses": {
+          "400": {
+            "description": "Par\u00e1metros de consulta inv\u00e1lidos",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Problem"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "integer",
+                          "const": 400
+                        },
+                        "code": {
+                          "type": "string",
+                          "const": "VALIDACION"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "code"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "200": {
             "description": "Promociones administrativas",
             "content": {
@@ -27079,6 +27196,9 @@
           }
         },
         "x-error-codes": {
+          "400": [
+            "VALIDACION"
+          ],
           "401": [
             "TOKEN_INVALIDO"
           ],
@@ -27320,6 +27440,37 @@
           }
         ],
         "responses": {
+          "400": {
+            "description": "Par\u00e1metros de consulta inv\u00e1lidos",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Problem"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "integer",
+                          "const": 400
+                        },
+                        "code": {
+                          "type": "string",
+                          "const": "VALIDACION"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "code"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "200": {
             "description": "Traslados visibles para el operador",
             "content": {
@@ -27464,6 +27615,9 @@
           }
         },
         "x-error-codes": {
+          "400": [
+            "VALIDACION"
+          ],
           "401": [
             "TOKEN_INVALIDO"
           ],
@@ -47085,7 +47239,11 @@
         ]
       },
       "combos:leer": {
-        "clients": []
+        "clients": [
+          "modulo-marketplace",
+          "modulo-chatbot",
+          "modulo-retail"
+        ]
       },
       "inventario:disponibilidad:leer": {
         "clients": [
@@ -47240,8 +47398,8 @@
     "forbidden_source": "service-token sub/client_id"
   },
   "x-apim-filter": {
-    "docsSha": "f785accbc7c290ba10f873c8f12061405bb2c622",
-    "gatewaySha": "6ea8bfbf41220cf3fc5ffab7c7847c8c522f9f96",
+    "docsSha": "099ad1926a53d1aec1aeae93e894d24ec2721748",
+    "gatewaySha": "2eb8c864f8d315060cf00ccd35ce4015b9569556",
     "g5EnabledByDefault": false,
     "privateOperationCount": 5,
     "publicationMode": "candidate",

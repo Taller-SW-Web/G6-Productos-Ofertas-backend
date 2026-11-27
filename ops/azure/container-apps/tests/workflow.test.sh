@@ -28,7 +28,9 @@ grep -Fq 'needs: [prepare, security]' "$WORKFLOW" || fail 'publicación no depen
 grep -Fq 'npm audit --omit=dev --audit-level=high' "$WORKFLOW" || fail 'gate obligatorio de auditoría de producción ausente'
 grep -Fq 'verify-environment-protection.sh' "$WORKFLOW" || fail 'preflight de protección del environment ausente'
 grep -Fq 'verify-environment-protection.test.sh' "$CI_WORKFLOW" || fail 'CI no prueba la protección real del environment'
-grep -Fq 'self-hosted, linux,' "$WORKFLOW" && grep -Fq 'needs.prepare.outputs.runner_label' "$WORKFLOW" || fail 'smoke no elige etiqueta privada según destino'
+if ! grep -Fq 'self-hosted, linux,' "$WORKFLOW" || ! grep -Fq 'needs.prepare.outputs.runner_label' "$WORKFLOW"; then
+  fail 'smoke no elige etiqueta privada según destino'
+fi
 grep -Fq -- '- azure-h5-smoke' "$ROOT/.github/actionlint.yaml" || fail 'actionlint no conoce la etiqueta privada del runner smoke'
 prepare_gate_line="$(grep -nF 'Preflight read-only de protección del Environment antes de publicar' "$WORKFLOW" | cut -d: -f1)"
 security_job_line="$(grep -n '^  security:' "$WORKFLOW" | cut -d: -f1)"
