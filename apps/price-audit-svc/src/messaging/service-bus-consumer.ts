@@ -113,8 +113,11 @@ export class AuditServiceBusRuntime
       const timers = new Set<ReturnType<typeof setInterval>>();
       this.receiver = {
         async peekMessages() {
-          const res = await fetch(`${origin}/queues/${encodeURIComponent(QUEUE)}/peek`);
-          if (!res.ok) throw new Error(`ISOLATED_BUS_PEEK_FAILED_${res.status}`);
+          const res = await fetch(
+            `${origin}/queues/${encodeURIComponent(QUEUE)}/peek`,
+          );
+          if (!res.ok)
+            throw new Error(`ISOLATED_BUS_PEEK_FAILED_${res.status}`);
           return (await res.json()) as ServiceBusReceivedMessage[];
         },
         subscribe(handlers: {
@@ -125,7 +128,10 @@ export class AuditServiceBusRuntime
           const timer = setInterval(async () => {
             if (!active) return;
             try {
-              const res = await fetch(`${origin}/queues/${encodeURIComponent(QUEUE)}/receive`, { method: 'POST' });
+              const res = await fetch(
+                `${origin}/queues/${encodeURIComponent(QUEUE)}/receive`,
+                { method: 'POST' },
+              );
               if (res.status === 204 || !res.ok) return;
               const msg = (await res.json()) as {
                 deliveryId: string;
@@ -149,7 +155,8 @@ export class AuditServiceBusRuntime
               } as unknown as ServiceBusReceivedMessage);
             } catch (error) {
               await handlers.processError({
-                error: error instanceof Error ? error : new Error(String(error)),
+                error:
+                  error instanceof Error ? error : new Error(String(error)),
               });
             }
           }, 250);
@@ -164,26 +171,41 @@ export class AuditServiceBusRuntime
           };
         },
         async completeMessage(message: ServiceBusReceivedMessage) {
-          const id = (message as unknown as { _deliveryId?: string })._deliveryId;
+          const id = (message as unknown as { _deliveryId?: string })
+            ._deliveryId;
           if (!id) return;
-          await fetch(`${origin}/queues/${encodeURIComponent(QUEUE)}/complete/${encodeURIComponent(id)}`, { method: 'POST' });
+          await fetch(
+            `${origin}/queues/${encodeURIComponent(QUEUE)}/complete/${encodeURIComponent(id)}`,
+            { method: 'POST' },
+          );
         },
         async abandonMessage(message: ServiceBusReceivedMessage) {
-          const id = (message as unknown as { _deliveryId?: string })._deliveryId;
+          const id = (message as unknown as { _deliveryId?: string })
+            ._deliveryId;
           if (!id) return;
-          await fetch(`${origin}/queues/${encodeURIComponent(QUEUE)}/abandon/${encodeURIComponent(id)}`, { method: 'POST' });
+          await fetch(
+            `${origin}/queues/${encodeURIComponent(QUEUE)}/abandon/${encodeURIComponent(id)}`,
+            { method: 'POST' },
+          );
         },
         async deadLetterMessage(
           message: ServiceBusReceivedMessage,
-          options?: { deadLetterReason?: string; deadLetterErrorDescription?: string },
+          options?: {
+            deadLetterReason?: string;
+            deadLetterErrorDescription?: string;
+          },
         ) {
-          const id = (message as unknown as { _deliveryId?: string })._deliveryId;
+          const id = (message as unknown as { _deliveryId?: string })
+            ._deliveryId;
           if (!id) return;
-          await fetch(`${origin}/queues/${encodeURIComponent(QUEUE)}/deadletter/${encodeURIComponent(id)}`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(options ?? {}),
-          });
+          await fetch(
+            `${origin}/queues/${encodeURIComponent(QUEUE)}/deadletter/${encodeURIComponent(id)}`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(options ?? {}),
+            },
+          );
         },
         async close() {
           for (const t of timers) clearInterval(t);

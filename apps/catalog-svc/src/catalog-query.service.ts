@@ -235,7 +235,11 @@ export class CatalogQueryService {
     const parseOptionalString = (key: string): string | undefined => {
       const value = record[key];
       if (value === undefined) return undefined;
-      if (typeof value !== 'string' || value.length === 0 || value.includes('\0'))
+      if (
+        typeof value !== 'string' ||
+        value.length === 0 ||
+        value.includes('\0')
+      )
         throw new BadRequestException({ code: 'VALIDACION' });
       return value;
     };

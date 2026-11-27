@@ -199,10 +199,7 @@ export class HttpBulkExportSource implements BulkExportSource {
       this.config.inventoryUrl,
     );
     url.searchParams.set('skus', slice.join(','));
-    url.searchParams.set(
-      'location_id',
-      '00000000-0000-4000-8000-000000000101',
-    );
+    url.searchParams.set('location_id', '00000000-0000-4000-8000-000000000101');
     const response = await fetch(url, {
       signal,
       headers: {
@@ -226,8 +223,7 @@ export class HttpBulkExportSource implements BulkExportSource {
       .filter((row) => row.sku)
       .map((row) => ({
         sku: row.sku!,
-        locationId:
-          row.location_id ?? '00000000-0000-4000-8000-000000000101',
+        locationId: row.location_id ?? '00000000-0000-4000-8000-000000000101',
         onHand: Number(row.on_hand ?? 0),
         reserved: Number(row.reserved ?? 0),
         blocked: Number(row.blocked ?? 0),

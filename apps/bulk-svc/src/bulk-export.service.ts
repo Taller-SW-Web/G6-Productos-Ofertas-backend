@@ -213,7 +213,9 @@ export class BulkExportService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async process(exportId: string): Promise<void> {
-    console.error(`[bulk-export] error=NONE process(${exportId}) source=${Boolean(this.source)} storage=${Boolean(this.storage)}`);
+    console.error(
+      `[bulk-export] error=NONE process(${exportId}) source=${Boolean(this.source)} storage=${Boolean(this.storage)}`,
+    );
     let fence = this.failureFences.get(exportId);
     if (
       fence &&

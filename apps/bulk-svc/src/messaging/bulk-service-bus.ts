@@ -128,10 +128,16 @@ export class BulkServiceBus {
           } catch (error) {
             const errCode = (error as { code?: string })?.code;
             if ((error as { name?: string })?.name !== 'BulkDomainError') {
-              console.error(`[bulk-sb-consumer] consume error on ${queue}:`, error);
+              console.error(
+                `[bulk-sb-consumer] consume error on ${queue}:`,
+                error,
+              );
               reportError();
             } else {
-              console.error(`[bulk-sb-consumer] BulkDomainError(${errCode}) on ${queue}:`, (error as Error).message);
+              console.error(
+                `[bulk-sb-consumer] BulkDomainError(${errCode}) on ${queue}:`,
+                (error as Error).message,
+              );
             }
             await receiver.abandonMessage(received);
             return;
@@ -258,7 +264,8 @@ function createIsolatedHttpServiceBusClient(
                 body: JSON.stringify(item),
               },
             );
-            if (!res.ok) throw new Error(`ISOLATED_BUS_SEND_FAILED_${res.status}`);
+            if (!res.ok)
+              throw new Error(`ISOLATED_BUS_SEND_FAILED_${res.status}`);
           }
         },
       } as never;
@@ -299,7 +306,8 @@ function createIsolatedHttpServiceBusClient(
               } as unknown as ServiceBusReceivedMessage);
             } catch (error) {
               await handlers.processError({
-                error: error instanceof Error ? error : new Error(String(error)),
+                error:
+                  error instanceof Error ? error : new Error(String(error)),
               });
             }
           }, 250);
@@ -317,7 +325,8 @@ function createIsolatedHttpServiceBusClient(
           const res = await fetch(
             `${origin}/queues/${encodeURIComponent(queue)}/peek`,
           );
-          if (!res.ok) throw new Error(`ISOLATED_BUS_PEEK_FAILED_${res.status}`);
+          if (!res.ok)
+            throw new Error(`ISOLATED_BUS_PEEK_FAILED_${res.status}`);
           return (await res.json()) as ServiceBusReceivedMessage[];
         },
         async completeMessage(message: ServiceBusReceivedMessage) {
@@ -340,7 +349,10 @@ function createIsolatedHttpServiceBusClient(
         },
         async deadLetterMessage(
           message: ServiceBusReceivedMessage,
-          options?: { deadLetterReason?: string; deadLetterErrorDescription?: string },
+          options?: {
+            deadLetterReason?: string;
+            deadLetterErrorDescription?: string;
+          },
         ) {
           const deliveryId = (message as unknown as { _deliveryId?: string })
             ._deliveryId;

@@ -503,7 +503,10 @@ export class CatalogQueryRepository {
           const items = await this.adminVariants(tx, rows);
           return {
             items: commercialOnly
-              ? items.map(({ catalog_version: _cv, ...rest }) => rest as typeof items[number])
+              ? items.map(
+                  ({ catalog_version: _cv, ...rest }) =>
+                    rest as (typeof items)[number],
+                )
               : items,
             meta: {
               pagina: page,

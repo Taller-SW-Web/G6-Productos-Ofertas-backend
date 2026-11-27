@@ -238,7 +238,8 @@ export class InventoryServiceBusRuntime
                     body: JSON.stringify(item),
                   },
                 );
-                if (!res.ok) throw new Error(`ISOLATED_BUS_SEND_FAILED_${res.status}`);
+                if (!res.ok)
+                  throw new Error(`ISOLATED_BUS_SEND_FAILED_${res.status}`);
               }
             },
             async close() {},

@@ -166,7 +166,11 @@ export class InventoryServiceBusHandler {
       await this.commands.process(payload);
     } catch (error) {
       if (error instanceof InventoryMessageError) {
-        console.error('[inventory-sb-consumer] InventoryMessageError:', error.reason, error);
+        console.error(
+          '[inventory-sb-consumer] InventoryMessageError:',
+          error.reason,
+          error,
+        );
         // INVALID_MESSAGE, BLOCKED_CONTRACT o FEATURE_DISABLED van a DLQ de inmediato sin bucle de reintentos
         await this.receiver.deadLetterMessage(message, {
           deadLetterReason: error.reason,
@@ -198,9 +202,11 @@ export class InventoryServiceBusHandler {
           queue: this.queueName,
           event: bodyObj.name ?? message.subject ?? null,
           message_id: bodyObj.message_id ?? message.messageId ?? null,
-          correlation_id: bodyObj.correlation_id ?? message.correlationId ?? null,
+          correlation_id:
+            bodyObj.correlation_id ?? message.correlationId ?? null,
           sku: dataObj.sku ?? null,
-          location_id: dataObj.location_id ?? dataObj.default_location_id ?? null,
+          location_id:
+            dataObj.location_id ?? dataObj.default_location_id ?? null,
           delivery_count: deliveryCount,
           error: error instanceof Error ? error.message : String(error),
         }),
@@ -218,7 +224,8 @@ export class InventoryServiceBusHandler {
 
       // Error transitorio (DB, deadlock, red): aplicar retardo de 1, 2, 4, 8 hasta 16s según deliveryCount antes de abandonMessage
       const delayMs =
-        process.env.NODE_ENV === 'test' && process.env.G6_ISOLATED_SERVICE_BUS_URL
+        process.env.NODE_ENV === 'test' &&
+        process.env.G6_ISOLATED_SERVICE_BUS_URL
           ? 300
           : computeTransientBackoffMs(message.deliveryCount);
       await this.delay(delayMs);
@@ -261,8 +268,11 @@ export class InventoryServiceBusConsumerRuntime
         createReceiver(queue: string) {
           return {
             async peekMessages() {
-              const res = await fetch(`${origin}/queues/${encodeURIComponent(queue)}/peek`);
-              if (!res.ok) throw new Error(`ISOLATED_BUS_PEEK_FAILED_${res.status}`);
+              const res = await fetch(
+                `${origin}/queues/${encodeURIComponent(queue)}/peek`,
+              );
+              if (!res.ok)
+                throw new Error(`ISOLATED_BUS_PEEK_FAILED_${res.status}`);
               return (await res.json()) as ServiceBusReceivedMessage[];
             },
             subscribe(handlers: {
@@ -273,7 +283,10 @@ export class InventoryServiceBusConsumerRuntime
               const timer = setInterval(async () => {
                 if (!active) return;
                 try {
-                  const res = await fetch(`${origin}/queues/${encodeURIComponent(queue)}/receive`, { method: 'POST' });
+                  const res = await fetch(
+                    `${origin}/queues/${encodeURIComponent(queue)}/receive`,
+                    { method: 'POST' },
+                  );
                   if (res.status === 204 || !res.ok) return;
                   const msg = (await res.json()) as {
                     deliveryId: string;
@@ -297,7 +310,8 @@ export class InventoryServiceBusConsumerRuntime
                   } as unknown as ServiceBusReceivedMessage);
                 } catch (error) {
                   await handlers.processError({
-                    error: error instanceof Error ? error : new Error(String(error)),
+                    error:
+                      error instanceof Error ? error : new Error(String(error)),
                   });
                 }
               }, 250);
@@ -312,26 +326,41 @@ export class InventoryServiceBusConsumerRuntime
               };
             },
             async completeMessage(message: ServiceBusReceivedMessage) {
-              const id = (message as unknown as { _deliveryId?: string })._deliveryId;
+              const id = (message as unknown as { _deliveryId?: string })
+                ._deliveryId;
               if (!id) return;
-              await fetch(`${origin}/queues/${encodeURIComponent(queue)}/complete/${encodeURIComponent(id)}`, { method: 'POST' });
+              await fetch(
+                `${origin}/queues/${encodeURIComponent(queue)}/complete/${encodeURIComponent(id)}`,
+                { method: 'POST' },
+              );
             },
             async abandonMessage(message: ServiceBusReceivedMessage) {
-              const id = (message as unknown as { _deliveryId?: string })._deliveryId;
+              const id = (message as unknown as { _deliveryId?: string })
+                ._deliveryId;
               if (!id) return;
-              await fetch(`${origin}/queues/${encodeURIComponent(queue)}/abandon/${encodeURIComponent(id)}`, { method: 'POST' });
+              await fetch(
+                `${origin}/queues/${encodeURIComponent(queue)}/abandon/${encodeURIComponent(id)}`,
+                { method: 'POST' },
+              );
             },
             async deadLetterMessage(
               message: ServiceBusReceivedMessage,
-              options?: { deadLetterReason?: string; deadLetterErrorDescription?: string },
+              options?: {
+                deadLetterReason?: string;
+                deadLetterErrorDescription?: string;
+              },
             ) {
-              const id = (message as unknown as { _deliveryId?: string })._deliveryId;
+              const id = (message as unknown as { _deliveryId?: string })
+                ._deliveryId;
               if (!id) return;
-              await fetch(`${origin}/queues/${encodeURIComponent(queue)}/deadletter/${encodeURIComponent(id)}`, {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify(options ?? {}),
-              });
+              await fetch(
+                `${origin}/queues/${encodeURIComponent(queue)}/deadletter/${encodeURIComponent(id)}`,
+                {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify(options ?? {}),
+                },
+              );
             },
             async close() {
               for (const t of timers) clearInterval(t);
@@ -519,7 +548,9 @@ export class InventoryServiceBusConsumerRuntime
       this.available = false;
       try {
         await Promise.resolve(this.receiver?.close()).catch(() => undefined);
-        await Promise.resolve(this.bulkReceiver?.close()).catch(() => undefined);
+        await Promise.resolve(this.bulkReceiver?.close()).catch(
+          () => undefined,
+        );
       } finally {
         this.receiver = undefined;
         this.bulkReceiver = undefined;

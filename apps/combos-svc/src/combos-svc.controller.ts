@@ -128,7 +128,10 @@ export class CombosSvcController {
     allowedClients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
   })
   @Get('combos/:comboId/disponibilidad')
-  async availability(@Req() req: ComboActorRequest, @Param('comboId') id: string) {
+  async availability(
+    @Req() req: ComboActorRequest,
+    @Param('comboId') id: string,
+  ) {
     return this.service.availability(id, req.comboPrincipalKind === 'service');
   }
 }

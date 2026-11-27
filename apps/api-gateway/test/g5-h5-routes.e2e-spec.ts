@@ -77,13 +77,18 @@ describe('G5 H5 routes behind authenticated Gateway opt-in', () => {
     await request(app.getHttpServer()).get('/api/v1/productos').expect(401);
     expect(upstream).not.toHaveBeenCalled();
 
-    const g1Token = signed.token({ sub: 'modulo-marketplace', scope: 'catalogo:leer' });
+    const g1Token = signed.token({
+      sub: 'modulo-marketplace',
+      scope: 'catalogo:leer',
+    });
     await request(app.getHttpServer())
       .get('/api/v1/productos')
       .set('Authorization', `Bearer ${g1Token}`)
       .expect(200);
     expect(upstream).toHaveBeenCalledTimes(1);
-    expect(upstream.mock.calls[0][1].headers.authorization).toBe(`Bearer ${g1Token}`);
+    expect(upstream.mock.calls[0][1].headers.authorization).toBe(
+      `Bearer ${g1Token}`,
+    );
 
     const noRoleToken = signed.token({
       sub: randomUUID(),

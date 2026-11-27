@@ -68,7 +68,10 @@ export class PricingServiceBusRelay {
       });
       confirmed = true;
     } catch (err) {
-      console.error('[pricing-publishOne] error for dest=' + claim.destination + ':', err instanceof Error ? err.message : String(err));
+      console.error(
+        '[pricing-publishOne] error for dest=' + claim.destination + ':',
+        err instanceof Error ? err.message : String(err),
+      );
       // A timeout can occur after the broker accepted the batch; retain its ID.
     }
     const updated = await this.store.finish(claim, confirmed);
@@ -142,7 +145,8 @@ export class PricingServiceBusRuntime
                   body: JSON.stringify(item),
                 },
               );
-              if (!res.ok) throw new Error(`ISOLATED_BUS_SEND_FAILED_${res.status}`);
+              if (!res.ok)
+                throw new Error(`ISOLATED_BUS_SEND_FAILED_${res.status}`);
             }
           },
           async close() {},
@@ -184,7 +188,10 @@ export class PricingServiceBusRuntime
         this.available = result === 'empty' || result === 'sent';
       })()
         .catch((err) => {
-          console.error('[pricing-service-bus-relay] tick error:', err instanceof Error ? err.message : String(err));
+          console.error(
+            '[pricing-service-bus-relay] tick error:',
+            err instanceof Error ? err.message : String(err),
+          );
           this.available = false;
         })
         .finally(() => {

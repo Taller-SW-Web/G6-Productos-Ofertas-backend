@@ -76,8 +76,11 @@ describe('inventory-svc H5 + H01/H02 PostgreSQL 17 descartable', () => {
         'POSTGRES_DB=inventory_it',
         'postgres:17-alpine',
       ]);
-      const pgPort = docker(['port', pgContainer, '5432/tcp']).split(':').at(-1);
-      if (!pgPort) throw new Error('Docker no asignó puerto loopback a PostgreSQL.');
+      const pgPort = docker(['port', pgContainer, '5432/tcp'])
+        .split(':')
+        .at(-1);
+      if (!pgPort)
+        throw new Error('Docker no asignó puerto loopback a PostgreSQL.');
       pgUrl = `postgresql://inventory_test:${password}@127.0.0.1:${pgPort}/inventory_it?sslmode=disable`;
 
       await waitForContainer(
@@ -90,9 +93,15 @@ describe('inventory-svc H5 + H01/H02 PostgreSQL 17 descartable', () => {
             resolve(process.env.G6_DOCS_ROOT, 'datos/inventory-svc') + '/',
           )
         : new URL('../../../../docs/datos/inventory-svc/', import.meta.url);
-      const initial = await readFile(new URL('migration.sql', docsRoot), 'utf8');
+      const initial = await readFile(
+        new URL('migration.sql', docsRoot),
+        'utf8',
+      );
       const incremental = await readFile(
-        new URL('migrations/0002_order_id_operaciones_disponibilidad.sql', docsRoot),
+        new URL(
+          'migrations/0002_order_id_operaciones_disponibilidad.sql',
+          docsRoot,
+        ),
         'utf8',
       );
       const inventoryCandidateMigration = await readFile(
@@ -112,7 +121,18 @@ describe('inventory-svc H5 + H01/H02 PostgreSQL 17 descartable', () => {
 
       const psql = (user: string, sqlInput: string) =>
         docker(
-          ['exec', '-i', pgContainer, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', user, '-d', 'inventory_it'],
+          [
+            'exec',
+            '-i',
+            pgContainer,
+            'psql',
+            '-v',
+            'ON_ERROR_STOP=1',
+            '-U',
+            user,
+            '-d',
+            'inventory_it',
+          ],
           sqlInput,
         );
 
@@ -1141,10 +1161,12 @@ GRANT inventory_app TO inventory_test;`,
       });
     });
   });
-
 });
 
-async function waitForContainer(container: string, command: string): Promise<void> {
+async function waitForContainer(
+  container: string,
+  command: string,
+): Promise<void> {
   const started = Date.now();
   let lastError: unknown;
   while (Date.now() - started < 60_000) {

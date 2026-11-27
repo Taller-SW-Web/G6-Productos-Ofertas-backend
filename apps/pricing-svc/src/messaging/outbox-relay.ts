@@ -71,8 +71,12 @@ function validPriceChanged(data: Record<string, unknown>): boolean {
     ].every((key) => Object.hasOwn(data, key)) &&
     (data.target_type === 'PRODUCTO' || data.target_type === 'SKU') &&
     (data.target_type === 'PRODUCTO'
-      ? typeof data.product_id === 'string' && data.product_id.length > 0 && data.sku === null
-      : (data.product_id === null || (typeof data.product_id === 'string' && data.product_id.length > 0)) &&
+      ? typeof data.product_id === 'string' &&
+        data.product_id.length > 0 &&
+        data.sku === null
+      : (data.product_id === null ||
+          (typeof data.product_id === 'string' &&
+            data.product_id.length > 0)) &&
         typeof data.sku === 'string' &&
         data.sku.length > 0) &&
     (data.channel_id === null || typeof data.channel_id === 'string') &&
@@ -119,7 +123,10 @@ export function pricingEnvelope(row: typeof outbox.$inferSelect) {
     row.eventName === 'pricing.price.changed' &&
     !validPriceChanged(row.payload)
   ) {
-    console.error('[outbox-relay] invalid pricing.price.changed payload:', JSON.stringify(row.payload));
+    console.error(
+      '[outbox-relay] invalid pricing.price.changed payload:',
+      JSON.stringify(row.payload),
+    );
     throw new Error('Hecho de cambio de precio incompatible.');
   }
   if (

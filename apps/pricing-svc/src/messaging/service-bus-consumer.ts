@@ -58,7 +58,10 @@ export class PricingServiceBusHandler {
   constructor(
     private readonly queue: string,
     private readonly receiver: PricingBusSettlement,
-    private readonly initialization: Pick<PricingProductInitialization, 'consume'>,
+    private readonly initialization: Pick<
+      PricingProductInitialization,
+      'consume'
+    >,
     private readonly deactivation: Pick<CatalogSkuDeactivated, 'consume'>,
     private readonly bulkApply: Pick<BulkPriceApplyService, 'process'>,
   ) {}
@@ -87,7 +90,9 @@ export class PricingServiceBusHandler {
       await this.receiver.deadLetterMessage(message, {
         deadLetterReason: 'INVALID_MESSAGE',
         deadLetterErrorDescription:
-          error instanceof Error ? error.message : 'Invalid Service Bus message',
+          error instanceof Error
+            ? error.message
+            : 'Invalid Service Bus message',
       });
       return 'dead-lettered';
     }
@@ -147,9 +152,15 @@ export class PricingServiceBusConsumer
   private stopped = false;
   private readonly queues = [CATALOG_TO_PRICING_QUEUE, BULK_TO_PRICING_QUEUE];
   private readonly receivers = new Map<string, ServiceBusReceiver>();
-  private readonly subscriptions = new Map<string, { close(): Promise<void> }>();
+  private readonly subscriptions = new Map<
+    string,
+    { close(): Promise<void> }
+  >();
   private readonly queueReady = new Map<string, boolean>();
-  private readonly recoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly recoveryTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
   private readonly logger = new Logger(PricingServiceBusConsumer.name);
 
   constructor(
@@ -174,8 +185,11 @@ export class PricingServiceBusConsumer
         createReceiver(queue: string) {
           return {
             async peekMessages() {
-              const res = await fetch(`${origin}/queues/${encodeURIComponent(queue)}/peek`);
-              if (!res.ok) throw new Error(`ISOLATED_BUS_PEEK_FAILED_${res.status}`);
+              const res = await fetch(
+                `${origin}/queues/${encodeURIComponent(queue)}/peek`,
+              );
+              if (!res.ok)
+                throw new Error(`ISOLATED_BUS_PEEK_FAILED_${res.status}`);
               return (await res.json()) as ServiceBusReceivedMessage[];
             },
             subscribe(handlers: {
@@ -186,7 +200,10 @@ export class PricingServiceBusConsumer
               const timer = setInterval(async () => {
                 if (!active) return;
                 try {
-                  const res = await fetch(`${origin}/queues/${encodeURIComponent(queue)}/receive`, { method: 'POST' });
+                  const res = await fetch(
+                    `${origin}/queues/${encodeURIComponent(queue)}/receive`,
+                    { method: 'POST' },
+                  );
                   if (res.status === 204 || !res.ok) return;
                   const msg = (await res.json()) as {
                     deliveryId: string;
@@ -210,7 +227,8 @@ export class PricingServiceBusConsumer
                   } as unknown as ServiceBusReceivedMessage);
                 } catch (error) {
                   await handlers.processError({
-                    error: error instanceof Error ? error : new Error(String(error)),
+                    error:
+                      error instanceof Error ? error : new Error(String(error)),
                   });
                 }
               }, 250);
@@ -225,26 +243,41 @@ export class PricingServiceBusConsumer
               };
             },
             async completeMessage(message: ServiceBusReceivedMessage) {
-              const id = (message as unknown as { _deliveryId?: string })._deliveryId;
+              const id = (message as unknown as { _deliveryId?: string })
+                ._deliveryId;
               if (!id) return;
-              await fetch(`${origin}/queues/${encodeURIComponent(queue)}/complete/${encodeURIComponent(id)}`, { method: 'POST' });
+              await fetch(
+                `${origin}/queues/${encodeURIComponent(queue)}/complete/${encodeURIComponent(id)}`,
+                { method: 'POST' },
+              );
             },
             async abandonMessage(message: ServiceBusReceivedMessage) {
-              const id = (message as unknown as { _deliveryId?: string })._deliveryId;
+              const id = (message as unknown as { _deliveryId?: string })
+                ._deliveryId;
               if (!id) return;
-              await fetch(`${origin}/queues/${encodeURIComponent(queue)}/abandon/${encodeURIComponent(id)}`, { method: 'POST' });
+              await fetch(
+                `${origin}/queues/${encodeURIComponent(queue)}/abandon/${encodeURIComponent(id)}`,
+                { method: 'POST' },
+              );
             },
             async deadLetterMessage(
               message: ServiceBusReceivedMessage,
-              options?: { deadLetterReason?: string; deadLetterErrorDescription?: string },
+              options?: {
+                deadLetterReason?: string;
+                deadLetterErrorDescription?: string;
+              },
             ) {
-              const id = (message as unknown as { _deliveryId?: string })._deliveryId;
+              const id = (message as unknown as { _deliveryId?: string })
+                ._deliveryId;
               if (!id) return;
-              await fetch(`${origin}/queues/${encodeURIComponent(queue)}/deadletter/${encodeURIComponent(id)}`, {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify(options ?? {}),
-              });
+              await fetch(
+                `${origin}/queues/${encodeURIComponent(queue)}/deadletter/${encodeURIComponent(id)}`,
+                {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify(options ?? {}),
+                },
+              );
             },
             async close() {
               for (const t of timers) clearInterval(t);
@@ -347,11 +380,15 @@ export class PricingServiceBusConsumer
     for (const timer of this.recoveryTimers.values()) clearTimeout(timer);
     this.recoveryTimers.clear();
     await Promise.all(
-      [...this.subscriptions.values()].map((sub) => sub.close().catch(() => undefined)),
+      [...this.subscriptions.values()].map((sub) =>
+        sub.close().catch(() => undefined),
+      ),
     );
     this.subscriptions.clear();
     await Promise.all(
-      [...this.receivers.values()].map((rec) => rec.close().catch(() => undefined)),
+      [...this.receivers.values()].map((rec) =>
+        rec.close().catch(() => undefined),
+      ),
     );
     this.receivers.clear();
     await this.client?.close().catch(() => undefined);

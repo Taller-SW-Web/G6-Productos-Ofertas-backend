@@ -1,5 +1,9 @@
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { Agent, createServer as createHttpsServer, request as httpsRequest } from 'node:https';
+import {
+  Agent,
+  createServer as createHttpsServer,
+  request as httpsRequest,
+} from 'node:https';
 import { once } from 'node:events';
 import {
   internalOperations,
@@ -82,7 +86,10 @@ function createSelfSignedCertPem(options: {
   const spkiDer = publicKey.export({ type: 'spki', format: 'der' });
   const keyPem = privateKey.export({ type: 'pkcs8', format: 'pem' }) as string;
 
-  const sha256WithRsaAlg = derSeq(derOid('1.2.840.113549.1.1.11'), derTag(0x05, Buffer.alloc(0)));
+  const sha256WithRsaAlg = derSeq(
+    derOid('1.2.840.113549.1.1.11'),
+    derTag(0x05, Buffer.alloc(0)),
+  );
   const subjectName = derSeq(
     derSet(derSeq(derOid('2.5.4.3'), derUtf8(options.commonName))),
   );
@@ -102,7 +109,11 @@ function createSelfSignedCertPem(options: {
   const extensions = derTag(
     0xa3,
     derSeq(
-      derSeq(derOid('2.5.29.19'), derTag(0x01, Buffer.from([0xff])), derTag(0x04, derSeq(derTag(0x01, Buffer.from([0xff]))))),
+      derSeq(
+        derOid('2.5.29.19'),
+        derTag(0x01, Buffer.from([0xff])),
+        derTag(0x04, derSeq(derTag(0x01, Buffer.from([0xff])))),
+      ),
       derSeq(derOid('2.5.29.17'), derTag(0x04, derSeq(...sanEntries))),
     ),
   );
@@ -119,7 +130,11 @@ function createSelfSignedCertPem(options: {
   );
 
   const signature = sign('sha256', tbsCertificate, privateKey);
-  const fullCert = derSeq(tbsCertificate, sha256WithRsaAlg, derBitString(signature));
+  const fullCert = derSeq(
+    tbsCertificate,
+    sha256WithRsaAlg,
+    derBitString(signature),
+  );
   const b64 = fullCert.toString('base64').replace(/(.{64})/g, '$1\n');
   const certPem = `-----BEGIN CERTIFICATE-----\n${b64}\n-----END CERTIFICATE-----\n`;
   return { certPem, keyPem };
@@ -138,12 +153,12 @@ function httpsGetWithAgent(url: string, agent?: Agent): Promise<number> {
 
 describe('G5 HTTPS policy, /api/v1 prefix, TLS verification, and G7 token contract regression', () => {
   it('rejects plain HTTP origins for ventas upstream while preserving HTTPS', () => {
-    expect(() => internalOrigin('http://127.0.0.1:4123', false, 'ventas')).toThrow(
-      'INVALID_COMMERCIAL_ORIGIN',
-    );
-    expect(() => internalOrigin('http://127.0.0.1:4123', true, 'ventas')).toThrow(
-      'INVALID_COMMERCIAL_ORIGIN',
-    );
+    expect(() =>
+      internalOrigin('http://127.0.0.1:4123', false, 'ventas'),
+    ).toThrow('INVALID_COMMERCIAL_ORIGIN');
+    expect(() =>
+      internalOrigin('http://127.0.0.1:4123', true, 'ventas'),
+    ).toThrow('INVALID_COMMERCIAL_ORIGIN');
     expect(internalOrigin('https://127.0.0.1:4123', false, 'ventas')).toBe(
       'https://127.0.0.1:4123',
     );
@@ -190,7 +205,10 @@ describe('G5 HTTPS policy, /api/v1 prefix, TLS verification, and G7 token contra
       ],
     };
 
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
       requestedUrls.push(String(input));
       requestedHeaders.push(
         Object.fromEntries(new Headers(init?.headers).entries()),
@@ -254,7 +272,9 @@ describe('G5 HTTPS policy, /api/v1 prefix, TLS verification, and G7 token contra
       expect(requestedUrls).toEqual([
         `https://127.0.0.1:4999/api/v1/integraciones/productos/pedidos/${orderId}/evidencia-cupon`,
       ]);
-      expect(requestedHeaders[0]?.authorization).toBe('Bearer jwt-ventas-token');
+      expect(requestedHeaders[0]?.authorization).toBe(
+        'Bearer jwt-ventas-token',
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -310,7 +330,10 @@ describe('G5 HTTPS policy, /api/v1 prefix, TLS verification, and G7 token contra
 
     try {
       await expect(
-        httpsGetWithAgent(`https://127.0.0.1:${validAddr.port}/`, untrustedAgent),
+        httpsGetWithAgent(
+          `https://127.0.0.1:${validAddr.port}/`,
+          untrustedAgent,
+        ),
       ).rejects.toThrow();
 
       const status = await httpsGetWithAgent(
@@ -320,7 +343,10 @@ describe('G5 HTTPS policy, /api/v1 prefix, TLS verification, and G7 token contra
       expect(status).toBe(200);
 
       await expect(
-        httpsGetWithAgent(`https://127.0.0.1:${wrongAddr.port}/`, wrongHostAgent),
+        httpsGetWithAgent(
+          `https://127.0.0.1:${wrongAddr.port}/`,
+          wrongHostAgent,
+        ),
       ).rejects.toThrow();
     } finally {
       validAgent.destroy();

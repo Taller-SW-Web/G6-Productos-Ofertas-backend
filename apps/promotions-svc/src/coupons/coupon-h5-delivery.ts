@@ -223,7 +223,12 @@ export class CouponH5DeliveryHandler {
           deadLetterErrorDescription: 'No matching durable admission',
         });
       else {
-        console.error(`[coupon-h5-delivery] worker.process error:`, error instanceof Error ? error.stack ?? error.message : String(error));
+        console.error(
+          `[coupon-h5-delivery] worker.process error:`,
+          error instanceof Error
+            ? (error.stack ?? error.message)
+            : String(error),
+        );
         await this.settlement.abandonMessage(message);
       }
       return;

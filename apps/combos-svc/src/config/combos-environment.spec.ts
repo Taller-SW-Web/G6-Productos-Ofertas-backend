@@ -46,7 +46,11 @@ describe('readCombosEnvironment', () => {
     });
   });
   it('rejects PUBLIC_READ_ONLY and public read allowlists in H5', () => {
-    for (const mode of ['PUBLIC_READ_ONLY', 'G7_AUTHENTICATED', 'SIMULATED_AUTH'])
+    for (const mode of [
+      'PUBLIC_READ_ONLY',
+      'G7_AUTHENTICATED',
+      'SIMULATED_AUTH',
+    ])
       expect(() =>
         readCombosEnvironment({
           ...base(),

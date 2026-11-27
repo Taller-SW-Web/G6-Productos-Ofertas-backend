@@ -146,11 +146,7 @@ export class CatalogQueryController {
     identity: 'either',
     roles: ['GESTOR_COMERCIAL'],
     scope: 'catalogo:leer',
-    allowedClients: [
-      'modulo-marketplace',
-      'modulo-chatbot',
-      'modulo-retail',
-    ],
+    allowedClients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
   })
   variants(
     @Param('productoId') productId: string,

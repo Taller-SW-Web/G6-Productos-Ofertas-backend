@@ -165,9 +165,7 @@ export class OfflineReconciliationService {
       client_id: 'modulo-ventas',
       actor_ref: actorRef,
       store_ref:
-        claimStoreRef ??
-        resolvedLocation.external_ref ??
-        resolvedLocation.code,
+        claimStoreRef ?? resolvedLocation.external_ref ?? resolvedLocation.code,
       location_id: resolvedLocation.id,
       authorized: true,
     };
@@ -180,7 +178,9 @@ export class OfflineReconciliationService {
         throw ProblemDetailsException.validation(error.message, correlationId);
       }
       const message =
-        error instanceof Error ? error.message : 'Error en conciliación offline';
+        error instanceof Error
+          ? error.message
+          : 'Error en conciliación offline';
       if (
         message.includes('ya fue conciliada con otro contenido') ||
         message.includes('operation_id ya utilizado')

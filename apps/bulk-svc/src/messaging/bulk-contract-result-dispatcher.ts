@@ -11,7 +11,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function deterministicUuid(seed: string): string {
-  const bytes = Buffer.from(createHash('sha256').update(seed).digest().subarray(0, 16));
+  const bytes = Buffer.from(
+    createHash('sha256').update(seed).digest().subarray(0, 16),
+  );
   bytes[6] = (bytes[6]! & 0x0f) | 0x40;
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
   const hex = bytes.toString('hex');
@@ -19,9 +21,7 @@ function deterministicUuid(seed: string): string {
 }
 
 @Injectable()
-export class BulkContractResultDispatcherService
-  implements BulkContractResultDispatcher
-{
+export class BulkContractResultDispatcherService implements BulkContractResultDispatcher {
   constructor(private readonly bulkImportService: BulkImportService) {}
 
   async dispatch(input: {

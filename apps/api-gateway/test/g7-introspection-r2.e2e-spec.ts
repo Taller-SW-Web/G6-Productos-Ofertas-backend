@@ -21,11 +21,17 @@ describe('API Gateway P0-AUTH-03 G7 introspection scenarios (ESCRITA_NO_EJECUTAD
   let upstream: Server;
   let signed: ReturnType<typeof createSignedIdentity>;
   let origin = '';
-  let nextIntrospectionResponse: { status: number; body: Record<string, unknown> } = {
+  let nextIntrospectionResponse: {
+    status: number;
+    body: Record<string, unknown>;
+  } = {
     status: 200,
     body: { activo: true },
   };
-  let nextTokenResponse: { status: number; body: Record<string, unknown> } | null = null;
+  let nextTokenResponse: {
+    status: number;
+    body: Record<string, unknown>;
+  } | null = null;
   let upstreamPricingCalls = 0;
   let tokenCalls = 0;
   let introspectionCalls = 0;
@@ -178,21 +184,24 @@ describe('API Gateway P0-AUTH-03 G7 introspection scenarios (ESCRITA_NO_EJECUTAD
     ['TOKEN_REVOCADO'],
     ['USUARIO_BLOQUEADO'],
     ['USUARIO_INACTIVO'],
-  ])('rejects with 401 when introspection returns inactive motivo=%s', async (motivo) => {
-    const { jwt } = userToken();
-    nextIntrospectionResponse = {
-      status: 200,
-      body: { activo: false, motivo },
-    };
-    await request(app.getHttpServer())
-      .patch(`/api/v1/precios/productos/${randomUUID()}`)
-      .set('Authorization', `Bearer ${jwt}`)
-      .set('Idempotency-Key', randomUUID())
-      .send(validPricingPatchBody)
-      .expect(401);
-    expect(introspectionCalls).toBe(1);
-    expect(upstreamPricingCalls).toBe(0);
-  });
+  ])(
+    'rejects with 401 when introspection returns inactive motivo=%s',
+    async (motivo) => {
+      const { jwt } = userToken();
+      nextIntrospectionResponse = {
+        status: 200,
+        body: { activo: false, motivo },
+      };
+      await request(app.getHttpServer())
+        .patch(`/api/v1/precios/productos/${randomUUID()}`)
+        .set('Authorization', `Bearer ${jwt}`)
+        .set('Idempotency-Key', randomUUID())
+        .send(validPricingPatchBody)
+        .expect(401);
+      expect(introspectionCalls).toBe(1);
+      expect(upstreamPricingCalls).toBe(0);
+    },
+  );
 
   it('rejects with 401 when introspection sub does not match JWT sub', async () => {
     const { jwt } = userToken();

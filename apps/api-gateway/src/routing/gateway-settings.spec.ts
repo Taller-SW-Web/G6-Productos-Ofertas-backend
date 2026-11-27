@@ -61,7 +61,11 @@ describe('Gateway route boundaries and configuration', () => {
     expect(() =>
       readGatewaySettings({ GATEWAY_PUBLIC_OPERATION_IDS: 'listarProductos' }),
     ).toThrow();
-    for (const mode of ['PUBLIC_READ_ONLY', 'SIMULATED_AUTH', 'G7_AUTHENTICATED'])
+    for (const mode of [
+      'PUBLIC_READ_ONLY',
+      'SIMULATED_AUTH',
+      'G7_AUTHENTICATED',
+    ])
       expect(() =>
         readGatewaySettings({
           G6_SECURITY_MODE: mode,

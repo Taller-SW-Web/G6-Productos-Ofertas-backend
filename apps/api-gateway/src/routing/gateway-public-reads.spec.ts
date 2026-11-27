@@ -39,7 +39,11 @@ describe('Universal G7 policy and retired Phase 1 public reads', () => {
   });
 
   it('rejects legacy bypasses and SIMULATED_AUTH in production', () => {
-    for (const mode of ['PUBLIC_READ_ONLY', 'G7_AUTHENTICATED', 'SIMULATED_AUTH'])
+    for (const mode of [
+      'PUBLIC_READ_ONLY',
+      'G7_AUTHENTICATED',
+      'SIMULATED_AUTH',
+    ])
       for (const flag of [
         'GATEWAY_DEMO_NO_AUTH_ENABLED',
         'G6_READ_ONLY_DEMO_ENABLED',

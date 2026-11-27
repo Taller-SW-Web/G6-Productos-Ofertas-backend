@@ -128,7 +128,10 @@ describe('Authoritative HTTP admin references #74', () => {
         status: 404,
         body: { status: 404, code: 'PRODUCTO_NO_ENCONTRADO' },
       }),
-      { mode: 'AUTHENTICATED', getServiceAccessToken: async () => 'synthetic-own-service-token' },
+      {
+        mode: 'AUTHENTICATED',
+        getServiceAccessToken: async () => 'synthetic-own-service-token',
+      },
     );
   });
   it('excludes inactive references while preserving their distinction from technical failure', async () => {

@@ -4,7 +4,12 @@ import { ApiGatewayService } from './api-gateway.service.js';
 import { GatewayReadiness } from './routing/gateway-readiness.js';
 
 function mockResponse() {
-  const res: { statusCode?: number; body?: unknown; status: (code: number) => typeof res; json: (payload: unknown) => typeof res } = {
+  const res: {
+    statusCode?: number;
+    body?: unknown;
+    status: (code: number) => typeof res;
+    json: (payload: unknown) => typeof res;
+  } = {
     status(code: number) {
       this.statusCode = code;
       return this;

@@ -789,7 +789,9 @@ export class CatalogBulkService {
     )
       throw new InvalidCatalogMessage();
     const prior = await this.preflight(message);
-    console.error(`[catalog-bulk] error=NONE consume msg=${message.message_id} schema=${message.schema_version} prior=${String(prior)}`);
+    console.error(
+      `[catalog-bulk] error=NONE consume msg=${message.message_id} schema=${message.schema_version} prior=${String(prior)}`,
+    );
     if (prior) return prior;
     let claimRequest: BulkRequest | null | undefined;
     if (message.schema_version === 3 || message.schema_version === 4) {
@@ -1090,7 +1092,9 @@ export class CatalogBulkService {
         );
       // Receipt checks above are repeated here under the transaction locks
       // after any V3 content download, before applying effects.
-      console.error(`[catalog-bulk] error=NONE persistReply ${name} reply=${replyMessageId} result=${JSON.stringify(result).slice(0, 300)}`);
+      console.error(
+        `[catalog-bulk] error=NONE persistReply ${name} reply=${replyMessageId} result=${JSON.stringify(result).slice(0, 300)}`,
+      );
       await this.persistReply(
         tx,
         message,

@@ -53,11 +53,15 @@ describe('API Gateway H5 R2 transversal G7 authorization and correlation (simula
       if (req.url?.endsWith('?pagina=0')) {
         res.statusCode = 400;
         res.setHeader('content-type', 'application/problem+json');
-        res.end(JSON.stringify({
-          type: '/errores/validacion', title: 'Paginación inválida',
-          status: 400, code: 'VALIDACION',
-          correlationId: req.headers['x-correlation-id'],
-        }));
+        res.end(
+          JSON.stringify({
+            type: '/errores/validacion',
+            title: 'Paginación inválida',
+            status: 400,
+            code: 'VALIDACION',
+            correlationId: req.headers['x-correlation-id'],
+          }),
+        );
         return;
       }
       res.setHeader('content-type', 'application/json');
@@ -190,8 +194,12 @@ describe('API Gateway H5 R2 transversal G7 authorization and correlation (simula
     '/api/v1/promociones/administracion',
     '/api/v1/inventario/traslados',
   ])('preserves contractual pagination errors from %s', async (path) => {
-    const token = signed.token({ tipo: 'acceso', sub: randomUUID(),
-      roles: ['GESTOR_COMERCIAL'], scope: '' });
+    const token = signed.token({
+      tipo: 'acceso',
+      sub: randomUUID(),
+      roles: ['GESTOR_COMERCIAL'],
+      scope: '',
+    });
     const correlationId = randomUUID();
     const response = await request(app.getHttpServer())
       .get(`${path}?pagina=0`)

@@ -61,7 +61,10 @@ export class AuthoritativeCouponEvidence implements CouponEvidenceProvider<PoolC
     try {
       facts = await this.source.read(command, signal);
     } catch (err) {
-      console.error(`[coupon-evidence] source.read error for order=${command.data.order_id}:`, err);
+      console.error(
+        `[coupon-evidence] source.read error for order=${command.data.order_id}:`,
+        err,
+      );
       throw err;
     }
     const inventoryConfirmed = await this.inventory?.confirms(command, signal);

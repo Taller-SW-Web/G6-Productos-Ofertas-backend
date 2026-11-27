@@ -76,7 +76,10 @@ describe('Explicit internal read-only demo (HTTP provider, isolated repositories
       }),
     ).toThrow();
     expect(
-      readCatalogReadDemo({ NODE_ENV: 'test', G6_SECURITY_MODE: 'SIMULATED_AUTH' }),
+      readCatalogReadDemo({
+        NODE_ENV: 'test',
+        G6_SECURITY_MODE: 'SIMULATED_AUTH',
+      }),
     ).toMatchObject({ enabled: false, securityMode: 'SIMULATED_AUTH' });
     expect(
       readCatalogReadDemo({ G6_SECURITY_MODE: 'G7_AUTHENTICATED' }),

@@ -268,7 +268,9 @@ export class CatalogBulkResultConsumer
     contentType: string | undefined;
     body: Uint8Array;
   }): Promise<void> {
-    console.error(`[bulk-result-consumer] error=NONE received subject=${input.subject} msg=${input.messageId}`);
+    console.error(
+      `[bulk-result-consumer] error=NONE received subject=${input.subject} msg=${input.messageId}`,
+    );
     if (!input.messageId) throw new Error('INVALID_SERVICE_BUS_MESSAGE_ID');
     const content = Buffer.from(input.body);
     const message = {
@@ -294,7 +296,9 @@ export class CatalogBulkResultConsumer
     try {
       envelope = validateEnvelope(decoded, message);
     } catch (err) {
-      const other = record(decoded) ? OTHER_BULK_ROUTES.get(String(decoded.name)) : undefined;
+      const other = record(decoded)
+        ? OTHER_BULK_ROUTES.get(String(decoded.name))
+        : undefined;
       if (
         other &&
         record(decoded) &&
@@ -329,7 +333,14 @@ export class CatalogBulkResultConsumer
         });
         return;
       }
-      console.error('[bulk-result-consumer] validateEnvelope error:', err, 'subject=', input.subject, 'decoded=', JSON.stringify(decoded)?.slice(0, 400));
+      console.error(
+        '[bulk-result-consumer] validateEnvelope error:',
+        err,
+        'subject=',
+        input.subject,
+        'decoded=',
+        JSON.stringify(decoded)?.slice(0, 400),
+      );
       await this.persistInvalidMessage(
         input,
         content,
@@ -351,7 +362,10 @@ export class CatalogBulkResultConsumer
         return;
       } catch (error) {
         if (error instanceof BulkDomainError) {
-          console.error('[bulk-result-consumer] recordCatalogBulkResult BulkDomainError:', error);
+          console.error(
+            '[bulk-result-consumer] recordCatalogBulkResult BulkDomainError:',
+            error,
+          );
           await this.repository.persistPendingContractResult({
             messageId: envelope.message_id,
             eventName: envelope.name,

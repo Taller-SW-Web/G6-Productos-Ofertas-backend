@@ -259,7 +259,8 @@ function createIsolatedTaxonomyServiceBusClient(
               } as unknown as ServiceBusReceivedMessage);
             } catch (error) {
               await handlers.processError({
-                error: error instanceof Error ? error : new Error(String(error)),
+                error:
+                  error instanceof Error ? error : new Error(String(error)),
               });
             }
           }, 250);
@@ -277,7 +278,8 @@ function createIsolatedTaxonomyServiceBusClient(
           const res = await fetch(
             `${origin}/queues/${encodeURIComponent(queue)}/peek`,
           );
-          if (!res.ok) throw new Error(`ISOLATED_BUS_PEEK_FAILED_${res.status}`);
+          if (!res.ok)
+            throw new Error(`ISOLATED_BUS_PEEK_FAILED_${res.status}`);
           return (await res.json()) as ServiceBusReceivedMessage[];
         },
         async completeMessage(message: ServiceBusReceivedMessage) {

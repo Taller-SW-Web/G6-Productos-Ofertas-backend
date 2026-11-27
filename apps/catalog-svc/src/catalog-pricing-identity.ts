@@ -76,7 +76,9 @@ export class CatalogPricingIdentityProvider implements CatalogPricingIdentity {
   private async issue() {
     const credentials = this.credentials;
     if (!credentials || !this.config?.security) {
-      console.error(`[catalog-identity] missing credentials or security for ${this.clientId} scope=${this.scope}`);
+      console.error(
+        `[catalog-identity] missing credentials or security for ${this.clientId} scope=${this.scope}`,
+      );
       throw new ServiceUnavailableException();
     }
     const signal = AbortSignal.timeout(5000);
@@ -155,7 +157,10 @@ export class CatalogPricingIdentityProvider implements CatalogPricingIdentity {
     try {
       return await aborted(request(), signal);
     } catch (error) {
-      console.error(`[catalog-identity] failed for ${this.clientId} scope=${this.scope}:`, error instanceof Error ? error.stack ?? error.message : String(error));
+      console.error(
+        `[catalog-identity] failed for ${this.clientId} scope=${this.scope}:`,
+        error instanceof Error ? (error.stack ?? error.message) : String(error),
+      );
       if (error instanceof CatalogIdentityAcquisitionError) throw error;
       if (
         signal.aborted &&
@@ -206,7 +211,10 @@ export class CatalogPricingIdentityProvider implements CatalogPricingIdentity {
     try {
       return (await aborted(this.loading, signal)).authorization;
     } catch (error) {
-      console.error(`[catalog-identity] failed for ${this.clientId} scope=${this.scope}:`, error instanceof Error ? error.stack ?? error.message : String(error));
+      console.error(
+        `[catalog-identity] failed for ${this.clientId} scope=${this.scope}:`,
+        error instanceof Error ? (error.stack ?? error.message) : String(error),
+      );
       if (error instanceof CatalogIdentityAcquisitionError) throw error;
       if (
         error instanceof Error &&
