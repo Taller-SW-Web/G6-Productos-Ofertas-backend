@@ -53,6 +53,12 @@ param applicationInsightsConnectionString string
 param expectedOperationSetSha256 string
 @description('SHA-256 esperado del OpenAPI filtrado efectivo autorizado.')
 param expectedFilteredOpenApiSha256 string
+@description('Etapa de despliegue: infrastructure (solo recurso base APIM sin publicar APIs) o effective (publicación completa con políticas y anti-bypass).')
+@allowed([
+  'infrastructure'
+  'effective'
+])
+param deploymentStage string = 'effective'
 @description('ID aislado para la API candidata; nunca la API operativa.')
 param candidateApiName string = 'g6-h5-candidate'
 @description('Ruta de ensayo aislada; no reemplaza api/v1.')
@@ -62,7 +68,7 @@ var operationsManifest = loadJsonContent('./openapi/operation-security.json')
 var fixedFilteredOpenApiObject = loadJsonContent('./openapi/gateway-filtered.compact.json')
 var fixedFilteredOpenApi = string(fixedFilteredOpenApiObject)
 var publicationGatePassed = operationsManifest.publicationMode == 'effective' && operationsManifest.effectivePublication.authorized == true && operationsManifest.operationSetSha256 == expectedOperationSetSha256 && operationsManifest.filteredOpenApiCanonicalSha256 == expectedFilteredOpenApiSha256
-var authorizedOperations = publicationGatePassed ? filter(operationsManifest.operations, op => op.environmentEnabled == true) : []
+var authorizedOperations = (deploymentStage == 'effective' && publicationGatePassed) ? filter(operationsManifest.operations, op => op.environmentEnabled == true) : []
 var corsOriginNodes = join(map(corsAllowedOrigins, origin => '<origin>${xmlEscape(origin)}</origin>'), '')
 var apiPolicyTemplate = loadTextContent('./policies/api.xml')
 var securedOperationPolicyTemplate = loadTextContent('./policies/operation-secured.xml')
@@ -70,7 +76,7 @@ var publicOperationPolicyTemplate = loadTextContent('./policies/operation-public
 
 func xmlEscape(value string) string => replace(replace(replace(value, '&', '&amp;'), '<', '&lt;'), '>', '&gt;')
 
-resource apim 'Microsoft.ApiManagement/service@2022-08-01' = if (!reuseExistingApim && publicationGatePassed && !empty(authorizedOperations)) {
+resource apim 'Microsoft.ApiManagement/service@2022-08-01' = if (!reuseExistingApim && (deploymentStage == 'infrastructure' || (publicationGatePassed && !empty(authorizedOperations)))) {
   name: apimName
   location: location
   sku: {
@@ -228,7 +234,7 @@ resource operationPolicies 'Microsoft.ApiManagement/service/apis/operations/poli
   }
 }]
 
-resource applicationInsightsLogger 'Microsoft.ApiManagement/service/loggers@2022-08-01' = if (publicationGatePassed && !empty(authorizedOperations)) {
+resource applicationInsightsLogger 'Microsoft.ApiManagement/service/loggers@2022-08-01' = if (deploymentStage == 'infrastructure' || (publicationGatePassed && !empty(authorizedOperations))) {
   name: '${apimName}/g6-h5-candidate-applicationinsights'
   dependsOn: [
     apim
@@ -294,3 +300,9 @@ resource apiDiagnostics 'Microsoft.ApiManagement/service/apis/diagnostics@2022-0
     httpCorrelationProtocol: 'W3C'
   }
 }
+
+output deploymentStage string = deploymentStage
+output apimName string = apimName
+output apimGatewayUrl string = 'https://${apimName}.azure-api.net'
+output apimPublicIpAddresses array = reuseExistingApim ? (existingApim.?properties.?publicIPAddresses ?? []) : (apim.?properties.?publicIPAddresses ?? [])
+output apimPrincipalId string = reuseExistingApim ? (existingApim.?identity.?principalId ?? '') : (apim.?identity.?principalId ?? '')

@@ -1053,6 +1053,80 @@ class ApimClosureRequirementsTests(unittest.TestCase):
                 expected_cidrs,
             )
 
+    def test_two_stage_deployment_infrastructure_vs_effective(self):
+        from datetime import datetime, timezone
+        with tempfile.TemporaryDirectory(prefix="apim-two-stage-") as temp_dir:
+            evidence_path = Path(temp_dir) / "cli-evidence.json"
+            evidence_path.write_text(
+                json.dumps(
+                    {
+                        "subscriptionId": "00000000-0000-0000-0000-000000000000",
+                        "resourceGroup": "rg-g6-aca-chile",
+                        "environment": "env-g6-phase1-chile",
+                        "capturedAtUtc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                        "sourceCommand": "az containerapp show -g rg-g6-aca-chile -n api-gateway",
+                        "acaEnvironment": {"vnetConfiguration": None},
+                        "gatewayApp": {
+                            "resourceId": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-g6-aca-chile/providers/Microsoft.App/containerApps/api-gateway",
+                            "external": True,
+                            "ipSecurityRestrictions": [],
+                            "directRoutesBlocked": False,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            filtered = json.loads((ROOT / "openapi" / "gateway-filtered.json").read_text(encoding="utf-8"))
+            manifest = json.loads((ROOT / "openapi" / "operation-security.json").read_text(encoding="utf-8"))
+            base_params = {
+                "deploymentStage": "infrastructure",
+                "candidateApiName": "g6-h5-candidate",
+                "candidateApiPath": "h5-candidate/api/v1",
+                "environmentTier": "lab",
+                "expectedSubscriptionId": "00000000-0000-0000-0000-000000000000",
+                "expectedResourceGroup": "rg-g6-aca-chile",
+                "expectedEnvironment": "env-g6-phase1-chile",
+                "expectedGatewayResourceId": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-g6-aca-chile/providers/Microsoft.App/containerApps/api-gateway",
+                "apimSubnetResourceId": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-g6-productos-azure/providers/Microsoft.Network/virtualNetworks/vm-g6-backendVNET/subnets/snet-g6-apim",
+                "gatewayBackendUrl": "https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io/api/v1",
+                "azureCliEvidencePath": str(evidence_path),
+                "operationalApprovalRef": "APROBACION-INFRA-H5",
+                "g7Issuer": "https://g7-auth-service.onrender.com/api/v1/auth",
+                "g7OpenIdConfigurationUrl": "https://g7-auth-service.onrender.com/api/v1/auth/.well-known/openid-configuration",
+                "g7Audience": "api-productos",
+                "corsAllowedOrigins": ["https://marketplace.example.com"],
+                "burstCalls": 60,
+                "burstWindowSeconds": 60,
+                "quotaCalls": 1000,
+                "quotaWindowSeconds": 3600,
+                "rateProfiles": {
+                    name: {"burstCalls": 60, "burstWindowSeconds": 60, "quotaCalls": 1000, "quotaWindowSeconds": 3600, "maxConcurrency": 0}
+                    for name in FILTER.KNOWN_RATE_PROFILES
+                },
+                "applicationInsightsResourceId": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-g6-aca-chile/providers/Microsoft.Insights/components/appi-g6-apim-chile",
+                "applicationInsightsConnectionString": "InstrumentationKey=00000000-0000-0000-0000-000000000000",
+                "expectedOperationSetSha256": manifest["operationSetSha256"],
+                "expectedFilteredOpenApiSha256": manifest["filteredOpenApiCanonicalSha256"],
+            }
+            # Etapa A (infrastructure): pasa sin directRoutesBlocked ni manifest effective
+            PARAMS.validate(
+                base_params,
+                filtered,
+                manifest,
+                expected_docs_sha=manifest["docsSha"],
+                expected_gateway_sha=manifest["gatewaySha"],
+            )
+            # Etapa B (effective): sigue bloqueando si manifest es candidate o falta directRoutesBlocked
+            effective_params = dict(base_params, deploymentStage="effective", expectedApimOriginCidrs=["20.10.20.30/32"])
+            with self.assertRaisesRegex(ValueError, "Publicación efectiva bloqueada"):
+                PARAMS.validate(
+                    effective_params,
+                    filtered,
+                    manifest,
+                    expected_docs_sha=manifest["docsSha"],
+                    expected_gateway_sha=manifest["gatewaySha"],
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

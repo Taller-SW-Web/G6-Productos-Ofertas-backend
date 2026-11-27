@@ -3,8 +3,8 @@
     <base />
     <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized" require-scheme="Bearer" output-token-variable-name="jwt">
       <openid-config url="{{g6-h5-candidate-g7-openid-config-url}}" />
-      <issuers><issuer>{{g6-h5-candidate-g7-issuer}}</issuer></issuers>
       {{audience-check-element}}
+      <issuers><issuer>{{g6-h5-candidate-g7-issuer}}</issuer></issuers>
     </validate-jwt>
     <set-variable name="rateIdentity" value="@(((Jwt)context.Variables[&quot;jwt&quot;]).Subject ?? string.Empty)" />
     <choose>
@@ -34,9 +34,9 @@
         if (tokenType == &quot;acceso&quot; &amp;&amp; allowHuman) {
           var reqRolesCsv = (string)context.Variables[&quot;requiredRolesCsv&quot;];
           if (!string.IsNullOrEmpty(reqRolesCsv)) {
-            var requiredRoles = reqRolesCsv.Split(',', StringSplitOptions.RemoveEmptyEntries);
-            var tokenRoles = jwt.Claims.GetValueOrDefault(&quot;roles&quot;, string.Empty).Split(new[] {' ', ','}, StringSplitOptions.RemoveEmptyEntries);
-            if (!requiredRoles.Any(r => tokenRoles.Contains(r))) return true;
+            var requiredRoles = reqRolesCsv.Split(new[] {','}, StringSplitOptions.RemoveEmptyEntries);
+            var tokenRoles = (jwt.Claims.GetValueOrDefault(&quot;roles&quot;, string.Empty)).Split(new[] {' ', ','}, StringSplitOptions.RemoveEmptyEntries);
+            if (!requiredRoles.Any(r => tokenRoles.Contains(r))) { return true; }
           }
           return false;
         }
@@ -45,19 +45,19 @@
           var expectedAud = (string)context.Variables[&quot;m2mAudience&quot;];
           if (!string.IsNullOrEmpty(expectedAud)) {
             var audiences = jwt.Audiences ?? Enumerable.Empty&lt;string&gt;();
-            if (!audiences.Contains(expectedAud)) return true;
+            if (!audiences.Contains(expectedAud)) { return true; }
           }
           var reqScopesCsv = (string)context.Variables[&quot;requiredScopesCsv&quot;];
           if (!string.IsNullOrEmpty(reqScopesCsv)) {
-            var requiredScopes = reqScopesCsv.Split(',', StringSplitOptions.RemoveEmptyEntries);
+            var requiredScopes = reqScopesCsv.Split(new[] {','}, StringSplitOptions.RemoveEmptyEntries);
             var tokenScopes = (jwt.Claims.GetValueOrDefault(&quot;scope&quot;, string.Empty) + &quot; &quot; + jwt.Claims.GetValueOrDefault(&quot;scp&quot;, string.Empty)).Split(new[] {' ', ','}, StringSplitOptions.RemoveEmptyEntries);
-            if (!requiredScopes.Any(s => tokenScopes.Contains(s))) return true;
+            if (!requiredScopes.Any(s => tokenScopes.Contains(s))) { return true; }
           }
           var clientsCsv = (string)context.Variables[&quot;allowedClientsCsv&quot;];
           if (!string.IsNullOrEmpty(clientsCsv)) {
-            var allowed = clientsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries);
+            var allowed = clientsCsv.Split(new[] {','}, StringSplitOptions.RemoveEmptyEntries);
             var clientId = jwt.Claims.GetValueOrDefault(&quot;client_id&quot;, jwt.Claims.GetValueOrDefault(&quot;azp&quot;, jwt.Subject ?? string.Empty));
-            if (!allowed.Contains(clientId)) return true;
+            if (!allowed.Contains(clientId)) { return true; }
           }
           return false;
         }
