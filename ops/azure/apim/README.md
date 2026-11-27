@@ -71,3 +71,19 @@ python ops/azure/apim/filter-openapi.py `
 | APIM-T07 | Correlación `X-Correlation-Id` UUID preservada/generada en todo flujo | Estático preparado; instancia `BLOCKED_INFRA` |
 | APIM-T08 | Comparación privada y rollback de revisión/políticas | Estático preparado; instancia `BLOCKED_INFRA` |
 | RL-01..RL-06 | Perfiles burst, cuota, concurrencia, aislamiento y anti-bypass según Docs | Estático preparado; instancia `BLOCKED_INFRA` |
+
+## Mecanismo de dos etapas (`deploymentStage`) y scripts operativos
+
+Para resolver la dependencia circular entre `directRoutesBlocked: true` y la IP pública asignada por APIM tras su creación, `main.bicep` y `validate-parameters.py` soportan `deploymentStage`:
+- `infrastructure` (Etapa A): aprovisiona únicamente la instancia base APIM Developer (`External` VNet en `snet-g6-apim`) y el logger de Application Insights, **sin publicar APIs de negocio**.
+- `effective` (Etapa B, valor por defecto): exige manifiesto `effective`, `effectivePublication.authorized=true`, `expectedApimOriginCidrs` y `directRoutesBlocked=true` (Modalidad A o Modalidad B en `api-gateway`).
+
+Scripts de operación bajo demanda en `ops/azure/apim/scripts/`:
+- `Iniciar-G6.ps1`: restaura `minReplicas=1, maxReplicas=1` en las 9 Container Apps y valida readiness.
+- `Detener-G6.ps1`: verifica jobs activos y mensajes pendientes en Service Bus (sin purgar colas) antes de escalar a 0 réplicas.
+- `Desplegar-APIM.ps1`: valida parámetros y despliega/recrea APIM mediante Bicep (`infrastructure` o `effective`), verificando soft-delete y asignando `Monitoring Metrics Publisher`.
+- `Conectar-APIM.ps1`: lee las IPs públicas de APIM, asegura `serviceUrl` hacia `api-gateway`, aplica `ipSecurityRestrictions` Allow-only (Modalidad B) y verifica bloqueo directo (HTTP 403).
+- `Eliminar-APIM.ps1`: elimina exclusivamente `apim-g6-productos-chile` previa autorización explícita (`-AuthorizeDelete`), preservando VNet, `snet-g6-apim`, `nsg-g6-apim`, Application Insights y ACA.
+- `Verificar-G6.ps1`: auditoría de solo lectura de red, APIM, Modalidad B y réplicas ACA.
+
+> **Nota de Soft-Delete e IP pública:** al eliminar APIM, Azure retiene el nombre durante 48 horas en soft-delete (requiere `az apim deletedservice purge` si se recrea antes con el mismo nombre). Al usar la IP administrada por APIM, una recreación puede asignar una IP diferente, por lo que debe ejecutarse `Conectar-APIM.ps1` tras recrear.
