@@ -7,18 +7,41 @@ cat > "$TEMP/curl" <<'MOCK'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 output=''
+dump_header=''
 url=''
 method='GET'
+req_cid=''
 [[ -z "${CURL_ARGS_LOG:-}" ]] || printf '%s\n' "$*" >> "$CURL_ARGS_LOG"
 while (($#)); do
   case "$1" in
     --output) shift; output="$1" ;;
+    --dump-header) shift; dump_header="$1" ;;
     --request) shift; method="$1" ;;
+    --header)
+      shift
+      if [[ "${1,,}" == x-correlation-id:* ]]; then
+        req_cid="${1#*: }"
+      fi
+      ;;
     https://*) url="$1" ;;
   esac
   shift
 done
 [[ -z "${CURL_LOG:-}" ]] || printf '%s\n' "$url" >> "$CURL_LOG"
+if [[ -n "$dump_header" ]]; then
+  printf 'HTTP/1.1 401 Unauthorized\r\n' > "$dump_header"
+  if [[ -n "$req_cid" && "${MOCK_APIM_OMIT_CID:-false}" != true ]]; then
+    printf 'x-correlation-id: %s\r\n' "$req_cid" >> "$dump_header"
+  fi
+fi
+if [[ "$url" == https://apim-g6-productos-chile.azure-api.net/* ]]; then
+  printf '%s' "${MOCK_APIM_STATUS:-401}"
+  exit 0
+fi
+if [[ "$url" == https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io/* ]]; then
+  printf '%s' "${MOCK_DIRECT_GW_STATUS:-403}"
+  exit 0
+fi
 if [[ -n "$output" && "$output" != /dev/null ]]; then
   base_service="${MOCK_HEALTH_SERVICE:-catalog-svc}"
   if [[ "$url" == */health/ready || "$url" == */health/readiness ]]; then
@@ -40,6 +63,8 @@ if [[ "$url" == *'/private/read' || "$url" == *'/api/v1/promociones/evaluar' ]];
   exit 0
 fi
 if [[ "${MOCK_READINESS_FAILURE:-false}" == true && ( "$url" == */health/ready || "$url" == */health/readiness ) ]]; then
+  printf '503'
+elif [[ "${MOCK_LIVENESS_FAILURE:-false}" == true && "$url" == */health ]]; then
   printf '503'
 else
   printf '200'
@@ -269,3 +294,54 @@ rm -f "$CURL_LOG"
 PATH="$TEMP:$PATH" bash "$ROOT/ops/azure/container-apps/smoke-service.sh" api-gateway > "$TEMP/g5-case-pass.log"
 [[ -s "$CURL_LOG" ]] || { echo 'FAIL: lowercase containerapps ARM resource ID rejected for g5-labelled' >&2; exit 1; }
 echo 'PASS: G5 label smoke uses its isolated URL and requires the same-run Marketplace 100% receipt'
+
+# Modalidad B Gateway standard: digest/salud en recibo, health interno autorizado, API vía APIM y 403 directo anti-bypass.
+service=api-gateway
+gw_ext='https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io'
+gw_int='https://api-gateway.internal.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io'
+target='ghcr.io/taller-sw-web/g6-productos-ofertas-backend/api-gateway@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+resource_id='/subscriptions/fef42188-accd-4470-ae88-78f583eb4906/resourceGroups/rg-g6-aca-chile/providers/Microsoft.App/containerApps/api-gateway'
+make_gw_modb_receipt() {
+  jq -n --arg run "$run_id" --arg id "$resource_id" --arg ext "$gw_ext" --arg int "$gw_int" --arg target "$target" '{
+    destination:"chile-shared",
+    github_environment:"azure-h5-chile",
+    aca_environment:"env-g6-phase1-chile",
+    service:"api-gateway",
+    workflow_run_id:$run,
+    app_resource_id:$id,
+    origin_https:$ext,
+    internal_origin_https:$int,
+    modalidad_b:true,
+    preserved_labels:[{"label":"g5-h5","revisionName":"api-gateway--0000002","weight":0}],
+    target:$target,
+    digest_candidate:($target|split("@")[1]),
+    served_digest:($target|split("@")[1]),
+    served_revision:"api-gateway--0000004",
+    served_health:"Healthy",
+    traffic_weight:100,
+    route_profile:"standard"
+  }' > "$receipt"
+}
+make_gw_modb_receipt
+export SMOKE_URL="$gw_ext" SMOKE_PROTECTED_PATH='/api/v1/productos/administracion' H5_GATEWAY_ROUTE_PROFILE=standard MOCK_HEALTH_SERVICE=api-gateway
+rm -f "$CURL_LOG"
+PATH="$TEMP:$PATH" bash "$ROOT/ops/azure/container-apps/smoke-service.sh" api-gateway > "$TEMP/gw-modb-pass.log" 2>&1 || { cat "$TEMP/gw-modb-pass.log"; exit 1; }
+grep -Fq 'PASS recibo Modalidad B:' "$TEMP/gw-modb-pass.log"
+grep -Fq 'PASS /health HTTP 200' "$TEMP/gw-modb-pass.log"
+grep -Fq 'PASS API vía APIM sin credenciales: HTTP 401' "$TEMP/gw-modb-pass.log"
+grep -Fq 'PASS anti-bypass Modalidad B: acceso directo rechazado HTTP 403' "$TEMP/gw-modb-pass.log"
+grep -Fxq "${gw_int}/health" "$CURL_LOG"
+grep -Fxq 'https://apim-g6-productos-chile.azure-api.net/api/v1/productos/administracion' "$CURL_LOG"
+grep -Fxq "${gw_ext}/health" "$CURL_LOG"
+grep -Fxq "${gw_ext}/api/v1/productos/administracion" "$CURL_LOG"
+if PATH="$TEMP:$PATH" MOCK_DIRECT_GW_STATUS=200 bash "$ROOT/ops/azure/container-apps/smoke-service.sh" api-gateway > "$TEMP/gw-modb-bypass.log" 2>&1; then
+  echo 'FAIL: Modalidad B aceptó acceso directo HTTP 200 (bypass)' >&2; exit 1
+fi
+grep -Fq 'FALLO anti-bypass Modalidad B' "$TEMP/gw-modb-bypass.log"
+if PATH="$TEMP:$PATH" MOCK_APIM_OMIT_CID=true bash "$ROOT/ops/azure/container-apps/smoke-service.sh" api-gateway > "$TEMP/gw-modb-nocid.log" 2>&1; then
+  echo 'FAIL: Modalidad B aceptó respuesta APIM sin x-correlation-id' >&2; exit 1
+fi
+if PATH="$TEMP:$PATH" MOCK_LIVENESS_FAILURE=true bash "$ROOT/ops/azure/container-apps/smoke-service.sh" api-gateway > "$TEMP/gw-modb-unhealthy.log" 2>&1; then
+  echo 'FAIL: Modalidad B aceptó health interno 503' >&2; exit 1
+fi
+echo 'PASS: Gateway Modalidad B acredita digest/salud en recibo, health interno autorizado, API vía APIM con correlación y 403 directo anti-bypass'

@@ -33,13 +33,13 @@ if [[ "${1:-}" == containerapp ]]; then [[ "$*" == *"--resource-group ${MOCK_RES
 if [[ "${1:-}" == group && "${2:-}" == show ]]; then printf '{"id":"/subscriptions/%s/resourceGroups/%s"}\n' "$subscription" "$group"; exit 0; fi
 if [[ "${1:-}" == containerapp && "${2:-}" == env && "${3:-}" == show ]]; then [[ "${MOCK_BAD_ENVIRONMENT:-false}" != true ]] || env_id="$env_id-wrong"; printf '{"id":"%s","location":"%s"}\n' "$env_id" "$location"; exit 0; fi
 if [[ "${1:-}" == containerapp && "${2:-}" == show ]]; then
-  jq --arg id "$app_id" --arg env "$env_id" --arg service "$service" --arg traffic "${MOCK_TRAFFIC:-state}" '. + {id:$id} | .properties.managedEnvironmentId=$env | .properties.configuration.ingress.fqdn=($service+".internal.chilecentral.azurecontainerapps.io") | .properties.configuration.ingress.allowInsecure=false | if $traffic == "old" then .properties.configuration.ingress.traffic=[{revisionName:"rev-0",weight:100}] elif $traffic == "ambiguous" then .properties.configuration.ingress.traffic=[{latestRevision:true,weight:50},{revisionName:"rev-0",weight:50}] elif $traffic == "old-after-rollback" and .updates >= 2 then .properties.configuration.ingress.traffic=[{revisionName:"rev-0",weight:100}] else . end' "$state"
+  jq --arg id "$app_id" --arg env "$env_id" --arg service "$service" --arg traffic "${MOCK_TRAFFIC:-state}" --arg ext_fqdn "${MOCK_EXTERNAL_FQDN:-false}" '. + {id:$id} | .properties.managedEnvironmentId=$env | .properties.configuration.ingress.fqdn=(if $ext_fqdn == "true" then ($service+".calmgrass-aec0b33c.chilecentral.azurecontainerapps.io") else ($service+".internal.chilecentral.azurecontainerapps.io") end) | .properties.configuration.ingress.allowInsecure=false | if $traffic == "old" then .properties.configuration.ingress.traffic=[{revisionName:"rev-0",weight:100}] elif $traffic == "ambiguous" then .properties.configuration.ingress.traffic=[{latestRevision:true,weight:50},{revisionName:"rev-0",weight:50}] elif $traffic == "old-after-rollback" and .updates >= 2 then .properties.configuration.ingress.traffic=[{revisionName:"rev-0",weight:100}] else . end' "$state"
   exit 0
 fi
 if [[ "${1:-}" == containerapp && "${2:-}" == revision && "${3:-}" == show ]]; then
   requested=''
   while (($#)); do [[ "$1" != --revision ]] || { shift; requested="$1"; }; shift || true; done
-  jq -c --arg requested "$requested" --arg startup "${MOCK_STARTUP:-false}" '(.revisionPolls += 1) | if $startup == "true" and .revisionPolls == 1 then .revision.properties.runningState="Processing" elif $startup == "true" and .revisionPolls >= 2 then .revision.properties.runningState="Running" else . end | if .previousRevisionName == $requested then .previousRevision else .revision end' "$state"
+  jq -c --arg requested "$requested" --arg startup "${MOCK_STARTUP:-false}" '(.revisionPolls += 1) | if $startup == "true" and .revisionPolls == 1 then .revision.properties.runningState="Processing" elif $startup == "true" and .revisionPolls >= 2 then .revision.properties.runningState="Running" else . end | if (.namedRevisions[$requested] // null) != null then .namedRevisions[$requested] elif .previousRevisionName == $requested then .previousRevision else .revision end' "$state"
   jq --arg startup "${MOCK_STARTUP:-false}" '(.revisionPolls += 1) | if $startup == "true" and .revisionPolls == 1 then .revision.properties.runningState="Processing" elif $startup == "true" and .revisionPolls >= 2 then .revision.properties.runningState="Running" else . end' "$state" > "$state.tmp"
   mv "$state.tmp" "$state"
   exit 0
@@ -50,10 +50,33 @@ if [[ "${1:-}" == containerapp && "${2:-}" == ingress && "${3:-}" == traffic && 
   mv "$state.tmp" "$state"
   [[ "${MOCK_TRAFFIC_SET_FAIL_ON:-0}" != "$(jq -r .trafficSetCount "$state")" ]] || exit 65
   revision_weight=''
-  while (($#)); do [[ "$1" != --revision-weight ]] || { shift; revision_weight="$1"; }; shift || true; done
+  label_weights_json='[]'
+  while (($#)); do
+    case "$1" in
+      --revision-weight)
+        shift
+        revision_weight="$1"
+        ;;
+      --label-weight)
+        shift
+        while (($#)) && [[ "$1" != --* ]]; do
+          [[ "$1" == *=0 ]] || exit 67
+          lbl="${1%=0}"
+          label_weights_json="$(jq -c --arg lbl "$lbl" '. + [$lbl]' <<< "$label_weights_json")"
+          shift
+        done
+        continue
+        ;;
+    esac
+    shift || true
+  done
+  [[ -z "${MOCK_TRAFFIC_LOG:-}" ]] || printf 'revision=%s labels=%s\n' "$revision_weight" "$label_weights_json" >> "$MOCK_TRAFFIC_LOG"
   revision="${revision_weight%=100}"
-  [[ -n "$revision" && "$revision_weight" == "$revision=100" ]] || exit 66
-  jq --arg revision "$revision" '.properties.configuration.ingress.traffic=[{revisionName:$revision,weight:100}]' "$state" > "$state.tmp"
+  [[ -n "$revision" && "$revision" != latest && "$revision_weight" == "$revision=100" ]] || exit 66
+  jq --arg revision "$revision" --argjson kept "$label_weights_json" --arg drop "${MOCK_DROP_LABEL:-false}" '
+    ([.properties.configuration.ingress.traffic[]? | select((.label // "") != "") | select($drop != "true") | select(.label as $l | ($kept | index($l)) != null)]) as $preserved
+    | .properties.configuration.ingress.traffic = ($preserved + [{revisionName:$revision,weight:100}])
+  ' "$state" > "$state.tmp"
   mv "$state.tmp" "$state"
   exit 0
 fi
@@ -287,3 +310,203 @@ for bad_state in "RunningAtMaxScale:Unhealthy:1:Provisioned" "RunningAtMaxScale:
   fi
 done
 printf 'PASS: estados degradados, Failed, Stopped y ScaledToZero con réplicas/salud inválidas siguen rechazándose\n'
+
+# Preflight 1: Gateway standard + Modalidad B + preservación de etiqueta g5-h5 durante despliegue, fallo y rollback
+cat > "$TEMP/gw-g5-state.json" <<EOF
+{
+  "properties":{
+    "configuration":{
+      "activeRevisionsMode":"Multiple",
+      "secrets":[{"name":"ACA_PRIVATE_SENTINEL","value":"must-not-be-printed"}],
+      "ingress":{
+        "external":true,
+        "targetPort":8080,
+        "ipSecurityRestrictions":[{"name":"allow-apim-1","action":"Allow","ipAddressRange":"57.156.40.55/32"}],
+        "traffic":[
+          {"label":"g5-h5","revisionName":"api-gateway--0000002","weight":0},
+          {"revisionName":"api-gateway--0000003","weight":100}
+        ]
+      }
+    },
+    "template":{
+      "revisionSuffix":"0000003",
+      "containers":[
+        {"name":"api-gateway","image":"$PREVIOUS","env":[{"name":"G6_SECURITY_MODE","value":"G7_AUTHENTICATED"},{"name":"GATEWAY_G5_H5_ENABLED","value":"true"}]},
+        {"name":"caddy","image":"ghcr.io/taller-sw-web/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+      ],
+      "scale":{"minReplicas":1,"maxReplicas":1}
+    },
+    "latestRevisionName":"api-gateway--0000003",
+    "latestReadyRevisionName":"api-gateway--0000003"
+  },
+  "revision":{
+    "properties":{
+      "healthState":"Healthy","active":true,"runningState":"RunningAtMaxScale","replicas":1,"provisioningState":"Provisioned",
+      "template":{
+        "containers":[
+          {"name":"api-gateway","image":"$PREVIOUS","env":[{"name":"G6_SECURITY_MODE","value":"G7_AUTHENTICATED"},{"name":"GATEWAY_G5_H5_ENABLED","value":"true"}]},
+          {"name":"caddy","image":"ghcr.io/taller-sw-web/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+        ],
+        "scale":{"minReplicas":1,"maxReplicas":1}
+      }
+    }
+  },
+  "namedRevisions":{
+    "api-gateway--0000003":{
+      "properties":{
+        "healthState":"Healthy","active":true,"runningState":"RunningAtMaxScale","replicas":1,"provisioningState":"Provisioned",
+        "template":{
+          "containers":[
+            {"name":"api-gateway","image":"$PREVIOUS","env":[{"name":"G6_SECURITY_MODE","value":"G7_AUTHENTICATED"},{"name":"GATEWAY_G5_H5_ENABLED","value":"true"}]},
+            {"name":"caddy","image":"ghcr.io/taller-sw-web/caddy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+          ],
+          "scale":{"minReplicas":1,"maxReplicas":1}
+        }
+      }
+    }
+  },
+  "updates":0,"trafficSetCount":0
+}
+EOF
+cp "$TEMP/gw-g5-state.json" "$TEMP/gw-g5-drop.json"
+if MOCK_SERVICE=api-gateway MOCK_STATE="$TEMP/gw-g5-drop.json" MOCK_EXTERNAL_FQDN=true MOCK_DROP_LABEL=true DEPLOY_RECEIPT="$TEMP/gw-g5-drop.receipt" \
+  bash "$DEPLOY" api-gateway "$TARGET" > "$TEMP/gw-g5-drop.log" 2>&1; then
+  fail 'Gateway standard aceptó perder la etiqueta g5-h5 durante el pinning'
+fi
+MOCK_SERVICE=api-gateway MOCK_STATE="$TEMP/gw-g5-state.json" MOCK_EXTERNAL_FQDN=true MOCK_TRAFFIC_LOG="$TEMP/gw-g5-traffic.log" \
+  DEPLOY_RECEIPT="$TEMP/gw-g5.receipt" bash "$DEPLOY" api-gateway "$TARGET" > "$TEMP/gw-g5.log" 2>&1 || { cat "$TEMP/gw-g5.log"; fail 'Gateway standard con g5-h5 y Modalidad B falló'; }
+jq -e '
+  .modalidad_b == true and
+  .internal_origin_https == "https://api-gateway.internal.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io" and
+  .origin_https == "https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io" and
+  .served_revision == "rev-1" and .served_health == "Healthy" and .traffic_weight == 100 and
+  .preserved_labels == [{"label":"g5-h5","revisionName":"api-gateway--0000002","weight":0}]
+' "$TEMP/gw-g5.receipt" >/dev/null || { cat "$TEMP/gw-g5.receipt"; fail 'recibo Gateway Modalidad B/g5-h5 incompleto'; }
+jq -e '
+  ([.properties.configuration.ingress.traffic[] | select(.label == "g5-h5" and .revisionName == "api-gateway--0000002" and .weight == 0)] | length) == 1 and
+  ([.properties.configuration.ingress.traffic[] | select((.label // "") == "" and .revisionName == "rev-1" and .weight == 100)] | length) == 1 and
+  .properties.configuration.ingress.ipSecurityRestrictions[0].ipAddressRange == "57.156.40.55/32"
+' "$TEMP/gw-g5-state.json" >/dev/null || fail 'corte Gateway no preservó g5-h5 o Modalidad B'
+gw_g5_cfg="$(jq -r '.config_sha256' "$TEMP/gw-g5.receipt")"
+gw_g5_labels="$(jq -c '.preserved_labels' "$TEMP/gw-g5.receipt")"
+AZURE_CHILE_DEPLOY_ENABLED=false MOCK_SERVICE=api-gateway MOCK_STATE="$TEMP/gw-g5-state.json" MOCK_EXTERNAL_FQDN=true H5_PRESERVED_LABELS="$gw_g5_labels" \
+  bash "$DEPLOY" --restore api-gateway "$PREVIOUS" "$TARGET" "$gw_g5_cfg" > "$TEMP/gw-g5-restore.log" 2>&1 || { cat "$TEMP/gw-g5-restore.log"; fail 'rollback Gateway con g5-h5 falló'; }
+jq -e '
+  ([.properties.configuration.ingress.traffic[] | select(.label == "g5-h5" and .revisionName == "api-gateway--0000002" and .weight == 0)] | length) == 1 and
+  ([.properties.configuration.ingress.traffic[] | select((.label // "") == "" and .weight == 100)] | length) == 1
+' "$TEMP/gw-g5-state.json" >/dev/null || fail 'rollback Gateway perdió la etiqueta g5-h5'
+printf 'PASS: Gateway standard preserva Modalidad B y etiqueta g5-h5 en despliegue y recuperación\n'
+
+# Preflight 3: Price Audit en modo Multiple (corte explícito sin latest=100, candidato unhealthy, rollback a revisión previa y contención R16)
+PA_PREV='ghcr.io/taller-sw-web/g6-productos-ofertas-backend/price-audit-svc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+PA_NEXT='ghcr.io/taller-sw-web/g6-productos-ofertas-backend/price-audit-svc@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+cat > "$TEMP/pa-multiple-state.json" <<EOF
+{
+  "properties":{
+    "configuration":{
+      "activeRevisionsMode":"Multiple",
+      "secrets":[{"name":"DATABASE_URL","value":"must-not-be-printed"}],
+      "ingress":{"external":false,"targetPort":3003,"traffic":[{"revisionName":"price-audit-svc--0000001","weight":100}]}
+    },
+    "template":{
+      "revisionSuffix":"0000001",
+      "containers":[{
+        "name":"price-audit-svc",
+        "image":"$PA_PREV",
+        "env":[
+          {"name":"G6_SECURITY_MODE","value":"G7_AUTHENTICATED"},
+          {"name":"MESSAGING_PROVIDER","value":"AZURE_SERVICE_BUS"},
+          {"name":"G6_SERVICE_BUS_PILOT_ENABLED","value":"true"},
+          {"name":"G6_SERVICE_BUS_PRODUCTION_ENABLED","value":"true"},
+          {"name":"SERVICE_BUS_NAMESPACE_FQDN","value":"g6-sb-h5-chile-261127.servicebus.windows.net"}
+        ]
+      }],
+      "scale":{"minReplicas":1,"maxReplicas":1}
+    },
+    "latestRevisionName":"price-audit-svc--0000001",
+    "latestReadyRevisionName":"price-audit-svc--0000001"
+  },
+  "revision":{
+    "properties":{
+      "healthState":"Healthy","active":true,"runningState":"RunningAtMaxScale","replicas":1,"provisioningState":"Provisioned",
+      "template":{
+        "containers":[{"name":"price-audit-svc","image":"$PA_PREV","env":[{"name":"G6_SECURITY_MODE","value":"G7_AUTHENTICATED"}]}],
+        "scale":{"minReplicas":1,"maxReplicas":1}
+      }
+    }
+  },
+  "namedRevisions":{
+    "price-audit-svc--0000001":{
+      "properties":{
+        "healthState":"Healthy","active":true,"runningState":"RunningAtMaxScale","replicas":1,"provisioningState":"Provisioned",
+        "template":{
+          "containers":[{"name":"price-audit-svc","image":"$PA_PREV","env":[{"name":"G6_SECURITY_MODE","value":"G7_AUTHENTICATED"}]}],
+          "scale":{"minReplicas":1,"maxReplicas":1}
+        }
+      }
+    }
+  },
+  "updates":0,"trafficSetCount":0
+}
+EOF
+cp "$TEMP/pa-multiple-state.json" "$TEMP/pa-latest-rejected.json"
+jq '.properties.configuration.ingress.traffic=[{latestRevision:true,weight:100}]' "$TEMP/pa-latest-rejected.json" > "$TEMP/pa-latest-rejected.tmp" && mv "$TEMP/pa-latest-rejected.tmp" "$TEMP/pa-latest-rejected.json"
+if MOCK_SERVICE=price-audit-svc MOCK_STATE="$TEMP/pa-latest-rejected.json" bash "$DEPLOY" price-audit-svc "$PA_NEXT" > "$TEMP/pa-latest.log" 2>&1; then
+  fail 'Price Audit Multiple aceptó latestRevision=true como corte'
+fi
+
+cp "$TEMP/pa-multiple-state.json" "$TEMP/pa-unhealthy.json"
+if MOCK_SERVICE=price-audit-svc MOCK_STATE="$TEMP/pa-unhealthy.json" MOCK_UNHEALTHY_TARGET="$PA_NEXT" \
+  bash "$DEPLOY" price-audit-svc "$PA_NEXT" > "$TEMP/pa-unhealthy.log" 2>&1; then
+  fail 'Price Audit Multiple aceptó candidato unhealthy'
+fi
+grep -Fq 'TRÁFICO PREVIO CONSERVADO: price-audit-svc mantiene revisión price-audit-svc--0000001' "$TEMP/pa-unhealthy.log" || { cat "$TEMP/pa-unhealthy.log"; fail 'candidato unhealthy de Price Audit no conservó la revisión previa'; }
+jq -e '.properties.configuration.ingress.traffic == [{"revisionName":"price-audit-svc--0000001","weight":100}]' "$TEMP/pa-unhealthy.json" >/dev/null || fail 'tráfico de Price Audit cambió ante candidato unhealthy'
+
+: > "$TEMP/pa-traffic.log"
+MOCK_SERVICE=price-audit-svc MOCK_STATE="$TEMP/pa-multiple-state.json" MOCK_TRAFFIC_LOG="$TEMP/pa-traffic.log" \
+  DEPLOY_RECEIPT="$TEMP/pa.receipt" bash "$DEPLOY" price-audit-svc "$PA_NEXT" > "$TEMP/pa-deploy.log" 2>&1 || { cat "$TEMP/pa-deploy.log"; fail 'corte exitoso de Price Audit Multiple falló'; }
+if grep -Fq 'revision=latest=100' "$TEMP/pa-traffic.log"; then fail 'Price Audit utilizó latest=100'; fi
+grep -Fq 'revision=price-audit-svc--0000001=100' "$TEMP/pa-traffic.log" || fail 'Price Audit no fijó 100% a la revisión vigente antes de actualizar'
+grep -Fq 'revision=rev-1=100' "$TEMP/pa-traffic.log" || fail 'Price Audit no movió el tráfico explícitamente a la nueva revisión'
+jq -e '
+  .previous_served_revision == "price-audit-svc--0000001" and
+  .served_revision == "rev-1" and .traffic_weight == 100 and
+  (.config_sha256 | test("^[0-9a-f]{64}$")) and
+  (.config_without_messaging_flags_sha256 | test("^[0-9a-f]{64}$"))
+' "$TEMP/pa.receipt" >/dev/null || { cat "$TEMP/pa.receipt"; fail 'recibo de Price Audit incompleto'; }
+
+pa_cfg="$(jq -r '.config_sha256' "$TEMP/pa.receipt")"
+pa_nosb="$(jq -r '.config_without_messaging_flags_sha256' "$TEMP/pa.receipt")"
+cp "$TEMP/pa-multiple-state.json" "$TEMP/pa-restore-clean.json"
+AZURE_CHILE_DEPLOY_ENABLED=false MOCK_SERVICE=price-audit-svc MOCK_STATE="$TEMP/pa-restore-clean.json" \
+  H5_PREVIOUS_SERVED_REVISION=price-audit-svc--0000001 \
+  bash "$DEPLOY" --restore price-audit-svc "$PA_PREV" "$PA_NEXT" "$pa_cfg" > "$TEMP/pa-restore-clean.log" 2>&1 || { cat "$TEMP/pa-restore-clean.log"; fail 'restauración directa de revisión previa de Price Audit falló'; }
+grep -Fq 'ROLLBACK COORDINADO VERIFICADO: servicio=price-audit-svc revision=price-audit-svc--0000001' "$TEMP/pa-restore-clean.log" || fail 'rollback no restauró la revisión previa price-audit-svc--0000001'
+jq -e '.properties.configuration.ingress.traffic == [{"revisionName":"price-audit-svc--0000001","weight":100}]' "$TEMP/pa-restore-clean.json" >/dev/null || fail 'tráfico no volvió a price-audit-svc--0000001'
+
+# Simular contención de emergencia de flags Service Bus R16 antes de la recuperación supervisada
+cp "$TEMP/pa-multiple-state.json" "$TEMP/pa-containment.json"
+jq '.properties.template.containers[0].env |= (map(select(.name != "SERVICE_BUS_NAMESPACE_FQDN")) | map(if .name == "MESSAGING_PROVIDER" then .value="RABBITMQ" elif .name == "G6_SERVICE_BUS_PILOT_ENABLED" or .name == "G6_SERVICE_BUS_PRODUCTION_ENABLED" then .value="false" else . end))' \
+  "$TEMP/pa-containment.json" > "$TEMP/pa-containment.tmp" && mv "$TEMP/pa-containment.tmp" "$TEMP/pa-containment.json"
+if AZURE_CHILE_DEPLOY_ENABLED=false MOCK_SERVICE=price-audit-svc MOCK_STATE="$TEMP/pa-containment.json" \
+  H5_PREVIOUS_SERVED_REVISION=price-audit-svc--0000001 \
+  bash "$DEPLOY" --restore price-audit-svc "$PA_PREV" "$PA_NEXT" "$pa_cfg" > "$TEMP/pa-contain-strict.log" 2>&1; then
+  fail 'rollback estricto sin modo contención aceptó cambio de flags'
+fi
+grep -Fq 'RECUPERACIÓN OMITIDA' "$TEMP/pa-contain-strict.log" || fail 'cambio de flags sin modo contención no fue bloqueado'
+
+cp "$TEMP/pa-containment.json" "$TEMP/pa-containment-drift.json"
+jq '.properties.configuration.ingress.targetPort=3999' "$TEMP/pa-containment-drift.json" > "$TEMP/pa-containment-drift.tmp" && mv "$TEMP/pa-containment-drift.tmp" "$TEMP/pa-containment-drift.json"
+if AZURE_CHILE_DEPLOY_ENABLED=false MOCK_SERVICE=price-audit-svc MOCK_STATE="$TEMP/pa-containment-drift.json" \
+  H5_PREVIOUS_SERVED_REVISION=price-audit-svc--0000001 H5_RESTORE_MESSAGING_CONTAINMENT=true H5_EXPECTED_CONFIG_NO_SB_HASH="$pa_nosb" \
+  bash "$DEPLOY" --restore price-audit-svc "$PA_PREV" "$PA_NEXT" "$pa_cfg" > "$TEMP/pa-contain-drift.log" 2>&1; then
+  fail 'modo contención aceptó drift fuera de flags Service Bus (targetPort)'
+fi
+
+AZURE_CHILE_DEPLOY_ENABLED=false MOCK_SERVICE=price-audit-svc MOCK_STATE="$TEMP/pa-containment.json" \
+  H5_PREVIOUS_SERVED_REVISION=price-audit-svc--0000001 H5_RESTORE_MESSAGING_CONTAINMENT=true H5_EXPECTED_CONFIG_NO_SB_HASH="$pa_nosb" \
+  bash "$DEPLOY" --restore price-audit-svc "$PA_PREV" "$PA_NEXT" "$pa_cfg" > "$TEMP/pa-contain-ok.log" 2>&1 || { cat "$TEMP/pa-contain-ok.log"; fail 'recuperación supervisada con contención R16 autorizada falló'; }
+grep -Fq 'ROLLBACK COORDINADO VERIFICADO: servicio=price-audit-svc revision=price-audit-svc--0000001' "$TEMP/pa-contain-ok.log" || fail 'rollback con contención R16 no quedó verificado'
+grep -Fq 'containment_flags=true' "$TEMP/pa-contain-ok.log" || fail 'rollback con contención no registró containment_flags=true'
+printf 'PASS: Price Audit Multiple corta explícitamente sin latest=100, protege ante unhealthy, restaura revisión previa y preserva recuperación con contención R16\n'
