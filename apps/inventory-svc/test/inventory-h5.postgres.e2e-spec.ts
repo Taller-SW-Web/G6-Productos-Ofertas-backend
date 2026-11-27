@@ -24,6 +24,22 @@ import {
   INVENTORY_QUEUES,
 } from '../src/messaging/service-bus-deliveries.js';
 import { InventoryServiceBusRelay } from '../src/messaging/service-bus-relay.js';
+import { InventoryServiceBusHandler } from '../src/messaging/service-bus-consumer.js';
+import { InventoryCommandService } from '../src/inbox/inventory-command.service.js';
+import { AbsoluteStockAdjustmentService } from '../src/bulk/absolute-stock-adjustment.service.js';
+import { IdempotencyService } from '../src/idempotency/idempotency.service.js';
+import { KardexService } from '../src/kardex/kardex.service.js';
+import { OutboxService } from '../src/outbox/outbox.service.js';
+import { DrizzleInboxRepository } from '../src/repositories/drizzle/drizzle-inbox.repository.js';
+import { DrizzleOperationsRepository } from '../src/repositories/drizzle/drizzle-operations.repository.js';
+import { DrizzleLocationsRepository } from '../src/repositories/drizzle/drizzle-locations.repository.js';
+import { DrizzleStockBalanceRepository } from '../src/repositories/drizzle/drizzle-stock-balance.repository.js';
+import { DrizzleKardexRepository } from '../src/repositories/drizzle/drizzle-kardex.repository.js';
+import { DrizzleOutboxRepository } from '../src/repositories/drizzle/drizzle-outbox.repository.js';
+import type {
+  ServiceBusReceivedMessage,
+  ServiceBusReceiver,
+} from '@azure/service-bus';
 
 const previousDatabaseUrl = process.env.DATABASE_URL;
 
@@ -179,10 +195,326 @@ GRANT inventory_app TO inventory_test;`,
 
     beforeAll(() => {
       process.env.MESSAGING_PROVIDER = 'AZURE_SERVICE_BUS';
+      process.env.G6_SERVICE_BUS_PILOT_ENABLED = 'true';
+      process.env.SERVICE_BUS_NAMESPACE_FQDN =
+        'isolated-test-bus.servicebus.windows.net';
+      process.env.INVENTORY_SERVICE_BUS_PUBLISH_ENABLED = 'true';
+      process.env.INVENTORY_SERVICE_BUS_CONSUME_ENABLED = 'false';
     });
 
     afterAll(() => {
       delete process.env.MESSAGING_PROVIDER;
+      delete process.env.G6_SERVICE_BUS_PILOT_ENABLED;
+      delete process.env.SERVICE_BUS_NAMESPACE_FQDN;
+      delete process.env.INVENTORY_SERVICE_BUS_PUBLISH_ENABLED;
+      delete process.env.INVENTORY_SERVICE_BUS_CONSUME_ENABLED;
+    });
+
+    it('R10 se rechaza con el check físico anterior y se registra tras la migración incremental repetible', async () => {
+      const eventId = randomUUID();
+      docker(
+        [
+          'exec',
+          '-i',
+          pgContainer,
+          'psql',
+          '-v',
+          'ON_ERROR_STOP=1',
+          '-U',
+          'inventory_test',
+          '-d',
+          'inventory_it',
+        ],
+        `ALTER TABLE inventory.outbox_delivery DROP CONSTRAINT ck_inventory_delivery_route;
+         ALTER TABLE inventory.outbox_delivery ADD CONSTRAINT ck_inventory_delivery_route CHECK (
+           route_version = 1 AND transport = 'AZURE_SERVICE_BUS' AND
+           destination IN ('g6.catalog.from.inventory', 'g6.combos.from.inventory', 'g6.promotions.from.inventory')
+         )`,
+      );
+      await database.query(
+        `INSERT INTO inventory.outbox
+           (event_id, event_type, aggregate_type, aggregate_id, payload, status, created_at)
+         VALUES ($1::uuid, 'inventory.bulk.stock.adjust.completed', 'bulk_stock_adjust', $1::text, '{}', 'PENDING', now())`,
+        [eventId],
+      );
+      await expect(
+        database.query(
+          `INSERT INTO inventory.outbox_delivery (message_id, destination)
+           VALUES ($1, 'g6.bulk.from.inventory')`,
+          [eventId],
+        ),
+      ).rejects.toThrow(/ck_inventory_delivery_route/);
+
+      const migration = await readFile(
+        new URL(
+          '../migrations-candidate/h5/0002_allow_bulk_r10_delivery.sql',
+          import.meta.url,
+        ),
+        'utf8',
+      );
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        docker(
+          [
+            'exec',
+            '-i',
+            pgContainer,
+            'psql',
+            '-v',
+            'ON_ERROR_STOP=1',
+            '-U',
+            'po_inventory_owner',
+            '-d',
+            'inventory_it',
+          ],
+          migration,
+        );
+      }
+      await database.query(
+        `INSERT INTO inventory.outbox_delivery (message_id, destination)
+         VALUES ($1, 'g6.bulk.from.inventory')`,
+        [eventId],
+      );
+      const saved = await database.query<{ destination: string }>(
+        'SELECT destination FROM inventory.outbox_delivery WHERE message_id = $1',
+        [eventId],
+      );
+      expect(saved.rows).toEqual([{ destination: INVENTORY_QUEUES.BULK }]);
+    });
+
+    it('R02 confirma stock, Inbox y R10 en una transacción antes del ACK del receptor aislado', async () => {
+      const sku = `R02-${randomUUID()}`;
+      const location = await database.query<{ id: string }>(
+        `INSERT INTO inventory.locations (code, name, type, active)
+         VALUES ($1, $1, 'TIENDA', true) RETURNING id`,
+        [`R02-${randomUUID()}`],
+      );
+      const locationId = location.rows[0]!.id;
+      await database.query(
+        `INSERT INTO inventory.stock_balance (sku_id, location_id, on_hand, reserved, blocked)
+         VALUES ($1, $2, 0, 0, 0)`,
+        [sku, locationId],
+      );
+
+      const operations = new DrizzleOperationsRepository(database);
+      const stock = new DrizzleStockBalanceRepository(database);
+      const idempotency = new IdempotencyService();
+      const outbox = new OutboxService(new DrizzleOutboxRepository(database));
+      const adjustment = new AbsoluteStockAdjustmentService(
+        database,
+        idempotency,
+        new KardexService(new DrizzleKardexRepository(database)),
+        outbox,
+        operations,
+        stock,
+      );
+      const command = new InventoryCommandService(
+        database,
+        idempotency,
+        outbox,
+        new DrizzleInboxRepository(database),
+        operations,
+        new DrizzleLocationsRepository(database),
+        stock,
+        adjustment,
+      );
+      const messageId = randomUUID();
+      const operationId = randomUUID();
+      const payload = {
+        message_id: messageId,
+        operation_id: operationId,
+        correlation_id: randomUUID(),
+        schema_version: 1,
+        occurred_at: new Date().toISOString(),
+        kind: 'command',
+        producer: 'bulk-svc',
+        name: 'inventory.bulk.stock.adjust.requested',
+        data: {
+          operation_id: operationId,
+          batch_id: randomUUID(),
+          row_operation_id: randomUUID(),
+          sku,
+          location_id: locationId,
+          target_on_hand: 15,
+          expected_stock_version: 0,
+          reason: 'BULK_INITIAL_STOCK',
+          requested_at: new Date().toISOString(),
+        },
+      };
+      const received = {
+        body: Buffer.from(JSON.stringify(payload)),
+        messageId,
+        subject: payload.name,
+        deliveryCount: 1,
+      } as ServiceBusReceivedMessage;
+      const settlement = {
+        completeMessage: vi.fn(async () => undefined),
+        abandonMessage: vi.fn(async () => undefined),
+        deadLetterMessage: vi.fn(async () => undefined),
+      };
+      const handler = new InventoryServiceBusHandler(
+        command,
+        settlement as Pick<
+          ServiceBusReceiver,
+          'completeMessage' | 'abandonMessage' | 'deadLetterMessage'
+        >,
+        async () => undefined,
+        'g6.inventory.from.bulk',
+      );
+      expect(await handler.handle(received)).toBe('completed');
+      expect(settlement.completeMessage).toHaveBeenCalledOnce();
+      const state = await database.query<{
+        on_hand: number;
+        stock_version: number;
+        inbox: number;
+        r10: number;
+        delivery: number;
+      }>(
+        `SELECT b.on_hand, b.stock_version::int AS stock_version,
+           (SELECT count(*)::int FROM inventory.inbox WHERE message_id = $3::uuid) AS inbox,
+           (SELECT count(*)::int FROM inventory.outbox WHERE event_type = 'inventory.bulk.stock.adjust.completed' AND payload->>'causation_id' = $3::text) AS r10,
+           (SELECT count(*)::int FROM inventory.outbox_delivery d JOIN inventory.outbox o ON o.event_id = d.message_id WHERE o.payload->>'causation_id' = $3::text AND d.destination = 'g6.bulk.from.inventory') AS delivery
+         FROM inventory.stock_balance b WHERE b.sku_id = $1 AND b.location_id = $2`,
+        [sku, locationId, messageId],
+      );
+      expect(state.rows[0]).toMatchObject({
+        on_hand: 15,
+        stock_version: 1,
+        inbox: 1,
+        r10: 1,
+        delivery: 1,
+      });
+      expect(await handler.handle(received)).toBe('completed');
+      expect(
+        (
+          await database.query<{ count: number }>(
+            `SELECT count(*)::int AS count FROM inventory.outbox WHERE event_type = 'inventory.bulk.stock.adjust.completed' AND payload->>'causation_id' = $1`,
+            [messageId],
+          )
+        ).rows[0]?.count,
+      ).toBe(1);
+
+      const retryId = randomUUID();
+      const retryOperation = randomUUID();
+      const retryPayload = {
+        ...payload,
+        message_id: retryId,
+        operation_id: retryOperation,
+        data: {
+          ...payload.data,
+          operation_id: retryOperation,
+          row_operation_id: randomUUID(),
+          target_on_hand: 20,
+          expected_stock_version: 1,
+        },
+      };
+      const retryMessage = {
+        ...received,
+        messageId: retryId,
+        body: Buffer.from(JSON.stringify(retryPayload)),
+      } as ServiceBusReceivedMessage;
+      delete process.env.SERVICE_BUS_NAMESPACE_FQDN;
+      try {
+        expect(await handler.handle(retryMessage)).toBe('abandoned');
+      } finally {
+        process.env.SERVICE_BUS_NAMESPACE_FQDN =
+          'isolated-test-bus.servicebus.windows.net';
+      }
+      const beforeRecovery = await database.query<{
+        on_hand: number;
+        count: number;
+      }>(
+        `SELECT b.on_hand,
+           (SELECT count(*)::int FROM inventory.inbox WHERE message_id = $3::uuid) AS count
+         FROM inventory.stock_balance b WHERE b.sku_id = $1 AND b.location_id = $2`,
+        [sku, locationId, retryId],
+      );
+      expect(beforeRecovery.rows[0]).toMatchObject({ on_hand: 15, count: 0 });
+      expect(await handler.handle(retryMessage)).toBe('completed');
+      expect(
+        (
+          await database.query<{ on_hand: number; stock_version: number }>(
+            `SELECT on_hand, stock_version::int AS stock_version FROM inventory.stock_balance
+         WHERE sku_id = $1 AND location_id = $2`,
+            [sku, locationId],
+          )
+        ).rows[0],
+      ).toEqual({ on_hand: 20, stock_version: 2 });
+
+      const collision = {
+        ...retryPayload,
+        message_id: randomUUID(),
+        data: { ...retryPayload.data, target_on_hand: 21 },
+      };
+      expect(
+        await handler.handle({
+          ...received,
+          messageId: collision.message_id,
+          body: Buffer.from(JSON.stringify(collision)),
+        } as ServiceBusReceivedMessage),
+      ).toBe('completed');
+      const collisionResult = await database.query<{
+        event_type: string;
+        code: string;
+      }>(
+        `SELECT event_type, payload->'data'->>'code' AS code FROM inventory.outbox
+         WHERE payload->>'causation_id' = $1`,
+        [collision.message_id],
+      );
+      expect(collisionResult.rows).toEqual([
+        {
+          event_type: 'inventory.bulk.stock.adjust.rejected',
+          code: 'IDEMPOTENCY_CONFLICT',
+        },
+      ]);
+      expect(
+        (
+          await database.query<{ on_hand: number }>(
+            `SELECT on_hand FROM inventory.stock_balance WHERE sku_id = $1 AND location_id = $2`,
+            [sku, locationId],
+          )
+        ).rows[0]?.on_hand,
+      ).toBe(20);
+
+      const stale = {
+        ...retryPayload,
+        message_id: randomUUID(),
+        operation_id: randomUUID(),
+        data: {
+          ...retryPayload.data,
+          operation_id: randomUUID(),
+          row_operation_id: randomUUID(),
+          target_on_hand: 25,
+          expected_stock_version: 1,
+        },
+      };
+      expect(
+        await handler.handle({
+          ...received,
+          messageId: stale.message_id,
+          body: Buffer.from(JSON.stringify(stale)),
+        } as ServiceBusReceivedMessage),
+      ).toBe('completed');
+      const staleResult = await database.query<{ code: string }>(
+        `SELECT payload->'data'->>'code' AS code FROM inventory.outbox
+         WHERE event_type = 'inventory.bulk.stock.adjust.rejected' AND payload->>'causation_id' = $1`,
+        [stale.message_id],
+      );
+      expect(staleResult.rows).toEqual([{ code: 'VERSION_STALE' }]);
+
+      const tampered = {
+        ...payload,
+        data: { ...payload.data, target_on_hand: 99 },
+      };
+      expect(
+        await handler.handle({
+          ...received,
+          body: Buffer.from(JSON.stringify(tampered)),
+        } as ServiceBusReceivedMessage),
+      ).toBe('dead-lettered');
+      expect(settlement.deadLetterMessage).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ deadLetterReason: 'INVALID_MESSAGE' }),
+      );
     });
 
     it('Outbox y Delivery se confirman o revierten en la misma transacción', async () => {

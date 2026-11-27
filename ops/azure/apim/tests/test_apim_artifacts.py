@@ -9,8 +9,8 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_DOCS_SHA = "099ad1926a53d1aec1aeae93e894d24ec2721748"
-EXPECTED_GATEWAY_SHA = "2eb8c864f8d315060cf00ccd35ce4015b9569556"
+EXPECTED_DOCS_SHA = "5f30802129ba4bbc0674dcc5878f10065f443118"
+EXPECTED_GATEWAY_SHA = "097dac1bf4a8dcf5c6e799742d2df340f6d893d5"
 SPEC = importlib.util.spec_from_file_location("filter_openapi", ROOT / "filter-openapi.py")
 FILTER = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -236,6 +236,8 @@ class ApimPolicyTests(unittest.TestCase):
             "maxConcurrency": 0,
         }
         self.parameters = {
+            "candidateApiName": "g6-h5-candidate",
+            "candidateApiPath": "h5-candidate/api/v1",
             "environmentTier": "lab",
             "expectedSubscriptionId": "sub-test",
             "expectedResourceGroup": "rg-lab",
@@ -272,6 +274,16 @@ class ApimPolicyTests(unittest.TestCase):
             expected_docs_sha=EXPECTED_DOCS_SHA,
             expected_gateway_sha=EXPECTED_GATEWAY_SHA,
         )
+        for unsafe in (
+            {"candidateApiName": "g6-productos-ofertas"},
+            {"candidateApiPath": "api/v1"},
+        ):
+            with self.subTest(unsafe=unsafe), self.assertRaises(ValueError):
+                PARAMS.validate(
+                    {**self.parameters, **unsafe}, self.filtered, self.manifest,
+                    expected_docs_sha=EXPECTED_DOCS_SHA,
+                    expected_gateway_sha=EXPECTED_GATEWAY_SHA,
+                )
         # Integración completa de preflight con Modalidad B (external=true Allow-only, vnetConfiguration=None)
         from datetime import datetime, timezone
 
@@ -355,11 +367,22 @@ class ApimPolicyTests(unittest.TestCase):
         self.assertIn("bytes: 0", bicep)
         self.assertIn("gatewayBackendUrl", bicep)
 
+    def test_candidate_api_and_named_values_do_not_use_operational_ids(self):
+        bicep = (ROOT / "main.bicep").read_text(encoding="utf-8")
+        secured = (ROOT / "policies" / "operation-secured.xml").read_text(encoding="utf-8")
+        self.assertIn("name: '${apimName}/${candidateApiName}'", bicep)
+        self.assertIn("path: candidateApiPath", bicep)
+        self.assertNotIn("name: '${apimName}/g6-productos-ofertas'", bicep)
+        for name in ("g7-openid-config-url", "g7-issuer", "g7-audience"):
+            self.assertIn(f"g6-h5-candidate-{name}", bicep)
+        self.assertIn("{{g6-h5-candidate-g7-openid-config-url}}", secured)
+        self.assertIn("{{g6-h5-candidate-g7-issuer}}", secured)
+
     def test_application_insights_logger_uses_secure_connection_and_system_identity(self):
         bicep = (ROOT / "main.bicep").read_text(encoding="utf-8")
         self.assertIn("Microsoft.ApiManagement/service/loggers@2022-08-01", bicep)
         logger_block = bicep.split("resource applicationInsightsLogger", 1)[1].split("resource apiDiagnostics", 1)[0]
-        self.assertIn("name: '${apimName}/applicationinsights'", logger_block)
+        self.assertIn("name: '${apimName}/g6-h5-candidate-applicationinsights'", logger_block)
         self.assertIn("apim", logger_block)
         self.assertIn("existingApim", logger_block)
         self.assertIn("loggerType: 'applicationInsights'", bicep)
@@ -456,7 +479,7 @@ class ApimPolicyTests(unittest.TestCase):
         api_policy = (ROOT / "policies" / "api.xml").read_text(encoding="utf-8")
         self.assertNotIn("rewrite-uri", api_policy)
         bicep = (ROOT / "main.bicep").read_text(encoding="utf-8")
-        self.assertIn("path: 'api/v1'", bicep)
+        self.assertIn("path: candidateApiPath", bicep)
 
 
 class CompiledArmTests(unittest.TestCase):
@@ -860,7 +883,7 @@ class ApimClosureRequirementsTests(unittest.TestCase):
                     "operationPolicies": {
                         "type": "Microsoft.ApiManagement/service/apis/operations/policies",
                         "copy": {"count": "[length(variables('authorizedOperations'))]"},
-                        "name": "[format('{0}/{1}/{2}/policy', parameters('apimName'), variables('apiName'), variables('authorizedOperations')[copyIndex()].apimOperationId)]",
+                        "name": "[format('{0}/{1}/{2}/policy', parameters('apimName'), parameters('candidateApiName'), variables('authorizedOperations')[copyIndex()].apimOperationId)]",
                         "dependsOn": ["api", "openIdNamedValue", "issuerNamedValue", "audienceNamedValue"],
                     },
                 },

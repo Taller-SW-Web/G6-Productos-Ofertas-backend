@@ -1,6 +1,6 @@
 {
-  "docsSha": "099ad1926a53d1aec1aeae93e894d24ec2721748",
-  "gatewaySha": "2eb8c864f8d315060cf00ccd35ce4015b9569556",
+  "docsSha": "5f30802129ba4bbc0674dcc5878f10065f443118",
+  "gatewaySha": "097dac1bf4a8dcf5c6e799742d2df340f6d893d5",
   "publicationMode": "candidate",
   "securityProfile": "UNSPECIFIED",
   "enabledProviders": [],
@@ -3957,7 +3957,8 @@
           "allowedClients": [
             "modulo-chatbot",
             "modulo-marketplace",
-            "modulo-retail"
+            "modulo-retail",
+            "modulo-ventas"
           ],
           "clientAllowlistStatus": "CONTRACT_DEFINED",
           "introspectionRequired": false
@@ -3975,7 +3976,8 @@
       "allowedClients": [
         "modulo-chatbot",
         "modulo-marketplace",
-        "modulo-retail"
+        "modulo-retail",
+        "modulo-ventas"
       ],
       "clientAllowlistStatus": "CONTRACT_DEFINED",
       "m2mAlternativeExcludedReason": null,
@@ -7353,5 +7355,5 @@
     }
   ],
   "operationSetSha256": "ee7b318011ff845770f2baee07fda13808f0f60372420abc6d2eef222a274cc9",
-  "filteredOpenApiCanonicalSha256": "40b0486b03b9a5f7aff3a5af120010e046556a8855de51c24aac0f4a42d59044"
+  "filteredOpenApiCanonicalSha256": "d07e05b2531914ca11e9eaee641821fdcc09febfd4ed1ac65642b1be8d28a160"
 }

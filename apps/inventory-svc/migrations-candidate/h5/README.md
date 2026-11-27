@@ -2,6 +2,13 @@
 
 `0001_outbox_delivery.sql` define la tabla `inventory.outbox_delivery` para soportar la entrega punto a punto hacia Azure Service Bus Basic (sin tópicos ni suscripciones).
 
+`0002_allow_bulk_r10_delivery.sql` es una migración incremental **NO APLICADA** para
+admitir el destino contractual R10 `g6.bulk.from.inventory` sin modificar la tabla ni
+los tres destinos previos. Incluye guard de owner, timeouts y validación antes de
+intercambiar la constraint. `0002_allow_bulk_r10_delivery.rollback.sql` exige que no
+existan entregas Bulk. Preparar esta ruta no activa R02/R10: el runtime de Inventory
+en `master` aún bloquea el comando R02 y no registra entregas R10.
+
 ## Características
 1. **No destructiva**: No altera migraciones H4 existentes, no realiza backfills y nunca se ejecuta en el bootstrap de la aplicación.
 2. **Destinos aprobados (G6 Basic)**:

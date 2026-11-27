@@ -339,6 +339,9 @@ export class DisposableCatalogBroker {
     }
     throw new Error('Joint requested message not delivered');
   }
+  async purge(queue: string): Promise<void> {
+    await this.channel!.purgeQueue(queue);
+  }
   async result(
     producer: 'inventory' | 'pricing',
     body: Record<string, unknown>,

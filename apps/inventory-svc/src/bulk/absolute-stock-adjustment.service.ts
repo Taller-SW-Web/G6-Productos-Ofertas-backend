@@ -55,7 +55,7 @@ export class AbsoluteStockAdjustmentService {
 
   /**
    * Applies an absolute on_hand target under a version lock. It is deliberately
-   * not wired to AMQP until Bulk publishes an approved typed command schema.
+   * Used by the typed R02 Service Bus command handler; legacy AMQP remains separate.
    */
   async apply(
     input: AbsoluteStockAdjustment,

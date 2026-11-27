@@ -17051,7 +17051,7 @@
           "Marketplace",
           "Chatbot",
           "Retail",
-          "Ventas/Postventa"
+          "Ventas"
         ],
         "x-service-audience": "api-productos",
         "x-required-scope": "catalogo:leer",
@@ -17509,7 +17509,8 @@
         "x-allowed-client-ids": [
           "modulo-marketplace",
           "modulo-chatbot",
-          "modulo-retail"
+          "modulo-retail",
+          "modulo-ventas"
         ],
         "description": "Lectura comercial. Los consumidores de servicio deben informar canal y solo reciben productos ACTIVO y comercialmente elegibles para ese canal. El par\u00e1metro estado no habilita a un canal a consultar BORRADOR/INACTIVO. La respuesta usa una proyecci\u00f3n comercial sin flags administrativos."
       }
@@ -47398,8 +47399,8 @@
     "forbidden_source": "service-token sub/client_id"
   },
   "x-apim-filter": {
-    "docsSha": "099ad1926a53d1aec1aeae93e894d24ec2721748",
-    "gatewaySha": "2eb8c864f8d315060cf00ccd35ce4015b9569556",
+    "docsSha": "5f30802129ba4bbc0674dcc5878f10065f443118",
+    "gatewaySha": "097dac1bf4a8dcf5c6e799742d2df340f6d893d5",
     "g5EnabledByDefault": false,
     "privateOperationCount": 5,
     "publicationMode": "candidate",

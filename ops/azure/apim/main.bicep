@@ -53,8 +53,11 @@ param applicationInsightsConnectionString string
 param expectedOperationSetSha256 string
 @description('SHA-256 esperado del OpenAPI filtrado efectivo autorizado.')
 param expectedFilteredOpenApiSha256 string
+@description('ID aislado para la API candidata; nunca la API operativa.')
+param candidateApiName string = 'g6-h5-candidate'
+@description('Ruta de ensayo aislada; no reemplaza api/v1.')
+param candidateApiPath string = 'h5-candidate/api/v1'
 
-var apiName = 'g6-productos-ofertas'
 var operationsManifest = loadJsonContent('./openapi/operation-security.json')
 var fixedFilteredOpenApiObject = loadJsonContent('./openapi/gateway-filtered.compact.json')
 var fixedFilteredOpenApi = string(fixedFilteredOpenApiObject)
@@ -93,14 +96,14 @@ resource existingApim 'Microsoft.ApiManagement/service@2022-08-01' existing = if
 }
 
 resource api 'Microsoft.ApiManagement/service/apis@2022-08-01' = if (publicationGatePassed && !empty(authorizedOperations)) {
-  name: '${apimName}/${apiName}'
+  name: '${apimName}/${candidateApiName}'
   dependsOn: [
     apim
     existingApim
   ]
   properties: {
     displayName: 'G6 Productos y Ofertas'
-    path: 'api/v1'
+    path: candidateApiPath
     protocols: [
       'https'
     ]
@@ -112,39 +115,39 @@ resource api 'Microsoft.ApiManagement/service/apis@2022-08-01' = if (publication
 }
 
 resource openIdNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-01' = if (publicationGatePassed && !empty(authorizedOperations)) {
-  name: '${apimName}/g7-openid-config-url'
+  name: '${apimName}/g6-h5-candidate-g7-openid-config-url'
   dependsOn: [
     apim
     existingApim
   ]
   properties: {
-    displayName: 'g7-openid-config-url'
+    displayName: 'g6-h5-candidate-g7-openid-config-url'
     value: g7OpenIdConfigurationUrl
     secret: false
   }
 }
 
 resource issuerNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-01' = if (publicationGatePassed && !empty(authorizedOperations)) {
-  name: '${apimName}/g7-issuer'
+  name: '${apimName}/g6-h5-candidate-g7-issuer'
   dependsOn: [
     apim
     existingApim
   ]
   properties: {
-    displayName: 'g7-issuer'
+    displayName: 'g6-h5-candidate-g7-issuer'
     value: g7Issuer
     secret: false
   }
 }
 
 resource audienceNamedValue 'Microsoft.ApiManagement/service/namedValues@2022-08-01' = if (publicationGatePassed && !empty(authorizedOperations)) {
-  name: '${apimName}/g7-audience'
+  name: '${apimName}/g6-h5-candidate-g7-audience'
   dependsOn: [
     apim
     existingApim
   ]
   properties: {
-    displayName: 'g7-audience'
+    displayName: 'g6-h5-candidate-g7-audience'
     value: g7Audience
     secret: false
   }
@@ -160,7 +163,7 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2022-08-01' = 
 }
 
 resource operationPolicies 'Microsoft.ApiManagement/service/apis/operations/policies@2022-08-01' = [for operation in authorizedOperations: {
-  name: '${apimName}/${apiName}/${operation.apimOperationId}/policy'
+  name: '${apimName}/${candidateApiName}/${operation.apimOperationId}/policy'
   dependsOn: [
     api
     openIdNamedValue
@@ -226,7 +229,7 @@ resource operationPolicies 'Microsoft.ApiManagement/service/apis/operations/poli
 }]
 
 resource applicationInsightsLogger 'Microsoft.ApiManagement/service/loggers@2022-08-01' = if (publicationGatePassed && !empty(authorizedOperations)) {
-  name: '${apimName}/applicationinsights'
+  name: '${apimName}/g6-h5-candidate-applicationinsights'
   dependsOn: [
     apim
     existingApim
@@ -244,7 +247,7 @@ resource applicationInsightsLogger 'Microsoft.ApiManagement/service/loggers@2022
 
 resource apiDiagnostics 'Microsoft.ApiManagement/service/apis/diagnostics@2022-08-01' = if (publicationGatePassed && !empty(authorizedOperations)) {
   parent: api
-  name: 'applicationinsights'
+  name: 'g6-h5-candidate-applicationinsights'
   properties: {
     alwaysLog: 'allErrors'
     loggerId: applicationInsightsLogger.id
