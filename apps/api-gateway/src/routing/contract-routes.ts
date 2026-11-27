@@ -9,7 +9,12 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer', 'serviceBearer'],
     scope: 'catalogo:leer',
     audience: 'api-productos',
-    clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
+    clients: [
+      'modulo-marketplace',
+      'modulo-chatbot',
+      'modulo-retail',
+      'modulo-ventas',
+    ],
     introspection: false,
     headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],

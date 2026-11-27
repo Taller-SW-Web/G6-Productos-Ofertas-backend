@@ -7312,7 +7312,8 @@
       "clients": [
         "modulo-chatbot",
         "modulo-marketplace",
-        "modulo-retail"
+        "modulo-retail",
+        "modulo-ventas"
       ],
       "role": null,
       "introspection": false,
