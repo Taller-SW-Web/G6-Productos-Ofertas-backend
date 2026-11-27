@@ -70,6 +70,7 @@ export class BulkOutboxRelay implements OnModuleInit, OnModuleDestroy {
       const channel = await this.getChannel();
       const pending = await this.repository.findPendingOutbox(50, true);
       for (const item of pending) {
+        if (item.eventName !== CATALOG_UPSERT) continue;
         const payload = Buffer.from(JSON.stringify(item.payload), 'utf8');
         this.returned.delete(item.messageId);
         const accepted = channel.publish(EXCHANGE, item.eventName, payload, {

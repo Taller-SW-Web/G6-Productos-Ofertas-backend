@@ -767,7 +767,9 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
     });
     const row = admitted.parsed.rows[0]!;
     const command = (await repository.findPendingOutbox(10)).find(
-      (item) => item.correlationId === correlationId,
+      (item) =>
+        item.correlationId === correlationId &&
+        item.eventName === 'catalog.bulk.upsert.requested',
     )!;
     const resultMessageId = id();
     const envelope = {

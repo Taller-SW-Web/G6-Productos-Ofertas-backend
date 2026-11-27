@@ -366,9 +366,9 @@ describe.skipIf(!dockerAvailable)(
       60000,
     );
 
-    it('uses PUBLIC_READ_ONLY readiness in HTTP and CLI, and fails closed on missing privileges or relations', async () => {
+    it('uses G7_AUTHENTICATED readiness in HTTP and CLI, and fails closed on missing privileges or relations', async () => {
       const port = await freePort();
-      const env = environment('session', port, true);
+      const env = environment('session', port, false);
       const child = spawn(process.execPath, [main], {
         cwd: directory,
         env,
@@ -401,12 +401,7 @@ describe.skipIf(!dockerAvailable)(
           base +
             '/api/v1/productos?canal=MARKETPLACE&pagina=1&tamanio=1&orden=NOMBRE_ASC',
         );
-        expect(commercial.status).toBe(200);
-        expect(await commercial.json()).toMatchObject({
-          items: [],
-          pagina: 1,
-          tamanio: 1,
-        });
+        expect(commercial.status).toBe(401);
 
         const cli = spawnSync(
           process.execPath,

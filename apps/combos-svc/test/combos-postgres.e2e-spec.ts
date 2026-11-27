@@ -902,7 +902,7 @@ describe.skipIf(!isolatedHarnessEnabled)(
         )
         .expect(200);
       process.env.G6_SECURITY_MODE = 'G7_AUTHENTICATED';
-      process.env.COMBOS_ALLOWED_CLIENTS_COMBOS_READ = 'modulo-productos';
+      process.env.COMBOS_ALLOWED_CLIENTS_COMBOS_READ = 'modulo-marketplace';
       try {
         await request(app.getHttpServer()).get('/api/v1/combos').expect(401);
         await calls[2]!()
@@ -914,7 +914,7 @@ describe.skipIf(!isolatedHarnessEnabled)(
         await calls[2]!()
           .set(
             'Authorization',
-            `Bearer ${makeToken('servicio', 'combos:leer')}`,
+            `Bearer ${makeToken('servicio', 'combos:leer', { sub: 'modulo-marketplace' })}`,
           )
           .expect(200);
         await calls[4]!()

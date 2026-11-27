@@ -2741,46 +2741,21 @@ describeIntegracion(
       }
     });
 
-    it('PUBLIC_READ_ONLY expone solo las dos lecturas aprobadas y mantiene protegidas escrituras', async () => {
-      const fixture = await Test.createTestingModule({
-        imports: [
-          TaxonomySvcModule.forRoot({
-            databaseUrl: urlApp,
-            env: {
-              NODE_ENV: 'test',
-              G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
-              TAXONOMY_PUBLIC_OPERATION_IDS: 'listarCategorias,listarMarcas',
-            },
-          }),
-        ],
-      }).compile();
-      const demo = fixture.createNestApplication();
-      await demo.init();
-      try {
-        for (const [path, key] of [
-          ['categorias', 'categories'],
-          ['marcas', 'brands'],
-        ] as const) {
-          const response = await request(demo.getHttpServer())
-            .get(`/api/v1/${path}`)
-            .expect(200);
-          expect(response.body[key].length).toBeGreaterThan(0);
-          expect(
-            response.body[key].every(
-              (row: { status: string }) => row.status === 'ACTIVA',
-            ),
-          ).toBe(true);
-        }
-        await request(demo.getHttpServer())
-          .post('/api/v1/categorias')
-          .send({ nombre: 'Sin autorización' })
-          .expect(401);
-        await request(demo.getHttpServer())
-          .get('/api/v1/categorias/administracion')
-          .expect(401);
-      } finally {
-        await demo.close();
-      }
+    it('rechaza PUBLIC_READ_ONLY bajo política universal G7', async () => {
+      await expect(
+        Test.createTestingModule({
+          imports: [
+            TaxonomySvcModule.forRoot({
+              databaseUrl: urlApp,
+              env: {
+                NODE_ENV: 'test',
+                G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+                TAXONOMY_PUBLIC_OPERATION_IDS: 'listarCategorias,listarMarcas',
+              },
+            }),
+          ],
+        }).compile(),
+      ).rejects.toThrow('Configuración de demo Taxonomy inválida');
     });
 
     it('la migración de configuración inicializa 60 segundos y respeta un valor existente', async () => {

@@ -59,11 +59,8 @@ describe('Inventory comercial demo — HTTP real, persistencia de prueba (#25/#1
     });
   beforeAll(async () => {
     vi.stubEnv('RABBITMQ_URL', undefined);
-    vi.stubEnv('G6_SECURITY_MODE', 'PUBLIC_READ_ONLY');
-    vi.stubEnv(
-      'INVENTORY_PUBLIC_OPERATION_IDS',
-      'consultarDisponibilidadComercial',
-    );
+    vi.stubEnv('G6_SECURITY_MODE', 'G7_AUTHENTICATED');
+    vi.stubEnv('INVENTORY_PUBLIC_OPERATION_IDS', '');
     vi.stubEnv('G7_JWT_ISSUER', TEST_ISSUER);
     InventoryAuthGuard.setTrustedPublicKey(TEST_PUBLIC_KEY);
     db = new InMemoryDatabaseMock();
@@ -88,11 +85,8 @@ describe('Inventory comercial demo — HTTP real, persistencia de prueba (#25/#1
     vi.restoreAllMocks();
     db.seedDefaults();
     incoming = [];
-    vi.stubEnv('G6_SECURITY_MODE', 'PUBLIC_READ_ONLY');
-    vi.stubEnv(
-      'INVENTORY_PUBLIC_OPERATION_IDS',
-      'consultarDisponibilidadComercial',
-    );
+    vi.stubEnv('G6_SECURITY_MODE', 'G7_AUTHENTICATED');
+    vi.stubEnv('INVENTORY_PUBLIC_OPERATION_IDS', '');
     db.commercialRoutes.push(
       ...channels.map((channel_id, index) => ({
         id: `route-${index}`,
@@ -111,12 +105,16 @@ describe('Inventory comercial demo — HTTP real, persistencia de prueba (#25/#1
   });
 
   it.each(channels)(
-    'expone GET %s anónimo y protege POST de consulta con identidad válida',
+    'expone GET %s autenticado y protege POST de consulta con identidad válida',
     async (channel) => {
       const before = state();
       const transaction = vi.spyOn(db, 'transaction');
+      await request(origin)
+        .get(`${commercial}?skus=${sku}&canal=${channel}`)
+        .expect(401);
       const get = await request(origin)
         .get(`${commercial}?skus=${sku}&canal=${channel}`)
+        .set('Authorization', serviceAuthorization(channel))
         .expect(200);
       expect(get.body).toEqual({ items: [{ sku, status: 'DISPONIBLE' }] });
       await request(origin).post(verify).send(input(channel)).expect(401);
@@ -269,11 +267,13 @@ describe('Inventory comercial demo — HTTP real, persistencia de prueba (#25/#1
     );
     const res = await request(origin)
       .get(`${commercial}?skus=${sku}&canal=MARKETPLACE`)
+      .set('Authorization', serviceAuthorization())
       .expect(503);
     expect(res.body.code).toBe('SERVICIO_NO_DISPONIBLE');
     expect(JSON.stringify(res.body)).not.toContain('host-privado');
     await request(origin)
       .get(`${commercial}?skus=${sku}&canal=MARKETPLACE`)
+      .set('Authorization', serviceAuthorization())
       .expect(200);
   });
 

@@ -15,6 +15,7 @@ import type {
 import type { Database } from '../../apps/taxonomy-svc/src/database.js';
 import { CategorySeoService } from '../../apps/taxonomy-svc/src/domain/category-seo.service.js';
 import { DeactivationIntentService } from '../../apps/taxonomy-svc/src/domain/deactivation-intent.service.js';
+import { TaxonomyAmqpRuntime } from '../../apps/taxonomy-svc/src/domain/taxonomy-amqp.runtime.js';
 import { Database as CatalogDatabase } from '../../apps/catalog-svc/src/database.js';
 import { CatalogMessageService } from '../../apps/catalog-svc/src/catalog-message.service.js';
 import type { CatalogEnvelope } from '../../apps/catalog-svc/src/catalog-messages.js';

@@ -133,6 +133,7 @@ describe('Issue #50 authenticated real Gateway → real Catalog (cryptographic f
             'listarProductos',
             'obtenerProducto',
             'obtenerProductoPorSlug',
+            'listarVariantesProducto',
           ].includes(_id)
         ) {
           const denied = await harness.call(

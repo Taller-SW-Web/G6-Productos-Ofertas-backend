@@ -9,8 +9,8 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_DOCS_SHA = "490172c11cb4b83ddd1996f8d5834d0402184cf8"
-EXPECTED_GATEWAY_SHA = "1b90543dc39a8919fd94f0e059d10e1002b3b2a9"
+EXPECTED_DOCS_SHA = "099ad1926a53d1aec1aeae93e894d24ec2721748"
+EXPECTED_GATEWAY_SHA = "2eb8c864f8d315060cf00ccd35ce4015b9569556"
 SPEC = importlib.util.spec_from_file_location("filter_openapi", ROOT / "filter-openapi.py")
 FILTER = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -689,7 +689,7 @@ class ApimClosureRequirementsTests(unittest.TestCase):
             FILTER.filter_spec(spec, routes, [], False, "d", "g", effective_publish=True)
 
         # APIM-R3-01: human_or_m2m con M2M pendiente se bloquea por defecto (sin allow_human_only_when_m2m_pending)
-        with self.assertRaisesRegex(ValueError, "PUBLIC_READ_ONLY retirado bajo política universal G7"):
+        with self.assertRaisesRegex(ValueError, "Publicación efectiva bloqueada"):
             FILTER.filter_spec(
                 spec,
                 routes,
