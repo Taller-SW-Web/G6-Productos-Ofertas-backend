@@ -87,7 +87,7 @@ foreach ($mode in @('Diagnostic','Smoke')) {
         if ($mode -eq 'Diagnostic') {
             Assert-True ($actualLabels.Count -eq 1 -and $actualLabels[0] -eq 'h5-runner-preflight-only' -and $actualLabels -notcontains 'azure-h5-smoke') 'Diagnostic labels incorrect or can match CD'
         } else {
-            Assert-True ($actualLabels.Count -eq 2 -and $actualLabels -contains 'linux' -and $actualLabels -contains 'azure-h5-smoke') 'Smoke labels incorrect'
+            Assert-True ($actualLabels.Count -eq 3 -and $actualLabels -contains 'self-hosted' -and $actualLabels -contains 'linux' -and $actualLabels -contains 'azure-h5-smoke') 'Smoke labels incorrect'
         }
     } finally { $doc.Dispose() }
 }

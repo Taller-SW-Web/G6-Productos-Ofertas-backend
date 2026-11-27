@@ -32,7 +32,7 @@ if [[ "${H5_DEPLOY_DESTINATION:-}" == chile-shared ]]; then
     [[ "$service" == api-gateway ]] || { echo 'FALLO: perfil etiquetado solo corresponde a api-gateway.' >&2; exit 1; }
     jq -e --arg service "$service" --arg run "${GITHUB_RUN_ID:-}" --arg id "$expected_id" --arg url "$base" '
       .destination == "chile-shared" and .github_environment == "azure-h5-chile" and .aca_environment == "env-g6-phase1-chile" and
-      .service == $service and .workflow_run_id == $run and .app_resource_id == $id and .route_profile == "g5-labelled" and
+      .service == $service and .workflow_run_id == $run and (.app_resource_id | ascii_downcase) == ($id | ascii_downcase) and .route_profile == "g5-labelled" and
       .route_mode == "revision_label" and .g5_label == "g5-h5" and .g5_label_url == $url and
       (.marketplace_revision | type == "string" and length > 0) and .marketplace_traffic_weight == 100 and
       (.target | test("^ghcr\\.io/taller-sw-web/g6-productos-ofertas-backend/api-gateway@sha256:[0-9a-f]{64}$")) and
@@ -42,7 +42,7 @@ if [[ "${H5_DEPLOY_DESTINATION:-}" == chile-shared ]]; then
   else
     jq -e --arg service "$service" --arg run "${GITHUB_RUN_ID:-}" --arg id "$expected_id" --arg url "$base" '
       .destination == "chile-shared" and .github_environment == "azure-h5-chile" and .aca_environment == "env-g6-phase1-chile" and
-      .service == $service and .workflow_run_id == $run and .app_resource_id == $id and .origin_https == $url and
+      .service == $service and .workflow_run_id == $run and (.app_resource_id | ascii_downcase) == ($id | ascii_downcase) and .origin_https == $url and
       (.target | test("^ghcr\\.io/taller-sw-web/g6-productos-ofertas-backend/" + $service + "@sha256:[0-9a-f]{64}$")) and
       .digest_candidate == (.target | split("@")[1]) and .served_digest == .digest_candidate and
       (.served_revision | type == "string" and length > 0) and .traffic_weight == 100

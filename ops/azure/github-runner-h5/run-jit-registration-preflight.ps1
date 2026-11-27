@@ -241,15 +241,20 @@ function Get-ApprovedSmokeMatrix {
     if ($WorkflowRunId -le 0) { throw 'SMOKE_RUN_ID_REQUIRED: Mode Smoke requires one official CD workflow run ID.' }
     $run = Invoke-GhJson @('api',"repos/$Repository/actions/runs/$WorkflowRunId")
     $master = Invoke-GhJson @('api',"repos/$Repository/commits/master")
-    if ($run.path -ne '.github/workflows/cd-services-azure.yml' -or $run.event -ne 'workflow_dispatch' -or $run.head_branch -cne 'master' -or $run.head_sha -cne $master.sha -or $run.status -ne 'in_progress') {
+    if ($run.path -ne '.github/workflows/cd-services-azure.yml' -or $run.event -ne 'workflow_dispatch' -or $run.head_branch -cne 'master' -or $run.head_sha -cne $master.sha -or $run.status -notin @('queued','in_progress')) {
         throw 'SMOKE_RUN_NOT_AUTHORIZED: expected the active official workflow_dispatch from the current master SHA.'
     }
     foreach ($status in @('queued','in_progress')) {
         $runs = Invoke-GhJson @('api',"repos/$Repository/actions/workflows/$WorkflowId/runs?status=$status&per_page=100")
         $rivalRuns = @($runs.workflow_runs | Where-Object { [long]$_.id -ne $WorkflowRunId })
         if ($rivalRuns.Count -gt 0) { throw "CD_RIVAL_RUN: another official CD run is $status; refusing the smoke runner." }
-        if ($status -eq 'queued' -and $runs.total_count -gt 0) { throw 'CD_RUN_QUEUED: queued CD work exists; refusing the smoke runner.' }
-        if ($status -eq 'in_progress' -and @($runs.workflow_runs | Where-Object { [long]$_.id -eq $WorkflowRunId }).Count -ne 1) {
+        if ($status -eq 'queued') {
+            if ($run.status -eq 'in_progress' -and $runs.total_count -gt 0) { throw 'CD_RUN_QUEUED: queued CD work exists; refusing the smoke runner.' }
+            if ($run.status -eq 'queued' -and @($runs.workflow_runs | Where-Object { [long]$_.id -eq $WorkflowRunId }).Count -ne 1) {
+                throw 'SMOKE_RUN_NOT_ACTIVE: requested official CD run is absent from queued runs.'
+            }
+        }
+        if ($status -eq 'in_progress' -and $run.status -eq 'in_progress' -and @($runs.workflow_runs | Where-Object { [long]$_.id -eq $WorkflowRunId }).Count -ne 1) {
             throw 'SMOKE_RUN_NOT_ACTIVE: requested official CD run is absent from in-progress runs.'
         }
     }
@@ -269,18 +274,28 @@ function Get-ApprovedSmokeMatrix {
     } elseif (@($plan.Services | Where-Object { $_ -cne $runService }).Count -gt 0 -or $plan.Services.Count -ne 1) {
         throw 'SMOKE_RUN_SERVICE_MISMATCH: successful deploy jobs differ from the service in official run-name.'
     }
-    $deployments = Invoke-GhJson @('api',"repos/$Repository/deployments?ref=$($run.head_sha)&environment=$GitHubEnvironment&per_page=100")
-    $runCreatedAt = [DateTimeOffset]::Parse([string]$run.created_at)
+    $deployments = Invoke-GhJson @('api',"repos/$Repository/deployments?sha=$($run.head_sha)&environment=$GitHubEnvironment&per_page=100")
+    $runCreatedAt = [DateTimeOffset]::Parse([string]$run.created_at, [System.Globalization.CultureInfo]::InvariantCulture)
     $matching = @($deployments | Where-Object {
         $_.environment -ceq $GitHubEnvironment -and $_.sha -ceq $run.head_sha -and
-        [DateTimeOffset]::Parse([string]$_.created_at) -ge $runCreatedAt
+        [DateTimeOffset]::Parse([string]$_.created_at, [System.Globalization.CultureInfo]::InvariantCulture) -ge $runCreatedAt
     })
     if ($matching.Count -lt $deployJobs.Count) { throw "SMOKE_ENVIRONMENT_NOT_VERIFIED: deployment objects do not cover every selected job in $GitHubEnvironment after this run began." }
+    $successfulDeployments = 0
     foreach ($deployment in $matching) {
         $statuses = Invoke-GhJson @('api',"repos/$Repository/deployments/$($deployment.id)/statuses?per_page=1")
-        if (@($statuses).Count -eq 0 -or $statuses[0].state -ne 'success') { throw "SMOKE_ENVIRONMENT_DEPLOYMENT_NOT_SUCCESSFUL: a matched $GitHubEnvironment deployment lacks a successful latest status." }
+        if (@($statuses).Count -eq 0) { throw "SMOKE_ENVIRONMENT_DEPLOYMENT_NOT_SUCCESSFUL: a matched $GitHubEnvironment deployment lacks a status." }
+        $latestState = [string]$statuses[0].state
+        if ($latestState -eq 'success') { $successfulDeployments++ }
+        elseif ($latestState -notin @('queued','in_progress')) { throw "SMOKE_ENVIRONMENT_DEPLOYMENT_NOT_SUCCESSFUL: a matched $GitHubEnvironment deployment has state '$latestState'." }
     }
+    if ($successfulDeployments -lt $deployJobs.Count) { throw "SMOKE_ENVIRONMENT_DEPLOYMENT_NOT_SUCCESSFUL: successful $GitHubEnvironment deployments ($successfulDeployments) do not cover deploy jobs ($($deployJobs.Count))." }
+    $pendingDeployments = @(Invoke-GhJson @('api',"repos/$Repository/actions/runs/$WorkflowRunId/pending_deployments"))
+    if ($pendingDeployments.Count -gt 0) { throw "SMOKE_ENVIRONMENT_APPROVAL_PENDING: $GitHubEnvironment approval is still pending for run $WorkflowRunId." }
     $completedSmoke = @($plan.Services | Where-Object { $_ -notin (Get-PendingSmokeServices -SmokeJobs $plan.SmokeJobs) })
+    if ($run.status -eq 'queued' -and @(Get-PendingSmokeServices -SmokeJobs $plan.SmokeJobs).Count -eq 0) {
+        throw 'SMOKE_RUN_QUEUED_WITHOUT_PENDING_SMOKE: queued run has no pending smoke jobs.'
+    }
     return [pscustomobject]@{Run=$run;Plan=$plan;Completed=$completedSmoke}
 }
 

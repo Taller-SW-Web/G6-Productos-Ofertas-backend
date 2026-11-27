@@ -237,4 +237,35 @@ grep -Fq 'PASS ruta protegida sin credenciales' "$TEMP/g5-label-pass.log"
 [[ -s "$CURL_LOG" ]] || { echo 'FAIL: G5 labelled URL no reached HTTP checks' >&2; exit 1; }
 jq '.marketplace_traffic_weight=50' "$receipt" > "$receipt.tmp" && mv "$receipt.tmp" "$receipt"
 expect_no_http 'Marketplace route not at 100% in G5 labelled receipt'
+
+# Case-insensitive ARM resource ID normalization + required negative receipt checks (both profiles).
+service=price-audit-svc
+origin=https://price-audit-svc.internal.chilecentral.azurecontainerapps.io
+target='ghcr.io/taller-sw-web/g6-productos-ofertas-backend/price-audit-svc@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
+resource_id='/subscriptions/fef42188-accd-4470-ae88-78f583eb4906/resourceGroups/rg-g6-aca-chile/providers/Microsoft.App/containerapps/price-audit-svc'
+export SMOKE_URL="$origin" SMOKE_PROTECTED_PATH=/private/read H5_GATEWAY_ROUTE_PROFILE=standard MOCK_HEALTH_SERVICE=price-audit-svc
+make_receipt chile-shared azure-h5-chile price-audit-svc 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
+rm -f "$CURL_LOG"
+PATH="$TEMP:$PATH" bash "$ROOT/ops/azure/container-apps/smoke-service.sh" price-audit-svc > "$TEMP/case-pass.log"
+[[ -s "$CURL_LOG" ]] || { echo 'FAIL: lowercase containerapps ARM resource ID was rejected' >&2; exit 1; }
+jq '.app_resource_id="/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-g6-aca-chile/providers/Microsoft.App/containerapps/price-audit-svc"' "$receipt" > "$receipt.tmp" && mv "$receipt.tmp" "$receipt"
+expect_no_http 'other subscription'
+make_receipt chile-shared azure-h5-chile price-audit-svc 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
+jq '.app_resource_id="/subscriptions/fef42188-accd-4470-ae88-78f583eb4906/resourceGroups/rg-other/providers/Microsoft.App/containerapps/price-audit-svc"' "$receipt" > "$receipt.tmp" && mv "$receipt.tmp" "$receipt"
+expect_no_http 'other resource group'
+make_receipt chile-shared azure-h5-chile price-audit-svc 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
+jq '.app_resource_id="/subscriptions/fef42188-accd-4470-ae88-78f583eb4906/resourceGroups/rg-g6-aca-chile/providers/Microsoft.App/containerapps/other-svc"' "$receipt" > "$receipt.tmp" && mv "$receipt.tmp" "$receipt"
+expect_no_http 'other container app'
+make_receipt chile-shared azure-h5-chile price-audit-svc 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
+jq '.workflow_run_id="11111"' "$receipt" > "$receipt.tmp" && mv "$receipt.tmp" "$receipt"
+expect_no_http 'other workflow run'
+
+service=api-gateway
+target='ghcr.io/taller-sw-web/g6-productos-ofertas-backend/api-gateway@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+resource_id='/subscriptions/fef42188-accd-4470-ae88-78f583eb4906/resourceGroups/rg-g6-aca-chile/providers/Microsoft.App/containerapps/api-gateway'
+jq -n --arg service "$service" --arg run "$run_id" --arg target "$target" --arg id "$resource_id" --arg url "$label_url" '{destination:"chile-shared",github_environment:"azure-h5-chile",aca_environment:"env-g6-phase1-chile",service:$service,workflow_run_id:$run,app_resource_id:$id,target:$target,digest_candidate:($target|split("@")[1]),served_digest:($target|split("@")[1]),served_revision:"api-gateway--g5candidate",route_profile:"g5-labelled",route_mode:"revision_label",g5_label:"g5-h5",g5_label_url:$url,marketplace_revision:"api-gateway--g3sec1125a",marketplace_traffic_weight:100}' > "$receipt"
+export SMOKE_URL="$label_url" SMOKE_PROTECTED_PATH=/private/read H5_GATEWAY_ROUTE_PROFILE=g5-labelled MOCK_HEALTH_SERVICE=api-gateway
+rm -f "$CURL_LOG"
+PATH="$TEMP:$PATH" bash "$ROOT/ops/azure/container-apps/smoke-service.sh" api-gateway > "$TEMP/g5-case-pass.log"
+[[ -s "$CURL_LOG" ]] || { echo 'FAIL: lowercase containerapps ARM resource ID rejected for g5-labelled' >&2; exit 1; }
 echo 'PASS: G5 label smoke uses its isolated URL and requires the same-run Marketplace 100% receipt'

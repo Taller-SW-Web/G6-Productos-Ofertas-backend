@@ -97,7 +97,7 @@ function New-GitHubJitRequestJson {
     )
 
     [string[]]$jitLabels = if ($Mode -eq 'Smoke') {
-        @('linux', $SmokeLabel)
+        @('self-hosted', 'linux', $SmokeLabel)
     } else {
         @($DiagnosticLabel)
     }
