@@ -1,0 +1,62 @@
+{
+  "capturedAtUtc": "2026-11-27T14:31:00Z",
+  "subscriptionId": "fef42188-accd-4470-ae88-78f583eb4906",
+  "region": "chilecentral",
+  "network": {
+    "vnetResourceGroup": "rg-g6-productos-azure",
+    "vnetName": "vm-g6-backendVNET",
+    "vnetAddressSpace": "10.0.0.0/16",
+    "apimSubnetName": "snet-g6-apim",
+    "apimSubnetPrefix": "10.0.1.0/28",
+    "apimNsgName": "nsg-g6-apim",
+    "delegations": []
+  },
+  "apim": {
+    "resourceGroup": "rg-g6-aca-chile",
+    "name": "apim-g6-productos-chile",
+    "sku": "Developer",
+    "capacity": 1,
+    "virtualNetworkType": "External",
+    "provisioningState": "Succeeded",
+    "gatewayUrl": "https://apim-g6-productos-chile.azure-api.net",
+    "apiBaseUrl": "https://apim-g6-productos-chile.azure-api.net/api/v1",
+    "publicIpAddresses": ["57.156.40.55"],
+    "subscriptionRequired": false,
+    "importedOperationsCount": 145,
+    "appliedOperationPoliciesCount": 145
+  },
+  "observability": {
+    "logAnalyticsWorkspace": "law-g6-apim-chile",
+    "applicationInsights": "appi-g6-apim-chile",
+    "loggerId": "g6-h5-candidate-applicationinsights",
+    "managedIdentityRole": "Monitoring Metrics Publisher",
+    "bodyBytesLogged": 0,
+    "headersLogged": ["x-correlation-id"]
+  },
+  "gateway": {
+    "acaEnvironment": "env-g6-phase1-chile",
+    "vnetConfiguration": null,
+    "app": "api-gateway",
+    "fqdn": "api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io",
+    "external": true,
+    "securityMode": "Modalidad B (Allow-only)",
+    "ipSecurityRestrictions": [
+      {
+        "name": "allow-apim-1",
+        "action": "Allow",
+        "ipAddressRange": "57.156.40.55/32"
+      }
+    ],
+    "directRoutesBlocked": true
+  },
+  "checks": {
+    "dnsResolution": "PASS (57.156.40.55)",
+    "openApiParity": "PASS (145/145)",
+    "directGatewayBypass": "PASS (HTTP 403)",
+    "apimUnauthenticated": "PASS (HTTP 401 + x-correlation-id)",
+    "apimInvalidJwt": "PASS (HTTP 401)",
+    "apimInvalidCorrelationId": "PASS (HTTP 400)",
+    "apimUnknownOrInternalExcludedRoute": "PASS (HTTP 404)",
+    "g7PositiveM2mAndHumanFlows": "PENDIENTE DE RETEST EXTERNO (sin JWT privados de G7/consumidores)"
+  }
+}
