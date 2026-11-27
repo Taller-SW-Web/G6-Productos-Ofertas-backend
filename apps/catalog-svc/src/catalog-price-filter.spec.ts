@@ -58,18 +58,21 @@ describe('D-CAT price filtering (isolated HTTP fixtures, no external grant claim
     expect(
       await demo.matchingProducts([{ productId: 'p', sku: 'sku' }], query),
     ).toEqual(['p']);
-    expect(identity.authorization).not.toHaveBeenCalled();
+    expect(identity.authorization).toHaveBeenCalled();
     const init = fetchMock.mock.calls[0][1];
-    expect(new Headers(init?.headers).has('authorization')).toBe(false);
+    expect(new Headers(init?.headers).has('authorization')).toBe(true);
 
-    const publicReadOnly = new CatalogPriceFilter({
-      pricingOrigin: 'http://pricing-svc:3002',
-      readDemo: {
-        enabled: false,
-        restricted: false,
-        securityMode: 'PUBLIC_READ_ONLY',
-      },
-    } as CatalogConfig);
+    const publicReadOnly = new CatalogPriceFilter(
+      {
+        pricingOrigin: 'http://pricing-svc:3002',
+        readDemo: {
+          enabled: false,
+          restricted: false,
+          securityMode: 'PUBLIC_READ_ONLY',
+        },
+      } as CatalogConfig,
+      identity,
+    );
     for (const canal of [
       'MARKETPLACE',
       'CHATBOT',
@@ -86,7 +89,7 @@ describe('D-CAT price filtering (isolated HTTP fixtures, no external grant claim
         ),
       ).toEqual(['p']);
     }
-    expect(identity.authorization).not.toHaveBeenCalled();
+    expect(identity.authorization).toHaveBeenCalled();
   });
 
   it('filters monetary bounds over the Azure Container Apps private HTTPS Pricing origin for all four allowed channels in PUBLIC_READ_ONLY and G7_AUTHENTICATED', async () => {
@@ -134,10 +137,10 @@ describe('D-CAT price filtering (isolated HTTP fixtures, no external grant claim
       expect(parsed.pathname).toBe('/api/v1/precios');
       expect(parsed.searchParams.get('canal')).toBe(canal);
       const headers = new Headers(calledInit?.headers);
-      expect(headers.has('authorization')).toBe(false);
+      expect(headers.has('authorization')).toBe(true);
       expect(headers.get('x-correlation-id')).toBe(`corr-public-${canal}`);
     }
-    expect(identity.authorization).not.toHaveBeenCalled();
+    expect(identity.authorization).toHaveBeenCalled();
 
     const g7Filter = new CatalogPriceFilter(
       {
@@ -178,7 +181,7 @@ describe('D-CAT price filtering (isolated HTTP fixtures, no external grant claim
       );
       expect(headers.get('x-correlation-id')).toBe(`corr-g7-${canal}`);
     }
-    expect(identity.authorization).toHaveBeenCalledTimes(channels.length);
+    expect(identity.authorization).toHaveBeenCalledTimes(channels.length * 2);
   });
 
   it('preserves decimal bounds and wire numbers without binary rounding or exponent expansion', () => {

@@ -153,7 +153,7 @@ describe('Bulk H4 userBearer and reversible demo policy', () => {
     ).rejects.toThrow('TOKEN_INVALIDO');
   });
 
-  it('permits only the configured template operation without credentials in phase 1', async () => {
+  it('rejects anonymous template operation even when PUBLIC_READ_ONLY is configured (H5 G7_AUTHENTICATED)', async () => {
     process.env.G6_SECURITY_MODE = 'PUBLIC_READ_ONLY';
     process.env.BULK_PUBLIC_OPERATION_IDS = 'descargarPlantillaProductos';
     const { context } = executionContext(
@@ -161,9 +161,9 @@ describe('Bulk H4 userBearer and reversible demo policy', () => {
       '10.0.0.2',
       'descargarPlantillaProductos',
     );
-    await expect(new BulkUserBearerGuard().canActivate(context)).resolves.toBe(
-      true,
-    );
+    await expect(
+      new BulkUserBearerGuard().canActivate(context),
+    ).rejects.toMatchObject({ status: 401 });
   });
 
   it('verifies signed phase 2 JWTs through the independent JWKS and rejects them after switching to G7', async () => {

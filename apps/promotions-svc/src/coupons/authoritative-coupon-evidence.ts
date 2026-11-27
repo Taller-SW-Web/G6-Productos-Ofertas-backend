@@ -57,7 +57,16 @@ export class AuthoritativeCouponEvidence implements CouponEvidenceProvider<PoolC
       throw new Error('COUPON_EVIDENCE_UNAVAILABLE');
     // Read external evidence before acquiring coupon/promotion row locks. The
     // processor bounds this entire call and already serializes order/operation.
-    const facts = await this.source.read(command, signal);
+    let facts: DurableCouponFacts;
+    try {
+      facts = await this.source.read(command, signal);
+    } catch (err) {
+      console.error(
+        `[coupon-evidence] source.read error for order=${command.data.order_id}:`,
+        err,
+      );
+      throw err;
+    }
     const inventoryConfirmed = await this.inventory?.confirms(command, signal);
     signal.throwIfAborted();
     const proof: ConsumptionEvidence = {

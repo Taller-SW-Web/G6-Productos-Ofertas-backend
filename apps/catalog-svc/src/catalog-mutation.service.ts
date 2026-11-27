@@ -429,16 +429,29 @@ export class CatalogMutationService {
           },
           actor,
         );
-        if (!input.tieneVariantes)
+        if (!input.tieneVariantes) {
+          const defaultLoc =
+            process.env.CATALOG_DEFAULT_LOCATION_ID &&
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+              process.env.CATALOG_DEFAULT_LOCATION_ID,
+            )
+              ? process.env.CATALOG_DEFAULT_LOCATION_ID
+              : undefined;
           await this.prepare(
             tx,
             id,
             null,
             input.skuBase!,
             'INVENTORY',
-            { sku: input.skuBase!, product_id: id, variant_id: null },
+            {
+              sku: input.skuBase!,
+              product_id: id,
+              variant_id: null,
+              ...(defaultLoc ? { default_location_id: defaultLoc } : {}),
+            },
             actor,
           );
+        }
         return presentProduct(await this.repository.aggregate(tx, product));
       },
       transaction,
@@ -556,13 +569,25 @@ export class CatalogMutationService {
             id,
             input.perfilFisico,
           );
+        const defaultLoc =
+          process.env.CATALOG_DEFAULT_LOCATION_ID &&
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+            process.env.CATALOG_DEFAULT_LOCATION_ID,
+          )
+            ? process.env.CATALOG_DEFAULT_LOCATION_ID
+            : undefined;
         await this.prepare(
           tx,
           aggregate.id,
           id,
           sku,
           'INVENTORY',
-          { sku, product_id: aggregate.id, variant_id: id },
+          {
+            sku,
+            product_id: aggregate.id,
+            variant_id: id,
+            ...(defaultLoc ? { default_location_id: defaultLoc } : {}),
+          },
           actor,
         );
         const parent = parentAlreadyMutated

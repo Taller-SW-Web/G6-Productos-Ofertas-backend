@@ -34,7 +34,12 @@ export class CommercialController {
     identity: 'either',
     roles: ['GESTOR_COMERCIAL'],
     scope: 'catalogo:leer',
-    allowedClients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
+    allowedClients: [
+      'modulo-marketplace',
+      'modulo-chatbot',
+      'modulo-retail',
+      'bulk-svc',
+    ],
   })
   list(
     @Query() query: Record<string, unknown>,
@@ -85,7 +90,12 @@ export class CommercialController {
     identity: 'either',
     roles: ['GESTOR_COMERCIAL'],
     scope: 'catalogo:leer',
-    allowedClients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
+    allowedClients: [
+      'modulo-marketplace',
+      'modulo-chatbot',
+      'modulo-retail',
+      'bulk-svc',
+    ],
   })
   detail(
     @Param('slug') slug: string,

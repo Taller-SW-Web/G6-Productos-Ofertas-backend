@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import type { CommercialReadContext } from '../../domain/commercial-context.js';
+import { PromotionsDependencyTimeout } from '../resilience/deadline.js';
 
 export type InternalOperation =
   | 'obtenerProducto'
@@ -69,11 +71,12 @@ export type ServiceAccessTokenSource = (
     scope: string;
   },
   signal: AbortSignal,
+  correlationId?: string,
 ) => Promise<string | null>;
 export interface InternalHttpOptions {
   origin: string;
   origins?: Partial<Record<Upstream, string>>;
-  mode?: 'AUTHENTICATED' | 'RESTRICTED_DEMO' | 'PUBLIC_READ_ONLY';
+  mode?: 'AUTHENTICATED' | 'RESTRICTED_DEMO';
   getServiceAccessToken?: ServiceAccessTokenSource;
 }
 
@@ -134,6 +137,7 @@ export class InternalHttpReader {
     signal: AbortSignal,
     missing = false,
     correlationId?: string,
+    trace?: CommercialReadContext,
   ): Promise<unknown> {
     signal.throwIfAborted();
     if (
@@ -142,40 +146,133 @@ export class InternalHttpReader {
     )
       throw new Error('INVALID_COMMERCIAL_CORRELATION');
     const spec = internalOperations[operation];
+    const operationName = operation;
+    const callId = randomUUID();
+    const pendingStage = (stage: string) => {
+      trace?.pendingStages?.set(callId, {
+        operation: operationName,
+        upstream: spec.service,
+        stage,
+      });
+    };
+    const remaining = () =>
+      trace?.deadlineAt === undefined
+        ? undefined
+        : Math.max(0, trace.deadlineAt - performance.now());
+    const emit = (
+      stage: string,
+      started: number,
+      outcome:
+        'success' | 'http_error' | 'internal_error' | 'timeout' | 'cancelled',
+      status?: number,
+      errorCode?: string,
+    ) => {
+      // Keep an aborted read in the live registry until the global deadline
+      // observer snapshots it; sibling abort handlers must not make the set
+      // appear empty or change which dependency is attributed.
+      if (!signal.aborted) trace?.pendingStages?.delete(callId);
+      if (!trace?.observe || !trace.correlationId) return;
+      trace.observe({
+        operation: operationName,
+        upstream: spec.service,
+        stage,
+        durationMs: performance.now() - started,
+        outcome,
+        ...(status === undefined ? {} : { status }),
+        ...(errorCode === undefined ? {} : { errorCode }),
+        ...(trace?.deadlineMs === undefined
+          ? {}
+          : { deadlineMs: trace.deadlineMs }),
+        ...(remaining() === undefined
+          ? {}
+          : { budgetRemainingMs: remaining() }),
+      });
+    };
     const headers: Record<string, string> = {
       Accept: 'application/json',
       'X-Correlation-Id': correlationId ?? randomUUID(),
     };
-    if (
-      spec.service === 'ventas' ||
-      (this.options.mode !== 'RESTRICTED_DEMO' &&
-        this.options.mode !== 'PUBLIC_READ_ONLY')
-    ) {
+    if (spec.service === 'ventas' || this.options.mode !== 'RESTRICTED_DEMO') {
       // Own service credentials only. For HTTP aliases, the deployment must first
       // prove the private network above; an alias string alone proves no secrecy.
-      const token = await this.options.getServiceAccessToken?.(
-        {
+      const tokenStarted = performance.now();
+      pendingStage('service_token');
+      let token: string | null | undefined;
+      try {
+        const tokenRequest = {
           operationId: operation,
           audience: spec.audience ?? 'api-productos',
           scope: spec.scope,
-        },
-        signal,
-      );
+        };
+        token = trace?.correlationId
+          ? await this.options.getServiceAccessToken?.(
+              tokenRequest,
+              signal,
+              trace.correlationId,
+            )
+          : await this.options.getServiceAccessToken?.(tokenRequest, signal);
+        if (!token || /\s/.test(token))
+          throw new Error('COMMERCIAL_SESSION_UNAVAILABLE');
+        emit('service_token', tokenStarted, 'success');
+      } catch {
+        const aborted = signal.aborted;
+        const timeout = aborted && remaining() === 0;
+        emit(
+          'service_token',
+          tokenStarted,
+          timeout ? 'timeout' : aborted ? 'cancelled' : 'internal_error',
+          undefined,
+          timeout
+            ? 'COMMERCIAL_DEADLINE_EXCEEDED'
+            : aborted
+              ? 'DEPENDENCY_CANCELLED'
+              : 'SERVICE_TOKEN_UNAVAILABLE',
+        );
+        if (timeout) throw new PromotionsDependencyTimeout();
+        throw new Error(
+          aborted
+            ? 'COMMERCIAL_REQUEST_CANCELLED'
+            : 'COMMERCIAL_SESSION_UNAVAILABLE',
+        );
+      }
       signal.throwIfAborted();
-      if (!token || /\s/.test(token))
-        throw new Error('COMMERCIAL_SESSION_UNAVAILABLE');
       headers.Authorization = 'Bearer ' + token;
     }
     const origin = this.origins[spec.service];
     if (spec.service === 'ventas' && !origin)
       throw new Error('COMMERCIAL_HTTP_UNAVAILABLE');
-    const response = await fetch((origin ?? this.fallback) + '/api/v1' + path, {
-      signal,
-      redirect: 'error',
-      credentials: 'omit',
-      cache: 'no-store',
-      headers,
-    });
+    const requestStarted = performance.now();
+    pendingStage('upstream_request');
+    let response: Response;
+    try {
+      response = await fetch((origin ?? this.fallback) + '/api/v1' + path, {
+        signal,
+        redirect: 'error',
+        credentials: 'omit',
+        cache: 'no-store',
+        headers,
+      });
+    } catch {
+      const aborted = signal.aborted;
+      const timeout = aborted && remaining() === 0;
+      emit(
+        'upstream_request',
+        requestStarted,
+        timeout ? 'timeout' : aborted ? 'cancelled' : 'internal_error',
+        undefined,
+        timeout
+          ? 'COMMERCIAL_DEADLINE_EXCEEDED'
+          : aborted
+            ? 'DEPENDENCY_CANCELLED'
+            : 'UPSTREAM_CONNECTION_FAILED',
+      );
+      if (timeout) throw new PromotionsDependencyTimeout();
+      throw new Error(
+        aborted
+          ? 'COMMERCIAL_REQUEST_CANCELLED'
+          : 'COMMERCIAL_HTTP_UNAVAILABLE',
+      );
+    }
     if (
       !response.body ||
       !/^application\/(?:json|problem\+json)(?:\s*;|$)/i.test(
@@ -183,6 +280,13 @@ export class InternalHttpReader {
       )
     ) {
       await response.body?.cancel();
+      emit(
+        'upstream_request',
+        requestStarted,
+        'http_error',
+        response.status,
+        'INVALID_UPSTREAM_CONTENT_TYPE',
+      );
       throw new Error('COMMERCIAL_HTTP_UNAVAILABLE');
     }
     const reader = response.body.getReader();
@@ -208,17 +312,47 @@ export class InternalHttpReader {
         data.status === 404 &&
         'code' in data &&
         data.code === spec.missing
-      )
+      ) {
+        emit('upstream_request', requestStarted, 'success', response.status);
         return null;
+      }
       if (
         !response.ok ||
         (spec.service === 'ventas' && response.status !== 200) ||
         !/^application\/json(?:\s*;|$)/i.test(
           response.headers.get('content-type') ?? '',
         )
-      )
+      ) {
+        emit(
+          'upstream_request',
+          requestStarted,
+          'http_error',
+          response.status,
+          'UPSTREAM_HTTP_REJECTED',
+        );
         throw new Error('COMMERCIAL_HTTP_UNAVAILABLE');
+      }
+      emit('upstream_request', requestStarted, 'success', response.status);
       return data;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === 'COMMERCIAL_HTTP_UNAVAILABLE'
+      )
+        throw error;
+      const aborted = signal.aborted;
+      emit(
+        'upstream_request',
+        requestStarted,
+        aborted ? 'cancelled' : 'internal_error',
+        response.status,
+        aborted ? 'DEPENDENCY_CANCELLED' : 'UPSTREAM_RESPONSE_INVALID',
+      );
+      throw new Error(
+        aborted
+          ? 'COMMERCIAL_REQUEST_CANCELLED'
+          : 'COMMERCIAL_HTTP_UNAVAILABLE',
+      );
     } finally {
       await reader.cancel().catch(() => undefined);
     }

@@ -18,12 +18,33 @@ export interface InventoryServiceBusConfig {
   publishEnabled: boolean;
   consumeEnabled: boolean;
   managedIdentityClientId?: string;
+  isolatedBusUrl?: string;
 }
 
 export function readInventoryServiceBus(
   env: NodeJS.ProcessEnv,
 ): InventoryServiceBusConfig | undefined {
   const provider = env.MESSAGING_PROVIDER;
+  if (
+    env.NODE_ENV === 'test' &&
+    provider === 'AZURE_SERVICE_BUS' &&
+    env.G6_SERVICE_BUS_PILOT_ENABLED === 'true' &&
+    env.RABBITMQ_URL === undefined &&
+    env.G6_ISOLATED_SERVICE_BUS_URL
+  ) {
+    const parsed = new URL(env.G6_ISOLATED_SERVICE_BUS_URL);
+    if (
+      parsed.protocol === 'http:' &&
+      ['127.0.0.1', 'localhost'].includes(parsed.hostname)
+    ) {
+      return {
+        namespace: 'isolated-test-bus.local',
+        publishEnabled: env.INVENTORY_SERVICE_BUS_PUBLISH_ENABLED === 'true',
+        consumeEnabled: env.INVENTORY_SERVICE_BUS_CONSUME_ENABLED === 'true',
+        isolatedBusUrl: parsed.origin,
+      };
+    }
+  }
 
   // Rechazar cualquier valor no reconocido
   if (

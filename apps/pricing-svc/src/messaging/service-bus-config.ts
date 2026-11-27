@@ -1,12 +1,32 @@
 export interface PricingServiceBusConfig {
   namespace: string;
   managedIdentityClientId?: string;
+  isolatedBusUrl?: string;
 }
 
 // H5 is selected explicitly; production uses only the assigned workload identity.
 export function readPricingServiceBus(
   env: NodeJS.ProcessEnv,
 ): PricingServiceBusConfig | undefined {
+  if (
+    env.NODE_ENV === 'test' &&
+    env.MESSAGING_PROVIDER === 'AZURE_SERVICE_BUS' &&
+    env.G6_SERVICE_BUS_PILOT_ENABLED === 'true' &&
+    env.PRICING_PRICE_CHANGED_PUBLISH_ENABLED === 'true' &&
+    env.PRICING_AMQP_URL === undefined &&
+    env.G6_ISOLATED_SERVICE_BUS_URL
+  ) {
+    const parsed = new URL(env.G6_ISOLATED_SERVICE_BUS_URL);
+    if (
+      parsed.protocol === 'http:' &&
+      ['127.0.0.1', 'localhost'].includes(parsed.hostname)
+    ) {
+      return {
+        namespace: 'isolated-test-bus.local',
+        isolatedBusUrl: parsed.origin,
+      };
+    }
+  }
   if (
     (env.MESSAGING_PROVIDER === undefined ||
       env.MESSAGING_PROVIDER === 'RABBITMQ') &&

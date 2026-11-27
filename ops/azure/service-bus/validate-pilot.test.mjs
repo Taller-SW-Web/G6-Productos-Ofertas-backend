@@ -48,7 +48,6 @@ test('manifest and IaC refer to exactly the implemented pilot queue', () => {
   assert.equal(manifest.destination, validatePilotParameters(fixture()).queue);
   assert(bicep.includes(`'${manifest.destination}'`));
   for (const property of [
-    'defaultMessageTimeToLive',
     'requiresSession',
     'requiresDuplicateDetection',
     'forwardTo',

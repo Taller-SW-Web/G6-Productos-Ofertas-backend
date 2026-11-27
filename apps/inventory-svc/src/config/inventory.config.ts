@@ -7,7 +7,7 @@ import {
 } from '../messaging/service-bus-config.js';
 
 export interface InventoryConfig {
-  securityMode: 'PUBLIC_READ_ONLY' | 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
+  securityMode: 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
   publicOperations: readonly string[];
   databaseUrl?: string;
   pgHost?: string;
@@ -45,6 +45,11 @@ export function loadCommercialDemoConfig(): CommercialDemoConfig {
   if (flag !== 'true' && flag !== 'false') {
     throw new Error(
       '[inventory-svc] INVENTORY_DEMO_NO_AUTH_ENABLED debe ser true o false',
+    );
+  }
+  if (flag === 'true' && process.env.NODE_ENV !== 'test') {
+    throw new Error(
+      '[inventory-svc] INVENTORY_DEMO_NO_AUTH_ENABLED está deshabilitado fuera de test',
     );
   }
   const rawIps = process.env.INVENTORY_DEMO_GATEWAY_IPS;
@@ -93,19 +98,15 @@ function integerSetting(
 export function loadInventoryConfig(): InventoryConfig {
   const securityMode = process.env.G6_SECURITY_MODE ?? 'G7_AUTHENTICATED';
   if (
-    !['PUBLIC_READ_ONLY', 'SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(
-      securityMode,
-    )
+    !['SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(securityMode) ||
+    (securityMode === 'SIMULATED_AUTH' && process.env.NODE_ENV !== 'test')
   )
     throw new Error('[inventory-svc] G6_SECURITY_MODE inválido');
   const publicOperations = (process.env.INVENTORY_PUBLIC_OPERATION_IDS ?? '')
     .split(',')
     .map((id) => id.trim())
     .filter(Boolean);
-  if (
-    publicOperations.some((id) => !PHASE1_PUBLIC_OPERATION_IDS.has(id)) ||
-    (securityMode !== 'PUBLIC_READ_ONLY' && publicOperations.length)
-  )
+  if (publicOperations.length > 0)
     throw new Error('[inventory-svc] INVENTORY_PUBLIC_OPERATION_IDS inválido');
   if (securityMode === 'SIMULATED_AUTH') {
     try {

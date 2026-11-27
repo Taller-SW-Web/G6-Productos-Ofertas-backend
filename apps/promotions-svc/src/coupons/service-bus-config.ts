@@ -4,6 +4,8 @@ export interface PromotionsServiceBusConfig {
   eventsEnabled: boolean;
   couponCommandsEnabled?: boolean;
   couponAdmissionPaused?: boolean;
+  isolatedBus?: boolean;
+  isolatedBusUrl?: string;
 }
 
 function isSecureG7Issuer(value: string | undefined): boolean {
@@ -11,6 +13,23 @@ function isSecureG7Issuer(value: string | undefined): boolean {
     const url = new URL(value ?? '');
     return (
       url.protocol === 'https:' &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      value?.trim() === value
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isLocalHttpUrl(value: string | undefined): boolean {
+  try {
+    const url = new URL(value ?? '');
+    return (
+      url.protocol === 'http:' &&
+      ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) &&
       !url.username &&
       !url.password &&
       !url.search &&
@@ -31,6 +50,42 @@ export function readPromotionsServiceBus(
   const couponCommands = env.PROMOTIONS_H5_COUPON_COMMANDS_ENABLED;
   const pauseAdmission = env.PROMOTIONS_H5_COUPON_ADMISSION_PAUSED;
   const production = env.G6_SERVICE_BUS_PRODUCTION_ENABLED;
+  const isolatedBus = env.PROMOTIONS_H5_ISOLATED_BUS === '1';
+
+  if (isolatedBus) {
+    if (
+      env.NODE_ENV !== 'test' ||
+      !azure ||
+      env.G6_SECURITY_MODE !== 'G7_AUTHENTICATED' ||
+      env.RABBITMQ_URL !== undefined ||
+      env.PROMOTIONS_COUPON_RUNTIME_ENABLED === 'true' ||
+      production === 'true' ||
+      !(isSecureG7Issuer(env.AUTH_ISSUER) || isLocalHttpUrl(env.AUTH_ISSUER)) ||
+      !(
+        isSecureG7Issuer(env.AUTH_JWKS_URL) || isLocalHttpUrl(env.AUTH_JWKS_URL)
+      )
+    ) {
+      throw new Error('PROMOTIONS_SERVICE_BUS_CONFIGURATION_INVALID');
+    }
+    const origin = env.G6_ISOLATED_SERVICE_BUS_URL;
+    if (
+      origin !== undefined &&
+      (!isLocalHttpUrl(origin) || new URL(origin).pathname !== '/')
+    )
+      throw new Error('PROMOTIONS_SERVICE_BUS_CONFIGURATION_INVALID');
+    return Object.freeze({
+      namespace: 'isolated-lab.local',
+      eventsEnabled: flag === 'true',
+      ...(couponCommands === 'true' ? { couponCommandsEnabled: true } : {}),
+      ...(pauseAdmission === 'true' ? { couponAdmissionPaused: true } : {}),
+      isolatedBus: true,
+      ...(origin ? { isolatedBusUrl: new URL(origin).origin } : {}),
+    });
+  }
+
+  if (env.G6_ISOLATED_SERVICE_BUS_URL !== undefined)
+    throw new Error('PROMOTIONS_SERVICE_BUS_CONFIGURATION_INVALID');
+
   if (!azure) {
     if (
       (env.MESSAGING_PROVIDER !== undefined &&
@@ -60,9 +115,7 @@ export function readPromotionsServiceBus(
     env.RABBITMQ_URL !== undefined ||
     env.PROMOTIONS_COUPON_RUNTIME_ENABLED === 'true' ||
     (couponCommands === 'true' &&
-      (!['G7_AUTHENTICATED', 'PUBLIC_READ_ONLY'].includes(
-        env.G6_SECURITY_MODE ?? '',
-      ) ||
+      (env.G6_SECURITY_MODE !== 'G7_AUTHENTICATED' ||
         !isSecureG7Issuer(env.AUTH_ISSUER) ||
         !isSecureG7Issuer(env.AUTH_JWKS_URL) ||
         !identity)) ||
@@ -71,9 +124,7 @@ export function readPromotionsServiceBus(
         /^0{8}-0{4}-0{4}-0{4}-0{12}$/.test(identity))) ||
     (env.NODE_ENV === 'production' &&
       (production !== 'true' ||
-        !['G7_AUTHENTICATED', 'PUBLIC_READ_ONLY'].includes(
-          env.G6_SECURITY_MODE ?? '',
-        ) ||
+        env.G6_SECURITY_MODE !== 'G7_AUTHENTICATED' ||
         !identity)) ||
     (env.NODE_ENV !== 'production' && production === 'true')
   )

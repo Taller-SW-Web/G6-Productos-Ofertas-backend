@@ -5,8 +5,7 @@ import { resolve } from 'node:path';
 import { parseEnv } from 'node:util';
 
 export const GATEWAY_SETTINGS = Symbol('GATEWAY_SETTINGS');
-export type GatewaySecurityMode =
-  'PUBLIC_READ_ONLY' | 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
+export type GatewaySecurityMode = 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
 export interface GatewaySettings {
   readonly upstreams: Readonly<Record<string, string>>;
   readonly timeoutMs: number;
@@ -105,10 +104,10 @@ export function readGatewaySettings(
     if (readOnlyDemoEnabled === 'true') throw new Error();
     if (
       env.G6_SECURITY_MODE !== undefined &&
-      !['PUBLIC_READ_ONLY', 'SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(
-        env.G6_SECURITY_MODE,
-      )
+      !['SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(env.G6_SECURITY_MODE)
     )
+      throw new Error();
+    if (env.G6_SECURITY_MODE === 'SIMULATED_AUTH' && env.NODE_ENV !== 'test')
       throw new Error();
     const securityMode: GatewaySecurityMode =
       (env.G6_SECURITY_MODE as GatewaySecurityMode | undefined) ??
@@ -168,16 +167,7 @@ export function readGatewaySettings(
       .split(',')
       .map((id) => id.trim())
       .filter(Boolean);
-    if (
-      publicOperations.some((id) =>
-        securityMode === 'PUBLIC_READ_ONLY'
-          ? !CONTRACT_ROUTES.some(
-              (r) => r.operationId === id && isEligiblePublicRead(r),
-            )
-          : true,
-      )
-    )
-      throw new Error();
+    if (publicOperations.length > 0) throw new Error();
     return Object.freeze({
       upstreams: Object.freeze(upstreams),
       readinessPaths: Object.freeze(readinessPaths),

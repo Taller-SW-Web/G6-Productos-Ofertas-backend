@@ -185,6 +185,13 @@ jobs:
     steps:
     - name: Obtener código fuente
       uses: actions/checkout@v4
+    - name: Obtener contratos y migraciones oficiales de Docs
+      uses: actions/checkout@v4
+      with:
+        repository: Taller-SW-Web/G6-Productos-Ofertas-docs
+        ref: 099ad1926a53d1aec1aeae93e894d24ec2721748
+        path: .ci/G6-Productos-Ofertas-docs
+        persist-credentials: 'false'
     - name: Configurar Node.js
       uses: actions/setup-node@v4
       with:
@@ -193,6 +200,8 @@ jobs:
     - name: Instalar dependencias de forma reproducible
       run: npm ci
     - name: Ejecutar pruebas de extremo a extremo
+      env:
+        G6_DOCS_ROOT: ${{ github.workspace }}/.ci/G6-Productos-Ofertas-docs
       run: npm run test:e2e
   contratos:
     if: >-
@@ -398,14 +407,14 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: 4d285c5ffb91611b60385e0fab5a7295c95e3ed6
+        ref: 099ad1926a53d1aec1aeae93e894d24ec2721748
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Verificar correspondencia estructural de rutas Taxonomy
       run: |
         set -euo pipefail
-        test "$(git -C .ci/G6-Productos-Ofertas-docs rev-parse HEAD)" = '4d285c5ffb91611b60385e0fab5a7295c95e3ed6'
-        test "$(git -C .ci/G6-Productos-Ofertas-docs rev-parse HEAD:contratos/http/openapi.yaml)" = '6ff062c563d381d4bcf7976f223590b400ace4ec'
+        test "$(git -C .ci/G6-Productos-Ofertas-docs rev-parse HEAD)" = '099ad1926a53d1aec1aeae93e894d24ec2721748'
+        test "$(git -C .ci/G6-Productos-Ofertas-docs rev-parse HEAD:contratos/http/openapi.yaml)" = '98ec377da427be717aad4ba2317944143a8211de'
         node scripts/ci/check-taxonomy-contract.mjs .ci/G6-Productos-Ofertas-docs/contratos/http/openapi.yaml
     - name: Rechazar URL de base aportada antes de acceder a Docker
       run: node --test scripts/ci/run-taxonomy-integration.test.mjs
@@ -433,7 +442,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: e6a8ec28dad2d0eba8dc2f273ec9cc6891376df6
+        ref: 099ad1926a53d1aec1aeae93e894d24ec2721748
         path: G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Configurar Node.js
@@ -636,7 +645,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: c9e1e5c217616d28229fccf5315fb97a1ae061a9
+        ref: 099ad1926a53d1aec1aeae93e894d24ec2721748
         path: docs
         persist-credentials: 'false'
     - name: Configurar Node.js
@@ -650,8 +659,8 @@ jobs:
     - name: Verificar contrato OpenAPI H5 0.7.0-rc.3 de Combos
       run: |
         set -euo pipefail
-        test "$(git -C ../docs rev-parse HEAD)" = 'c9e1e5c217616d28229fccf5315fb97a1ae061a9'
-        test "$(git -C ../docs rev-parse HEAD:contratos/http/openapi.yaml)" = 'e094988f0f0d92a7a4241c1dc30a5e50d9ff709a'
+        test "$(git -C ../docs rev-parse HEAD)" = '099ad1926a53d1aec1aeae93e894d24ec2721748'
+        test "$(git -C ../docs rev-parse HEAD:contratos/http/openapi.yaml)" = '98ec377da427be717aad4ba2317944143a8211de'
         node scripts/ci/check-combos-contract.mjs ../docs/contratos/http/openapi.yaml
     - name: Ejecutar suite PostgreSQL 17 TLS de Combos sin RabbitMQ
       env:
@@ -704,7 +713,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: 490172c11cb4b83ddd1996f8d5834d0402184cf8
+        ref: 099ad1926a53d1aec1aeae93e894d24ec2721748
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Configurar Node.js
@@ -813,14 +822,14 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: 490172c11cb4b83ddd1996f8d5834d0402184cf8
+        ref: 099ad1926a53d1aec1aeae93e894d24ec2721748
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Obtener registro Gateway integrado
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-backend
-        ref: 1b90543dc39a8919fd94f0e059d10e1002b3b2a9
+        ref: 2eb8c864f8d315060cf00ccd35ce4015b9569556
         path: .ci/G6-Productos-Ofertas-gateway
         persist-credentials: 'false'
     - name: Configurar Python 3.12
@@ -844,8 +853,8 @@ jobs:
         --source-openapi .ci/G6-Productos-Ofertas-docs/contratos/http/openapi.yaml
         --gateway-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/contract-routes.ts
         --g5-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/g5-h5-routes.ts
-        --expected-docs-sha 490172c11cb4b83ddd1996f8d5834d0402184cf8
-        --expected-gateway-sha 1b90543dc39a8919fd94f0e059d10e1002b3b2a9
+        --expected-docs-sha 099ad1926a53d1aec1aeae93e894d24ec2721748
+        --expected-gateway-sha 2eb8c864f8d315060cf00ccd35ce4015b9569556
         --mode candidate
   integral:
     name: Validación integral de integración continua

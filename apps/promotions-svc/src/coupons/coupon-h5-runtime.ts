@@ -11,6 +11,7 @@ import {
 import { couponH5Queue, type CouponH5Worker } from './coupon-h5-operations.js';
 import type { PromotionsServiceBusConfig } from './service-bus-config.js';
 import type { EventReceiver } from './service-bus-events.js';
+import { createHttpPromotionsLabBus } from './http-lab-bus.js';
 
 interface CouponBus {
   sender: Pick<
@@ -21,9 +22,145 @@ interface CouponBus {
   close(): Promise<void>;
 }
 
+export interface IsolatedCouponH5Bus extends CouponBus {
+  readonly pendingQueue: unknown[];
+  readonly settled: {
+    completed: string[];
+    abandoned: string[];
+    deadLettered: Array<{ messageId: string; reason?: string }>;
+  };
+}
+
+export function isolatedCouponH5Bus(): IsolatedCouponH5Bus {
+  let handlers: Parameters<EventReceiver['subscribe']>[0] | undefined;
+  let closed = false;
+  const pendingQueue: unknown[] = [];
+  const settled: IsolatedCouponH5Bus['settled'] = {
+    completed: [],
+    abandoned: [],
+    deadLettered: [],
+  };
+  let draining = false;
+
+  async function drain(): Promise<void> {
+    if (draining || closed || !handlers) return;
+    draining = true;
+    try {
+      while (!closed && handlers && pendingQueue.length > 0) {
+        const nextMsg = pendingQueue.shift();
+        await handlers.processMessage(nextMsg as never);
+      }
+    } finally {
+      draining = false;
+    }
+  }
+
+  return {
+    pendingQueue,
+    settled,
+    sender: {
+      createMessageBatch: async () => {
+        const items: unknown[] = [];
+        return {
+          tryAddMessage: (msg: unknown) => {
+            items.push(msg);
+            return true;
+          },
+          get count() {
+            return items.length;
+          },
+          get sizeInBytes() {
+            return JSON.stringify(items).length;
+          },
+          get maxSizeInBytes() {
+            return 256 * 1024;
+          },
+          _messages: items,
+        } as never;
+      },
+      sendMessages: async (batch: unknown) => {
+        if (closed) {
+          throw new Error('ISOLATED_COUPON_BUS_CLOSED');
+        }
+        const list =
+          batch &&
+          typeof batch === 'object' &&
+          '_messages' in batch &&
+          Array.isArray((batch as { _messages: unknown[] })._messages)
+            ? (batch as { _messages: unknown[] })._messages
+            : Array.isArray(batch)
+              ? batch
+              : [batch];
+        pendingQueue.push(...list);
+        await drain();
+      },
+      close: async () => {
+        closed = true;
+      },
+    },
+    receiver: {
+      subscribe: (nextHandlers) => {
+        handlers = nextHandlers;
+        void drain();
+        return {
+          close: async () => {
+            handlers = undefined;
+          },
+        };
+      },
+      completeMessage: async (msg: unknown) => {
+        const id =
+          msg && typeof msg === 'object' && 'messageId' in msg
+            ? String((msg as { messageId: unknown }).messageId)
+            : '';
+        settled.completed.push(id);
+      },
+      abandonMessage: async (msg: unknown) => {
+        const id =
+          msg && typeof msg === 'object' && 'messageId' in msg
+            ? String((msg as { messageId: unknown }).messageId)
+            : '';
+        settled.abandoned.push(id);
+      },
+      deadLetterMessage: async (
+        msg: unknown,
+        options?: { deadLetterReason?: string },
+      ) => {
+        const id =
+          msg && typeof msg === 'object' && 'messageId' in msg
+            ? String((msg as { messageId: unknown }).messageId)
+            : '';
+        settled.deadLettered.push({
+          messageId: id,
+          reason: options?.deadLetterReason,
+        });
+      },
+      peekMessages: async () => pendingQueue.slice(0, 10) as never[],
+      close: async () => {
+        handlers = undefined;
+      },
+    },
+    close: async () => {
+      closed = true;
+      handlers = undefined;
+    },
+  };
+}
+
 export function nativeCouponH5Bus(
   config: PromotionsServiceBusConfig,
 ): CouponBus {
+  if (config.isolatedBus) {
+    if (config.isolatedBusUrl) {
+      const bus = createHttpPromotionsLabBus(config.isolatedBusUrl);
+      return {
+        sender: bus.sender(couponH5Queue),
+        receiver: bus.receiver(couponH5Queue),
+        close: () => bus.close(),
+      };
+    }
+    return isolatedCouponH5Bus();
+  }
   const identity = config.managedIdentityClientId
     ? new ManagedIdentityCredential({
         clientId: config.managedIdentityClientId,
@@ -125,9 +262,15 @@ export class CouponH5Runtime {
         this.started = true;
       }
       const result = await this.relay!.publishOne();
+      if (result !== 'empty')
+        console.error(`[coupon-h5-runtime] error=NONE publishOne=${result}`);
       if (result === 'pending') this.available = false;
       else delay = result === 'empty' ? 1000 : 200;
-    } catch {
+    } catch (err) {
+      console.error(
+        `[coupon-h5-runtime] poll error:`,
+        err instanceof Error ? (err.stack ?? err.message) : String(err),
+      );
       this.available = false;
     } finally {
       if (!this.stopping) {

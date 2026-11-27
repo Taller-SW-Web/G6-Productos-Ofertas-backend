@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import type { INestApplication } from '@nestjs/common';
@@ -15,7 +16,7 @@ describe('G5 H5 routes behind authenticated Gateway opt-in', () => {
   let app: INestApplication;
   const upstream = vi.fn();
   const settings = {
-    securityMode: 'PUBLIC_READ_ONLY',
+    securityMode: 'G7_AUTHENTICATED',
     g5H5Enabled: false,
     upstreams: {
       'catalog-svc': 'https://catalog.fixture.test',
@@ -68,14 +69,37 @@ describe('G5 H5 routes behind authenticated Gateway opt-in', () => {
     expect(upstream).not.toHaveBeenCalled();
   });
 
-  it('preserves an allowlisted public read while H5 mutations still require G7 JWT and scope', async () => {
+  it('enforces G7 JWT on reads even when publicOperations has legacy entries, while H5 mutations require G7 JWT and scope', async () => {
     settings.g5H5Enabled = true;
     settings.publicOperations.push('listarProductos');
     upstream.mockResolvedValue(Response.json({ items: [] }, { status: 200 }));
 
-    await request(app.getHttpServer()).get('/api/v1/productos').expect(200);
+    await request(app.getHttpServer()).get('/api/v1/productos').expect(401);
+    expect(upstream).not.toHaveBeenCalled();
+
+    const g1Token = signed.token({
+      sub: 'modulo-marketplace',
+      scope: 'catalogo:leer',
+    });
+    await request(app.getHttpServer())
+      .get('/api/v1/productos')
+      .set('Authorization', `Bearer ${g1Token}`)
+      .expect(200);
     expect(upstream).toHaveBeenCalledTimes(1);
-    expect(upstream.mock.calls[0][1].headers.authorization).toBeUndefined();
+    expect(upstream.mock.calls[0][1].headers.authorization).toBe(
+      `Bearer ${g1Token}`,
+    );
+
+    const noRoleToken = signed.token({
+      sub: randomUUID(),
+      tipo: 'acceso',
+      roles: [],
+      scope: '',
+    });
+    await request(app.getHttpServer())
+      .get('/api/v1/productos')
+      .set('Authorization', `Bearer ${noRoleToken}`)
+      .expect(403);
 
     await request(app.getHttpServer())
       .post('/api/v1/promociones/evaluar')

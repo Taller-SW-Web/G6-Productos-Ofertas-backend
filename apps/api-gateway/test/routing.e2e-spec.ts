@@ -736,7 +736,7 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
     );
     expect(
       (await request(app.getHttpServer()).get('/health/ready')).status,
-    ).toBe(404);
+    ).toBe(503);
   });
 
   it('preserves local validation/auth errors absent from operation responses (H-01)', async () => {
@@ -749,7 +749,12 @@ describe('Gateway forwarding against isolated HTTP providers', () => {
     const previous = settings.publicOperations;
     Object.assign(settings, { publicOperations: [] });
     try {
-      const denied = await request(app.getHttpServer()).get(path);
+      const unauth = await request(app.getHttpServer()).get(path);
+      expect(unauth.status).toBe(401);
+      expect(unauth.body.code).toBe('TOKEN_INVALIDO');
+      const denied = await request(app.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${signed.token({ scope: '' })}`);
       expect(denied.status).toBe(403);
       expect(denied.body.code).toBe('SCOPE_INSUFICIENTE');
     } finally {

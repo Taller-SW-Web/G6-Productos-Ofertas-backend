@@ -152,6 +152,7 @@ describe('CatalogQueryService', () => {
       2,
       200,
       'ACTIVA',
+      false,
     );
     for (const invalid of [
       { pagina: '0' },

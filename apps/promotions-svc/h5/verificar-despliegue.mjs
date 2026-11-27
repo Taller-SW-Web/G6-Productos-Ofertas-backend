@@ -99,12 +99,19 @@ export async function verificarDespliegue(
   const execute =
     typeof actionOrExecute === 'function' ? actionOrExecute : executeOverride;
   const requiredServices = requiredDeploymentServices(plan, action);
+  const gatewayRouteProfile = plan.gateway_route_profile ?? 'standard';
   const destination = deploymentTargets.destinations?.[plan.g6_destination];
   if (
     plan.environment !== 'integration' ||
     !/^[a-f0-9]{40}$/.test(plan.g6_sha) ||
     !destination ||
     !['brazil-isolated', 'chile-shared'].includes(plan.g6_destination) ||
+    !['standard', 'g5-labelled'].includes(gatewayRouteProfile) ||
+    (gatewayRouteProfile === 'g5-labelled' &&
+      (plan.g6_destination !== 'chile-shared' ||
+        !/^api-gateway---g5-h5\.[a-z0-9-]+\.chilecentral\.azurecontainerapps\.io$/i.test(
+          new URL(plan.gateway).hostname,
+        ))) ||
     (plan.g6_service_shas !== undefined &&
       (typeof plan.g6_service_shas !== 'object' ||
         Array.isArray(plan.g6_service_shas) ||
@@ -225,7 +232,7 @@ export async function verificarDespliegue(
         service,
         ...scope,
         '--query',
-        '{id:id,environment:properties.environmentId || properties.managedEnvironmentId,latest:properties.latestReadyRevisionName,host:properties.configuration.ingress.fqdn}',
+        '{id:id,environment:properties.environmentId || properties.managedEnvironmentId,latest:properties.latestReadyRevisionName,host:properties.configuration.ingress.fqdn,mode:properties.configuration.activeRevisionsMode,traffic:properties.configuration.ingress.traffic}',
       ]);
       const resource =
         '/subscriptions/' +
@@ -236,12 +243,16 @@ export async function verificarDespliegue(
       const appResourceId = resource + 'containerApps/' + service;
       const environmentResourceId =
         resource + 'managedEnvironments/' + destination.acaEnvironment;
+      const expectedGatewayHost =
+        service === 'api-gateway' && gatewayRouteProfile === 'g5-labelled'
+          ? app.host?.replace(/^api-gateway\./, 'api-gateway---g5-h5.')
+          : app.host;
       if (
         app.id?.toLowerCase() !== appResourceId.toLowerCase() ||
         app.environment?.toLowerCase() !==
           environmentResourceId.toLowerCase() ||
         (service === 'api-gateway' &&
-          new URL(plan.gateway).origin !== 'https://' + app.host)
+          new URL(plan.gateway).origin !== 'https://' + expectedGatewayHost)
       )
         throw unavailable();
       const active = json('az', [
@@ -254,16 +265,63 @@ export async function verificarDespliegue(
         '--query',
         '[?properties.active].{name:name,health:properties.healthState,traffic:properties.trafficWeight,containers:properties.template.containers[].{name:name,image:image}}',
       ]);
-      const serving = active.filter((revision) => revision.traffic > 0);
-      if (
-        serving.length !== 1 ||
-        serving[0].traffic !== 100 ||
-        serving[0].health !== 'Healthy' ||
-        (service === 'api-gateway' &&
-          (!app.latest || serving[0].name !== app.latest))
-      )
-        throw unavailable();
-      const serviceContainers = serving[0].containers.filter(
+      let serving;
+      const effectiveTraffic = 100;
+      let routeEvidence;
+      if (service === 'api-gateway' && gatewayRouteProfile === 'g5-labelled') {
+        const labelRoutes = (app.traffic ?? []).filter(
+          (route) => route.label === 'g5-h5',
+        );
+        const defaultRoutes = (app.traffic ?? []).filter(
+          (route) => !route.label,
+        );
+        if (
+          app.mode !== 'Multiple' ||
+          labelRoutes.length !== 1 ||
+          !labelRoutes[0].revisionName ||
+          labelRoutes[0].revisionName !== app.latest ||
+          defaultRoutes.length !== 1 ||
+          defaultRoutes[0].weight !== 100 ||
+          !defaultRoutes[0].revisionName ||
+          defaultRoutes[0].revisionName === labelRoutes[0].revisionName
+        )
+          throw unavailable();
+        serving = active.find(
+          (revision) => revision.name === labelRoutes[0].revisionName,
+        );
+        const marketplace = active.find(
+          (revision) => revision.name === defaultRoutes[0].revisionName,
+        );
+        if (
+          !serving ||
+          serving.health !== 'Healthy' ||
+          !marketplace ||
+          marketplace.health !== 'Healthy'
+        )
+          throw unavailable();
+        routeEvidence = {
+          route_mode: 'revision_label',
+          traffic_scope: 'label_url',
+          label: 'g5-h5',
+          label_url: plan.gateway,
+          marketplace_revision: marketplace.name,
+          marketplace_traffic_percent: defaultRoutes[0].weight,
+        };
+      } else {
+        const defaultServing = active.filter(
+          (revision) => revision.traffic > 0,
+        );
+        if (
+          defaultServing.length !== 1 ||
+          defaultServing[0].traffic !== 100 ||
+          defaultServing[0].health !== 'Healthy' ||
+          (service === 'api-gateway' &&
+            (!app.latest || defaultServing[0].name !== app.latest))
+        )
+          throw unavailable();
+        serving = defaultServing[0];
+      }
+      const serviceContainers = serving.containers.filter(
         (container) => container.name === service,
       );
       const image = serviceContainers[0]?.image;
@@ -318,20 +376,22 @@ export async function verificarDespliegue(
         deployed_at: Number.isFinite(Date.parse(completedAt))
           ? completedAt
           : null,
-        revision: serving[0].name,
-        effective_traffic_percent: serving[0].traffic,
+        revision: serving.name,
+        effective_traffic_percent: effectiveTraffic,
         image,
         oci_digest: image.slice(prefix.length),
         ...(service === 'api-gateway'
           ? {
               gateway_origin: new URL(plan.gateway).origin,
               gateway_origin_approved: true,
+              ...(routeEvidence ?? { route_mode: 'default_traffic' }),
             }
           : {}),
       });
     }
     return verified;
-  } catch {
+  } catch (error) {
+    if (process.env.DEBUG_G6_H5_DEPLOYMENT === 'true') console.error(error);
     throw unavailable();
   } finally {
     await rm(temp, { recursive: true, force: true });

@@ -99,6 +99,9 @@ describe('Inicialización SKU — Inbox/operación/Outbox atómicos (#102)', () 
       data: { status: 'INITIALIZED', code: null },
     });
     expect(db.kardex).toHaveLength(0); // No movimiento artificial de cantidad cero.
+    expect(
+      db.outbox.filter((row) => row.event_type === 'inventory.stock.changed'),
+    ).toHaveLength(0);
   });
 
   it('el mismo message_id no repite efectos ni resultados', async () => {
@@ -131,7 +134,7 @@ describe('Inicialización SKU — Inbox/operación/Outbox atómicos (#102)', () 
     expect(results[1].payload.data).toEqual(results[0].payload.data);
     expect(
       db.outbox.filter((row) => row.event_type === 'inventory.stock.changed'),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
   });
 
   it('no reinicia un saldo existente aunque reciba otra operación de inicialización', async () => {
@@ -246,15 +249,58 @@ describe('Inicialización SKU — Inbox/operación/Outbox atómicos (#102)', () 
     });
   });
 
-  it('mantiene bloqueado inventory.bulk.stock.adjust.requested mientras su contrato siga en GenericData', async () => {
-    await expect(
-      service.process({
-        ...message(),
-        name: 'inventory.bulk.stock.adjust.requested',
-      }),
-    ).rejects.toMatchObject({ reason: 'BLOCKED_CONTRACT' });
-    expect(db.inbox).toHaveLength(0);
-    expect(db.outbox).toHaveLength(0);
+  it('procesa inventory.bulk.stock.adjust.requested de bulk-svc con contrato absoluto idempotente y emite resultado R10 en Outbox', async () => {
+    const sku = 'SKU-BULK-1';
+    await service.process({
+      ...message(),
+      data: {
+        sku,
+        product_id: randomUUID(),
+        default_location_id: location,
+      },
+    });
+    const opId = randomUUID();
+    const bulkMsg = {
+      message_id: randomUUID(),
+      operation_id: opId,
+      correlation_id: randomUUID(),
+      schema_version: 1,
+      occurred_at: new Date().toISOString(),
+      kind: 'command',
+      producer: 'bulk-svc',
+      name: 'inventory.bulk.stock.adjust.requested',
+      data: {
+        operation_id: opId,
+        batch_id: randomUUID(),
+        row_operation_id: randomUUID(),
+        sku,
+        location_id: location,
+        target_on_hand: 5,
+        expected_stock_version: 0,
+        reason: 'BULK_INITIAL_STOCK',
+        requested_at: new Date().toISOString(),
+      },
+    };
+    const first = await service.process(bulkMsg);
+    expect(first).toEqual({ duplicate: false });
+    expect(db.inbox.some((i) => i.message_id === bulkMsg.message_id)).toBe(
+      true,
+    );
+    expect(
+      db.outbox.some(
+        (o) => o.event_type === 'inventory.bulk.stock.adjust.completed',
+      ),
+    ).toBe(true);
+    expect(
+      db.stockBalance.find(
+        (r) => r.sku_id === sku && r.location_id === location,
+      ),
+    ).toMatchObject({ on_hand: 5, stock_version: 1 });
+
+    const outboxCountBefore = db.outbox.length;
+    const second = await service.process(bulkMsg);
+    expect(second).toEqual({ duplicate: true });
+    expect(db.outbox).toHaveLength(outboxCountBefore);
   });
 
   it('acepta el envelope de Catalog PR #185 y evita reservas y disponibilidad positiva tras la baja', async () => {
@@ -515,5 +561,120 @@ describe('Inicialización SKU — Inbox/operación/Outbox atómicos (#102)', () 
         row.aggregate_id === sku,
     );
     expect(stockChangedForSku).toHaveLength(0);
+  });
+
+  it('aplica R02 inventory.bulk.stock.adjust.requested con contrato absoluto, actualiza saldo/Kardex/versión y emite inventory.stock.changed + R10', async () => {
+    const sku = 'SKU-R02-ABS';
+    const initCmd = {
+      ...message(),
+      data: {
+        sku,
+        product_id: randomUUID(),
+        default_location_id: location,
+      },
+    };
+    expect(await service.process(initCmd)).toEqual({
+      duplicate: false,
+      status: 'INITIALIZED',
+    });
+
+    const adjustOpId = randomUUID();
+    const adjustMsgId = randomUUID();
+    const adjustCorrelationId = randomUUID();
+    const batchId = randomUUID();
+    const rowOpId = randomUUID();
+    const adjustCmd = {
+      message_id: adjustMsgId,
+      operation_id: adjustOpId,
+      correlation_id: adjustCorrelationId,
+      schema_version: 1,
+      occurred_at: new Date().toISOString(),
+      kind: 'command',
+      producer: 'bulk-svc',
+      name: 'inventory.bulk.stock.adjust.requested',
+      data: {
+        operation_id: adjustOpId,
+        batch_id: batchId,
+        row_operation_id: rowOpId,
+        sku,
+        location_id: location,
+        target_on_hand: 15,
+        expected_stock_version: 0,
+        reason: 'BULK_INITIAL_STOCK',
+        requested_at: new Date().toISOString(),
+      },
+    };
+
+    expect(await service.process(adjustCmd)).toEqual({ duplicate: false });
+
+    const balance = db.stockBalance.find(
+      (r) => r.sku_id === sku && r.location_id === location,
+    );
+    expect(balance).toMatchObject({
+      on_hand: 15,
+      available: 15,
+      stock_version: 1,
+    });
+    expect(
+      db.kardex.some(
+        (k) =>
+          k.sku_id === sku &&
+          k.operation_id === adjustOpId &&
+          k.quantity === 15,
+      ),
+    ).toBe(true);
+    expect(
+      db.outbox.some(
+        (o) =>
+          o.event_type === 'inventory.stock.changed' && o.aggregate_id === sku,
+      ),
+    ).toBe(true);
+    const r10 = db.outbox.find(
+      (o) => o.event_type === 'inventory.bulk.stock.adjust.completed',
+    );
+    expect(r10?.payload).toMatchObject({
+      producer: 'inventory-svc',
+      kind: 'result',
+      name: 'inventory.bulk.stock.adjust.completed',
+      data: {
+        operation_id: adjustOpId,
+        batch_id: batchId,
+        row_operation_id: rowOpId,
+        sku,
+        location_id: location,
+        applied_on_hand: 15,
+        stock_version: 1,
+      },
+    });
+
+    // Replay idempotente
+    expect(await service.process(adjustCmd)).toEqual({ duplicate: true });
+
+    // Versión obsoleta -> emite R10 rejected sin mutar saldo
+    const staleCmd = {
+      ...adjustCmd,
+      message_id: randomUUID(),
+      operation_id: randomUUID(),
+      data: {
+        ...adjustCmd.data,
+        operation_id: randomUUID(),
+        target_on_hand: 20,
+        expected_stock_version: 0,
+      },
+    };
+    expect(await service.process(staleCmd)).toEqual({ duplicate: false });
+    expect(
+      db.outbox.some(
+        (o) =>
+          o.event_type === 'inventory.bulk.stock.adjust.rejected' &&
+          (o.payload as { data?: { code?: string } }).data?.code ===
+            'VERSION_STALE',
+      ),
+    ).toBe(true);
+    expect(
+      db.stockBalance.find(
+        (r) => r.sku_id === sku && r.location_id === location,
+      )?.on_hand,
+    ).toBe(15);
   });
 });

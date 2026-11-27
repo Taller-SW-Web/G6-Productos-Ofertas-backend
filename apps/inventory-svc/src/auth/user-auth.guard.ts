@@ -40,6 +40,8 @@ export class UserAuthGuard implements CanActivate {
     )
       return true;
     const simulated = process.env.G6_SECURITY_MODE === 'SIMULATED_AUTH';
+    if (simulated && process.env.NODE_ENV !== 'test')
+      throw ProblemDetailsException.tokenInvalido();
     if (!trust && (simulated || process.env.G7_JWT_JWKS_URL !== undefined)) {
       const authorization = phase1Request.headers.authorization;
       const bearer =

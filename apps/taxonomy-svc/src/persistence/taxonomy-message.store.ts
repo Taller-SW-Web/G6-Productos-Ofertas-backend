@@ -44,6 +44,12 @@ export interface TaxonomyDeliveryClaim {
   messageId: string;
   token: string;
 }
+export class TaxonomyMessageIdentityConflict extends Error {
+  constructor() {
+    super('MESSAGE_ID_COLLISION');
+    this.name = 'TaxonomyMessageIdentityConflict';
+  }
+}
 export function parseChecked(value: unknown): CheckedEnvelope {
   if (!objeto(value) || !objeto(value.data))
     throw new Error('INVALID_ENVELOPE');
@@ -187,7 +193,7 @@ export class TaxonomyMessageStore {
           const same = await tx.execute(
             sql`SELECT 1 FROM taxonomy.inbox WHERE message_id = ${envelope.message_id}::uuid AND handler = 'catalog.master.deactivation.checked' AND payload = ${JSON.stringify(envelope)}::jsonb`,
           );
-          if (!same.rows.length) throw new Error('MESSAGE_ID_COLLISION');
+          if (!same.rows.length) throw new TaxonomyMessageIdentityConflict();
           return;
         }
         const solicitud = await tx.execute(

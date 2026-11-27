@@ -81,6 +81,16 @@ if [[ "${1:-}" == containerapp && "${2:-}" == update ]]; then
   mv "$state.tmp" "$state"
   exit 0
 fi
+if [[ "${1:-}" == containerapp && "${2:-}" == revision && "${3:-}" == label && "${4:-}" == add ]]; then
+  jq '.g5_label=true | .properties.configuration.ingress.traffic=[{revisionName:.marketplace_revision,weight:100},{label:"g5-h5",revisionName:.properties.latestRevisionName,weight:0}]' "$state" > "$state.tmp"
+  mv "$state.tmp" "$state"
+  exit 0
+fi
+if [[ "${1:-}" == containerapp && "${2:-}" == revision && "${3:-}" == label && "${4:-}" == remove ]]; then
+  jq '.g5_label=false | .properties.configuration.ingress.traffic=[{revisionName:.marketplace_revision,weight:100}]' "$state" > "$state.tmp"
+  mv "$state.tmp" "$state"
+  exit 0
+fi
 exit 64
 MOCK
 chmod +x "$TEMP/bin/az"

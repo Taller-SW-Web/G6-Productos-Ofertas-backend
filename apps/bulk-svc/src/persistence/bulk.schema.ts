@@ -392,7 +392,7 @@ export const outboxDeliveries = bulk.table(
     }),
     check(
       'ck_outbox_delivery_destination',
-      sql`${t.destination} = 'g6.catalog.from.bulk'`,
+      sql`${t.destination} IN ('g6.catalog.from.bulk', 'g6.pricing.from.bulk', 'g6.inventory.from.bulk')`,
     ),
     check('ck_outbox_delivery_attempts', sql`${t.attempts} >= 0`),
     check(

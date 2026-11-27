@@ -79,6 +79,50 @@ function makeFakeReceiver() {
 }
 
 describe('readCombosServiceBus (COR-06 / T08)', () => {
+  it.each(['production', 'development', undefined])(
+    'rejects the HTTP lab transport outside explicit test mode (%s)',
+    (nodeEnv) => {
+      expect(() =>
+        readCombosServiceBus({
+          NODE_ENV: nodeEnv,
+          MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
+          COMBOS_SERVICE_BUS_EVENTS_ENABLED: 'true',
+          SERVICE_BUS_NAMESPACE_FQDN: 'g6-lab.servicebus.windows.net',
+          G6_ISOLATED_SERVICE_BUS_URL: 'http://127.0.0.1:1234',
+        }),
+      ).toThrow('COMBOS_ISOLATED_BUS_TEST_ONLY');
+    },
+  );
+
+  it.each([
+    'http://remote.example.test',
+    'https://127.0.0.1',
+    'http://u:p@127.0.0.1',
+    'http://127.0.0.1/path',
+  ])('rejects an unisolated broker origin %s', (origin) => {
+    expect(() =>
+      readCombosServiceBus({
+        NODE_ENV: 'test',
+        MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
+        COMBOS_SERVICE_BUS_EVENTS_ENABLED: 'true',
+        SERVICE_BUS_NAMESPACE_FQDN: 'g6-lab.servicebus.windows.net',
+        G6_ISOLATED_SERVICE_BUS_URL: origin,
+      }),
+    ).toThrow('COMBOS_ISOLATED_BUS_TEST_ONLY');
+  });
+
+  it('selects the explicit loopback HTTP lab transport only in test', () => {
+    expect(
+      readCombosServiceBus({
+        NODE_ENV: 'test',
+        MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
+        COMBOS_SERVICE_BUS_EVENTS_ENABLED: 'true',
+        SERVICE_BUS_NAMESPACE_FQDN: 'g6-lab.servicebus.windows.net',
+        G6_ISOLATED_SERVICE_BUS_URL: 'http://127.0.0.1:1234',
+      }),
+    ).toMatchObject({ enabled: true, isolatedBusUrl: 'http://127.0.0.1:1234' });
+  });
+
   it('returns undefined when H4/disabled without requiring Azure variables', () => {
     expect(readCombosServiceBus({})).toBeUndefined();
     expect(

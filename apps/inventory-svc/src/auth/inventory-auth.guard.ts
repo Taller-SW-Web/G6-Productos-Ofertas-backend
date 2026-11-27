@@ -54,18 +54,15 @@ export class InventoryAuthGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const mode = process.env.G6_SECURITY_MODE ?? 'G7_AUTHENTICATED';
     if (
-      !['PUBLIC_READ_ONLY', 'SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(mode)
+      !['SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(mode) ||
+      (mode === 'SIMULATED_AUTH' && process.env.NODE_ENV !== 'test')
     )
       throw ProblemDetailsException.tokenInvalido('G6_SECURITY_MODE inválido');
     const request = context.switchToHttp().getRequest();
-    const publicOperations = (process.env.INVENTORY_PUBLIC_OPERATION_IDS ?? '')
-      .split(',')
-      .map((id: string) => id.trim())
-      .filter(Boolean);
-    if (isPhase1PublicRead(request, mode, publicOperations)) {
-      request.inventoryPublicRead = true;
-      return true;
-    }
+    if ((process.env.INVENTORY_PUBLIC_OPERATION_IDS ?? '').trim().length > 0)
+      throw ProblemDetailsException.tokenInvalido(
+        'INVENTORY_PUBLIC_OPERATION_IDS inválido',
+      );
     const requiredScope = this.reflector.getAllAndOverride<string | undefined>(
       REQUIRED_SCOPE_KEY,
       [context.getHandler(), context.getClass()],

@@ -52,8 +52,10 @@ describe('Configured integration providers', () => {
     const config = new PromotionsConfigService(
       validatePromotionsConfiguration({
         ...fixture.environment,
-        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
-        PROMOTIONS_PUBLIC_OPERATION_IDS: 'evaluarPromociones',
+        G6_SECURITY_MODE: 'G7_AUTHENTICATED',
+        PROMOTIONS_PUBLIC_OPERATION_IDS: '',
+        AUTH_ISSUER: 'https://g7.test/api/v1/auth',
+        AUTH_JWKS_URL: 'https://g7.test/api/v1/auth/.well-known/jwks.json',
         GATEWAY_CATALOG_SVC_URL: 'http://catalog-svc:3001',
         GATEWAY_PRICING_SVC_URL: 'http://pricing-svc:3002',
         GATEWAY_INVENTORY_SVC_URL: 'http://inventory-svc:3005',
@@ -162,8 +164,10 @@ describe('Configured integration providers', () => {
     const config = new PromotionsConfigService(
       validatePromotionsConfiguration({
         ...fixture.environment,
-        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
-        PROMOTIONS_PUBLIC_OPERATION_IDS: 'evaluarPromociones',
+        G6_SECURITY_MODE: 'G7_AUTHENTICATED',
+        PROMOTIONS_PUBLIC_OPERATION_IDS: '',
+        AUTH_ISSUER: 'https://g7.test/api/v1/auth',
+        AUTH_JWKS_URL: 'https://g7.test/api/v1/auth/.well-known/jwks.json',
         GATEWAY_CATALOG_SVC_URL: 'http://catalog-svc:3001',
         GATEWAY_PRICING_SVC_URL: 'http://pricing-svc:3002',
         GATEWAY_INVENTORY_SVC_URL: 'http://inventory-svc:3005',
@@ -191,8 +195,10 @@ describe('Configured integration providers', () => {
     const config = new PromotionsConfigService(
       validatePromotionsConfiguration({
         ...fixture.environment,
-        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
-        PROMOTIONS_PUBLIC_OPERATION_IDS: 'evaluarPromociones',
+        G6_SECURITY_MODE: 'G7_AUTHENTICATED',
+        PROMOTIONS_PUBLIC_OPERATION_IDS: '',
+        AUTH_ISSUER: 'https://g7.test/api/v1/auth',
+        AUTH_JWKS_URL: 'https://g7.test/api/v1/auth/.well-known/jwks.json',
         GATEWAY_CATALOG_SVC_URL: 'http://catalog-svc:3001',
         GATEWAY_TAXONOMY_SVC_URL: 'http://taxonomy-svc:3006',
       }),
@@ -254,8 +260,10 @@ describe('Configured integration providers', () => {
     const config = new PromotionsConfigService(
       validatePromotionsConfiguration({
         ...fixture.environment,
-        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
-        PROMOTIONS_PUBLIC_OPERATION_IDS: 'evaluarPromociones',
+        G6_SECURITY_MODE: 'G7_AUTHENTICATED',
+        PROMOTIONS_PUBLIC_OPERATION_IDS: '',
+        AUTH_ISSUER: 'https://g7.test/api/v1/auth',
+        AUTH_JWKS_URL: 'https://g7.test/api/v1/auth/.well-known/jwks.json',
         GATEWAY_CATALOG_SVC_URL: 'http://catalog-svc:3001',
         GATEWAY_TAXONOMY_SVC_URL: 'http://taxonomy-svc:3006',
       }),

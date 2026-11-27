@@ -78,13 +78,23 @@ describe('PricingReadiness', () => {
     await database.onApplicationShutdown();
   });
 
-  it('comprueba PostgreSQL en PUBLIC_READ_ONLY con una allowlist explícita', async () => {
+  it('rechaza PUBLIC_READ_ONLY en H5 y comprueba PostgreSQL en G7_AUTHENTICATED', async () => {
+    expect(() =>
+      validateEnvironment({
+        NODE_ENV: 'test',
+        PRICING_SVC_PORT: '3002',
+        DATABASE_URL: 'postgresql://pricing:fixture@localhost/fixture',
+        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+        PRICING_PUBLIC_OPERATION_IDS: 'obtenerPrecioSku',
+      }),
+    ).toThrow('G6_SECURITY_MODE inválido.');
     const config = validateEnvironment({
       NODE_ENV: 'test',
       PRICING_SVC_PORT: '3002',
       DATABASE_URL: 'postgresql://pricing:fixture@localhost/fixture',
-      G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
-      PRICING_PUBLIC_OPERATION_IDS: 'obtenerPrecioSku',
+      G6_SECURITY_MODE: 'G7_AUTHENTICATED',
+      AUTH_ISSUER: 'https://g7.test/issuer',
+      AUTH_JWKS_URL: 'https://g7.test/jwks',
     });
     const database = new PricingDatabase(config);
     const readiness = new PricingReadiness(database, config);
@@ -94,7 +104,7 @@ describe('PricingReadiness', () => {
       rows: [{ compatible: true }],
     }));
 
-    expect(config.auth).toBeUndefined();
+    expect(config.auth).toBeDefined();
     expect(await readiness.check()).toBe(true);
     expect(pool.query).toHaveBeenCalledTimes(2);
 
@@ -122,30 +132,38 @@ describe('PricingReadiness', () => {
     await database.onApplicationShutdown();
   });
 
-  it.each(['test', 'production'])(
-    'en SIMULATED_AUTH comprueba PostgreSQL y conserva el fallo cerrado (%s)',
-    async (nodeEnv) => {
-      const config = validateEnvironment({
-        NODE_ENV: nodeEnv,
+  it('en SIMULATED_AUTH (test) comprueba PostgreSQL y lo rechaza en production', async () => {
+    expect(() =>
+      validateEnvironment({
+        NODE_ENV: 'production',
         PRICING_SVC_PORT: '3002',
         DATABASE_URL:
           'postgresql://pricing:fixture@localhost/fixture?sslmode=verify-full',
         G6_SECURITY_MODE: 'SIMULATED_AUTH',
         SIMULATED_AUTH_ISSUER: 'https://simulated.test',
         SIMULATED_AUTH_JWKS_URL: 'https://simulated.test/jwks',
-      });
-      const database = new PricingDatabase(config);
-      const readiness = new PricingReadiness(database, config);
-      const pool = vi.mocked(Pool).mock.instances.at(-1)!;
-      vi.mocked(pool.query).mockImplementationOnce(async () => ({ rows: [] }));
-      vi.mocked(pool.query).mockImplementationOnce(async () => ({
-        rows: [{ compatible: true }],
-      }));
-      expect(await readiness.check()).toBe(true);
-      expect(pool.query).toHaveBeenCalledTimes(2);
-      vi.mocked(pool.query).mockRejectedValueOnce(new Error('DB unavailable'));
-      expect(await readiness.check()).toBe(false);
-      await database.onApplicationShutdown();
-    },
-  );
+      }),
+    ).toThrow('G6_SECURITY_MODE inválido.');
+    const config = validateEnvironment({
+      NODE_ENV: 'test',
+      PRICING_SVC_PORT: '3002',
+      DATABASE_URL:
+        'postgresql://pricing:fixture@localhost/fixture?sslmode=verify-full',
+      G6_SECURITY_MODE: 'SIMULATED_AUTH',
+      SIMULATED_AUTH_ISSUER: 'https://simulated.test',
+      SIMULATED_AUTH_JWKS_URL: 'https://simulated.test/jwks',
+    });
+    const database = new PricingDatabase(config);
+    const readiness = new PricingReadiness(database, config);
+    const pool = vi.mocked(Pool).mock.instances.at(-1)!;
+    vi.mocked(pool.query).mockImplementationOnce(async () => ({ rows: [] }));
+    vi.mocked(pool.query).mockImplementationOnce(async () => ({
+      rows: [{ compatible: true }],
+    }));
+    expect(await readiness.check()).toBe(true);
+    expect(pool.query).toHaveBeenCalledTimes(2);
+    vi.mocked(pool.query).mockRejectedValueOnce(new Error('DB unavailable'));
+    expect(await readiness.check()).toBe(false);
+    await database.onApplicationShutdown();
+  });
 });

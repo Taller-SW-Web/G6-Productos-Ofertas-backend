@@ -11,7 +11,7 @@ export const PRICING_CONFIG = Symbol('PRICING_CONFIG');
 
 export interface PricingConfig {
   serviceBus?: PricingServiceBusConfig;
-  securityMode: 'PUBLIC_READ_ONLY' | 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
+  securityMode: 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
   publicOperations: readonly string[];
   nodeEnv: 'development' | 'test' | 'production';
   port: number;
@@ -40,19 +40,15 @@ export function validateEnvironment(env: NodeJS.ProcessEnv): PricingConfig {
   const serviceBus = readPricingServiceBus(env);
   const securityMode = env.G6_SECURITY_MODE ?? 'G7_AUTHENTICATED';
   if (
-    !['PUBLIC_READ_ONLY', 'SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(
-      securityMode,
-    )
+    !['SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(securityMode) ||
+    (securityMode === 'SIMULATED_AUTH' && nodeEnv !== 'test')
   )
     throw new InvalidPricingConfig('G6_SECURITY_MODE inválido.');
   const publicOperations = (env.PRICING_PUBLIC_OPERATION_IDS ?? '')
     .split(',')
     .map((id) => id.trim())
     .filter(Boolean);
-  if (
-    publicOperations.some((id) => !PHASE1_PUBLIC_OPERATION_IDS.has(id)) ||
-    (securityMode !== 'PUBLIC_READ_ONLY' && publicOperations.length)
-  )
+  if (publicOperations.length > 0)
     throw new InvalidPricingConfig('PRICING_PUBLIC_OPERATION_IDS inválido.');
   if (
     env.GATEWAY_DEMO_NO_AUTH_ENABLED === 'true' ||

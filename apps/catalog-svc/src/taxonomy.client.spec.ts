@@ -29,7 +29,10 @@ describe('Taxonomy HTTP boundary', () => {
         CATALOG_TAXONOMY_URL: origin,
       }),
       undefined,
-      readCatalogReadDemo({ G6_SECURITY_MODE: 'PUBLIC_READ_ONLY' }),
+      readCatalogReadDemo({
+        NODE_ENV: 'test',
+        G6_SECURITY_MODE: 'SIMULATED_AUTH',
+      }),
     );
     vi.stubEnv('CATALOG_TAXONOMY_URL', 'http://127.0.0.1:1');
   });
@@ -51,7 +54,10 @@ describe('Taxonomy HTTP boundary', () => {
     const standalone = new TaxonomyClient(
       undefined,
       undefined,
-      readCatalogReadDemo({ G6_SECURITY_MODE: 'PUBLIC_READ_ONLY' }),
+      readCatalogReadDemo({
+        NODE_ENV: 'test',
+        G6_SECURITY_MODE: 'SIMULATED_AUTH',
+      }),
     );
     vi.stubEnv('CATALOG_TAXONOMY_URL', 'malformed');
     body = { categories: [] };

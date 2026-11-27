@@ -268,6 +268,9 @@ export class CatalogBulkResultConsumer
     contentType: string | undefined;
     body: Uint8Array;
   }): Promise<void> {
+    console.error(
+      `[bulk-result-consumer] error=NONE received subject=${input.subject} msg=${input.messageId}`,
+    );
     if (!input.messageId) throw new Error('INVALID_SERVICE_BUS_MESSAGE_ID');
     const content = Buffer.from(input.body);
     const message = {
@@ -289,10 +292,55 @@ export class CatalogBulkResultConsumer
       await this.persistInvalidMessage(input, content, 'INVALID_JSON');
       return;
     }
-    let envelope: Envelope;
+    let envelope: Envelope | undefined;
     try {
       envelope = validateEnvelope(decoded, message);
-    } catch {
+    } catch (err) {
+      const other = record(decoded)
+        ? OTHER_BULK_ROUTES.get(String(decoded.name))
+        : undefined;
+      if (
+        other &&
+        record(decoded) &&
+        decoded.producer === other.producer &&
+        decoded.kind === other.kind &&
+        typeof decoded.message_id === 'string' &&
+        decoded.message_id === input.messageId &&
+        typeof decoded.correlation_id === 'string' &&
+        decoded.correlation_id.length > 0 &&
+        record(decoded.data)
+      ) {
+        if (
+          this.contractResultDispatcher &&
+          (decoded.name === 'inventory.bulk.stock.adjust.completed' ||
+            decoded.name === 'inventory.bulk.stock.adjust.rejected' ||
+            decoded.name === 'pricing.bulk.price.apply.completed' ||
+            decoded.name === 'pricing.bulk.price.apply.rejected')
+        ) {
+          await this.contractResultDispatcher.dispatch({
+            eventName: String(decoded.name),
+            messageId: decoded.message_id,
+            correlationId: decoded.correlation_id,
+            payload: decoded,
+          });
+          return;
+        }
+        await this.repository.persistPendingContractResult({
+          messageId: decoded.message_id,
+          eventName: String(decoded.name),
+          correlationId: decoded.correlation_id,
+          payload: decoded,
+        });
+        return;
+      }
+      console.error(
+        '[bulk-result-consumer] validateEnvelope error:',
+        err,
+        'subject=',
+        input.subject,
+        'decoded=',
+        JSON.stringify(decoded)?.slice(0, 400),
+      );
       await this.persistInvalidMessage(
         input,
         content,
@@ -314,6 +362,10 @@ export class CatalogBulkResultConsumer
         return;
       } catch (error) {
         if (error instanceof BulkDomainError) {
+          console.error(
+            '[bulk-result-consumer] recordCatalogBulkResult BulkDomainError:',
+            error,
+          );
           await this.repository.persistPendingContractResult({
             messageId: envelope.message_id,
             eventName: envelope.name,

@@ -99,9 +99,17 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       ),
       'utf8',
     );
+    const serviceBusAllDestinationsMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        'apps/bulk-svc/migrations/0009_h5_outbox_delivery_all_destinations.sql',
+      ),
+      'utf8',
+    );
     await pool.query(retryMigration);
     await pool.query(retryMigration);
     await pool.query(serviceBusDeliveryMigration);
+    await pool.query(serviceBusAllDestinationsMigration);
     const retryTables = await pool.query<{ table_name: string }>(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'bulk' AND table_name IN ('batch_resume_requests','retry_commands','domain_attempts') ORDER BY table_name",
     );
@@ -450,12 +458,16 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       await repository.findOwnedExportJobByExportId(exportId, OWNER_B),
     ).toBeNull();
     const command = (await repository.findPendingOutbox(10)).find(
-      (item) => item.correlationId === correlationId,
+      (item) =>
+        item.correlationId === correlationId &&
+        item.eventName === 'catalog.bulk.upsert.requested',
     );
     expect(command?.eventName).toBe('catalog.bulk.upsert.requested');
     await service.receiveImport(importInput);
     const replay = (await repository.findPendingOutbox(10)).find(
-      (item) => item.correlationId === correlationId,
+      (item) =>
+        item.correlationId === correlationId &&
+        item.eventName === 'catalog.bulk.upsert.requested',
     );
     expect(replay?.messageId).toBe(command?.messageId);
     expect(replay?.payload).toEqual(command?.payload);
@@ -759,7 +771,9 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
     });
     const row = admitted.parsed.rows[0]!;
     const command = (await repository.findPendingOutbox(10)).find(
-      (item) => item.correlationId === correlationId,
+      (item) =>
+        item.correlationId === correlationId &&
+        item.eventName === 'catalog.bulk.upsert.requested',
     )!;
     const resultMessageId = id();
     const envelope = {

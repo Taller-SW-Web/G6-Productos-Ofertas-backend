@@ -190,12 +190,12 @@ describe('Promotions H5 configuration', () => {
         G6_SECURITY_MODE: 'G7_AUTHENTICATED',
       })?.couponCommandsEnabled,
     ).toBe(true);
-    expect(
+    expect(() =>
       readPromotionsServiceBus({
         ...requested,
         G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
-      })?.couponCommandsEnabled,
-    ).toBe(true);
+      }),
+    ).toThrow('PROMOTIONS_SERVICE_BUS_CONFIGURATION_INVALID');
   });
   it.each([
     { RABBITMQ_URL: 'amqp://localhost' },
@@ -215,7 +215,7 @@ describe('Promotions H5 configuration', () => {
     const c = readPromotionsServiceBus({
       ...h5(),
       NODE_ENV: 'production',
-      G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+      G6_SECURITY_MODE: 'G7_AUTHENTICATED',
       G6_SERVICE_BUS_PRODUCTION_ENABLED: 'true',
       AZURE_CLIENT_ID: '11111111-1111-4111-8111-111111111111',
       AUTH_ISSUER: 'https://g7.example.test/issuer',

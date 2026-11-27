@@ -24,7 +24,7 @@ LEGACY_UNCONTRACTED = {
     "obtenerDefinicionPrecioSkuAdministracion",
 }
 KNOWN_SECURITY_SCHEMES = {"userBearer", "serviceBearer"}
-KNOWN_SECURITY_PROFILES = {"UNSPECIFIED", "G7_AUTHENTICATED", "PUBLIC_READ_ONLY"}
+KNOWN_SECURITY_PROFILES = {"UNSPECIFIED", "G7_AUTHENTICATED"}
 KNOWN_RATE_PROFILES = {
     "commercial_read",
     "admin_read",
@@ -442,6 +442,8 @@ def filter_spec(
     effective_publish: bool = False,
     allow_human_only_when_m2m_pending: bool = False,
 ) -> tuple[dict, dict]:
+    if security_profile == "PUBLIC_READ_ONLY":
+        raise ValueError("PUBLIC_READ_ONLY retirado bajo política universal G7")
     if security_profile not in KNOWN_SECURITY_PROFILES:
         raise ValueError(f"securityProfile no reconocido: {security_profile!r}")
     if enable_g5 and not g5_authorized:

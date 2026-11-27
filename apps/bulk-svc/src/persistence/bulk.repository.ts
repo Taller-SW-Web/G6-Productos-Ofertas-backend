@@ -137,6 +137,7 @@ export interface DomainResultInput {
   action:
     | 'UPSERT'
     | 'PRICE_INITIALIZATION'
+    | 'PRICE_BULK_APPLY'
     | 'SKU_INITIALIZATION'
     | 'STOCK_ADJUSTMENT';
   skuId?: string;
@@ -394,10 +395,18 @@ export class BulkPersistenceRepository {
             occurredAt: command.occurredAt,
             payload: command.payload,
           });
-          if (command.eventName === 'catalog.bulk.upsert.requested')
+          const bulkDeliveryDestination =
+            command.eventName === 'catalog.bulk.upsert.requested'
+              ? 'g6.catalog.from.bulk'
+              : command.eventName === 'inventory.bulk.stock.adjust.requested'
+                ? 'g6.inventory.from.bulk'
+                : command.eventName === 'pricing.bulk.price.apply.requested'
+                  ? 'g6.pricing.from.bulk'
+                  : null;
+          if (bulkDeliveryDestination)
             await tx.insert(outboxDeliveries).values({
               messageId: command.messageId,
-              destination: 'g6.catalog.from.bulk',
+              destination: bulkDeliveryDestination,
             });
         }
         return { manifest, batch, rows: createdRows };
@@ -543,6 +552,30 @@ export class BulkPersistenceRepository {
           row.status === 'COMPLETED' ||
           row.status === 'FAILED'
         ) {
+          if (
+            input.domain !== 'CATALOGO' &&
+            row.status === 'FAILED' &&
+            row.failedDomain === 'CATALOGO'
+          ) {
+            await tx.insert(inbox).values({
+              messageId: input.messageId,
+              handler: 'bulk.domain.result.late',
+              eventName: input.eventName,
+              correlationId: input.correlationId,
+              payload: {
+                batchId: input.batchId,
+                rowId: input.rowId,
+                domain: input.domain,
+                operationId: input.operationId,
+                status: input.status,
+              },
+              result: 'SUPERSEDED_BY_CATALOG_FAILURE',
+            });
+            return {
+              processed: false,
+              result: 'SUPERSEDED_BY_CATALOG_FAILURE',
+            };
+          }
           domainFailure(
             'INVALID_TRANSITION',
             'A terminal result cannot reopen a row or batch without an explicit requeue',
@@ -618,17 +651,43 @@ export class BulkPersistenceRepository {
             'INVALID_INPUT',
             'Bulk row results must be adapted from catalog.bulk.upsert.completed; catalog.bulk.upsert.rejected rejects the command as a whole.',
           );
-        if (
-          input.domain === 'PRICING' &&
-          (input.action !== 'PRICE_INITIALIZATION' ||
-            input.causationId == null ||
-            (input.status === 'COMPLETED'
-              ? input.eventName !== 'pricing.product.initialization.completed'
-              : input.eventName !== 'pricing.product.initialization.rejected'))
-        )
-          inconsistent(
-            'Pricing ALTA results must preserve initialization event, operation_id and causation_id identities.',
-          );
+        if (input.domain === 'PRICING') {
+          if (
+            input.action === 'PRICE_INITIALIZATION' &&
+            (input.causationId == null ||
+              (input.status === 'COMPLETED'
+                ? input.eventName !== 'pricing.product.initialization.completed'
+                : input.eventName !==
+                  'pricing.product.initialization.rejected'))
+          ) {
+            inconsistent(
+              'Pricing ALTA results must preserve initialization event, operation_id and causation_id identities.',
+            );
+          }
+          if (
+            input.action === 'PRICE_BULK_APPLY' &&
+            (input.causationId == null ||
+              Number(
+                normalizedRow.precioRegular ??
+                  (normalizedRow.product as Record<string, unknown> | undefined)
+                    ?.precioBaseInicial ??
+                  0,
+              ) <= 0 ||
+              (input.status === 'COMPLETED'
+                ? input.eventName !== 'pricing.bulk.price.apply.completed'
+                : input.eventName !== 'pricing.bulk.price.apply.rejected'))
+          ) {
+            inconsistent(
+              'Pricing bulk apply results must preserve pricing.bulk.price.apply event, normalized price intent, operation_id and causation_id identities.',
+            );
+          }
+          if (
+            input.action !== 'PRICE_INITIALIZATION' &&
+            input.action !== 'PRICE_BULK_APPLY'
+          ) {
+            inconsistent('Pricing result action is invalid.');
+          }
+        }
         if (input.domain === 'INVENTARIO') {
           if (
             input.action === 'SKU_INITIALIZATION' &&
@@ -707,7 +766,10 @@ export class BulkPersistenceRepository {
           const completedSkuIds = earlierSkuReceipts
             .filter((receipt) => receipt.payload.status === 'COMPLETED')
             .map((receipt) => receipt.payload.skuId);
-          if (skuIds.some((sku) => !completedSkuIds.includes(sku)))
+          if (
+            earlierSkuReceipts.length > 0 &&
+            skuIds.some((sku) => !completedSkuIds.includes(sku))
+          )
             domainFailure(
               'DEPENDENCY_PENDING',
               'Stock adjustment result cannot precede all SKU initialization confirmations',
@@ -763,7 +825,9 @@ export class BulkPersistenceRepository {
             stepStatus = 'FAILED';
           else
             stepStatus =
-              skuIds.every((sku) => completedSkuIds.includes(sku)) &&
+              (completedSkuIds.length > 0
+                ? skuIds.every((sku) => completedSkuIds.includes(sku))
+                : adjustmentComplete) &&
               (!adjustmentRequired || adjustmentComplete)
                 ? 'COMPLETED'
                 : 'PROCESSING';
@@ -874,6 +938,7 @@ export class BulkPersistenceRepository {
         return { processed: true, result: response };
       });
     } catch (error) {
+      console.error('[bulk-repo] recordDomainResult error:', error);
       if (error instanceof BulkDomainError) throw error;
       throw persistenceError(error);
     }
@@ -981,12 +1046,15 @@ export class BulkPersistenceRepository {
               : null,
           ),
         );
-        const normalizedRows = admittedRows.filter(
-          (value) =>
-            typeof value === 'object' &&
-            value !== null &&
-            commandRowOperations.has(Reflect.get(value, 'rowOperationId')),
-        );
+        const hasInlineRows = Array.isArray(commandData?.rows);
+        const normalizedRows = hasInlineRows
+          ? admittedRows.filter(
+              (value) =>
+                typeof value === 'object' &&
+                value !== null &&
+                commandRowOperations.has(Reflect.get(value, 'rowOperationId')),
+            )
+          : admittedRows;
         const normalizedByOperationId = new Map<
           string,
           Record<string, unknown>
@@ -1281,6 +1349,7 @@ export class BulkPersistenceRepository {
         return { processed: true, result: outcome };
       });
     } catch (error) {
+      console.error('[bulk-repo] recordDomainResult error:', error);
       if (error instanceof BulkDomainError) throw error;
       throw persistenceError(error);
     }
@@ -1987,6 +2056,7 @@ export class BulkPersistenceRepository {
         return { processed: true, result: 'RESULTS_APPLIED' };
       });
     } catch (error) {
+      console.error('[bulk-repo] recordDomainResult error:', error);
       if (error instanceof BulkDomainError) throw error;
       throw persistenceError(error);
     }
@@ -3260,15 +3330,39 @@ export class BulkPersistenceRepository {
   async claimPendingServiceBusDeliveries(limit = 20) {
     try {
       return await this.db.transaction(async (tx) => {
+        const bulkDestinations = [
+          'g6.catalog.from.bulk',
+          'g6.inventory.from.bulk',
+          'g6.pricing.from.bulk',
+        ];
         const due = await tx
           .select({ delivery: outboxDeliveries, message: outbox })
           .from(outboxDeliveries)
           .innerJoin(outbox, eq(outbox.messageId, outboxDeliveries.messageId))
           .where(
             and(
-              eq(outboxDeliveries.destination, 'g6.catalog.from.bulk'),
+              inArray(outboxDeliveries.destination, bulkDestinations),
               sql`${outboxDeliveries.publishedAt} IS NULL`,
               sql`${outboxDeliveries.availableAt} <= now()`,
+              // Downstream business commands stay durable and unpublished
+              // until Catalog has confirmed every referenced row. A Catalog
+              // retry then releases the original commands with unchanged IDs.
+              sql`(${outboxDeliveries.destination} = 'g6.catalog.from.bulk' OR NOT EXISTS (
+                SELECT 1
+                FROM jsonb_array_elements(COALESCE(
+                  ${outbox.payload}->'data'->'items',
+                  jsonb_build_array(${outbox.payload}->'data')
+                )) AS requested(item)
+                LEFT JOIN bulk.batch_jobs j
+                  ON j.batch_id::text = ${outbox.payload}->'data'->>'batch_id'
+                LEFT JOIN bulk.batch_rows r
+                  ON r.batch_job_id = j.id AND r.row_id::text = item->>'row_operation_id'
+                LEFT JOIN bulk.row_domain_steps s
+                  ON s.batch_row_id = r.id AND s.domain = 'CATALOGO'
+                WHERE r.id IS NULL OR (
+                  'CATALOGO' = ANY(r.required_domains) AND s.status IS DISTINCT FROM 'COMPLETED'
+                )
+              ))`,
             ),
           )
           .orderBy(asc(outboxDeliveries.availableAt), asc(outbox.createdAt))
@@ -3311,7 +3405,11 @@ export class BulkPersistenceRepository {
         .where(
           and(
             eq(outboxDeliveries.messageId, messageId),
-            eq(outboxDeliveries.destination, 'g6.catalog.from.bulk'),
+            inArray(outboxDeliveries.destination, [
+              'g6.catalog.from.bulk',
+              'g6.inventory.from.bulk',
+              'g6.pricing.from.bulk',
+            ]),
             eq(outboxDeliveries.leaseToken, leaseToken),
             sql`${outboxDeliveries.publishedAt} IS NULL`,
           ),
@@ -3342,7 +3440,11 @@ export class BulkPersistenceRepository {
         .where(
           and(
             eq(outboxDeliveries.messageId, messageId),
-            eq(outboxDeliveries.destination, 'g6.catalog.from.bulk'),
+            inArray(outboxDeliveries.destination, [
+              'g6.catalog.from.bulk',
+              'g6.inventory.from.bulk',
+              'g6.pricing.from.bulk',
+            ]),
             eq(outboxDeliveries.leaseToken, leaseToken),
             sql`${outboxDeliveries.publishedAt} IS NULL`,
           ),

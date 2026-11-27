@@ -73,18 +73,25 @@ describe('Promotions signed identity', () => {
       ),
     ).resolves.toBeUndefined();
   });
-  it('requires G3 JWT for evaluation when removed from the public allowlist, while retaining other public reads', async () => {
-    const publicConfig = new PromotionsConfigService(
+  it('requires G3 JWT for evaluation and rejects PUBLIC_READ_ONLY in H5', async () => {
+    expect(() =>
       validatePromotionsConfiguration({
         ...fixture.environment,
         G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
         PROMOTIONS_PUBLIC_OPERATION_IDS: 'listarPromociones',
+      }),
+    ).toThrow(/G6_SECURITY_MODE/);
+    const g7Config = new PromotionsConfigService(
+      validatePromotionsConfiguration({
+        ...fixture.environment,
+        G6_SECURITY_MODE: 'G7_AUTHENTICATED',
+        PROMOTIONS_PUBLIC_OPERATION_IDS: '',
         AUTH_ISSUER: 'https://security.isolated.test/api/v1/auth',
         AUTH_JWKS_URL:
           'https://security.isolated.test/api/v1/auth/.well-known/jwks.json',
       }),
     );
-    const promotions = new PromotionsIdentity(publicConfig, async () => [jwk]);
+    const promotions = new PromotionsIdentity(g7Config, async () => [jwk]);
     const evaluationRequest = {
       method: 'POST',
       path: '/api/v1/promociones/evaluar',
@@ -98,19 +105,19 @@ describe('Promotions signed identity', () => {
     expect(
       isPhase1PublicRead(
         evaluationRequest,
-        'PUBLIC_READ_ONLY',
-        ['listarPromociones'],
+        'G7_AUTHENTICATED',
+        [],
         'evaluarPromociones',
       ),
     ).toBe(false);
     expect(
       isPhase1PublicRead(
         listingRequest,
-        'PUBLIC_READ_ONLY',
-        ['listarPromociones'],
+        'G7_AUTHENTICATED',
+        [],
         'listarPromociones',
       ),
-    ).toBe(true);
+    ).toBe(false);
     await expect(
       promotions.authorize(httpContracts.evaluarPromociones, undefined),
     ).rejects.toMatchObject({ status: 401, code: 'TOKEN_INVALIDO' });

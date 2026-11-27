@@ -298,7 +298,8 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
         row('"A,""B"""'),
         row('=formula'),
       );
-      await post(base + '/prevalidar', file, false).expect(400);
+      await post(base + '/prevalidar', file, false).expect(200);
+      await post(base + '/prevalidar', file, 'yes').expect(400);
       await post(base, file, 'yes').expect(400);
       await post(base, file, undefined, '').expect(400);
       const admitted = await post(base, file).expect(202);
@@ -344,8 +345,15 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
         ),
         'utf8',
       );
+      const r2RoutesMigration = await readFile(
+        new URL(
+          '../migrations/0003_service_bus_h5_routes_r2.sql',
+          import.meta.url,
+        ),
+        'utf8',
+      );
       await admin.query(
-        `BEGIN; SET LOCAL ROLE po_pricing_owner; ${migration} COMMIT;`,
+        `BEGIN; SET LOCAL ROLE po_pricing_owner; ${migration}\n${r2RoutesMigration} COMMIT;`,
       );
       const pilot = await createApp(false, true);
       try {
@@ -384,9 +392,14 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
         expect(await pilot.imports.processNext()).toBe(true);
         expect(await pilot.imports.processNext()).toBe(false);
         expect(await version('pilot-update')).toBe('2');
-        expect((await facts()).rows).toEqual([
-          { destination: 'g6.price-audit.from.pricing', sent_at: null },
-        ]);
+        const factsRows = (await facts()).rows;
+        expect(factsRows).toHaveLength(2);
+        expect(factsRows).toEqual(
+          expect.arrayContaining([
+            { destination: 'g6.price-audit.from.pricing', sent_at: null },
+            { destination: 'g6.promotions.from.pricing', sent_at: null },
+          ]),
+        );
         const correlation = randomUUID();
         await request(pilot.app.getHttpServer())
           .patch(`/api/v1/precios/productos/${randomUUID()}`)
@@ -406,9 +419,13 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
            WHERE o.correlation_id=$1`,
           [correlation],
         );
-        expect(created.rows).toEqual([
-          { destination: 'g6.price-audit.from.pricing' },
-        ]);
+        expect(created.rows).toHaveLength(2);
+        expect(created.rows).toEqual(
+          expect.arrayContaining([
+            { destination: 'g6.price-audit.from.pricing' },
+            { destination: 'g6.promotions.from.pricing' },
+          ]),
+        );
       } finally {
         await pilot.app.close();
       }

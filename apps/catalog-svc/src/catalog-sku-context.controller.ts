@@ -16,7 +16,7 @@ import { PostgresCatalogRepository } from './postgres-catalog.repository.js';
 import { isCorrelationId } from './correlation.js';
 
 // Private g6-http read for Pricing; never calls commercial reads or Pricing.
-@Controller('api/v1/productos/skus')
+@Controller(['api/v1/productos/skus', 'productos/skus'])
 @UseGuards(CatalogAuthGuard)
 export class CatalogSkuContextController {
   constructor(private readonly repository: PostgresCatalogRepository) {}

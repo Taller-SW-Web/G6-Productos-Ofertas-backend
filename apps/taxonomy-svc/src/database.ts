@@ -147,7 +147,7 @@ export class Database implements OnModuleDestroy {
       }
       this.db ??= drizzle(this.pool);
       return await query(this.db);
-    } catch {
+    } catch (err) {
       this.logger.error({
         event: 'taxonomy.database.query_failed',
         service: 'taxonomy-svc',

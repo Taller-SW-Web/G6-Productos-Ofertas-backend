@@ -19,22 +19,12 @@ export class BulkUserBearerGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<Request>();
     const mode = process.env.G6_SECURITY_MODE ?? 'G7_AUTHENTICATED';
     if (
-      !['PUBLIC_READ_ONLY', 'SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(mode)
+      !['SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(mode) ||
+      (mode === 'SIMULATED_AUTH' && process.env.NODE_ENV !== 'test')
     )
       throw new UnauthorizedException('TOKEN_INVALIDO');
-    const publicOperations = (process.env.BULK_PUBLIC_OPERATION_IDS ?? '')
-      .split(',')
-      .map((id) => id.trim())
-      .filter(Boolean);
-    if (
-      isPhase1PublicRead(
-        request,
-        mode,
-        publicOperations,
-        context.getHandler().name,
-      )
-    )
-      return true;
+    if ((process.env.BULK_PUBLIC_OPERATION_IDS ?? '').trim().length > 0)
+      throw new UnauthorizedException('TOKEN_INVALIDO');
     const token = request.headers.authorization;
     if (typeof token !== 'string' || !token.startsWith('Bearer '))
       throw new UnauthorizedException('TOKEN_INVALIDO');

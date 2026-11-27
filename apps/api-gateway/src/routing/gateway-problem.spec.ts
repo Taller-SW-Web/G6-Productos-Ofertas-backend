@@ -26,8 +26,8 @@ describe('Gateway and provider problem boundaries (H-01)', () => {
     },
   );
   it('does not expand the provider contract or trust arbitrary local codes', () => {
-    expect(seo.responses['403']).toBeUndefined();
-    expect(gatewayProblem(seo, 403, 'SCOPE_INSUFICIENTE', 'provider')).toEqual({
+    expect(seo.responses['418']).toBeUndefined();
+    expect(gatewayProblem(seo, 418, 'UNLISTED_CODE', 'provider')).toEqual({
       status: 500,
       code: 'ERROR_INTERNO',
     });

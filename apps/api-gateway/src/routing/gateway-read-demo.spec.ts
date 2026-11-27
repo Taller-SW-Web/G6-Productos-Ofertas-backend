@@ -40,49 +40,23 @@ describe('G6 read-only demo Gateway boundary', () => {
       }),
     ).toThrow('Invalid Gateway configuration');
 
-    // Requisito #3: sin GATEWAY_PUBLIC_OPERATION_IDS explícito, PUBLIC_READ_ONLY
-    // mantiene 0 operaciones públicas activadas automáticamente.
-    const emptyPhase1Settings = readGatewaySettings({
-      G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
-    });
-    expect(emptyPhase1Settings.publicOperations).toEqual([]);
-    const emptyPhase1Identity = new GatewayIdentity(emptyPhase1Settings);
-    for (const route of CONTRACT_ROUTES) {
-      await expect(
-        emptyPhase1Identity.authorize(route, undefined),
-      ).rejects.toMatchObject(
-        route.security.length
-          ? { status: 401, code: 'TOKEN_INVALIDO' }
-          : { status: 403, code: 'SCOPE_INSUFICIENTE' },
-      );
-    }
-
-    // Solo las operaciones GET explícitamente declaradas en GATEWAY_PUBLIC_OPERATION_IDS se habilitan
-    const phase1Identity = new GatewayIdentity(
+    // H5: PUBLIC_READ_ONLY está deshabilitado y falla cerrado en readGatewaySettings.
+    expect(() =>
+      readGatewaySettings({
+        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+      }),
+    ).toThrow('Invalid Gateway configuration');
+    expect(() =>
       readGatewaySettings({
         G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
         GATEWAY_PUBLIC_OPERATION_IDS:
           'listarProductos,obtenerProductoPorSlug,listarCategorias,listarMarcas',
       }),
-    );
+    ).toThrow('Invalid Gateway configuration');
+
     const listarProductos = CONTRACT_ROUTES.find(
       (r) => r.operationId === 'listarProductos',
     )!;
-    const obtenerProducto = CONTRACT_ROUTES.find(
-      (r) => r.operationId === 'obtenerProducto',
-    )!;
-    const crearProducto = CONTRACT_ROUTES.find(
-      (r) => r.operationId === 'crearProducto',
-    )!;
-    await expect(
-      phase1Identity.authorize(listarProductos, undefined),
-    ).resolves.toBeUndefined();
-    await expect(
-      phase1Identity.authorize(obtenerProducto, undefined),
-    ).rejects.toMatchObject({ status: 401, code: 'TOKEN_INVALIDO' });
-    await expect(
-      phase1Identity.authorize(crearProducto, undefined),
-    ).rejects.toMatchObject({ status: 401, code: 'TOKEN_INVALIDO' });
 
     const simulated = readGatewaySettings({
       NODE_ENV: 'test',

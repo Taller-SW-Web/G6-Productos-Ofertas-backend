@@ -16,10 +16,12 @@ import {
 } from '../config/service-bus.js';
 import {
   parseChecked,
+  TaxonomyMessageIdentityConflict,
   type TaxonomyMessageStore,
 } from '../persistence/taxonomy-message.store.js';
 
 type Config = NonNullable<ReturnType<typeof readTaxonomyServiceBus>>;
+export const TAXONOMY_SERVICE_BUS_MAX_BATCH_BYTES = 240 * 1024;
 type Store = Pick<
   TaxonomyMessageStore,
   | 'consumir'
@@ -84,7 +86,7 @@ export async function publishTaxonomyDelivery(
   try {
     if (message) {
       const batch = await sender.createMessageBatch({
-        maxSizeInBytes: 256 * 1024,
+        maxSizeInBytes: TAXONOMY_SERVICE_BUS_MAX_BATCH_BYTES,
         abortSignal: AbortSignal.timeout(5000),
       });
       if (!batch.tryAddMessage(message)) outcome = 'terminal';
@@ -115,7 +117,7 @@ export async function receiveTaxonomyDelivery(
   try {
     if (
       !(message.body instanceof Uint8Array) ||
-      message.body.byteLength > 256 * 1024 ||
+      message.body.byteLength > TAXONOMY_SERVICE_BUS_MAX_BATCH_BYTES ||
       message.contentType !== 'application/json'
     )
       throw new Error('INVALID_ENVELOPE');
@@ -144,12 +146,186 @@ export async function receiveTaxonomyDelivery(
   }
   try {
     await store.consumir(checked);
-  } catch {
+  } catch (error) {
+    if (error instanceof TaxonomyMessageIdentityConflict) {
+      await receiver.deadLetterMessage(message, {
+        deadLetterReason: 'TAXONOMY_MESSAGE_ID_CONFLICT',
+        deadLetterErrorDescription:
+          'Message identity conflicts with persisted inbox',
+      });
+      return true;
+    }
     await receiver.abandonMessage(message);
     return false;
   }
   await receiver.completeMessage(message);
   return true;
+}
+
+function createIsolatedTaxonomyServiceBusClient(
+  baseUrl: string,
+): ServiceBusClient {
+  const parsed = new URL(baseUrl);
+  if (
+    parsed.protocol !== 'http:' ||
+    !['127.0.0.1', 'localhost'].includes(parsed.hostname)
+  ) {
+    throw new Error('G6_ISOLATED_SERVICE_BUS_URL debe ser HTTP loopback.');
+  }
+  const origin = parsed.origin;
+  const timers = new Set<ReturnType<typeof setInterval>>();
+  return {
+    createSender(queue: string) {
+      return {
+        async createMessageBatch() {
+          const messages: Array<Record<string, unknown>> = [];
+          return {
+            tryAddMessage(msg: {
+              body: unknown;
+              contentType?: string;
+              messageId?: string;
+              correlationId?: string;
+              subject?: string;
+            }) {
+              const rawBody =
+                msg.body instanceof Uint8Array
+                  ? Buffer.from(msg.body).toString('utf8')
+                  : typeof msg.body === 'string'
+                    ? msg.body
+                    : JSON.stringify(msg.body);
+              messages.push({
+                body: rawBody,
+                contentType: msg.contentType,
+                messageId: msg.messageId,
+                correlationId: msg.correlationId,
+                subject: msg.subject,
+              });
+              return true;
+            },
+            _messages: messages,
+          } as never;
+        },
+        async sendMessages(batch: unknown) {
+          const items =
+            (batch as { _messages?: Array<Record<string, unknown>> })
+              ._messages ?? [];
+          for (const item of items) {
+            const res = await fetch(
+              `${origin}/queues/${encodeURIComponent(queue)}/messages`,
+              {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify(item),
+              },
+            );
+            if (!res.ok)
+              throw new Error(`ISOLATED_BUS_SEND_FAILED_${res.status}`);
+          }
+        },
+      } as never;
+    },
+    createReceiver(queue: string) {
+      return {
+        subscribe(handlers: {
+          processMessage: (msg: ServiceBusReceivedMessage) => Promise<void>;
+          processError: (args: { error: Error }) => Promise<void>;
+        }) {
+          let active = true;
+          const timer = setInterval(async () => {
+            if (!active) return;
+            try {
+              const res = await fetch(
+                `${origin}/queues/${encodeURIComponent(queue)}/receive`,
+                { method: 'POST' },
+              );
+              if (res.status === 204 || !res.ok) return;
+              const msg = (await res.json()) as {
+                deliveryId: string;
+                body: string;
+                contentType?: string;
+                messageId?: string;
+                correlationId?: string;
+                subject?: string;
+                deliveryCount?: number;
+              };
+              await handlers.processMessage({
+                body: Buffer.from(msg.body, 'utf8'),
+                contentType: msg.contentType,
+                messageId: msg.messageId,
+                correlationId: msg.correlationId,
+                subject: msg.subject,
+                deliveryCount: msg.deliveryCount ?? 1,
+                _deliveryId: msg.deliveryId,
+              } as unknown as ServiceBusReceivedMessage);
+            } catch (error) {
+              await handlers.processError({
+                error:
+                  error instanceof Error ? error : new Error(String(error)),
+              });
+            }
+          }, 250);
+          timer.unref();
+          timers.add(timer);
+          return {
+            async close() {
+              active = false;
+              clearInterval(timer);
+              timers.delete(timer);
+            },
+          };
+        },
+        async peekMessages() {
+          const res = await fetch(
+            `${origin}/queues/${encodeURIComponent(queue)}/peek`,
+          );
+          if (!res.ok)
+            throw new Error(`ISOLATED_BUS_PEEK_FAILED_${res.status}`);
+          return (await res.json()) as ServiceBusReceivedMessage[];
+        },
+        async completeMessage(message: ServiceBusReceivedMessage) {
+          const deliveryId = (message as unknown as { _deliveryId?: string })
+            ._deliveryId;
+          if (!deliveryId) return;
+          await fetch(
+            `${origin}/queues/${encodeURIComponent(queue)}/complete/${encodeURIComponent(deliveryId)}`,
+            { method: 'POST' },
+          );
+        },
+        async abandonMessage(message: ServiceBusReceivedMessage) {
+          const deliveryId = (message as unknown as { _deliveryId?: string })
+            ._deliveryId;
+          if (!deliveryId) return;
+          await fetch(
+            `${origin}/queues/${encodeURIComponent(queue)}/abandon/${encodeURIComponent(deliveryId)}`,
+            { method: 'POST' },
+          );
+        },
+        async deadLetterMessage(
+          message: ServiceBusReceivedMessage,
+          options?: {
+            deadLetterReason?: string;
+            deadLetterErrorDescription?: string;
+          },
+        ) {
+          const deliveryId = (message as unknown as { _deliveryId?: string })
+            ._deliveryId;
+          if (!deliveryId) return;
+          await fetch(
+            `${origin}/queues/${encodeURIComponent(queue)}/deadletter/${encodeURIComponent(deliveryId)}`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(options ?? {}),
+            },
+          );
+        },
+      } as never;
+    },
+    async close() {
+      for (const timer of timers) clearInterval(timer);
+      timers.clear();
+    },
+  } as unknown as ServiceBusClient;
 }
 
 export class TaxonomyServiceBusRuntime {
@@ -163,33 +339,65 @@ export class TaxonomyServiceBusRuntime {
   private stopped = false;
   private failures = 0;
   available = false;
+  storageAvailable = false;
+  brokerAvailable = false;
 
   constructor(
     private readonly config: Config,
     private readonly store: Store,
-  ) {}
+  ) {
+    // Un transporte pausado no constituye una dependencia activa de readiness.
+    this.available = !config.enabled;
+  }
 
   start(): void {
     if (!this.config.enabled || this.client || this.stopped) return;
-    this.client = new ServiceBusClient(
-      this.config.namespace,
-      this.config.clientId
-        ? new ManagedIdentityCredential({ clientId: this.config.clientId })
-        : new DefaultAzureCredential(),
-      { retryOptions: { maxRetries: 0, timeoutInMs: 5000 } },
-    );
-    const receiver = this.client.createReceiver(catalogTaxonomyQueue, {
-      receiveMode: 'peekLock',
-      skipParsingBodyAsJson: true,
-      maxAutoLockRenewalDurationInMs: 60_000,
-    });
+    if (
+      process.env.NODE_ENV === 'test' &&
+      process.env.G6_ISOLATED_SERVICE_BUS_URL
+    ) {
+      this.client = createIsolatedTaxonomyServiceBusClient(
+        process.env.G6_ISOLATED_SERVICE_BUS_URL,
+      );
+    } else {
+      this.client = new ServiceBusClient(
+        this.config.namespace,
+        this.config.clientId
+          ? new ManagedIdentityCredential({ clientId: this.config.clientId })
+          : new DefaultAzureCredential(),
+        { retryOptions: { maxRetries: 0, timeoutInMs: 5000 } },
+      );
+    }
+    const receiver = this.config.receiveEnabled
+      ? this.client.createReceiver(catalogTaxonomyQueue, {
+          receiveMode: 'peekLock',
+          skipParsingBodyAsJson: true,
+          maxAutoLockRenewalDurationInMs: 60_000,
+        })
+      : undefined;
     this.receiver = receiver;
-    const sender = this.client.createSender(taxonomyCatalogQueue);
+    const sender = this.config.sendEnabled
+      ? this.client.createSender(taxonomyCatalogQueue)
+      : undefined;
     this.sender = sender;
-    this.subscription = receiver.subscribe(
+    this.subscription = receiver?.subscribe(
       {
         processMessage: (message) => {
-          const task = receiveTaxonomyDelivery(this.store, receiver, message)
+          const task = receiveTaxonomyDelivery(
+            {
+              consumir: async (envelope) => {
+                try {
+                  await this.store.consumir(envelope);
+                } catch (error) {
+                  if (!(error instanceof TaxonomyMessageIdentityConflict))
+                    this.storageAvailable = false;
+                  throw error;
+                }
+              },
+            },
+            receiver!,
+            message,
+          )
             .then((settled) => {
               if (!settled) this.markUnavailable();
             })
@@ -204,22 +412,36 @@ export class TaxonomyServiceBusRuntime {
     );
     const cycle = () => {
       const failures = this.failures;
+      let phase: 'postgres' | 'service_bus' = 'postgres';
       this.tick = this.store
         .verifyServiceBusStorage()
+        .then(() => {
+          this.storageAvailable = true;
+          phase = 'service_bus';
+        })
         .then(() =>
-          receiver.peekMessages(1, { abortSignal: AbortSignal.timeout(5000) }),
+          receiver?.peekMessages(1, { abortSignal: AbortSignal.timeout(5000) }),
         )
         .then(() =>
-          sender.createMessageBatch({
-            maxSizeInBytes: 256 * 1024,
+          sender?.createMessageBatch({
+            maxSizeInBytes: TAXONOMY_SERVICE_BUS_MAX_BATCH_BYTES,
             abortSignal: AbortSignal.timeout(5000),
           }),
         )
-        .then(() => publishTaxonomyDelivery(this.store, sender))
-        .then((ready) => {
-          this.available = ready && this.failures === failures && !this.stopped;
+        .then(() => {
+          phase = 'postgres';
+          return sender ? publishTaxonomyDelivery(this.store, sender) : true;
         })
-        .catch(() => this.markUnavailable())
+        .then((ready) => {
+          this.brokerAvailable =
+            ready && this.failures === failures && !this.stopped;
+          this.available = this.storageAvailable && this.brokerAvailable;
+        })
+        .catch((error) => {
+          console.error(`[taxonomy-sb] cycle error (${phase}):`, error);
+          if (phase === 'postgres') this.storageAvailable = false;
+          this.markUnavailable();
+        })
         .finally(() => {
           if (!this.stopped) {
             this.timer = setTimeout(cycle, 1000);
@@ -232,12 +454,15 @@ export class TaxonomyServiceBusRuntime {
 
   private markUnavailable(): void {
     this.available = false;
+    this.brokerAvailable = false;
     this.failures++;
   }
 
   async close(): Promise<void> {
     this.stopped = true;
     this.available = false;
+    this.storageAvailable = false;
+    this.brokerAvailable = false;
     clearTimeout(this.timer);
     await this.subscription?.close().catch(() => undefined);
     await this.tick;

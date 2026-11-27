@@ -88,14 +88,14 @@ describe('Private H5 Inventory evidence', () => {
     );
   });
 
-  it('keeps the private reader authenticated under PUBLIC_READ_ONLY and G7_AUTHENTICATED', async () => {
+  it('keeps the private reader authenticated under G7_AUTHENTICATED', async () => {
     read.mockClear();
     const get = () =>
       request(app.getHttpServer())
         .get(path)
         .query({ order_id: orderId })
         .set('X-Correlation-Id', correlationId);
-    for (const mode of ['PUBLIC_READ_ONLY', 'G7_AUTHENTICATED']) {
+    for (const mode of ['G7_AUTHENTICATED']) {
       vi.stubEnv('G6_SECURITY_MODE', mode);
       await get().expect(401);
       await get().set('Authorization', claim('modulo-ventas')).expect(403);
@@ -108,6 +108,6 @@ describe('Private H5 Inventory evidence', () => {
         .expect(403);
       await get().set('Authorization', claim('promotions-svc')).expect(200);
     }
-    expect(read).toHaveBeenCalledTimes(2);
+    expect(read).toHaveBeenCalledTimes(1);
   });
 });

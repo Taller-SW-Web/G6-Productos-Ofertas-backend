@@ -11,8 +11,7 @@ export interface CombosEnvironment {
   readonly port: number;
   readonly demoEnabled: boolean;
   readonly demoGatewayIps: readonly string[];
-  readonly securityMode:
-    'PUBLIC_READ_ONLY' | 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
+  readonly securityMode: 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
   readonly pool: PoolConfig;
 }
 
@@ -45,21 +44,18 @@ export function readCombosEnvironment(
   if (!validHost(host)) errors.push('COMBOS_SVC_HOST');
   const securityMode = env.G6_SECURITY_MODE ?? 'G7_AUTHENTICATED';
   if (
-    !['PUBLIC_READ_ONLY', 'SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(
-      securityMode,
-    )
+    !['SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(securityMode) ||
+    (securityMode === 'SIMULATED_AUTH' && env.NODE_ENV !== 'test')
   )
     errors.push('G6_SECURITY_MODE');
   const publicOperations = (env.COMBOS_PUBLIC_READ_OPERATIONS ?? '')
     .split(',')
     .map((id) => id.trim())
     .filter(Boolean);
-  if (
-    publicOperations.some((id) => !PHASE1_PUBLIC_OPERATION_IDS.has(id)) ||
-    (securityMode !== 'PUBLIC_READ_ONLY' && publicOperations.length)
-  )
-    errors.push('COMBOS_PUBLIC_READ_OPERATIONS');
+  if (publicOperations.length > 0) errors.push('COMBOS_PUBLIC_READ_OPERATIONS');
   const demoEnabled = env.COMBOS_RESTRICTED_DEMO_ENABLED === 'true';
+  if (demoEnabled && env.NODE_ENV !== 'test')
+    errors.push('COMBOS_RESTRICTED_DEMO_ENABLED');
   const demoGatewayIps = (env.COMBOS_RESTRICTED_DEMO_GATEWAY_IPS ?? '')
     .split(',')
     .map((address) => address.trim())
