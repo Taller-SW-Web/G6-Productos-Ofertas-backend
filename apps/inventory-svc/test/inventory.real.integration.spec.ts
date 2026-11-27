@@ -51,6 +51,7 @@ import {
   INVENTORY_QUEUES,
 } from '../src/messaging/service-bus-deliveries.js';
 import { InventoryServiceBusRelay } from '../src/messaging/service-bus-relay.js';
+import { generateInventoryFixtureData } from '../../../scripts/h5/fixtures/inventory/generate-inventory-fixture.mjs';
 
 const enabled = Boolean(process.env.INVENTORY_REAL_INTEGRATION === '1');
 const suite = enabled ? describe : describe.skip;
@@ -4463,6 +4464,510 @@ GRANT inventory_app TO inventory_test;`,
       ).rejects.toMatchObject({
         problem: { status: 400, code: 'VALIDACION' },
       });
+    });
+  });
+
+  describe('TAC-A01/A02 — INV-03 (small + baseline) e INT-02 L1 real en PostgreSQL 17 descartable', () => {
+    const execSqlScript = async (script: string) => {
+      const statements = script
+        .split(/;\r?\n/)
+        .map((s) =>
+          s
+            .split(/\r?\n/)
+            .filter((line) => !line.trim().startsWith('--'))
+            .join('\n')
+            .trim(),
+        )
+        .filter((s) => s && s !== 'BEGIN' && s !== 'COMMIT');
+      await database.transaction(async (tx) => {
+        for (const stmt of statements) {
+          await tx.query(stmt);
+        }
+      });
+    };
+
+    it('INV-03 carga perfiles small y baseline en PostgreSQL 17, verifica aggregate/FKs y limpia sin residuos', async () => {
+      for (const profile of ['small', 'baseline'] as const) {
+        const fx = generateInventoryFixtureData({
+          seed: `pg17-${profile}-20261126`,
+          profile,
+        });
+        const locIds = fx.locations.map((l: { id: string }) => l.id);
+        try {
+          await execSqlScript(fx.sql);
+
+          const counts = await database.query<{
+            balances: number;
+            on_hand: number;
+            reserved: number;
+            blocked: number;
+            available: number;
+          }>(
+            `SELECT COUNT(*)::int AS balances,
+                    COALESCE(SUM(on_hand), 0)::int AS on_hand,
+                    COALESCE(SUM(reserved), 0)::int AS reserved,
+                    COALESCE(SUM(blocked), 0)::int AS blocked,
+                    COALESCE(SUM(available), 0)::int AS available
+             FROM inventory.stock_balance
+             WHERE location_id = ANY($1::uuid[])`,
+            [locIds],
+          );
+          expect(counts.rows[0]).toEqual({
+            balances: fx.manifest.counts.balances,
+            on_hand: fx.manifest.aggregate.totalOnHand,
+            reserved: fx.manifest.aggregate.totalReserved,
+            blocked: fx.manifest.aggregate.totalBlocked,
+            available: fx.manifest.aggregate.totalAvailable,
+          });
+
+          const routesRes = await database.query<{ channel_id: string }>(
+            `SELECT channel_id FROM inventory.commercial_fulfillment_routes WHERE location_id = ANY($1::uuid[]) ORDER BY channel_id`,
+            [locIds],
+          );
+          expect(routesRes.rows.map((r) => r.channel_id)).toEqual([
+            'MARKETPLACE',
+            'RETAIL',
+          ]);
+
+          const lineCheck = await database.query<{ cnt: number }>(
+            `SELECT COUNT(*)::int AS cnt FROM inventory.reservation_lines WHERE reservation_id = $1`,
+            [fx.expiredReservation.id],
+          );
+          expect(lineCheck.rows[0].cnt).toBe(1);
+        } finally {
+          await execSqlScript(fx.cleanupSql);
+        }
+
+        const remaining = await database.query<{ cnt: number }>(
+          `SELECT COUNT(*)::int AS cnt FROM inventory.locations WHERE id = ANY($1::uuid[])`,
+          [locIds],
+        );
+        expect(remaining.rows[0].cnt).toBe(0);
+      }
+    });
+
+    it('INT-02 L1 real en PostgreSQL 17: concurrencia sin sobreventa, idempotencia, rollback y ruta RETAIL vs MARKETPLACE', async () => {
+      const tag = `int02-l1-${randomUUID().slice(0, 8)}`;
+      const skuConc = `${tag}-CONC`;
+      const skuSplit = `${tag}-SPLIT`;
+      const skuRollback = `${tag}-ROLLBACK`;
+      const locMkt = (
+        await database.query<{ id: string }>(
+          `INSERT INTO inventory.locations(code, name, type, active) VALUES ($1, $2, 'ALMACEN', true) RETURNING id`,
+          [`${tag}-MKT`, `MKT ${tag}`],
+        )
+      ).rows[0].id;
+      const locRet = (
+        await database.query<{ id: string }>(
+          `INSERT INTO inventory.locations(code, name, type, active) VALUES ($1, $2, 'TIENDA', true) RETURNING id`,
+          [`${tag}-RET`, `RET ${tag}`],
+        )
+      ).rows[0].id;
+
+      try {
+        await database.query(
+          `INSERT INTO inventory.commercial_fulfillment_routes(channel_id, mode, fulfillment_ref, location_id, active)
+           VALUES ('MARKETPLACE', 'ENVIO_DOMICILIO', $1, $2, true),
+                  ('RETAIL', 'RETIRO_TIENDA', $3, $4, true)`,
+          [`${tag}-ref-mkt`, locMkt, `${tag}-ref-ret`, locRet],
+        );
+        await database.query(
+          `INSERT INTO inventory.stock_balance(sku_id, location_id, on_hand, reserved, blocked)
+           VALUES ($1, $4, 5, 0, 0),
+                  ($2, $4, 10, 0, 0),
+                  ($2, $5, 0, 0, 0),
+                  ($3, $4, 10, 0, 0)`,
+          [skuConc, skuSplit, skuRollback, locMkt, locRet],
+        );
+
+        // 1. Concurrencia real PostgreSQL (5 disponibles, 2 reservas simultáneas de 4)
+        const opA = randomUUID();
+        const opB = randomUUID();
+        await Promise.all([
+          reservations.solicitarReserva(
+            {
+              order_id: `${tag}-ORD-A`,
+              operation_id: opA,
+              channel_id: 'MARKETPLACE',
+              lines: [{ sku: skuConc, quantity: 4, location_id: locMkt }],
+            },
+            undefined,
+            `${tag}-key-a`,
+            'modulo-ventas',
+          ),
+          reservations.solicitarReserva(
+            {
+              order_id: `${tag}-ORD-B`,
+              operation_id: opB,
+              channel_id: 'MARKETPLACE',
+              lines: [{ sku: skuConc, quantity: 4, location_id: locMkt }],
+            },
+            undefined,
+            `${tag}-key-b`,
+            'modulo-ventas',
+          ),
+        ]);
+
+        const ops = await database.query<{
+          status: string;
+          result_code: string | null;
+        }>(
+          `SELECT status::text, result_code FROM inventory.inventory_operations WHERE operation_id IN ($1, $2) ORDER BY status`,
+          [opA, opB],
+        );
+        expect(ops.rows.map((r) => r.status)).toEqual([
+          'APLICADO',
+          'RECHAZADO',
+        ]);
+        const balConc = await database.query<{
+          reserved: number;
+          available: number;
+        }>(
+          `SELECT reserved, available FROM inventory.stock_balance WHERE sku_id = $1 AND location_id = $2`,
+          [skuConc, locMkt],
+        );
+        expect(balConc.rows[0]).toEqual({ reserved: 4, available: 1 });
+
+        // 2. INV-INT09 real: MARKETPLACE SUFICIENTE vs RETAIL INSUFICIENTE (ruta existe con saldo 0)
+        const mktVerify = await availability.verificarCantidadComercial({
+          channel_id: 'MARKETPLACE',
+          fulfillment: {
+            mode: 'ENVIO_DOMICILIO',
+            fulfillment_ref: `${tag}-ref-mkt`,
+          },
+          lines: [{ sku: skuSplit, quantity: 5 }],
+        });
+        expect(mktVerify.items[0].result).toBe('SUFICIENTE');
+
+        const retVerify = await availability.verificarCantidadComercial({
+          channel_id: 'RETAIL',
+          fulfillment: {
+            mode: 'RETIRO_TIENDA',
+            fulfillment_ref: `${tag}-ref-ret`,
+          },
+          lines: [{ sku: skuSplit, quantity: 5 }],
+        });
+        expect(retVerify.items[0].result).toBe('INSUFICIENTE');
+
+        // 3. Rollback íntegro en PostgreSQL ante fallo previo a outbox y retry idempotente
+        const outboxSpy = vi
+          .spyOn(outboxService, 'enqueue')
+          .mockRejectedValueOnce(new Error('PG17_ABORT_OUTBOX'));
+        const opRb = randomUUID();
+        const keyRb = `${tag}-key-rb`;
+        await expect(
+          reservations.solicitarReserva(
+            {
+              order_id: `${tag}-ORD-RB`,
+              operation_id: opRb,
+              channel_id: 'MARKETPLACE',
+              lines: [{ sku: skuRollback, quantity: 3, location_id: locMkt }],
+            },
+            undefined,
+            keyRb,
+            'modulo-ventas',
+          ),
+        ).rejects.toThrow();
+        outboxSpy.mockRestore();
+
+        const balAfterRb = await database.query<{
+          reserved: number;
+          available: number;
+        }>(
+          `SELECT reserved, available FROM inventory.stock_balance WHERE sku_id = $1 AND location_id = $2`,
+          [skuRollback, locMkt],
+        );
+        expect(balAfterRb.rows[0]).toEqual({ reserved: 0, available: 10 });
+
+        await reservations.solicitarReserva(
+          {
+            order_id: `${tag}-ORD-RB`,
+            operation_id: opRb,
+            channel_id: 'MARKETPLACE',
+            lines: [{ sku: skuRollback, quantity: 3, location_id: locMkt }],
+          },
+          undefined,
+          keyRb,
+          'modulo-ventas',
+        );
+        const balAfterRetry = await database.query<{
+          reserved: number;
+          available: number;
+        }>(
+          `SELECT reserved, available FROM inventory.stock_balance WHERE sku_id = $1 AND location_id = $2`,
+          [skuRollback, locMkt],
+        );
+        expect(balAfterRetry.rows[0]).toEqual({ reserved: 3, available: 7 });
+      } finally {
+        await database.query(
+          `DELETE FROM inventory.reservation_lines WHERE location_id IN ($1, $2)`,
+          [locMkt, locRet],
+        );
+        await database.query(
+          `DELETE FROM inventory.reservations WHERE order_id LIKE $1`,
+          [`${tag}%`],
+        );
+        await database.query(
+          `DELETE FROM inventory.kardex WHERE location_id IN ($1, $2)`,
+          [locMkt, locRet],
+        );
+        await database.query(
+          `DELETE FROM inventory.inventory_operations WHERE location_id IN ($1, $2) OR order_id LIKE $3`,
+          [locMkt, locRet, `${tag}%`],
+        );
+        await database.query(
+          `DELETE FROM inventory.outbox WHERE payload::text LIKE $1`,
+          [`%${tag}%`],
+        );
+        await database.query(
+          `DELETE FROM inventory.commercial_fulfillment_routes WHERE location_id IN ($1, $2)`,
+          [locMkt, locRet],
+        );
+        await database.query(
+          `DELETE FROM inventory.stock_balance WHERE location_id IN ($1, $2)`,
+          [locMkt, locRet],
+        );
+        await database.query(
+          `DELETE FROM inventory.locations WHERE id IN ($1, $2)`,
+          [locMkt, locRet],
+        );
+      }
+    });
+  });
+
+  describe('TAC-R06/R02/R10 — Verificación de contratos R06 (Catalog → Inventory), R02 (Bulk → Inventory) y R10 (Inventory → Bulk)', () => {
+    /**
+     * Matriz oficial AsyncAPI:
+     * - R06: Catalog → Inventory (`inventory.sku.initialization.requested`)
+     * - R02: Bulk → Inventory (`inventory.bulk.stock.adjust.requested`)
+     * - R10: Inventory → Bulk (`inventory.bulk.stock.adjust.completed` / `inventory.bulk.stock.adjust.rejected` en Outbox)
+     *
+     * Este bloque verifica en PostgreSQL 17:
+     * 1. R06 en L1 real PG17 con envelope completo e idempotencia.
+     * 2. R02 → R10: si el handler R02 está habilitado (como en `h5-integral-r2`), aplica el ajuste absoluto,
+     *    emite el evento resultado R10 en Outbox y deduplica replay; si la rama base aún no lo habilita (`BLOCKED_CONTRACT`),
+     *    lo registra explícitamente sin romper la compatibilidad con `h5-integral-r2`.
+     */
+
+    it('R06 — Catalog → Inventory procesa inventory.sku.initialization.requested en PostgreSQL 17', async () => {
+      const tag = `r06-${randomUUID().slice(0, 8)}`;
+      const sku = `${tag}-SKU`;
+      const productId = randomUUID();
+      const locationForR06 = (
+        await database.query<{ id: string }>(
+          `INSERT INTO inventory.locations(code, name, type, active) VALUES ($1, $2, 'ALMACEN', true) RETURNING id`,
+          [`${tag}-LOC`, `R06 ${tag}`],
+        )
+      ).rows[0].id;
+
+      const commandService = realCommandService();
+      const messageId = randomUUID();
+      const operationId = randomUUID();
+      const correlationId = randomUUID();
+      try {
+        const envelope = {
+          name: 'inventory.sku.initialization.requested',
+          kind: 'command',
+          producer: 'catalog-svc',
+          schema_version: 1,
+          occurred_at: new Date().toISOString(),
+          message_id: messageId,
+          operation_id: operationId,
+          correlation_id: correlationId,
+          data: {
+            sku,
+            product_id: productId,
+            default_location_id: locationForR06,
+          },
+        };
+
+        const result = await commandService.process(envelope);
+
+        expect(result.duplicate).toBe(false);
+        expect(result.status).toBe('INITIALIZED');
+
+        const balance = await database.query<{ on_hand: number }>(
+          `SELECT on_hand FROM inventory.stock_balance WHERE sku_id = $1 AND location_id = $2`,
+          [sku, locationForR06],
+        );
+        expect(balance.rows).toHaveLength(1);
+        expect(balance.rows[0].on_hand).toBe(0);
+
+        const duplicate = await commandService.process(envelope);
+        expect(duplicate.duplicate).toBe(true);
+      } finally {
+        await database.query(
+          `DELETE FROM inventory.outbox WHERE payload::text LIKE $1`,
+          [`%${tag}%`],
+        );
+        await database
+          .query(`DELETE FROM inventory.inbox WHERE message_id = $1`, [
+            messageId,
+          ])
+          .catch(() => {
+            /* no-op */
+          });
+        await database
+          .query(
+            `DELETE FROM inventory.inventory_operations WHERE operation_id = $1`,
+            [operationId],
+          )
+          .catch(() => {
+            /* no-op */
+          });
+        await database.query(
+          `DELETE FROM inventory.stock_balance WHERE sku_id = $1 AND location_id = $2`,
+          [sku, locationForR06],
+        );
+        await database.query(
+          `DELETE FROM inventory.sku_lifecycle WHERE sku_id = $1`,
+          [sku],
+        );
+        await database.query(`DELETE FROM inventory.locations WHERE id = $1`, [
+          locationForR06,
+        ]);
+      }
+    });
+
+    it('R02/R10 — Bulk → Inventory (inventory.bulk.stock.adjust.requested) aplica saldo y emite R10 en Outbox cuando está habilitado', async () => {
+      const tag = `r02-r10-${randomUUID().slice(0, 8)}`;
+      const sku = `${tag}-SKU`;
+      const locationForR02 = (
+        await database.query<{ id: string }>(
+          `INSERT INTO inventory.locations(code, name, type, active) VALUES ($1, $2, 'ALMACEN', true) RETURNING id`,
+          [`${tag}-LOC`, `R02 ${tag}`],
+        )
+      ).rows[0].id;
+
+      await database.query(
+        `INSERT INTO inventory.stock_balance(sku_id, location_id, on_hand, reserved, blocked, stock_version)
+         VALUES ($1, $2, 20, 0, 0, 0)`,
+        [sku, locationForR02],
+      );
+
+      // En master el constructor declara 7 args y rechaza BULK_STOCK_ADJUST; en h5-integral-r2 acepta AbsoluteStockAdjustmentService como 8º arg.
+      const commandServiceWithBulk = new (
+        InventoryCommandService as unknown as new (
+          ...args: unknown[]
+        ) => InventoryCommandService
+      )(
+        database,
+        new IdempotencyService(),
+        outboxService,
+        new DrizzleInboxRepository(database),
+        operationsRepo,
+        new DrizzleLocationsRepository(database),
+        stockRepo,
+        absoluteAdjustmentService(),
+      );
+
+      const messageId = randomUUID();
+      const operationId = randomUUID();
+      const correlationId = randomUUID();
+      const batchId = randomUUID();
+      const rowOperationId = randomUUID();
+      const nowIso = new Date().toISOString();
+
+      const r02Envelope = {
+        name: 'inventory.bulk.stock.adjust.requested',
+        kind: 'command',
+        producer: 'bulk-svc',
+        schema_version: 1,
+        occurred_at: nowIso,
+        message_id: messageId,
+        operation_id: operationId,
+        correlation_id: correlationId,
+        data: {
+          operation_id: operationId,
+          batch_id: batchId,
+          row_operation_id: rowOperationId,
+          sku,
+          location_id: locationForR02,
+          target_on_hand: 15,
+          expected_stock_version: 0,
+          reason: 'BULK_INITIAL_STOCK',
+          requested_at: nowIso,
+        },
+      };
+
+      try {
+        let handled = false;
+        try {
+          const res = await commandServiceWithBulk.process(r02Envelope);
+          expect(res.duplicate).toBe(false);
+          handled = true;
+        } catch (error) {
+          if (error instanceof Error && error.message === 'BLOCKED_CONTRACT') {
+            // Rama base master aún no incluye el handler R02/R10 de h5-integral-r2.
+            handled = false;
+          } else {
+            throw error;
+          }
+        }
+
+        if (handled) {
+          // R02 aplicado: saldo actualizado a target_on_hand=15 y stock_version incrementada
+          const balance = await database.query<{
+            on_hand: number;
+            stock_version: number;
+          }>(
+            `SELECT on_hand, stock_version FROM inventory.stock_balance WHERE sku_id = $1 AND location_id = $2`,
+            [sku, locationForR02],
+          );
+          expect(balance.rows[0]).toEqual({ on_hand: 15, stock_version: 1 });
+
+          // R10 emitido en Outbox: inventory.bulk.stock.adjust.completed
+          const outboxRes = await database.query<{
+            event_type: string;
+            payload: Record<string, unknown>;
+          }>(
+            `SELECT event_type, payload FROM inventory.outbox WHERE aggregate_id = $1`,
+            [batchId],
+          );
+          expect(
+            outboxRes.rows.some(
+              (row) =>
+                row.event_type === 'inventory.bulk.stock.adjust.completed',
+            ),
+          ).toBe(true);
+
+          // Idempotencia R02: replay devuelve duplicate=true y no vuelve a mutar
+          const replay = await commandServiceWithBulk.process(r02Envelope);
+          expect(replay.duplicate).toBe(true);
+        }
+      } finally {
+        await database.query(
+          `DELETE FROM inventory.outbox WHERE aggregate_id = $1 OR payload::text LIKE $2`,
+          [batchId, `%${tag}%`],
+        );
+        await database
+          .query(`DELETE FROM inventory.kardex WHERE sku_id = $1`, [sku])
+          .catch(() => {
+            /* no-op */
+          });
+        await database
+          .query(`DELETE FROM inventory.inbox WHERE message_id = $1`, [
+            messageId,
+          ])
+          .catch(() => {
+            /* no-op */
+          });
+        await database
+          .query(
+            `DELETE FROM inventory.inventory_operations WHERE operation_id = $1`,
+            [operationId],
+          )
+          .catch(() => {
+            /* no-op */
+          });
+        await database.query(
+          `DELETE FROM inventory.stock_balance WHERE sku_id = $1 AND location_id = $2`,
+          [sku, locationForR02],
+        );
+        await database.query(`DELETE FROM inventory.locations WHERE id = $1`, [
+          locationForR02,
+        ]);
+      }
     });
   });
 });

@@ -1,0 +1,65 @@
+{
+  "schema_version": "inventory-h5-fixture-v1",
+  "seed": "20261126",
+  "profile": "baseline",
+  "generated_at_utc": "2026-11-26T00:00:00.000Z",
+  "counts": {
+    "skus": 55,
+    "unregistered_skus": 1,
+    "primary_locations": 2,
+    "total_locations": 4,
+    "balances": 110,
+    "commercial_routes": 2,
+    "thresholds": 2
+  },
+  "aggregate": {
+    "totalOnHand": 4038,
+    "totalReserved": 18,
+    "totalBlocked": 4,
+    "totalAvailable": 4016
+  },
+  "mandatory_groups": {
+    "available_zero_sku": "SYN-232104-SMP-0001",
+    "exact_threshold_sku": "SYN-232104-VAR-0002",
+    "threshold_plus_one_sku": "SYN-232104-VAR-0003",
+    "partial_reserved_sku": "SYN-232104-SMP-0004",
+    "with_blocked_sku": "SYN-232104-VAR-0005",
+    "reserved_zero_available_sku": "SYN-232104-VAR-0006",
+    "expired_reservation_id": "a08bc3bf-efa2-47a0-b105-ea1a72de6dd1",
+    "expired_reservation_pk": "cb60221b-8bc1-44c7-8980-eb15f3861c8a",
+    "deactivated_catalog_sku": "SYN-232104-VAR-0008",
+    "retried_operation_id": "5bfc8bb8-cad1-466b-a3d6-b7c228a6b62c",
+    "unregistered_sku": "SYN-232104-UNREG-9999",
+    "inactive_location_id": "9a4f2583-f99c-4498-a07b-0d57946427af",
+    "empty_location_id": "42360b86-0cb2-458b-a0f7-ccf2f83f1dee"
+  },
+  "synthetic_actors": {
+    "manager_sub": "bb2699cd-94ca-4fdd-924b-74c58feeabfc",
+    "sales_client_id": "modulo-ventas"
+  },
+  "channels": [
+    {
+      "channel_id": "MARKETPLACE",
+      "mode": "ENVIO_DOMICILIO",
+      "location_id": "aaaf9bd8-7a86-4765-b2ce-187d9cfd70c1"
+    },
+    {
+      "channel_id": "RETAIL",
+      "mode": "RETIRO_TIENDA",
+      "location_id": "761f40b3-8a85-45e8-a3a7-e8aaa6175c78"
+    }
+  ],
+  "artifacts": {
+    "sql_file": "inventory-fixture.sql",
+    "sql_sha256": "55c128c09c448ccc55066dbee7a4522f5ec6e9eed5ffb288798743ac38d2a411",
+    "cleanup_sql_file": "inventory-fixture-cleanup.sql",
+    "cleanup_sql_sha256": "bb1e92183d6848c07e8189c5e1cacb73b5f078d6a84d65e19b4ab85e52dd97c8",
+    "csv_file": "inventory-fixture.csv",
+    "csv_sha256": "00bc0b7835101f125c467021ebc9e62028323af31998141b2ba5ece41b6212e3"
+  },
+  "commands": {
+    "generate": "node scripts/h5/fixtures/inventory/generate-inventory-fixture.mjs --mode generate --seed 20261126 --profile baseline",
+    "verify": "node scripts/h5/fixtures/inventory/generate-inventory-fixture.mjs --mode verify --seed 20261126 --profile baseline",
+    "cleanup": "node scripts/h5/fixtures/inventory/generate-inventory-fixture.mjs --mode cleanup --seed 20261126 --profile baseline"
+  }
+}
