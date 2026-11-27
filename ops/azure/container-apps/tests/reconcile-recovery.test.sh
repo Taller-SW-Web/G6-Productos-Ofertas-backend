@@ -70,7 +70,7 @@ grep -Fq -- '--inspect inventory-svc' "$TEMP/deploy-calls.log" || { cat "$TEMP/d
 if grep -Fq -- '--restore combos-svc' "$TEMP/deploy-calls.log"; then echo 'FAIL: receipt con destino incompatible llegó al ejecutor de restore' >&2; exit 1; fi
 echo 'PASS: recuperación e inspección se ejecutan con Bash sobre un archivo 100644; procedencia incompatible no ejecuta rollback'
 
-# Verify Chile receipt forwards previous_served_revision, preserved_labels, and R16 no-SB hash to deploy.sh --restore
+# Verify Chile receipt forwards previous_served_revision, preserved_labels, and the strict configuration hash to deploy.sh --restore
 pa_target='ghcr.io/taller-sw-web/g6-productos-ofertas-backend/price-audit-svc@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 pa_prev='ghcr.io/taller-sw-web/g6-productos-ofertas-backend/price-audit-svc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 printf '%s\n' "$pa_target" > "$TEMP/artifacts/image-price-audit-svc.txt"
@@ -88,22 +88,21 @@ jq -n --arg target "$pa_target" --arg prev "$pa_prev" '{
   target:$target,
   previous_served_revision:"price-audit-svc--0000001",
   preserved_labels:[],
-  config_sha256:"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-  config_without_messaging_flags_sha256:"1111111111111111111111111111111111111111111111111111111111111111"
+  config_sha256:"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 }' > "$TEMP/artifacts/price-audit-svc.receipt"
 cat > "$TEMP/deploy-env-stub.sh" <<'STUB2'
 #!/usr/bin/env bash
 set -Eeuo pipefail
-printf 'args=%s prev_rev=%s nosb=%s contain=%s\n' "$*" "${H5_PREVIOUS_SERVED_REVISION:-}" "${H5_EXPECTED_CONFIG_NO_SB_HASH:-}" "${H5_RESTORE_MESSAGING_CONTAINMENT:-}" >> "${MOCK_ENV_LOG:?}"
+printf 'args=%s prev_rev=%s labels=%s\n' "$*" "${H5_PREVIOUS_SERVED_REVISION:-}" "${H5_PRESERVED_LABELS:-}" >> "${MOCK_ENV_LOG:?}"
 echo 'ROLLBACK COORDINADO VERIFICADO'
 STUB2
 : > "$TEMP/env-calls.log"
 cat > "$TEMP/jobs-pa.json" <<'JOBSPA'
 {"jobs":[{"name":"Desplegar price-audit-svc en Azure","conclusion":"success","steps":[{"name":"Actualizar solo la imagen y verificar revisión/rollback","conclusion":"success"}]}]}
 JOBSPA
-DEPLOY_SCRIPT="$TEMP/deploy-env-stub.sh" MOCK_ENV_LOG="$TEMP/env-calls.log" H5_RESTORE_MESSAGING_CONTAINMENT=true GITHUB_STEP_SUMMARY="$TEMP/pa-rec.md" \
+DEPLOY_SCRIPT="$TEMP/deploy-env-stub.sh" MOCK_ENV_LOG="$TEMP/env-calls.log" GITHUB_STEP_SUMMARY="$TEMP/pa-rec.md" \
   bash "$ROOT/ops/azure/container-apps/reconcile-recovery.sh" '["price-audit-svc"]' "$TEMP/artifacts" "$TEMP/jobs-pa.json" chile-shared azure-h5-chile > "$TEMP/pa-rec.log" 2>&1 || { cat "$TEMP/pa-rec.log"; exit 1; }
 grep -Fq 'prev_rev=price-audit-svc--0000001' "$TEMP/env-calls.log" || { cat "$TEMP/env-calls.log"; echo 'FAIL: H5_PREVIOUS_SERVED_REVISION no fue reenviado' >&2; exit 1; }
-grep -Fq 'nosb=1111111111111111111111111111111111111111111111111111111111111111' "$TEMP/env-calls.log" || { cat "$TEMP/env-calls.log"; echo 'FAIL: H5_EXPECTED_CONFIG_NO_SB_HASH no fue reenviado' >&2; exit 1; }
-grep -Fq 'contain=true' "$TEMP/env-calls.log" || { cat "$TEMP/env-calls.log"; echo 'FAIL: H5_RESTORE_MESSAGING_CONTAINMENT no fue reenviado' >&2; exit 1; }
-echo 'PASS: reconcile-recovery reenvía revisión previa, etiquetas preservadas y hash de contención R16 desde el recibo'
+grep -Fq 'labels=[]' "$TEMP/env-calls.log"
+grep -Fq 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff' "$TEMP/env-calls.log"
+echo 'PASS: reconcile-recovery reenvía revisión previa, etiquetas preservadas y hash estricto desde el recibo'

@@ -79,8 +79,7 @@ validate_target() {
   [[ "$(jq -r '.properties.managedEnvironmentId | ascii_downcase' <<< "$app_json")" == "$expected_env" ]] || fail 'ACA pertenece a otro Environment'
 }
 normalize_app() {
-  local strip_sb_flags="${2:-false}"
-  jq -S -c --arg target "$container" --arg destination "$destination" --arg route_profile "$gateway_route_profile" --arg strip_sb_flags "$strip_sb_flags" '
+  jq -S -c --arg target "$container" --arg destination "$destination" --arg route_profile "$gateway_route_profile" '
     {
       identity: .identity,
       location: .location,
@@ -96,14 +95,6 @@ normalize_app() {
                 if .name == $target then
                   del(.image)
                   | if $route_profile == "g5-labelled" then .env = ((.env // []) | map(select(.name != "GATEWAY_G5_H5_ENABLED"))) else . end
-                  | if $strip_sb_flags == "true" and $target == "price-audit-svc" then
-                      .env = ((.env // []) | map(select(
-                        .name != "MESSAGING_PROVIDER" and
-                        .name != "G6_SERVICE_BUS_PILOT_ENABLED" and
-                        .name != "G6_SERVICE_BUS_PRODUCTION_ENABLED" and
-                        .name != "SERVICE_BUS_NAMESPACE_FQDN"
-                      )))
-                    else . end
                 else . end
               )
           )
@@ -404,6 +395,108 @@ verify_specific_revision_healthy() {
   [[ "$revision_image" == "$expected_image" && "$active" == true && "$health" == Healthy && ( "$running" == Running || "$running" == RunningAtMaxScale ) && "$replicas" =~ ^[1-9][0-9]*$ && "$provisioning" == Provisioned ]]
 }
 
+# Active revisions can consume R16 even when they receive zero HTTP traffic.
+price_audit_consumers() {
+  local names name revision_json="$work/r16-revision.json"
+  names="$(az containerapp revision list --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --output json |
+    jq -er 'if type != "array" then error("revisiones ACA inválidas") else [.[] | select(.properties.active == true) | .name] | sort | .[] end')" || return 1
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || return 1
+    revision_health "$name" "$revision_json" || return 1
+    jq -e '.properties.active == true and ([.properties.template.containers[] | select(.name == "price-audit-svc")] | length == 1)' "$revision_json" >/dev/null || return 1
+    if price_audit_has_service_bus "$revision_json"; then printf '%s\n' "$name"; fi
+  done <<< "$names"
+}
+
+price_audit_has_service_bus() {
+  jq -e 'any(.properties.template.containers[] | select(.name == "price-audit-svc") | .env[]?; .name == "MESSAGING_PROVIDER" and .value == "AZURE_SERVICE_BUS")' "$1" >/dev/null
+}
+
+price_audit_revision_state() {
+  local action="$1" name="$2" expected_image="$3" state="$work/r16-state.json" attempt
+  [[ -n "$name" ]] || return 1
+  revision_health "$name" "$state" || return 1
+  [[ "$(container_image "$state")" == "$expected_image" ]] && price_audit_has_service_bus "$state" || return 1
+  if [[ "$action" == activate ]]; then
+    if jq -e '.properties.active == false' "$state" >/dev/null; then
+      az containerapp revision activate --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --revision "$name" --output none || return 1
+    fi
+    for ((attempt=0; attempt<${ACA_POLL_ATTEMPTS:-30}; attempt++)); do
+      verify_specific_revision_healthy "$name" "$expected_image" && return 0
+      sleep "${ACA_POLL_INTERVAL_SECONDS:-10}"
+    done
+  else
+    if jq -e '.properties.active == true' "$state" >/dev/null; then
+      az containerapp revision deactivate --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --revision "$name" --output none || return 1
+    fi
+    for ((attempt=0; attempt<${ACA_POLL_ATTEMPTS:-30}; attempt++)); do
+      if revision_health "$name" "$state" && jq -e '.properties.active == false and .properties.replicas == 0' "$state" >/dev/null; then return 0; fi
+      sleep "${ACA_POLL_INTERVAL_SECONDS:-10}"
+    done
+  fi
+  return 1
+}
+
+restore_price_audit_revision() {
+  local previous_revision="$1" current_image="$2" candidate_revision restored_template consumer consumers
+  [[ -n "$previous_revision" ]] || fail 'RECUPERACIÓN OMITIDA: recibo de Price Audit sin revisión anterior'
+  if [[ "$current_image" == "$image" && "$image" != "$previous_image" ]]; then
+    candidate_revision="$(jq -er '.properties.latestRevisionName | select(type == "string" and length > 0)' "$after")" ||
+      fail 'RECUPERACIÓN OMITIDA: sin revisión candidata identificable'
+    [[ "$candidate_revision" != "$previous_revision" ]] || fail 'RECUPERACIÓN OMITIDA: revisión candidata coincide con la anterior'
+    if ! traffic_is_revision "$after" "$previous_revision" && ! traffic_is_revision "$after" "$candidate_revision"; then
+      fail 'RECUPERACIÓN OMITIDA: tráfico de Price Audit cambió concurrentemente'
+    fi
+    consumers="$(price_audit_consumers)" || fail 'RECUPERACIÓN OMITIDA: no se pudieron identificar consumidores R16'
+    while IFS= read -r consumer; do
+      [[ -z "$consumer" || "$consumer" == "$previous_revision" || "$consumer" == "$candidate_revision" ]] ||
+        fail "RECUPERACIÓN OMITIDA: consumidor R16 inesperado: $consumer"
+    done <<< "$consumers"
+    price_audit_revision_state activate "$previous_revision" "$previous_image" ||
+      fail 'RECUPERACIÓN INCOMPLETA: no se verificó la reactivación sana de la revisión anterior'
+    local recheck="$work/r16-recheck.json"
+    if ! read_app > "$recheck" || ! normalize_app "$recheck" > "$work/r16-before-traffic.json" ||
+       ! cmp -s "$work/current-normalized.json" "$work/r16-before-traffic.json" ||
+       [[ "$(container_image "$recheck")" != "$image" || "$(traffic_snapshot "$recheck")" != "$(traffic_snapshot "$after")" ]]; then
+      fail 'RECUPERACIÓN OMITIDA: Price Audit cambió al reactivar la revisión anterior'
+    fi
+    if traffic_is_revision "$recheck" "$candidate_revision"; then
+      set_traffic_revision "$previous_revision" || fail 'RECUPERACIÓN INCOMPLETA: no se pudo fijar el tráfico anterior'
+    fi
+    if ! verify_chile_gateway_current_traffic "$previous_image" || [[ "$verified_served_revision" != "$previous_revision" ]]; then
+      fail 'RECUPERACIÓN INCOMPLETA: la revisión anterior no sirve el digest previo'
+    fi
+    price_audit_revision_state deactivate "$candidate_revision" "$image" ||
+      fail 'RECUPERACIÓN INCOMPLETA: el candidato todavía puede consumir R16'
+    [[ "$(price_audit_consumers)" == "$previous_revision" ]] ||
+      fail 'RECUPERACIÓN INCOMPLETA: el consumidor R16 anterior no es único'
+    if ! read_app > "$recheck" || ! normalize_app "$recheck" > "$work/r16-before-template.json" ||
+       ! cmp -s "$work/current-normalized.json" "$work/r16-before-template.json" ||
+       ! traffic_is_revision "$recheck" "$previous_revision" ||
+       [[ "$(container_image "$recheck")" != "$image" || "$(jq -r '.properties.latestRevisionName' "$recheck")" != "$candidate_revision" ]]; then
+      fail 'RECUPERACIÓN OMITIDA: Price Audit cambió antes de restaurar la plantilla'
+    fi
+    az containerapp update --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --container-name "$container" --image "$previous_image" --output none ||
+      fail 'RECUPERACIÓN INCOMPLETA: Azure rechazó restaurar el digest de la plantilla'
+  fi
+  if ! read_app > "$after" || ! normalize_app "$after" > "$work/r16-restored.json" ||
+     ! cmp -s "$work/current-normalized.json" "$work/r16-restored.json" ||
+     [[ "$(container_image "$after")" != "$previous_image" ]] || ! traffic_is_revision "$after" "$previous_revision"; then
+    fail 'RECUPERACIÓN INCOMPLETA: plantilla, tráfico o configuración de Price Audit no coinciden'
+  fi
+  restored_template="$(jq -er '.properties.latestRevisionName | select(type == "string" and length > 0)' "$after")" ||
+    fail 'RECUPERACIÓN INCOMPLETA: no se pudo identificar la plantilla restaurada'
+  if [[ "$restored_template" != "$previous_revision" ]]; then
+    price_audit_revision_state deactivate "$restored_template" "$previous_image" ||
+      fail 'RECUPERACIÓN INCOMPLETA: la revisión creada al restaurar la plantilla todavía puede consumir R16'
+  fi
+  if [[ "$(price_audit_consumers)" != "$previous_revision" ]] ||
+     ! verify_chile_gateway_current_traffic "$previous_image" || [[ "$verified_served_revision" != "$previous_revision" ]]; then
+    fail 'RECUPERACIÓN INCOMPLETA: no se verificó el consumidor único y la ruta anterior de Price Audit'
+  fi
+  printf 'ROLLBACK COORDINADO VERIFICADO: servicio=%s revision=%s image=%s consumidor_r16=%s.\n' "$service" "$previous_revision" "$previous_image" "$previous_revision"
+}
+
 recover_chile_gateway_template() {
   local current_image
   verify_chile_gateway_current_traffic "$previous_image" "$previous_preserved_labels" || fail "RECUPERACIÓN OMITIDA: revisión anterior de $service no sigue saludable y servida"
@@ -495,73 +588,43 @@ if [[ "$mode" == restore ]]; then
   elif [[ "$destination" == chile-shared && "$current" == "$previous_image" && "$explicit_multiple" != true ]]; then
     verify_chile_served_revision "$previous_image" || fail 'RECUPERACIÓN NO VERIFICADA: el digest anterior no recibe el 100% del tráfico Chile'
   fi
-  if [[ "$explicit_multiple" == true && "$current" != "$previous_image" ]]; then
+  if [[ "$explicit_multiple" == true && "$service" != price-audit-svc && "$current" != "$previous_image" ]]; then
     verify_chile_served_revision "$current" "$restore_preserved_labels" || fail "RECUPERACIÓN OMITIDA: $service no sirve de forma exclusiva la revisión aplicada ni conserva etiquetas preservadas"
     restore_served_revision="$verified_served_revision"
     restore_traffic="$(traffic_snapshot "$before")"
   fi
-  restore_strip_sb=false
-  normalize_app "$before" false > "$work/current-normalized.json"
+  normalize_app "$before" > "$work/current-normalized.json"
   current_hash="$(sha256sum "$work/current-normalized.json" | awk '{print $1}')"
-  config_match=false
-  if [[ "$current_hash" == "$expected_config_hash" ]]; then
-    config_match=true
-  elif [[ "$service" == price-audit-svc && "${H5_RESTORE_MESSAGING_CONTAINMENT:-false}" == true && "${H5_EXPECTED_CONFIG_NO_SB_HASH:-}" =~ ^[0-9a-f]{64}$ ]]; then
-    normalize_app "$before" true > "$work/current-normalized-nosb.json"
-    current_nosb_hash="$(sha256sum "$work/current-normalized-nosb.json" | awk '{print $1}')"
-    if [[ "$current_nosb_hash" == "$H5_EXPECTED_CONFIG_NO_SB_HASH" ]]; then
-      config_match=true
-      restore_strip_sb=true
-      cp "$work/current-normalized-nosb.json" "$work/current-normalized.json"
-    fi
+  [[ "$current_hash" == "$expected_config_hash" && ( "$current" == "$image" || "$current" == "$previous_image" ) ]] ||
+    fail "RECUPERACIÓN OMITIDA: $service cambió concurrentemente (imagen/configuración)"
+  if [[ "$explicit_multiple" == true && "$service" == price-audit-svc ]]; then
+    cp "$before" "$after"
+    restore_price_audit_revision "${H5_PREVIOUS_SERVED_REVISION:-}" "$current"
+    exit 0
   fi
-  if [[ "$current" == "$previous_image" && "$config_match" == true ]]; then
+  if [[ "$current" == "$previous_image" ]]; then
     if [[ "$explicit_multiple" == true ]]; then
-      verify_chile_gateway_current_traffic "$previous_image" "$restore_preserved_labels" || fail "RECUPERACIÓN NO VERIFICADA: $([[ "$service" == api-gateway ]] && printf Gateway || printf '%s' "$service") no sirve al 100% una revisión saludable con el digest anterior ni conserva etiquetas"
+      verify_chile_gateway_current_traffic "$previous_image" "$restore_preserved_labels" || fail 'RECUPERACIÓN NO VERIFICADA: Gateway no sirve al 100% una revisión saludable con el digest anterior ni conserva etiquetas'
     fi
     printf 'RECUPERACIÓN YA PRESENTE: servicio=%s conserva digest anterior y configuración.\n' "$service"
     exit 0
   fi
-  [[ "$current" == "$image" && "$config_match" == true ]] || {
-    printf 'RECUPERACIÓN OMITIDA: %s cambió concurrentemente (imagen/configuración); no se sobrescribe. Revisión manual requerida.\n' "$service" >&2
-    exit 1
-  }
   if [[ "$gateway_route_profile" == g5-labelled ]]; then
     restore_g5_gateway_revision "$previous_image" "$image" "$marketplace_revision" || fail 'RECUPERACIÓN NO VERIFICADA: Gateway conserva su URL Marketplace y el rollback del label G5 no pudo acreditarse'
-    normalize_app "$after" "$restore_strip_sb" > "$work/after-normalized.json"
+    normalize_app "$after" > "$work/after-normalized.json"
     cmp -s "$work/current-normalized.json" "$work/after-normalized.json" || fail 'la configuración cambió durante la recuperación de Gateway etiquetado'
     printf 'ROLLBACK COORDINADO VERIFICADO: servicio=%s revision=%s image=%s Marketplace_revision=%s.\n' "$service" "$(jq -r '.properties.latestRevisionName' "$after")" "$previous_image" "$marketplace_revision"
     exit 0
   fi
-  if [[ "$explicit_multiple" == true && "$service" == price-audit-svc && -n "${H5_PREVIOUS_SERVED_REVISION:-}" ]] && verify_specific_revision_healthy "$H5_PREVIOUS_SERVED_REVISION" "$previous_image"; then
-    target_restore_revision="$H5_PREVIOUS_SERVED_REVISION"
-    read_app > "$after" || fail "no se pudo releer $service antes de restaurar revisión previa"
-    normalize_app "$after" "$restore_strip_sb" > "$work/restore-pre-shift-normalized.json"
-    cmp -s "$work/current-normalized.json" "$work/restore-pre-shift-normalized.json" || fail 'RECUPERACIÓN OMITIDA: configuración cambió antes de restaurar tráfico'
-    [[ "$(traffic_snapshot "$after")" == "$restore_traffic" ]] || fail 'RECUPERACIÓN OMITIDA: tráfico cambió concurrentemente antes de restaurar tráfico'
-    set_traffic_revision "$target_restore_revision" "$restore_preserved_labels" || fail "Azure rechazó restaurar el tráfico de $service a $target_restore_revision"
-    read_app > "$after" || fail "no se pudo comprobar el tráfico restaurado de $service"
-    traffic_is_revision "$after" "$target_restore_revision" "$restore_preserved_labels" || fail "RECUPERACIÓN NO VERIFICADA: tráfico no apunta exclusivamente a $target_restore_revision"
-    verify_chile_gateway_current_traffic "$previous_image" "$restore_preserved_labels" || fail "RECUPERACIÓN NO VERIFICADA: $target_restore_revision no está Healthy con digest anterior"
-    az containerapp update --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --container-name "$container" --image "$previous_image" --output none || fail "Azure rechazó restaurar la plantilla de $service al digest anterior"
-    verify_revision "$previous_image" || fail 'revisión de plantilla restaurada no Healthy'
-    read_app > "$after" || fail "no se pudo releer $service tras restaurar plantilla"
-    traffic_is_revision "$after" "$target_restore_revision" "$restore_preserved_labels" || fail "RECUPERACIÓN NO VERIFICADA: tráfico cambió al restaurar plantilla de $service"
-    verify_chile_gateway_current_traffic "$previous_image" "$restore_preserved_labels" || fail "RECUPERACIÓN NO VERIFICADA: $target_restore_revision perdió salud"
-    normalize_app "$after" "$restore_strip_sb" > "$work/after-normalized.json"
-    cmp -s "$work/current-normalized.json" "$work/after-normalized.json" || fail 'la configuración cambió durante la recuperación'
-    printf 'ROLLBACK COORDINADO VERIFICADO: servicio=%s revision=%s image=%s containment_flags=%s.\n' "$service" "$target_restore_revision" "$previous_image" "$restore_strip_sb"
-    exit 0
-  fi
   if [[ "$explicit_multiple" == true ]]; then
     read_app > "$after" || fail "no se pudo releer $service antes de recuperación"
-    normalize_app "$after" "$restore_strip_sb" > "$work/restore-pre-pin-normalized.json"
+    normalize_app "$after" > "$work/restore-pre-pin-normalized.json"
     cmp -s "$work/current-normalized.json" "$work/restore-pre-pin-normalized.json" || fail 'RECUPERACIÓN OMITIDA: configuración cambió antes de fijar tráfico'
     [[ "$(traffic_snapshot "$after")" == "$restore_traffic" ]] || fail 'RECUPERACIÓN OMITIDA: tráfico cambió concurrentemente antes del pinning'
     set_traffic_revision "$restore_served_revision" "$restore_preserved_labels" || fail "no se pudo fijar revisión actual antes de la recuperación de $service"
     read_app > "$after" || fail "no se pudo releer $service tras fijar tráfico de recuperación"
     traffic_is_revision "$after" "$restore_served_revision" "$restore_preserved_labels" || fail 'RECUPERACIÓN OMITIDA: el tráfico o etiquetas preservadas cambiaron durante el pinning'
-    normalize_app "$after" "$restore_strip_sb" > "$work/restore-pinned-normalized.json"
+    normalize_app "$after" > "$work/restore-pinned-normalized.json"
     cmp -s "$work/current-normalized.json" "$work/restore-pinned-normalized.json" || fail 'RECUPERACIÓN OMITIDA: configuración cambió durante el pinning'
   fi
   az containerapp update --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --container-name "$container" --image "$previous_image" --output none || fail 'Azure rechazó la recuperación'
@@ -569,7 +632,7 @@ if [[ "$mode" == restore ]]; then
   if [[ "$destination" == chile-shared ]]; then
     if [[ "$explicit_multiple" == true ]]; then
       read_app > "$after" || fail "no se pudo comprobar el tráfico durante recuperación de $service"
-      normalize_app "$after" "$restore_strip_sb" > "$work/restore-normalized.json"
+      normalize_app "$after" > "$work/restore-normalized.json"
       cmp -s "$work/current-normalized.json" "$work/restore-normalized.json" || fail 'RECUPERACIÓN OMITIDA: configuración cambió concurrentemente'
       traffic_is_revision "$after" "$restore_served_revision" "$restore_preserved_labels" || fail 'RECUPERACIÓN OMITIDA: tráfico o etiquetas cambiaron concurrentemente'
       restore_candidate_revision="$(jq -r '.properties.latestRevisionName' "$after")"
@@ -577,9 +640,9 @@ if [[ "$mode" == restore ]]; then
     fi
     verify_chile_served_revision "$previous_image" "$restore_preserved_labels" || fail 'RECUPERACIÓN NO VERIFICADA: el digest anterior no recibe el 100% del tráfico Chile ni conserva etiquetas'
   fi
-  normalize_app "$after" "$restore_strip_sb" > "$work/after-normalized.json"
+  normalize_app "$after" > "$work/after-normalized.json"
   cmp -s "$work/current-normalized.json" "$work/after-normalized.json" || fail 'la configuración cambió durante la recuperación'
-  printf 'ROLLBACK COORDINADO VERIFICADO: servicio=%s revision=%s image=%s containment_flags=%s.\n' "$service" "$(jq -r '.properties.latestRevisionName' "$after")" "$previous_image" "$restore_strip_sb"
+  printf 'ROLLBACK COORDINADO VERIFICADO: servicio=%s revision=%s image=%s.\n' "$service" "$(jq -r '.properties.latestRevisionName' "$after")" "$previous_image"
   exit 0
 fi
 
@@ -618,14 +681,13 @@ elif [[ "$destination" == chile-shared ]]; then
   fi
   previous_served_revision="$verified_served_revision"
   previous_traffic="$(traffic_snapshot "$before")"
+  if [[ "$explicit_multiple" == true && "$service" == price-audit-svc ]]; then
+    [[ "$(price_audit_consumers)" == "$previous_served_revision" ]] ||
+      fail 'preflight R16 exige que solo la revisión previa consuma Service Bus'
+  fi
 fi
-normalize_app "$before" false > "$work/before-normalized.json"
+normalize_app "$before" > "$work/before-normalized.json"
 baseline_hash="$(sha256sum "$work/before-normalized.json" | awk '{print $1}')"
-baseline_nosb_hash=''
-if [[ "$service" == price-audit-svc ]]; then
-  normalize_app "$before" true > "$work/before-normalized-nosb.json"
-  baseline_nosb_hash="$(sha256sum "$work/before-normalized-nosb.json" | awk '{print $1}')"
-fi
 modalidad_b=false
 internal_origin=''
 if gateway_modalidad_b_active "$before"; then
@@ -649,7 +711,6 @@ if [[ -n "${DEPLOY_RECEIPT:-}" ]]; then
     --arg previous "$previous_image" \
     --arg target "$image" \
     --arg config "$baseline_hash" \
-    --arg config_no_sb "$baseline_nosb_hash" \
     --arg origin "$origin" \
     --arg internal_origin "$internal_origin" \
     --argjson modalidad_b "$modalidad_b" \
@@ -676,7 +737,6 @@ if [[ -n "${DEPLOY_RECEIPT:-}" ]]; then
       preserved_labels:$preserved_labels,
       previous_served_revision:(if $previous_served_revision == "" then null else $previous_served_revision end),
       config_sha256:$config,
-      config_without_messaging_flags_sha256:(if $config_no_sb == "" then null else $config_no_sb end),
       route_profile:$route_profile,
       marketplace_revision:(if $route_profile == "g5-labelled" then $previous_served_revision else null end)
     }' > "$DEPLOY_RECEIPT"
@@ -691,7 +751,7 @@ if [[ "$previous_image" == "$image" ]]; then
       [[ -n "${DEPLOY_RECEIPT:-}" ]] && jq --arg revision "$verified_served_revision" --arg digest "$verified_served_digest" --arg url "$verified_label_url" '.served_revision=$revision | .served_digest=$digest | .served_health="Healthy" | .route_mode="revision_label" | .g5_label="g5-h5" | .g5_label_url=$url | .marketplace_traffic_weight=100' "$DEPLOY_RECEIPT" > "$DEPLOY_RECEIPT.tmp" && mv "$DEPLOY_RECEIPT.tmp" "$DEPLOY_RECEIPT"
     else
       verify_chile_served_revision "$image" "$previous_preserved_labels" || fail 'tráfico efectivo Chile no apunta exclusivamente a la revisión latest con digest candidato ni conserva etiquetas'
-      [[ -n "${DEPLOY_RECEIPT:-}" ]] && jq --arg revision "$verified_served_revision" --arg digest "$verified_served_digest" --arg health "${verified_served_health:-Healthy}" --argjson labels "$verified_preserved_labels" '.served_revision=$revision | .served_digest=$digest | .served_health=$health | .preserved_labels=$labels | .traffic_weight=100' "$DEPLOY_RECEIPT" > "$DEPLOY_RECEIPT.tmp" && mv "$DEPLOY_RECEIPT.tmp" "$DEPLOY_RECEIPT"
+      [[ -n "${DEPLOY_RECEIPT:-}" ]] && jq --arg revision "$verified_served_revision" --arg digest "$verified_served_digest" --arg health "${verified_served_health:-Healthy}" --argjson labels "$verified_preserved_labels" --argjson explicit "$explicit_multiple" '.served_revision=$revision | .served_digest=$digest | .served_health=$health | .preserved_labels=$labels | .traffic_weight=100 | if .service == "price-audit-svc" and $explicit then .r16_consumer_revision=$revision else . end' "$DEPLOY_RECEIPT" > "$DEPLOY_RECEIPT.tmp" && mv "$DEPLOY_RECEIPT.tmp" "$DEPLOY_RECEIPT"
     fi
   fi
   printf 'REVISIÓN VERIFICADA: servicio=%s modo=%s réplicas=%s salud=%s.\n' "$service" "$verified_mode" "$verified_replicas" "$verified_health"
@@ -758,12 +818,18 @@ else
       failure_stage='el tráfico Chile o las etiquetas preservadas cambiaron durante la verificación final'
     fi
   fi
+  if [[ -z "$failure_stage" && "$explicit_multiple" == true && "$service" == price-audit-svc ]]; then
+    if ! price_audit_revision_state deactivate "$previous_served_revision" "$previous_image" ||
+       [[ "$(price_audit_consumers)" != "$verified_served_revision" ]]; then
+      failure_stage='R16 no quedó con un único consumidor en la revisión candidata'
+    fi
+  fi
   if [[ -z "$failure_stage" ]]; then
     if [[ "$destination" == chile-shared && -n "${DEPLOY_RECEIPT:-}" ]]; then
       if [[ "$gateway_route_profile" == g5-labelled ]]; then
         jq --arg revision "$verified_served_revision" --arg digest "$verified_served_digest" --arg url "$verified_label_url" '.served_revision=$revision | .served_digest=$digest | .served_health="Healthy" | .route_mode="revision_label" | .g5_label="g5-h5" | .g5_label_url=$url | .marketplace_traffic_weight=100' "$DEPLOY_RECEIPT" > "$DEPLOY_RECEIPT.tmp" && mv "$DEPLOY_RECEIPT.tmp" "$DEPLOY_RECEIPT"
       else
-        jq --arg revision "$verified_served_revision" --arg digest "$verified_served_digest" --arg health "${verified_served_health:-Healthy}" --argjson labels "$verified_preserved_labels" '.served_revision=$revision | .served_digest=$digest | .served_health=$health | .preserved_labels=$labels | .traffic_weight=100' "$DEPLOY_RECEIPT" > "$DEPLOY_RECEIPT.tmp" && mv "$DEPLOY_RECEIPT.tmp" "$DEPLOY_RECEIPT"
+        jq --arg revision "$verified_served_revision" --arg digest "$verified_served_digest" --arg health "${verified_served_health:-Healthy}" --argjson labels "$verified_preserved_labels" --argjson explicit "$explicit_multiple" '.served_revision=$revision | .served_digest=$digest | .served_health=$health | .preserved_labels=$labels | .traffic_weight=100 | if .service == "price-audit-svc" and $explicit then .r16_consumer_revision=$revision else . end' "$DEPLOY_RECEIPT" > "$DEPLOY_RECEIPT.tmp" && mv "$DEPLOY_RECEIPT.tmp" "$DEPLOY_RECEIPT"
       fi
     fi
     printf 'Despliegue verificado: servicio=%s revision=%s image=%s modo=%s réplicas=%s salud=%s.\n' "$service" "$(jq -r '.properties.latestRevisionName' "$after")" "$image" "$verified_mode" "$verified_replicas" "$verified_health"
@@ -779,10 +845,19 @@ else
     if [[ "$current" == "$previous_image" ]]; then
       traffic_is_revision "$after" "$previous_served_revision" "$previous_preserved_labels" || fail 'RECUPERACIÓN OMITIDA: tráfico cambió concurrentemente; no se sobrescribe'
       verify_chile_gateway_current_traffic "$previous_image" "$previous_preserved_labels" || fail 'RECUPERACIÓN NO VERIFICADA: revisión anterior perdió salud o etiquetas preservadas'
+      if [[ "$service" == price-audit-svc ]]; then
+        [[ "$(price_audit_consumers)" == "$previous_served_revision" ]] ||
+          fail 'RECUPERACIÓN INCOMPLETA: la revisión anterior no es el único consumidor de R16'
+      fi
       printf 'ACTUALIZACIÓN NO APLICADA: %s conserva digest, configuración y ruta previos.\n' "$service" >&2
       exit 1
     fi
     [[ "$current" == "$image" ]] || fail 'RECUPERACIÓN OMITIDA: digest de plantilla cambió concurrentemente'
+    if [[ "$service" == price-audit-svc ]]; then
+      cp "$work/before-normalized.json" "$work/current-normalized.json"
+      restore_price_audit_revision "$previous_served_revision" "$current"
+      exit 1
+    fi
     candidate_revision="$(jq -r '.properties.latestRevisionName' "$after")"
     if traffic_is_revision "$after" "$candidate_revision" "$previous_preserved_labels"; then
       set_traffic_revision "$previous_served_revision" "$previous_preserved_labels" || fail 'RECUPERACIÓN NO VERIFICADA: no se pudo restaurar el tráfico a la revisión anterior'

@@ -119,7 +119,7 @@ if [[ "$gateway_modalidad_b" == true ]]; then
       "$gateway_apim_origin" "$SMOKE_PROTECTED_PATH" "${apim_status:-sin-respuesta}" "${apim_cid_echo:-ausente}" "$apim_cid" >&2
     exit 1
   fi
-  printf 'PASS API vía APIM sin credenciales: HTTP %s %s (x-correlation-id=%s)\n' "$apim_status" "$SMOKE_PROTECTED_PATH" "$apim_cid"
+  printf 'PASS rechazo anónimo en APIM: HTTP %s %s (x-correlation-id=%s)\n' "$apim_status" "$SMOKE_PROTECTED_PATH" "$apim_cid"
 
   direct_health_status="$(curl --silent --show-error --max-time "$request_timeout" --output /dev/null --write-out '%{http_code}' "${base}/health" 2>/dev/null || true)"
   direct_protected_status="$(curl --silent --show-error --max-time "$request_timeout" --output /dev/null --write-out '%{http_code}' "${base}${SMOKE_PROTECTED_PATH}" 2>/dev/null || true)"
@@ -131,7 +131,7 @@ if [[ "$gateway_modalidad_b" == true ]]; then
   printf 'PASS anti-bypass Modalidad B: acceso directo rechazado HTTP 403 en /health y %s\n' "$SMOKE_PROTECTED_PATH"
 
   {
-    printf "Infraestructura HTTP Modalidad B verificada para \`%s\`: digest/salud/revisión en recibo, liveness interno autorizado 200, API vía APIM HTTP %s con correlación UUID y acceso directo rechazado HTTP 403.\n" \
+    printf "Infraestructura HTTP Modalidad B verificada para \`%s\`: digest/salud/revisión en recibo, liveness interno autorizado 200, rechazo anónimo en APIM HTTP %s con correlación UUID y acceso directo rechazado HTTP 403. La prueba autenticada APIM → Gateway se registra aparte.\n" \
       "$service" "$apim_status"
   } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
   exit 0

@@ -54,7 +54,6 @@ while IFS= read -r service; do
     previous_served_revision="$(jq -r '.previous_served_revision // empty' "$receipt_file" 2>/dev/null || true)"
     preserved_labels="$(jq -c '.preserved_labels // []' "$receipt_file" 2>/dev/null || printf '[]')"
     config_hash="$(jq -r '.config_sha256 // empty' "$receipt_file" 2>/dev/null || true)"
-    config_no_sb_hash="$(jq -r '.config_without_messaging_flags_sha256 // empty' "$receipt_file" 2>/dev/null || true)"
     receipt_rg="$(jq -r '.resource_group // empty' "$receipt_file" 2>/dev/null || true)"
     receipt_aca_environment="$(jq -r '.aca_environment // empty' "$receipt_file" 2>/dev/null || true)"
     receipt_location="$(jq -r '.location // empty' "$receipt_file" 2>/dev/null || true)"
@@ -72,7 +71,7 @@ while IFS= read -r service; do
       continue
     fi
     printf 'ACTUALIZADO CON RECIBO: %s target=%s\n' "$service" "$target" | tee -a "$summary_file"
-    if recovery_output="$(H5_DEPLOY_DESTINATION="$destination" H5_DEPLOY_ENVIRONMENT="$environment" H5_PILOT_SELF_REVIEW="$([[ "$environment" == azure-h5-pilot-234 ]] && echo true || echo false)" H5_GATEWAY_ROUTE_PROFILE="$route_profile" H5_G5_MARKETPLACE_REVISION="$marketplace_revision" H5_PREVIOUS_SERVED_REVISION="$previous_served_revision" H5_PRESERVED_LABELS="$preserved_labels" H5_EXPECTED_CONFIG_NO_SB_HASH="$config_no_sb_hash" H5_RESTORE_MESSAGING_CONTAINMENT="${H5_RESTORE_MESSAGING_CONTAINMENT:-false}" bash "$deploy_script" --restore "$service" "$previous" "$target" "$config_hash" 2>&1)"; then
+    if recovery_output="$(H5_DEPLOY_DESTINATION="$destination" H5_DEPLOY_ENVIRONMENT="$environment" H5_PILOT_SELF_REVIEW="$([[ "$environment" == azure-h5-pilot-234 ]] && echo true || echo false)" H5_GATEWAY_ROUTE_PROFILE="$route_profile" H5_G5_MARKETPLACE_REVISION="$marketplace_revision" H5_PREVIOUS_SERVED_REVISION="$previous_served_revision" H5_PRESERVED_LABELS="$preserved_labels" bash "$deploy_script" --restore "$service" "$previous" "$target" "$config_hash" 2>&1)"; then
       printf '%s\n' "$recovery_output"
       printf 'RECUPERADO: %s digest=%s; estado y configuración verificados.\n' "$service" "$previous" | tee -a "$summary_file"
     else

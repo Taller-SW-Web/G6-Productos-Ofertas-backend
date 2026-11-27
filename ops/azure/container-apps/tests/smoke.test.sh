@@ -328,7 +328,7 @@ rm -f "$CURL_LOG"
 PATH="$TEMP:$PATH" bash "$ROOT/ops/azure/container-apps/smoke-service.sh" api-gateway > "$TEMP/gw-modb-pass.log" 2>&1 || { cat "$TEMP/gw-modb-pass.log"; exit 1; }
 grep -Fq 'PASS recibo Modalidad B:' "$TEMP/gw-modb-pass.log"
 grep -Fq 'PASS /health HTTP 200' "$TEMP/gw-modb-pass.log"
-grep -Fq 'PASS API vía APIM sin credenciales: HTTP 401' "$TEMP/gw-modb-pass.log"
+grep -Fq 'PASS rechazo anónimo en APIM: HTTP 401' "$TEMP/gw-modb-pass.log"
 grep -Fq 'PASS anti-bypass Modalidad B: acceso directo rechazado HTTP 403' "$TEMP/gw-modb-pass.log"
 grep -Fxq "${gw_int}/health" "$CURL_LOG"
 grep -Fxq 'https://apim-g6-productos-chile.azure-api.net/api/v1/productos/administracion' "$CURL_LOG"
