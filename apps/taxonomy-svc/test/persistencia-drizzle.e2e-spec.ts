@@ -2741,21 +2741,17 @@ describeIntegracion(
       }
     });
 
-    it('rechaza PUBLIC_READ_ONLY bajo política universal G7', async () => {
-      await expect(
-        Test.createTestingModule({
-          imports: [
-            TaxonomySvcModule.forRoot({
-              databaseUrl: urlApp,
-              env: {
-                NODE_ENV: 'test',
-                G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
-                TAXONOMY_PUBLIC_OPERATION_IDS: 'listarCategorias,listarMarcas',
-              },
-            }),
-          ],
-        }).compile(),
-      ).rejects.toThrow('Configuración de demo Taxonomy inválida');
+    it('rechaza PUBLIC_READ_ONLY bajo política universal G7', () => {
+      expect(() =>
+        TaxonomySvcModule.forRoot({
+          databaseUrl: urlApp,
+          env: {
+            NODE_ENV: 'test',
+            G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+            TAXONOMY_PUBLIC_OPERATION_IDS: 'listarCategorias,listarMarcas',
+          },
+        }),
+      ).toThrow('Configuración de demo Taxonomy inválida');
     });
 
     it('la migración de configuración inicializa 60 segundos y respeta un valor existente', async () => {

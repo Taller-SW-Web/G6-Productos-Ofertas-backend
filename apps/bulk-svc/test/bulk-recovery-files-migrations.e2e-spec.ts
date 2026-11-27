@@ -1035,10 +1035,12 @@ integration(
           .where(eq(fileManifests.id, batchRows[0]!.inputFileId));
         expect(manifestRows).toHaveLength(1);
 
-        const outboxRows = await bulkDb
-          .select()
-          .from(bulkOutbox)
-          .where(eq(bulkOutbox.correlationId, realOutageCorrelationId));
+        const outboxRows = (
+          await bulkDb
+            .select()
+            .from(bulkOutbox)
+            .where(eq(bulkOutbox.correlationId, realOutageCorrelationId))
+        ).filter((row) => row.eventName === 'catalog.bulk.upsert.requested');
         expect(outboxRows).toHaveLength(1);
 
         // 8. Consume outbox twice -> APPLIED then DUPLICATE, zero commercial duplication

@@ -57,16 +57,41 @@ describe('Expanded Phase 1 Gateway HTTP transport', () => {
     const address = provider.address();
     if (!address || typeof address === 'string')
       throw new Error('Missing provider');
+    const issuer = 'https://security.test/issuer';
+    const jwksUrl = 'https://security.test/jwks';
     const env: NodeJS.ProcessEnv = {
       NODE_ENV: 'test',
-      G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
-      GATEWAY_PUBLIC_OPERATION_IDS: routes.map((r) => r.operationId).join(','),
+      G6_SECURITY_MODE: 'G7_AUTHENTICATED',
+      AUTH_ISSUER: issuer,
+      AUTH_JWKS_URL: jwksUrl,
     };
     for (const service of new Set(routes.map((r) => r.service)))
       env['GATEWAY_' + service.replaceAll('-', '_').toUpperCase() + '_URL'] =
         'http://127.0.0.1:' + address.port;
+    expect(() =>
+      readGatewaySettings({
+        ...env,
+        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+        GATEWAY_PUBLIC_OPERATION_IDS: routes
+          .map((r) => r.operationId)
+          .join(','),
+      }),
+    ).toThrow(
+      'Invalid Gateway configuration; review upstream origins, auth configuration and public operation allowlist',
+    );
     const settings = readGatewaySettings(env);
     signed = createSignedIdentity(settings);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === jwksUrl)
+        return Promise.resolve(
+          new Response(JSON.stringify({ keys: [signed.key] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        );
+      return originalFetch(input, init);
+    }) as typeof fetch;
     const module = await Test.createTestingModule({
       imports: [ApiGatewayModule],
     })
@@ -84,27 +109,44 @@ describe('Expanded Phase 1 Gateway HTTP transport', () => {
     if (provider)
       await new Promise<void>((resolve) => provider.close(() => resolve()));
   });
-  it('selects 58 GET and five non-mutating POST candidates', () => {
-    expect(routes.filter((r) => r.method === 'GET')).toHaveLength(58);
-    expect(routes.filter((r) => r.method === 'POST')).toHaveLength(5);
+  it('confirma cero rutas públicas anónimas bajo política universal G7', () => {
+    expect(routes).toHaveLength(0);
   });
   for (const route of routes)
     it(
-      route.operationId + ' forwards anonymously without fabricating identity',
+      route.operationId +
+        ' forwards under G7_AUTHENTICATED without fabricating identity',
       async () => {
         const path = route.path.replace(/[{][^}]+[}]/g, 'fixture');
         const start = received.length;
         const client = request(app.getHttpServer());
+        const token = signed.token({
+          sub: '00000000-0000-4000-8000-000000000001',
+          tipo: 'acceso',
+          aud: ['api-productos'],
+          roles: [
+            'GESTOR_COMERCIAL',
+            'OPERADOR_INVENTARIO',
+            'CATALOGO_ADMIN',
+            'PROMOCIONES_ADMIN',
+            'PRECIOS_ADMIN',
+            'COMBOS_ADMIN',
+            'AUDITOR',
+            'ADMINISTRADOR',
+          ],
+        });
         const call =
           route.method === 'POST'
-            ? client.post(path).send({ probe: 'transport-only' })
-            : client.get(path);
+            ? client
+                .post(path)
+                .set('Authorization', `Bearer ${token}`)
+                .send({ probe: 'transport-only' })
+            : client.get(path).set('Authorization', `Bearer ${token}`);
         await call.expect(200);
         expect(received).toHaveLength(start + 1);
         expect(received.at(-1)).toMatchObject({
           method: route.method,
           url: path,
-          authorization: undefined,
           body: route.method === 'POST' ? '{"probe":"transport-only"}' : '',
         });
       },
@@ -122,7 +164,7 @@ describe('Expanded Phase 1 Gateway HTTP transport', () => {
     await request(app.getHttpServer())
       .get('/api/v1/productos')
       .set('Authorization', 'Bearer invalid')
-      .expect(503);
+      .expect(401);
     expect(received).toHaveLength(start);
   });
 

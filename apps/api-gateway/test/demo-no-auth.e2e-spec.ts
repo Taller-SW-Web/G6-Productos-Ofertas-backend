@@ -98,21 +98,17 @@ describe('Gateway security phase selection', () => {
     return { app, token: signed.token, key: signed.key };
   }
 
-  it('Fase 1 reenvía solo la lectura aprobada y rechaza escrituras anónimas', async () => {
-    const { app } = await start('PUBLIC_READ_ONLY');
-    try {
-      await request(app.getHttpServer()).get('/api/v1/productos').expect(200);
-      expect(calls).toEqual([
-        { method: 'GET', url: '/api/v1/productos', authorization: undefined },
-      ]);
-      await request(app.getHttpServer())
-        .post('/api/v1/productos')
-        .send({})
-        .expect(401);
-      expect(calls).toHaveLength(1);
-    } finally {
-      await app.close();
-    }
+  it('rechaza PUBLIC_READ_ONLY bajo política universal G7', () => {
+    expect(() =>
+      readGatewaySettings({
+        NODE_ENV: 'test',
+        G6_SECURITY_MODE: 'PUBLIC_READ_ONLY',
+        GATEWAY_PUBLIC_OPERATION_IDS: 'listarProductos',
+        GATEWAY_CATALOG_SVC_URL: providerOrigin,
+      }),
+    ).toThrow(
+      'Invalid Gateway configuration; review upstream origins, auth configuration and public operation allowlist',
+    );
   });
 
   it.each(['SIMULATED_AUTH', 'G7_AUTHENTICATED'] as const)(

@@ -458,12 +458,16 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       await repository.findOwnedExportJobByExportId(exportId, OWNER_B),
     ).toBeNull();
     const command = (await repository.findPendingOutbox(10)).find(
-      (item) => item.correlationId === correlationId,
+      (item) =>
+        item.correlationId === correlationId &&
+        item.eventName === 'catalog.bulk.upsert.requested',
     );
     expect(command?.eventName).toBe('catalog.bulk.upsert.requested');
     await service.receiveImport(importInput);
     const replay = (await repository.findPendingOutbox(10)).find(
-      (item) => item.correlationId === correlationId,
+      (item) =>
+        item.correlationId === correlationId &&
+        item.eventName === 'catalog.bulk.upsert.requested',
     );
     expect(replay?.messageId).toBe(command?.messageId);
     expect(replay?.payload).toEqual(command?.payload);

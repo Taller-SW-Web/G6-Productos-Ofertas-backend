@@ -6,6 +6,7 @@ import { Pool } from 'pg';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { TAXONOMY_READINESS } from '../../apps/taxonomy-svc/src/health/readiness.port.js';
+import { ReadinessController } from '../../apps/taxonomy-svc/src/health/readiness.controller.js';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type {
   ServiceBusMessage,

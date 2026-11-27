@@ -865,12 +865,13 @@ describe.skipIf(!isolatedHarnessEnabled)(
           `Bearer ${makeToken('acceso', undefined, { roles: ['combos:admin'] })}`,
         )
         .expect(200);
-      await calls[1]!()
+      const createdCombo = await calls[1]!()
         .set(
           'Authorization',
           `Bearer ${makeToken('acceso', undefined, { roles: ['combos:admin'] })}`,
         )
         .expect(201);
+      const activeComboId = createdCombo.body.id as string;
       await calls[2]!()
         .set(
           'Authorization',
@@ -911,7 +912,8 @@ describe.skipIf(!isolatedHarnessEnabled)(
             `Bearer ${makeToken('acceso', undefined, { roles: ['combos:admin'] })}`,
           )
           .expect(200);
-        await calls[2]!()
+        await request(app.getHttpServer())
+          .get(`/api/v1/combos/${activeComboId}`)
           .set(
             'Authorization',
             `Bearer ${makeToken('servicio', 'combos:leer', { sub: 'modulo-marketplace' })}`,

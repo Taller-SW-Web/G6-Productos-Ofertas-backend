@@ -333,7 +333,7 @@ describe('Catalog HTTP routes and security (isolated use-case fixtures)', () => 
     ['get', '/productos/p?canal=MARKETPLACE', 'dispatch'],
     ['get', '/productos/por-slug/fixture?canal=MARKETPLACE', 'dispatch'],
     ['get', '/productos/p/preparacion', 'channel'],
-    ['get', '/productos/p/variantes', 'channel'],
+    ['get', '/productos/p/variantes', 'dispatch'],
     ['get', '/productos/p/variantes/v', 'channel'],
     ['post', '/productos/datos-fisicos/consulta', 'manager'],
     ['post', '/productos/codigos-barras/resolver', 'channel'],
