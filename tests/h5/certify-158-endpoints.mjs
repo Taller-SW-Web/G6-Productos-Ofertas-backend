@@ -5,6 +5,7 @@ import http from "node:http";
 import https from "node:https";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 
 const BACKEND_ROOT = resolve(process.cwd());
 const FRONTEND_ROOT = resolve(BACKEND_ROOT, "../frontend");
@@ -728,12 +729,76 @@ async function main() {
       f.append("archivo", new Blob([`${priceCsvHeader}\n${[sku, "MARKETPLACE", String(version), "125.00", "CONSERVAR", "", "PEN", "CERT_IMP"].join(",")}`], { type: "text/csv" }), "precios.csv");
       return f;
     };
+    const seedDedicatedPriceImportFixture = async () => {
+      const productId = randomUUID();
+      const sku = `SKU-IMP-PRECIO-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const seedProductRes = await httpCall(`${env.g5SeedOrigin}/__test/catalog-active-product`, {
+        method: "POST",
+        body: { productId, skuBase: sku, categoriaId: catId, marcaId: brandId, tipoProductoId: typeId },
+      });
+      if (seedProductRes.status < 200 || seedProductRes.status >= 300) {
+        throw new Error(`PRICE_IMPORT_FIXTURE_CATALOG_SEED_FAILED status=${seedProductRes.status} body=${seedProductRes.text}`);
+      }
+      const catalogCtxRes = await httpCall(`${env.serviceUrls["catalog-svc"]}/productos/skus/contexto/lote`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${prodSvcToken}` },
+        body: { skus: [sku] },
+      });
+      const catalogItem = catalogCtxRes.json?.items?.[0];
+      const catalogCtx = catalogItem?.context ?? catalogItem;
+      if (
+        catalogCtxRes.status !== 200 ||
+        catalogItem?.status !== "FOUND" ||
+        !catalogCtx ||
+        catalogCtx.sku !== sku ||
+        catalogCtx.productId !== productId ||
+        catalogCtx.active !== true ||
+        catalogCtx.eligible !== true
+      ) {
+        throw new Error(`PRICE_IMPORT_FIXTURE_CATALOG_CONTEXT_INVALID status=${catalogCtxRes.status} body=${catalogCtxRes.text}`);
+      }
+      const createPriceRes = await httpCall(`${gw}/api/v1/precios/skus/${encodeURIComponent(sku)}`, {
+        method: "PATCH",
+        headers: { ...authH, "Idempotency-Key": randomUUID() },
+        body: {
+          accionPrecioOferta: "CONSERVAR",
+          priceVersion: 0,
+          precioRegular: 120,
+          moneda: "PEN",
+          channelId: "MARKETPLACE",
+          motivoCambio: "CERT_SEED_IMP_PRECIO",
+        },
+      });
+      if (createPriceRes.status < 200 || createPriceRes.status >= 300) {
+        throw new Error(`PRICE_IMPORT_FIXTURE_PRICE_CREATE_FAILED status=${createPriceRes.status} body=${createPriceRes.text}`);
+      }
+      const defRes = await httpCall(`${gw}/api/v1/precios/administracion/skus/${encodeURIComponent(sku)}?channelId=MARKETPLACE`, {
+        headers: { Authorization: `Bearer ${gestorJwt}` },
+      });
+      if (
+        defRes.status !== 200 ||
+        defRes.json?.sku !== sku ||
+        defRes.json?.channelId !== "MARKETPLACE" ||
+        !Number.isSafeInteger(defRes.json?.priceVersion) ||
+        defRes.json.priceVersion <= 0
+      ) {
+        throw new Error(`PRICE_IMPORT_FIXTURE_DEFINITION_INVALID status=${defRes.status} body=${defRes.text}`);
+      }
+      return {
+        productId,
+        sku,
+        channelId: "MARKETPLACE",
+        initialPriceVersion: defRes.json.priceVersion,
+      };
+    };
     const priceImportRes = await httpCall(`${gw}/api/v1/precios/importaciones`, {
       method: "POST",
       headers: { ...authH, "Idempotency-Key": randomUUID() },
       body: makePriceCsvForm(activeSku2, 1),
     });
-    let priceBatchId = priceImportRes.json?.batchId ?? priceImportRes.json?.batch_id;
+    const seedPriceBatchId = priceImportRes.json?.batchId ?? priceImportRes.json?.batch_id;
+    let priceBatchId = seedPriceBatchId;
+    let priceImportFixture = null;
     if (priceImportRes.status >= 400 || !priceBatchId) {
       throw new Error(`SEED_FAILED priceImportRes status=${priceImportRes.status} body=${priceImportRes.text}`);
     }
@@ -962,11 +1027,39 @@ async function main() {
           const f = makeBrandForm(`Marca ${opId === "crearMarca" ? "Pos" : "Upd"} ${randomUUID().slice(0, 6)}`);
           if (opId === "actualizarMarca") f.append("version", "0");
           posBody = f;
-        } else if (opId === "prevalidarImportacionPrecios" || opId === "crearImportacionPrecios") {
-          const definition = await httpCall(`${gw}/api/v1/precios/administracion/skus/${encodeURIComponent(activeSku1)}?channelId=MARKETPLACE`, { headers: { Authorization: `Bearer ${gestorJwt}` } });
-          if (definition.status !== 200 || !Number.isSafeInteger(definition.json?.priceVersion))
-            throw new Error('PRICE_IMPORT_CURRENT_VERSION_UNAVAILABLE');
-          posBody = makePriceCsvForm(activeSku1, definition.json.priceVersion);
+        } else if (opId === "prevalidarImportacionPrecios") {
+          const prevalidateFixture = await seedDedicatedPriceImportFixture();
+          posBody = makePriceCsvForm(prevalidateFixture.sku, prevalidateFixture.initialPriceVersion);
+        } else if (opId === "crearImportacionPrecios") {
+          priceImportFixture = await seedDedicatedPriceImportFixture();
+          const definition = await httpCall(
+            `${gw}/api/v1/precios/administracion/skus/${encodeURIComponent(priceImportFixture.sku)}?channelId=MARKETPLACE`,
+            { headers: { Authorization: `Bearer ${gestorJwt}` } },
+          );
+          if (
+            definition.status !== 200 ||
+            definition.json?.sku !== priceImportFixture.sku ||
+            definition.json?.channelId !== "MARKETPLACE" ||
+            definition.json?.priceVersion !== priceImportFixture.initialPriceVersion
+          ) {
+            throw new Error(`PRICE_IMPORT_CURRENT_VERSION_UNAVAILABLE status=${definition.status} body=${definition.text}`);
+          }
+          const prevalidateCsv = makePriceCsvForm(priceImportFixture.sku, definition.json.priceVersion);
+          const prevalidateRes = await httpCall(`${gw}/api/v1/precios/importaciones/prevalidar`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${gestorJwt}`, "Idempotency-Key": randomUUID() },
+            body: prevalidateCsv,
+          });
+          if (
+            prevalidateRes.status !== 200 ||
+            prevalidateRes.json?.valid !== true ||
+            prevalidateRes.json?.total_rows !== 1 ||
+            !Array.isArray(prevalidateRes.json?.errors) ||
+            prevalidateRes.json.errors.length !== 0
+          ) {
+            throw new Error(`PRICE_IMPORT_PREVALIDATION_FAILED status=${prevalidateRes.status} body=${prevalidateRes.text}`);
+          }
+          posBody = makePriceCsvForm(priceImportFixture.sku, definition.json.priceVersion);
         } else if (opId === "crearImportacionGeneralProductos") {
           const f = new FormData();
           const sku = `BULK-POS-${randomUUID().slice(0, 6).toUpperCase()}`;
@@ -1114,9 +1207,43 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
         const rows = await pollUntil(() => pgSelect(g5SeedOrigin, `SELECT status, total_rows, completed_rows, failed_rows FROM pricing.bulk_price_jobs WHERE id = '${id}'::uuid`),
           rows => rows.length === 1 && ['COMPLETED', 'FAILED', 'PARTIAL'].includes(rows[0].status), 40, 300);
         ok = rows.length === 1 && rows[0].status === 'COMPLETED' && rows[0].completed_rows === rows[0].total_rows && rows[0].total_rows > 0 && rows[0].failed_rows === 0;
+        const importRows = await pgSelect(g5SeedOrigin, `SELECT sku, status, code, row_input FROM pricing.bulk_price_rows WHERE batch_id = '${id}'::uuid`);
+        let priceDiag = null;
+        if (opId === 'crearImportacionPrecios' && ctx.priceImportFixture) {
+          const expectedSku = safe(ctx.priceImportFixture.sku);
+          const expectedChannel = safe(ctx.priceImportFixture.channelId);
+          const expectedVersion = Number(ctx.priceImportFixture.initialPriceVersion) + 1;
+          const priceRows = await pgSelect(
+            g5SeedOrigin,
+            `SELECT p.id, p.sku, p.channel_id, p.price_version, v.precio_regular, v.currency, v.price_version AS validity_version, v.is_cancelled
+             FROM pricing.prices p
+             JOIN pricing.price_validities v ON v.price_id = p.id AND v.price_version = p.price_version
+             WHERE p.sku = '${expectedSku}' AND p.channel_id = '${expectedChannel}' AND v.is_cancelled = false`,
+          );
+          const dupValidities = await pgSelect(
+            g5SeedOrigin,
+            `SELECT count(*)::int AS c
+             FROM pricing.price_validities v
+             JOIN pricing.prices p ON p.id = v.price_id
+             WHERE p.sku = '${expectedSku}' AND p.channel_id = '${expectedChannel}' AND v.valid_until IS NULL AND v.is_cancelled = false`,
+          );
+          const rowOk =
+            importRows.length === 1 &&
+            importRows[0].sku === ctx.priceImportFixture.sku &&
+            importRows[0].status === 'COMPLETED' &&
+            importRows[0].code === null;
+          const priceOk =
+            priceRows.length === 1 &&
+            Number(priceRows[0].precio_regular) === 125 &&
+            priceRows[0].currency === 'PEN' &&
+            priceRows[0].channel_id === 'MARKETPLACE' &&
+            Number(priceRows[0].price_version) === expectedVersion &&
+            Number(dupValidities[0]?.c ?? 0) === 1;
+          ok = ok && rows[0].total_rows === 1 && rows[0].completed_rows === 1 && rowOk && priceOk;
+          priceDiag = { priceRows, dupValidities };
+        }
         if (!ok) {
-          const details = await pgSelect(g5SeedOrigin, `SELECT status, code, row_input FROM pricing.bulk_price_rows WHERE batch_id = '${id}'::uuid`);
-          return { label: 'FAIL', ok: false, detail: JSON.stringify({ job: rows, rows: details }) };
+          return { label: 'FAIL', ok: false, detail: JSON.stringify({ job: rows, rows: importRows, priceDiag }) };
         }
       } else if (opId.startsWith('programar')) {
         const id = safe(posRes.json?.programacionId);
@@ -1284,7 +1411,7 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
         semanticOk = typeof posRes.json?.original_amount === "number" && typeof posRes.json?.result_amount === "number" && typeof posRes.json?.discount_amount === "number";
       }
       if (opId === 'prevalidarImportacionPrecios' && posRes.status === 200)
-        semanticOk = posRes.json?.valid === true && posRes.json?.total_rows === 1 && posRes.json?.errors?.length === 0;
+        semanticOk = posRes.json?.valid === true && posRes.json?.total_rows === 1 && Array.isArray(posRes.json?.errors) && posRes.json.errors.length === 0;
       const functionalPass = posRes.status >= 200 && posRes.status < 300 && semanticOk;
       let asyncTerminalPass = true;
       if (posRes.status === 202) {
@@ -1295,7 +1422,7 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
         method,
         isHealth,
         posRes,
-        { activeProd1, varId, retryProdId, retryVarId, retryBatchId, activeSku1, orderId, orderId2, orderId3, orderId4, couponCode },
+        { activeProd1, varId, retryProdId, retryVarId, retryBatchId, activeSku1, orderId, orderId2, orderId3, orderId4, couponCode, priceImportFixture },
         env.g5SeedOrigin,
         posBody,
         posPath,
@@ -1391,6 +1518,21 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       const overallPass = auth401 && auth403 && functionalPass && persistencePass && asyncTerminalPass && negativeLabel !== "FAIL" && negativeLabel !== "NOT_RUN";
       if (!overallPass) {
         console.error(`[certify] FAIL [${i}/158] ${opId} (${svc} ${method} ${posPath}) -> http=${posRes.status} 401=${auth401} 403=${auth403} func=${functionalPass} pers=${persistenceCheck.label} async=${asyncTerminalPass} neg=${negativeLabel}(${negStatus}) body=${posRes.text.slice(0, 400)}`);
+        if (opId === "crearImportacionPrecios" && priceImportFixture) {
+          const bId = posRes.json?.batch_id ?? posRes.json?.batchId;
+          const catCtx = await httpCall(`${env.serviceUrls["catalog-svc"]}/productos/skus/contexto/lote`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${prodSvcToken}` },
+            body: { skus: [priceImportFixture.sku] },
+          }).catch(() => null);
+          const def = await httpCall(`${gw}/api/v1/precios/administracion/skus/${encodeURIComponent(priceImportFixture.sku)}?channelId=MARKETPLACE`, {
+            headers: { Authorization: `Bearer ${gestorJwt}` },
+          }).catch(() => null);
+          const pgPrices = await pgSelect(env.g5SeedOrigin, `SELECT sku, channel_id, price_version FROM pricing.prices WHERE sku = '${priceImportFixture.sku}'`).catch(() => []);
+          const pgJobs = bId ? await pgSelect(env.g5SeedOrigin, `SELECT id, status, total_rows, completed_rows, failed_rows FROM pricing.bulk_price_jobs WHERE id = '${bId}'::uuid`).catch(() => []) : [];
+          const pgRows = bId ? await pgSelect(env.g5SeedOrigin, `SELECT row_id, sku, status, code FROM pricing.bulk_price_rows WHERE batch_id = '${bId}'::uuid`).catch(() => []) : [];
+          console.error(`[certify] PRICE_IMPORT_DIAG catCtx=${JSON.stringify(catCtx?.json)} def=${JSON.stringify(def?.json)} pgPrices=${JSON.stringify(pgPrices)} pgJobs=${JSON.stringify(pgJobs)} pgRows=${JSON.stringify(pgRows)}`);
+        }
         if (opId === "reanudarImportacionGeneral") {
           console.error("[certify] retry snapshot=" + (await httpCall(`${gw}/api/v1/carga-masiva/productos/importaciones/${retryBatchId}`, { headers: { Authorization: `Bearer ${gestorJwt}` } })).text);
           console.error("[certify] retry inbox=" + JSON.stringify(await pgSelect(env.g5SeedOrigin, `SELECT handler, payload, result FROM bulk.inbox WHERE payload::text LIKE '%${retryBatchId}%'`)));
@@ -1411,7 +1553,7 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
         functional: functionalPass ? "FUNCTIONAL_PASS" : "FAIL",
         persistence: persistenceCheck.label,
         persistenceDetail: persistenceCheck.detail,
-        asyncTerminal: posRes.status === 202 ? (asyncTerminalPass ? "ASYNC_TERMINAL_PASS" : "FAIL") : "NOT_APPLICABLE",
+        asyncTerminal: formatAsyncTerminalStatus(posRes.status, asyncTerminalPass),
         auth401,
         auth403,
       });
@@ -1496,7 +1638,11 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
   }
 }
 
-async function verifyAsyncTerminal(opId, json, ctx) {
+export function formatAsyncTerminalStatus(httpStatus, asyncTerminalPass) {
+  return httpStatus === 202 ? (asyncTerminalPass ? "ASYNC_TERMINAL_PASS" : "ASYNC_TERMINAL_FAIL") : "NOT_APPLICABLE";
+}
+
+export async function verifyAsyncTerminal(opId, json, ctx) {
   if ((opId === "crearImportacionGeneralProductos" || opId === "reanudarImportacionGeneral") && json?.batch_id) {
     const p = await pollUntil(
       () => httpCall(`${ctx.gw}/api/v1/carga-masiva/productos/importaciones/${json.batch_id}`, { headers: { Authorization: `Bearer ${ctx.gestorJwt}` } }),
@@ -1555,6 +1701,47 @@ async function verifyAsyncTerminal(opId, json, ctx) {
       (r) => ["APLICADO", "COMPLETED", "COMPLETADA"].includes(r.json?.status),
     );
     return ["APLICADO", "COMPLETED", "COMPLETADA"].includes(p?.json?.status);
+  }
+  if (opId === "crearImportacionPrecios") {
+    const batchId = json?.batch_id ?? json?.batchId;
+    if (!batchId) return false;
+
+    const result = await pollUntil(
+      () =>
+        httpCall(
+          `${ctx.gw}/api/v1/precios/importaciones/${batchId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${ctx.gestorJwt}`,
+            },
+          },
+        ),
+      (response) =>
+        ["COMPLETED", "FAILED", "PARTIAL"].includes(
+          response.json?.status,
+        ),
+      40,
+      300,
+    );
+
+    const batch = result?.json;
+
+    return (
+      batch?.status === "COMPLETED" &&
+      Number(batch.total_rows) > 0 &&
+      Number(batch.completed_rows) ===
+        Number(batch.total_rows) &&
+      Number(batch.failed_rows) === 0 &&
+      (
+        !Array.isArray(batch.rows) ||
+        (
+          batch.rows.length === Number(batch.total_rows) &&
+          batch.rows.every(
+            (row) => row.status === "COMPLETED",
+          )
+        )
+      )
+    );
   }
   return true;
 }
@@ -1686,25 +1873,28 @@ function buildPositiveBody(opId, ctx) {
   }
 }
 
-void main().catch((err) => {
-  console.error(err);
-  writeFileSync(
-    REPORT_JSON_PATH,
-    JSON.stringify(
-      {
-        status: "SETUP_FAILED",
-        timestamp: new Date().toISOString(),
-        total: 0,
-        executed: 0,
-        notExecuted: 158,
-        passed: 0,
-        failed: 0,
-        error: err instanceof Error ? err.message : String(err),
-      },
-      null,
-      2,
-    ),
-    "utf8",
-  );
-  process.exit(1);
-});
+const IS_MAIN = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (IS_MAIN) {
+  void main().catch((err) => {
+    console.error(err);
+    writeFileSync(
+      REPORT_JSON_PATH,
+      JSON.stringify(
+        {
+          status: "SETUP_FAILED",
+          timestamp: new Date().toISOString(),
+          total: 0,
+          executed: 0,
+          notExecuted: 158,
+          passed: 0,
+          failed: 0,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    process.exit(1);
+  });
+}

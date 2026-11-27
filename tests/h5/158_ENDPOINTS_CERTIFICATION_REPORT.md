@@ -1,6 +1,6 @@
 # Certificación 158 Endpoints G6 H5 R2
-- Fecha: 2026-11-27T00:32:06.268Z
-- Total: 158 | PASS: 157 | FAIL: 1
+- Fecha: 2026-11-27T00:58:36.114Z
+- Total: 158 | PASS: 158 | FAIL: 0
 - N01 Consume: COMPLETED | Bulk Terminal: COMPLETED | AuthChecks: true
 
 | # | Servicio | operationId | Método | Ruta | HTTP | Seguridad | Negativo | Funcional | Persistencia | Async | Estado |
@@ -101,7 +101,7 @@
 | 94 | pricing-svc | `listarProgramacionesPrecioSku` | GET | `/api/v1/precios/skus/{sku}/programaciones` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 95 | pricing-svc | `programarPrecioSku` | POST | `/api/v1/precios/skus/{sku}/programaciones` | 201 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | NOT_APPLICABLE | **PASS** |
 | 96 | pricing-svc | `prevalidarImportacionPrecios` | POST | `/api/v1/precios/importaciones/prevalidar` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
-| 97 | pricing-svc | `crearImportacionPrecios` | POST | `/api/v1/precios/importaciones` | 202 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | FAIL | ASYNC_TERMINAL_PASS | **FAIL** |
+| 97 | pricing-svc | `crearImportacionPrecios` | POST | `/api/v1/precios/importaciones` | 202 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | PERSISTENCE_PASS | ASYNC_TERMINAL_PASS | **PASS** |
 | 98 | pricing-svc | `obtenerImportacionPrecios` | GET | `/api/v1/precios/importaciones/{batchId}` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 99 | pricing-svc | `descargarReporteImportacionPrecios` | GET | `/api/v1/precios/importaciones/{batchId}/reporte` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
 | 100 | price-audit-svc | `listarAuditoriaPrecios` | GET | `/api/v1/auditoria-precios` | 200 | ROUTE_SECURITY_PASS | NEGATIVE_CONTRACT_PASS | FUNCTIONAL_PASS | NOT_APPLICABLE | NOT_APPLICABLE | **PASS** |
