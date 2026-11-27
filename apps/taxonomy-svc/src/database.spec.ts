@@ -139,4 +139,41 @@ describe('taxonomy PostgreSQL configuration and lifecycle', () => {
   it('handles invalid URL safely in parseDatabaseUrl without throwing', () => {
     expect(parseDatabaseUrl(':::not-a-url:::')).toEqual({});
   });
+  it('sets transaction-local g6.taxonomy_messaging inside db.transaction when Azure Service Bus is enabled', async () => {
+    for (const [key, value] of Object.entries({
+      ...env,
+      MESSAGING_PROVIDER: 'AZURE_SERVICE_BUS',
+      TAXONOMY_SERVICE_BUS_ENABLED: 'true',
+      TAXONOMY_SERVICE_BUS_RECEIVE_ENABLED: 'true',
+      SERVICE_BUS_NAMESPACE_FQDN:
+        'g6-sb-h5-chile-261127.servicebus.windows.net',
+    })) {
+      vi.stubEnv(key, value);
+    }
+    const database = new Database();
+    const executed: unknown[] = [];
+    const txMock = {
+      execute: vi.fn(async (q: unknown) => {
+        executed.push(q);
+        return { rows: [] };
+      }),
+    };
+    const dbMock = {
+      transaction: vi.fn(async (fn: (tx: typeof txMock) => Promise<unknown>) =>
+        fn(txMock),
+      ),
+    };
+    (database as unknown as { pool: unknown; db: unknown }).pool = {
+      end: vi.fn(async () => undefined),
+    };
+    (database as unknown as { pool: unknown; db: unknown }).db = dbMock;
+    const result = await database.read(async (tx) => {
+      await tx.execute('SELECT 1' as never);
+      return 'ok';
+    });
+    expect(result).toBe('ok');
+    expect(dbMock.transaction).toHaveBeenCalledTimes(1);
+    expect(txMock.execute).toHaveBeenCalledTimes(2);
+    await database.onModuleDestroy();
+  });
 });
