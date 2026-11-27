@@ -37,3 +37,7 @@ ROLLBACK;
 Los pendientes H4 permanecen en H4 y no se convierten automáticamente en entregas Azure. El owner debe documentar por cada `message_id` la evidencia de entrega o el procedimiento de recuperación autorizado, con coordinación del consumidor; una fila no clasificada bloquea su corte. Ejecutar la consulta solo donde existan la candidata y los permisos de lectura correspondientes. El ensayo en PostgreSQL descartable no demuestra el estado del entorno compartido.
 
 Para reproducir el ensayo H5, situar el repositorio Docs junto al Backend o indicar `G6_E2E_DOCS_PATH` apuntando a un checkout de Docs que contenga la versión contractual `0.7.0-rc.3`; ejecutar `node tests/h5/run-taxonomy-catalog-postgres.mjs`. La prueba carga el AsyncAPI de ese checkout y falla si la versión o la cola R18 difieren.
+
+## Corte local provisional de 0006
+
+SHA-256 del archivo de trabajo: `4d0edd7b8347e60bd1ead4558184f9a35b9a14618431c120085cfc3dddece03a`. SQL-CLEAN instala sobre H4; SQL-UPGRADE valida el almacenamiento H5 existente y no realiza backfill. No ejecutar en Supabase compartido. Reversión: detener el runtime, preservar los datos y restaurar desde respaldo validado bajo coordinación del owner; no descartar entregas ni aplicar un rollback destructivo automáticamente. La verificación integral y el SHA publicado siguen pendientes.

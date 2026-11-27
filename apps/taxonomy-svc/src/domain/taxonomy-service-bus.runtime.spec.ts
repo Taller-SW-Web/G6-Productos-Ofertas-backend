@@ -140,6 +140,7 @@ describe('Taxonomy R09 settlement', () => {
     'subject',
     'contentType',
     'oversize',
+    'invalidJson',
     'producer',
     'operationId',
   ] as const)(
@@ -151,8 +152,8 @@ describe('Taxonomy R09 settlement', () => {
       if (invalid === 'correlationId') altered.correlationId = randomUUID();
       if (invalid === 'subject') altered.subject = 'wrong.event';
       if (invalid === 'contentType') altered.contentType = 'text/plain';
-      if (invalid === 'oversize')
-        altered.body = Buffer.alloc(TAXONOMY_SERVICE_BUS_MAX_BATCH_BYTES + 1);
+      if (invalid === 'oversize') altered.body = Buffer.alloc(256 * 1024 + 1);
+      if (invalid === 'invalidJson') altered.body = Buffer.from('{invalid');
       if (invalid === 'producer' || invalid === 'operationId') {
         const body = JSON.parse(
           Buffer.from(message.body).toString('utf8'),
@@ -215,6 +216,56 @@ it('limits the encoded batch below 256 KiB and never sends a rejected message', 
     'terminal',
   );
   expect(sender.sendMessages).not.toHaveBeenCalled();
+});
+
+it('retries an ambiguous send timeout using the same MessageId', async () => {
+  const id = randomUUID();
+  const correlation = randomUUID();
+  const claim = {
+    messageId: id,
+    token: randomUUID(),
+    row: {
+      message_id: id,
+      correlation_id: correlation,
+      event_name: 'taxonomy.category.updated',
+      payload: {
+        message_id: id,
+        correlation_id: correlation,
+        name: 'taxonomy.category.updated',
+        kind: 'event',
+        producer: 'taxonomy-svc',
+        schema_version: 1,
+        data: {},
+      },
+    },
+  };
+  const store = {
+    claimServiceBusDelivery: vi.fn().mockResolvedValue(claim),
+    finishServiceBusDelivery: vi.fn().mockResolvedValue(true),
+  };
+  const tryAddMessage = vi.fn().mockReturnValue(true);
+  const sender = {
+    createMessageBatch: vi.fn().mockResolvedValue({ tryAddMessage }),
+    sendMessages: vi
+      .fn()
+      .mockRejectedValueOnce(new Error('timeout'))
+      .mockResolvedValueOnce(undefined),
+  };
+  expect(await publishTaxonomyDelivery(store, sender)).toBe(false);
+  expect(store.finishServiceBusDelivery).toHaveBeenNthCalledWith(
+    1,
+    claim,
+    'pending',
+  );
+  expect(await publishTaxonomyDelivery(store, sender)).toBe(true);
+  expect(store.finishServiceBusDelivery).toHaveBeenNthCalledWith(
+    2,
+    claim,
+    'sent',
+  );
+  expect(tryAddMessage).toHaveBeenCalledTimes(2);
+  expect(tryAddMessage.mock.calls[0][0].messageId).toBe(id);
+  expect(tryAddMessage.mock.calls[1][0].messageId).toBe(id);
 });
 
 describe('Taxonomy H5 transport readiness', () => {
