@@ -4911,7 +4911,7 @@ GRANT inventory_app TO inventory_test;`,
             on_hand: number;
             stock_version: number;
           }>(
-            `SELECT on_hand, stock_version FROM inventory.stock_balance WHERE sku_id = $1 AND location_id = $2`,
+            `SELECT on_hand, stock_version::int AS stock_version FROM inventory.stock_balance WHERE sku_id = $1 AND location_id = $2`,
             [sku, locationForR02],
           );
           expect(balance.rows[0]).toEqual({ on_hand: 15, stock_version: 1 });

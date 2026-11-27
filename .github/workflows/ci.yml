@@ -822,14 +822,14 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: 099ad1926a53d1aec1aeae93e894d24ec2721748
+        ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Obtener registro Gateway integrado
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-backend
-        ref: 2eb8c864f8d315060cf00ccd35ce4015b9569556
+        ref: 097dac1bf4a8dcf5c6e799742d2df340f6d893d5
         path: .ci/G6-Productos-Ofertas-gateway
         persist-credentials: 'false'
     - name: Configurar Python 3.12
@@ -853,8 +853,8 @@ jobs:
         --source-openapi .ci/G6-Productos-Ofertas-docs/contratos/http/openapi.yaml
         --gateway-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/contract-routes.ts
         --g5-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/g5-h5-routes.ts
-        --expected-docs-sha 099ad1926a53d1aec1aeae93e894d24ec2721748
-        --expected-gateway-sha 2eb8c864f8d315060cf00ccd35ce4015b9569556
+        --expected-docs-sha 5f30802129ba4bbc0674dcc5878f10065f443118
+        --expected-gateway-sha 097dac1bf4a8dcf5c6e799742d2df340f6d893d5
         --mode candidate
   integral:
     name: Validación integral de integración continua
