@@ -243,3 +243,47 @@ cp "$MOCK_STATE" "$TEMP/brazil-state.json"
 MOCK_STATE="$TEMP/brazil-state.json" MOCK_RESOURCE_GROUP=rg-g6-sb-h5-int-fork MOCK_SCALE_ZERO=true H5_DEPLOY_ENVIRONMENT=azure-h5 H5_DEPLOY_DESTINATION=brazil-isolated H5_PILOT_SELF_REVIEW=false bash "$DEPLOY" api-gateway "$BRAZIL_TARGET" > "$TEMP/brazil.log" 2>&1 || { cat "$TEMP/brazil.log"; fail 'Brazil behavior changed by Chile hot-replica rule'; }
 grep -Fq 'modo=scale-to-zero réplicas=0' "$TEMP/brazil.log" || fail 'Brazil scale-to-zero verification behavior changed'
 printf 'PASS: Brasil conserva la verificación previa de escala cero\n'
+
+# Regresión run 45868007664: catalog-svc en Chile con runningState=RunningAtMaxScale y runningStatus dinámico
+cat > "$TEMP/catalog-maxscale.json" <<EOF
+{"properties":{"runningStatus":"Running","configuration":{"activeRevisionsMode":"Single","secrets":[{"name":"ACA_PRIVATE_SENTINEL","value":"must-not-be-printed"}],"ingress":{"external":false,"targetPort":3001,"traffic":[{"latestRevision":true,"weight":100}]}},"template":{"revisionSuffix":"b80jpbt","containers":[{"name":"catalog-svc","image":"ghcr.io/taller-sw-web/g6-productos-ofertas-backend/catalog-svc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","env":[{"name":"PRIVATE_SETTING","value":"must-not-be-printed"}]}],"scale":{"minReplicas":1,"maxReplicas":1}},"latestRevisionName":"catalog-svc--b80jpbt","latestReadyRevisionName":"catalog-svc--b80jpbt"},"revision":{"properties":{"healthState":"Healthy","active":true,"runningState":"RunningAtMaxScale","replicas":1,"provisioningState":"Provisioned","template":{"containers":[{"name":"catalog-svc","image":"ghcr.io/taller-sw-web/g6-productos-ofertas-backend/catalog-svc@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","env":[{"name":"PRIVATE_SETTING","value":"must-not-be-printed"}]}],"scale":{"minReplicas":1,"maxReplicas":1}}}},"updates":0,"trafficSetCount":0}
+EOF
+cat > "$TEMP/bin/az-maxscale" <<'MOCK2'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ "${1:-}" == containerapp && "${2:-}" == update ]]; then
+  "$MOCK_BASE_AZ" "$@"
+  jq '.revision.properties.runningState="RunningAtMaxScale" | .properties.runningStatus="Progressing"' "$MOCK_STATE" > "$MOCK_STATE.tmp"
+  mv "$MOCK_STATE.tmp" "$MOCK_STATE"
+  exit 0
+fi
+exec "$MOCK_BASE_AZ" "$@"
+MOCK2
+chmod +x "$TEMP/bin/az-maxscale"
+CAT_TARGET='ghcr.io/taller-sw-web/g6-productos-ofertas-backend/catalog-svc@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+MOCK_BASE_AZ="$TEMP/bin/az" PATH="$TEMP/bin:$PATH" bash -c '
+  ln -sf "$MOCK_BASE_AZ-maxscale" "'"$TEMP"'/bin/az-wrap"
+' >/dev/null 2>&1 || true
+MOCK_SERVICE=catalog-svc MOCK_STATE="$TEMP/catalog-maxscale.json" H5_DEPLOY_ENVIRONMENT=azure-h5-chile H5_DEPLOY_DESTINATION=chile-shared H5_PILOT_SELF_REVIEW=false bash -c '
+  mkdir -p "'"$TEMP"'/wrapbin"
+  ln -sf "'"$TEMP"'/bin/az-maxscale" "'"$TEMP"'/wrapbin/az"
+  export MOCK_BASE_AZ="'"$TEMP"'/bin/az"
+  export PATH="'"$TEMP"'/wrapbin:$PATH"
+  bash "'"$DEPLOY"'" catalog-svc "'"$CAT_TARGET"'"
+' > "$TEMP/catalog-maxscale.log" 2>&1 || { cat "$TEMP/catalog-maxscale.log"; fail 'RunningAtMaxScale con Healthy y Provisioned debe aceptarse sin falso drift'; }
+grep -Fq 'Despliegue verificado: servicio=catalog-svc' "$TEMP/catalog-maxscale.log" || fail 'RunningAtMaxScale no quedó verificado'
+printf 'PASS: RunningAtMaxScale saludable y cambio dinámico de runningStatus aceptados sin falso drift\n'
+
+# Rechazo de estados degradados/no preparados incluso con RunningAtMaxScale o Stopped/ScaledToZero/Failed
+for bad_state in "RunningAtMaxScale:Unhealthy:1:Provisioned" "RunningAtMaxScale:Healthy:0:Provisioned" "RunningAtMaxScale:Healthy:1:Failed" "Failed:Healthy:1:Provisioned" "Stopped:Healthy:1:Provisioned" "ScaledToZero:Healthy:1:Provisioned"; do
+  IFS=: read -r r_state r_health r_reps r_prov <<< "$bad_state"
+  cp "$TEMP/catalog-maxscale.json" "$TEMP/bad-state.json"
+  jq --arg rs "$r_state" --arg rh "$r_health" --argjson rr "$r_reps" --arg rp "$r_prov" \
+    '.revision.properties.runningState=$rs | .revision.properties.healthState=$rh | .revision.properties.replicas=$rr | .revision.properties.provisioningState=$rp' \
+    "$TEMP/bad-state.json" > "$TEMP/bad-state.tmp" && mv "$TEMP/bad-state.tmp" "$TEMP/bad-state.json"
+  if MOCK_SERVICE=catalog-svc MOCK_STATE="$TEMP/bad-state.json" H5_DEPLOY_ENVIRONMENT=azure-h5-chile H5_DEPLOY_DESTINATION=chile-shared H5_PILOT_SELF_REVIEW=false \
+    bash "$DEPLOY" catalog-svc "$CAT_TARGET" > "$TEMP/bad-state.log" 2>&1; then
+    fail "Estado inválido $bad_state fue aceptado"
+  fi
+done
+printf 'PASS: estados degradados, Failed, Stopped y ScaledToZero con réplicas/salud inválidas siguen rechazándose\n'

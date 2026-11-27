@@ -87,7 +87,7 @@ normalize_app() {
       kind: .kind,
       properties: (
         .properties
-        | del(.latestRevisionName, .latestReadyRevisionName, .latestRevisionFqdn, .provisioningState)
+        | del(.latestRevisionName, .latestReadyRevisionName, .latestRevisionFqdn, .provisioningState, .runningStatus)
         | if $destination == "chile-shared" then del(.configuration.ingress.traffic) else . end
         | .template |= (
             del(.revisionSuffix)
@@ -141,7 +141,7 @@ verify_revision() {
       revision_max="$(jq -r '.properties.template.scale.maxReplicas // 0' "$revision")"
       if chile_hot_service && [[ "$revision_min" != 1 || "$revision_max" != 1 ]]; then
         revision_verify_detail+=" expected_scale=1/1"
-      elif [[ "$revision_image" == "$expected" && "$active" == true && "$running" == Running && "$replicas" =~ ^[1-9][0-9]*$ && "$health" == Healthy && "$provisioning" == Provisioned ]]; then
+      elif [[ "$revision_image" == "$expected" && "$active" == true && ( "$running" == Running || "$running" == RunningAtMaxScale ) && "$replicas" =~ ^[1-9][0-9]*$ && "$health" == Healthy && "$provisioning" == Provisioned ]]; then
         verified_mode=running; verified_replicas="$replicas"; verified_health="$health"
         return 0
       fi
@@ -287,7 +287,7 @@ verify_chile_gateway_current_traffic() {
   provisioning="$(jq -r '.properties.provisioningState // empty' "$revision_json")"
   min="$(jq -r '.properties.template.scale.minReplicas // 0' "$revision_json")"
   max="$(jq -r '.properties.template.scale.maxReplicas // 0' "$revision_json")"
-  [[ "$revision_image" == "$expected" && "$active" == true && "$health" == Healthy && "$running" == Running && "$replicas" =~ ^[1-9][0-9]*$ && "$provisioning" == Provisioned && "$min" == 1 && "$max" == 1 ]] || { printf 'Gateway traffic check: revision=%s image=%s active=%s health=%s running=%s replicas=%s provisioning=%s scale=%s/%s expected=%s\n' "$served_revision" "$revision_image" "$active" "$health" "$running" "$replicas" "$provisioning" "$min" "$max" "$expected" >&2; return 1; }
+  [[ "$revision_image" == "$expected" && "$active" == true && "$health" == Healthy && ( "$running" == Running || "$running" == RunningAtMaxScale ) && "$replicas" =~ ^[1-9][0-9]*$ && "$provisioning" == Provisioned && "$min" == 1 && "$max" == 1 ]] || { printf 'Gateway traffic check: revision=%s image=%s active=%s health=%s running=%s replicas=%s provisioning=%s scale=%s/%s expected=%s\n' "$served_revision" "$revision_image" "$active" "$health" "$running" "$replicas" "$provisioning" "$min" "$max" "$expected" >&2; return 1; }
   verified_served_revision="$served_revision"
   verified_served_digest="${expected##*@}"
 }
