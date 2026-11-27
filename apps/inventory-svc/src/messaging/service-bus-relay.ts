@@ -2,6 +2,7 @@
  * Relay de Outbox → Azure Service Bus para inventory-svc (H5).
  *
  * Publica mensajes point-to-point a las colas autorizadas:
+ *   R10: g6.bulk.from.inventory      → inventory.bulk.stock.adjust.completed / rejected
  *   R11: g6.catalog.from.inventory   → inventory.sku.initialization.completed / rejected
  *   R12: g6.combos.from.inventory    → inventory.stock.changed
  *   R13: g6.promotions.from.inventory → inventory.stock.changed

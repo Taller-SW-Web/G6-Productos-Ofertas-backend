@@ -158,7 +158,11 @@ function command(executable: string, args: string[], input?: string): string {
   });
   if (result.error || result.status !== 0)
     throw new Error(
-      basename(executable) + ' failed in isolated catalog PostgreSQL setup',
+      basename(executable) +
+        ' failed in isolated catalog PostgreSQL setup: ' +
+        (result.error?.message ??
+          result.stderr.trim().slice(-3000) ??
+          `exit ${result.status}`),
     );
   return result.stdout.trim();
 }
@@ -2999,6 +3003,7 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
 
     it('JOINT-01: commits aggregate/Outbox, transports requested/results through a real broker, deduplicates Inbox and reconnects', async () => {
       // Seed an internal BORRADOR coordination fixture, not a mocked HTTP or Taxonomy flow.
+      await jointBroker.purge('po.inventario.q');
       const correlation = randomUUID(),
         operation = randomUUID(),
         messageId = randomUUID(),

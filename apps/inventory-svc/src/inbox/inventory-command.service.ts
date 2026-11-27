@@ -327,6 +327,14 @@ export class InventoryCommandService {
         ) {
           throw error;
         }
+        if (
+          !(error instanceof Error) ||
+          error.message !== 'Conflicto de idempotencia en ajuste absoluto'
+        ) {
+          // Un fallo técnico tras mutar el saldo debe revertir toda la transacción;
+          // no puede persistirse como rechazo comercial de R10.
+          throw error;
+        }
         resultEvent = 'inventory.bulk.stock.adjust.rejected';
         resultData = {
           operation_id: dataOperationId,
