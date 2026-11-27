@@ -17,7 +17,9 @@ ENV NODE_ENV=production
 ENV CATALOG_SVC_HOST=0.0.0.0 TAXONOMY_SVC_HOST=0.0.0.0
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+# El runtime ejecuta Node directamente. npm solo instala dependencias durante el build.
+RUN npm ci --omit=dev && npm cache clean --force \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build --chown=node:node /app/dist/apps ./dist/apps
 
 USER node
