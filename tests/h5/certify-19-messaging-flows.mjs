@@ -7,11 +7,12 @@ import { dirname, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 const BACKEND_ROOT = resolve(process.cwd());
-const FRONTEND_ROOT = resolve(BACKEND_ROOT, "../frontend");
-const DOCS_ROOT = resolve(BACKEND_ROOT, "../docs");
+const FRONTEND_ROOT = resolve(process.env.G6_FRONTEND_ROOT ?? resolve(BACKEND_ROOT, "../frontend"));
+const DOCS_ROOT = resolve(process.env.G6_DOCS_ROOT ?? resolve(BACKEND_ROOT, "../docs"));
 const MANIFEST_PATH = resolve(FRONTEND_ROOT, "tests/e2e-real/.runtime-stack.json");
-const REPORT_JSON_PATH = resolve(DOCS_ROOT, "hitos/h5/evidencias/r2-cierre-gemini/MENSAJERIA_19_RECORRIDOS.json");
-const REPORT_CSV_PATH = resolve(DOCS_ROOT, "hitos/h5/evidencias/r2-cierre-gemini/MENSAJERIA_19_RECORRIDOS.csv");
+const REPORT_DIR = resolve(process.env.G6_MESSAGING_REPORT_DIR ?? resolve(BACKEND_ROOT, "tests/h5"));
+const REPORT_JSON_PATH = resolve(REPORT_DIR, "MENSAJERIA_19_RECORRIDOS.json");
+const REPORT_CSV_PATH = resolve(REPORT_DIR, "MENSAJERIA_19_RECORRIDOS.csv");
 const VALID_PNG_BYTES = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=",
   "base64",
@@ -188,7 +189,10 @@ async function main() {
       headers: { ...authH, "Idempotency-Key": randomUUID() },
       body: { nombre: `Prod Adm ${admSku}`, descripcion: "Desc", categoriaId: catId, tipoProductoId: typeId, marcaId: brandId, tieneVariantes: false, skuBase: admSku, precioBaseInicial: 90, imagenes: [{ url: "https://example.test/a.png", principal: true }], perfilFisico: { pesoKg: 0.2, dimensionesCm: { alto: 5, ancho: 5, largo: 5 } } },
     }));
-    const admProdId = prodRes.json?.product_id;
+    const admProdId = prodRes.json?.productoId ?? prodRes.json?.product_id ?? prodRes.json?.id;
+    if (!admProdId || !/^[0-9a-f-]{36}$/i.test(String(admProdId))) {
+      throw new Error(`SEED_FAILED crearProducto missing productoId: status=${prodRes.status} body=${(prodRes.text ?? "").slice(0, 400)}`);
+    }
     const checksReady = await pollUntil(
       () => pgSelect(env.g5SeedOrigin, `SELECT count(*)::int AS c FROM catalog.activation_checks WHERE product_id = '${admProdId}'::uuid AND state = 'COMPLETED'`),
       (rows) => Number(rows[0]?.c ?? 0) === 2,
@@ -211,7 +215,10 @@ async function main() {
     // explicit disposable fixture data, not evidence of a receiving operation.
     requireSeedResult("stockFixtureAdministrativo", await httpCall(`${env.g5SeedOrigin}/__test/inventory-stock`, { method: "POST", body: { sku: admSku, on_hand: 20 } }));
     const combo = requireSeedResult("crearCombo", await httpCall(`${gw}/api/v1/combos/administracion`, { method: "POST", headers: { ...authH, "Idempotency-Key": randomUUID() }, body: { nombre: `Combo ${admSku}`, componentes: [{ sku: admSku, cantidad: 1 }, { sku: bulkSku, cantidad: 1 }], precioCombo: 150 } }));
-    const comboId = combo.json?.combo_id;
+    const comboId = combo.json?.combo_id ?? combo.json?.comboId ?? combo.json?.id;
+    if (!comboId || !/^[0-9a-f-]{36}$/i.test(String(comboId))) {
+      throw new Error(`SEED_FAILED crearCombo missing combo_id: status=${combo.status} body=${(combo.text ?? "").slice(0, 400)}`);
+    }
 
     // 3. Trigger R16/R17 via PATCH precio SKU
     requireSeedResult("actualizarPrecioSku", await httpCall(`${gw}/api/v1/precios/skus/${admSku}`, {

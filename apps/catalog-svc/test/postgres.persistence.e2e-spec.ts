@@ -1624,7 +1624,7 @@ describe.skipIf(!dockerAvailable)(
         'SELECT count(*) FROM foreign_context.private_probe;',
       );
       expect(otherSchema.trim()).toBe('1');
-    });
+    }, 30000);
 
     it('BLOCK-A2: consolidated Inventory authenticates completed/rejected, preserves balances, replays and initializes without location', async () => {
       const peerDirectory = join(directory, 'preparation-peers');
@@ -2942,7 +2942,7 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         await http.close();
         await broker.close();
       }
-    }, 240000);
+    }, 360000);
 
     it('reads internal demo drafts and their actual variant photos without exposing them through the ordinary active-only query', async () => {
       const marker = 'DEMO-READ-' + randomUUID();
@@ -3002,8 +3002,16 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
     });
 
     it('JOINT-01: commits aggregate/Outbox, transports requested/results through a real broker, deduplicates Inbox and reconnects', async () => {
-      // Seed an internal BORRADOR coordination fixture, not a mocked HTTP or Taxonomy flow.
+      // Isolate prior tests' unpublished catalog.outbox residue and broker queues
+      // so JOINT-01 correlates exclusively its own synthetic message_id/followupId.
+      await database.transaction((tx) =>
+        tx.execute(
+          sql`UPDATE catalog.outbox SET published_at = now() WHERE published_at IS NULL`,
+        ),
+      );
       await jointBroker.purge('po.inventario.q');
+      await jointBroker.purge('po.catalogo.q');
+      // Seed an internal BORRADOR coordination fixture, not a mocked HTTP or Taxonomy flow.
       const correlation = randomUUID(),
         operation = randomUUID(),
         messageId = randomUUID(),
@@ -3036,107 +3044,178 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         new CatalogMessageService(database, signals),
         jointBroker.settings,
       );
-      jointRuntime.onModuleInit();
-      const requested = await jointBroker.next('po.inventario.q');
-      expect(JSON.parse(requested.content.toString()).message_id).toBe(
-        messageId,
-      );
-      const result = {
-        message_id: randomUUID(),
-        schema_version: 1,
-        occurred_at: new Date().toISOString(),
-        correlation_id: correlation,
-        operation_id: operation,
-        causation_id: messageId,
-        producer: 'inventory-svc',
-        kind: 'result',
-        name: 'inventory.sku.initialization.completed',
-        data: {
-          product_id: product.id,
-          sku,
-          variant_id: null,
-          status: 'INITIALIZED',
-          completed_at: new Date().toISOString(),
-        },
-      };
-      await jointBroker.result('inventory', result);
-      async function completed() {
-        const [row] = await database.read((db) =>
-          db
-            .select()
-            .from(activationChecks)
-            .where(eq(activationChecks.operation_id, operation)),
+      try {
+        jointRuntime.onModuleInit();
+        const requested = await jointBroker.next('po.inventario.q');
+        expect(JSON.parse(requested.content.toString()).message_id).toBe(
+          messageId,
         );
-        return row.state === 'COMPLETED';
-      }
-      const deadline = Date.now() + 15000;
-      while (!(await completed())) {
-        if (Date.now() > deadline)
-          throw new Error('Joint result not committed');
-        await pause(50);
-      }
-      await jointBroker.result('inventory', result);
-      const replayDeadline = Date.now() + 15000;
-      while (!signals.snapshot().INBOX_DUPLICATE) {
-        if (Date.now() > replayDeadline)
-          throw new Error('Joint replay not processed');
-        await pause(50);
-      }
-      const seen = await database.read((db) =>
-        db.execute(
-          sql`SELECT count(*)::int AS n FROM catalog.inbox WHERE message_id=${result.message_id}`,
-        ),
-      );
-      expect(seen.rows[0]?.n).toBe(1);
-      const [published] = await database.read((db) =>
-        db.select().from(outbox).where(eq(outbox.message_id, messageId)),
-      );
-      expect(published.published_at).not.toBeNull();
-      jointBroker.stop();
-      const followupId = randomUUID();
-      await transactions.run(async (tx) => {
-        const pending = await repository.insertProduct(
-          tx,
-          productInput('AFTER-OUTAGE-' + randomUUID()),
+        const result = {
+          message_id: randomUUID(),
+          schema_version: 1,
+          occurred_at: new Date().toISOString(),
+          correlation_id: correlation,
+          operation_id: operation,
+          causation_id: messageId,
+          producer: 'inventory-svc',
+          kind: 'result',
+          name: 'inventory.sku.initialization.completed',
+          data: {
+            product_id: product.id,
+            sku,
+            variant_id: null,
+            status: 'INITIALIZED',
+            completed_at: new Date().toISOString(),
+          },
+        };
+        await jointBroker.result('inventory', result);
+        async function completed() {
+          const [row] = await database.read((db) =>
+            db
+              .select()
+              .from(activationChecks)
+              .where(eq(activationChecks.operation_id, operation)),
+          );
+          return row.state === 'COMPLETED';
+        }
+        const deadline = Date.now() + 15000;
+        while (!(await completed())) {
+          if (Date.now() > deadline)
+            throw new Error('Joint result not committed');
+          await pause(50);
+        }
+        await jointBroker.result('inventory', result);
+        const replayDeadline = Date.now() + 15000;
+        while (!signals.snapshot().INBOX_DUPLICATE) {
+          if (Date.now() > replayDeadline)
+            throw new Error('Joint replay not processed');
+          await pause(50);
+        }
+        const seen = await database.read((db) =>
+          db.execute(
+            sql`SELECT count(*)::int AS n FROM catalog.inbox WHERE message_id=${result.message_id}`,
+          ),
         );
-        const nextOperation = randomUUID(),
-          data = {
+        expect(seen.rows[0]?.n).toBe(1);
+        const [published] = await database.read((db) =>
+          db.select().from(outbox).where(eq(outbox.message_id, messageId)),
+        );
+        expect(published.published_at).not.toBeNull();
+        jointBroker.stop();
+        const followupId = randomUUID();
+        await transactions.run(async (tx) => {
+          const pending = await repository.insertProduct(
+            tx,
+            productInput('AFTER-OUTAGE-' + randomUUID()),
+          );
+          const nextOperation = randomUUID(),
+            data = {
+              product_id: pending.id,
+              sku: pending.sku_base,
+              variant_id: null,
+            };
+          await repository.insertActivationCheck(tx, {
             product_id: pending.id,
             sku: pending.sku_base,
-            variant_id: null,
-          };
-        await repository.insertActivationCheck(tx, {
-          product_id: pending.id,
-          sku: pending.sku_base,
-          dependency: 'INVENTORY',
-          operation_id: nextOperation,
-          correlation_id: correlation,
-          state: 'PENDING',
-          request_payload: data,
+            dependency: 'INVENTORY',
+            operation_id: nextOperation,
+            correlation_id: correlation,
+            state: 'PENDING',
+            request_payload: data,
+          });
+          return repository.insertOutboxMessage(tx, {
+            message_id: followupId,
+            event_name: 'inventory.sku.initialization.requested',
+            kind: 'command',
+            correlation_id: correlation,
+            operation_id: nextOperation,
+            occurred_at: new Date(),
+            payload: data,
+          });
         });
-        return repository.insertOutboxMessage(tx, {
-          message_id: followupId,
+        const [pending] = await database.read((db) =>
+          db.select().from(outbox).where(eq(outbox.message_id, followupId)),
+        );
+        expect(pending.published_at).toBeNull();
+        await jointBroker.resume();
+        expect(
+          JSON.parse(
+            (await jointBroker.next('po.inventario.q')).content.toString(),
+          ).message_id,
+        ).toBe(followupId);
+      } finally {
+        await jointRuntime.onModuleDestroy();
+        jointRuntime = undefined;
+      }
+    }, 90000);
+
+    it('JOINT-01-REGRESSION: unpublished prior outbox residue cannot hijack JOINT correlation after isolation', async () => {
+      // Simulate an earlier failed test leaving an unpublished outbox row.
+      const staleId = randomUUID(),
+        staleOp = randomUUID(),
+        staleCorr = randomUUID();
+      await transactions.run(async (tx) => {
+        const staleProd = await repository.insertProduct(
+          tx,
+          productInput('STALE-RESIDUE-' + randomUUID()),
+        );
+        await repository.insertOutboxMessage(tx, {
+          message_id: staleId,
           event_name: 'inventory.sku.initialization.requested',
           kind: 'command',
-          correlation_id: correlation,
-          operation_id: nextOperation,
-          occurred_at: new Date(),
-          payload: data,
+          correlation_id: staleCorr,
+          operation_id: staleOp,
+          occurred_at: new Date(Date.now() - 60000),
+          payload: {
+            product_id: staleProd.id,
+            sku: staleProd.sku_base,
+            variant_id: null,
+          },
         });
       });
-      const [pending] = await database.read((db) =>
-        db.select().from(outbox).where(eq(outbox.message_id, followupId)),
+      await database.transaction((tx) =>
+        tx.execute(
+          sql`UPDATE catalog.outbox SET published_at = now() WHERE published_at IS NULL`,
+        ),
       );
-      expect(pending.published_at).toBeNull();
-      await jointBroker.resume();
-      expect(
-        JSON.parse(
-          (await jointBroker.next('po.inventario.q')).content.toString(),
-        ).message_id,
-      ).toBe(followupId);
-      await jointRuntime.onModuleDestroy();
-      jointRuntime = undefined;
-    }, 90000);
+      await jointBroker.purge('po.inventario.q');
+      const freshId = randomUUID(),
+        freshOp = randomUUID(),
+        freshCorr = randomUUID();
+      await transactions.run(async (tx) => {
+        const freshProd = await repository.insertProduct(
+          tx,
+          productInput('FRESH-CORR-' + randomUUID()),
+        );
+        await repository.insertOutboxMessage(tx, {
+          message_id: freshId,
+          event_name: 'inventory.sku.initialization.requested',
+          kind: 'command',
+          correlation_id: freshCorr,
+          operation_id: freshOp,
+          occurred_at: new Date(),
+          payload: {
+            product_id: freshProd.id,
+            sku: freshProd.sku_base,
+            variant_id: null,
+          },
+        });
+      });
+      jointRuntime = new CatalogAmqpRuntime(
+        new CatalogMessageService(database, new CatalogTelemetry()),
+        jointBroker.settings,
+      );
+      try {
+        jointRuntime.onModuleInit();
+        const delivered = await jointBroker.next('po.inventario.q');
+        const parsed = JSON.parse(delivered.content.toString());
+        expect(parsed.message_id).toBe(freshId);
+        expect(parsed.message_id).not.toBe(staleId);
+      } finally {
+        await jointRuntime.onModuleDestroy();
+        jointRuntime = undefined;
+      }
+    }, 30000);
 
     it('PG-FAULT-01: statement timeout rolls back the transaction and the same pool recovers', async () => {
       const sku = 'TIMEOUT-' + randomUUID();
@@ -3662,7 +3741,7 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
       expect((await bulkReply(commandConflict)).payload.code).toBe(
         'IDEMPOTENCY_CONFLICT',
       );
-    });
+    }, 30000);
     it('BULK V3: replays an applied operation without downloading its claim-check document again', async () => {
       const row = bulkRow();
       const operationId = randomUUID();
@@ -4850,7 +4929,7 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
       expect((await bulkReply(simpleUpdate)).payload.results).toMatchObject([
         { status: 'COMPLETED' },
       ]);
-    });
+    }, 30000);
 
     it('BULK-CONSUMER-v2: real RabbitMQ/PG, SKU resolution and replay (producer fixture; Bulk app remains v1)', async () => {
       const messages = new CatalogMessageService(

@@ -8,8 +8,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 const BACKEND_ROOT = resolve(process.cwd());
-const FRONTEND_ROOT = resolve(BACKEND_ROOT, "../frontend");
-const DOCS_ROOT = resolve(BACKEND_ROOT, "../docs");
+const FRONTEND_ROOT = resolve(process.env.G6_FRONTEND_ROOT ?? resolve(BACKEND_ROOT, "../frontend"));
+const DOCS_ROOT = resolve(process.env.G6_DOCS_ROOT ?? resolve(BACKEND_ROOT, "../docs"));
 const MANIFEST_PATH = resolve(FRONTEND_ROOT, "tests/e2e-real/.runtime-stack.json");
 const MATRIX_PATH = resolve(DOCS_ROOT, "hitos/h5/MATRIZ_158_OPERACIONES_H5_R2.csv");
 const RETRY_ONLY = process.argv.includes("--retry-only");
@@ -17,8 +17,9 @@ const FOCUS_OPERATION = process.argv.find(arg => arg.startsWith('--operation='))
 if (FOCUS_OPERATION && !/^[a-zA-Z0-9]+$/.test(FOCUS_OPERATION)) throw new Error('Invalid focused operation');
 const FOCUSED = RETRY_ONLY || Boolean(FOCUS_OPERATION);
 const REPORT_SUFFIX = RETRY_ONLY ? '_RETRY_ONLY' : FOCUS_OPERATION ? `_${FOCUS_OPERATION}` : '';
-const REPORT_JSON_PATH = resolve(BACKEND_ROOT, `tests/h5/158_ENDPOINTS_CERTIFICATION_REPORT${REPORT_SUFFIX}.json`);
-const REPORT_MD_PATH = resolve(BACKEND_ROOT, `tests/h5/158_ENDPOINTS_CERTIFICATION_REPORT${REPORT_SUFFIX}.md`);
+const REPORT_DIR = resolve(process.env.G6_158_REPORT_DIR ?? resolve(BACKEND_ROOT, "tests/h5"));
+const REPORT_JSON_PATH = resolve(REPORT_DIR, `158_ENDPOINTS_CERTIFICATION_REPORT${REPORT_SUFFIX}.json`);
+const REPORT_MD_PATH = resolve(REPORT_DIR, `158_ENDPOINTS_CERTIFICATION_REPORT${REPORT_SUFFIX}.md`);
 
 function parseCsvLine(line) {
   const cols = [];

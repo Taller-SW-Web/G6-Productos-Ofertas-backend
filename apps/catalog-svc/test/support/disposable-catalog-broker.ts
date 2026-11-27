@@ -26,178 +26,212 @@ export class DisposableCatalogBroker {
       timeout: 120000,
       windowsHide: true,
     });
-    if (result.status !== 0)
-      throw new Error('Disposable joint broker command failed');
+    if (result.error || result.status !== 0) {
+      const detail =
+        result.error?.message ??
+        result.stderr?.trim().slice(-1500) ??
+        `exit ${String(result.status)}`;
+      throw new Error(
+        `Disposable joint broker command failed (docker ${args[0] ?? ''}): ${detail}`,
+      );
+    }
     return result.stdout.trim();
   }
+  private async commandWithRetry(
+    args: string[],
+    attempts = 5,
+    delayMs = 500,
+  ): Promise<string> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        return this.command(args);
+      } catch (error) {
+        lastError = error;
+        if (attempt < attempts) await pause(delayMs * attempt);
+      }
+    }
+    throw lastError;
+  }
   async start(): Promise<void> {
-    this.command([
-      'run',
-      '--detach',
-      '--name',
-      this.name,
-      '--publish',
-      '127.0.0.1::5672',
-      '--env',
-      'RABBITMQ_DEFAULT_USER=catalog-joint',
-      '--env',
-      'RABBITMQ_DEFAULT_PASS=' + this.password,
-      '--env',
-      'RABBITMQ_DEFAULT_VHOST=g6-productos-ofertas',
-      'rabbitmq:4.2.9-alpine',
-    ]);
-    const port = this.command(['port', this.name, '5672/tcp'])
-      .split(':')
-      .at(-1)!;
-    this.base = '@127.0.0.1:' + port + '/g6-productos-ofertas';
-    const admin = await this.open('catalog-joint');
-    this.channel = await admin.createChannel();
-    for (const exchange of ['po.comandos.x', 'po.eventos.x', 'po.resultados.x'])
-      await this.channel.assertExchange(exchange, 'topic', { durable: true });
-    for (const exchange of ['po.retry.x', 'po.dlx.x'])
-      await this.channel.assertExchange(exchange, 'direct', { durable: true });
-    for (const queue of ['po.catalogo.q', 'po.inventario.q', 'po.precios.q'])
-      await this.channel.assertQueue(queue, {
-        durable: true,
-        arguments: { 'x-queue-type': 'quorum' },
-      });
-    for (const [prefix, queue] of [
-      ['inventory', 'po.inventario.q'],
-      ['pricing', 'po.precios.q'],
-    ]) {
-      await this.channel.bindQueue(
-        queue,
+    try {
+      this.command([
+        'run',
+        '--detach',
+        '--name',
+        this.name,
+        '--publish',
+        '127.0.0.1::5672',
+        '--env',
+        'RABBITMQ_DEFAULT_USER=catalog-joint',
+        '--env',
+        'RABBITMQ_DEFAULT_PASS=' + this.password,
+        '--env',
+        'RABBITMQ_DEFAULT_VHOST=g6-productos-ofertas',
+        'rabbitmq:4.2.9-alpine',
+      ]);
+      const port = this.command(['port', this.name, '5672/tcp'])
+        .split(':')
+        .at(-1)!;
+      this.base = '@127.0.0.1:' + port + '/g6-productos-ofertas';
+      const admin = await this.open('catalog-joint');
+      this.channel = await admin.createChannel();
+      for (const exchange of [
         'po.comandos.x',
-        prefix +
-          '.' +
-          (prefix === 'pricing' ? 'product' : 'sku') +
-          '.initialization.requested',
-      );
-      for (const result of ['completed', 'rejected'])
+        'po.eventos.x',
+        'po.resultados.x',
+      ])
+        await this.channel.assertExchange(exchange, 'topic', { durable: true });
+      for (const exchange of ['po.retry.x', 'po.dlx.x'])
+        await this.channel.assertExchange(exchange, 'direct', {
+          durable: true,
+        });
+      for (const queue of ['po.catalogo.q', 'po.inventario.q', 'po.precios.q'])
+        await this.channel.assertQueue(queue, {
+          durable: true,
+          arguments: { 'x-queue-type': 'quorum' },
+        });
+      for (const [prefix, queue] of [
+        ['inventory', 'po.inventario.q'],
+        ['pricing', 'po.precios.q'],
+      ]) {
         await this.channel.bindQueue(
-          'po.catalogo.q',
-          'po.resultados.x',
+          queue,
+          'po.comandos.x',
           prefix +
             '.' +
             (prefix === 'pricing' ? 'product' : 'sku') +
-            '.initialization.' +
-            result,
+            '.initialization.requested',
         );
-      const user =
-        prefix === 'inventory' ? this.inventoryUser : prefix + '-joint';
-      this.command([
+        for (const result of ['completed', 'rejected'])
+          await this.channel.bindQueue(
+            'po.catalogo.q',
+            'po.resultados.x',
+            prefix +
+              '.' +
+              (prefix === 'pricing' ? 'product' : 'sku') +
+              '.initialization.' +
+              result,
+          );
+        const user =
+          prefix === 'inventory' ? this.inventoryUser : prefix + '-joint';
+        await this.commandWithRetry([
+          'exec',
+          this.name,
+          'rabbitmqctl',
+          'add_user',
+          user,
+          this.password,
+        ]);
+        await this.commandWithRetry([
+          'exec',
+          this.name,
+          'rabbitmqctl',
+          'set_permissions',
+          '-p',
+          'g6-productos-ofertas',
+          user,
+          '.*',
+          '.*',
+          '.*',
+        ]);
+      }
+      await this.channel.assertQueue('po.catalogo.q.retry', {
+        durable: true,
+        arguments: {
+          'x-message-ttl': 30000,
+          'x-dead-letter-exchange': '',
+          'x-dead-letter-routing-key': 'po.catalogo.q',
+        },
+      });
+      await this.channel.bindQueue(
+        'po.catalogo.q.retry',
+        'po.retry.x',
+        'po.catalogo.q',
+      );
+      await this.channel.assertQueue('po.catalogo.q.dlq', { durable: true });
+      await this.channel.bindQueue(
+        'po.catalogo.q.dlq',
+        'po.dlx.x',
+        'po.catalogo.q',
+      );
+      await this.commandWithRetry([
         'exec',
         this.name,
         'rabbitmqctl',
         'add_user',
-        user,
+        'bulk-joint',
         this.password,
       ]);
-      this.command([
+      await this.commandWithRetry([
         'exec',
         this.name,
         'rabbitmqctl',
         'set_permissions',
         '-p',
         'g6-productos-ofertas',
-        user,
+        'bulk-joint',
         '.*',
         '.*',
         '.*',
       ]);
-    }
-    await this.channel.assertQueue('po.catalogo.q.retry', {
-      durable: true,
-      arguments: {
-        'x-message-ttl': 30000,
-        'x-dead-letter-exchange': '',
-        'x-dead-letter-routing-key': 'po.catalogo.q',
-      },
-    });
-    await this.channel.bindQueue(
-      'po.catalogo.q.retry',
-      'po.retry.x',
-      'po.catalogo.q',
-    );
-    await this.channel.assertQueue('po.catalogo.q.dlq', { durable: true });
-    await this.channel.bindQueue(
-      'po.catalogo.q.dlq',
-      'po.dlx.x',
-      'po.catalogo.q',
-    );
-    this.command([
-      'exec',
-      this.name,
-      'rabbitmqctl',
-      'add_user',
-      'bulk-joint',
-      this.password,
-    ]);
-    this.command([
-      'exec',
-      this.name,
-      'rabbitmqctl',
-      'set_permissions',
-      '-p',
-      'g6-productos-ofertas',
-      'bulk-joint',
-      '.*',
-      '.*',
-      '.*',
-    ]);
-    await this.channel.assertQueue('po.masivos.q', {
-      durable: true,
-      arguments: { 'x-queue-type': 'quorum' },
-    });
-    await this.channel.bindQueue(
-      'po.catalogo.q',
-      'po.comandos.x',
-      'catalog.bulk.upsert.requested',
-    );
-    for (const suffix of ['completed', 'rejected'])
+      await this.channel.assertQueue('po.masivos.q', {
+        durable: true,
+        arguments: { 'x-queue-type': 'quorum' },
+      });
       await this.channel.bindQueue(
-        'po.masivos.q',
-        'po.resultados.x',
-        'catalog.bulk.upsert.' + suffix,
+        'po.catalogo.q',
+        'po.comandos.x',
+        'catalog.bulk.upsert.requested',
       );
-    this.command([
-      'exec',
-      this.name,
-      'rabbitmqctl',
-      'add_user',
-      'taxonomy-joint',
-      this.password,
-    ]);
-    this.command([
-      'exec',
-      this.name,
-      'rabbitmqctl',
-      'set_permissions',
-      '-p',
-      'g6-productos-ofertas',
-      'taxonomy-joint',
-      '.*',
-      '.*',
-      '.*',
-    ]);
-    for (const name of [
-      'taxonomy.category.updated',
-      'taxonomy.product-type-schema.changed',
-      'taxonomy.characteristic-value.updated',
-    ])
-      await this.channel.bindQueue('po.catalogo.q', 'po.eventos.x', name);
-    this.settings = {
-      connection: {
-        url: 'amqp://catalog-joint:' + this.password + this.base,
-        user: 'catalog-joint',
-        producerUsers: {
-          'pricing-svc': 'pricing-joint',
-          'inventory-svc': this.inventoryUser,
-          'taxonomy-svc': 'taxonomy-joint',
-          'bulk-svc': 'bulk-joint',
+      for (const suffix of ['completed', 'rejected'])
+        await this.channel.bindQueue(
+          'po.masivos.q',
+          'po.resultados.x',
+          'catalog.bulk.upsert.' + suffix,
+        );
+      await this.commandWithRetry([
+        'exec',
+        this.name,
+        'rabbitmqctl',
+        'add_user',
+        'taxonomy-joint',
+        this.password,
+      ]);
+      await this.commandWithRetry([
+        'exec',
+        this.name,
+        'rabbitmqctl',
+        'set_permissions',
+        '-p',
+        'g6-productos-ofertas',
+        'taxonomy-joint',
+        '.*',
+        '.*',
+        '.*',
+      ]);
+      for (const name of [
+        'taxonomy.category.updated',
+        'taxonomy.product-type-schema.changed',
+        'taxonomy.characteristic-value.updated',
+      ])
+        await this.channel.bindQueue('po.catalogo.q', 'po.eventos.x', name);
+      this.settings = {
+        connection: {
+          url: 'amqp://catalog-joint:' + this.password + this.base,
+          user: 'catalog-joint',
+          producerUsers: {
+            'pricing-svc': 'pricing-joint',
+            'inventory-svc': this.inventoryUser,
+            'taxonomy-svc': 'taxonomy-joint',
+            'bulk-svc': 'bulk-joint',
+          },
         },
-      },
-    };
+      };
+    } catch (error) {
+      await this.close();
+      throw error;
+    }
   }
   /** Taxonomy wire fixture, not a producer implementation or an Azure certification. */
   async taxonomyFact(body: Record<string, unknown>): Promise<void> {
@@ -308,7 +342,7 @@ export class DisposableCatalogBroker {
     ]);
   }
   private async open(user: string): Promise<ChannelModel> {
-    const deadline = Date.now() + 60000;
+    const deadline = Date.now() + 120000;
     while (true) {
       try {
         const connection = await connect(
