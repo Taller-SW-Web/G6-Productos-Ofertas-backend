@@ -82,8 +82,9 @@ Scripts de operación bajo demanda en `ops/azure/apim/scripts/`:
 - `Iniciar-G6.ps1`: restaura `minReplicas=1, maxReplicas=1` en las 9 Container Apps y valida readiness.
 - `Detener-G6.ps1`: verifica jobs activos y mensajes pendientes en Service Bus (sin purgar colas) antes de escalar a 0 réplicas.
 - `Desplegar-APIM.ps1`: valida parámetros y despliega/recrea APIM mediante Bicep (`infrastructure` o `effective`), verificando soft-delete y asignando `Monitoring Metrics Publisher`.
-- `Conectar-APIM.ps1`: lee las IPs públicas de APIM, asegura `serviceUrl` hacia `api-gateway`, aplica `ipSecurityRestrictions` Allow-only (Modalidad B) y verifica bloqueo directo (HTTP 403).
+- `Conectar-APIM.ps1`: lee las IPs públicas de `apim-g6-productos-chile`, asegura `serviceUrl` en `g6-productos-ofertas` sin duplicar `/api/v1`, actualiza `ipSecurityRestrictions` Allow-only (Modalidad B) sin ventana de exposición (agrega reglas nuevas antes de quitar obsoletas), valida explícitamente HTTP `403` directo y ejecuta rollback automático ante fallo.
 - `Eliminar-APIM.ps1`: elimina exclusivamente `apim-g6-productos-chile` previa autorización explícita (`-AuthorizeDelete`), preservando VNet, `snet-g6-apim`, `nsg-g6-apim`, Application Insights y ACA.
-- `Verificar-G6.ps1`: auditoría de solo lectura de red, APIM, Modalidad B y réplicas ACA.
+- `Verificar-G6.ps1`: auditoría de red, APIM, Modalidad B, réplicas ACA y pruebas HTTP reales (`403` directo, `401`, `400`, `404`, CORS preflight y soporte opcional `-JwtToken` para `200`).
+- `export-apim-openapi.py`: normaliza determinísticamente OpenAPI 3.1.0 filtrado a OpenAPI 3.0.3 compatible con el importador de Azure APIM.
 
 > **Nota de Soft-Delete e IP pública:** al eliminar APIM, Azure retiene el nombre durante 48 horas en soft-delete (requiere `az apim deletedservice purge` si se recrea antes con el mismo nombre). Al usar la IP administrada por APIM, una recreación puede asignar una IP diferente, por lo que debe ejecutarse `Conectar-APIM.ps1` tras recrear.
