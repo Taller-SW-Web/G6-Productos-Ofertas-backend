@@ -99,9 +99,17 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       ),
       'utf8',
     );
+    const serviceBusAllDestinationsMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        'apps/bulk-svc/migrations/0009_h5_outbox_delivery_all_destinations.sql',
+      ),
+      'utf8',
+    );
     await pool.query(retryMigration);
     await pool.query(retryMigration);
     await pool.query(serviceBusDeliveryMigration);
+    await pool.query(serviceBusAllDestinationsMigration);
     const retryTables = await pool.query<{ table_name: string }>(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'bulk' AND table_name IN ('batch_resume_requests','retry_commands','domain_attempts') ORDER BY table_name",
     );

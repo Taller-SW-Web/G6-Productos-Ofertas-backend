@@ -344,8 +344,15 @@ describe.skipIf(process.env.PRICING_TEST_POSTGRES !== '1')(
         ),
         'utf8',
       );
+      const r2RoutesMigration = await readFile(
+        new URL(
+          '../migrations/0003_service_bus_h5_routes_r2.sql',
+          import.meta.url,
+        ),
+        'utf8',
+      );
       await admin.query(
-        `BEGIN; SET LOCAL ROLE po_pricing_owner; ${migration} COMMIT;`,
+        `BEGIN; SET LOCAL ROLE po_pricing_owner; ${migration}\n${r2RoutesMigration} COMMIT;`,
       );
       const pilot = await createApp(false, true);
       try {
