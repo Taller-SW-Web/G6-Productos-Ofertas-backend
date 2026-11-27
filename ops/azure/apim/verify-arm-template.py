@@ -65,7 +65,7 @@ def validate(
         raise ValueError("operationPolicies no es un recurso policy de operación APIM")
     if policy.get("copy", {}).get("count") != "[length(variables('authorizedOperations'))]":
         raise ValueError("El bucle de políticas no está ligado a authorizedOperations")
-    expected_name = "[format('{0}/{1}/{2}/policy', parameters('apimName'), variables('apiName'), variables('authorizedOperations')[copyIndex()].apimOperationId)]"
+    expected_name = "[format('{0}/{1}/{2}/policy', parameters('apimName'), parameters('candidateApiName'), variables('authorizedOperations')[copyIndex()].apimOperationId)]"
     if policy.get("name") != expected_name:
         raise ValueError("La jerarquía ARM de policy no usa APIM/API/apimOperationId/policy sobre authorizedOperations")
     required_dependencies = {"api", "openIdNamedValue", "issuerNamedValue", "audienceNamedValue"}

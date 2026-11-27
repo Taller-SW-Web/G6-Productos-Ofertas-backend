@@ -1,5 +1,12 @@
 # Preparación APIM H5 (sin aprovisionamiento)
 
+La plantilla actual usa por defecto `candidateApiName=g6-h5-candidate` y
+`candidateApiPath=h5-candidate/api/v1`. El preflight exige ambos parámetros
+explícitos en el documento de despliegue y rechaza la ruta operativa `api/v1`.
+El Gateway de Azure continúa público: el gate de red `directRoutesBlocked`
+del validador no puede pasar en este entorno sin un cutover posterior autorizado.
+No aplicar la plantilla ni interpretar un `what-if` vacío como APIM operativo.
+
 Este paquete prepara la importación, el manifiesto de seguridad enriquecido, perfiles de protección parametrizados y las políticas de Azure API Management (`Developer` clásico para laboratorio o reutilización de instancia compatible mediante `reuseExistingApim`). No crea ni muta recursos Azure: el despliegue requiere aprobación operativa y parámetros de red, identidad, observabilidad y cuotas acreditados.
 
 ## Contrato filtrado y manifiesto enriquecido (`APIM-C01`, `APIM-C03`)

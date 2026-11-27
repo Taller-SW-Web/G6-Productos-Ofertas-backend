@@ -2,8 +2,8 @@
   <inbound>
     <base />
     <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized" require-scheme="Bearer" output-token-variable-name="jwt">
-      <openid-config url="{{g7-openid-config-url}}" />
-      <issuers><issuer>{{g7-issuer}}</issuer></issuers>
+      <openid-config url="{{g6-h5-candidate-g7-openid-config-url}}" />
+      <issuers><issuer>{{g6-h5-candidate-g7-issuer}}</issuer></issuers>
       {{audience-check-element}}
     </validate-jwt>
     <set-variable name="rateIdentity" value="@(((Jwt)context.Variables[&quot;jwt&quot;]).Subject ?? string.Empty)" />

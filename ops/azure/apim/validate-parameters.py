@@ -107,6 +107,8 @@ def validate(
         )
 
     for key in (
+        "candidateApiName",
+        "candidateApiPath",
         "environmentTier",
         "expectedSubscriptionId",
         "expectedResourceGroup",
@@ -133,6 +135,15 @@ def validate(
     ):
         if key not in parameters:
             raise ValueError(f"Falta parámetro obligatorio: {key}")
+
+    if not isinstance(parameters["candidateApiName"], str) or not re.fullmatch(
+        r"g6-h5-[a-z0-9-]{1,60}", parameters["candidateApiName"]
+    ):
+        raise ValueError("candidateApiName debe ser un ID aislado g6-h5-*")
+    if not isinstance(parameters["candidateApiPath"], str) or not re.fullmatch(
+        r"h5-[a-z0-9-]+/api/v1", parameters["candidateApiPath"]
+    ):
+        raise ValueError("candidateApiPath debe estar bajo h5-*/api/v1")
 
     tier = parameters["environmentTier"]
     if tier not in {"lab", "production"}:
