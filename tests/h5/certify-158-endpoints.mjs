@@ -12,8 +12,12 @@ const DOCS_ROOT = resolve(BACKEND_ROOT, "../docs");
 const MANIFEST_PATH = resolve(FRONTEND_ROOT, "tests/e2e-real/.runtime-stack.json");
 const MATRIX_PATH = resolve(DOCS_ROOT, "hitos/h5/MATRIZ_158_OPERACIONES_H5_R2.csv");
 const RETRY_ONLY = process.argv.includes("--retry-only");
-const REPORT_JSON_PATH = resolve(BACKEND_ROOT, `tests/h5/158_ENDPOINTS_CERTIFICATION_REPORT${RETRY_ONLY ? "_RETRY_ONLY" : ""}.json`);
-const REPORT_MD_PATH = resolve(BACKEND_ROOT, `tests/h5/158_ENDPOINTS_CERTIFICATION_REPORT${RETRY_ONLY ? "_RETRY_ONLY" : ""}.md`);
+const FOCUS_OPERATION = process.argv.find(arg => arg.startsWith('--operation='))?.slice('--operation='.length);
+if (FOCUS_OPERATION && !/^[a-zA-Z0-9]+$/.test(FOCUS_OPERATION)) throw new Error('Invalid focused operation');
+const FOCUSED = RETRY_ONLY || Boolean(FOCUS_OPERATION);
+const REPORT_SUFFIX = RETRY_ONLY ? '_RETRY_ONLY' : FOCUS_OPERATION ? `_${FOCUS_OPERATION}` : '';
+const REPORT_JSON_PATH = resolve(BACKEND_ROOT, `tests/h5/158_ENDPOINTS_CERTIFICATION_REPORT${REPORT_SUFFIX}.json`);
+const REPORT_MD_PATH = resolve(BACKEND_ROOT, `tests/h5/158_ENDPOINTS_CERTIFICATION_REPORT${REPORT_SUFFIX}.md`);
 
 function parseCsvLine(line) {
   const cols = [];
@@ -816,6 +820,7 @@ async function main() {
       const cols = parseCsvLine(matrixLines[i]);
       const [opId, vigencia, svc, method, rawRoute, rolScope, actorPerm] = cols;
       if (RETRY_ONLY && opId !== "reanudarImportacionGeneral") continue;
+      if (FOCUS_OPERATION && opId !== FOCUS_OPERATION) continue;
       const isHealth = rawRoute.includes("/health");
       const isPublic = false;
       const isPrivate = vigencia === "ENDPOINT_PRIVADO" || (!rawRoute.startsWith("/api/v1/") && !isHealth);
@@ -958,7 +963,10 @@ async function main() {
           if (opId === "actualizarMarca") f.append("version", "0");
           posBody = f;
         } else if (opId === "prevalidarImportacionPrecios" || opId === "crearImportacionPrecios") {
-          posBody = makePriceCsvForm(activeSku1, 1);
+          const definition = await httpCall(`${gw}/api/v1/precios/administracion/skus/${encodeURIComponent(activeSku1)}?channelId=MARKETPLACE`, { headers: { Authorization: `Bearer ${gestorJwt}` } });
+          if (definition.status !== 200 || !Number.isSafeInteger(definition.json?.priceVersion))
+            throw new Error('PRICE_IMPORT_CURRENT_VERSION_UNAVAILABLE');
+          posBody = makePriceCsvForm(activeSku1, definition.json.priceVersion);
         } else if (opId === "crearImportacionGeneralProductos") {
           const f = new FormData();
           const sku = `BULK-POS-${randomUUID().slice(0, 6).toUpperCase()}`;
@@ -1065,8 +1073,12 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
     }
     if (["crearProducto", "actualizarProducto", "activarProducto", "desactivarProducto", "reactivarProducto", "reemplazarImagenesProducto", "definirAtributosProducto", "definirPerfilFisicoProducto", "reintentarPreparacionProducto"].includes(opId)) {
       const id = safe(posRes.json?.productoId ?? posRes.json?.product_id ?? (opId === "reintentarPreparacionProducto" ? ctx.retryProdId : ctx.activeProd1));
-      const rows = await pgSelect(g5SeedOrigin, `SELECT id, estado, catalog_version FROM catalog.products WHERE id = '${id}'::uuid`);
+      const rows = await pgSelect(g5SeedOrigin, `SELECT * FROM catalog.products WHERE id = '${id}'::uuid`);
       if (rows.length !== 1) return { label: "FAIL", ok: false };
+      for (const [input, column] of Object.entries({ nombre: 'nombre', descripcion: 'descripcion', categoriaId: 'categoria_id', marcaId: 'marca_id', tipoProductoId: 'tipo_producto_id', skuBase: 'sku_base', tieneVariantes: 'tiene_variantes' })) {
+        if (reqBody?.[input] !== undefined && rows[0][column] !== reqBody[input])
+          return { label: 'FAIL', ok: false, detail: `PRODUCT_VALUE_NOT_PERSISTED ${column}` };
+      }
       if (opId === "desactivarProducto" && rows[0].estado !== "INACTIVO") return { label: "FAIL", ok: false };
       if ((opId === "activarProducto" || opId === "reactivarProducto") && rows[0].estado !== "ACTIVO") return { label: "FAIL", ok: false };
       if (opId === "reintentarPreparacionProducto") {
@@ -1096,12 +1108,29 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       return Number(rows[0]?.c ?? 0) > 0 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     if (["actualizarPrecioSku", "actualizarPrecioBaseProducto", "programarPrecioSku", "programarPrecioBaseProducto", "crearImportacionPrecios", "reintentarImportacionPrecios"].includes(opId)) {
-      if (opId === "programarPrecioBaseProducto") {
-        const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM pricing.scheduled_prices`);
-        return Number(rows[0]?.c ?? 0) > 0 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+      let ok = false;
+      if (opId.includes('Importacion')) {
+        const id = safe(posRes.json?.batchId ?? posRes.json?.batch_id ?? requestPath.split('/').at(-2));
+        const rows = await pollUntil(() => pgSelect(g5SeedOrigin, `SELECT status, total_rows, completed_rows, failed_rows FROM pricing.bulk_price_jobs WHERE id = '${id}'::uuid`),
+          rows => rows.length === 1 && ['COMPLETED', 'FAILED', 'PARTIAL'].includes(rows[0].status), 40, 300);
+        ok = rows.length === 1 && rows[0].status === 'COMPLETED' && rows[0].completed_rows === rows[0].total_rows && rows[0].total_rows > 0 && rows[0].failed_rows === 0;
+        if (!ok) {
+          const details = await pgSelect(g5SeedOrigin, `SELECT status, code, row_input FROM pricing.bulk_price_rows WHERE batch_id = '${id}'::uuid`);
+          return { label: 'FAIL', ok: false, detail: JSON.stringify({ job: rows, rows: details }) };
+        }
+      } else if (opId.startsWith('programar')) {
+        const id = safe(posRes.json?.programacionId);
+        const rows = await pgSelect(g5SeedOrigin, `SELECT s.*, p.sku, p.product_id AS target_product_id, p.channel_id FROM pricing.scheduled_prices s JOIN pricing.prices p ON p.id = s.price_id WHERE s.id = '${id}'::uuid`);
+        const target = decodeURIComponent(requestPath.split('/').at(-2));
+        ok = rows.length === 1 && rows[0].status === 'SCHEDULED' && rows[0].tipo_precio === reqBody.tipoPrecio && Number(rows[0].importe) === reqBody.importe &&
+          (opId === 'programarPrecioSku' ? rows[0].sku === target : rows[0].target_product_id === target) && rows[0].channel_id === (reqBody.channelId ?? null);
+      } else {
+        const target = decodeURIComponent(requestPath.split('/').at(-1));
+        const column = opId === 'actualizarPrecioSku' ? 'sku' : 'product_id';
+        const rows = await pgSelect(g5SeedOrigin, `SELECT p.${column}, p.channel_id, v.precio_regular, v.currency, v.price_version FROM pricing.prices p JOIN pricing.price_validities v ON v.price_id = p.id AND v.price_version = p.price_version WHERE p.${column} = '${safe(target)}' AND p.channel_id IS NOT DISTINCT FROM ${reqBody.channelId ? `'${safe(reqBody.channelId)}'` : 'NULL'} AND v.is_cancelled = false`);
+        ok = rows.length === 1 && Number(rows[0].precio_regular) === reqBody.precioRegular && rows[0].currency === reqBody.moneda && Number(rows[0].price_version) === Number(posRes.json?.price_version);
       }
-      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM pricing.prices`);
-      return Number(rows[0]?.c ?? 0) > 0 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+      return { label: ok ? 'PERSISTENCE_PASS' : 'FAIL', ok, detail: ok ? undefined : 'EXACT_PRICING_MUTATION_NOT_PERSISTED' };
     }
     if (opId === "crearExportacionAuditoriaPrecios") {
       const id = safe(posRes.json?.export_id ?? posRes.json?.exportId);
@@ -1164,9 +1193,9 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       return { label: ok ? "PERSISTENCE_PASS" : "FAIL", ok };
     }
     if (opId === "establecerUmbralSku" || opId === "eliminarUmbralSku") {
-      const rows = await pgSelect(g5SeedOrigin, `SELECT count(*)::int AS c FROM inventory.stock_threshold_override WHERE sku_id = '${safe(ctx.activeSku1)}'`);
+      const rows = await pgSelect(g5SeedOrigin, `SELECT umbral_efectivo FROM inventory.stock_threshold_override WHERE sku_id = '${safe(ctx.activeSku1)}' AND location_id IS NULL`);
       const expectedZero = opId === "eliminarUmbralSku";
-      return (expectedZero ? Number(rows[0]?.c ?? 0) === 0 : Number(rows[0]?.c ?? 0) >= 1) ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
+      return (expectedZero ? rows.length === 0 : rows.length === 1 && Number(rows[0].umbral_efectivo) === reqBody.umbral) ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     if (opId === "registrarRecepcionTrasladoInventario") {
       const receiptId = safe(posRes.json?.receipt_id);
@@ -1200,8 +1229,8 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       return Number(rows[0]?.c ?? 0) >= 1 ? { label: "PERSISTENCE_PASS", ok: true } : { label: "FAIL", ok: false };
     }
     return { label: "NOT_VERIFIED", ok: false };
-  } catch {
-    return { label: "FAIL", ok: false };
+  } catch (error) {
+    return { label: "FAIL", ok: false, detail: error.message };
   }
 }
 
@@ -1254,6 +1283,8 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       if (opId === "evaluarPromociones" && posRes.status === 200) {
         semanticOk = typeof posRes.json?.original_amount === "number" && typeof posRes.json?.result_amount === "number" && typeof posRes.json?.discount_amount === "number";
       }
+      if (opId === 'prevalidarImportacionPrecios' && posRes.status === 200)
+        semanticOk = posRes.json?.valid === true && posRes.json?.total_rows === 1 && posRes.json?.errors?.length === 0;
       const functionalPass = posRes.status >= 200 && posRes.status < 300 && semanticOk;
       let asyncTerminalPass = true;
       if (posRes.status === 202) {
@@ -1379,6 +1410,7 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
         negativeContract: negativeLabel,
         functional: functionalPass ? "FUNCTIONAL_PASS" : "FAIL",
         persistence: persistenceCheck.label,
+        persistenceDetail: persistenceCheck.detail,
         asyncTerminal: posRes.status === 202 ? (asyncTerminalPass ? "ASYNC_TERMINAL_PASS" : "FAIL") : "NOT_APPLICABLE",
         auth401,
         auth403,
@@ -1392,7 +1424,7 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
     const executed = results.filter((r) => r.status !== "NOT_RUN").length;
     const countBy = (key, val) => results.filter((r) => r[key] === val).length;
     const summary = {
-      status: failed === 0 && blocked === 0 && notRun === 0 && results.length === (RETRY_ONLY ? 1 : 158) ? (RETRY_ONLY ? "FOCUSED_PASS" : "PASS") : (blocked > 0 ? "INFRA_LOST" : "FAIL"),
+      status: failed === 0 && blocked === 0 && notRun === 0 && results.length === (FOCUSED ? 1 : 158) ? (FOCUSED ? "FOCUSED_PASS" : "PASS") : (blocked > 0 ? "INFRA_LOST" : "FAIL"),
       timestamp: new Date().toISOString(),
       total: results.length,
       executed,

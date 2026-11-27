@@ -10,8 +10,8 @@ const BACKEND_ROOT = resolve(process.cwd());
 const FRONTEND_ROOT = resolve(BACKEND_ROOT, "../frontend");
 const DOCS_ROOT = resolve(BACKEND_ROOT, "../docs");
 const MANIFEST_PATH = resolve(FRONTEND_ROOT, "tests/e2e-real/.runtime-stack.json");
-const REPORT_JSON_PATH = resolve(DOCS_ROOT, "hitos/h5/evidencias/r2-cierre-iteracion-7/MENSAJERIA_19_RECORRIDOS.json");
-const REPORT_CSV_PATH = resolve(DOCS_ROOT, "hitos/h5/evidencias/r2-cierre-iteracion-7/MENSAJERIA_19_RECORRIDOS.csv");
+const REPORT_JSON_PATH = resolve(DOCS_ROOT, "hitos/h5/evidencias/r2-cierre-gemini/MENSAJERIA_19_RECORRIDOS.json");
+const REPORT_CSV_PATH = resolve(DOCS_ROOT, "hitos/h5/evidencias/r2-cierre-gemini/MENSAJERIA_19_RECORRIDOS.csv");
 const VALID_PNG_BYTES = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=",
   "base64",
@@ -353,6 +353,32 @@ async function main() {
       (r) => replays.every((replay) => r.json?.evidence.filter((event) => event.queue === replay.queue &&
         event.messageId === replay.messageId && event.stage === 'COMPLETED').length > replay.completedBefore));
     const replayAfter = await snapshot();
+    const originalPricing = beforeReplay.evidence.find(event => event.queue === 'g6.pricing.from.bulk' &&
+      event.stage === 'PUBLISHED' && event.envelope);
+    if (!originalPricing) throw new Error('NO_PRICING_COMMAND_FOR_PROCESS_RECOVERY');
+    const stopped = requireSeedResult('kill actual Pricing process', await httpCall(`${env.g5SeedOrigin}/__test/pricing-process`, {
+      method: 'POST', body: { action: 'stop' },
+    })).json;
+    const completedBeforeRestart = replayPoll.json.evidence.filter(event => event.queue === originalPricing.queue &&
+      event.messageId === originalPricing.messageId && event.stage === 'COMPLETED').length;
+    requireSeedResult('publish while Pricing process is stopped', await httpCall(`${env.isolatedBusUrl}/queues/g6.pricing.from.bulk/messages`, {
+      method: 'POST', body: { body: JSON.stringify(originalPricing.envelope), messageId: originalPricing.messageId,
+        correlationId: originalPricing.correlationId, subject: originalPricing.subject, contentType: originalPricing.contentType,
+        applicationProperties: originalPricing.applicationProperties },
+    }));
+    const whileStopped = requireSeedResult('pending during actual process outage', await httpCall(`${env.isolatedBusUrl}/__test/broker-evidence`)).json;
+    const restarted = requireSeedResult('start new actual Pricing process', await httpCall(`${env.g5SeedOrigin}/__test/pricing-process`, {
+      method: 'POST', body: { action: 'start' },
+    })).json;
+    const recovered = await pollUntil(() => httpCall(`${env.isolatedBusUrl}/__test/broker-evidence`), response =>
+      response.json.evidence.filter(event => event.queue === originalPricing.queue && event.messageId === originalPricing.messageId &&
+        event.stage === 'COMPLETED').length > completedBeforeRestart);
+    const processRecovery = { kind: 'ACTUAL_LOCAL_PROCESS_KILL_AND_RESTART', stopped, restarted,
+      messageId: originalPricing.messageId, queuedWhileStopped: whileStopped.active['g6.pricing.from.bulk'] >= 1,
+      settled: recovered.json.evidence.filter(event => event.queue === originalPricing.queue && event.messageId === originalPricing.messageId &&
+        event.stage === 'COMPLETED').length > completedBeforeRestart,
+      businessUnchanged: JSON.stringify(replayAfter) === JSON.stringify(await snapshot()),
+      limitation: 'Broker remains HTTP in-memory; this does not prove Azure persistence or lock expiry.' };
     const duplicateEvidence = { replays, before: replayBefore, after: replayAfter,
       recovery: { kind: 'LAB_RECEIVE_503_NOT_CONSUMER_PROCESS_STOP', queue: 'g6.pricing.from.bulk',
         queuedWhileUnavailable: unavailableEvidence.active['g6.pricing.from.bulk'] >= 1 },
@@ -389,7 +415,7 @@ async function main() {
       flow.ok = flow.ok && flow.chainPass && flow.invalidMessages.length === 0;
     }
     const passed = flows.filter((f) => f.ok).length;
-    const summary = { timestamp: new Date().toISOString(), environment: "local-isolated-service-bus-and-postgres", transport: "HTTP_IN_MEMORY_NOT_AZURE", total: flows.length, passed, failed: flows.length - passed, fixture: { batchId, bulkProdId, bulkSku, admProdId, admSku, comboId, catDeactId, n01Order, n01ConsumeOp, n01RestoreOp }, flows, queryEvidence, duplicateEvidence, negativeEvidence, broker };
+    const summary = { timestamp: new Date().toISOString(), environment: "local-isolated-service-bus-and-postgres", transport: "HTTP_IN_MEMORY_NOT_AZURE", total: flows.length, passed, failed: flows.length - passed, fixture: { batchId, bulkProdId, bulkSku, admProdId, admSku, comboId, catDeactId, n01Order, n01ConsumeOp, n01RestoreOp }, flows, queryEvidence, duplicateEvidence, processRecovery, negativeEvidence, broker };
     mkdirSync(dirname(REPORT_JSON_PATH), { recursive: true });
     writeFileSync(REPORT_JSON_PATH, JSON.stringify(summary, null, 2), "utf8");
     const csvLines = [
@@ -399,7 +425,8 @@ async function main() {
     writeFileSync(REPORT_CSV_PATH, csvLines.join("\n"), "utf8");
     console.log(JSON.stringify({ total: flows.length, passed, failed: flows.length - passed }));
     exitCode = passed === flows.length && duplicateEvidence.recovery.queuedWhileUnavailable && duplicateEvidence.allSettled && duplicateEvidence.unchanged &&
-      negativeEvidence.rejected && negativeEvidence.unchanged ? 0 : 1;
+      negativeEvidence.rejected && negativeEvidence.unchanged && processRecovery.stopped.stopped && processRecovery.restarted.ready &&
+      processRecovery.stopped.pid !== processRecovery.restarted.pid && processRecovery.queuedWhileStopped && processRecovery.settled && processRecovery.businessUnchanged ? 0 : 1;
   } finally {
     writeFileSync(resolve(BACKEND_ROOT, "tests/h5/messaging-stack.log"), stackLogs, "utf8");
     await stopStack();

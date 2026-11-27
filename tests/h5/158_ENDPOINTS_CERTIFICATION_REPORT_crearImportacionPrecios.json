@@ -1,0 +1,112 @@
+{
+  "status": "FOCUSED_PASS",
+  "timestamp": "2026-11-27T00:29:27.193Z",
+  "total": 1,
+  "executed": 1,
+  "notExecuted": 0,
+  "passed": 1,
+  "failed": 0,
+  "blocked": 0,
+  "persistenceBreakdown": {
+    "PERSISTENCE_PASS": 1,
+    "NOT_APPLICABLE": 0,
+    "NOT_VERIFIED": 0,
+    "FAIL": 0
+  },
+  "negativeBreakdown": {
+    "NEGATIVE_CONTRACT_PASS": 1,
+    "NOT_APPLICABLE": 0,
+    "NOT_RUN": 0,
+    "FAIL": 0
+  },
+  "authChecks": [
+    {
+      "name": "login_gestor",
+      "pass": true
+    },
+    {
+      "name": "login_sinrol",
+      "pass": true
+    },
+    {
+      "name": "login_bad_password_401",
+      "pass": true
+    },
+    {
+      "name": "login_blocked_401",
+      "pass": true
+    },
+    {
+      "name": "refresh_rotate_200",
+      "pass": true
+    },
+    {
+      "name": "refresh_reuse_401",
+      "pass": true
+    }
+  ],
+  "n01ConsumeStatus": "COMPLETED",
+  "bulkTerminal": "COMPLETED",
+  "bulkSnap": {
+    "batch_id": "d9eb9580-5e04-42e8-8180-e046280fdfad",
+    "status": "COMPLETED",
+    "total_rows": 1,
+    "completed_rows": 1,
+    "failed_rows": 0,
+    "needs_reconciliation": false,
+    "rows": [
+      {
+        "row_id": "f1463179-d4a4-5874-b93f-d1660c487574",
+        "status": "COMPLETED",
+        "applied_domains": [
+          "CATALOGO",
+          "PRICING",
+          "INVENTARIO"
+        ],
+        "failed_domain": null,
+        "needs_reconciliation": false,
+        "code": null,
+        "detail": null,
+        "steps": [
+          {
+            "dominio": "CATALOGO",
+            "status": "COMPLETED",
+            "code": null,
+            "detail": null
+          },
+          {
+            "dominio": "INVENTARIO",
+            "status": "COMPLETED",
+            "code": null,
+            "detail": null
+          },
+          {
+            "dominio": "PRICING",
+            "status": "COMPLETED",
+            "code": null,
+            "detail": null
+          }
+        ]
+      }
+    ]
+  },
+  "results": [
+    {
+      "n": 97,
+      "opId": "crearImportacionPrecios",
+      "vigencia": "VIGENTE",
+      "svc": "pricing-svc",
+      "method": "POST",
+      "rawRoute": "/api/v1/precios/importaciones",
+      "status": "PASS",
+      "httpStatus": 202,
+      "routeSecurity": "ROUTE_SECURITY_PASS",
+      "negativeContract": "NEGATIVE_CONTRACT_PASS",
+      "functional": "FUNCTIONAL_PASS",
+      "persistence": "PERSISTENCE_PASS",
+      "asyncTerminal": "ASYNC_TERMINAL_PASS",
+      "auth401": true,
+      "auth403": true
+    }
+  ]
+}

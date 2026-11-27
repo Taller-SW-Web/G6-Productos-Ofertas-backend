@@ -1,17 +1,17 @@
 {
-  "status": "PASS",
-  "timestamp": "2026-11-26T23:54:43.931Z",
+  "status": "FAIL",
+  "timestamp": "2026-11-27T00:32:06.268Z",
   "total": 158,
   "executed": 158,
   "notExecuted": 0,
-  "passed": 158,
-  "failed": 0,
+  "passed": 157,
+  "failed": 1,
   "blocked": 0,
   "persistenceBreakdown": {
-    "PERSISTENCE_PASS": 73,
+    "PERSISTENCE_PASS": 72,
     "NOT_APPLICABLE": 85,
     "NOT_VERIFIED": 0,
-    "FAIL": 0
+    "FAIL": 1
   },
   "negativeBreakdown": {
     "NEGATIVE_CONTRACT_PASS": 151,
@@ -48,7 +48,7 @@
   "n01ConsumeStatus": "COMPLETED",
   "bulkTerminal": "COMPLETED",
   "bulkSnap": {
-    "batch_id": "1b759701-c703-4332-8468-89709dcb31f5",
+    "batch_id": "c1a9bb9b-bc37-4f74-8f5a-56e6748aff7f",
     "status": "COMPLETED",
     "total_rows": 1,
     "completed_rows": 1,
@@ -56,7 +56,7 @@
     "needs_reconciliation": false,
     "rows": [
       {
-        "row_id": "01affefc-6fa4-545c-b1f2-e7ff48add640",
+        "row_id": "0b841b4d-3a93-564b-9daf-022c2c0a4888",
         "status": "COMPLETED",
         "applied_domains": [
           "CATALOGO",
@@ -1730,12 +1730,13 @@
       "svc": "pricing-svc",
       "method": "POST",
       "rawRoute": "/api/v1/precios/importaciones",
-      "status": "PASS",
+      "status": "FAIL",
       "httpStatus": 202,
       "routeSecurity": "ROUTE_SECURITY_PASS",
       "negativeContract": "NEGATIVE_CONTRACT_PASS",
       "functional": "FUNCTIONAL_PASS",
-      "persistence": "PERSISTENCE_PASS",
+      "persistence": "FAIL",
+      "persistenceDetail": "{\"job\":[{\"status\":\"FAILED\",\"total_rows\":1,\"completed_rows\":0,\"failed_rows\":1}],\"rows\":[{\"status\":\"FAILED\",\"code\":\"PRECIO_NO_ENCONTRADO\",\"row_input\":{\"sku\":\"SKU-CERT1-4D88BB\",\"moneda\":\"PEN\",\"channelId\":\"MARKETPLACE\",\"motivoCambio\":\"CERT_IMP\",\"precioOferta\":\"\",\"priceVersion\":\"2\",\"precioRegular\":\"125.00\",\"accionPrecioOferta\":\"CONSERVAR\"}}]}",
       "asyncTerminal": "ASYNC_TERMINAL_PASS",
       "auth401": true,
       "auth403": true
