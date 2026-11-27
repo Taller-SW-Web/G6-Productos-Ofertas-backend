@@ -4,8 +4,7 @@ import { PHASE1_PUBLIC_OPERATION_IDS } from './phase1-public-reads.js';
  * Neither policy grants commercial eligibility or fabricates a G7 principal.
  */
 export const CATALOG_READ_DEMO = Symbol('CATALOG_READ_DEMO');
-export type CatalogSecurityMode =
-  'PUBLIC_READ_ONLY' | 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
+export type CatalogSecurityMode = 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
 export interface CatalogReadDemo {
   readonly enabled: boolean;
   readonly restricted?: boolean;
@@ -37,13 +36,14 @@ export function readCatalogReadDemo(
   const securityModeRaw = env.G6_SECURITY_MODE;
   if (
     securityModeRaw !== undefined &&
-    !['PUBLIC_READ_ONLY', 'SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(
-      securityModeRaw,
-    )
+    !['SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(securityModeRaw)
   ) {
     throw new Error(
-      'G6_SECURITY_MODE debe ser PUBLIC_READ_ONLY, SIMULATED_AUTH o G7_AUTHENTICATED.',
+      'G6_SECURITY_MODE debe ser G7_AUTHENTICATED (o SIMULATED_AUTH en test).',
     );
+  }
+  if (securityModeRaw === 'SIMULATED_AUTH' && env.NODE_ENV !== 'test') {
+    throw new Error('SIMULATED_AUTH solo se permite en NODE_ENV=test.');
   }
   const securityMode =
     (securityModeRaw as CatalogSecurityMode | undefined) ?? 'G7_AUTHENTICATED';
@@ -51,11 +51,9 @@ export function readCatalogReadDemo(
     .split(',')
     .map((id) => id.trim())
     .filter(Boolean);
-  if (
-    publicOperations.some((id) => !CATALOG_ELIGIBLE_PUBLIC_OPERATIONS.has(id))
-  ) {
+  if (publicOperations.length > 0) {
     throw new Error(
-      'CATALOG_PUBLIC_OPERATION_IDS contiene una operación no elegible para lectura pública.',
+      'CATALOG_PUBLIC_OPERATION_IDS está deshabilitado bajo política universal G7.',
     );
   }
   if (
@@ -64,9 +62,6 @@ export function readCatalogReadDemo(
     env.CATALOG_MARKETPLACE_DEMO_PREVIEW_ENABLED === 'true'
   )
     throw new Error('Los bypasses de lectura heredados están deshabilitados.');
-  if (securityMode !== 'PUBLIC_READ_ONLY' && publicOperations.length > 0) {
-    throw new Error('Configuracion G6_SECURITY_MODE contradictoria.');
-  }
   return Object.freeze({
     enabled: false,
     securityMode,

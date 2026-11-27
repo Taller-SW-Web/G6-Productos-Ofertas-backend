@@ -231,8 +231,11 @@ describe('Phase 1 real three-service integration on disposable PostgreSQL', () =
     await postgres.close();
   }, 30000);
 
-  it('keeps every operation protected when all runtime lists are empty', async () => {
-    await restart('PUBLIC_READ_ONLY', false);
+  it('rejects PUBLIC_READ_ONLY configuration and denies unauthenticated reads on every route', async () => {
+    expect(() =>
+      readGatewaySettings({ G6_SECURITY_MODE: 'PUBLIC_READ_ONLY' }),
+    ).toThrow();
+    await restart('G7_AUTHENTICATED', false);
     for (const path of paths)
       await request(gateway!.getHttpServer()).get(path).expect(401);
     for (const path of [
@@ -241,26 +244,21 @@ describe('Phase 1 real three-service integration on disposable PostgreSQL', () =
     ]) {
       const response = await request(gateway!.getHttpServer())
         .get(path)
-        .expect(403);
+        .expect(401);
       expect(response.body).toMatchObject({
-        status: 403,
-        code: 'SCOPE_INSUFICIENTE',
+        status: 401,
+        code: 'TOKEN_INVALIDO',
       });
-      expect(Object.keys(response.body).sort()).toEqual([
-        'code',
-        'correlationId',
-        'status',
-        'title',
-      ]);
     }
     expect(snapshot()).toEqual(persistedBefore);
   });
 
-  it('serves the five exact public reads and real Catalog ID/slug -> Taxonomy enrichment', async () => {
-    await restart('PUBLIC_READ_ONLY');
+  it('serves the five authenticated commercial reads and real Catalog ID/slug -> Taxonomy enrichment', async () => {
+    const auth = 'Bearer ' + token();
     for (const path of paths) {
       const response = await request(gateway!.getHttpServer())
         .get(path)
+        .set('Authorization', auth)
         .expect(200);
       expect(JSON.stringify(response.body)).not.toMatch(
         /on_hand|reserved|blocked|available|location_id|stock_version|cost_price|supplier|internal_margin|costo_interno/i,
@@ -270,6 +268,7 @@ describe('Phase 1 real three-service integration on disposable PostgreSQL', () =
     }
     const category = await request(gateway!.getHttpServer())
       .get(paths[0])
+      .set('Authorization', auth)
       .expect(200);
     expect(
       category.body.categories.map(
@@ -278,18 +277,22 @@ describe('Phase 1 real three-service integration on disposable PostgreSQL', () =
     ).toEqual([id(1)]);
     const brands = await request(gateway!.getHttpServer())
       .get(paths[1])
+      .set('Authorization', auth)
       .expect(200);
     expect(
       brands.body.brands.map((row: { marca_id: string }) => row.marca_id),
     ).toEqual([id(3)]);
     await request(gateway!.getHttpServer())
       .get(paths[2] + `&categoriaId=${id(1)}&marcaId=${id(3)}`)
+      .set('Authorization', auth)
       .expect(200);
   });
 
   it('applies eligibility before count/page, hides drafts/inactive/empty parents and inactive variants', async () => {
+    const auth = 'Bearer ' + token();
     const page = await request(gateway!.getHttpServer())
       .get(paths[2] + '&tamanio=1')
+      .set('Authorization', auth)
       .expect(200);
     expect(page.body.total).toBe(2);
     expect(page.body.items).toHaveLength(1);
@@ -303,16 +306,21 @@ describe('Phase 1 real three-service integration on disposable PostgreSQL', () =
         `/api/v1/productos/${id(productId)}?canal=MARKETPLACE`,
         `/api/v1/productos/por-slug/${slug}?canal=MARKETPLACE`,
       ])
-        await request(gateway!.getHttpServer()).get(path).expect(404);
+        await request(gateway!.getHttpServer())
+          .get(path)
+          .set('Authorization', auth)
+          .expect(404);
     }
     const parent = await request(gateway!.getHttpServer())
       .get('/api/v1/productos/por-slug/parent?canal=MARKETPLACE')
+      .set('Authorization', auth)
       .expect(200);
     expect(parent.body.variants.map((row: { sku: string }) => row.sku)).toEqual(
       ['ACTIVE-VARIANT'],
     );
     await request(gateway!.getHttpServer())
       .get(paths[2] + '&estado=BORRADOR')
+      .set('Authorization', auth)
       .expect(403);
   });
 
@@ -380,23 +388,7 @@ describe('Phase 1 real three-service integration on disposable PostgreSQL', () =
     }
   });
 
-  it('fails closed if Taxonomy public approval is absent, without opening its private detail routes', async () => {
-    await restart('PUBLIC_READ_ONLY', true, false);
-    for (const path of [paths[3], paths[4]])
-      await request(gateway!.getHttpServer()).get(path).expect(503);
-    await request(taxonomy!.getHttpServer())
-      .get(`/api/v1/marcas/${id(3)}`)
-      .expect(401);
-  });
-
-  it('requires independent Gateway approval even when both providers are public', async () => {
-    await restart('PUBLIC_READ_ONLY', true, true, false);
-    for (const path of paths)
-      await request(gateway!.getHttpServer()).get(path).expect(401);
-    await request(catalog!.getHttpServer()).get(paths[3]).expect(200);
-  });
-
-  it('restores the five original JWT contracts by configuration/restart, with no application edits', async () => {
+  it('enforces independent Gateway and provider JWT verification on every read route', async () => {
     await restart('G7_AUTHENTICATED');
     for (const path of paths) {
       await request(gateway!.getHttpServer()).get(path).expect(401);

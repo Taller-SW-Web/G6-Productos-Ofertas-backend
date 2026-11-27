@@ -9,8 +9,7 @@ export const BULK_ENVIRONMENT = Symbol('BULK_ENVIRONMENT');
 export const BULK_READINESS_POOL = Symbol('BULK_READINESS_POOL');
 
 export interface BulkEnvironment {
-  readonly securityMode:
-    'PUBLIC_READ_ONLY' | 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
+  readonly securityMode: 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
   readonly publicOperations: readonly string[];
   readonly nodeEnv: 'development' | 'test' | 'production';
   readonly host: '127.0.0.1' | '0.0.0.0';
@@ -102,21 +101,15 @@ export function parseBulkEnvironment(
 
   const port = strictPort(env.BULK_SVC_PORT ?? env.PORT ?? '3008');
   const securityMode = env.G6_SECURITY_MODE ?? 'G7_AUTHENTICATED';
-  if (
-    !['PUBLIC_READ_ONLY', 'SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(
-      securityMode,
-    )
-  )
+  if (!['SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(securityMode))
     fail('G6_SECURITY_MODE inválido.');
+  if (securityMode === 'SIMULATED_AUTH' && nodeEnv !== 'test')
+    fail('SIMULATED_AUTH solo se permite en NODE_ENV=test.');
   const publicOperations = (env.BULK_PUBLIC_OPERATION_IDS ?? '')
     .split(',')
     .map((id) => id.trim())
     .filter(Boolean);
-  if (
-    publicOperations.some((id) => !PHASE1_PUBLIC_OPERATION_IDS.has(id)) ||
-    (securityMode !== 'PUBLIC_READ_ONLY' && publicOperations.length)
-  )
-    fail('BULK_PUBLIC_OPERATION_IDS inválido.');
+  if (publicOperations.length > 0) fail('BULK_PUBLIC_OPERATION_IDS inválido.');
   if (securityMode === 'SIMULATED_AUTH') {
     const issuer = env.SIMULATED_AUTH_ISSUER;
     const jwksValue = env.SIMULATED_AUTH_JWKS_URL;

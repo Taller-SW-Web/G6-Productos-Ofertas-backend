@@ -1,4 +1,4 @@
-// Generated from Docs OpenAPI 0.7.0-rc.3; focused update: conciliarImportacionGeneralPorCorrelacion.
+// Generated from Docs OpenAPI 0.7.0-rc.3; focused update: resolverSlugAnterior.
 import type { ContractRoute } from './contract-route.js';
 export const CONTRACT_ROUTES: readonly ContractRoute[] = [
   {
@@ -9,7 +9,12 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer', 'serviceBearer'],
     scope: 'catalogo:leer',
     audience: 'api-productos',
-    clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
+    clients: [
+      'modulo-marketplace',
+      'modulo-chatbot',
+      'modulo-retail',
+      'modulo-ventas',
+    ],
     introspection: false,
     headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
@@ -812,7 +817,7 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer', 'serviceBearer'],
     scope: 'combos:leer',
     audience: 'api-productos',
-    clients: [],
+    clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
     introspection: false,
     headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
@@ -1204,12 +1209,25 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     path: '/api/v1/seo/{slug}',
     operationId: 'obtenerSeoPorSlug',
     service: 'taxonomy-svc',
-    security: [],
+    security: ['serviceBearer', 'userBearer'],
+    scope: 'catalogo:leer',
+    audience: 'api-productos',
+    clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
     introspection: false,
     headers: [],
     requestTypes: [],
     responses: {
       '200': { types: ['application/json'], codes: [], headers: [] },
+      '401': {
+        types: ['application/problem+json'],
+        codes: ['TOKEN_INVALIDO'],
+        headers: [],
+      },
+      '403': {
+        types: ['application/problem+json'],
+        codes: ['SCOPE_INSUFICIENTE'],
+        headers: [],
+      },
       '404': {
         types: ['application/problem+json'],
         codes: ['SLUG_NO_ENCONTRADO'],
@@ -1218,6 +1236,11 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
       '500': {
         types: ['application/problem+json'],
         codes: ['ERROR_INTERNO'],
+        headers: [],
+      },
+      '503': {
+        types: ['application/problem+json'],
+        codes: ['SERVICIO_NO_DISPONIBLE'],
         headers: [],
       },
     },
@@ -1227,12 +1250,25 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     path: '/api/v1/seo/resoluciones/{slugAnterior}',
     operationId: 'resolverSlugAnterior',
     service: 'taxonomy-svc',
-    security: [],
+    security: ['serviceBearer', 'userBearer'],
+    scope: 'catalogo:leer',
+    audience: 'api-productos',
+    clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
     introspection: false,
     headers: [],
     requestTypes: [],
     responses: {
       '200': { types: ['application/json'], codes: [], headers: [] },
+      '401': {
+        types: ['application/problem+json'],
+        codes: ['TOKEN_INVALIDO'],
+        headers: [],
+      },
+      '403': {
+        types: ['application/problem+json'],
+        codes: ['SCOPE_INSUFICIENTE'],
+        headers: [],
+      },
       '404': {
         types: ['application/problem+json'],
         codes: ['SLUG_NO_ENCONTRADO'],
@@ -1241,6 +1277,11 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
       '500': {
         types: ['application/problem+json'],
         codes: ['ERROR_INTERNO'],
+        headers: [],
+      },
+      '503': {
+        types: ['application/problem+json'],
+        codes: ['SERVICIO_NO_DISPONIBLE'],
         headers: [],
       },
     },
@@ -1551,7 +1592,10 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     path: '/api/v1/productos/{productoId}/variantes',
     operationId: 'listarVariantesProducto',
     service: 'catalog-svc',
-    security: ['userBearer'],
+    security: ['userBearer', 'serviceBearer'],
+    scope: 'catalogo:leer',
+    audience: 'api-productos',
+    clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
     introspection: false,
     headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
@@ -2081,7 +2125,7 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     security: ['userBearer', 'serviceBearer'],
     scope: 'combos:leer',
     audience: 'api-productos',
-    clients: [],
+    clients: ['modulo-marketplace', 'modulo-chatbot', 'modulo-retail'],
     introspection: false,
     headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
@@ -5222,6 +5266,11 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
       '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
@@ -5258,6 +5307,11 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
       '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
@@ -5291,6 +5345,11 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     headers: [{ name: 'x-correlation-id', required: false }],
     requestTypes: [],
     responses: {
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
       '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],
@@ -5749,6 +5808,11 @@ export const CONTRACT_ROUTES: readonly ContractRoute[] = [
     headers: [],
     requestTypes: [],
     responses: {
+      '400': {
+        types: ['application/problem+json'],
+        codes: ['VALIDACION'],
+        headers: [],
+      },
       '200': { types: ['application/json'], codes: [], headers: [] },
       '401': {
         types: ['application/problem+json'],

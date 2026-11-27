@@ -9,6 +9,7 @@ import {
   type ServiceBusReceiver,
   type ServiceBusReceiverOptions,
 } from '@azure/service-bus';
+import { createIsolatedCombosBusClient } from './combos-isolated-service-bus.js';
 
 export const combosServiceBusRoutes = {
   'g6.combos.from.catalog': [
@@ -30,6 +31,7 @@ export type CombosServiceBusConfig =
       readonly enabled: true;
       readonly namespace: string;
       readonly clientId: string | undefined;
+      readonly isolatedBusUrl?: string;
     };
 
 const NAMESPACE_REGEX =
@@ -44,6 +46,22 @@ export function readCombosServiceBus(
   const namespace = env.SERVICE_BUS_NAMESPACE_FQDN?.trim();
   const clientId = env.AZURE_CLIENT_ID?.trim() || undefined;
   const enabled = env.COMBOS_SERVICE_BUS_EVENTS_ENABLED;
+  let isolatedBusUrl: string | undefined;
+  if (env.G6_ISOLATED_SERVICE_BUS_URL !== undefined) {
+    const url = new URL(env.G6_ISOLATED_SERVICE_BUS_URL);
+    if (
+      env.NODE_ENV !== 'test' ||
+      url.protocol !== 'http:' ||
+      !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
+      url.username ||
+      url.password ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash
+    )
+      throw new Error('COMBOS_ISOLATED_BUS_TEST_ONLY');
+    isolatedBusUrl = url.origin;
+  }
 
   if (provider === undefined || provider === 'RABBITMQ') {
     if (enabled === 'true') {
@@ -92,6 +110,7 @@ export function readCombosServiceBus(
     enabled: true,
     namespace,
     clientId,
+    ...(isolatedBusUrl ? { isolatedBusUrl } : {}),
   };
 }
 
@@ -208,19 +227,21 @@ export class CombosServiceBus {
     }
     this.client = hooks.clientFactory
       ? hooks.clientFactory(config)
-      : new ServiceBusClient(
-          config.namespace,
-          config.clientId
-            ? new ManagedIdentityCredential({ clientId: config.clientId })
-            : new DefaultAzureCredential(),
-          {
-            retryOptions: {
-              maxRetries: 3,
-              retryDelayInMs: 500,
-              maxRetryDelayInMs: 5000,
+      : config.isolatedBusUrl
+        ? createIsolatedCombosBusClient(config.isolatedBusUrl)
+        : new ServiceBusClient(
+            config.namespace,
+            config.clientId
+              ? new ManagedIdentityCredential({ clientId: config.clientId })
+              : new DefaultAzureCredential(),
+            {
+              retryOptions: {
+                maxRetries: 3,
+                retryDelayInMs: 500,
+                maxRetryDelayInMs: 5000,
+              },
             },
-          },
-        );
+          );
   }
 
   private recomputeQueueReady(state: QueueRuntimeState): boolean {

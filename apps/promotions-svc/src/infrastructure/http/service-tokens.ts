@@ -30,6 +30,7 @@ export function promotionsServiceTokens(
       PromotionsConfigService['settings']['serviceCredentials']
     >,
     controller: AbortController,
+    correlationId?: string,
   ) =>
     withDeadline(async (deadline) => {
       const signal = AbortSignal.any([controller.signal, deadline]);
@@ -42,6 +43,10 @@ export function promotionsServiceTokens(
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           Accept: 'application/json',
+          ...(correlationId &&
+          /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(correlationId)
+            ? { 'X-Correlation-Id': correlationId }
+            : {}),
         },
         body: new URLSearchParams({
           grant_type: 'client_credentials',
@@ -127,7 +132,7 @@ export function promotionsServiceTokens(
       });
       return body.accessToken;
     }, 1000);
-  return async (request, callerSignal) => {
+  return async (request, callerSignal, correlationId) => {
     try {
       callerSignal.throwIfAborted();
       const operation = Object.hasOwn(internalOperations, request.operationId)
@@ -156,7 +161,14 @@ export function promotionsServiceTokens(
           controller,
           waiters: 0,
           settled: false,
-          promise: issue(clientId, audience, scope, credentials, controller),
+          promise: issue(
+            clientId,
+            audience,
+            scope,
+            credentials,
+            controller,
+            correlationId,
+          ),
         };
         pending.set(key, flight);
         const current = flight;

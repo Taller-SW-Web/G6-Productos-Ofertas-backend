@@ -178,7 +178,7 @@ describe('G7 and independent simulated JWKS on real HTTP transport', () => {
       await expect(authorize()).rejects.toMatchObject({ status: 401 });
     }
     vi.stubEnv('G6_SECURITY_MODE', 'PUBLIC_READ_ONLY');
-    await expect(authorize()).resolves.toBe(true);
+    await expect(authorize()).rejects.toMatchObject({ status: 401 });
     await expect(
       authorize('Bearer ' + token({}, simulated.privateKey)),
     ).rejects.toMatchObject({ status: 401 });

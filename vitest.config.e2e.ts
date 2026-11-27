@@ -1,8 +1,17 @@
+import { realpathSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { defineConfig } from 'vitest/config';
 import tsconfigPaths from 'vite-tsconfig-paths';
 
+const vitestRoot = dirname(realpathSync('node_modules/vitest/package.json'));
+
 export default defineConfig({
   plugins: [tsconfigPaths()],
+  resolve: {
+    alias: {
+      vitest: vitestRoot,
+    },
+  },
   test: {
     globals: true,
     root: './',

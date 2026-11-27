@@ -14,31 +14,38 @@ import { PRICING_CONFIG, type PricingConfig } from '../config/environment.js';
 import { PricingRepository } from '../persistence/pricing.repository.js';
 import {
   PricingDeliveryStore,
-  AUDIT_PILOT_QUEUE,
+  PRICING_APPROVED_DESTINATIONS,
 } from './service-bus-deliveries.js';
 import { pricingEnvelope } from './outbox-relay.js';
 
+type SenderLike = Pick<ServiceBusSender, 'createMessageBatch' | 'sendMessages'>;
+
 export class PricingServiceBusRelay {
+  private readonly resolveSender: (destination: string) => SenderLike;
+
   constructor(
     private readonly store: Pick<PricingDeliveryStore, 'claim' | 'finish'>,
-    private readonly sender: Pick<
-      ServiceBusSender,
-      'createMessageBatch' | 'sendMessages'
-    >,
-  ) {}
+    senderOrResolver: SenderLike | ((destination: string) => SenderLike),
+  ) {
+    this.resolveSender =
+      typeof senderOrResolver === 'function'
+        ? senderOrResolver
+        : () => senderOrResolver;
+  }
 
   async publishOne(): Promise<'empty' | 'sent' | 'pending' | 'lease-lost'> {
     const claim = await this.store.claim();
     if (!claim) return 'empty';
     let confirmed = false;
     try {
-      if (claim.destination !== AUDIT_PILOT_QUEUE)
-        throw new Error('SERVICE_BUS_PILOT_ROUTE_NOT_APPROVED');
+      if (!PRICING_APPROVED_DESTINATIONS.has(claim.destination))
+        throw new Error('SERVICE_BUS_ROUTE_NOT_APPROVED');
+      const sender = this.resolveSender(claim.destination);
       // The SDK JSON-serializes non-binary bodies. Send canonical UTF-8 bytes
       // to avoid wrapping the envelope in a second JSON string.
       const body = pricingEnvelope(claim.row);
       // tryAddMessage accounts for AMQP properties/encoding, not only JSON bytes.
-      const batch = await this.sender.createMessageBatch({
+      const batch = await sender.createMessageBatch({
         maxSizeInBytes: 256 * 1024,
       });
       if (
@@ -46,21 +53,25 @@ export class PricingServiceBusRelay {
           body,
           messageId: claim.row.messageId,
           correlationId: claim.row.correlationId,
-          subject: 'pricing.price.changed',
+          subject: claim.row.eventName,
           contentType: 'application/json',
           applicationProperties: {
             producer: 'pricing-svc',
-            schema_version: 1,
+            schema_version: claim.row.schemaVersion,
             route_version: 1,
           },
         })
       )
         throw new Error('SERVICE_BUS_MESSAGE_TOO_LARGE');
-      await this.sender.sendMessages(batch, {
+      await sender.sendMessages(batch, {
         abortSignal: AbortSignal.timeout(10_000),
       });
       confirmed = true;
-    } catch {
+    } catch (err) {
+      console.error(
+        '[pricing-publishOne] error for dest=' + claim.destination + ':',
+        err instanceof Error ? err.message : String(err),
+      );
       // A timeout can occur after the broker accepted the batch; retain its ID.
     }
     const updated = await this.store.finish(claim, confirmed);
@@ -74,7 +85,7 @@ export class PricingServiceBusRuntime
 {
   available = false;
   private client?: ServiceBusClient;
-  private sender?: ServiceBusSender;
+  private senders = new Map<string, ServiceBusSender>();
   private timer?: ReturnType<typeof setTimeout>;
   private active?: Promise<void>;
   private stopped = false;
@@ -87,31 +98,100 @@ export class PricingServiceBusRuntime
 
   onApplicationBootstrap(): void {
     if (!this.config.serviceBus) return;
-    this.client = new ServiceBusClient(
-      this.config.serviceBus.namespace,
-      this.config.serviceBus.managedIdentityClientId
-        ? new ManagedIdentityCredential({
-            clientId: this.config.serviceBus.managedIdentityClientId,
-          })
-        : new DefaultAzureCredential(),
-      {
-        retryOptions: { maxRetries: 0, timeoutInMs: 5000 },
-      },
-    );
-    this.sender = this.client.createSender(AUDIT_PILOT_QUEUE);
-    const sender = this.sender;
+    if (this.config.serviceBus.isolatedBusUrl) {
+      const origin = this.config.serviceBus.isolatedBusUrl;
+      for (const destination of PRICING_APPROVED_DESTINATIONS) {
+        const sender = {
+          async createMessageBatch() {
+            const messages: Array<Record<string, unknown>> = [];
+            return {
+              tryAddMessage(msg: {
+                body: unknown;
+                contentType?: string;
+                messageId?: string;
+                correlationId?: string;
+                subject?: string;
+                applicationProperties?: Record<string, unknown>;
+              }) {
+                const rawBody =
+                  msg.body instanceof Uint8Array
+                    ? Buffer.from(msg.body).toString('utf8')
+                    : typeof msg.body === 'string'
+                      ? msg.body
+                      : JSON.stringify(msg.body);
+                messages.push({
+                  body: rawBody,
+                  contentType: msg.contentType,
+                  messageId: msg.messageId,
+                  correlationId: msg.correlationId,
+                  subject: msg.subject,
+                  applicationProperties: msg.applicationProperties,
+                });
+                return true;
+              },
+              _messages: messages,
+            } as never;
+          },
+          async sendMessages(batch: unknown) {
+            const items =
+              (batch as { _messages?: Array<Record<string, unknown>> })
+                ._messages ?? [];
+            for (const item of items) {
+              const res = await fetch(
+                `${origin}/queues/${encodeURIComponent(destination)}/messages`,
+                {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify(item),
+                },
+              );
+              if (!res.ok)
+                throw new Error(`ISOLATED_BUS_SEND_FAILED_${res.status}`);
+            }
+          },
+          async close() {},
+        } as unknown as ServiceBusSender;
+        this.senders.set(destination, sender);
+      }
+    } else {
+      this.client = new ServiceBusClient(
+        this.config.serviceBus.namespace,
+        this.config.serviceBus.managedIdentityClientId
+          ? new ManagedIdentityCredential({
+              clientId: this.config.serviceBus.managedIdentityClientId,
+            })
+          : new DefaultAzureCredential(),
+        {
+          retryOptions: { maxRetries: 0, timeoutInMs: 5000 },
+        },
+      );
+      const client = this.client;
+      for (const destination of PRICING_APPROVED_DESTINATIONS) {
+        this.senders.set(destination, client.createSender(destination));
+      }
+    }
     const relay = new PricingServiceBusRelay(
       new PricingDeliveryStore(this.repository),
-      sender,
+      (destination) => {
+        const sender = this.senders.get(destination);
+        if (!sender) throw new Error('SERVICE_BUS_ROUTE_NOT_APPROVED');
+        return sender;
+      },
     );
     const tick = () => {
       this.active = (async () => {
-        // Establish the link and check sender authorization even with no pending rows.
-        await sender.createMessageBatch({ maxSizeInBytes: 256 * 1024 });
+        // Establish links and check sender authorization even with no pending rows.
+        for (const sender of this.senders.values()) {
+          await sender.createMessageBatch({ maxSizeInBytes: 256 * 1024 });
+        }
         const result = await relay.publishOne();
         this.available = result === 'empty' || result === 'sent';
       })()
-        .catch(() => {
+        .catch((err) => {
+          console.error(
+            '[pricing-service-bus-relay] tick error:',
+            err instanceof Error ? err.message : String(err),
+          );
           this.available = false;
         })
         .finally(() => {
@@ -128,7 +208,12 @@ export class PricingServiceBusRuntime
     await this.active;
     this.available = false;
     try {
-      await this.sender?.close();
+      await Promise.all(
+        [...this.senders.values()].map((sender) =>
+          sender.close().catch(() => undefined),
+        ),
+      );
+      this.senders.clear();
     } finally {
       await this.client?.close();
     }

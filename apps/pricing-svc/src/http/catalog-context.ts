@@ -41,18 +41,12 @@ export class CatalogContextHttp implements PricingCatalogContext {
       if ((!this.h4 && !this.config.catalogUrl) || !uuid.test(correlationId))
         throw new Error();
       // Credencial propia: nunca se recibe ni reenvía el bearer del consumidor.
-      const publicRead =
-        !this.h4 &&
-        this.config.securityMode === 'PUBLIC_READ_ONLY' &&
-        operationId !== undefined &&
-        this.config.publicOperations?.includes(operationId) &&
-        PHASE1_PUBLIC_OPERATION_IDS.has(operationId);
-      const authorization = publicRead ? undefined : await this.token?.(sku);
-      if (!publicRead && !authorization) throw new Error();
+      const authorization = await this.token?.(sku);
+      if (!authorization) throw new Error();
       const headers = {
         Accept: 'application/json, application/problem+json',
         'X-Correlation-Id': correlationId,
-        ...(authorization ? { Authorization: 'Bearer ' + authorization } : {}),
+        Authorization: 'Bearer ' + authorization,
       };
       const response = this.h4
         ? await this.h4.get(sku, headers)

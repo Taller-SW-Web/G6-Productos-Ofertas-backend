@@ -632,7 +632,8 @@ export class CatalogBulkService {
         priorCommand?.data.batch_operation_id !== request.batch_operation_id ||
         priorResult.schema_version !== 2 ||
         priorResult.causation_id !== retry.previous_command_message_id ||
-        priorResult.payload.command_attempt_id !== previous.commandAttemptId ||
+        (priorResult.payload.command_attempt_id ?? null) !==
+          previous.commandAttemptId ||
         priorResult.event_name !== 'catalog.bulk.upsert.completed' ||
         !object(priorRow) ||
         priorRow.status !== 'REJECTED' ||
@@ -788,6 +789,9 @@ export class CatalogBulkService {
     )
       throw new InvalidCatalogMessage();
     const prior = await this.preflight(message);
+    console.error(
+      `[catalog-bulk] error=NONE consume msg=${message.message_id} schema=${message.schema_version} prior=${String(prior)}`,
+    );
     if (prior) return prior;
     let claimRequest: BulkRequest | null | undefined;
     if (message.schema_version === 3 || message.schema_version === 4) {
@@ -938,7 +942,10 @@ export class CatalogBulkService {
                     process.env.CATALOG_BULK_RESULT_V2_ENABLED === 'true'
                   )
                     temporaryIdentityFailure = true;
-                  else throw new ServiceUnavailableException();
+                  else {
+                    console.error('[catalog-bulk] identity error:', error);
+                    throw new ServiceUnavailableException();
+                  }
                 }
               }
               if (temporaryIdentityFailure) {
@@ -965,7 +972,10 @@ export class CatalogBulkService {
                   });
                 } catch (error) {
                   const code = businessCode(error);
-                  if (!code) throw error;
+                  if (!code) {
+                    console.error('[catalog-bulk] family error:', error);
+                    throw error;
+                  }
                   applied = rows.map((r) => rejection(r, code));
                 }
               }
@@ -1082,6 +1092,9 @@ export class CatalogBulkService {
         );
       // Receipt checks above are repeated here under the transaction locks
       // after any V3 content download, before applying effects.
+      console.error(
+        `[catalog-bulk] error=NONE persistReply ${name} reply=${replyMessageId} result=${JSON.stringify(result).slice(0, 300)}`,
+      );
       await this.persistReply(
         tx,
         message,

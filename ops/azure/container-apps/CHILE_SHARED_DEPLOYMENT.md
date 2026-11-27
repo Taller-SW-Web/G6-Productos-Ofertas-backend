@@ -6,6 +6,23 @@
 
 Las nueve aplicaciones se pueden seleccionar individualmente. `all` se rechaza para Chile. El plan RBAC inicial usa Catalog, Inventory, Pricing, Promotions y Gateway; los otros cuatro requieren selección expresa y autorización del owner RBAC.
 
+## Gateway: perfil aislado G5 durante uso de Marketplace
+
+El workflow manual admite `gateway_route_profile=g5-labelled` únicamente con `destination=chile-shared` y `service=api-gateway`. El perfil estándar continúa igual para Gateway y para todos los demás servicios.
+
+El perfil G5 publica la imagen oficial inmutable por digest y fija `GATEWAY_G5_H5_ENABLED=true` solo en la nueva revisión de Gateway. Exige modo ACA `Multiple`, revisión Marketplace previa sana y una única ruta default fijada al 100 % a una revisión explícita. Tras crear la revisión, asigna la etiqueta ACA `g5-h5` y comprueba por separado que:
+
+- el FQDN default de Gateway conserva la revisión Marketplace anterior al 100 %;
+- `https://api-gateway---g5-h5.<environment-domain>` enruta directamente a la revisión G5 nueva;
+- la imagen/digest, revisión, flag de esa revisión y etiqueta coinciden;
+- el recibo incluye el run, Environment, resource ID, SHA/digest, revisión Marketplace, ruta etiquetada y URL usada por el smoke.
+
+ACA revision labels funcionan independientemente del split de tráfico del FQDN default. La etiqueta G5 debe recibir el smoke de este mismo run desde el runner autorizado; no se asigna porcentaje de tráfico default a la revisión G5. El smoke anónimo comprueba liveness y rechazo de la ruta protegida; no sustituye la prueba con JWT real de G7 ni acredita por sí solo la certificación de despliegue. Un run CD fallido nunca es certificación `SUCCESS`, aunque la etiqueta/digest sigan observables.
+
+La recuperación supervisada solo retira `g5-h5` y el flag H5 si el recibo identifica exactamente la revisión Marketplace, el digest, la etiqueta y la configuración esperada. Si hay drift de tráfico, revisión o digest, se bloquea sin sobrescribirlo. No se cambia `G6_SECURITY_MODE`, Caddy ni la ruta default de Marketplace.
+
+Este perfil no abre la ventana ni aprueba un despliegue. Sigue requiriendo el Environment `azure-h5-chile`, su aprobación humana, `AZURE_CHILE_DEPLOY_ENABLED=true` y un SHA vigente de `master` con CI aprobada.
+
 ## Ventana de despliegue
 
 Un owner autorizado administra manualmente la variable `AZURE_CHILE_DEPLOY_ENABLED` del GitHub Environment `azure-h5-chile`. El workflow la consume desde `vars` dentro del job `deploy`, después de la aprobación humana del Environment y antes de solicitar OIDC. `deploy.sh` vuelve a rechazar el despliegue Chile si el valor no es exactamente `true`; inspect y recuperación supervisada no están sujetos a esta variable.

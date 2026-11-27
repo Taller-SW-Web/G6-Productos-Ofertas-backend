@@ -338,6 +338,12 @@ describe('Bulk recovery after a real PostgreSQL outage (disposable Docker only)'
       resolve('apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql'),
       'utf8',
     );
+    const serviceBusAllDestinationsMigration = readFileSync(
+      resolve(
+        'apps/bulk-svc/migrations/0009_h5_outbox_delivery_all_destinations.sql',
+      ),
+      'utf8',
+    );
     docker(
       [
         'exec',
@@ -363,6 +369,7 @@ ${actorOwnershipMigration}
 ${ownerCorrelationMigration}
 ${retryMigration}
 ${serviceBusDeliveryMigration}
+${serviceBusAllDestinationsMigration}
 GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA bulk TO bulk_fixture_app;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
@@ -740,7 +747,7 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,
         payload: { data: { content_ref: Record<string, unknown> } };
       }>(
         `SELECT schema_version,payload FROM bulk.outbox
-         WHERE payload->'data'->>'batch_id'=$1`,
+         WHERE payload->'data'->>'batch_id'=$1 AND event_name='catalog.bulk.upsert.requested'`,
         [batchId],
       );
       expect(delivery.rows).toHaveLength(1);

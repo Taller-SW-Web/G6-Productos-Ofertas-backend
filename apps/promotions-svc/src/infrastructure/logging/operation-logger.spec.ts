@@ -65,4 +65,54 @@ describe('Sanitized operation telemetry', () => {
     });
     expect(write.mock.calls[0][0]).not.toContain('secret');
   });
+  it('emits allowlisted commercial stage telemetry with correlation and no supplied secrets', () => {
+    const lines: string[] = [];
+    const logger = new PromotionsOperationLogger((line) => lines.push(line));
+    logger.commercialStage({
+      correlationId: trace,
+      operation: 'obtenerPrecioSku',
+      upstream: 'pricing',
+      stage: 'upstream_request',
+      durationMs: 554,
+      outcome: 'http_error',
+      status: 503,
+      errorCode: 'UPSTREAM_HTTP_REJECTED',
+      deadlineMs: 2500,
+      budgetRemainingMs: 118,
+      exhaustedStage: 'upstream_request',
+      pendingStageCount: 2,
+      pendingStages: ['upstream_request'],
+      pendingOperations: ['obtenerContextoSku', 'obtenerPrecioSku'],
+      pendingUpstreams: ['catalog', 'pricing'],
+    });
+    logger.commercialStage({
+      correlationId: 'invalid-correlation',
+      operation: 'obtenerPrecioSku',
+      upstream: 'pricing',
+      stage: 'upstream_request',
+      durationMs: 1,
+      outcome: 'success',
+    });
+    const entry = JSON.parse(lines[0]);
+    expect(entry).toMatchObject({
+      event: 'commercial_stage',
+      correlation_id: trace,
+      operation: 'obtenerPrecioSku',
+      upstream: 'pricing',
+      stage: 'upstream_request',
+      duration_ms: 554,
+      outcome: 'http_error',
+      status: 503,
+      deadline_ms: 2500,
+      budget_remaining_ms: 118,
+      exhausted_stage: 'upstream_request',
+      pending_stage_count: 2,
+      pending_stages: ['upstream_request'],
+      pending_operations: ['obtenerContextoSku', 'obtenerPrecioSku'],
+      pending_upstreams: ['catalog', 'pricing'],
+    });
+    expect(lines).toHaveLength(1);
+    expect(lines.join('')).not.toContain('Bearer');
+    expect(lines.join('')).not.toContain('secret');
+  });
 });

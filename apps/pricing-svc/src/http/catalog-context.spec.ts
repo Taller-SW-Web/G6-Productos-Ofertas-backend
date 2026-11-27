@@ -128,8 +128,8 @@ describe('Pricing -> Catalog: contrato HTTP privado', () => {
         tokens,
       ).resolve(sku, randomUUID(), 'consultarPrecios'),
     ).resolves.toEqual(body);
-    expect(received[0].authorization).toBeUndefined();
-    expect(tokens).not.toHaveBeenCalled();
+    expect(received[0].authorization).toBe('Bearer unused');
+    expect(tokens).toHaveBeenCalled();
     for (const securityMode of ['SIMULATED_AUTH', 'G7_AUTHENTICATED'] as const)
       await expect(
         new CatalogContextHttp({
@@ -140,21 +140,24 @@ describe('Pricing -> Catalog: contrato HTTP privado', () => {
       ).rejects.toMatchObject({ status: 503 });
     expect(received).toHaveLength(1);
   });
-  it('permite contexto sin credencial solo para las lecturas de precio autorizadas', async () => {
+  it('requiere credencial técnica incluso para lecturas de precio autorizadas en H5', async () => {
     for (const operation of ['consultarPrecios', 'obtenerPrecioSku']) {
       received = [];
       await expect(
-        new CatalogContextHttp({
-          ...config(),
-          securityMode: 'PUBLIC_READ_ONLY',
-          publicOperations: [operation],
-        }).resolve(
+        new CatalogContextHttp(
+          {
+            ...config(),
+            securityMode: 'PUBLIC_READ_ONLY',
+            publicOperations: [operation],
+          },
+          async () => 'service-token',
+        ).resolve(
           sku,
           randomUUID(),
           operation as 'consultarPrecios' | 'obtenerPrecioSku',
         ),
       ).resolves.toMatchObject({ sku });
-      expect(received[0].authorization).toBeUndefined();
+      expect(received[0].authorization).toBe('Bearer service-token');
     }
 
     received = [];

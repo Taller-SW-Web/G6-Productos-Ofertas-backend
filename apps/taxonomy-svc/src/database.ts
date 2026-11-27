@@ -146,8 +146,16 @@ export class Database implements OnModuleDestroy {
         });
       }
       this.db ??= drizzle(this.pool);
+      if (readTaxonomyServiceBus(this.env)) {
+        return await this.db.transaction(async (tx) => {
+          await tx.execute(
+            sql`SELECT set_config('g6.taxonomy_messaging', 'AZURE_SERVICE_BUS', true)`,
+          );
+          return await query(tx as unknown as NodePgDatabase);
+        });
+      }
       return await query(this.db);
-    } catch {
+    } catch (err) {
       this.logger.error({
         event: 'taxonomy.database.query_failed',
         service: 'taxonomy-svc',

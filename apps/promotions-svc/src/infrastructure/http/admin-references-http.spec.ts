@@ -17,7 +17,7 @@ async function fixture(
     const path = req.url!;
     calls.push(path);
     expect(req.headers.authorization).toBe(
-      options.mode === 'AUTHENTICATED'
+      options.getServiceAccessToken
         ? 'Bearer synthetic-own-service-token'
         : undefined,
     );
@@ -102,7 +102,7 @@ describe('Authoritative HTTP admin references #74', () => {
         },
         { mode, getServiceAccessToken: tokens },
       );
-      if (mode === 'AUTHENTICATED') {
+      if (mode === 'AUTHENTICATED' || mode === 'PUBLIC_READ_ONLY') {
         expect(tokens).toHaveBeenCalledExactlyOnceWith(
           {
             operationId: 'obtenerProducto',
@@ -128,7 +128,10 @@ describe('Authoritative HTTP admin references #74', () => {
         status: 404,
         body: { status: 404, code: 'PRODUCTO_NO_ENCONTRADO' },
       }),
-      { mode: 'PUBLIC_READ_ONLY' },
+      {
+        mode: 'AUTHENTICATED',
+        getServiceAccessToken: async () => 'synthetic-own-service-token',
+      },
     );
   });
   it('excludes inactive references while preserving their distinction from technical failure', async () => {

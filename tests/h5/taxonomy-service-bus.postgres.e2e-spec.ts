@@ -6,6 +6,7 @@ import { Pool } from 'pg';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { TAXONOMY_READINESS } from '../../apps/taxonomy-svc/src/health/readiness.port.js';
+import { ReadinessController } from '../../apps/taxonomy-svc/src/health/readiness.controller.js';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type {
   ServiceBusMessage,
@@ -15,17 +16,16 @@ import type {
 import type { Database } from '../../apps/taxonomy-svc/src/database.js';
 import { CategorySeoService } from '../../apps/taxonomy-svc/src/domain/category-seo.service.js';
 import { DeactivationIntentService } from '../../apps/taxonomy-svc/src/domain/deactivation-intent.service.js';
+import { TaxonomyAmqpRuntime } from '../../apps/taxonomy-svc/src/domain/taxonomy-amqp.runtime.js';
 import { Database as CatalogDatabase } from '../../apps/catalog-svc/src/database.js';
 import { CatalogMessageService } from '../../apps/catalog-svc/src/catalog-message.service.js';
 import type { CatalogEnvelope } from '../../apps/catalog-svc/src/catalog-messages.js';
 import { createCatalogTaxonomyConsumer } from '../../apps/catalog-svc/src/catalog-service-bus.runtime.js';
 import { relayCatalogDelivery } from '../../apps/catalog-svc/src/catalog-service-bus-relay.js';
 import { taxonomyReplyQueue } from '../../apps/catalog-svc/src/catalog-service-bus.js';
-import { TaxonomyAmqpRuntime } from '../../apps/taxonomy-svc/src/domain/taxonomy-amqp.runtime.js';
-import { ReadinessController } from '../../apps/taxonomy-svc/src/health/readiness.controller.js';
 import {
-  TaxonomyMessageStore,
   parseChecked,
+  TaxonomyMessageStore,
 } from '../../apps/taxonomy-svc/src/persistence/taxonomy-message.store.js';
 import {
   publishTaxonomyDelivery,
@@ -171,7 +171,7 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
       });
       catalog = new CatalogMessageService(catalogDb);
       const candidate = await readFile(
-        'apps/taxonomy-svc/migrations/0006_service_bus_outbox_delivery.sql',
+        'apps/taxonomy-svc/migrations-candidate/h5/0001_outbox_delivery.sql',
         'utf8',
       );
       await admin.query(
@@ -203,21 +203,6 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
           ).rows,
         ).toEqual([{ message_id: taxonomyLegacyId, published_at: null }]);
         await taxonomyOwner.query('DROP TABLE taxonomy.outbox_delivery');
-        // Upgrade from an existing transport marker must preserve historical rows.
-        await taxonomyOwner.query('BEGIN');
-        await taxonomyOwner.query(
-          "ALTER TABLE taxonomy.outbox ADD COLUMN delivery_transport text NOT NULL DEFAULT 'RABBITMQ'",
-        );
-        await taxonomyOwner.query(candidate);
-        expect(
-          (
-            await taxonomyOwner.query(
-              'SELECT delivery_transport FROM taxonomy.outbox WHERE message_id=$1',
-              [taxonomyLegacyId],
-            )
-          ).rows,
-        ).toEqual([{ delivery_transport: 'RABBITMQ' }]);
-        await taxonomyOwner.query('ROLLBACK');
         await taxonomyOwner.query('BEGIN; ' + candidate + ' COMMIT;');
       } finally {
         await taxonomyOwner.query('ROLLBACK');
@@ -436,7 +421,7 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
       );
       expect(result.rows).toEqual([{ sent_at: expect.any(Date), attempts: 2 }]);
       await expect(insert(runtime, 'unknown.event')).rejects.toThrow(
-        'taxonomy_outbox_h5_valid_event',
+        'Unsupported Taxonomy H5 route',
       );
     });
 

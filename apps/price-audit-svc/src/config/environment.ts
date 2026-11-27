@@ -13,7 +13,7 @@ export const PRICE_AUDIT_CONFIG = Symbol('PRICE_AUDIT_CONFIG');
 export interface AuditConfig {
   serviceBus?: AuditServiceBusConfig;
   publicOperations?: readonly string[];
-  securityMode: 'PUBLIC_READ_ONLY' | 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
+  securityMode: 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
   nodeEnv: 'development' | 'test' | 'production';
   port: number;
   hotRetentionMonths: number;
@@ -42,19 +42,15 @@ export function validateEnvironment(env: NodeJS.ProcessEnv): AuditConfig {
   const serviceBus = readAuditServiceBus(env);
   const securityMode = env.G6_SECURITY_MODE ?? 'G7_AUTHENTICATED';
   if (
-    !['PUBLIC_READ_ONLY', 'SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(
-      securityMode,
-    )
+    !['SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(securityMode) ||
+    (securityMode === 'SIMULATED_AUTH' && nodeEnv !== 'test')
   )
     throw new InvalidAuditConfig('G6_SECURITY_MODE inválido.');
   const publicOperations = (env.PRICE_AUDIT_PUBLIC_OPERATION_IDS ?? '')
     .split(',')
     .map((id) => id.trim())
     .filter(Boolean);
-  if (
-    publicOperations.some((id) => !PHASE1_PUBLIC_OPERATION_IDS.has(id)) ||
-    (securityMode !== 'PUBLIC_READ_ONLY' && publicOperations.length)
-  )
+  if (publicOperations.length > 0)
     throw new InvalidAuditConfig('PRICE_AUDIT_PUBLIC_OPERATION_IDS inválido.');
   const rawPort = env.PRICE_AUDIT_SVC_PORT ?? env.PORT;
   const port = Number(rawPort);
@@ -147,11 +143,7 @@ export function validateEnvironment(env: NodeJS.ProcessEnv): AuditConfig {
   }
   url.search = '';
   let auth: AuditConfig['auth'];
-  if (
-    securityMode !== 'PUBLIC_READ_ONLY' ||
-    env.AUTH_ISSUER !== undefined ||
-    env.AUTH_JWKS_URL !== undefined
-  ) {
+  {
     try {
       const issuer =
         securityMode === 'SIMULATED_AUTH'

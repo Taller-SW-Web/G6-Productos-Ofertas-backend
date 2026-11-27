@@ -60,6 +60,7 @@ describe('Gateway identity from G6/G7 contracts', () => {
     const g7Issuer = 'https://g7.test/issuer';
     const simulated = new GatewayIdentity(
       readGatewaySettings({
+        NODE_ENV: 'test',
         G6_SECURITY_MODE: 'SIMULATED_AUTH',
         SIMULATED_AUTH_ISSUER: simIssuer,
         SIMULATED_AUTH_JWKS_URL: 'https://simulated.test/jwks',
@@ -496,71 +497,58 @@ describe('Gateway identity from G6/G7 contracts', () => {
     )!;
     await expect(
       signed.identity.authorize(publicRoute, undefined),
-    ).rejects.toMatchObject({ status: 403 });
+    ).rejects.toMatchObject({ status: 401 });
   });
-  it('validates supplied JWT even on selected public SEO and never carries that exception into phase 3', async () => {
+  it('requires valid G7 JWT on SEO routes and rejects unauthenticated or invalid tokens with 401', async () => {
     const route = CONTRACT_ROUTES.find(
       (r) => r.operationId === 'obtenerSeoPorSlug',
     )!;
-    const identity = new GatewayIdentity({
-      ...settings,
-      securityMode: 'PUBLIC_READ_ONLY',
-      publicOperations: [route.operationId],
-    });
-    await expect(identity.authorize(route, undefined)).resolves.toBeUndefined();
-    await expect(identity.authorize(route, 'not bearer')).rejects.toMatchObject(
-      { status: 401 },
-    );
-    await expect(
-      identity.authorize(route, 'Bearer invalid'),
-    ).rejects.toMatchObject({ status: 503 });
     const g7 = new GatewayIdentity({
       ...settings,
       securityMode: 'G7_AUTHENTICATED',
-      publicOperations: [route.operationId],
     });
+    g7.authenticate = signed.identity.authenticate.bind(signed.identity);
     await expect(g7.authorize(route, undefined)).rejects.toMatchObject({
-      status: 403,
+      status: 401,
+      code: 'TOKEN_INVALIDO',
     });
+    await expect(g7.authorize(route, 'not bearer')).rejects.toMatchObject({
+      status: 401,
+      code: 'TOKEN_INVALIDO',
+    });
+    const service = `Bearer ${signed.token({ sub: 'modulo-marketplace', scope: 'catalogo:leer' })}`;
+    await expect(g7.authorize(route, service)).resolves.toBeUndefined();
   });
-  it('requires G3 service JWT for evaluation when only that public allowlist entry is removed', async () => {
+  it('requires G3 service JWT for evaluation and G7 JWT for listing promotions', async () => {
     const evaluation = CONTRACT_ROUTES.find(
       (r) => r.operationId === 'evaluarPromociones',
     )!;
     const publicList = CONTRACT_ROUTES.find(
       (r) => r.operationId === 'listarPromociones',
     )!;
-    const readonly = new GatewayIdentity({
+    const g7 = new GatewayIdentity({
       ...settings,
-      securityMode: 'PUBLIC_READ_ONLY',
-      publicOperations: ['listarPromociones'],
+      securityMode: 'G7_AUTHENTICATED',
     });
-    await expect(
-      readonly.authorize(publicList, undefined),
-    ).resolves.toBeUndefined();
-    await expect(
-      readonly.authorize(evaluation, undefined),
-    ).rejects.toMatchObject({ status: 401, code: 'TOKEN_INVALIDO' });
+    g7.authenticate = signed.identity.authenticate.bind(signed.identity);
+    await expect(g7.authorize(publicList, undefined)).rejects.toMatchObject({
+      status: 401,
+      code: 'TOKEN_INVALIDO',
+    });
+    await expect(g7.authorize(evaluation, undefined)).rejects.toMatchObject({
+      status: 401,
+      code: 'TOKEN_INVALIDO',
+    });
     const g3 = `Bearer ${signed.token({ sub: 'modulo-chatbot', scope: 'promociones:evaluar' })}`;
-    const authenticatedReadonly = new GatewayIdentity({
-      ...settings,
-      securityMode: 'PUBLIC_READ_ONLY',
-      publicOperations: ['listarPromociones'],
-    });
-    authenticatedReadonly.authenticate = signed.identity.authenticate.bind(
-      signed.identity,
-    );
+    await expect(g7.authorize(evaluation, g3)).resolves.toBeUndefined();
     await expect(
-      authenticatedReadonly.authorize(evaluation, g3),
-    ).resolves.toBeUndefined();
-    await expect(
-      authenticatedReadonly.authorize(
+      g7.authorize(
         evaluation,
         `Bearer ${signed.token({ sub: 'modulo-chatbot', scope: 'promociones:evaluar', exp: 1 })}`,
       ),
     ).rejects.toMatchObject({ status: 401 });
     await expect(
-      authenticatedReadonly.authorize(
+      g7.authorize(
         evaluation,
         `Bearer ${signed.token({ sub: 'modulo-chatbot', scope: 'promociones:leer' })}`,
       ),
@@ -598,8 +586,8 @@ describe('Gateway identity from G6/G7 contracts', () => {
     await expect(
       demoIdentity.authorize(product, undefined),
     ).rejects.toMatchObject({
-      status: 401,
-      code: 'TOKEN_INVALIDO',
+      status: 403,
+      code: 'SCOPE_INSUFICIENTE',
     });
   });
 

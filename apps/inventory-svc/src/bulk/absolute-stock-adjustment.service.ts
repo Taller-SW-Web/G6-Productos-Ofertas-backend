@@ -61,6 +61,20 @@ export class AbsoluteStockAdjustmentService {
     input: AbsoluteStockAdjustment,
   ): Promise<AbsoluteStockAdjustmentResult> {
     this.validate(input);
+    return this.database.transaction((client) =>
+      this.applyInTransaction(client, input),
+    );
+  }
+
+  /**
+   * Executes the absolute stock adjustment inside an existing database transaction.
+   * Used both by direct domain calls and by the R02 bulk inbox command handler.
+   */
+  async applyInTransaction(
+    client: IDatabaseClient,
+    input: AbsoluteStockAdjustment,
+  ): Promise<AbsoluteStockAdjustmentResult> {
+    this.validate(input);
     const clientId = 'bulk-svc';
     const idempotencyKey = `bulk-adjust:${input.operation_id}`;
     const fingerprint = this.idempotency.computeFingerprint({
@@ -71,7 +85,7 @@ export class AbsoluteStockAdjustmentService {
     });
     const correlationId = input.correlation_id ?? input.operation_id;
 
-    return this.database.transaction(async (client) => {
+    {
       await this.operations.lockIdempotencyKey(client, idempotencyKey);
       const existing = await this.operations.findByOperationIdOrIdempotencyKey(
         input.operation_id,
@@ -206,7 +220,7 @@ export class AbsoluteStockAdjustmentService {
         });
       }
       return result;
-    });
+    }
   }
 
   private validate(input: AbsoluteStockAdjustment): void {

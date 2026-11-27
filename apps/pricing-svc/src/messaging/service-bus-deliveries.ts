@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, isNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
 import {
   pgSchema,
   text,
@@ -16,6 +16,41 @@ import type { PricingTransaction } from '../persistence/pricing.database.js';
 import { PricingRepository } from '../persistence/pricing.repository.js';
 
 export const AUDIT_PILOT_QUEUE = 'g6.price-audit.from.pricing';
+export const PROMOTIONS_PRICE_QUEUE = 'g6.promotions.from.pricing';
+export const CATALOG_INIT_QUEUE = 'g6.catalog.from.pricing';
+export const BULK_PRICE_RESULT_QUEUE = 'g6.bulk.from.pricing';
+export const CATALOG_TO_PRICING_QUEUE = 'g6.pricing.from.catalog';
+export const BULK_TO_PRICING_QUEUE = 'g6.pricing.from.bulk';
+
+export const PRICING_APPROVED_DESTINATIONS = new Set<string>([
+  AUDIT_PILOT_QUEUE,
+  PROMOTIONS_PRICE_QUEUE,
+  CATALOG_INIT_QUEUE,
+  BULK_PRICE_RESULT_QUEUE,
+]);
+
+export function pricingDestinationsForFact(
+  fact: Pick<typeof outbox.$inferInsert, 'kind' | 'eventName'>,
+): readonly string[] {
+  if (fact.kind === 'event' && fact.eventName === 'pricing.price.changed') {
+    return [AUDIT_PILOT_QUEUE, PROMOTIONS_PRICE_QUEUE];
+  }
+  if (
+    fact.kind === 'result' &&
+    (fact.eventName === 'pricing.product.initialization.completed' ||
+      fact.eventName === 'pricing.product.initialization.rejected')
+  ) {
+    return [CATALOG_INIT_QUEUE];
+  }
+  if (
+    fact.kind === 'result' &&
+    (fact.eventName === 'pricing.bulk.price.apply.completed' ||
+      fact.eventName === 'pricing.bulk.price.apply.rejected')
+  ) {
+    return [BULK_PRICE_RESULT_QUEUE];
+  }
+  return [];
+}
 const schema = pgSchema('pricing');
 export const outboxDeliveries = schema.table(
   'outbox_delivery',
@@ -48,7 +83,7 @@ export const outboxDeliveries = schema.table(
     }),
     check(
       'ck_delivery_route',
-      sql`${t.routeVersion} = 1 AND ${t.destination} = 'g6.price-audit.from.pricing' AND ${t.transport} = 'AZURE_SERVICE_BUS'`,
+      sql`${t.routeVersion} = 1 AND ${t.destination} IN ('g6.price-audit.from.pricing', 'g6.promotions.from.pricing', 'g6.catalog.from.pricing', 'g6.bulk.from.pricing') AND ${t.transport} = 'AZURE_SERVICE_BUS'`,
     ),
     check('ck_delivery_attempts', sql`${t.attempts} >= 0`),
     check(
@@ -64,30 +99,35 @@ export const outboxDeliveries = schema.table(
 // Must be called with the same transaction that inserts the business fact.
 export async function insertPricingFacts(
   tx: PricingTransaction,
-  facts: (typeof outbox.$inferInsert)[],
-  pilot = false,
+  facts: (Omit<typeof outbox.$inferInsert, 'occurredAt'> & {
+    occurredAt: Date | SQL;
+  })[],
+  serviceBusEnabled = false,
 ): Promise<void> {
   if (!facts.length) return;
-  if (!pilot) {
+  if (!serviceBusEnabled) {
     await tx.insert(outbox).values(facts);
     return;
   }
-  if (
-    facts.some(
-      (fact) =>
-        fact.eventName !== 'pricing.price.changed' || fact.kind !== 'event',
-    )
-  )
-    throw new Error('SERVICE_BUS_PILOT_ROUTE_NOT_APPROVED');
+  const deliveries: Array<typeof outboxDeliveries.$inferInsert> = [];
   const stored = await tx.insert(outbox).values(facts).returning();
-  await tx.insert(outboxDeliveries).values(
-    stored.map((fact) => ({
-      messageId: fact.messageId,
-      destination: AUDIT_PILOT_QUEUE,
-      routeVersion: 1,
-      transport: 'AZURE_SERVICE_BUS',
-    })),
-  );
+  for (const fact of stored) {
+    const destinations = pricingDestinationsForFact(fact);
+    if (!destinations.length) {
+      throw new Error('SERVICE_BUS_ROUTE_NOT_APPROVED');
+    }
+    for (const destination of destinations) {
+      deliveries.push({
+        messageId: fact.messageId,
+        destination,
+        routeVersion: 1,
+        transport: 'AZURE_SERVICE_BUS',
+      });
+    }
+  }
+  if (deliveries.length) {
+    await tx.insert(outboxDeliveries).values(deliveries);
+  }
 }
 
 export type PricingDeliveryClaim = {
@@ -123,21 +163,20 @@ export class PricingDeliveryStore {
         .for('update', { skipLocked: true });
       if (!candidate) return undefined;
       if (
-        candidate.destination !== AUDIT_PILOT_QUEUE ||
+        !PRICING_APPROVED_DESTINATIONS.has(candidate.destination) ||
         candidate.routeVersion !== 1 ||
         candidate.transport !== 'AZURE_SERVICE_BUS'
       )
-        throw new Error('SERVICE_BUS_PILOT_ROUTE_NOT_APPROVED');
+        throw new Error('SERVICE_BUS_ROUTE_NOT_APPROVED');
       const [row] = await tx
         .select()
         .from(outbox)
         .where(eq(outbox.messageId, candidate.messageId));
       if (
         !row ||
-        row.eventName !== 'pricing.price.changed' ||
-        row.kind !== 'event'
+        !pricingDestinationsForFact(row).includes(candidate.destination)
       )
-        throw new Error('SERVICE_BUS_PILOT_FACT_INVALID');
+        throw new Error('SERVICE_BUS_FACT_INVALID');
       const token = randomUUID();
       await tx
         .update(outboxDeliveries)

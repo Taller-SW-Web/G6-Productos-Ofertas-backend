@@ -16,6 +16,7 @@ import { validInstant } from '../../domain/date-time.js';
 import { effectiveAt } from '../../domain/promotion-rules.js';
 import type { RecommendationCandidate } from '../../domain/promotion-rules.js';
 import { withDeadline } from '../resilience/deadline.js';
+import { PromotionsDependencyTimeout } from '../resilience/deadline.js';
 
 export type CommercialHttpOptions = InternalHttpOptions;
 
@@ -31,23 +32,43 @@ export class HttpCommercialContext implements CommercialContext {
     signal: AbortSignal,
     missing = false,
     correlationId?: string,
+    trace?: CommercialReadContext,
   ) {
-    return this.reader.read(operation, path, signal, missing, correlationId);
+    return this.reader.read(
+      operation,
+      path,
+      signal,
+      missing,
+      correlationId,
+      trace,
+    );
   }
   private async bounded<T>(
     operation: string,
     signal: AbortSignal | undefined,
     work: (signal: AbortSignal) => Promise<T>,
+    context?: CommercialReadContext,
   ): Promise<T> {
+    const remaining =
+      context?.deadlineAt === undefined
+        ? 2500
+        : Math.max(
+            1,
+            Math.floor(Math.min(2500, context.deadlineAt - performance.now())),
+          );
     try {
       signal?.throwIfAborted();
       return await withDeadline(
         (timeout) =>
           work(signal ? AbortSignal.any([signal, timeout]) : timeout),
-        2500,
+        remaining,
       );
     } catch (error) {
-      if (error instanceof CommercialInputError) throw error;
+      if (
+        error instanceof CommercialInputError ||
+        (error instanceof PromotionsDependencyTimeout && context?.observe)
+      )
+        throw error;
       throw new CommercialDependencyError(
         operation,
         'Catálogo/Pricing/Inventario + integración G6/G7',
@@ -61,6 +82,7 @@ export class HttpCommercialContext implements CommercialContext {
     channel: string,
     signal: AbortSignal,
     correlationId?: string,
+    trace?: CommercialReadContext,
   ) {
     const raw = await this.read(
       'obtenerProducto',
@@ -71,6 +93,7 @@ export class HttpCommercialContext implements CommercialContext {
       signal,
       true,
       correlationId,
+      trace,
     );
     if (raw === null) return null; // Not commercially visible, never an authoritative admin absence.
     const row = object(raw);
@@ -108,6 +131,7 @@ export class HttpCommercialContext implements CommercialContext {
     at: string,
     signal: AbortSignal,
     correlationId?: string,
+    trace?: CommercialReadContext,
   ) {
     const raw = await this.read(
       'obtenerPrecioSku',
@@ -120,6 +144,7 @@ export class HttpCommercialContext implements CommercialContext {
       signal,
       true,
       correlationId,
+      trace,
     );
     if (raw === null) return null;
     const row = object(raw);
@@ -230,6 +255,7 @@ export class HttpCommercialContext implements CommercialContext {
                   bounded,
                   false,
                   context?.correlationId,
+                  context,
                 ),
               );
               if (
@@ -253,6 +279,7 @@ export class HttpCommercialContext implements CommercialContext {
                 request.channel_id,
                 bounded,
                 context?.correlationId,
+                context,
               ),
             );
           const product = products.get(id);
@@ -266,6 +293,7 @@ export class HttpCommercialContext implements CommercialContext {
               at,
               bounded,
               context?.correlationId,
+              context,
             );
             if (!price) throw new Error('BASKET_PRICE_UNAVAILABLE');
             prices.set(line.sku, price);
@@ -283,6 +311,7 @@ export class HttpCommercialContext implements CommercialContext {
           throw new Error('MIXED_CURRENCIES');
         return { lines };
       },
+      context,
     );
   }
 
@@ -335,7 +364,7 @@ export class HttpCommercialContext implements CommercialContext {
         const uniqueIds = [...new Set(ids)];
         uniqueIds.forEach(text);
         const details = await limitedReads(uniqueIds, bounded, (id, signal) =>
-          this.product(id, channelId, signal, context?.correlationId),
+          this.product(id, channelId, signal, context?.correlationId, context),
         );
         for (const [index, id] of uniqueIds.entries()) {
           const p = details[index];
@@ -365,6 +394,7 @@ export class HttpCommercialContext implements CommercialContext {
               bounded,
               false,
               context?.correlationId,
+              context,
             ),
           );
           for (const value of array(row.items)) {
@@ -437,6 +467,7 @@ export class HttpCommercialContext implements CommercialContext {
         }
         return result;
       },
+      context,
     );
   }
 }

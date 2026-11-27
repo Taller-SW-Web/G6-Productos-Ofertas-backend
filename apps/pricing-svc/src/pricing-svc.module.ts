@@ -25,6 +25,8 @@ import { createH4CatalogClient } from './http/h4-catalog-client.js';
 import { CatalogServiceToken } from './http/catalog-token.js';
 import { PricingOutboxRelay } from './messaging/outbox-relay.js';
 import { PricingServiceBusRuntime } from './messaging/service-bus-relay.js';
+import { BulkPriceApplyService } from './messaging/bulk-price-apply.service.js';
+import { PricingServiceBusConsumer } from './messaging/service-bus-consumer.js';
 import { createPricingPriceChangedFacts } from './messaging/pricing-fact.js';
 import { PricingWriteAuthorization } from './http/pricing-write.authorization.js';
 import { PricingScheduleReconciler } from './messaging/schedule-reconciler.js';
@@ -58,6 +60,8 @@ import {
     CommercialPrices,
     PricingOutboxRelay,
     PricingServiceBusRuntime,
+    BulkPriceApplyService,
+    PricingServiceBusConsumer,
     PricingScheduleReconciler,
     PricingProductInitialization,
     CatalogSkuDeactivated,

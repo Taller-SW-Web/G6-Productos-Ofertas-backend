@@ -200,6 +200,9 @@ export class CouponH5Operations {
         VALUES ($1,$2,$3)`,
         [c.message_id, c.operation_id, couponH5Queue],
       );
+      console.error(
+        `[coupon-h5-ops] error=NONE admit op=${c.operation_id} order=${c.data.order_id}`,
+      );
       return { replay: false, snapshot: this.snapshot(inserted.rows[0]) };
     });
   }

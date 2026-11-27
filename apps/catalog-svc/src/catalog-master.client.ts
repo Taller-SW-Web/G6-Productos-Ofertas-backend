@@ -72,6 +72,9 @@ export class CatalogMasterClient {
         response.headers.get('content-type')?.split(';')[0] !==
           'application/json'
       ) {
+        console.error(
+          `[catalog-master-client] GET ${path} -> status=${response.status} ct=${response.headers.get('content-type')}`,
+        );
         await response.body?.cancel();
         throw new Error();
       }
@@ -96,6 +99,10 @@ export class CatalogMasterClient {
         if (error.status === 400) catalogError(400, 'VALIDACION');
         catalogError(422, invalidCode);
       }
+      console.error(
+        `[catalog-master-client] catch error on ${path} (origin=${this.config.origin}):`,
+        error,
+      );
       throw new ServiceUnavailableException();
     }
   }

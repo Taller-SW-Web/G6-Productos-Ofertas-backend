@@ -5,13 +5,18 @@ import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import { Test } from '@nestjs/testing';
+import type { ExecutionContext } from '@nestjs/common';
 import request from 'supertest';
 import { BulkSvcController } from '../bulk-svc.controller.js';
 import { BulkSvcService } from '../bulk-svc.service.js';
+import { BulkContentService } from '../bulk-content.service.js';
 import { BulkImportService } from '../bulk-import.service.js';
 import { BulkStorageService } from '../storage/bulk-storage.service.js';
 import { BulkReadinessService } from '../health/bulk-readiness.service.js';
-import { BulkUserBearerGuard } from '../auth/bulk-user-bearer.guard.js';
+import {
+  BulkUserBearerGuard,
+  type BulkAuthenticatedRequest,
+} from '../auth/bulk-user-bearer.guard.js';
 import { BulkProblemFilter } from '../http/bulk-problem.filter.js';
 import { BulkExportService } from '../bulk-export.service.js';
 import type { BulkExportSource } from '../export/bulk-export-source.js';
@@ -27,6 +32,7 @@ import {
   outbox,
   rowDomainSteps,
   retryCommands,
+  contentDocuments,
 } from './bulk.schema.js';
 import { BulkPersistenceError } from './bulk.persistence.errors.js';
 import {
@@ -1186,6 +1192,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
         },
         { provide: BulkImportService, useValue: {} },
         { provide: BulkStorageService, useValue: {} },
+        { provide: BulkContentService, useValue: {} },
         {
           provide: BulkReadinessService,
           useValue: { check: async () => true },
@@ -1193,7 +1200,15 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       ],
     })
       .overrideGuard(BulkUserBearerGuard)
-      .useValue({ canActivate: () => true })
+      .useValue({
+        canActivate: (context: ExecutionContext) => {
+          context
+            .switchToHttp()
+            .getRequest<BulkAuthenticatedRequest>().bulkActorSub =
+            TEST_OWNER_SUB;
+          return true;
+        },
+      })
       .compile();
     const app = appModule.createNestApplication();
     app.useGlobalFilters(new BulkProblemFilter());
@@ -2093,6 +2108,15 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
         receiptMessageId,
       });
 
+      await database.insert(contentDocuments).values({
+        contentId: command.data.content_ref.content_id,
+        batchId,
+        batchOperationId: operationId,
+        contentRef,
+        sha256: command.data.content_ref.sha256,
+        byteLength: command.data.content_ref.byte_length,
+        contentType: command.data.content_ref.content_type,
+      });
       await expect(
         repository.getRetryEligibility(batchId, TEST_OWNER_SUB),
       ).resolves.toEqual({

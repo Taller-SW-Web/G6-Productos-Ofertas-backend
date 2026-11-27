@@ -865,12 +865,13 @@ describe.skipIf(!isolatedHarnessEnabled)(
           `Bearer ${makeToken('acceso', undefined, { roles: ['combos:admin'] })}`,
         )
         .expect(200);
-      await calls[1]!()
+      const createdCombo = await calls[1]!()
         .set(
           'Authorization',
           `Bearer ${makeToken('acceso', undefined, { roles: ['combos:admin'] })}`,
         )
         .expect(201);
+      const activeComboId = createdCombo.body.combo_id as string;
       await calls[2]!()
         .set(
           'Authorization',
@@ -901,26 +902,36 @@ describe.skipIf(!isolatedHarnessEnabled)(
           `Bearer ${makeToken('acceso', undefined, { roles: ['combos:admin'] })}`,
         )
         .expect(200);
-      process.env.G6_SECURITY_MODE = 'PUBLIC_READ_ONLY';
-      process.env.COMBOS_ALLOWED_CLIENTS_COMBOS_READ = 'modulo-productos';
-      await request(app.getHttpServer()).get('/api/v1/combos').expect(401);
-      await calls[2]!()
-        .set(
-          'Authorization',
-          `Bearer ${makeToken('acceso', undefined, { roles: ['combos:admin'] })}`,
-        )
-        .expect(200);
-      await calls[2]!()
-        .set('Authorization', `Bearer ${makeToken('servicio', 'combos:leer')}`)
-        .expect(200);
-      await calls[4]!()
-        .set('Authorization', `Bearer ${makeToken('servicio', 'combos:leer')}`)
-        .expect(403);
       process.env.G6_SECURITY_MODE = 'G7_AUTHENTICATED';
-      delete process.env.COMBOS_ALLOWED_CLIENTS_COMBOS_READ;
+      process.env.COMBOS_ALLOWED_CLIENTS_COMBOS_READ = 'modulo-marketplace';
+      try {
+        await request(app.getHttpServer()).get('/api/v1/combos').expect(401);
+        await calls[2]!()
+          .set(
+            'Authorization',
+            `Bearer ${makeToken('acceso', undefined, { roles: ['combos:admin'] })}`,
+          )
+          .expect(200);
+        await request(app.getHttpServer())
+          .get(`/api/v1/combos/${activeComboId}`)
+          .set(
+            'Authorization',
+            `Bearer ${makeToken('servicio', 'combos:leer', { sub: 'modulo-marketplace' })}`,
+          )
+          .expect(200);
+        await calls[4]!()
+          .set(
+            'Authorization',
+            `Bearer ${makeToken('servicio', 'combos:leer')}`,
+          )
+          .expect(403);
+      } finally {
+        process.env.G6_SECURITY_MODE = 'G7_AUTHENTICATED';
+        delete process.env.COMBOS_ALLOWED_CLIENTS_COMBOS_READ;
+        for (const key of roleKeys) process.env[key] = 'admin';
+        process.env.COMBOS_TEST_DEFAULT_AUTH = 'true';
+      }
       expect(issuedServiceTokens).toBeGreaterThan(0);
-      for (const key of roleKeys) process.env[key] = 'admin';
-      process.env.COMBOS_TEST_DEFAULT_AUTH = 'true';
     }, 30000);
 
     it('rolls back parent and child rows on component constraint failure', async () => {

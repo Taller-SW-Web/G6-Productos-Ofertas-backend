@@ -272,6 +272,7 @@ run('Gateway -> Bulk real -> PostgreSQL descartable (GW-T03)', () => {
           'apps/bulk-svc/migrations/0006_owner_correlation_identity.sql',
           'apps/bulk-svc/migrations/0007_bulk_retry_v1.sql',
           'apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql',
+          'apps/bulk-svc/migrations/0009_h5_outbox_delivery_all_destinations.sql',
         ].map((p) => readFileSync(resolve(process.cwd(), p), 'utf8'));
 
         docker(

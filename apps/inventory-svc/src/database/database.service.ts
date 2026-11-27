@@ -117,6 +117,7 @@ export class DatabaseService
       this.logger.error({
         event: 'inventory.database.initialization_failed',
         reason: 'POSTGRES_CONFIGURATION_CONNECTION_OR_SCHEMA',
+        detail: err instanceof Error ? err.message : String(err),
         errorCode:
           err &&
           typeof err === 'object' &&
@@ -198,20 +199,28 @@ export class DatabaseService
       foreign_table_name: string;
       foreign_column_name: string;
     }>(
-      `SELECT kcu.column_name,
-              ccu.table_schema AS foreign_table_schema,
-              ccu.table_name AS foreign_table_name,
-              ccu.column_name AS foreign_column_name
-         FROM information_schema.table_constraints tc
-         JOIN information_schema.key_column_usage kcu
-           ON tc.constraint_name = kcu.constraint_name
-          AND tc.table_schema = kcu.table_schema
-         JOIN information_schema.constraint_column_usage ccu
-           ON ccu.constraint_name = tc.constraint_name
-          AND ccu.table_schema = tc.table_schema
-        WHERE tc.table_schema = 'inventory'
-          AND tc.table_name = 'outbox_delivery'
-          AND tc.constraint_type = 'FOREIGN KEY'`,
+      `SELECT a.attname AS column_name,
+              fn.nspname AS foreign_table_schema,
+              fc.relname AS foreign_table_name,
+              fa.attname AS foreign_column_name
+         FROM pg_catalog.pg_constraint con
+         JOIN pg_catalog.pg_class c
+           ON c.oid = con.conrelid
+         JOIN pg_catalog.pg_namespace n
+           ON n.oid = c.relnamespace
+         JOIN pg_catalog.pg_attribute a
+           ON a.attrelid = c.oid
+          AND a.attnum = con.conkey[1]
+         JOIN pg_catalog.pg_class fc
+           ON fc.oid = con.confrelid
+         JOIN pg_catalog.pg_namespace fn
+           ON fn.oid = fc.relnamespace
+         JOIN pg_catalog.pg_attribute fa
+           ON fa.attrelid = fc.oid
+          AND fa.attnum = con.confkey[1]
+        WHERE n.nspname = 'inventory'
+          AND c.relname = 'outbox_delivery'
+          AND con.contype = 'f'`,
     );
 
     const hasFk = fkResult.rows.some(

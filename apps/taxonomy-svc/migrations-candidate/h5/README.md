@@ -1,6 +1,6 @@
 # Outbox H5 de Taxonomy
 
-La versión propuesta es `../../migrations/0006_service_bus_outbox_delivery.sql`; la candidata `0001_outbox_delivery.sql` es referencia histórica y no debe aplicarse junto con ella. Aplicar 0006 únicamente como po_taxonomy_owner sobre su schema y mediante el proceso de datos autorizado. La migración añade un marcador a outbox y una tabla de entregas por destinatario. No genera un backfill. El marcador de filas históricas es RABBITMQ.
+Aplicar 0001 únicamente como po_taxonomy_owner sobre su schema y mediante el proceso de datos autorizado. La migración añade un marcador a outbox y una tabla de entregas por destinatario. No genera un backfill. El marcador de filas históricas es RABBITMQ.
 
 El runtime H5 usa MESSAGING_PROVIDER=AZURE_SERVICE_BUS y TAXONOMY_SERVICE_BUS_ENABLED=true. Al habilitar alguna dirección requiere SERVICE_BUS_NAMESPACE_FQDN y, en producción, identidad administrada; producción exige G7_AUTHENTICATED y habilitación general H5. Con ambas direcciones apagadas no requiere namespace ni identidad del broker, pero la selección Azure conserva la comprobación del almacenamiento H5. Deben estar ausentes RABBITMQ_URL y TAXONOMY_CATALOG_AMQP_USER. PostgreSQL recibe la opción de sesión g6.taxonomy_messaging. Se comprueba el marcador en la conexión real, la tabla y el trigger antes de exponer HTTP. Verificar compatibilidad con el pooler y con el rol runtime en el ambiente destino.
 
@@ -38,8 +38,6 @@ Los pendientes H4 permanecen en H4 y no se convierten automáticamente en entreg
 
 Para reproducir el ensayo H5, situar el repositorio Docs junto al Backend o indicar `G6_E2E_DOCS_PATH` apuntando a un checkout de Docs que contenga la versión contractual `0.7.0-rc.3`; ejecutar `node tests/h5/run-taxonomy-catalog-postgres.mjs`. La prueba carga el AsyncAPI de ese checkout y falla si la versión o la cola R18 difieren.
 
-## Migración versionada propuesta: 0006
+## Corte local provisional de 0006
 
-Ruta: `apps/taxonomy-svc/migrations/0006_service_bus_outbox_delivery.sql`. SHA-256 (bytes LF): `ab68c32c188ddbc6b75a07dfe7c5a6a3123d42711ed8bd344277e56b4f3f7f63`. No se ha aplicado en Supabase compartido. Ejecutar solo tras preflight de ledger, propietario, estructura y permisos; requiere una transacción completa. No reejecutar: los guards rechazan una instalación existente o alternativa y conservan sus filas. No hay backfill automático. La variante homónima del PR #247 es incompatible: si su ledger o estructuras existen, detener el despliegue y diseñar un upgrade preservando datos con el owner.
-
-Reversión planificada, no automática: detener sender y receiver, reconciliar y drenar las entregas H5 con Catalog, respaldar y conservar outbox/delivery/inbox y evidencia de mensajes, y coordinar el corte con los owners. Solo después y bajo autorización de datos, el owner podrá retirar el trigger y función de H5, restricciones, tabla delivery y columna transport, verificando dependencias y ledger; restaurar H4 únicamente con reconciliación expresa. No ejecutar DROP ni modificar ledger en la base compartida desde este ensayo.
+SHA-256 del archivo de trabajo: `4d0edd7b8347e60bd1ead4558184f9a35b9a14618431c120085cfc3dddece03a`. SQL-CLEAN instala sobre H4; SQL-UPGRADE valida el almacenamiento H5 existente y no realiza backfill. No ejecutar en Supabase compartido. Reversión: detener el runtime, preservar los datos y restaurar desde respaldo validado bajo coordinación del owner; no descartar entregas ni aplicar un rollback destructivo automáticamente. La verificación integral y el SHA publicado siguen pendientes.

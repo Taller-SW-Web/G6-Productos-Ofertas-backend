@@ -16,6 +16,7 @@ import type { OutboxEntity } from '../repositories/interfaces/outbox.repository.
 
 export const INVENTORY_QUEUES = {
   CATALOG: 'g6.catalog.from.inventory',
+  BULK: 'g6.bulk.from.inventory',
   COMBOS: 'g6.combos.from.inventory',
   PROMOTIONS: 'g6.promotions.from.inventory',
 } as const;
@@ -27,6 +28,8 @@ export const APPROVED_ROUTES: ReadonlyMap<string, readonly InventoryQueue[]> =
   new Map([
     ['inventory.sku.initialization.completed', [INVENTORY_QUEUES.CATALOG]],
     ['inventory.sku.initialization.rejected', [INVENTORY_QUEUES.CATALOG]],
+    ['inventory.bulk.stock.adjust.completed', [INVENTORY_QUEUES.BULK]],
+    ['inventory.bulk.stock.adjust.rejected', [INVENTORY_QUEUES.BULK]],
     [
       'inventory.stock.changed',
       [INVENTORY_QUEUES.COMBOS, INVENTORY_QUEUES.PROMOTIONS],

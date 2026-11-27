@@ -584,9 +584,10 @@ GRANT inventory_app TO inventory_test;`,
     cleanupOwnedResources();
   }, 30_000);
 
-  it('PUBLIC_READ_ONLY sirve disponibilidad comercial sin filtrar stock ni mutar y protege POST', async () => {
+  it('rechaza PUBLIC_READ_ONLY, exige JWT G7 en disponibilidad comercial sin filtrar stock ni mutar y protege POST', async () => {
     const previousMode = process.env.G6_SECURITY_MODE;
     const previousPublicOperations = process.env.INVENTORY_PUBLIC_OPERATION_IDS;
+    const previousIssuer = process.env.G7_JWT_ISSUER;
     let app: INestApplication | undefined;
     const sku = await seedStock();
     const route = await database.query<{ id: string }>(
@@ -609,9 +610,10 @@ GRANT inventory_app TO inventory_test;`,
       );
       return result.rows[0]?.value;
     };
-    process.env.G6_SECURITY_MODE = 'PUBLIC_READ_ONLY';
-    process.env.INVENTORY_PUBLIC_OPERATION_IDS =
-      'consultarDisponibilidadComercial';
+    process.env.G6_SECURITY_MODE = 'G7_AUTHENTICATED';
+    process.env.G7_JWT_ISSUER = TEST_ISSUER;
+    InventoryAuthGuard.setTrustedPublicKey(TEST_PUBLIC_KEY);
+    delete process.env.INVENTORY_PUBLIC_OPERATION_IDS;
     try {
       const module = await Test.createTestingModule({
         imports: [InventorySvcModule],
@@ -624,9 +626,22 @@ GRANT inventory_app TO inventory_test;`,
       await app.listen(0, '127.0.0.1');
       const origin = await app.getUrl();
       const before = await snapshot();
+      await request(origin)
+        .get(
+          `/api/v1/inventario/disponibilidad/comercial?skus=${sku}&canal=MARKETPLACE`,
+        )
+        .expect(401);
       const read = await request(origin)
         .get(
           `/api/v1/inventario/disponibilidad/comercial?skus=${sku}&canal=MARKETPLACE`,
+        )
+        .set(
+          'Authorization',
+          'Bearer ' +
+            createCryptographicJwt({
+              clientId: 'modulo-marketplace',
+              scope: 'inventario:disponibilidad:leer',
+            }),
         )
         .expect(200);
       expect(read.body).toEqual({
@@ -663,6 +678,9 @@ GRANT inventory_app TO inventory_test;`,
         delete process.env.INVENTORY_PUBLIC_OPERATION_IDS;
       else
         process.env.INVENTORY_PUBLIC_OPERATION_IDS = previousPublicOperations;
+      InventoryAuthGuard.setTrustedPublicKey(null);
+      if (previousIssuer === undefined) delete process.env.G7_JWT_ISSUER;
+      else process.env.G7_JWT_ISSUER = previousIssuer;
     }
   }, 60_000);
 
@@ -1695,15 +1713,12 @@ GRANT inventory_app TO inventory_test;`,
           `SELECT event_type,count(*)::text AS count FROM inventory.outbox WHERE aggregate_id=$1 GROUP BY event_type`,
           [first.data.sku],
         );
-        expect(events.rows).toHaveLength(2);
-        expect(events.rows).toContainEqual({
-          event_type: 'inventory.stock.changed',
-          count: '1',
-        });
-        expect(events.rows).toContainEqual({
-          event_type: 'inventory.sku.initialization.completed',
-          count: '2',
-        });
+        expect(events.rows).toEqual([
+          {
+            event_type: 'inventory.sku.initialization.completed',
+            count: '2',
+          },
+        ]);
 
         // Catalog valida delivery.properties.userId contra su producerUsers.
         // El publisher real debe propagar el usuario AMQP autenticado de la

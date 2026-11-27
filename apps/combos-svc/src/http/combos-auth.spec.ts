@@ -307,7 +307,7 @@ describe('Combos JWT security', () => {
 
   it('allows contract-listed M2M only on the two read operations with an explicit client grant', async () => {
     process.env.G6_SECURITY_MODE = 'G7_AUTHENTICATED';
-    process.env.COMBOS_ALLOWED_CLIENTS_COMBOS_READ = 'modulo-productos';
+    process.env.COMBOS_ALLOWED_CLIENTS_COMBOS_READ = 'modulo-marketplace';
     const verifier = new ComboTokenVerifier();
     const guard = new CombosAuthGuard(
       new Reflector(),
@@ -353,20 +353,20 @@ describe('Combos JWT security', () => {
       return guard.canActivate(ctx);
     };
     await expect(
-      run('obtenerCombo', '/combos/:comboId', 'modulo-productos'),
+      run('obtenerCombo', '/combos/:comboId', 'modulo-marketplace'),
     ).resolves.toBe(true);
     await expect(
       run(
         'consultarDisponibilidadCombo',
         '/combos/:comboId/disponibilidad',
-        'modulo-productos',
+        'modulo-marketplace',
       ),
     ).resolves.toBe(true);
     await expect(
       run('obtenerCombo', '/combos/:comboId', 'otro-modulo'),
     ).rejects.toMatchObject({ status: 403 });
     await expect(
-      run('actualizarCombo', '/combos/:comboId', 'modulo-productos', 'user'),
+      run('actualizarCombo', '/combos/:comboId', 'modulo-marketplace', 'user'),
     ).rejects.toMatchObject({ status: 403 });
     delete process.env.COMBOS_ALLOWED_CLIENTS_COMBOS_READ;
   });

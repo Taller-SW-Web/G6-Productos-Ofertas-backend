@@ -3,7 +3,6 @@ import { Inject, Injectable } from '@nestjs/common';
 import { GATEWAY_SETTINGS, type GatewaySettings } from './gateway-settings.js';
 import type { ContractRoute } from './contract-route.js';
 import { readLimitedResponse } from './bounded-response.js';
-import { isEligiblePublicRead } from './gateway-public-reads.js';
 
 export class GatewayFailure extends Error {
   constructor(
@@ -181,27 +180,10 @@ export class GatewayIdentity {
     route: ContractRoute,
     authorization: string | undefined,
   ): Promise<void> {
-    if (
-      authorization === undefined &&
-      this.settings.securityMode === 'PUBLIC_READ_ONLY' &&
-      isEligiblePublicRead(route) &&
-      this.settings.publicOperations.includes(route.operationId)
-    )
-      return;
-    if (isDemoBypassRoute(route, this.settings)) return;
-    if (this.settings.readOnlyDemoEnabled)
+    if (this.settings.demoNoAuthEnabled || this.settings.readOnlyDemoEnabled)
       throw new GatewayFailure(403, 'SCOPE_INSUFICIENTE');
-    if (!route.security.length) {
-      if (
-        this.settings.securityMode !== 'PUBLIC_READ_ONLY' ||
-        !this.settings.publicOperations.includes(route.operationId)
-      )
-        throw new GatewayFailure(403, 'SCOPE_INSUFICIENTE');
-      const bearer = /^Bearer ([^\s]+)$/i.exec(authorization ?? '');
-      if (!bearer) throw new GatewayFailure(401, 'TOKEN_INVALIDO');
-      await this.authenticate(bearer[1]);
-      return;
-    }
+    if (!route.security.length)
+      throw new GatewayFailure(403, 'SCOPE_INSUFICIENTE');
     const bearer = /^Bearer ([^\s]+)$/i.exec(authorization ?? '');
     if (!bearer) throw new GatewayFailure(401, 'TOKEN_INVALIDO');
     const claims = await this.authenticate(bearer[1]);
@@ -422,15 +404,10 @@ export class GatewayIdentity {
   }
 }
 
-/** Selects a bypass only for routes already found in CONTRACT_ROUTES. */
+/** Retired demo bypass selector; always returns false under G7-only policy. */
 export function isDemoBypassRoute(
-  route: ContractRoute,
-  settings: GatewaySettings,
+  _route: ContractRoute,
+  _settings: GatewaySettings,
 ): boolean {
-  if (
-    settings.securityMode === 'PUBLIC_READ_ONLY' ||
-    settings.securityMode === 'SIMULATED_AUTH'
-  )
-    return false;
   return false;
 }

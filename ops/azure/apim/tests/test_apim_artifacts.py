@@ -9,8 +9,8 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_DOCS_SHA = "490172c11cb4b83ddd1996f8d5834d0402184cf8"
-EXPECTED_GATEWAY_SHA = "1b90543dc39a8919fd94f0e059d10e1002b3b2a9"
+EXPECTED_DOCS_SHA = "099ad1926a53d1aec1aeae93e894d24ec2721748"
+EXPECTED_GATEWAY_SHA = "2eb8c864f8d315060cf00ccd35ce4015b9569556"
 SPEC = importlib.util.spec_from_file_location("filter_openapi", ROOT / "filter-openapi.py")
 FILTER = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -439,8 +439,8 @@ class ApimPolicyTests(unittest.TestCase):
         manifest = json.loads((ROOT / "openapi" / "operation-security.json").read_text(encoding="utf-8"))
         operations = manifest["operations"]
         self.assertEqual(len(operations), 145)
-        self.assertEqual(sum(operation["secured"] for operation in operations), 143)
-        self.assertEqual(sum(not operation["secured"] for operation in operations), 2)
+        self.assertEqual(sum(operation["secured"] for operation in operations), 145)
+        self.assertEqual(sum(not operation["secured"] for operation in operations), 0)
         self.assertEqual(len(manifest["privateOperationIds"]), 5)
         self.assertFalse(manifest["g5EnabledByDefault"])
         self.assertEqual(sum(operation["g5OptIn"] for operation in operations), 0)
@@ -918,7 +918,7 @@ class ApimClosureRequirementsTests(unittest.TestCase):
         routes = [{"method": "GET", "path": "/api/v1/seo", "operationId": "seoPublico", "service": "taxonomy-svc"}]
         with self.assertRaisesRegex(ValueError, "securityProfile no reconocido"):
             FILTER.filter_spec(spec, routes, [], False, "d", "g", security_profile="INVENTADO")
-        with self.assertRaisesRegex(ValueError, "Publicación efectiva bloqueada"):
+        with self.assertRaisesRegex(ValueError, "PUBLIC_READ_ONLY retirado bajo política universal G7"):
             FILTER.filter_spec(
                 spec,
                 routes,
@@ -949,8 +949,9 @@ class ApimClosureRequirementsTests(unittest.TestCase):
         self.assertIn('buffer-response="false"', secured_xml)
 
         public_xml = (ROOT / "policies/operation-public.xml").read_text(encoding="utf-8")
-        self.assertIn("context.Request.IpAddress", public_xml)
-        self.assertIn('buffer-response="false"', public_xml)
+        self.assertIn("Acceso anónimo deshabilitado", public_xml)
+        self.assertIn("SCOPE_INSUFICIENTE", public_xml)
+        self.assertNotIn("context.Request.IpAddress", public_xml)
         self.assertNotIn("X-Forwarded-For", public_xml)
         self.assertNotIn("X-Real-IP", public_xml)
 

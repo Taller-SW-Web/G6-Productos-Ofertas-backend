@@ -18,6 +18,7 @@ const cdServices = [
 const globalFields = [
   'environment',
   'gateway',
+  'gateway_route_profile',
   'g6_sha',
   'g6_service_shas',
   'g6_cd_runs',
@@ -139,6 +140,9 @@ async function validateAuthorized(profile, plans, scenarios, selectedIds) {
     fail('INTEGRATION_SHAS_REQUIRED');
   if (!['brazil-isolated', 'chile-shared'].includes(profile.g6_destination))
     fail('G6_DEPLOYMENT_DESTINATION_REQUIRED');
+  const gatewayRouteProfile = profile.gateway_route_profile ?? 'standard';
+  if (!['standard', 'g5-labelled'].includes(gatewayRouteProfile))
+    fail('GATEWAY_ROUTE_PROFILE_INVALID');
   if (
     profile.g6_service_shas !== undefined &&
     (typeof profile.g6_service_shas !== 'object' ||
@@ -165,6 +169,14 @@ async function validateAuthorized(profile, plans, scenarios, selectedIds) {
       profile.gateway !== `${gateway.origin}/`)
   )
     fail('AUTHORIZED_PRIVATE_GATEWAY_REQUIRED');
+  if (
+    gatewayRouteProfile === 'g5-labelled' &&
+    (profile.g6_destination !== 'chile-shared' ||
+      !/^api-gateway---g5-h5\.[a-z0-9-]+\.chilecentral\.azurecontainerapps\.io$/i.test(
+        gateway.hostname,
+      ))
+  )
+    fail('G5_LABELLED_GATEWAY_PROFILE_REQUIRES_CHILE_LABEL_URL');
   if (
     profile.g6_cd_runs !== undefined &&
     (typeof profile.g6_cd_runs !== 'object' ||

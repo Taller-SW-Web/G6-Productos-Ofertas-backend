@@ -158,3 +158,7 @@ La clasificación siguiente es para el árbol de esta tarea: PORTAR_ADAPTANDO id
 - R09: Catalog → `g6.taxonomy.from.catalog`, `catalog.master.deactivation.checked`; `TAXONOMY_SERVICE_BUS_RECEIVE_ENABLED`, OFF por defecto.
 - `TAX-BL02`: owner datos, ledger/permisos/migración en entorno autorizado pendientes. `TAX-BL03`: owner Catalog, homologación y E2E reales pendientes. `TAX-BL04`: owner Axel/Azure, namespace y RBAC reales pendientes. `TAX-BL05`: owner G7, sesiones/grants reales pendientes. T4 y performance: NOT_RUN.
 - La referencia `docs_sha` histórica que emite `tests/h5/run-int06.mjs` es `c9e1e5c...`; el contrato de Docs `f785acc...` tiene idéntico SHA-256 `f3331a6630b68039a1d33063000c600ec74db7429d78846da922141101e6c0eb`. No interpretar el campo histórico del runner como el HEAD actual de Docs.
+
+## Corte local provisional de 0006
+
+SHA-256 del archivo de trabajo: `4d0edd7b8347e60bd1ead4558184f9a35b9a14618431c120085cfc3dddece03a`. SQL-CLEAN instala sobre H4; SQL-UPGRADE valida el almacenamiento H5 existente y no realiza backfill. No ejecutar en Supabase compartido. Reversión: detener el runtime, preservar los datos y restaurar desde respaldo validado bajo coordinación del owner; no descartar entregas ni aplicar un rollback destructivo automáticamente. La verificación integral y el SHA publicado siguen pendientes.

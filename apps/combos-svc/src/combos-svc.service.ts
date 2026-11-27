@@ -183,11 +183,11 @@ export class CombosSvcService {
     };
   }
 
-  async get(id: string) {
+  async get(id: string, commercialOnly = false) {
     if (!UUID.test(id))
       throw new ComboError(400, 'VALIDACION', 'Identificador inválido');
     const aggregate = await this.repository.get(id);
-    if (!aggregate)
+    if (!aggregate || (commercialOnly && aggregate.combo.status !== 'ACTIVO'))
       throw new ComboError(404, 'COMBO_NO_ENCONTRADO', 'Combo no encontrado');
     return wire(aggregate);
   }
@@ -537,10 +537,10 @@ export class CombosSvcService {
       throw new ComboError(404, 'COMBO_NO_ENCONTRADO', 'Combo no encontrado');
     return this.get(id);
   }
-  async availability(id: string) {
+  async availability(id: string, commercialOnly = false) {
     if (!UUID.test(id))
       throw new ComboError(400, 'VALIDACION', 'Identificador inválido');
-    const combo = await this.get(id);
+    const combo = await this.get(id, commercialOnly);
     return {
       comboId: combo.combo_id,
       verificable: false,

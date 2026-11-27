@@ -5,7 +5,18 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { and, asc, eq, inArray, notInArray, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { Database, type CatalogTransaction } from './database.js';
 import {
   activationChecks,
@@ -449,19 +460,28 @@ export class CatalogQueryRepository {
     page: number,
     pageSize: number,
     status?: 'BORRADOR' | 'ACTIVA' | 'INACTIVA',
+    commercialOnly = false,
   ): Promise<VariantPage | null> {
     return this.database.read((db) =>
       db.transaction(
         async (tx) => {
           const [product] = await tx
-            .select({ id: products.id })
+            .select({ id: products.id, estado: products.estado })
             .from(products)
             .where(sql`${products.id}::text = ${productId}`)
             .limit(1);
-          if (!product) return null;
+          if (!product || (commercialOnly && product.estado !== 'ACTIVO'))
+            return null;
           const condition = and(
             eq(variants.product_id, product.id),
-            status ? eq(variants.estado, status) : undefined,
+            commercialOnly
+              ? and(
+                  eq(variants.estado, 'ACTIVA'),
+                  status ? eq(variants.estado, status) : undefined,
+                )
+              : status
+                ? eq(variants.estado, status)
+                : undefined,
           );
           const [count] = await tx
             .select({ total: sql<number>`count(*)::integer` })
@@ -480,8 +500,14 @@ export class CatalogQueryRepository {
             .limit(pageSize)
             .offset((page - 1) * pageSize);
           const total = count?.total ?? 0;
+          const items = await this.adminVariants(tx, rows);
           return {
-            items: await this.adminVariants(tx, rows),
+            items: commercialOnly
+              ? items.map(
+                  ({ catalog_version: _cv, ...rest }) =>
+                    rest as (typeof items)[number],
+                )
+              : items,
             meta: {
               pagina: page,
               tamanio: pageSize,
@@ -752,5 +778,94 @@ export class CatalogQueryRepository {
           throw new ServiceUnavailableException();
         throw error;
       });
+  }
+
+  filterSellableSkus(filters: {
+    productoId?: string;
+    categoriaId?: string;
+    marcaId?: string;
+    sku?: string;
+    cursorSku?: string;
+    tamanio: number;
+  }): Promise<{
+    items: Array<{
+      sku: string;
+      productoId: string;
+      categoriaId: string | null;
+      marcaId: string | null;
+    }>;
+    nextCursor: string | null;
+  }> {
+    return this.database.read((db) =>
+      db.transaction(
+        async (tx) => {
+          const conditions = [
+            eq(products.estado, 'ACTIVO'),
+            or(
+              and(
+                isNull(skuIdentity.variant_id),
+                eq(products.tiene_variantes, false),
+              ),
+              and(
+                isNotNull(skuIdentity.variant_id),
+                eq(products.tiene_variantes, true),
+                eq(variants.estado, 'ACTIVA'),
+              ),
+            ),
+            filters.productoId
+              ? sql`${products.id}::text = ${filters.productoId}`
+              : undefined,
+            filters.categoriaId
+              ? sql`${products.categoria_id}::text = ${filters.categoriaId}`
+              : undefined,
+            filters.marcaId
+              ? sql`${products.marca_id}::text = ${filters.marcaId}`
+              : undefined,
+            filters.sku ? eq(skuIdentity.sku, filters.sku) : undefined,
+            filters.cursorSku
+              ? gt(skuIdentity.sku, filters.cursorSku)
+              : undefined,
+          ];
+          const rows = await tx
+            .select({
+              sku: skuIdentity.sku,
+              productoId: products.id,
+              categoriaId: products.categoria_id,
+              marcaId: products.marca_id,
+            })
+            .from(skuIdentity)
+            .leftJoin(variants, eq(skuIdentity.variant_id, variants.id))
+            .innerJoin(
+              products,
+              or(
+                eq(skuIdentity.product_id, products.id),
+                eq(variants.product_id, products.id),
+              ),
+            )
+            .where(and(...conditions))
+            .orderBy(asc(skuIdentity.sku))
+            .limit(filters.tamanio + 1);
+
+          const hasMore = rows.length > filters.tamanio;
+          const items = (hasMore ? rows.slice(0, filters.tamanio) : rows).map(
+            (row) => ({
+              sku: row.sku,
+              productoId: row.productoId,
+              categoriaId: row.categoriaId ?? null,
+              marcaId: row.marcaId ?? null,
+            }),
+          );
+          const nextCursor =
+            hasMore && items.length > 0
+              ? Buffer.from(
+                  JSON.stringify({ sku: items[items.length - 1]!.sku }),
+                  'utf8',
+                ).toString('base64url')
+              : null;
+          return { items, nextCursor };
+        },
+        { isolationLevel: 'repeatable read', accessMode: 'read only' },
+      ),
+    );
   }
 }

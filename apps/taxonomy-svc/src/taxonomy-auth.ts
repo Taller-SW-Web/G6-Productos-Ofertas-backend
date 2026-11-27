@@ -22,8 +22,7 @@ export const TAXONOMY_DEMO_ENABLED = Symbol('TAXONOMY_DEMO_ENABLED');
 export const TAXONOMY_PUBLIC_READ_CONFIG = Symbol(
   'TAXONOMY_PUBLIC_READ_CONFIG',
 );
-export type TaxonomySecurityMode =
-  'PUBLIC_READ_ONLY' | 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
+export type TaxonomySecurityMode = 'SIMULATED_AUTH' | 'G7_AUTHENTICATED';
 export interface TaxonomyPublicReadConfig {
   readonly securityMode: TaxonomySecurityMode;
   readonly publicOperations: readonly string[];
@@ -44,7 +43,8 @@ export function readTaxonomyPublicReadConfig(
   const mode = env.G6_SECURITY_MODE;
   if (
     mode !== undefined &&
-    !['PUBLIC_READ_ONLY', 'SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(mode)
+    (!['SIMULATED_AUTH', 'G7_AUTHENTICATED'].includes(mode) ||
+      (mode === 'SIMULATED_AUTH' && env.NODE_ENV !== 'test'))
   ) {
     throw new Error('Configuración de demo Taxonomy inválida');
   }
@@ -54,12 +54,7 @@ export function readTaxonomyPublicReadConfig(
     .split(',')
     .map((id) => id.trim())
     .filter(Boolean);
-  if (
-    publicOperations.some((id) => !TAXONOMY_ELIGIBLE_PUBLIC_OPERATIONS.has(id))
-  ) {
-    throw new Error('Configuración de demo Taxonomy inválida');
-  }
-  if (securityMode !== 'PUBLIC_READ_ONLY' && publicOperations.length > 0) {
+  if (publicOperations.length > 0) {
     throw new Error('Configuración de demo Taxonomy inválida');
   }
   return Object.freeze({
@@ -91,6 +86,8 @@ export function readTaxonomySecurityConfig(
   env: Record<string, string | undefined> = process.env,
 ): TaxonomySecurityConfig | undefined {
   const simulated = env.G6_SECURITY_MODE === 'SIMULATED_AUTH';
+  if (simulated && env.NODE_ENV !== 'test')
+    throw new Error('SIMULATED_AUTH solo se permite en NODE_ENV=test.');
   const values = [
     simulated ? env.SIMULATED_AUTH_ISSUER : env.SECURITY_ISSUER,
     simulated ? undefined : env.SECURITY_DISCOVERY_URL,
@@ -472,14 +469,10 @@ export class TaxonomyTokenVerifier {
 }
 
 function isApprovedPublicTaxonomyOperation(
-  handlerName: string | undefined,
-  config: TaxonomyPublicReadConfig | undefined,
+  _handlerName: string | undefined,
+  _config: TaxonomyPublicReadConfig | undefined,
 ): boolean {
-  if (!handlerName || config?.securityMode !== 'PUBLIC_READ_ONLY') return false;
-  return (
-    TAXONOMY_ELIGIBLE_PUBLIC_OPERATIONS.has(handlerName) &&
-    config.publicOperations.includes(handlerName)
-  );
+  return false;
 }
 
 @Injectable()
@@ -628,6 +621,15 @@ export class TaxonomyAuthGuard implements CanActivate {
       if (error instanceof TaxonomyTokenRejected)
         throw new UnauthorizedException();
       throw new ServiceUnavailableException();
+    }
+    if (principal.kind === 'user') {
+      const allowCommercialUser = Reflect.getMetadata(
+        TAXONOMY_COMMERCIAL_USER_READ,
+        context.getHandler(),
+      ) as boolean | undefined;
+      if (!allowCommercialUser || !principal.roles.includes('GESTOR_COMERCIAL'))
+        throw new ForbiddenException();
+      return true;
     }
     if (principal.kind !== 'service') throw new ForbiddenException();
     if (!principal.audiences.includes(SECURITY_AUDIENCE))

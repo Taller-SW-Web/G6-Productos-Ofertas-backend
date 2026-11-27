@@ -6,7 +6,11 @@ import {
 } from '@nestjs/common';
 import { BulkPersistenceRepository } from '../persistence/bulk.repository.js';
 import { CatalogBulkResultConsumer } from './catalog-bulk-result-consumer.js';
-import { BulkServiceBus, createBulkServiceBus } from './bulk-service-bus.js';
+import {
+  BulkServiceBus,
+  bulkCommandQueueForEvent,
+  createBulkServiceBus,
+} from './bulk-service-bus.js';
 
 const pollIntervalMs = 2000;
 const recoveryDelayMs = 2000;
@@ -20,7 +24,7 @@ export class BulkServiceBusRuntime implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(BulkServiceBusRuntime.name);
   private readonly bus?: BulkServiceBus;
   private readonly required: boolean;
-  private subscription?: BulkSubscription;
+  private subscriptions: BulkSubscription[] = [];
   private timer?: ReturnType<typeof setInterval>;
   private recoveryTimer?: ReturnType<typeof setTimeout>;
   private running?: Promise<void>;
@@ -69,20 +73,33 @@ export class BulkServiceBusRuntime implements OnModuleInit, OnModuleDestroy {
     const bus = this.bus;
     if (!bus || this.stopped || Date.now() < this.retryAfter) return;
     try {
-      if (!this.subscription) {
-        this.subscription = bus.subscribeCatalogResults(this.results, () =>
-          this.scheduleRecovery(),
-        );
+      if (this.subscriptions.length === 0) {
+        this.subscriptions = [
+          bus.subscribeCatalogResults(this.results, () =>
+            this.scheduleRecovery(),
+          ),
+          bus.subscribePricingResults(this.results, () =>
+            this.scheduleRecovery(),
+          ),
+          bus.subscribeInventoryResults(this.results, () =>
+            this.scheduleRecovery(),
+          ),
+        ];
       }
       await bus.verifySender(AbortSignal.timeout(5000));
-      await this.subscription.probe(AbortSignal.timeout(5000));
+      await Promise.all(
+        this.subscriptions.map((sub) => sub.probe(AbortSignal.timeout(5000))),
+      );
       const pending =
         await this.repository.claimPendingServiceBusDeliveries(20);
+      if (pending.length > 0)
+        console.error(`[bulk-sb-runtime] error=NONE claimed=${pending.length}`);
       for (const item of pending) {
         const leaseToken = item.delivery.leaseToken;
         if (!leaseToken) continue;
         try {
-          await bus.publishCatalogCommand(
+          await bus.publishCommand(
+            bulkCommandQueueForEvent(item.eventName),
             {
               messageId: item.messageId,
               correlationId: item.correlationId,
@@ -95,7 +112,8 @@ export class BulkServiceBusRuntime implements OnModuleInit, OnModuleDestroy {
             item.messageId,
             leaseToken,
           );
-        } catch {
+        } catch (error) {
+          console.error('[bulk-sb-runtime] flush error:', error);
           await this.repository.releaseServiceBusDelivery(
             item.messageId,
             leaseToken,
@@ -108,7 +126,8 @@ export class BulkServiceBusRuntime implements OnModuleInit, OnModuleDestroy {
       this.connected = true;
       this.failures = 0;
       this.retryAfter = 0;
-    } catch {
+    } catch (error) {
+      console.error('[bulk-sb-runtime] flush error:', error);
       this.connected = false;
       this.failures = Math.min(this.failures + 1, 8);
       this.retryAfter =
@@ -116,9 +135,11 @@ export class BulkServiceBusRuntime implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(
         'Bulk Service Bus no disponible; entregas durables pendientes se reintentarán con backoff.',
       );
-      if (this.subscription) {
-        await this.subscription.close().catch(() => undefined);
-        this.subscription = undefined;
+      if (this.subscriptions.length > 0) {
+        await Promise.all(
+          this.subscriptions.map((sub) => sub.close().catch(() => undefined)),
+        );
+        this.subscriptions = [];
       }
       this.scheduleRecovery();
     }
@@ -140,7 +161,10 @@ export class BulkServiceBusRuntime implements OnModuleInit, OnModuleDestroy {
     if (this.timer) clearInterval(this.timer);
     if (this.recoveryTimer) clearTimeout(this.recoveryTimer);
     await this.running?.catch(() => undefined);
-    await this.subscription?.close().catch(() => undefined);
+    await Promise.all(
+      this.subscriptions.map((sub) => sub.close().catch(() => undefined)),
+    );
+    await this.bus?.close().catch(() => undefined);
     await this.bus?.close().catch(() => undefined);
   }
 }

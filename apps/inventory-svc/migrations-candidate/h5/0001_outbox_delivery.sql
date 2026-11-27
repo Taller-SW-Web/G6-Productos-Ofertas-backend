@@ -28,7 +28,8 @@ CREATE TABLE inventory.outbox_delivery (
     destination IN (
       'g6.catalog.from.inventory',
       'g6.combos.from.inventory',
-      'g6.promotions.from.inventory'
+      'g6.promotions.from.inventory',
+      'g6.bulk.from.inventory'
     )
   ),
   CONSTRAINT ck_inventory_delivery_attempts CHECK (attempts >= 0),

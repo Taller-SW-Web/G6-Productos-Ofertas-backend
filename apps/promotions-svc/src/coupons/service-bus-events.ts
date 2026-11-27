@@ -11,6 +11,7 @@ import { assignedH4Contracts } from './assigned-h4-contract.generated.js';
 import { PromotionsAssignedEventDispatcher } from './assigned-event-dispatcher.js';
 import { record } from './schema-validator.js';
 import type { PromotionsServiceBusConfig } from './service-bus-config.js';
+import { createHttpPromotionsLabBus } from './http-lab-bus.js';
 
 // Queue ownership and Sender RBAC must be verified before activation. The body
 // producer/app properties alone never authenticate the producer.
@@ -49,6 +50,8 @@ export interface EventBus {
 export function nativePromotionsEventBus(
   config: PromotionsServiceBusConfig,
 ): EventBus {
+  if (config.isolatedBus && config.isolatedBusUrl)
+    return createHttpPromotionsLabBus(config.isolatedBusUrl);
   const credential = config.managedIdentityClientId
     ? new ManagedIdentityCredential({
         clientId: config.managedIdentityClientId,

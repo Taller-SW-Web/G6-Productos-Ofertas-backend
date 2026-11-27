@@ -35,6 +35,8 @@ export function readCatalogSecurityConfig(
   env: Record<string, string | undefined> = process.env,
 ): CatalogSecurityConfig | undefined {
   const simulated = env.G6_SECURITY_MODE === 'SIMULATED_AUTH';
+  if (simulated && env.NODE_ENV !== 'test')
+    throw new Error('SIMULATED_AUTH solo se permite en NODE_ENV=test.');
   const values = [
     simulated ? env.SIMULATED_AUTH_ISSUER : env.SECURITY_ISSUER,
     simulated ? undefined : env.SECURITY_DISCOVERY_URL,

@@ -1,6 +1,6 @@
 {
-  "docsSha": "490172c11cb4b83ddd1996f8d5834d0402184cf8",
-  "gatewaySha": "1b90543dc39a8919fd94f0e059d10e1002b3b2a9",
+  "docsSha": "099ad1926a53d1aec1aeae93e894d24ec2721748",
+  "gatewaySha": "2eb8c864f8d315060cf00ccd35ce4015b9569556",
   "publicationMode": "candidate",
   "securityProfile": "UNSPECIFIED",
   "enabledProviders": [],
@@ -13,7 +13,7 @@
     "approved": false
   },
   "contractInventory": {
-    "totalOperations": 154,
+    "totalOperations": 156,
     "internalExcludedIds": [
       "filtrarSkusVendiblesInterno",
       "obtenerContenidoCargaMasivaInternoH5",
@@ -38,10 +38,7 @@
   },
   "candidateCatalog": {
     "operationCount": 145,
-    "pendingG7AllowlistIds": [
-      "consultarDisponibilidadCombo",
-      "obtenerCombo"
-    ]
+    "pendingG7AllowlistIds": []
   },
   "effectivePublication": {
     "authorized": false,
@@ -527,7 +524,7 @@
       },
       {
         "operationId": "obtenerSeoPorSlug",
-        "reason": "PUBLIC_NOT_IN_ALLOWLIST"
+        "reason": "NO_SECURITY_PROFILE"
       },
       {
         "operationId": "obtenerTipoProducto",
@@ -623,7 +620,7 @@
       },
       {
         "operationId": "resolverSlugAnterior",
-        "reason": "PUBLIC_NOT_IN_ALLOWLIST"
+        "reason": "NO_SECURITY_PROFILE"
       },
       {
         "operationId": "resolverSlugCategoriaCreacion",
@@ -1841,8 +1838,12 @@
             "combos:leer"
           ],
           "roles": [],
-          "allowedClients": [],
-          "clientAllowlistStatus": "PENDING_G7_ALLOWLIST",
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
           "introspectionRequired": false
         }
       ],
@@ -1855,8 +1856,12 @@
       "roles": [
         "GESTOR_COMERCIAL"
       ],
-      "allowedClients": [],
-      "clientAllowlistStatus": "PENDING_G7_ALLOWLIST",
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-retail"
+      ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "m2mAlternativeExcludedReason": null,
       "introspectionRequired": false,
       "exposureProfile": "human_or_m2m_partner",
@@ -4496,9 +4501,10 @@
       "service": "catalog-svc",
       "secured": true,
       "authSchemes": [
+        "serviceBearer",
         "userBearer"
       ],
-      "identityType": "human",
+      "identityType": "human_or_m2m",
       "securityAlternatives": [
         {
           "scheme": "userBearer",
@@ -4512,20 +4518,44 @@
           ],
           "allowedClients": [],
           "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
         }
       ],
       "issuerRequired": true,
       "audienceRequired": false,
-      "audience": null,
-      "scopes": [],
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
       "roles": [
         "GESTOR_COMERCIAL"
       ],
-      "allowedClients": [],
-      "clientAllowlistStatus": "NOT_APPLICABLE",
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-retail"
+      ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "m2mAlternativeExcludedReason": null,
       "introspectionRequired": false,
-      "exposureProfile": "commercial",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
       "environmentEnabled": false,
       "g5OptIn": false
@@ -4818,8 +4848,12 @@
             "combos:leer"
           ],
           "roles": [],
-          "allowedClients": [],
-          "clientAllowlistStatus": "PENDING_G7_ALLOWLIST",
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
           "introspectionRequired": false
         }
       ],
@@ -4832,8 +4866,12 @@
       "roles": [
         "GESTOR_COMERCIAL"
       ],
-      "allowedClients": [],
-      "clientAllowlistStatus": "PENDING_G7_ALLOWLIST",
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-retail"
+      ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "m2mAlternativeExcludedReason": null,
       "introspectionRequired": false,
       "exposureProfile": "human_or_m2m_partner",
@@ -5775,20 +5813,63 @@
       "method": "GET",
       "path": "/seo/{slug}",
       "service": "taxonomy-svc",
-      "secured": false,
-      "authSchemes": [],
-      "identityType": "public",
-      "securityAlternatives": [],
-      "issuerRequired": false,
+      "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
+      "issuerRequired": true,
       "audienceRequired": false,
-      "audience": null,
-      "scopes": [],
-      "roles": [],
-      "allowedClients": [],
-      "clientAllowlistStatus": "NOT_APPLICABLE",
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-retail"
+      ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "m2mAlternativeExcludedReason": null,
       "introspectionRequired": false,
-      "exposureProfile": "public_read",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
       "environmentEnabled": false,
       "g5OptIn": false
@@ -6808,20 +6889,63 @@
       "method": "GET",
       "path": "/seo/resoluciones/{slugAnterior}",
       "service": "taxonomy-svc",
-      "secured": false,
-      "authSchemes": [],
-      "identityType": "public",
-      "securityAlternatives": [],
-      "issuerRequired": false,
+      "secured": true,
+      "authSchemes": [
+        "serviceBearer",
+        "userBearer"
+      ],
+      "identityType": "human_or_m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": false
+        },
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "catalogo:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-chatbot",
+            "modulo-marketplace",
+            "modulo-retail"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
+      "issuerRequired": true,
       "audienceRequired": false,
-      "audience": null,
-      "scopes": [],
-      "roles": [],
-      "allowedClients": [],
-      "clientAllowlistStatus": "NOT_APPLICABLE",
+      "audience": "api-productos",
+      "scopes": [
+        "catalogo:leer"
+      ],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [
+        "modulo-chatbot",
+        "modulo-marketplace",
+        "modulo-retail"
+      ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
       "m2mAlternativeExcludedReason": null,
       "introspectionRequired": false,
-      "exposureProfile": "public_read",
+      "exposureProfile": "human_or_m2m_partner",
       "rateProfile": "commercial_read",
       "environmentEnabled": false,
       "g5OptIn": false
@@ -7228,6 +7352,6 @@
       "g5OptIn": false
     }
   ],
-  "operationSetSha256": "040544e1666747ff00c9eb77c6509b6831c83368dcba7b0ef29f3668ac7365fb",
-  "filteredOpenApiCanonicalSha256": "2393ebc7625a84300d23f556cb31eeccfd19ee5b39d5ee3fb8ab2e72abd07101"
+  "operationSetSha256": "ee7b318011ff845770f2baee07fda13808f0f60372420abc6d2eef222a274cc9",
+  "filteredOpenApiCanonicalSha256": "40b0486b03b9a5f7aff3a5af120010e046556a8855de51c24aac0f4a42d59044"
 }

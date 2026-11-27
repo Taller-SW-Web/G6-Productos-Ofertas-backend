@@ -16,6 +16,7 @@ import {
   CommercialDependencyError,
   type CommercialContext,
   type BasketRequest,
+  type CommercialReadContext,
 } from '../domain/commercial-context.js';
 import { evaluateBasket } from '../domain/basket-evaluation.js';
 import { Decimal } from '../domain/decimal.js';
@@ -23,6 +24,10 @@ import { PROMOTIONS_CLOCK, type PromotionsClock } from '../domain/clock.js';
 import { BoundedCommercialContext } from '../infrastructure/resilience/commercial-deadline.js';
 import { httpContracts } from './http-contract.generated.js';
 import { withHttpClientSignal } from './client-cancellation.js';
+import {
+  PROMOTIONS_OPERATION_LOGGER,
+  PromotionsOperationLogger,
+} from '../infrastructure/logging/operation-logger.js';
 import {
   isUuid,
   PromotionsHttpError,
@@ -120,6 +125,8 @@ export class PromotionsQueryService {
     private readonly persistence: PromotionsPersistence,
     @Inject(COMMERCIAL_CONTEXT) facts: CommercialContext,
     @Inject(PROMOTIONS_CLOCK) private readonly clock: PromotionsClock,
+    @Inject(PROMOTIONS_OPERATION_LOGGER)
+    private readonly logger: PromotionsOperationLogger,
   ) {
     this.facts = new BoundedCommercialContext(facts);
   }
@@ -219,6 +226,19 @@ export class PromotionsQueryService {
       }
       case 'evaluarPromociones':
       case 'validarCupon': {
+        const evaluationStarted = performance.now();
+        const logEvaluationTotal = (
+          outcome: 'success' | 'internal_error',
+          errorCode?: string,
+        ) =>
+          this.logger.commercialStage({
+            correlationId: context.correlationId,
+            operation: id,
+            stage: 'evaluation_total',
+            durationMs: performance.now() - evaluationStarted,
+            outcome,
+            ...(errorCode ? { errorCode } : {}),
+          });
         const raw = request.body as BasketRequest;
         const body: BasketRequest = {
           channel_id: raw.channel_id,
@@ -232,70 +252,136 @@ export class PromotionsQueryService {
           ...(id === 'evaluarPromociones' ? { at: raw.at } : {}),
         };
         const at = id === 'evaluarPromociones' ? (body.at ?? now) : now;
-        // External calls precede the short, read-only database transaction.
-        const basketContext = await this.facts.basket(body, at, signal, {
+        const commercialTrace: CommercialReadContext = {
           ...context,
           at,
-        });
+          deadlineAt: performance.now() + 2500,
+          deadlineMs: 2500,
+          observe: (event) =>
+            this.logger.commercialStage({
+              correlationId: context.correlationId,
+              ...event,
+            }),
+        };
+        // External calls precede the short, read-only database transaction.
+        const basketContext = await this.facts
+          .basket(body, at, signal, { ...commercialTrace })
+          .catch((error: unknown) => {
+            logEvaluationTotal('internal_error', 'COMMERCIAL_CONTEXT_FAILED');
+            throw error;
+          });
         signal.throwIfAborted();
-        const snapshot = await this.persistence.read(async (r) => {
-          const active = await r.queries.summaries(
-            body.channel_id,
-            true,
-            undefined,
-            at,
-          );
-          const coupon = body.coupon_code
-            ? await r.coupons.findByCode(body.coupon_code)
-            : undefined;
-          const ids = new Set(
-            id === 'validarCupon' ? [] : active.map((p) => p.id),
-          );
-          if (coupon) ids.add(coupon.promotionId);
-          const promotions = await r.queries.promotionsByIds([...ids]);
-          const usage = coupon
-            ? await r.queries.couponUsage(coupon.id, body.customer_ref ?? null)
-            : undefined;
-          return {
-            promotions,
-            coupon: coupon && usage ? { ...coupon, ...usage } : undefined,
-          };
+        const persistenceStarted = performance.now();
+        const snapshot = await this.persistence
+          .read(async (r) => {
+            const active = await r.queries.summaries(
+              body.channel_id,
+              true,
+              undefined,
+              at,
+            );
+            const coupon = body.coupon_code
+              ? await r.coupons.findByCode(body.coupon_code)
+              : undefined;
+            const ids = new Set(
+              id === 'validarCupon' ? [] : active.map((p) => p.id),
+            );
+            if (coupon) ids.add(coupon.promotionId);
+            const promotions = await r.queries.promotionsByIds([...ids]);
+            const usage = coupon
+              ? await r.queries.couponUsage(
+                  coupon.id,
+                  body.customer_ref ?? null,
+                )
+              : undefined;
+            return {
+              promotions,
+              coupon: coupon && usage ? { ...coupon, ...usage } : undefined,
+            };
+          })
+          .catch((error: unknown) => {
+            this.logger.commercialStage({
+              correlationId: context.correlationId,
+              operation: id,
+              upstream: 'postgres',
+              stage: 'postgres_promotion_read',
+              durationMs: performance.now() - persistenceStarted,
+              outcome: 'internal_error',
+              errorCode: 'PROMOTIONS_PERSISTENCE_FAILED',
+            });
+            logEvaluationTotal(
+              'internal_error',
+              'PROMOTIONS_PERSISTENCE_FAILED',
+            );
+            throw error;
+          });
+        this.logger.commercialStage({
+          correlationId: context.correlationId,
+          operation: id,
+          upstream: 'postgres',
+          stage: 'postgres_promotion_read',
+          durationMs: performance.now() - persistenceStarted,
+          outcome: 'success',
         });
-        const evaluation = evaluateBasket(
-          body,
-          basketContext,
-          snapshot.promotions,
-          snapshot.coupon,
-          at,
-          id === 'validarCupon',
-        );
-        if (id === 'evaluarPromociones')
-          result = {
-            promotion_id: evaluation.promotionId,
-            original_amount: evaluation.original.toNumber(),
-            discount_amount: evaluation.discount.toNumber(),
-            result_amount: evaluation.result.toNumber(),
-            currency: evaluation.currency,
-            reason: evaluation.couponRejection ?? null,
-          };
-        else {
-          const candidate = evaluation.couponCandidate;
-          const validCoupon = evaluation.couponApplicable && !!candidate;
-          result = {
-            valid: validCoupon,
-            code: validCoupon
-              ? null
-              : (evaluation.couponRejection ?? 'CUPON_NO_COMBINABLE'),
-            benefit: validCoupon ? { promotion_id: candidate!.id } : null,
-            discount_amount: validCoupon
-              ? evaluation.original.subtract(candidate!.resultAmount).toNumber()
-              : 0,
-            result_amount: validCoupon
-              ? candidate!.resultAmount.toNumber()
-              : evaluation.original.toNumber(),
-            currency: evaluation.currency,
-          };
+        const processingStarted = performance.now();
+        try {
+          const evaluation = evaluateBasket(
+            body,
+            basketContext,
+            snapshot.promotions,
+            snapshot.coupon,
+            at,
+            id === 'validarCupon',
+          );
+          if (id === 'evaluarPromociones')
+            result = {
+              promotion_id: evaluation.promotionId,
+              original_amount: evaluation.original.toNumber(),
+              discount_amount: evaluation.discount.toNumber(),
+              result_amount: evaluation.result.toNumber(),
+              currency: evaluation.currency,
+              reason: evaluation.couponRejection ?? null,
+            };
+          else {
+            const candidate = evaluation.couponCandidate;
+            const validCoupon = evaluation.couponApplicable && !!candidate;
+            result = {
+              valid: validCoupon,
+              code: validCoupon
+                ? null
+                : (evaluation.couponRejection ?? 'CUPON_NO_COMBINABLE'),
+              benefit: validCoupon ? { promotion_id: candidate!.id } : null,
+              discount_amount: validCoupon
+                ? evaluation.original
+                    .subtract(candidate!.resultAmount)
+                    .toNumber()
+                : 0,
+              result_amount: validCoupon
+                ? candidate!.resultAmount.toNumber()
+                : evaluation.original.toNumber(),
+              currency: evaluation.currency,
+            };
+          }
+          this.logger.commercialStage({
+            correlationId: context.correlationId,
+            operation: id,
+            stage: 'basket_processing',
+            durationMs: performance.now() - processingStarted,
+            outcome: 'success',
+          });
+        } catch (error) {
+          this.logger.commercialStage({
+            correlationId: context.correlationId,
+            operation: id,
+            stage: 'basket_processing',
+            durationMs: performance.now() - processingStarted,
+            outcome: 'internal_error',
+            errorCode: 'BASKET_PROCESSING_FAILED',
+          });
+          logEvaluationTotal('internal_error', 'BASKET_PROCESSING_FAILED');
+          throw error;
         }
+        logEvaluationTotal('success');
         break;
       }
       case 'obtenerRecomendaciones': {

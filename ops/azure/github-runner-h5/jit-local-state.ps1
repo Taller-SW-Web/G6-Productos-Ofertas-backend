@@ -139,7 +139,8 @@ function Test-H5LegacyOperationReconciled {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Operation,[Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Resolutions)
     try { $expectedReadback=Get-AcaPatchExpectedReadback -Operation ([string]$Operation.operation) } catch { return $false }
-    $expectedSecretName=Get-AcaPatchExpectedJitSecretName -Operation ([string]$Operation.operation) -RecordedName ([string]$Operation.expectedSecretName)
+    $recordedSecretName=if($Operation.PSObject.Properties.Name -contains 'expectedSecretName'){[string]$Operation.expectedSecretName}else{''}
+    $expectedSecretName=Get-AcaPatchExpectedJitSecretName -Operation ([string]$Operation.operation) -RecordedName $recordedSecretName
     $matches=@($Resolutions | Where-Object {
         [string]$_.sourceAttemptId -ceq [string]$Operation.attemptId -and
         [string]::Equals([string]$_.resourceId,[string]$Operation.resourceId,[System.StringComparison]::OrdinalIgnoreCase) -and

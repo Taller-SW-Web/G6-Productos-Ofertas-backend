@@ -556,20 +556,19 @@ describe('Inventory Service Bus Consumer — Recepción en PeekLock e Idempotenc
     expect(mockCommands.process).not.toHaveBeenCalled();
   });
 
-  it('bloquea por contrato inventory.bulk.stock.adjust.requested y lo envía a DLQ con BLOCKED_CONTRACT', async () => {
+  it('procesa inventory.bulk.stock.adjust.requested de bulk-svc y completa el mensaje tras commit', async () => {
     const msg = createReceivedMessage('inventory.bulk.stock.adjust.requested', {
-      items: [],
+      batch_id: 'batch-1',
+      items: [{ row_number: 2, sku: 'SKU-1', delta: 3 }],
     });
+    const parsed = JSON.parse(String(msg.body));
+    parsed.producer = 'bulk-svc';
+    (msg as any).body = JSON.stringify(parsed);
     const result = await handler.handle(msg);
-    expect(result).toBe('dead-lettered');
-    expect(mockCommands.process).not.toHaveBeenCalled();
-    expect(settlement.deadLetterMessage).toHaveBeenCalledWith(
-      msg,
-      expect.objectContaining({
-        deadLetterReason: 'BLOCKED_CONTRACT',
-      }),
-    );
-    expect(settlement.completeMessage).not.toHaveBeenCalled();
+    expect(result).toBe('completed');
+    expect(mockCommands.process).toHaveBeenCalledOnce();
+    expect(settlement.completeMessage).toHaveBeenCalledWith(msg);
+    expect(settlement.deadLetterMessage).not.toHaveBeenCalled();
   });
 
   it('envía a DLQ sin bucle de reintentos cuando ocurre FEATURE_DISABLED', async () => {
@@ -814,8 +813,8 @@ describe('Inventory Service Bus Consumer Runtime — Ciclo de Vida y Reconexión
     // Intento 2: subscription.close() se recupera y confirma el cierre
     await (runtime as any).open();
     expect(mockSubscription.close).toHaveBeenCalledTimes(2);
-    // Exactamente una suscripción activa
-    expect(mockReceiver.subscribe).toHaveBeenCalledTimes(1);
+    // Exactamente una suscripción activa por receiver (catalog + bulk)
+    expect(mockReceiver.subscribe).toHaveBeenCalledTimes(2);
     expect((runtime as any).available).toBe(true);
 
     await runtime.onModuleDestroy();

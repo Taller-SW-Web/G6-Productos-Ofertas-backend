@@ -789,9 +789,12 @@ integration(
           [bId, ownerA, mId, randomUUID()],
         );
 
-        // Upgrade 0007 + 0008 with pre-existing data
+        // Upgrade 0007 + 0008 + 0009 with pre-existing data
         await apply('apps/bulk-svc/migrations/0007_bulk_retry_v1.sql');
         await apply('apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql');
+        await apply(
+          'apps/bulk-svc/migrations/0009_h5_outbox_delivery_all_destinations.sql',
+        );
 
         const preserved = await adminPool.query(
           `SELECT batch_id FROM ${testSchema}.batch_jobs WHERE batch_id = $1`,
@@ -1032,10 +1035,12 @@ integration(
           .where(eq(fileManifests.id, batchRows[0]!.inputFileId));
         expect(manifestRows).toHaveLength(1);
 
-        const outboxRows = await bulkDb
-          .select()
-          .from(bulkOutbox)
-          .where(eq(bulkOutbox.correlationId, realOutageCorrelationId));
+        const outboxRows = (
+          await bulkDb
+            .select()
+            .from(bulkOutbox)
+            .where(eq(bulkOutbox.correlationId, realOutageCorrelationId))
+        ).filter((row) => row.eventName === 'catalog.bulk.upsert.requested');
         expect(outboxRows).toHaveLength(1);
 
         // 8. Consume outbox twice -> APPLIED then DUPLICATE, zero commercial duplication

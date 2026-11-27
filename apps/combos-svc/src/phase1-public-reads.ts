@@ -32,48 +32,14 @@ export interface Phase1Request {
 
 /** Only fixed GET dependency clients call this selector. */
 export function usePublicDependencyReads(): boolean {
-  return (
-    process.env.G6_SECURITY_MODE === 'PUBLIC_READ_ONLY' &&
-    (process.env.COMBOS_PUBLIC_READ_OPERATIONS ?? '')
-      .split(',')
-      .some((id) => PHASE1_PUBLIC_OPERATION_IDS.has(id.trim()))
-  );
+  return false;
 }
 
 export function isPhase1PublicRead(
-  request: Phase1Request,
-  mode: string | undefined,
-  enabled: readonly string[] = [],
-  operationId?: string,
+  _request: Phase1Request,
+  _mode: string | undefined,
+  _enabled: readonly string[] = [],
+  _operationId?: string,
 ): boolean {
-  if (
-    mode !== 'PUBLIC_READ_ONLY' ||
-    request.headers.authorization !== undefined
-  )
-    return false;
-  const path = request.path;
-  if (!path || path.includes(String.fromCharCode(92)) || /%00/i.test(path))
-    return false;
-  const actual = path.split('/');
-  try {
-    if (actual.some((part) => ['.', '..'].includes(decodeURIComponent(part))))
-      return false;
-  } catch {
-    return false;
-  }
-  return PHASE1_PUBLIC_READS.some((route) => {
-    const expected = route.path.split('/');
-    return (
-      request.method === route.method &&
-      enabled.includes(route.operationId) &&
-      (operationId === undefined || route.operationId === operationId) &&
-      expected.length === actual.length &&
-      expected.every((part, index) =>
-        part.startsWith('{')
-          ? actual[index].length > 0 &&
-            (part === '{sku}' || !/%2f|%5c/i.test(actual[index]))
-          : part === actual[index],
-      )
-    );
-  });
+  return false;
 }
