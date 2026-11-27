@@ -159,8 +159,8 @@ describe('taxonomy PostgreSQL configuration and lifecycle', () => {
       }),
     };
     const dbMock = {
-      transaction: vi.fn(
-        async (fn: (tx: typeof txMock) => Promise<unknown>) => fn(txMock),
+      transaction: vi.fn(async (fn: (tx: typeof txMock) => Promise<unknown>) =>
+        fn(txMock),
       ),
     };
     (database as unknown as { pool: unknown; db: unknown }).pool = {
