@@ -38,6 +38,7 @@ export class CommercialController {
       'modulo-marketplace',
       'modulo-chatbot',
       'modulo-retail',
+      'modulo-ventas',
       'bulk-svc',
     ],
   })

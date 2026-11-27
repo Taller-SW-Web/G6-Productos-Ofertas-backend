@@ -166,7 +166,11 @@ describe('Marketplace provider security and invalid pagination regression', () =
     }
   });
   it('keeps scope/client 403 and audience 401 ahead of validation, and valid reads return 503 on persistence failure', async () => {
-    for (const claims of [{ scope: 'invalid' }, { sub: 'modulo-ventas' }])
+    for (const claims of [
+      { scope: 'invalid' },
+      { sub: 'modulo-postventa' },
+      { sub: 'modulo-ventas', scope: 'invalid' },
+    ])
       expect(
         (
           await request(app.getHttpServer())
@@ -175,6 +179,14 @@ describe('Marketplace provider security and invalid pagination regression', () =
             .expect(403)
         ).body.code,
       ).toBe('SCOPE_INSUFICIENTE');
+    await request(app.getHttpServer())
+      .get('/api/v1/productos?canal=VENTAS&estado=BORRADOR')
+      .auth(token({ sub: 'modulo-ventas' }), { type: 'bearer' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .get('/api/v1/productos/administracion')
+      .auth(token({ sub: 'modulo-ventas' }), { type: 'bearer' })
+      .expect(403);
     const wrongAudience = await request(app.getHttpServer())
       .get(path)
       .auth(token({ aud: ['other-api'] }), { type: 'bearer' })
@@ -318,9 +330,10 @@ describe('Marketplace provider security and invalid pagination regression', () =
         ['modulo-marketplace', 'MARKETPLACE'],
         ['modulo-chatbot', 'CHATBOT'],
         ['modulo-retail', 'RETAIL'],
+        ['modulo-ventas', 'VENTAS'],
       ]) {
         const response = await request(app.getHttpServer())
-          .get('/api/v1/productos?canal=' + canal)
+          .get('/api/v1/productos?canal=' + canal + '&pagina=1&tamanio=100')
           .auth(token({ sub }), { type: 'bearer' })
           .expect(200);
         expect(response.body).toEqual({
@@ -331,10 +344,14 @@ describe('Marketplace provider security and invalid pagination regression', () =
         });
       }
       await request(app.getHttpServer())
-        .get('/api/v1/productos?canal=VENTAS')
+        .get('/api/v1/productos?page=0&size=100')
         .auth(token({ sub: 'modulo-ventas' }), { type: 'bearer' })
+        .expect(400);
+      await request(app.getHttpServer())
+        .get('/api/v1/productos?canal=VENTAS')
+        .auth(token({ sub: 'modulo-postventa' }), { type: 'bearer' })
         .expect(403);
-      expect(read).toHaveBeenCalledTimes(3);
+      expect(read).toHaveBeenCalledTimes(4);
     } finally {
       read.mockRestore();
     }
