@@ -1,10 +1,22 @@
-import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { execFileSync, spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import { dirname, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+
+function resolveGitSha(cwd) {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function sha256Text(text) {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
 
 const BACKEND_ROOT = resolve(process.cwd());
 const FRONTEND_ROOT = resolve(process.env.G6_FRONTEND_ROOT ?? resolve(BACKEND_ROOT, "../frontend"));
@@ -380,14 +392,23 @@ async function main() {
     const recovered = await pollUntil(() => httpCall(`${env.isolatedBusUrl}/__test/broker-evidence`), response =>
       response.json.evidence.filter(event => event.queue === originalPricing.queue && event.messageId === originalPricing.messageId &&
         event.stage === 'COMPLETED').length > completedBeforeRestart);
-    const processRecovery = { kind: 'ACTUAL_LOCAL_PROCESS_KILL_AND_RESTART', stopped, restarted,
-      messageId: originalPricing.messageId, queuedWhileStopped: whileStopped.active['g6.pricing.from.bulk'] >= 1,
+    const processRecovery = {
+      evidenceType: 'R03_PRICING_CONSUMER_PROCESS_RESTART',
+      flow: 'R03',
+      queue: 'g6.pricing.from.bulk',
+      service: 'pricing-svc',
+      kind: 'ACTUAL_LOCAL_PROCESS_KILL_AND_RESTART',
+      stopped,
+      restarted,
+      messageId: originalPricing.messageId,
+      queuedWhileStopped: whileStopped.active['g6.pricing.from.bulk'] >= 1,
       settled: recovered.json.evidence.filter(event => event.queue === originalPricing.queue && event.messageId === originalPricing.messageId &&
         event.stage === 'COMPLETED').length > completedBeforeRestart,
       businessUnchanged: JSON.stringify(replayAfter) === JSON.stringify(await snapshot()),
-      limitation: 'Broker remains HTTP in-memory; this does not prove Azure persistence or lock expiry.' };
+      limitation: 'Applies to R03 (pricing-svc consuming g6.pricing.from.bulk), NOT R16 (price-audit-svc). Broker remains HTTP in-memory; this does not prove Azure persistence or lock expiry.',
+    };
     const duplicateEvidence = { replays, before: replayBefore, after: replayAfter,
-      recovery: { kind: 'LAB_RECEIVE_503_NOT_CONSUMER_PROCESS_STOP', queue: 'g6.pricing.from.bulk',
+      recovery: { flow: 'R03', kind: 'LAB_RECEIVE_503_NOT_CONSUMER_PROCESS_STOP', queue: 'g6.pricing.from.bulk',
         queuedWhileUnavailable: unavailableEvidence.active['g6.pricing.from.bulk'] >= 1 },
       allSettled: replays.every((replay) => replayPoll?.json?.evidence.filter((event) => event.queue === replay.queue &&
         event.messageId === replay.messageId && event.stage === 'COMPLETED').length > replay.completedBefore),
@@ -422,18 +443,49 @@ async function main() {
       flow.ok = flow.ok && flow.chainPass && flow.invalidMessages.length === 0;
     }
     const passed = flows.filter((f) => f.ok).length;
-    const summary = { timestamp: new Date().toISOString(), environment: "local-isolated-service-bus-and-postgres", transport: "HTTP_IN_MEMORY_NOT_AZURE", total: flows.length, passed, failed: flows.length - passed, fixture: { batchId, bulkProdId, bulkSku, admProdId, admSku, comboId, catDeactId, n01Order, n01ConsumeOp, n01RestoreOp }, flows, queryEvidence, duplicateEvidence, processRecovery, negativeEvidence, broker };
+    const generatedAtUtc = new Date().toISOString();
+    exitCode = passed === flows.length && duplicateEvidence.recovery.queuedWhileUnavailable && duplicateEvidence.allSettled && duplicateEvidence.unchanged &&
+      negativeEvidence.rejected && negativeEvidence.unchanged && processRecovery.stopped.stopped && processRecovery.restarted.ready &&
+      processRecovery.stopped.pid !== processRecovery.restarted.pid && processRecovery.queuedWhileStopped && processRecovery.settled && processRecovery.businessUnchanged ? 0 : 1;
+    const provenance = {
+      backendSha: resolveGitSha(BACKEND_ROOT),
+      frontendSha: resolveGitSha(FRONTEND_ROOT),
+      docsSha: resolveGitSha(DOCS_ROOT),
+      contractVersion: "0.7.0-rc.3",
+      evidenceLevel: "L1_ISOLATED",
+      transport: "HTTP_IN_MEMORY_NOT_AZURE",
+      command: `node tests/h5/certify-19-messaging-flows.mjs`,
+      generatedAtUtc,
+      exitCode,
+    };
+    const summary = { metadata: provenance, timestamp: generatedAtUtc, environment: "local-isolated-service-bus-and-postgres", transport: "HTTP_IN_MEMORY_NOT_AZURE", total: flows.length, passed, failed: flows.length - passed, fixture: { batchId, bulkProdId, bulkSku, admProdId, admSku, comboId, catDeactId, n01Order, n01ConsumeOp, n01RestoreOp }, flows, queryEvidence, duplicateEvidence, processRecovery, negativeEvidence, broker };
     mkdirSync(dirname(REPORT_JSON_PATH), { recursive: true });
-    writeFileSync(REPORT_JSON_PATH, JSON.stringify(summary, null, 2), "utf8");
+    const summaryJson = JSON.stringify(summary, null, 2);
+    writeFileSync(REPORT_JSON_PATH, summaryJson, "utf8");
     const csvLines = [
       "flujo,cola,productor,consumidor,estado_laboratorio_aislado,entorno",
       ...flows.map((f) => `${f.id},${f.cola},${f.productor},${f.consumidor},${f.ok ? "PASS" : "FAIL"},local-isolated-sb`),
     ];
-    writeFileSync(REPORT_CSV_PATH, csvLines.join("\n"), "utf8");
-    console.log(JSON.stringify({ total: flows.length, passed, failed: flows.length - passed }));
-    exitCode = passed === flows.length && duplicateEvidence.recovery.queuedWhileUnavailable && duplicateEvidence.allSettled && duplicateEvidence.unchanged &&
-      negativeEvidence.rejected && negativeEvidence.unchanged && processRecovery.stopped.stopped && processRecovery.restarted.ready &&
-      processRecovery.stopped.pid !== processRecovery.restarted.pid && processRecovery.queuedWhileStopped && processRecovery.settled && processRecovery.businessUnchanged ? 0 : 1;
+    const csvText = csvLines.join("\n");
+    writeFileSync(REPORT_CSV_PATH, csvText, "utf8");
+    const metaPath = resolve(REPORT_DIR, "MENSAJERIA_19_RECORRIDOS.meta.json");
+    writeFileSync(
+      metaPath,
+      JSON.stringify(
+        {
+          ...provenance,
+          total: flows.length,
+          passed,
+          failed: flows.length - passed,
+          reportJsonSha256: sha256Text(summaryJson),
+          reportCsvSha256: sha256Text(csvText),
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+    console.log(JSON.stringify({ total: flows.length, passed, failed: flows.length - passed, backendSha: provenance.backendSha }));
   } finally {
     writeFileSync(resolve(BACKEND_ROOT, "tests/h5/messaging-stack.log"), stackLogs, "utf8");
     await stopStack();

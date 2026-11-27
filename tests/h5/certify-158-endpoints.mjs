@@ -1,11 +1,23 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+
+function resolveGitSha(cwd) {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function sha256Text(text) {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
 
 const BACKEND_ROOT = resolve(process.cwd());
 const FRONTEND_ROOT = resolve(process.env.G6_FRONTEND_ROOT ?? resolve(BACKEND_ROOT, "../frontend"));
@@ -1566,9 +1578,28 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
     const notRun = results.filter((r) => r.status === "NOT_RUN").length;
     const executed = results.filter((r) => r.status !== "NOT_RUN").length;
     const countBy = (key, val) => results.filter((r) => r[key] === val).length;
+    const generatedAtUtc = new Date().toISOString();
+    const allOk =
+      failed === 0 &&
+      n01ConsumeStatus === "COMPLETED" &&
+      bulkTerminal === "COMPLETED" &&
+      authChecks.every((a) => a.pass);
+    exitCode = allOk ? 0 : 1;
+    const provenance = {
+      backendSha: resolveGitSha(BACKEND_ROOT),
+      frontendSha: resolveGitSha(FRONTEND_ROOT),
+      docsSha: resolveGitSha(DOCS_ROOT),
+      contractVersion: "0.7.0-rc.3",
+      evidenceLevel: "L1_ISOLATED",
+      transport: "HTTP_IN_MEMORY_NOT_AZURE",
+      command: `node tests/h5/certify-158-endpoints.mjs${process.argv.slice(2).length ? ` ${process.argv.slice(2).join(" ")}` : ""}`,
+      generatedAtUtc,
+      exitCode,
+    };
     const summary = {
+      metadata: provenance,
       status: failed === 0 && blocked === 0 && notRun === 0 && results.length === (FOCUSED ? 1 : 158) ? (FOCUSED ? "FOCUSED_PASS" : "PASS") : (blocked > 0 ? "INFRA_LOST" : "FAIL"),
-      timestamp: new Date().toISOString(),
+      timestamp: generatedAtUtc,
       total: results.length,
       executed,
       notExecuted: notRun,
@@ -1593,10 +1624,13 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       bulkSnap,
       results,
     };
-    writeFileSync(REPORT_JSON_PATH, JSON.stringify(summary, null, 2), "utf8");
+    mkdirSync(dirname(REPORT_JSON_PATH), { recursive: true });
+    const summaryJson = JSON.stringify(summary, null, 2);
+    writeFileSync(REPORT_JSON_PATH, summaryJson, "utf8");
     const mdLines = [
       `# Certificación 158 Endpoints G6 H5 R2`,
       `- Fecha: ${summary.timestamp}`,
+      `- Backend SHA: \`${provenance.backendSha}\` | Frontend SHA: \`${provenance.frontendSha}\` | Docs SHA: \`${provenance.docsSha}\``,
       `- Total: ${summary.total} | PASS: ${passed} | FAIL: ${failed}`,
       `- N01 Consume: ${n01ConsumeStatus} | Bulk Terminal: ${bulkTerminal} | AuthChecks: ${authChecks.every((a) => a.pass)}`,
       ``,
@@ -1604,7 +1638,27 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       `|---:|---|---|---|---|---:|---|---|---|---|---|---|`,
       ...results.map((r) => `| ${r.n} | ${r.svc} | \`${r.opId}\` | ${r.method} | \`${r.rawRoute}\` | ${r.httpStatus} | ${r.routeSecurity} | ${r.negativeContract} | ${r.functional} | ${r.persistence} | ${r.asyncTerminal} | **${r.status}** |`),
     ];
-    writeFileSync(REPORT_MD_PATH, mdLines.join("\n"), "utf8");
+    const mdText = mdLines.join("\n");
+    writeFileSync(REPORT_MD_PATH, mdText, "utf8");
+    const metaPath = resolve(REPORT_DIR, `158_ENDPOINTS_CERTIFICATION_REPORT${REPORT_SUFFIX}.meta.json`);
+    writeFileSync(
+      metaPath,
+      JSON.stringify(
+        {
+          ...provenance,
+          status: summary.status,
+          total: summary.total,
+          passed,
+          failed,
+          blocked,
+          reportJsonSha256: sha256Text(summaryJson),
+          reportMdSha256: sha256Text(mdText),
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
 
     console.log(JSON.stringify({
       total: summary.total,
@@ -1613,6 +1667,7 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       n01ConsumeStatus,
       bulkTerminal,
       authChecksPass: authChecks.every((a) => a.pass),
+      backendSha: provenance.backendSha,
     }));
 
     if (failed > 0 || n01ConsumeStatus !== "COMPLETED" || bulkTerminal !== "COMPLETED") {
@@ -1622,12 +1677,6 @@ async function verifyPgPersistence(opId, method, isHealth, posRes, ctx, g5SeedOr
       const qTax = await httpCall(`${env.isolatedBusUrl}/queues/g6.catalog.from.taxonomy/peek`).catch(() => null);
       console.error(`[certify] DIAG n01=${n01ConsumeStatus} bulk=${bulkTerminal} bulkSnap=${JSON.stringify(bulkSnap)} qCat=${qCat?.text?.slice(0,200)} qBulk=${qBulk?.text?.slice(0,200)} qTax=${qTax?.text?.slice(0,200)}`);
     }
-    const allOk =
-      failed === 0 &&
-      n01ConsumeStatus === "COMPLETED" &&
-      bulkTerminal === "COMPLETED" &&
-      authChecks.every((a) => a.pass);
-    exitCode = allOk ? 0 : 1;
   } catch (err) {
     if (typeof stackLogs === "string" && stackLogs.length > 0) {
       writeFileSync(resolve(BACKEND_ROOT, "tests/h5/certify-stack.log"), stackLogs, "utf8");
