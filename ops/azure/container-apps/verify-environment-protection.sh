@@ -34,8 +34,14 @@ if [[ "$environment_name" == azure-h5-pilot-234 ]]; then
 elif [[ "$environment_name" == azure-h5-chile ]]; then
   admin_bypass="$(jq -r '.can_admins_bypass | tostring' <<< "$env_json")"
   [[ "$admin_bypass" == false ]] || fail 'el Environment Chile permite bypass administrativo o no declara esa regla'
-  required_reviewers="$(jq '[.protection_rules[]? | select(.type == "required_reviewers" and .prevent_self_review == false and (.reviewers | length == 1) and .reviewers[0].type == "User" and .reviewers[0].reviewer.id == 143348512)] | length' <<< "$env_json")"
-  [[ "$required_reviewers" == 1 ]] || fail 'Chile requiere solo a mrcastilla8 como reviewer y permite su autoaprobación explícita'
+  jq -e '
+    [.protection_rules[]? | select(.type == "required_reviewers")] |
+    length == 1 and .[0].prevent_self_review == false and
+    (.[0].reviewers | map({type, id: .reviewer.id}) | sort_by(.id)) == [
+      {type: "User", id: 129343979},
+      {type: "User", id: 143348512}
+    ]
+  ' <<< "$env_json" >/dev/null || fail 'Chile requiere exactamente a AXL031 y mrcastilla8 como reviewers y permite la autoaprobación explícita'
   branch_mode="$(jq -r 'if .deployment_branch_policy.custom_branch_policies == true and .deployment_branch_policy.protected_branches == false then "custom" else "invalid" end' <<< "$env_json")"
   [[ "$branch_mode" == custom ]] || fail 'la política Chile debe ser explícita y restringida a master'
   branch_policies="$(gh api -H 'X-GitHub-Api-Version: 2022-11-28' "$branch_policies_path")" || fail 'no se pudieron consultar las ramas autorizadas de Chile'
