@@ -402,15 +402,311 @@ const independentOptions = {
         : { apim_rl_demo_primary_pass: ['rate==1'] },
 };
 
-export const options = independent ? independentOptions : legacyOptions;
 
 const baseUrl = __ENV.APIM_BASE_URL;
-const tokenM2mA = independent ? __ENV.APIM_RL_TEST_TOKEN : __ENV.APIM_JWT_M2M_A;
+const tokenM2mA = __ENV.APIM_JWT_M2M_A;
 const tokenM2mB = __ENV.APIM_JWT_M2M_B;
-const tokenHumanQuota = independent ? __ENV.APIM_RL_TEST_TOKEN : __ENV.APIM_JWT_HUMAN_QUOTA;
-const tokenHumanConcurrency = independent ? __ENV.APIM_RL_TEST_TOKEN : __ENV.APIM_JWT_HUMAN_CONCURRENCY;
-const burstPath = independent ? __ENV.APIM_RL_OPERATION_PATH : (__ENV.APIM_RL_M2M_PATH || '/productos');
+const tokenHumanQuota = __ENV.APIM_JWT_HUMAN_QUOTA;
+const tokenHumanConcurrency = __ENV.APIM_JWT_HUMAN_CONCURRENCY;
+const burstPath = __ENV.APIM_RL_M2M_PATH || '/productos';
 const quotaPath = __ENV.APIM_RL_QUOTA_PATH || '/productos/administracion';
+
+function isAuthzRejection(res) {
+  const body = String(res.body || '');
+  return (
+    res.status === 401 ||
+    (res.status === 403 &&
+      (body.includes('SCOPE_INSUFICIENTE') || body.includes('TOKEN_INVALIDO')))
+  );
+}
+
+export function burstClientA() {
+  const res = http.get(`${baseUrl}${burstPath}`, {
+    headers: { Authorization: `Bearer ${tokenM2mA}` },
+  });
+  if (isAuthzRejection(res)) authzFalsePositive.add(1);
+  if (res.status === 429) {
+    burst429.add(1);
+    if (res.headers['Retry-After']) burstRetryAfter.add(1);
+  }
+  check(res, {
+    'RL-01/RL-02 burst produces 200 or 429 with Retry-After': (r) =>
+      r.status === 200 || (r.status === 429 && Boolean(r.headers['Retry-After'])),
+  });
+}
+
+export function recoveryClientA() {
+  const res = http.get(`${baseUrl}${burstPath}`, {
+    headers: { Authorization: `Bearer ${tokenM2mA}` },
+  });
+  if (isAuthzRejection(res)) authzFalsePositive.add(1);
+  if (res.status === 200) recovery200.add(1);
+  check(res, {
+    'RL-03 recovery same identity/op after window returns 200': (r) => r.status === 200,
+  });
+  sleep(1);
+}
+
+export function quotaHumanClient() {
+  const res = http.get(`${baseUrl}${quotaPath}`, {
+    headers: { Authorization: `Bearer ${tokenHumanQuota}` },
+  });
+  if (isAuthzRejection(res)) {
+    authzFalsePositive.add(1);
+  } else if (res.status === 429) {
+    quotaBurstCollision.add(1);
+  } else if (res.status === 403) {
+    const category = classifyHttpResponse(res.status, String(res.body || ''), res.headers, {
+      quotaEnabled: Boolean(__ENV.APIM_RL_QUOTA_ERROR_CODE),
+      quotaErrorCodes: __ENV.APIM_RL_QUOTA_ERROR_CODE ? [__ENV.APIM_RL_QUOTA_ERROR_CODE] : [],
+    });
+    if (category === 'quota_exhausted') quota403.add(1);
+    else quotaBurstCollision.add(1);
+  }
+  check(res, {
+    'quota uses the exact policy code or returns expected 200 (generic 403 is not quota)': (r) => {
+      const category = classifyHttpResponse(r.status, String(r.body || ''), r.headers, {
+        quotaEnabled: Boolean(__ENV.APIM_RL_QUOTA_ERROR_CODE),
+        quotaErrorCodes: __ENV.APIM_RL_QUOTA_ERROR_CODE ? [__ENV.APIM_RL_QUOTA_ERROR_CODE] : [],
+      });
+      return category === 'admitted' || category === 'quota_exhausted';
+    },
+  });
+}
+
+export function concurrencyExpensive() {
+  const res = http.get(`${baseUrl}${expensivePath}`, {
+    headers: { Authorization: `Bearer ${tokenHumanConcurrency}` },
+  });
+  if (isAuthzRejection(res)) {
+    authzFalsePositive.add(1);
+    concurrencyUnexpectedStatus.add(1);
+  } else if (res.status === 404 || res.status === 403 || res.status === 401 || res.status >= 500) {
+    concurrencyUnexpectedStatus.add(1);
+  } else if (res.status === 429) {
+    concurrency429.add(1);
+  }
+  check(res, {
+    'RL-06 concurrency limit returns 200 or 429 (idempotency is separately evaluated)': (r) =>
+      r.status === 200 || r.status === 429,
+  });
+}
+
+export function isolatedClientB() {
+  const res = http.get(`${baseUrl}${burstPath}`, {
+    headers: { Authorization: `Bearer ${tokenM2mB}` },
+  });
+  const ok = res.status === 200;
+  if (ok) clientB200.add(1);
+  clientBFailed.add(!ok);
+  check(res, {
+    'RL-04 client B isolated (strict 200)': (r) => r.status === 200,
+  });
+  sleep(0.25);
+}
+
+export function handleSummary(data) {
+  if (independent) {
+    const metric = (name) => data.metrics?.[name]?.values ?? null;
+    const count = (name) => metric(name)?.count ?? 0;
+    const rate = (name) => metric(name)?.rate ?? null;
+    const concurrencySummary = profile === 'concurrencia' ? {
+      requests_offered: count('apim_rl_demo_offered'),
+      requests_admitted: count('apim_rl_demo_admitted'),
+      requests_rejected_429: count('apim_rl_demo_concurrency_429'),
+      unexpected_responses: count('apim_rl_demo_concurrency_unexpected'),
+      max_concurrency_authorized: independentContext.policyConcurrencyLimit,
+      request_budget: independentContext.expected.maxRequests,
+      vus_authorized: independentContext.expected.maxVus,
+      requests_per_second_authorized: independentContext.expected.maxRps,
+      first_request_epoch_seconds: metric('apim_rl_demo_concurrency_epoch_seconds')?.min ?? null,
+      last_request_epoch_seconds: metric('apim_rl_demo_concurrency_epoch_seconds')?.max ?? null,
+    } : null;
+    const demoEvent = profile === 'concurrencia' ? {
+      profile,
+      run_id: __ENV.APIM_RL_RUN_ID,
+      status: concurrencySummary.requests_offered === concurrencySummary.request_budget &&
+        concurrencySummary.requests_admitted <= concurrencySummary.max_concurrency_authorized &&
+        concurrencySummary.requests_rejected_429 > 0 && concurrencySummary.unexpected_responses === 0 &&
+        count('dropped_iterations') === 0 ? 'PASS' : 'FAIL',
+      scope: __ENV.APIM_RL_MODE === 'local' ? 'L1_LOCAL_POLICY_SIMULATION' : 'L2_STAGING_APIM',
+      requirements: {
+        'RL-06': 'INCONCLUSIVE_IDEMPOTENCIA_NO_VERIFICADA',
+        concurrency_observation: concurrencySummary.requests_rejected_429 > 0 ? 'PASS' : 'FAIL',
+        'RL-05': 'INCONCLUSIVE_TELEMETRIA_REQUERIDA',
+      },
+      timeline_epoch_seconds: {
+        first_request: concurrencySummary.first_request_epoch_seconds,
+        last_request: concurrencySummary.last_request_epoch_seconds,
+      },
+      result: concurrencySummary,
+    } : null;
+    const demoPass = profile === 'aislamiento'
+      ? rate('apim_rl_demo_isolation_pass') === 1
+      : profile === 'cuota'
+        ? rate('apim_rl_demo_quota_pass') === 1
+        : profile === 'concurrencia'
+          ? demoEvent.status === 'PASS'
+          : rate('apim_rl_demo_primary_pass') === 1;
+    const summary = {
+      schema_version: 1,
+      case_id: profile === 'demo-rate-limit' ? 'RL-01-RL-03' : profile === 'aislamiento' ? 'RL-04' : profile === 'concurrencia' ? 'RL-06' : 'APIM-QUOTA',
+      execution_result: demoPass ? 'PASS' : 'FAIL',
+      overall_certification: 'INCONCLUSIVE',
+      scope: __ENV.APIM_RL_MODE === 'local' ? 'L1_LOCAL_POLICY_SIMULATION' : 'L2_STAGING_APIM',
+      assessment: {
+        'RL-01': ['demo-rate-limit', 'aislamiento'].includes(profile)
+          ? demoEvent?.requirements?.['RL-01'] ?? 'NOT_RUN' : 'NOT_RUN',
+        'RL-02': ['demo-rate-limit', 'aislamiento'].includes(profile)
+          ? demoEvent?.requirements?.['RL-02'] ?? 'NOT_RUN' : 'NOT_RUN',
+        'RL-03': ['demo-rate-limit', 'aislamiento'].includes(profile)
+          ? demoEvent?.requirements?.['RL-03'] ?? 'NOT_RUN' : 'NOT_RUN',
+        'RL-04': profile === 'aislamiento' && count('apim_rl_demo_isolation_b_200') === 1 ? 'PASS' : 'NOT_RUN',
+        'RL-05': 'INCONCLUSIVE_TELEMETRIA_APIM_GATEWAY_BACKEND_REQUERIDA',
+        'RL-06': profile === 'concurrencia' ? 'INCONCLUSIVE_IDEMPOTENCIA_NO_VERIFICADA' : 'NOT_RUN_IDEMPOTENCIA_NO_VERIFICADA',
+      },
+      metadata: {
+        profile,
+        run_id: __ENV.APIM_RL_RUN_ID,
+        mode: __ENV.APIM_RL_MODE,
+        operation_id: __ENV.APIM_RL_OPERATION_ID,
+        method: 'GET',
+        path: __ENV.APIM_RL_OPERATION_PATH,
+        revision: __ENV.APIM_REVISION,
+        policy_sha256: __ENV.APIM_POLICY_HASH,
+        effective_manifest_sha256: __ENV.APIM_EFFECTIVE_MANIFEST_SHA256 || null,
+        effective_parameters_sha256: __ENV.APIM_EFFECTIVE_PARAMETERS_SHA256 || null,
+        verified_permit_sha256: __ENV.APIM_RL_VERIFIED_PERMIT_SHA256 || null,
+        request_limit: Number(__ENV.APIM_RL_MAX_REQUESTS),
+        rps_limit: Number(__ENV.APIM_RL_MAX_RPS),
+        vus_limit: independentContext.expected.maxVus,
+        duration_limit_seconds: Number(__ENV.APIM_RL_MAX_DURATION_SECONDS),
+      },
+      metrics: {
+        offered: metric('apim_rl_demo_offered'),
+        admitted: metric('apim_rl_demo_admitted'),
+        rejected: metric('apim_rl_demo_rejected'),
+        quota_expected_403: metric('apim_rl_demo_quota_expected_403'),
+        concurrency_429: metric('apim_rl_demo_concurrency_429'),
+        status_200: metric('apim_rl_demo_status_200'),
+        status_401: metric('apim_rl_demo_status_401'),
+        status_403: metric('apim_rl_demo_status_403'),
+        status_429: metric('apim_rl_demo_status_429'),
+        status_5xx: metric('apim_rl_demo_status_5xx'),
+        connection_error: metric('apim_rl_demo_status_connection_error'),
+        unexpected: metric('apim_rl_demo_unexpected'),
+        unexpected_rate: metric('apim_rl_demo_unexpected_rate'),
+        retry_after_seconds: metric('apim_rl_demo_retry_after_seconds'),
+        actual_wait_seconds: metric('apim_rl_demo_retry_wait_seconds'),
+        recovery_seconds: metric('apim_rl_demo_recovery_seconds'),
+        recovery_200: metric('apim_rl_demo_recovery_200'),
+        raw_k6_http_req_duration: metric('http_req_duration'),
+        raw_k6_http_reqs: metric('http_reqs'),
+        raw_k6_http_req_failed: metric('http_req_failed'),
+        vus: metric('vus'),
+        checks: metric('checks'),
+        dropped_iterations: metric('dropped_iterations'),
+      },
+      demo_event: demoEvent,
+    };
+    const serialized = JSON.stringify(summary, null, 2);
+    const summaryPath = __ENV.APIM_RL_SUMMARY_PATH;
+    return summaryPath ? { [summaryPath]: serialized, stdout: serialized } : { stdout: serialized };
+  }
+
+  const burstCount = data.metrics?.apim_rl_burst_429?.values?.count || 0;
+  const burstRetryAfterCount = data.metrics?.apim_rl_burst_retry_after?.values?.count || 0;
+  const recoveryCount = data.metrics?.apim_rl_recovery_200?.values?.count || 0;
+  const quotaCount = data.metrics?.apim_rl_quota_403?.values?.count || 0;
+  const concCount = data.metrics?.apim_rl_concurrency_429?.values?.count || 0;
+  const concUnexpected = data.metrics?.apim_rl_concurrency_unexpected_status?.values?.count || 0;
+  const quotaCollision = data.metrics?.apim_rl_quota_burst_collision?.values?.count || 0;
+  const authzFp = data.metrics?.apim_rl_authz_false_positive?.values?.count || 0;
+  const clientBCount = data.metrics?.apim_rl_client_b_200?.values?.count || 0;
+  const clientBFailRate = data.metrics?.apim_rl_client_b_failed?.values?.rate ?? 1;
+  const checksRate = data.metrics?.checks?.values?.rate ?? 0;
+
+  const suitePassed =
+    burstCount > 0 &&
+    burstRetryAfterCount > 0 &&
+    recoveryCount > 0 &&
+    quotaCount > 0 &&
+    concCount > 0 &&
+    concUnexpected === 0 &&
+    quotaCollision === 0 &&
+    authzFp === 0 &&
+    clientBCount > 0 &&
+    clientBFailRate === 0 &&
+    checksRate === 1;
+
+  const rl01 = burstCount > 0 ? 'PASS' : 'FAIL';
+  const rl02 = burstCount > 0 && Boolean(effectiveRateProfile) ? 'PASS' : 'FAIL';
+  const rl03 = 'INCONCLUSIVE_RECUPERACION_NO_USA_RETRY_AFTER_OBSERVADO';
+  const rl04 = 'INCONCLUSIVE_CLIENTE_B_NO_SE_EVALUA_DURANTE_BLOQUEO_A';
+  const rl05 = 'INCONCLUSIVE_TELEMETRIA_APIM_GATEWAY_BACKEND_REQUERIDA';
+  const rl06 = concCount > 0 ? 'INCONCLUSIVE_IDEMPOTENCIA_NO_VERIFICADA' : 'FAIL';
+
+  return {
+    stdout: JSON.stringify(
+      {
+        verificationStatus: suitePassed ? 'INCONCLUSIVE' : 'FAIL',
+        executionStatus: suitePassed ? 'PASS' : 'FAIL',
+        overallCertification: 'INCONCLUSIVE',
+        requirements: { 'RL-01': rl01, 'RL-02': rl02, 'RL-03': rl03, 'RL-04': rl04, 'RL-05': rl05, 'RL-06': rl06 },
+        extensions: { quota403: quotaCount > 0 ? 'PASS' : 'NOT_RUN', quotaBurstCollision: quotaCollision },
+        metadata: {
+          region: __ENV.APIM_REGION || 'UNSET',
+          sku: __ENV.APIM_SKU || 'UNSET',
+          revision: __ENV.APIM_REVISION || 'UNSET',
+          policyHash: __ENV.APIM_POLICY_HASH || 'UNSET',
+          operationSetSha256: manifest.operationSetSha256,
+          filteredOpenApiCanonicalSha256: manifest.filteredOpenApiCanonicalSha256,
+          rl06OperationId: matchedExpensiveOp.operationId,
+          rl06RateProfile: matchedExpensiveOp.rateProfile,
+          rl06ResolvedPath: expensivePath,
+          labProfile: {
+            burstCalls: labBurstCalls,
+            burstWindowSec: labBurstWindowSec,
+            quotaCalls: labQuotaCalls,
+            quotaBurstCalls: labQuotaBurstCalls,
+            quotaBurstWindowSec: labQuotaBurstWindowSec,
+            concurrencyMax: labConcurrencyMax,
+            expensiveBurstCalls: labExpensiveBurstCalls,
+          },
+        },
+        causes: {
+          burst_rate_limit_by_key_429: burstCount,
+          burst_retry_after: burstRetryAfterCount,
+          recovery_200: recoveryCount,
+          quota_by_key_403: quotaCount,
+          quota_burst_collision_429: quotaCollision,
+          limit_concurrency_429: concCount,
+          concurrency_unexpected_status: concUnexpected,
+          authz_false_positive: authzFp,
+          client_b_200: clientBCount,
+        },
+        metrics: {
+          checksRate,
+          duration: data.metrics?.http_req_duration?.values || {},
+          requests: data.metrics?.http_reqs?.values || {},
+          failed: data.metrics?.http_req_failed?.values || {},
+          burst429: data.metrics?.apim_rl_burst_429?.values || {},
+          burstRetryAfter: data.metrics?.apim_rl_burst_retry_after?.values || {},
+          recovery200: data.metrics?.apim_rl_recovery_200?.values || {},
+          quota403: data.metrics?.apim_rl_quota_403?.values || {},
+          concurrency429: data.metrics?.apim_rl_concurrency_429?.values || {},
+          clientB200: data.metrics?.apim_rl_client_b_200?.values || {},
+          clientBFailed: data.metrics?.apim_rl_client_b_failed?.values || {},
+          authzFalsePositive: data.metrics?.apim_rl_authz_false_positive?.values || {},
+        },
+      },
+      null,
+      2,
+    ),
+  };
+}
+
+export const options = independent ? independentOptions : legacyOptions;
 
 function metricCounter(name, count) {
   const Metric = Counter;
@@ -716,299 +1012,4 @@ export function concurrencyIteration() {
   sendIndependentRead('concurrency', Number(__VU) * 100000 + Number(__ITER));
   // Keep each authorized VU occupied after the arrival window; no extra request is generated.
   sleep(3);
-}
-
-function isAuthzRejection(res) {
-  const body = String(res.body || '');
-  return (
-    res.status === 401 ||
-    (res.status === 403 &&
-      (body.includes('SCOPE_INSUFICIENTE') || body.includes('TOKEN_INVALIDO')))
-  );
-}
-
-export function burstClientA() {
-  const res = http.get(`${baseUrl}${burstPath}`, {
-    headers: { Authorization: `Bearer ${tokenM2mA}` },
-  });
-  if (isAuthzRejection(res)) authzFalsePositive.add(1);
-  if (res.status === 429) {
-    burst429.add(1);
-    if (res.headers['Retry-After']) burstRetryAfter.add(1);
-  }
-  check(res, {
-    'RL-01/RL-02 burst produces 200 or 429 with Retry-After': (r) =>
-      r.status === 200 || (r.status === 429 && Boolean(r.headers['Retry-After'])),
-  });
-}
-
-export function recoveryClientA() {
-  const res = http.get(`${baseUrl}${burstPath}`, {
-    headers: { Authorization: `Bearer ${tokenM2mA}` },
-  });
-  if (isAuthzRejection(res)) authzFalsePositive.add(1);
-  if (res.status === 200) recovery200.add(1);
-  check(res, {
-    'RL-03 recovery same identity/op after window returns 200': (r) => r.status === 200,
-  });
-  sleep(1);
-}
-
-export function quotaHumanClient() {
-  const res = http.get(`${baseUrl}${quotaPath}`, {
-    headers: { Authorization: `Bearer ${tokenHumanQuota}` },
-  });
-  if (isAuthzRejection(res)) {
-    authzFalsePositive.add(1);
-  } else if (res.status === 429) {
-    quotaBurstCollision.add(1);
-  } else if (res.status === 403) {
-    const category = classifyHttpResponse(res.status, String(res.body || ''), res.headers, {
-      quotaEnabled: Boolean(__ENV.APIM_RL_QUOTA_ERROR_CODE),
-      quotaErrorCodes: __ENV.APIM_RL_QUOTA_ERROR_CODE ? [__ENV.APIM_RL_QUOTA_ERROR_CODE] : [],
-    });
-    if (category === 'quota_exhausted') quota403.add(1);
-    else quotaBurstCollision.add(1);
-  }
-  check(res, {
-    'quota uses the exact policy code or returns expected 200 (generic 403 is not quota)': (r) => {
-      const category = classifyHttpResponse(r.status, String(r.body || ''), r.headers, {
-        quotaEnabled: Boolean(__ENV.APIM_RL_QUOTA_ERROR_CODE),
-        quotaErrorCodes: __ENV.APIM_RL_QUOTA_ERROR_CODE ? [__ENV.APIM_RL_QUOTA_ERROR_CODE] : [],
-      });
-      return category === 'admitted' || category === 'quota_exhausted';
-    },
-  });
-}
-
-export function concurrencyExpensive() {
-  const res = http.get(`${baseUrl}${expensivePath}`, {
-    headers: { Authorization: `Bearer ${tokenHumanConcurrency}` },
-  });
-  if (isAuthzRejection(res)) {
-    authzFalsePositive.add(1);
-    concurrencyUnexpectedStatus.add(1);
-  } else if (res.status === 404 || res.status === 403 || res.status === 401 || res.status >= 500) {
-    concurrencyUnexpectedStatus.add(1);
-  } else if (res.status === 429) {
-    concurrency429.add(1);
-  }
-  check(res, {
-    'RL-06 concurrency limit returns 200 or 429 (idempotency is separately evaluated)': (r) =>
-      r.status === 200 || r.status === 429,
-  });
-}
-
-export function isolatedClientB() {
-  const res = http.get(`${baseUrl}${burstPath}`, {
-    headers: { Authorization: `Bearer ${tokenM2mB}` },
-  });
-  const ok = res.status === 200;
-  if (ok) clientB200.add(1);
-  clientBFailed.add(!ok);
-  check(res, {
-    'RL-04 client B isolated (strict 200)': (r) => r.status === 200,
-  });
-  sleep(0.25);
-}
-
-export function handleSummary(data) {
-  if (independent) {
-    const metric = (name) => data.metrics?.[name]?.values ?? null;
-    const count = (name) => metric(name)?.count ?? 0;
-    const rate = (name) => metric(name)?.rate ?? null;
-    const concurrencySummary = profile === 'concurrencia' ? {
-      requests_offered: count('apim_rl_demo_offered'),
-      requests_admitted: count('apim_rl_demo_admitted'),
-      requests_rejected_429: count('apim_rl_demo_concurrency_429'),
-      unexpected_responses: count('apim_rl_demo_concurrency_unexpected'),
-      max_concurrency_authorized: independentContext.policyConcurrencyLimit,
-      request_budget: independentContext.expected.maxRequests,
-      vus_authorized: independentContext.expected.maxVus,
-      requests_per_second_authorized: independentContext.expected.maxRps,
-      first_request_epoch_seconds: metric('apim_rl_demo_concurrency_epoch_seconds')?.min ?? null,
-      last_request_epoch_seconds: metric('apim_rl_demo_concurrency_epoch_seconds')?.max ?? null,
-    } : null;
-    const demoEvent = profile === 'concurrencia' ? {
-      profile,
-      run_id: __ENV.APIM_RL_RUN_ID,
-      status: concurrencySummary.requests_offered === concurrencySummary.request_budget &&
-        concurrencySummary.requests_admitted <= concurrencySummary.max_concurrency_authorized &&
-        concurrencySummary.requests_rejected_429 > 0 && concurrencySummary.unexpected_responses === 0 &&
-        count('dropped_iterations') === 0 ? 'PASS' : 'FAIL',
-      scope: __ENV.APIM_RL_MODE === 'local' ? 'L1_LOCAL_POLICY_SIMULATION' : 'L2_STAGING_APIM',
-      requirements: {
-        'RL-06': 'INCONCLUSIVE_IDEMPOTENCIA_NO_VERIFICADA',
-        concurrency_observation: concurrencySummary.requests_rejected_429 > 0 ? 'PASS' : 'FAIL',
-        'RL-05': 'INCONCLUSIVE_TELEMETRIA_REQUERIDA',
-      },
-      timeline_epoch_seconds: {
-        first_request: concurrencySummary.first_request_epoch_seconds,
-        last_request: concurrencySummary.last_request_epoch_seconds,
-      },
-      result: concurrencySummary,
-    } : null;
-    const demoPass = profile === 'aislamiento'
-      ? rate('apim_rl_demo_isolation_pass') === 1
-      : profile === 'cuota'
-        ? rate('apim_rl_demo_quota_pass') === 1
-        : profile === 'concurrencia'
-          ? demoEvent.status === 'PASS'
-          : rate('apim_rl_demo_primary_pass') === 1;
-    const summary = {
-      schema_version: 1,
-      case_id: profile === 'demo-rate-limit' ? 'RL-01-RL-03' : profile === 'aislamiento' ? 'RL-04' : profile === 'concurrencia' ? 'RL-06' : 'APIM-QUOTA',
-      execution_result: demoPass ? 'PASS' : 'FAIL',
-      overall_certification: 'INCONCLUSIVE',
-      scope: __ENV.APIM_RL_MODE === 'local' ? 'L1_LOCAL_POLICY_SIMULATION' : 'L2_STAGING_APIM',
-      assessment: {
-        'RL-01': ['demo-rate-limit', 'aislamiento'].includes(profile)
-          ? demoEvent?.requirements?.['RL-01'] ?? 'NOT_RUN' : 'NOT_RUN',
-        'RL-02': ['demo-rate-limit', 'aislamiento'].includes(profile)
-          ? demoEvent?.requirements?.['RL-02'] ?? 'NOT_RUN' : 'NOT_RUN',
-        'RL-03': ['demo-rate-limit', 'aislamiento'].includes(profile)
-          ? demoEvent?.requirements?.['RL-03'] ?? 'NOT_RUN' : 'NOT_RUN',
-        'RL-04': profile === 'aislamiento' && count('apim_rl_demo_isolation_b_200') === 1 ? 'PASS' : 'NOT_RUN',
-        'RL-05': 'INCONCLUSIVE_TELEMETRIA_APIM_GATEWAY_BACKEND_REQUERIDA',
-        'RL-06': profile === 'concurrencia' ? 'INCONCLUSIVE_IDEMPOTENCIA_NO_VERIFICADA' : 'NOT_RUN_IDEMPOTENCIA_NO_VERIFICADA',
-      },
-      metadata: {
-        profile,
-        run_id: __ENV.APIM_RL_RUN_ID,
-        mode: __ENV.APIM_RL_MODE,
-        operation_id: __ENV.APIM_RL_OPERATION_ID,
-        method: 'GET',
-        path: __ENV.APIM_RL_OPERATION_PATH,
-        revision: __ENV.APIM_REVISION,
-        policy_sha256: __ENV.APIM_POLICY_HASH,
-        effective_manifest_sha256: __ENV.APIM_EFFECTIVE_MANIFEST_SHA256 || null,
-        effective_parameters_sha256: __ENV.APIM_EFFECTIVE_PARAMETERS_SHA256 || null,
-        verified_permit_sha256: __ENV.APIM_RL_VERIFIED_PERMIT_SHA256 || null,
-        request_limit: Number(__ENV.APIM_RL_MAX_REQUESTS),
-        rps_limit: Number(__ENV.APIM_RL_MAX_RPS),
-        vus_limit: independentContext.expected.maxVus,
-        duration_limit_seconds: Number(__ENV.APIM_RL_MAX_DURATION_SECONDS),
-      },
-      metrics: {
-        offered: metric('apim_rl_demo_offered'),
-        admitted: metric('apim_rl_demo_admitted'),
-        rejected: metric('apim_rl_demo_rejected'),
-        quota_expected_403: metric('apim_rl_demo_quota_expected_403'),
-        concurrency_429: metric('apim_rl_demo_concurrency_429'),
-        status_200: metric('apim_rl_demo_status_200'),
-        status_401: metric('apim_rl_demo_status_401'),
-        status_403: metric('apim_rl_demo_status_403'),
-        status_429: metric('apim_rl_demo_status_429'),
-        status_5xx: metric('apim_rl_demo_status_5xx'),
-        connection_error: metric('apim_rl_demo_status_connection_error'),
-        unexpected: metric('apim_rl_demo_unexpected'),
-        unexpected_rate: metric('apim_rl_demo_unexpected_rate'),
-        retry_after_seconds: metric('apim_rl_demo_retry_after_seconds'),
-        actual_wait_seconds: metric('apim_rl_demo_retry_wait_seconds'),
-        recovery_seconds: metric('apim_rl_demo_recovery_seconds'),
-        recovery_200: metric('apim_rl_demo_recovery_200'),
-        raw_k6_http_req_duration: metric('http_req_duration'),
-        raw_k6_http_reqs: metric('http_reqs'),
-        raw_k6_http_req_failed: metric('http_req_failed'),
-        vus: metric('vus'),
-        checks: metric('checks'),
-        dropped_iterations: metric('dropped_iterations'),
-      },
-      demo_event: demoEvent,
-    };
-    const serialized = JSON.stringify(summary, null, 2);
-    const summaryPath = __ENV.APIM_RL_SUMMARY_PATH;
-    return summaryPath ? { [summaryPath]: serialized, stdout: serialized } : { stdout: serialized };
-  }
-
-  const burstCount = data.metrics?.apim_rl_burst_429?.values?.count || 0;
-  const burstRetryAfterCount = data.metrics?.apim_rl_burst_retry_after?.values?.count || 0;
-  const recoveryCount = data.metrics?.apim_rl_recovery_200?.values?.count || 0;
-  const quotaCount = data.metrics?.apim_rl_quota_403?.values?.count || 0;
-  const concCount = data.metrics?.apim_rl_concurrency_429?.values?.count || 0;
-  const concUnexpected = data.metrics?.apim_rl_concurrency_unexpected_status?.values?.count || 0;
-  const quotaCollision = data.metrics?.apim_rl_quota_burst_collision?.values?.count || 0;
-  const authzFp = data.metrics?.apim_rl_authz_false_positive?.values?.count || 0;
-  const clientBCount = data.metrics?.apim_rl_client_b_200?.values?.count || 0;
-  const clientBFailRate = data.metrics?.apim_rl_client_b_failed?.values?.rate ?? 1;
-  const checksRate = data.metrics?.checks?.values?.rate ?? 0;
-
-  const suitePassed =
-    burstCount > 0 &&
-    burstRetryAfterCount > 0 &&
-    recoveryCount > 0 &&
-    quotaCount > 0 &&
-    concCount > 0 &&
-    concUnexpected === 0 &&
-    quotaCollision === 0 &&
-    authzFp === 0 &&
-    clientBCount > 0 &&
-    clientBFailRate === 0 &&
-    checksRate === 1;
-
-  const rl01 = burstCount > 0 ? 'PASS' : 'FAIL';
-  const rl02 = burstCount > 0 && Boolean(effectiveRateProfile) ? 'PASS' : 'FAIL';
-  const rl03 = 'INCONCLUSIVE_RECUPERACION_NO_USA_RETRY_AFTER_OBSERVADO';
-  const rl04 = 'INCONCLUSIVE_CLIENTE_B_NO_SE_EVALUA_DURANTE_BLOQUEO_A';
-  const rl05 = 'INCONCLUSIVE_TELEMETRIA_APIM_GATEWAY_BACKEND_REQUERIDA';
-  const rl06 = concCount > 0 ? 'INCONCLUSIVE_IDEMPOTENCIA_NO_VERIFICADA' : 'FAIL';
-
-  return {
-    stdout: JSON.stringify(
-      {
-        verificationStatus: suitePassed ? 'INCONCLUSIVE' : 'FAIL',
-        executionStatus: suitePassed ? 'PASS' : 'FAIL',
-        overallCertification: 'INCONCLUSIVE',
-        requirements: { 'RL-01': rl01, 'RL-02': rl02, 'RL-03': rl03, 'RL-04': rl04, 'RL-05': rl05, 'RL-06': rl06 },
-        extensions: { quota403: quotaCount > 0 ? 'PASS' : 'NOT_RUN', quotaBurstCollision: quotaCollision },
-        metadata: {
-          region: __ENV.APIM_REGION || 'UNSET',
-          sku: __ENV.APIM_SKU || 'UNSET',
-          revision: __ENV.APIM_REVISION || 'UNSET',
-          policyHash: __ENV.APIM_POLICY_HASH || 'UNSET',
-          operationSetSha256: manifest.operationSetSha256,
-          filteredOpenApiCanonicalSha256: manifest.filteredOpenApiCanonicalSha256,
-          rl06OperationId: matchedExpensiveOp.operationId,
-          rl06RateProfile: matchedExpensiveOp.rateProfile,
-          rl06ResolvedPath: expensivePath,
-          labProfile: {
-            burstCalls: labBurstCalls,
-            burstWindowSec: labBurstWindowSec,
-            quotaCalls: labQuotaCalls,
-            quotaBurstCalls: labQuotaBurstCalls,
-            quotaBurstWindowSec: labQuotaBurstWindowSec,
-            concurrencyMax: labConcurrencyMax,
-            expensiveBurstCalls: labExpensiveBurstCalls,
-          },
-        },
-        causes: {
-          burst_rate_limit_by_key_429: burstCount,
-          burst_retry_after: burstRetryAfterCount,
-          recovery_200: recoveryCount,
-          quota_by_key_403: quotaCount,
-          quota_burst_collision_429: quotaCollision,
-          limit_concurrency_429: concCount,
-          concurrency_unexpected_status: concUnexpected,
-          authz_false_positive: authzFp,
-          client_b_200: clientBCount,
-        },
-        metrics: {
-          checksRate,
-          duration: data.metrics?.http_req_duration?.values || {},
-          requests: data.metrics?.http_reqs?.values || {},
-          failed: data.metrics?.http_req_failed?.values || {},
-          burst429: data.metrics?.apim_rl_burst_429?.values || {},
-          burstRetryAfter: data.metrics?.apim_rl_burst_retry_after?.values || {},
-          recovery200: data.metrics?.apim_rl_recovery_200?.values || {},
-          quota403: data.metrics?.apim_rl_quota_403?.values || {},
-          concurrency429: data.metrics?.apim_rl_concurrency_429?.values || {},
-          clientB200: data.metrics?.apim_rl_client_b_200?.values || {},
-          clientBFailed: data.metrics?.apim_rl_client_b_failed?.values || {},
-          authzFalsePositive: data.metrics?.apim_rl_authz_false_positive?.values || {},
-        },
-      },
-      null,
-      2,
-    ),
-  };
 }
