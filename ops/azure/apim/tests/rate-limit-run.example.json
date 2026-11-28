@@ -1,0 +1,23 @@
+{
+  "base_url": "https://<host-apim-aprobado>/api/v1",
+  "channel": "MARKETPLACE",
+  "operation_id": "<operationId-del-manifiesto-efectivo>",
+  "method": "GET",
+  "operation_path": "/<ruta-get-concreta>",
+  "rate_profile": "<rateProfile-del-manifiesto-efectivo>",
+  "identity": "<identidad-de-prueba-aprobada>",
+  "revision": "<revision-desplegada>",
+  "revision_header": "x-g6-apim-revision",
+  "policy_hash": "<sha256-de-politica-efectiva>",
+  "burst_calls": null,
+  "burst_window_seconds": null,
+  "max_requests": null,
+  "max_concurrency": null,
+  "max_rps": null,
+  "max_duration_seconds": null,
+  "max_retry_after_seconds": null,
+  "window_start_utc": "<inicio-UTC-Z-del-permiso>",
+  "window_end_utc": "<fin-UTC-Z-del-permiso>",
+  "infra_approval_ref": "<referencia-firmada-Infra>",
+  "g7_approval_ref": "<referencia-firmada-G7>"
+}

@@ -39,7 +39,7 @@ $inert = @{
     release_manifest_sha256 = $manifestHash; comparison_context_sha256 = $contextHash
 }
 $null = Save-AutopruebaJson $config $inert
-$command = @('-NoProfile', '-File', (Join-Path $root 'bin/ejecutar-demo.ps1'), '-Config', $config,
+$command = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $root 'bin/ejecutar-demo.ps1'), '-Config', $config,
     '-Dataset', $dataset, '-Manifest', $manifest, '-ComparisonContext', $comparisonContext,
     '-Profile', 'demo-normal', '-K6Path', $K6Path, '-SoloValidar')
 $stageEnv = @{

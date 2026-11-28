@@ -23,6 +23,9 @@ import { Counter, Rate, Trend } from 'k6/metrics';
 const profiles = { smoke: [1, '60s'], small: [5, '3m'], medium: [20, '5m'] };
 const syntheticFixture =
   __ENV.PERF04_PROFILE === 'fixture' && __ENV.PERF04_SYNTHETIC_FIXTURE === '1';
+if (syntheticFixture && !/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(__ENV.PERF04_ORIGIN ?? '')) {
+  throw new Error('PERF04_SYNTHETIC_FIXTURE_REQUIRES_LOOPBACK');
+}
 const activeProfile = syntheticFixture
   ? 'fixture'
   : __ENV.PERF04_PROFILE || 'smoke';
@@ -70,6 +73,7 @@ const intents = new SharedArray('synthetic coupon intents', () => {
 // Only contract/integrity gates are defined here. Release latency/throughput
 // thresholds remain under Vera's coordination (SIN_UMBRAL_APROBADO).
 export const options = {
+  ...(syntheticFixture ? { rps: 2 } : {}),
   scenarios: {
     perf04: syntheticFixture
       ? {
@@ -274,6 +278,10 @@ export function handleSummary(data) {
         metrics.perf04_time_to_completed_ms,
       ),
     },
+    raw_k6_http_requests: metrics.http_reqs?.values ?? null,
+    raw_k6_http_request_duration_ms: trendValues(metrics.http_req_duration),
+    configured_vus: data?.metrics?.vus?.values?.value ?? 1,
+    runtime_duration_ms: data?.state?.testRunDurationMs ?? null,
   };
   const serialized = `${JSON.stringify(report, null, 2)}\n`;
   const outputPath = __ENV.PERF04_SUMMARY_PATH;

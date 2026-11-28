@@ -36,6 +36,28 @@ function envelope(overrides = {}, signers = [infra, g7]) {
   };
 }
 
+const rateLimitExpected = {
+  environment: 'STAGING_APIM', origin: 'https://apim.example.invalid', method: 'GET',
+  case_id: 'RL-01-RL-03', operation_id: 'listarProductos', operation_path: '/productos',
+  channel: 'MARKETPLACE', profile: 'demo-rate-limit', vus: 1, duration_seconds: 60, max_rps: 3,
+  max_concurrency: 3, max_requests: 5, max_retry_after_seconds: 10,
+  window_start_utc: '2026-11-28T09:59:00Z', window_end_utc: '2026-11-28T10:10:00Z',
+  infra_approval_ref: 'INFRA-FIXTURE', g7_approval_ref: 'G7-FIXTURE', revision: 'REV-FIXTURE',
+  revision_header: 'x-fixture-revision', backend_sha: 'a'.repeat(40), policy_hash: 'b'.repeat(64),
+  operation_set_sha256: 'c'.repeat(64), filtered_openapi_sha256: 'd'.repeat(64),
+  effective_manifest_sha256: 'e'.repeat(64), effective_parameters_sha256: 'f'.repeat(64),
+  rate_profile: 'commercial_read', burst_calls: 3, burst_window_seconds: 2,
+  identity: 'consumer-A', token_sha256: '1'.repeat(64), harness_commit: '2'.repeat(40),
+};
+
+function rateLimitEnvelope(overrides = {}, signers = [infra, g7]) {
+  const payload = Buffer.from(JSON.stringify({ schema_version: 1, ...rateLimitExpected, ...overrides }));
+  return {
+    payload_base64: payload.toString('base64'),
+    signatures: signers.map((key) => ({ key_id: key.id, signature_base64: sign(null, payload, key.privateKey).toString('base64') })),
+  };
+}
+
 test('acepta exclusivamente un permiso con las dos firmas y el contexto correspondiente', () => {
   assert.match(verifyStagingPermit(envelope(), expected, authorities, now).permit_sha256, /^[0-9a-f]{64}$/);
   assert.throws(() => verifyStagingPermit(envelope({}, [infra]), expected, authorities, now), /FIRMAS_INFRA_G7/);
@@ -46,6 +68,24 @@ test('acepta exclusivamente un permiso con las dos firmas y el contexto correspo
   const altered = envelope();
   altered.payload_base64 = envelope({ revision: 'OTRA-REVISION' }).payload_base64;
   assert.throws(() => verifyStagingPermit(altered, expected, authorities, now), /FIRMA_STAGING_INVALIDA/);
+});
+
+test('el perfil APIM independiente se autoriza solo con presupuesto, operación, política e identidad firmados', () => {
+  assert.match(verifyStagingPermit(rateLimitEnvelope(), rateLimitExpected, authorities, now).permit_sha256, /^[0-9a-f]{64}$/);
+  for (const overrides of [
+    { max_requests: 6 }, { operation_path: '/productos/administracion' },
+    { policy_hash: '9'.repeat(64) }, { identity: 'consumer-B' },
+    { effective_manifest_sha256: '8'.repeat(64) }, { burst_window_seconds: 3 },
+  ]) {
+    assert.throws(
+      () => verifyStagingPermit(rateLimitEnvelope(overrides), rateLimitExpected, authorities, now),
+      /PERMISO_NO_CORRESPONDE/,
+    );
+  }
+  assert.throws(
+    () => verifyStagingPermit(rateLimitEnvelope({ max_requests: 4 }), { ...rateLimitExpected, max_requests: 4 }, authorities, now),
+    /DECLARACION_RATE_LIMIT_INVALIDA/,
+  );
 });
 
 test('rechaza un permiso genuino de otro origen, ruta, carga, revisión, código, token o ventana', () => {
@@ -59,6 +99,36 @@ test('rechaza un permiso genuino de otro origen, ruta, carga, revisión, código
   }
   assert.throws(() => verifyStagingPermit(envelope(), expected, authorities, now + 600_000), /PERMISO_FUERA_DE_VENTANA/);
   assert.throws(() => verifyStagingPermit(envelope(), { profile: expected.profile }, authorities, now), /PERMISO_NO_CORRESPONDE/);
+});
+
+test('los permisos de cuota y concurrencia fijan límites y resultados esperados exactos', () => {
+  const quotaExpected = {
+    ...rateLimitExpected,
+    case_id: 'APIM-QUOTA', profile: 'cuota', max_requests: 5, max_concurrency: 1,
+    max_rps: 3, max_retry_after_seconds: 0, burst_calls: 10, burst_window_seconds: 1,
+    quota_calls: 4, quota_window_seconds: 300, quota_error_code: 'RATE_LIMIT_CUOTA',
+  };
+  assert.match(verifyStagingPermit(rateLimitEnvelope(quotaExpected), quotaExpected, authorities, now).permit_sha256, /^[0-9a-f]{64}$/);
+  assert.throws(() => verifyStagingPermit(
+    rateLimitEnvelope({ ...quotaExpected, quota_error_code: 'SCOPE_INSUFICIENTE' }),
+    quotaExpected, authorities, now,
+  ), /PERMISO_NO_CORRESPONDE/);
+  assert.throws(() => verifyStagingPermit(
+    rateLimitEnvelope({ ...quotaExpected, max_requests: 6 }),
+    { ...quotaExpected, max_requests: 6 }, authorities, now,
+  ), /DECLARACION_CUOTA_INVALIDA/);
+
+  const concurrencyExpected = {
+    ...rateLimitExpected,
+    case_id: 'RL-06', profile: 'concurrencia', vus: 3, max_requests: 3, max_concurrency: 3,
+    max_rps: 3, max_retry_after_seconds: 0, burst_calls: 3, burst_window_seconds: 2,
+    policy_concurrency_limit: 2, concurrency_calls: 3,
+  };
+  assert.match(verifyStagingPermit(rateLimitEnvelope(concurrencyExpected), concurrencyExpected, authorities, now).permit_sha256, /^[0-9a-f]{64}$/);
+  assert.throws(() => verifyStagingPermit(
+    rateLimitEnvelope({ ...concurrencyExpected, concurrency_calls: 4 }),
+    concurrencyExpected, authorities, now,
+  ), /PERMISO_NO_CORRESPONDE/);
 });
 
 test('la revisión observada debe ser exacta, presente y única', () => {

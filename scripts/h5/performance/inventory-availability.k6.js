@@ -1,5 +1,6 @@
 import http from 'k6/http';
 import { check, fail, sleep } from 'k6';
+import execution from 'k6/execution';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import { sha256 } from 'k6/crypto';
 
@@ -48,6 +49,7 @@ const VUS = Number(__ENV.VU ?? __ENV.VUS ?? String(profileSpec?.vus ?? 1));
 const DURATION = __ENV.DURATION ?? profileSpec?.duration ?? '60s';
 const REPETITION = Number(__ENV.REPETITION ?? '1');
 const SYNTHETIC_SMOKE = __ENV.H5_SYNTHETIC_SMOKE === '1';
+const MAX_RPS = Number(__ENV.MAX_RPS ?? (SYNTHETIC_SMOKE ? '2' : '0'));
 const VERIFY_FULFILLMENT_MODE =
   __ENV.FULFILLMENT_MODE ??
   (CHANNEL === 'RETAIL' ? 'RETIRO_TIENDA' : 'ENVIO_DOMICILIO');
@@ -60,6 +62,11 @@ if (!ALLOWED_CHANNELS.has(CHANNEL)) {
 }
 if (!AUTH_TOKEN) {
   fail('PERF03_PREFLIGHT_MISSING_AUTH_TOKEN');
+}
+if (SYNTHETIC_SMOKE &&
+    (!/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(BASE_URL) || MAX_RPS !== 2 ||
+      PROFILE !== '1VU-60s' || VUS !== 1 || DURATION !== '60s')) {
+  fail('PERF03_SYNTHETIC_SMOKE_REQUIRES_LOOPBACK_1VU_60S_AND_2_RPS');
 }
 if (!SYNTHETIC_SMOKE) {
   const expected = ALLOWED_PROFILES.get(PROFILE);
@@ -129,29 +136,42 @@ if (SKUS_NON_SELLABLE.length === 0) {
   SKUS_NON_SELLABLE.push('SYN-TEST-DEACT-01');
 }
 
+const SKU_GROUPS = {
+  available: SKUS_AVAILABLE,
+  low_stock: SKUS_LOW_STOCK,
+  exhausted: SKUS_ZERO,
+  unregistered: SKUS_UNREGISTERED,
+  non_sellable: SKUS_NON_SELLABLE,
+};
+const SKU_GROUP_COUNTERS = {
+  available: new Counter('h5_perf03_fixture_available_requests'),
+  low_stock: new Counter('h5_perf03_fixture_low_stock_requests'),
+  exhausted: new Counter('h5_perf03_fixture_exhausted_requests'),
+  unregistered: new Counter('h5_perf03_fixture_unregistered_requests'),
+  non_sellable: new Counter('h5_perf03_fixture_non_sellable_requests'),
+};
+const SYNTHETIC_SAMPLE_GROUPS = [
+  ...Array(18).fill('available'), ...Array(4).fill('low_stock'),
+  ...Array(3).fill('exhausted'), ...Array(3).fill('unregistered'),
+  ...Array(2).fill('non_sellable'),
+];
+const OFFICIAL_SAMPLE_GROUPS = [
+  ...Array(36).fill('available'), ...Array(9).fill('low_stock'),
+  ...Array(6).fill('exhausted'), ...Array(6).fill('unregistered'),
+  ...Array(3).fill('non_sellable'),
+];
+
 /**
  * Selección ponderada de SKU según distribución oficial PERF-03:
  * 60% disponibles, 15% stock-bajo, 10% agotados, 10% no registrados, 5% sin identidad vendible.
  */
 function pickSku() {
-  const r = Math.random() * 100;
-  if (r < 60) {
-    return SKUS_AVAILABLE[Math.floor(Math.random() * SKUS_AVAILABLE.length)];
-  }
-  if (r < 75) {
-    return SKUS_LOW_STOCK[Math.floor(Math.random() * SKUS_LOW_STOCK.length)];
-  }
-  if (r < 85) {
-    return SKUS_ZERO[Math.floor(Math.random() * SKUS_ZERO.length)];
-  }
-  if (r < 95) {
-    return SKUS_UNREGISTERED[
-      Math.floor(Math.random() * SKUS_UNREGISTERED.length)
-    ];
-  }
-  return SKUS_NON_SELLABLE[
-    Math.floor(Math.random() * SKUS_NON_SELLABLE.length)
-  ];
+  const iteration = execution.scenario.iterationInTest;
+  const schedule = SYNTHETIC_SMOKE ? SYNTHETIC_SAMPLE_GROUPS : OFFICIAL_SAMPLE_GROUPS;
+  const group = schedule[iteration % schedule.length];
+  const candidates = SKU_GROUPS[group];
+  SKU_GROUP_COUNTERS[group].add(1);
+  return candidates[iteration % candidates.length];
 }
 
 // Métricas separadas por operación y clasificación HTTP
@@ -180,13 +200,32 @@ const verifyLatencyMs = new Trend('h5_perf03_verify_duration_ms', true);
 const totalVus = SYNTHETIC_SMOKE ? 1 : VUS;
 const getVus = totalVus === 1 ? 1 : Math.max(1, Math.round(totalVus * 0.7));
 const verifyVus = totalVus === 1 ? 0 : Math.max(1, totalVus - getVus);
+const syntheticDurationSeconds = Number.parseInt(DURATION, 10);
+// k6's built-in rps option is an integer. Aim at one request/second here so
+// the complete 120-request ceiling cannot be crossed by iteration boundaries.
+const syntheticTargetRps = Math.floor(MAX_RPS * 0.95);
+const syntheticIterations = Math.floor((syntheticTargetRps * syntheticDurationSeconds) / 2);
 
 export const options =
   totalVus === 1
     ? {
-        // Con 1 VU: ejecutor único que corre ambas operaciones en secuencia
-        vus: 1,
-        duration: DURATION,
+        ...(SYNTHETIC_SMOKE ? { rps: syntheticTargetRps } : {}),
+        ...(SYNTHETIC_SMOKE
+          ? {
+              scenarios: {
+                controlled_fixture: {
+                  executor: 'per-vu-iterations',
+                  vus: 1,
+                  iterations: syntheticIterations,
+                  maxDuration: DURATION,
+                },
+              },
+            }
+          : {
+              // Con 1 VU: ejecutor único que corre ambas operaciones en secuencia
+              vus: 1,
+              duration: DURATION,
+            }),
         summaryTrendStats: [
           'avg',
           'min',
@@ -204,6 +243,7 @@ export const options =
         },
       }
     : {
+        ...(SYNTHETIC_SMOKE ? { rps: MAX_RPS } : {}),
         scenarios: {
           availability_get: {
             executor: 'constant-vus',
@@ -370,11 +410,20 @@ export default function () {
 export function handleSummary(data) {
   const outputPath = __ENV.PERF03_SUMMARY_PATH;
   const payload = {
+    schema_version: 1,
     case_id: 'PERF-03',
+    execution_scope: SYNTHETIC_SMOKE ? 'L1_NEST_FIXTURES_LOOPBACK' : 'PENDING_RUNNER_ADJUDICATION',
+    official_h5_03: 'NO_CERTIFICADO',
     h5_criterion: 'H5-03',
     owner: 'Taco',
     platform_owner: 'Vera',
     profile: PROFILE,
+    virtual_users: totalVus,
+    duration_seconds: Number.parseInt(DURATION, 10),
+    max_rps: SYNTHETIC_SMOKE ? MAX_RPS : null,
+    synthetic_target_rps: SYNTHETIC_SMOKE ? syntheticTargetRps : null,
+    max_requests: SYNTHETIC_SMOKE ? MAX_RPS * Number.parseInt(DURATION, 10) : null,
+    runtime_duration_ms: data?.state?.testRunDurationMs ?? null,
     channel: CHANNEL,
     repetition: REPETITION,
     dataset_seed: manifest.seed ?? null,
@@ -385,6 +434,13 @@ export function handleSummary(data) {
       zero: 10,
       unregistered: 10,
       non_sellable: 5,
+    },
+    fixture_group_request_counts: {
+      available: data.metrics.h5_perf03_fixture_available_requests?.values?.count ?? 0,
+      low_stock: data.metrics.h5_perf03_fixture_low_stock_requests?.values?.count ?? 0,
+      exhausted: data.metrics.h5_perf03_fixture_exhausted_requests?.values?.count ?? 0,
+      unregistered: data.metrics.h5_perf03_fixture_unregistered_requests?.values?.count ?? 0,
+      non_sellable: data.metrics.h5_perf03_fixture_non_sellable_requests?.values?.count ?? 0,
     },
     metrics: data.metrics,
   };

@@ -7,12 +7,23 @@ const identifier = /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/;
 const utcSecond = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 const roles = ['INFRA', 'G7'];
 const trustFile = new URL('../config/staging-authorities.json', import.meta.url);
-const bindings = [
+const performanceBindings = [
   'environment', 'origin', 'method', 'case_id', 'operation_id', 'channel', 'profile',
   'vus', 'duration_seconds', 'max_rps', 'subject', 'repetition', 'window_start_utc', 'window_end_utc',
   'infra_approval_ref', 'revision', 'backend_sha', 'subject_digest', 'release_manifest_sha256',
   'comparison_context_sha256', 'dataset_sha256', 'negative_401', 'token_sha256', 'harness_commit',
 ];
+const apimRateLimitBindings = [
+  'environment', 'origin', 'method', 'case_id', 'operation_id', 'operation_path', 'channel', 'profile',
+  'vus', 'duration_seconds', 'max_rps', 'max_concurrency', 'max_requests', 'max_retry_after_seconds',
+  'window_start_utc', 'window_end_utc', 'infra_approval_ref', 'g7_approval_ref', 'revision', 'revision_header',
+  'backend_sha', 'policy_hash', 'operation_set_sha256', 'filtered_openapi_sha256',
+  'effective_manifest_sha256', 'effective_parameters_sha256', 'rate_profile', 'burst_calls',
+  'burst_window_seconds', 'identity', 'token_sha256', 'harness_commit',
+];
+const apimIsolationBindings = [...apimRateLimitBindings, 'identity_b', 'token_sha256_b'];
+const apimQuotaBindings = [...apimRateLimitBindings, 'quota_calls', 'quota_window_seconds', 'quota_error_code'];
+const apimConcurrencyBindings = [...apimRateLimitBindings, 'policy_concurrency_limit', 'concurrency_calls'];
 
 function decode(value) {
   if (typeof value !== 'string' || value.length > 32768) throw new Error('PREFLIGHT_PERMISO_FORMATO');
@@ -57,10 +68,55 @@ export function verifyStagingPermit(envelope, expected, authorities, now = Date.
       !/^x-[a-z0-9-]{1,62}$/.test(permit?.revision_header ?? '')) {
     throw new Error('PREFLIGHT_DECLARACION_STAGING_INVALIDA');
   }
+  const isApimRateLimit = ['demo-rate-limit', 'aislamiento', 'cuota', 'concurrencia'].includes(expected.profile);
+  const bindings = expected.profile === 'aislamiento'
+    ? apimIsolationBindings
+    : expected.profile === 'cuota' ? apimQuotaBindings
+      : expected.profile === 'concurrencia' ? apimConcurrencyBindings
+        : expected.profile === 'demo-rate-limit' ? apimRateLimitBindings : performanceBindings;
   for (const field of bindings) {
     if (!Object.hasOwn(expected, field) || !Object.hasOwn(permit, field) || permit[field] !== expected[field]) {
       throw new Error('PREFLIGHT_PERMISO_NO_CORRESPONDE');
     }
+  }
+  if (isApimRateLimit &&
+      (!/^[a-f0-9]{64}$/.test(permit.policy_hash ?? '') ||
+       !/^[a-f0-9]{64}$/.test(permit.operation_set_sha256 ?? '') ||
+       !/^[a-f0-9]{64}$/.test(permit.filtered_openapi_sha256 ?? '') ||
+       !/^[a-f0-9]{64}$/.test(permit.effective_manifest_sha256 ?? '') ||
+       !/^[a-f0-9]{64}$/.test(permit.effective_parameters_sha256 ?? '') ||
+       !/^[a-f0-9]{64}$/.test(permit.token_sha256 ?? '') ||
+       !/^[a-f0-9]{40}$/.test(permit.backend_sha ?? '') ||
+       !/^[A-Za-z0-9_-]{1,256}$/.test(permit.identity ?? '') ||
+       !Number.isSafeInteger(permit.burst_calls) || permit.burst_calls < 1 ||
+       !Number.isSafeInteger(permit.burst_window_seconds) || permit.burst_window_seconds < 1 ||
+       !Number.isSafeInteger(permit.max_requests) ||
+       !Number.isSafeInteger(permit.max_concurrency) || permit.max_concurrency < 1 ||
+       !Number.isSafeInteger(permit.max_retry_after_seconds) || permit.max_retry_after_seconds < 0)) {
+    throw new Error('PREFLIGHT_DECLARACION_RATE_LIMIT_INVALIDA');
+  }
+  if (['demo-rate-limit', 'aislamiento'].includes(expected.profile) &&
+      permit.max_requests !== permit.burst_calls + (expected.profile === 'aislamiento' ? 3 : 2)) {
+    throw new Error('PREFLIGHT_DECLARACION_RATE_LIMIT_INVALIDA');
+  }
+  if (expected.profile === 'cuota' &&
+      (!Number.isSafeInteger(permit.quota_calls) || permit.quota_calls < 1 ||
+       !Number.isSafeInteger(permit.quota_window_seconds) || permit.quota_window_seconds < 1 ||
+       !/^[A-Z][A-Z0-9_]{2,63}$/.test(permit.quota_error_code ?? '') ||
+       permit.max_requests !== permit.quota_calls + 1 || permit.max_retry_after_seconds !== 0)) {
+    throw new Error('PREFLIGHT_DECLARACION_CUOTA_INVALIDA');
+  }
+  if (expected.profile === 'concurrencia' &&
+      (!Number.isSafeInteger(permit.policy_concurrency_limit) || permit.policy_concurrency_limit < 1 ||
+       permit.concurrency_calls !== permit.policy_concurrency_limit + 1 ||
+       permit.max_requests !== permit.concurrency_calls || permit.max_concurrency !== permit.concurrency_calls ||
+       permit.vus !== permit.concurrency_calls || permit.max_rps !== permit.concurrency_calls ||
+       permit.max_retry_after_seconds !== 0)) {
+    throw new Error('PREFLIGHT_DECLARACION_CONCURRENCIA_INVALIDA');
+  }
+  if (expected.profile === 'aislamiento' &&
+      (!/^[A-Za-z0-9_-]{1,256}$/.test(permit.identity_b ?? '') || !/^[a-f0-9]{64}$/.test(permit.token_sha256_b ?? ''))) {
+    throw new Error('PREFLIGHT_DECLARACION_AISLAMIENTO_INVALIDA');
   }
   const start = Date.parse(permit.window_start_utc);
   const end = Date.parse(permit.window_end_utc);

@@ -22,6 +22,7 @@ $Docs = git -C '<checkout de Docs>' rev-parse origin/master
 node --test scripts/h5/k6/tests/seguridad.test.mjs
 node scripts/h5/k6/tests/verificar-evidencia.mjs
 node scripts/h5/k6/bin/demo-local.mjs apps/catalog-svc/test/performance/h5/catalog-pagination.fixture-server.h5.mjs $Backend $Frontend $Docs $K6 --dashboard
+node apps/catalog-svc/test/performance/h5/catalog-pagination.k6.local-runner.mjs $K6 $Frontend $Docs
 
 node node_modules/typescript/bin/tsc --project scripts/h5/k6/tests/tsconfig.local.json
 node scripts/h5/k6/.local/build/scripts/h5/k6/tests/servicios-locales.js $Frontend $Docs $K6 PERF-02
@@ -29,6 +30,8 @@ node scripts/h5/k6/.local/build/scripts/h5/k6/tests/servicios-locales.js $Fronte
 ~~~
 
 Los tres smokes usan 1 VU durante 60 s y un máximo de 2 RPS sobre `127.0.0.1`. Los servidores de prueba usan puertos efímeros. Los helpers generan credenciales sintéticas de proceso y cierran sus listeners. En Catálogo, `--validar` limita el comando a preflight y controles sin tráfico; `--dashboard` abre el dashboard nativo en `http://127.0.0.1:5665` durante la medición. Cierra esa pestaña al terminar. Los runners exportan el HTML aun cuando el dashboard en vivo no se abrió, si la versión de k6 admite la función.
+
+El runner `catalog-pagination.k6.local-runner.mjs` ejecuta además el script canónico `apps/catalog-svc/test/performance/h5/catalog-pagination.k6.js` contra el fixture HTTP oficial, con el perfil 1 VU/60 s y un techo más conservador de 1 RPS. Verifica el snapshot semántico antes y después y produce HTML nativo, `summary.json`, `k6-summary.json` e índice SHA-256 bajo `.local/perf01-canonical/`. No mide el servicio real ni la capacidad máxima.
 
 ## Perfiles y seguridad
 
@@ -55,9 +58,50 @@ $Common = @{
 .\scripts\h5\k6\bin\ejecutar-demo.ps1 @Common -Profile demo-normal -Dashboard
 ~~~
 
+Para obtener evidencia adicional de carga controlada, el mismo arnés acepta `-Pattern constant|ramp|spike|recovery`. Solo admite `ISOLATED` o `LOCAL_SERVICE`, `demo-smoke`, 1 VU y un techo de 2 RPS; el perfil no se habilita para staging. Cada patrón dura 60 s, conserva el oráculo funcional y falla si k6 pierde iteraciones. No mide capacidad máxima ni estrés:
+
+~~~powershell
+$Local = @{
+    Config = Join-Path $Directory 'config-local.json'
+    Dataset = Join-Path $Directory 'dataset.json'
+    K6Path = $K6
+}
+.\scripts\h5\k6\bin\ejecutar-demo.ps1 @Local -Pattern constant -SoloValidar
+.\scripts\h5\k6\bin\ejecutar-demo.ps1 @Local -Pattern ramp -Dashboard
+.\scripts\h5\k6\bin\ejecutar-demo.ps1 @Local -Pattern spike -Dashboard
+.\scripts\h5\k6\bin\ejecutar-demo.ps1 @Local -Pattern recovery -Dashboard
+~~~
+
+Los cuatro reportes conservan `load_pattern` y el alcance `L1_LOOPBACK_CONTROLLED_LOAD_NOT_CAPACITY`; `constant_vus` identifica las ejecuciones existentes sin patrón explícito. El preflight sin tráfico valida el patrón de k6 y sus etapas antes de medir.
+
 ## Evidencia, comparación y CI
 
 - `.local/<id>/summary.json` incluye commit y árbol de Git, hashes de los módulos (incluido el oráculo importado de Catálogo), dataset, perfil y métricas. `summary.sha256` verifica sus bytes. CSV y dashboard HTML quedan en la misma carpeta ignorada. La evidencia L1 saneada está en [evidence/local](evidence/local/). Ver [formato y telemetría](evidence/README.md).
 - El gate por corrida exige 100% de invariantes críticos de 2xx, <1% de errores inesperados y resultado completo. Para comparar formalmente, usa `-Subject baseline|candidato` y `-Repetition 1|2|3` con cada perfil aprobado. Mantén mismo dataset y condiciones comparables. `comparar-corridas.ps1 -Baseline $Base -Candidato $Candidate -Telemetria $Dir` verifica procedencia Git, bytes originales de telemetría, sujeto, intervalo y gates. Si los intentos por segundo alcanzan al menos el 95% del techo del cliente, el gate de RPS queda sin evaluar; un `PASS` de un perfil fijo tampoco acredita capacidad máxima.
 - Después del merge de Backend #310, sincroniza la rama y prueba los mismos entrypoints en el runner de GitHub Actions. La integración propuesta usa `workflow_dispatch` con selección explícita de caso/perfil, origen y secretos desde un environment protegido, un grupo de concurrencia por ambiente y artefactos saneados. La primera prueba del workflow debe usar loopback y los permisos mínimos; Azure queda sujeto a aprobación. Las cargas prolongadas requieren disparo manual y autorización.
 - Promotions, las pruebas APIM/RL y el perfil oficial combinado de Inventario conservan sus arneses actuales. La demo GET y sus resultados no acreditan despliegue, homologación, rendimiento productivo o H5-03.
+
+## APIM Demo 4 — rate limiting
+
+El runner independiente de APIM está en `scripts/h5/k6/bin/ejecutar-rate-limit.ps1` y reutiliza `ops/azure/apim/tests/apim-rl-k6.js`. No duplica el runner de PERF ni altera el dashboard nativo de k6. Los perfiles `demo-rate-limit`, `aislamiento`, `cuota` y `concurrencia` solo evalúan las dependencias, operaciones y límites firmados que les corresponden. La secuencia principal normal → burst → 429/Retry-After → espera sin tráfico → recuperación 200 produce una secuencia temporal y correlaciones en el reporte.
+
+Una vez aprobada una ventana Azure, el pack de configuración privado se prepara en `ops/azure/apim/.local/rate-limit/` (ignorado por Git): configuración, manifiesto efectivo, parámetros efectivos, política desplegada y permiso Infra/G7 firmado. El token se inyecta solo en `APIM_RL_TEST_TOKEN` en el entorno del proceso. El runner valida el pack sin tráfico primero; `APIM_RL_AUTHORIZED=1` no otorga permiso. Las pruebas reales permanecen en STANDBY.
+
+~~~powershell
+$K6 = (Get-Command k6 -CommandType Application).Source
+$PermitDir = (Resolve-Path 'ops/azure/apim/.local/rate-limit').Path
+$Run = @{
+    Profile = 'demo-rate-limit'
+    Mode = 'remote'
+    Config = Join-Path $PermitDir 'config.json'
+    Manifest = Join-Path $PermitDir 'manifest.effective.json'
+    Parameters = Join-Path $PermitDir 'parameters.effective.json'
+    Policy = Join-Path $PermitDir 'policy.effective.xml'
+    Permit = Join-Path $PermitDir 'permit-infra-g7.json'
+    K6Path = $K6
+}
+.\scripts\h5\k6\bin\ejecutar-rate-limit.ps1 @Run -SoloValidar
+.\scripts\h5\k6\bin\ejecutar-rate-limit.ps1 @Run -Dashboard
+~~~
+
+`-Mode local` acepta solo loopback con manifiesto `LOCAL_SIMULATION`; sus reportes indican `L1_LOCAL_POLICY_SIMULATION` y no prueban Azure. Los reportes crudos quedan fuera de Git en `scripts/h5/k6/.local/apim-rate-limit/<run-id>/` con HTML nativo, `summary.json`, `k6-summary.json`, consola saneada e índice SHA-256. `FAIL`, `INCONCLUSIVE` y `NOT_RUN` se conservan por separado. RL-05 necesita contraste correlacionado APIM/Gateway/backend y RL-06 evidencia de idempotencia, por lo que una ejecución de concurrencia sola no certifica esos requisitos. El guion de Portal y exposición está en `ops/azure/apim/README.md` y Docs PR #155.
