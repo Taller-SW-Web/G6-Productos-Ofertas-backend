@@ -15,11 +15,24 @@ import {
   WORKSPACE_PARENT,
   resolveProfileFolders,
 } from './lib/constants.mjs';
-import { runPreflight } from './lib/preflight-core.mjs';
+import {
+  DEFAULT_COVERAGE_CSV_PATH,
+  runPreflight,
+  validateCollectionAgainstOpenApi,
+  validateMatrixParity,
+} from './lib/preflight-core.mjs';
 import { buildMarkdownReport, buildManifest, resolveGitHead, writeEvidenceBundle } from './lib/report-core.mjs';
 import { buildSanitizedJunitXml, sanitizeNewmanRun } from './lib/sanitizer-core.mjs';
-import { validateNewmanExecutionsWithAjv } from './lib/openapi-schema-validator.mjs';
-import { OFFICIAL_OPENAPI_CONTRACT_PATH } from './lib/constants.mjs';
+import {
+  createOpenApiValidator,
+  validateNewmanExecutionsWithAjv,
+  verifySchemaContractAlignment,
+} from './lib/openapi-schema-validator.mjs';
+import {
+  FAST_DEV_OPENAPI_PATH,
+  OFFICIAL_OPENAPI_CONTRACT_PATH,
+  SCHEMAS_PATH,
+} from './lib/constants.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -228,6 +241,62 @@ export async function executeSuite(options = {}) {
     };
   }
 
+  // H25: Preflight contractual estricto obligatorio antes de ejecutar solicitudes Newman
+  const fastDev = Boolean(options.fastDev);
+  const contractMode = fastDev ? 'FAST_DEV_NON_AUTHORITATIVE' : 'STRICT_OFFICIAL';
+  const activeOpenApiPath = options.openApiPath
+    ? resolve(options.openApiPath)
+    : fastDev
+      ? FAST_DEV_OPENAPI_PATH
+      : OFFICIAL_OPENAPI_CONTRACT_PATH;
+  const activeCsvPath = options.coverageCsvPath
+    ? resolve(options.coverageCsvPath)
+    : DEFAULT_COVERAGE_CSV_PATH;
+  const docsShaResolved = resolveGitHead(DOCS_ROOT);
+  const contractErrors = [];
+  let openApiSha256 = 'UNAVAILABLE';
+
+  if (!existsSync(activeOpenApiPath)) {
+    contractErrors.push(`H25: OpenAPI requerido no encontrado en '${activeOpenApiPath}'.`);
+  }
+  if (!fastDev && !existsSync(activeCsvPath)) {
+    contractErrors.push(`H25: Matriz CSV oficial requerida no encontrada en '${activeCsvPath}'.`);
+  }
+  if (!fastDev && docsShaResolved === 'UNAVAILABLE') {
+    contractErrors.push(`H25: No se pudo determinar el SHA de Git de Docs en '${DOCS_ROOT}'.`);
+  }
+
+  if (contractErrors.length === 0) {
+    const routeCheck = validateCollectionAgainstOpenApi(collectionPath, activeOpenApiPath);
+    if (!routeCheck.ok) contractErrors.push(...routeCheck.errors);
+
+    const alignCheck = verifySchemaContractAlignment(activeOpenApiPath, SCHEMAS_PATH);
+    if (!alignCheck.ok) contractErrors.push(...alignCheck.errors);
+    else openApiSha256 = alignCheck.officialSha256;
+
+    if (!fastDev) {
+      const csvCheck = validateMatrixParity(collectionPath, activeCsvPath);
+      if (!csvCheck.ok) contractErrors.push(...csvCheck.errors);
+    }
+
+    try {
+      const compiled = createOpenApiValidator(activeOpenApiPath);
+      openApiSha256 = compiled.sha256;
+    } catch (compileErr) {
+      contractErrors.push(`H25: No se pudo compilar OpenAPI con Ajv: ${compileErr.message}`);
+    }
+  }
+
+  if (contractErrors.length > 0) {
+    return {
+      ok: false,
+      exitCode: 2,
+      stage: 'contract_preflight',
+      errors: contractErrors,
+      warnings: preflight.warnings,
+    };
+  }
+
   let newman;
   let newmanVersion = 'unknown';
   try {
@@ -368,30 +437,36 @@ export async function executeSuite(options = {}) {
       plannedCases: plan.plannedCases,
     });
 
-    // H17: Validacion contractual estricta con Ajv compilado directamente desde OpenAPI oficial
-    // sobre TODAS las respuestas HTTP JSON ejecutadas (principales y auxiliares).
-    let openApiSha256 = null;
-    if (existsSync(OFFICIAL_OPENAPI_CONTRACT_PATH)) {
-      const ajvAudit = validateNewmanExecutionsWithAjv(rawData, OFFICIAL_OPENAPI_CONTRACT_PATH);
-      openApiSha256 = ajvAudit.openApiSha256;
-      if (!ajvAudit.ok) {
-        for (const v of ajvAudit.violations) {
-          const targetCase = sanitizedSummary.cases.find((c) => c.pmId === v.pmId);
-          const msg = `H17 Ajv OpenAPI (${v.schemaName}): ${v.errors.slice(0, 3).join('; ')}`;
-          if (targetCase && targetCase.status !== 'NOT_RUN') {
-            targetCase.assertions.push({ name: `H17 Ajv ${v.schemaName}`, passed: false, errorMessage: msg });
-            targetCase.assertionsTotal += 1;
-            targetCase.assertionsFailed += 1;
-            targetCase.status = 'FAIL';
-          }
+    // H24 + H25: Validacion contractual estricta con Ajv compilado directamente desde OpenAPI
+    // sobre TODAS las respuestas HTTP ejecutadas (principales y auxiliares, con o sin PM ID).
+    const ajvAudit = validateNewmanExecutionsWithAjv(rawData, activeOpenApiPath);
+    openApiSha256 = ajvAudit.openApiSha256;
+    const auxiliaryContractViolations = [];
+    if (!ajvAudit.ok) {
+      for (const v of ajvAudit.violations) {
+        const targetCase = sanitizedSummary.cases.find((c) => c.pmId === v.pmId);
+        const msg = `H24 Ajv OpenAPI (${v.operationId} ${v.statusCode}): ${v.errors.slice(0, 3).join('; ')}`;
+        if (targetCase && targetCase.status !== 'NOT_RUN') {
+          targetCase.assertions.push({ name: `H24 Ajv ${v.operationId}`, passed: false, errorMessage: msg });
+          targetCase.assertionsTotal += 1;
+          targetCase.assertionsFailed += 1;
+          targetCase.status = 'FAIL';
+        } else {
+          // H24: Violacion contractual en solicitud auxiliar sin caso PM asociado impide PASS global
+          auxiliaryContractViolations.push({ ...v, message: msg });
         }
-        sanitizedSummary.totals.pass = sanitizedSummary.cases.filter((c) => c.status === 'PASS').length;
-        sanitizedSummary.totals.fail = sanitizedSummary.cases.filter((c) => c.status === 'FAIL').length;
-        sanitizedSummary.totals.assertionsTotal = sanitizedSummary.cases.reduce((a, c) => a + c.assertionsTotal, 0);
-        sanitizedSummary.totals.assertionsFailed = sanitizedSummary.cases.reduce((a, c) => a + c.assertionsFailed, 0);
-        if (sanitizedSummary.totals.fail > 0) {
-          sanitizedSummary.overallVerdict = 'FAIL';
-        }
+      }
+      sanitizedSummary.auxiliaryContractViolations = auxiliaryContractViolations;
+      sanitizedSummary.totals.pass = sanitizedSummary.cases.filter((c) => c.status === 'PASS').length;
+      sanitizedSummary.totals.fail =
+        sanitizedSummary.cases.filter((c) => c.status === 'FAIL').length +
+        auxiliaryContractViolations.length;
+      sanitizedSummary.totals.assertionsTotal = sanitizedSummary.cases.reduce((a, c) => a + c.assertionsTotal, 0);
+      sanitizedSummary.totals.assertionsFailed =
+        sanitizedSummary.cases.reduce((a, c) => a + c.assertionsFailed, 0) +
+        auxiliaryContractViolations.length;
+      if (sanitizedSummary.totals.fail > 0) {
+        sanitizedSummary.overallVerdict = 'FAIL';
       }
     }
 
@@ -444,6 +519,8 @@ export async function executeSuite(options = {}) {
       blockers,
       durationMs,
       exitCode: newmanExitCode,
+      openApiSha256,
+      contractMode,
     });
 
     markdownReport = buildMarkdownReport(manifest, sanitizedSummary, extraSecrets);

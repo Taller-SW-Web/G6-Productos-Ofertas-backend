@@ -281,13 +281,19 @@ function startOpenApiHarnessServer({
     if (u.pathname.startsWith('/api/v1/productos/') && u.pathname.endsWith('/preparacion')) {
       const pid = u.pathname.split('/')[4];
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ product_id: pid, tiene_variantes: false, pricing: { completo: true }, variantes: [] }));
+      res.end(JSON.stringify({
+        product_id: pid,
+        tiene_variantes: false,
+        pricing: { status: 'COMPLETED', manual_retry_allowed: false, code: null },
+        inventario: { status: 'COMPLETED', manual_retry_allowed: false, code: null },
+        variantes: [],
+      }));
       return;
     }
 
     if (u.pathname.startsWith('/api/v1/productos/') && u.pathname.endsWith('/variantes')) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ items: [] }));
+      res.end(JSON.stringify({ items: [], meta: { pagina: 1, tamanio: 20, total: 0, totalPaginas: 0 } }));
       return;
     }
 
@@ -311,8 +317,8 @@ function startOpenApiHarnessServer({
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         items: [
-          { location_id: 'LOC-LIMA-01', name: 'Almacen Lima Norte' },
-          { location_id: 'LOC-AREQUIPA-02', name: 'Almacen Arequipa' },
+          { location_id: '00000000-0000-4000-8000-000000000101', name: 'Almacen Lima Norte' },
+          { location_id: '00000000-0000-4000-8000-000000000102', name: 'Almacen Arequipa' },
         ],
       }));
       return;
@@ -340,7 +346,7 @@ function startOpenApiHarnessServer({
       res.end(JSON.stringify({
         items: skus.map((s) => ({
           sku: s,
-          location_id: locationId || 'LOC-LIMA-01',
+          location_id: locationId || '00000000-0000-4000-8000-000000000101',
           on_hand: 20,
           reserved: 3,
           blocked: 2,
@@ -641,22 +647,22 @@ test('H18 + Defecto B Regresion (4 escenarios Inventory): 1 ubicacion sin locati
     try {
       const res = await executeSuite({
         env: 'local', baseUrl, folder: '02 - Preparacion comercial e Inventory', runId: 'h18-multi-valid-loc',
-        outDir, accessToken: 'synth-user-token-harness', productId: 'prod-h5-001', sku: 'SKU-H5-001', locationId: 'LOC-LIMA-01',
+        outDir, accessToken: 'synth-user-token-harness', productId: 'prod-h5-001', sku: 'SKU-H5-001', locationId: '00000000-0000-4000-8000-000000000101',
         evidenceLevel: 'ISOLATED', skipSecretScan: true,
       });
       assert.equal(res.ok, true, 'Multi-ubicacion con fixture explicito locationId debe aprobar');
-      assert.ok(observedRequests.some((r) => r.includes('/api/v1/inventario/disponibilidad') && r.includes('location_id=LOC-LIMA-01')));
+      assert.ok(observedRequests.some((r) => r.includes('/api/v1/inventario/disponibilidad') && r.includes('location_id=00000000-0000-4000-8000-000000000101')));
     } finally { server.close(); rmSync(outDir, { recursive: true, force: true }); }
   }
 
   // 4) Ubicacion sin saldo para el SKU -> items vacio falla asercion de disponibilidad
   {
-    const { server, baseUrl } = await startOpenApiHarnessServer({ requireLocationIdOnInventory: true, emptyLocationId: 'LOC-SIN-SALDO' });
+    const { server, baseUrl } = await startOpenApiHarnessServer({ requireLocationIdOnInventory: true, emptyLocationId: '00000000-0000-4000-8000-000000000199' });
     const outDir = mkdtempSync(join(tmpdir(), 'g6-h18-empty-loc-'));
     try {
       const res = await executeSuite({
         env: 'local', baseUrl, folder: '02 - Preparacion comercial e Inventory', runId: 'h18-empty-loc',
-        outDir, accessToken: 'synth-user-token-harness', productId: 'prod-h5-001', sku: 'SKU-H5-001', locationId: 'LOC-SIN-SALDO',
+        outDir, accessToken: 'synth-user-token-harness', productId: 'prod-h5-001', sku: 'SKU-H5-001', locationId: '00000000-0000-4000-8000-000000000199',
         evidenceLevel: 'ISOLATED', skipSecretScan: true,
       });
       assert.equal(res.overallVerdict, 'FAIL');

@@ -5,7 +5,6 @@ import addFormats from 'ajv-formats';
 import YAML from 'yaml';
 import {
   OPENAPI_CONTRACT_PATH,
-  PM_RESPONSE_SCHEMA_MAP,
   SCHEMAS_PATH,
 } from './constants.mjs';
 
@@ -23,6 +22,15 @@ export const CORE_CONTRACT_SCHEMAS = Object.freeze([
   'Problem',
 ]);
 
+// H24: Unicas rutas explicitamente exentas del contrato OpenAPI /api/v1 (justificadas por diseno)
+export const EXPLICIT_NON_OPENAPI_PATHS = Object.freeze(
+  new Set([
+    '/health',
+    '/health/ready',
+    '/api/v1/ruta-inexistente-h5-probe',
+  ]),
+);
+
 function rewriteOpenApiRefs(node) {
   if (Array.isArray(node)) return node.map(rewriteOpenApiRefs);
   if (!node || typeof node !== 'object') return node;
@@ -33,23 +41,24 @@ function rewriteOpenApiRefs(node) {
     } else if (k.startsWith('x-')) {
       continue;
     } else if (k === 'nullable' && v === true) {
-      // OpenAPI 3.0 nullable -> JSON Schema union type
       out.nullable = true;
     } else {
       out[k] = rewriteOpenApiRefs(v);
     }
   }
-  if (out.nullable === true && typeof out.type === 'string') {
-    out.type = [out.type, 'null'];
+  if (out.nullable === true) {
+    if (typeof out.type === 'string') {
+      out.type = [out.type, 'null'];
+    } else if (out.$ref) {
+      const refTarget = out.$ref;
+      delete out.$ref;
+      out.anyOf = [{ $ref: refTarget }, { type: 'null' }];
+    }
     delete out.nullable;
   }
   return out;
 }
 
-/**
- * H17 + H22: Carga los esquemas desde el OpenAPI oficial (fuente unica de verdad)
- * y calcula su checksum SHA-256 para trazabilidad.
- */
 export function loadOfficialOpenApiSchemas(openApiPath = OPENAPI_CONTRACT_PATH) {
   if (!existsSync(openApiPath)) {
     throw new Error(
@@ -64,16 +73,137 @@ export function loadOfficialOpenApiSchemas(openApiPath = OPENAPI_CONTRACT_PATH) 
   for (const [name, schema] of Object.entries(rawSchemas)) {
     $defs[name] = rewriteOpenApiRefs(schema);
   }
+  const rawResponses = doc?.components?.responses || {};
+  const responses = {};
+  for (const [name, resp] of Object.entries(rawResponses)) {
+    responses[name] = rewriteOpenApiRefs(resp);
+  }
   return {
     version: doc?.info?.version || 'unknown',
     sha256,
     paths: doc?.paths || {},
+    responses,
     $defs,
   };
 }
 
+function normalizePath(rawUrl) {
+  let pathPart = String(rawUrl || '').split('?')[0].split('#')[0];
+  pathPart = pathPart.replace(/^https?:\/\/[^/]+/i, '');
+  if (!pathPart.startsWith('/')) pathPart = `/${pathPart}`;
+  return pathPart;
+}
+
+function stripApiPrefix(pathPart) {
+  return pathPart.startsWith('/api/v1/')
+    ? pathPart.slice('/api/v1'.length)
+    : pathPart === '/api/v1'
+      ? '/'
+      : pathPart;
+}
+
+/**
+ * H24: Resuelve la operacion OpenAPI oficial a partir de (metodo HTTP, ruta efectiva, statusCode, Content-Type).
+ * Prioriza siempre la ruta y operacion reales por encima del identificador PM del caso padre.
+ */
+export function resolveOpenApiResponseSpec(openApiDoc, method, rawUrl, statusCode, rawContentType = '') {
+  const fullPath = normalizePath(rawUrl);
+  if (EXPLICIT_NON_OPENAPI_PATHS.has(fullPath)) {
+    return { status: 'EXEMPT', reason: `Ruta fuera de contrato OpenAPI justificada (${fullPath}).` };
+  }
+
+  const openApiPath = stripApiPrefix(fullPath);
+  const reqSegs = openApiPath.split('/').filter(Boolean);
+  const lowerMethod = String(method || 'GET').toLowerCase();
+
+  let matchedOp = null;
+  let matchedTemplate = null;
+
+  // Preferir coincidencia exacta de segmentos literales antes que parametros {id}
+  let bestLiteralScore = -1;
+  for (const [template, pathItem] of Object.entries(openApiDoc.paths || {})) {
+    const op = pathItem?.[lowerMethod];
+    if (!op) continue;
+    const tplSegs = template.split('/').filter(Boolean);
+    if (tplSegs.length !== reqSegs.length) continue;
+    let literalScore = 0;
+    let ok = true;
+    for (let i = 0; i < tplSegs.length; i += 1) {
+      const isParam = tplSegs[i].startsWith('{') && tplSegs[i].endsWith('}');
+      if (isParam) continue;
+      if (tplSegs[i] !== reqSegs[i]) {
+        ok = false;
+        break;
+      }
+      literalScore += 1;
+    }
+    if (ok && literalScore > bestLiteralScore) {
+      bestLiteralScore = literalScore;
+      matchedOp = op;
+      matchedTemplate = template;
+    }
+  }
+
+  if (!matchedOp) {
+    return {
+      status: 'UNRESOLVED',
+      reason: `No existe operacion OpenAPI oficial para ${String(method).toUpperCase()} ${openApiPath}.`,
+    };
+  }
+
+  const statusKey = String(statusCode);
+  let respSpec = matchedOp.responses?.[statusKey] || matchedOp.responses?.default;
+  if (!respSpec) {
+    return {
+      status: 'UNRESOLVED',
+      operationId: matchedOp.operationId || `${lowerMethod} ${matchedTemplate}`,
+      reason: `Codigo HTTP ${statusCode} no documentado en OpenAPI para ${matchedOp.operationId || matchedTemplate}.`,
+    };
+  }
+
+  if (respSpec.$ref && typeof respSpec.$ref === 'string' && respSpec.$ref.startsWith('#/components/responses/')) {
+    const refName = respSpec.$ref.replace('#/components/responses/', '');
+    respSpec = openApiDoc.responses?.[refName] || respSpec;
+  }
+
+  const contentMap = respSpec.content || {};
+  const allowedMediaTypes = Object.keys(contentMap);
+  if (allowedMediaTypes.length === 0) {
+    return {
+      status: 'VALID_NO_BODY',
+      operationId: matchedOp.operationId || `${lowerMethod} ${matchedTemplate}`,
+      template: matchedTemplate,
+    };
+  }
+
+  const actualMedia = String(rawContentType || '').split(';')[0].trim().toLowerCase();
+  const matchedMedia = allowedMediaTypes.find((mt) => mt.toLowerCase() === actualMedia);
+  if (!matchedMedia) {
+    return {
+      status: 'CONTENT_TYPE_MISMATCH',
+      operationId: matchedOp.operationId || `${lowerMethod} ${matchedTemplate}`,
+      template: matchedTemplate,
+      expectedMediaTypes: allowedMediaTypes,
+      actualMediaType: actualMedia || '(vacio)',
+      reason: `Content-Type '${actualMedia || '(vacio)'}' no coincide con los permitidos por OpenAPI [${allowedMediaTypes.join(', ')}] en ${matchedOp.operationId || matchedTemplate} (${statusCode}).`,
+    };
+  }
+
+  const isJson = matchedMedia.includes('json');
+  const rawSchema = contentMap[matchedMedia]?.schema || null;
+  return {
+    status: 'RESOLVED',
+    operationId: matchedOp.operationId || `${lowerMethod} ${matchedTemplate}`,
+    template: matchedTemplate,
+    mediaType: matchedMedia,
+    isJson,
+    schema: rawSchema ? rewriteOpenApiRefs(rawSchema) : null,
+  };
+}
+
 export function createOpenApiValidator(openApiPath = OPENAPI_CONTRACT_PATH) {
-  const { version, sha256, $defs } = loadOfficialOpenApiSchemas(openApiPath);
+  const openApiDoc = loadOfficialOpenApiSchemas(openApiPath);
+  const { version, sha256, $defs } = openApiDoc;
   const ajv = new Ajv({
     allErrors: true,
     strict: false,
@@ -87,19 +217,41 @@ export function createOpenApiValidator(openApiPath = OPENAPI_CONTRACT_PATH) {
   };
   ajv.addSchema(rootSchema);
 
-  const compiledCache = new Map();
+  const compiledByName = new Map();
+  const compiledBySchemaKey = new Map();
 
   return {
     version,
     sha256,
+    openApiDoc,
     validate(schemaName, payload) {
       if (!$defs[schemaName]) {
         return { ok: false, errors: [`Esquema '${schemaName}' no existe en OpenAPI ${version}.`] };
       }
-      let validateFn = compiledCache.get(schemaName);
+      let validateFn = compiledByName.get(schemaName);
       if (!validateFn) {
         validateFn = ajv.compile({ $ref: `https://g6.local/openapi-schemas.json#/$defs/${schemaName}` });
-        compiledCache.set(schemaName, validateFn);
+        compiledByName.set(schemaName, validateFn);
+      }
+      const ok = validateFn(payload);
+      return {
+        ok: Boolean(ok),
+        errors: ok
+          ? []
+          : (validateFn.errors || []).map((e) => `${e.instancePath || '/'} ${e.message}`),
+      };
+    },
+    validateInlineSchema(schemaObj, payload, cacheKey) {
+      if (!schemaObj) return { ok: true, errors: [] };
+      const key = cacheKey || JSON.stringify(schemaObj);
+      let validateFn = compiledBySchemaKey.get(key);
+      if (!validateFn) {
+        const wrapped = {
+          ...schemaObj,
+          $defs,
+        };
+        validateFn = ajv.compile(wrapped);
+        compiledBySchemaKey.set(key, validateFn);
       }
       const ok = validateFn(payload);
       return {
@@ -119,11 +271,14 @@ function normalizeTypes(schema) {
   return [];
 }
 
-function resolveRef(schema, defs) {
+function resolveRef(schema, defs, seen = new Set()) {
   if (!schema || typeof schema !== 'object') return schema;
   if (schema.$ref && typeof schema.$ref === 'string') {
     const name = schema.$ref.replace('#/$defs/', '');
-    return defs[name] ? resolveRef(defs[name], defs) : schema;
+    if (!seen.has(name) && defs[name]) {
+      seen.add(name);
+      return resolveRef(defs[name], defs, seen);
+    }
   }
   return schema;
 }
@@ -163,10 +318,80 @@ function collectProperties(schema, defs, seen = new Set()) {
 }
 
 /**
- * H17: Comparacion estructural profunda entre schemas locales y OpenAPI oficial:
- * valida version, required, tipos, enumeraciones, formatos, limites numericos,
- * additionalProperties y referencias/estructuras anidadas.
+ * H24: Comparacion estructural recursiva completa (required, type, enum, const, pattern,
+ * format, minimum, maximum, exclusiveMinimum, additionalProperties, items y propiedades anidadas).
  */
+function compareSchemasRecursive(label, rawOff, rawLoc, offDefs, locDefs, errors, depth = 0) {
+  if (depth > 8 || !rawOff || !rawLoc) return;
+  const off = resolveRef(rawOff, offDefs);
+  const loc = resolveRef(rawLoc, locDefs);
+
+  const offTypes = normalizeTypes(off);
+  const locTypes = normalizeTypes(loc);
+  if (offTypes.length > 0 && locTypes.length > 0) {
+    const offBase = offTypes.filter((t) => t !== 'null');
+    const locBase = locTypes.filter((t) => t !== 'null');
+    if (JSON.stringify(offBase) !== JSON.stringify(locBase)) {
+      errors.push(`Divergencia de tipo en '${label}': oficial=${JSON.stringify(offTypes)} vs local=${JSON.stringify(locTypes)}.`);
+    }
+  }
+
+  if (Array.isArray(off.enum)) {
+    const locEnum = Array.isArray(loc.enum) ? loc.enum.filter((v) => v !== null) : null;
+    if (!locEnum || off.enum.some((v) => !locEnum.includes(v))) {
+      errors.push(`Divergencia de enum en '${label}': oficial=${JSON.stringify(off.enum)} vs local=${JSON.stringify(loc.enum)}.`);
+    }
+  }
+
+  if (off.const !== undefined && loc.const !== off.const) {
+    errors.push(`Divergencia de const en '${label}': oficial=${JSON.stringify(off.const)} vs local=${JSON.stringify(loc.const)}.`);
+  }
+
+  if (off.pattern !== undefined && loc.pattern !== off.pattern) {
+    errors.push(`Divergencia de pattern en '${label}': oficial='${off.pattern}' vs local='${loc.pattern || 'none'}'.`);
+  }
+
+  if (off.format && ['date-time', 'uuid', 'uri'].includes(off.format) && loc.format !== off.format) {
+    errors.push(`Divergencia de formato en '${label}': oficial='${off.format}' vs local='${loc.format || 'none'}'.`);
+  }
+
+  if (off.minimum !== undefined && loc.minimum !== off.minimum) {
+    errors.push(`Divergencia de minimum en '${label}': oficial=${off.minimum} vs local=${loc.minimum}.`);
+  }
+
+  if (off.maximum !== undefined && loc.maximum !== off.maximum) {
+    errors.push(`Divergencia de maximum en '${label}': oficial=${off.maximum} vs local=${loc.maximum}.`);
+  }
+
+  if (off.exclusiveMinimum !== undefined && loc.exclusiveMinimum !== off.exclusiveMinimum) {
+    errors.push(`Divergencia de exclusiveMinimum en '${label}': oficial=${off.exclusiveMinimum} vs local=${loc.exclusiveMinimum}.`);
+  }
+
+  if (off.additionalProperties === false && loc.additionalProperties !== false) {
+    errors.push(`Divergencia OpenAPI en '${label}': additionalProperties debe ser false.`);
+  }
+
+  const offReq = collectRequired(off, offDefs);
+  const locReq = collectRequired(loc, locDefs);
+  for (const reqField of offReq) {
+    if (!locReq.has(reqField)) {
+      errors.push(`Divergencia OpenAPI en '${label}': falta campo obligatorio '${reqField}'.`);
+    }
+  }
+
+  if (off.items && loc.items) {
+    compareSchemasRecursive(`${label}[]`, off.items, loc.items, offDefs, locDefs, errors, depth + 1);
+  }
+
+  const offProps = collectProperties(off, offDefs);
+  const locProps = collectProperties(loc, locDefs);
+  for (const [propName, offChild] of Object.entries(offProps)) {
+    if (locProps[propName]) {
+      compareSchemasRecursive(`${label}.${propName}`, offChild, locProps[propName], offDefs, locDefs, errors, depth + 1);
+    }
+  }
+}
+
 export function verifySchemaContractAlignment(
   openApiPath = OPENAPI_CONTRACT_PATH,
   localSchemasPath = SCHEMAS_PATH,
@@ -195,67 +420,7 @@ export function verifySchemaContractAlignment(
       errors.push(`Esquema '${name}' faltante en ${localSchemasPath}.`);
       continue;
     }
-
-    const offReq = collectRequired(offDef, official.$defs);
-    const locReq = new Set(locDef.required || []);
-    for (const reqField of offReq) {
-      if (!locReq.has(reqField)) {
-        errors.push(`Divergencia OpenAPI en '${name}': falta campo obligatorio '${reqField}'.`);
-      }
-    }
-
-    if (offDef.additionalProperties === false && locDef.additionalProperties !== false) {
-      errors.push(`Divergencia OpenAPI en '${name}': additionalProperties debe ser false.`);
-    }
-
-    const offProps = collectProperties(offDef, official.$defs);
-    const locProps = collectProperties(locDef, local.$defs || {});
-
-    for (const [propName, rawOffProp] of Object.entries(offProps)) {
-      const rawLocProp = locProps[propName];
-      if (!rawLocProp) continue;
-      const offProp = resolveRef(rawOffProp, official.$defs);
-      const locProp = resolveRef(rawLocProp, local.$defs || {});
-
-      const offTypes = normalizeTypes(offProp);
-      const locTypes = normalizeTypes(locProp);
-      if (offTypes.length > 0 && locTypes.length > 0) {
-        const offBase = offTypes.filter((t) => t !== 'null');
-        const locBase = locTypes.filter((t) => t !== 'null');
-        if (JSON.stringify(offBase) !== JSON.stringify(locBase)) {
-          errors.push(
-            `Divergencia de tipo en '${name}.${propName}': oficial=${JSON.stringify(offTypes)} vs local=${JSON.stringify(locTypes)}.`,
-          );
-        }
-      }
-
-      if (Array.isArray(offProp.enum)) {
-        const locEnum = Array.isArray(locProp.enum) ? locProp.enum.filter((v) => v !== null) : null;
-        if (!locEnum || offProp.enum.some((v) => !locEnum.includes(v))) {
-          errors.push(
-            `Divergencia de enum en '${name}.${propName}': oficial=${JSON.stringify(offProp.enum)} vs local=${JSON.stringify(locProp.enum)}.`,
-          );
-        }
-      }
-
-      if (offProp.format && ['date-time', 'uuid', 'uri'].includes(offProp.format) && locProp.format !== offProp.format) {
-        errors.push(
-          `Divergencia de formato en '${name}.${propName}': oficial='${offProp.format}' vs local='${locProp.format || 'none'}'.`,
-        );
-      }
-
-      if (offProp.minimum !== undefined && locProp.minimum !== offProp.minimum) {
-        errors.push(
-          `Divergencia de minimum en '${name}.${propName}': oficial=${offProp.minimum} vs local=${locProp.minimum}.`,
-        );
-      }
-
-      if (offProp.exclusiveMinimum !== undefined && locProp.exclusiveMinimum !== offProp.exclusiveMinimum) {
-        errors.push(
-          `Divergencia de exclusiveMinimum en '${name}.${propName}': oficial=${offProp.exclusiveMinimum} vs local=${locProp.exclusiveMinimum}.`,
-        );
-      }
-    }
+    compareSchemasRecursive(name, offDef, locDef, official.$defs, local.$defs || {}, errors, 0);
   }
 
   return {
@@ -267,35 +432,23 @@ export function verifySchemaContractAlignment(
 }
 
 /**
- * H17: Valida respuestas HTTP (principales y auxiliares) directamente contra OpenAPI oficial compilado en Ajv.
+ * H24: Valida TODAS las respuestas HTTP ejecutadas (principales y auxiliares) resolviendo
+ * el esquema directamente desde (metodo HTTP, ruta efectiva, codigo de estado, Content-Type)
+ * en el OpenAPI oficial compilado con Ajv. Nunca omite silenciosamente respuestas JSON.
  */
-export function inferSchemaForUrlAndStatus(pmId, url, statusCode) {
-  if (pmId && PM_RESPONSE_SCHEMA_MAP[pmId]?.[statusCode]) {
-    return PM_RESPONSE_SCHEMA_MAP[pmId][statusCode];
-  }
-  const path = String(url || '').split('?')[0];
-  if (statusCode === 200) {
-    if (path.endsWith('/api/v1/productos')) return 'PaginaProductosComercial';
-    if (/\/api\/v1\/productos\/[^/]+$/.test(path)) return 'ProductoDetalleComercial';
-    if (path.endsWith('/api/v1/precios')) return 'ConsultaPrecios';
-    if (path.endsWith('/api/v1/inventario/disponibilidad/comercial')) return 'ConsultaDisponibilidadComercialResponse';
-    if (path.endsWith('/api/v1/inventario/disponibilidad')) return 'ConsultaDisponibilidadResponse';
-  }
-  return null;
-}
-
 export function validateNewmanExecutionsWithAjv(rawSummary, openApiPath = OPENAPI_CONTRACT_PATH) {
   const validator = createOpenApiValidator(openApiPath);
   const violations = [];
+  const auditLog = [];
   const executions = Array.isArray(rawSummary?.run?.executions) ? rawSummary.run.executions : [];
 
   for (const exec of executions) {
-    if (!exec.response || !exec.response.stream) continue;
+    if (!exec.response) continue;
     const statusCode = exec.response.code;
+    const method = String(exec.request?.method || 'GET').toUpperCase();
     const contentType = (exec.response.header || [])
       .find((h) => String(h.key || '').toLowerCase() === 'content-type')
       ?.value || '';
-    if (!String(contentType).toLowerCase().includes('json')) continue;
 
     const itemName = String(exec.item?.name || '');
     const pmId = itemName.match(/^(PM-\d+[A-Z]?)\b/)?.[1] || null;
@@ -305,8 +458,45 @@ export function validateNewmanExecutionsWithAjv(rawSummary, openApiPath = OPENAP
         ? `/${exec.request.url.path.join('/')}`
         : '';
 
-    const schemaName = inferSchemaForUrlAndStatus(pmId, rawUrl, statusCode);
-    if (!schemaName) continue;
+    const resolved = resolveOpenApiResponseSpec(
+      validator.openApiDoc,
+      method,
+      rawUrl,
+      statusCode,
+      contentType,
+    );
+
+    if (resolved.status === 'EXEMPT' || resolved.status === 'VALID_NO_BODY') {
+      auditLog.push({ pmId: pmId || 'AUX', method, url: normalizePath(rawUrl), statusCode, outcome: resolved.status });
+      continue;
+    }
+
+    if (resolved.status === 'UNRESOLVED' || resolved.status === 'CONTENT_TYPE_MISMATCH') {
+      violations.push({
+        pmId: pmId || 'AUX',
+        operationId: resolved.operationId || `${method} ${normalizePath(rawUrl)}`,
+        url: normalizePath(rawUrl),
+        statusCode,
+        errors: [resolved.reason],
+      });
+      continue;
+    }
+
+    if (!resolved.isJson || !resolved.schema) {
+      auditLog.push({ pmId: pmId || 'AUX', method, url: normalizePath(rawUrl), statusCode, outcome: 'VALID_NON_JSON' });
+      continue;
+    }
+
+    if (!exec.response.stream) {
+      violations.push({
+        pmId: pmId || 'AUX',
+        operationId: resolved.operationId,
+        url: normalizePath(rawUrl),
+        statusCode,
+        errors: ['Cuerpo de respuesta JSON vacio o ausente'],
+      });
+      continue;
+    }
 
     let payload;
     try {
@@ -315,18 +505,34 @@ export function validateNewmanExecutionsWithAjv(rawSummary, openApiPath = OPENAP
         : Buffer.from(exec.response.stream?.data || exec.response.stream).toString('utf8');
       payload = JSON.parse(text);
     } catch {
-      violations.push({ pmId: pmId || 'AUX', schemaName, errors: ['Respuesta JSON no parseable'] });
+      violations.push({
+        pmId: pmId || 'AUX',
+        operationId: resolved.operationId,
+        url: normalizePath(rawUrl),
+        statusCode,
+        errors: ['Respuesta JSON no parseable'],
+      });
       continue;
     }
 
-    const check = validator.validate(schemaName, payload);
+    const cacheKey = `${resolved.operationId}:${statusCode}:${resolved.mediaType}`;
+    const check = validator.validateInlineSchema(resolved.schema, payload, cacheKey);
     if (!check.ok) {
       violations.push({
         pmId: pmId || 'AUX',
-        schemaName,
-        url: rawUrl,
+        operationId: resolved.operationId,
+        url: normalizePath(rawUrl),
         statusCode,
         errors: check.errors,
+      });
+    } else {
+      auditLog.push({
+        pmId: pmId || 'AUX',
+        operationId: resolved.operationId,
+        method,
+        url: normalizePath(rawUrl),
+        statusCode,
+        outcome: 'VALIDATED',
       });
     }
   }
@@ -336,5 +542,6 @@ export function validateNewmanExecutionsWithAjv(rawSummary, openApiPath = OPENAP
     openApiVersion: validator.version,
     openApiSha256: validator.sha256,
     violations,
+    auditLog,
   };
 }

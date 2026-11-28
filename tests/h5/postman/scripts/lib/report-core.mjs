@@ -36,6 +36,8 @@ export function buildManifest({
   blockers = [],
   durationMs = 0,
   exitCode = 0,
+  openApiSha256 = 'UNAVAILABLE',
+  contractMode = 'STRICT_OFFICIAL',
 }) {
   const collectionHash = existsSync(collectionPath)
     ? sha256Buffer(readFileSync(collectionPath))
@@ -66,6 +68,8 @@ export function buildManifest({
     },
     contract: {
       openApiVersion: OPENAPI_CONTRACT_VERSION,
+      openApiSha256,
+      mode: contractMode,
       path: 'contratos/http/openapi.yaml',
     },
     reconciliation: {

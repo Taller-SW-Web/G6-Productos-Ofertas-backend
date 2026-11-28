@@ -25,7 +25,7 @@
         "marca_id": { "type": "string", "minLength": 1 },
         "tiene_variantes": { "type": "boolean" },
         "sku_base": { "type": ["string", "null"] },
-        "images": { "type": "array", "items": { "type": "string" } },
+        "images": { "type": "array", "items": { "type": "string", "format": "uri" } },
         "attributes": { "type": "array" }
       }
     },
@@ -37,7 +37,7 @@
         "sku": { "type": "string", "minLength": 1 },
         "identifying_attributes": { "type": "array" },
         "non_identifying_attributes": { "type": "array" },
-        "images": { "type": "array", "items": { "type": "string" } }
+        "images": { "type": "array", "items": { "type": "string", "format": "uri" } }
       }
     },
     "ProductoDetalleComercial": {
@@ -52,7 +52,14 @@
         "marca_id": { "type": "string", "minLength": 1 },
         "tiene_variantes": { "type": "boolean" },
         "sku_base": { "type": ["string", "null"] },
-        "marca": { "type": "object" },
+        "marca": {
+          "type": "object",
+          "required": ["marca_id", "name"],
+          "properties": {
+            "marca_id": { "type": "string", "minLength": 1 },
+            "name": { "type": "string", "minLength": 1 }
+          }
+        },
         "variants": { "type": "array", "items": { "$ref": "#/$defs/VarianteComercial" } }
       }
     },
