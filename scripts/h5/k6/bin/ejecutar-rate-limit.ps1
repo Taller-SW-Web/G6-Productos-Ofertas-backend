@@ -158,6 +158,8 @@ try {
         APIM_RL_MAX_DURATION_SECONDS = [string]$effective.max_duration_seconds
         APIM_RL_AUTHORIZED_DURATION_SECONDS = [string]$effective.max_duration_seconds
         APIM_RL_MAX_RETRY_AFTER_SECONDS = [string]$effective.max_retry_after_seconds
+        APIM_RL_BACKEND_SHA = $effective.backend_sha
+        APIM_RL_SOURCE_WORKTREE_CLEAN = ([bool]$effective.source_worktree_clean).ToString().ToLowerInvariant()
         APIM_RL_RUN_ID = $runId
         APIM_RL_SUMMARY_PATH = $k6SummaryPath
         APIM_RL_VERIFIED_PERMIT_SHA256 = if ($effective.permit_sha256) { $effective.permit_sha256 } else { '' }
@@ -225,7 +227,7 @@ try {
     }
     if ($SoloValidar) {
         $validated = [ordered]@{
-            schema_version = 1; case_id = if ($Profile -eq 'aislamiento') { 'RL-04' } elseif ($Profile -eq 'concurrencia') { 'RL-06' } elseif ($Profile -eq 'cuota') { 'APIM-QUOTA' } else { 'RL-01-RL-03' }
+            schema_version = 1; backend_sha = $effective.backend_sha; source_worktree_clean = [bool]$effective.source_worktree_clean; case_id = if ($Profile -eq 'aislamiento') { 'RL-04' } elseif ($Profile -eq 'concurrencia') { 'RL-06' } elseif ($Profile -eq 'cuota') { 'APIM-QUOTA' } else { 'RL-01-RL-03' }
             profile = $Profile; mode = $Mode; status = 'NOT_RUN'; scope = if ($Mode -eq 'local') { 'L1_LOCAL_POLICY_SIMULATION' } else { 'L2_STAGING_APIM' }
             verified_permit_sha256 = $effective.permit_sha256; operation_id = $effective.operation_id
             operation_path = $effective.operation_path; revision = $effective.revision
@@ -272,7 +274,7 @@ try {
     $latency = $k6Summary.metrics.raw_k6_http_req_duration
     $httpReqs = $k6Summary.metrics.raw_k6_http_reqs
     $final = [ordered]@{
-        schema_version = 1; case_id = if ($Profile -eq 'aislamiento') { 'RL-04' } elseif ($Profile -eq 'concurrencia') { 'RL-06' } elseif ($Profile -eq 'cuota') { 'APIM-QUOTA' } else { 'RL-01-RL-03' }
+        schema_version = 1; backend_sha = $effective.backend_sha; source_worktree_clean = [bool]$effective.source_worktree_clean; case_id = if ($Profile -eq 'aislamiento') { 'RL-04' } elseif ($Profile -eq 'concurrencia') { 'RL-06' } elseif ($Profile -eq 'cuota') { 'APIM-QUOTA' } else { 'RL-01-RL-03' }
         profile = $Profile; mode = $Mode; environment = $k6Summary.scope; status = $resultStatus
         overall_certification = 'INCONCLUSIVE'; timestamp_utc = [DateTimeOffset]::UtcNow.ToString('o')
         operation = @{ operation_id = $effective.operation_id; method = 'GET'; path = $effective.operation_path; revision = $effective.revision }

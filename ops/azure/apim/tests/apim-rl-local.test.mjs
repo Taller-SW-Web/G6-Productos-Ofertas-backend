@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -217,6 +217,9 @@ test('la simulación local ejecuta normal → 429/Retry-After → espera → rec
   assert.equal(run.code, 0, `${run.stderr}${run.stdout}; backend requests=${run.requests.length}`);
   assert.equal(run.summary.environment, 'L1_LOCAL_POLICY_SIMULATION');
   assert.equal(run.summary.status, 'PASS');
+  assert.match(run.summary.backend_sha, /^[a-f0-9]{40}$/);
+  assert.equal(typeof run.summary.source_worktree_clean, 'boolean');
+  assert.equal(run.summary.k6_summary.metadata.backend_sha, run.summary.backend_sha);
   assert.equal(run.summary.demo_event.requirements['RL-01'], 'PASS');
   assert.equal(run.summary.demo_event.requirements['RL-02'], 'PASS');
   assert.equal(run.summary.demo_event.result.normal_and_burst_within_effective_window, true);
@@ -245,6 +248,9 @@ test('el perfil de aislamiento limita a A y admite a B antes de la recuperación
   const run = await runCase('normal', 'aislamiento');
   assert.equal(run.code, 0, run.stderr + run.stdout);
   assert.equal(run.summary.status, 'PASS');
+  assert.match(run.summary.backend_sha, /^[a-f0-9]{40}$/);
+  assert.equal(typeof run.summary.source_worktree_clean, 'boolean');
+  assert.equal(run.summary.k6_summary.metadata.backend_sha, run.summary.backend_sha);
   assert.equal(run.summary.demo_event.requirements['RL-04'], 'PASS');
   assert.equal(run.summary.demo_event.result.consumer_b_status, 200);
   assert.equal(run.requests.length, 5);
@@ -254,6 +260,9 @@ test('el perfil de cuota exige presupuesto y código HTTP 403 respaldados por la
   const run = await runCase('normal', 'cuota');
   assert.equal(run.code, 0, run.stderr + run.stdout);
   assert.equal(run.summary.status, 'PASS');
+  assert.match(run.summary.backend_sha, /^[a-f0-9]{40}$/);
+  assert.equal(typeof run.summary.source_worktree_clean, 'boolean');
+  assert.equal(run.summary.k6_summary.metadata.backend_sha, run.summary.backend_sha);
   assert.equal(run.summary.demo_event.result.requests_offered, 5);
   assert.equal(run.summary.demo_event.result.requests_admitted, 4);
   assert.equal(run.summary.demo_event.result.requests_rejected, 1);
@@ -275,6 +284,9 @@ test('el perfil de concurrencia registra el bloqueo y deja RL-06 inconcluso sin 
   const run = await runCase('normal', 'concurrencia');
   assert.equal(run.code, 0, run.stderr + run.stdout);
   assert.equal(run.summary.status, 'PASS');
+  assert.match(run.summary.backend_sha, /^[a-f0-9]{40}$/);
+  assert.equal(typeof run.summary.source_worktree_clean, 'boolean');
+  assert.equal(run.summary.k6_summary.metadata.backend_sha, run.summary.backend_sha);
   assert.equal(run.summary.demo_event.requirements['RL-06'], 'INCONCLUSIVE_IDEMPOTENCIA_NO_VERIFICADA');
   assert.ok(run.summary.demo_event.result.requests_rejected_429 > 0);
   assert.equal(run.summary.demo_event.result.requests_offered, 3);
@@ -326,6 +338,8 @@ test('preflight sin tráfico produce resumen e índice con SHA-256 y no envía s
     assert.equal(result.code, 0, result.stderr + result.stdout);
     const summary = readRunSummary(result.stdout, result.stderr);
     assert.equal(summary.status, 'NOT_RUN');
+    assert.match(summary.backend_sha, /^[a-f0-9]{40}$/);
+    assert.equal(typeof summary.source_worktree_clean, 'boolean');
     assert.match(summary.exact_command, /-SoloValidar/);
     assert.equal(lab.requests.length, 0);
     const indexPath = join(summary._evidenceDir, 'evidence-index.json');
@@ -355,6 +369,25 @@ test('preflight sin tráfico rechaza código de cuota no respaldado por parámet
   }
 });
 
+test('preflight remoto rechaza código modificado antes de validar credenciales', () => {
+  const files = fixtureFiles('https://apim.example.invalid/api/v1');
+  const manifest = JSON.parse(readFileSync(files.manifest, 'utf8'));
+  delete manifest.fixtureType;
+  writeFileSync(files.manifest, JSON.stringify(manifest));
+  const marker = join(repo, `.apim-worktree-dirty-${randomUUID()}.tmp`);
+  writeFileSync(marker, 'dirty probe');
+  try {
+    assert.throws(() => resolveRateLimitRun({
+      mode: 'remote', profile: 'demo-rate-limit', configPath: files.config,
+      manifestPath: files.manifest, parametersPath: files.parameters, policyPath: files.policy,
+    }), /PREFLIGHT_CODIGO_BACKEND_MODIFICADO/);
+  } finally {
+    rmSync(marker, { force: true });
+    const target = resolve(files.temp);
+    const tempRoot = resolve(os.tmpdir()) + '\\';
+    if (target.startsWith(tempRoot)) rmSync(target, { recursive: true, force: true });
+  }
+});
 test('preflight remoto rechaza la ejecución si no recibe una credencial para validar contra el permiso firmado', () => {
   const files = fixtureFiles('https://apim.example.invalid/api/v1');
   const manifest = JSON.parse(readFileSync(files.manifest, 'utf8'));

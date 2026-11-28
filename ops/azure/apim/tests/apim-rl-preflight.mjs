@@ -15,6 +15,18 @@ const readJson = (path, code) => {
 
 function fail(code) { throw new Error(code); }
 
+function getBackendProvenance() {
+  try {
+    const backendRoot = resolve(here, '../../../../');
+    const backendSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: backendRoot, encoding: 'utf8' }).trim();
+    if (!/^[a-f0-9]{40}$/i.test(backendSha)) fail('PREFLIGHT_PROCEDENCIA_BACKEND_AUSENTE');
+    const status = execFileSync('git', ['status', '--porcelain'], { cwd: backendRoot, encoding: 'utf8' });
+    return { backendSha, sourceWorktreeClean: status.trim() === '' };
+  } catch {
+    fail('PREFLIGHT_PROCEDENCIA_BACKEND_AUSENTE');
+  }
+}
+
 export function resolveRateLimitRun({ mode, profile, configPath, manifestPath, parametersPath, policyPath, permitPath }) {
   if (!['local', 'remote'].includes(mode)) fail('PREFLIGHT_MODO_INVALIDO');
   if (!['demo-rate-limit', 'aislamiento', 'cuota', 'concurrencia'].includes(profile)) fail('PREFLIGHT_PERFIL_NO_ADMITIDO');
@@ -28,6 +40,8 @@ export function resolveRateLimitRun({ mode, profile, configPath, manifestPath, p
   let baseUrl;
   try { baseUrl = new URL(config.base_url); } catch { fail('PREFLIGHT_ORIGEN_INVALIDO'); }
   const remote = mode === 'remote';
+  const provenance = getBackendProvenance();
+  if (remote && !provenance.sourceWorktreeClean) fail('PREFLIGHT_CODIGO_BACKEND_MODIFICADO');
   if (mode === 'local' && !['127.0.0.1', 'localhost', '[::1]'].includes(baseUrl.hostname)) fail('PREFLIGHT_HOST_NO_AUTORIZADO');
   if (remote && baseUrl.protocol !== 'https:') fail('PREFLIGHT_HOST_NO_AUTORIZADO');
 
@@ -136,6 +150,8 @@ export function resolveRateLimitRun({ mode, profile, configPath, manifestPath, p
   const result = {
     profile,
     mode,
+    backend_sha: provenance.backendSha,
+    source_worktree_clean: provenance.sourceWorktreeClean,
     base_url: config.base_url,
     operation_id: valid.operation.operationId,
     operation_path: config.operation_path,
@@ -173,7 +189,7 @@ export function resolveRateLimitRun({ mode, profile, configPath, manifestPath, p
     if (!token) fail('PREFLIGHT_CREDENCIAL_APIM_AUSENTE');
     if (!permitPath) fail('PREFLIGHT_PERMISO_STAGING_AUSENTE');
     const tokenHash = sha256(Buffer.from(token, 'utf8'));
-    const backendSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: process.cwd(), encoding: 'utf8' }).trim();
+    const backendSha = provenance.backendSha;
     const bindings = {
       environment: 'STAGING_APIM',
       origin: baseUrl.origin,

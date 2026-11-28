@@ -534,6 +534,8 @@ export function handleSummary(data) {
       },
       metadata: {
         profile,
+        backend_sha: __ENV.APIM_RL_BACKEND_SHA || null,
+        source_worktree_clean: __ENV.APIM_RL_SOURCE_WORKTREE_CLEAN === 'true',
         run_id: __ENV.APIM_RL_RUN_ID,
         mode: __ENV.APIM_RL_MODE,
         operation_id: __ENV.APIM_RL_OPERATION_ID,
