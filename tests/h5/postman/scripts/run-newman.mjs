@@ -18,6 +18,8 @@ import {
 import { runPreflight } from './lib/preflight-core.mjs';
 import { buildMarkdownReport, buildManifest, resolveGitHead, writeEvidenceBundle } from './lib/report-core.mjs';
 import { buildSanitizedJunitXml, sanitizeNewmanRun } from './lib/sanitizer-core.mjs';
+import { validateNewmanExecutionsWithAjv } from './lib/openapi-schema-validator.mjs';
+import { OFFICIAL_OPENAPI_CONTRACT_PATH } from './lib/constants.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -83,6 +85,9 @@ export function planExecution(collection, targetFolders, tokens = {}, initialFix
     availableFixtures.add('skusCsv');
   }
   if (initialFixtures.locationId) availableFixtures.add('locationId');
+  if (initialFixtures.marketplaceSku) availableFixtures.add('marketplaceSku');
+  if (initialFixtures.ventasSku) availableFixtures.add('ventasSku');
+  if (initialFixtures.ventasLocationId) availableFixtures.add('ventasLocationId');
 
   const filteredItems = (collection.item || [])
     .filter((folder) => selectedFolders.has(folder.name))
@@ -191,6 +196,9 @@ export async function executeSuite(options = {}) {
   const initialProductId = options.productId ?? process.env.G6_PRODUCT_ID ?? '';
   const initialSku = options.sku ?? process.env.G6_SKU ?? '';
   const initialLocationId = options.locationId ?? process.env.G6_LOCATION_ID ?? '';
+  const initialMarketplaceSku = options.marketplaceSku ?? process.env.G6_MARKETPLACE_SKU ?? '';
+  const initialVentasSku = options.ventasSku ?? process.env.G6_VENTAS_SKU ?? '';
+  const initialVentasLocationId = options.ventasLocationId ?? process.env.G6_VENTAS_LOCATION_ID ?? '';
 
   const preflight = runPreflight({
     baseUrl,
@@ -245,7 +253,14 @@ export async function executeSuite(options = {}) {
     rawCollection,
     targetFolders,
     { accessToken, restrictedAccessToken, marketplaceAccessToken, ventasAccessToken },
-    { productId: initialProductId, sku: initialSku, locationId: initialLocationId },
+    {
+      productId: initialProductId,
+      sku: initialSku,
+      locationId: initialLocationId,
+      marketplaceSku: initialMarketplaceSku,
+      ventasSku: initialVentasSku,
+      ventasLocationId: initialVentasLocationId,
+    },
   );
 
   const privateTmpDir = mkdtempSync(join(tmpdir(), 'g6-h5-newman-'));
@@ -271,6 +286,9 @@ export async function executeSuite(options = {}) {
     sku: initialSku,
     skusCsv: initialSku,
     locationId: initialLocationId,
+    marketplaceSku: initialMarketplaceSku,
+    ventasSku: initialVentasSku,
+    ventasLocationId: initialVentasLocationId,
     priceMin: options.priceMin ?? process.env.G6_PRICE_MIN ?? '0',
     priceMax: options.priceMax ?? process.env.G6_PRICE_MAX ?? '100',
     priceMaxNarrow: options.priceMaxNarrow ?? process.env.G6_PRICE_MAX_NARROW ?? '60',
@@ -349,6 +367,33 @@ export async function executeSuite(options = {}) {
       extraSecrets,
       plannedCases: plan.plannedCases,
     });
+
+    // H17: Validacion contractual estricta con Ajv compilado directamente desde OpenAPI oficial
+    // sobre TODAS las respuestas HTTP JSON ejecutadas (principales y auxiliares).
+    let openApiSha256 = null;
+    if (existsSync(OFFICIAL_OPENAPI_CONTRACT_PATH)) {
+      const ajvAudit = validateNewmanExecutionsWithAjv(rawData, OFFICIAL_OPENAPI_CONTRACT_PATH);
+      openApiSha256 = ajvAudit.openApiSha256;
+      if (!ajvAudit.ok) {
+        for (const v of ajvAudit.violations) {
+          const targetCase = sanitizedSummary.cases.find((c) => c.pmId === v.pmId);
+          const msg = `H17 Ajv OpenAPI (${v.schemaName}): ${v.errors.slice(0, 3).join('; ')}`;
+          if (targetCase && targetCase.status !== 'NOT_RUN') {
+            targetCase.assertions.push({ name: `H17 Ajv ${v.schemaName}`, passed: false, errorMessage: msg });
+            targetCase.assertionsTotal += 1;
+            targetCase.assertionsFailed += 1;
+            targetCase.status = 'FAIL';
+          }
+        }
+        sanitizedSummary.totals.pass = sanitizedSummary.cases.filter((c) => c.status === 'PASS').length;
+        sanitizedSummary.totals.fail = sanitizedSummary.cases.filter((c) => c.status === 'FAIL').length;
+        sanitizedSummary.totals.assertionsTotal = sanitizedSummary.cases.reduce((a, c) => a + c.assertionsTotal, 0);
+        sanitizedSummary.totals.assertionsFailed = sanitizedSummary.cases.reduce((a, c) => a + c.assertionsFailed, 0);
+        if (sanitizedSummary.totals.fail > 0) {
+          sanitizedSummary.overallVerdict = 'FAIL';
+        }
+      }
+    }
 
     if (sanitizedSummary.overallVerdict === 'PASS') {
       newmanExitCode = 0;

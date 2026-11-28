@@ -88,16 +88,22 @@ test('H13 Regresion: Ajv compilado desde OpenAPI oficial valida formatos, objeto
   });
   assert.equal(extraProp.ok, false, 'Ajv debe rechazar propiedad adicional en DisponibilidadComercial');
 
-  // Deteccion de deriva de contrato cuando un esquema local elimina un campo obligatorio
-  const tmp = mkdtempSync(join(tmpdir(), 'g6-h13-drift-'));
+  // H17: Deteccion profunda de deriva (campo requerido, tipo, enum y formato)
+  const tmp = mkdtempSync(join(tmpdir(), 'g6-h17-drift-'));
   try {
     const drifted = JSON.parse(readFileSync(SCHEMAS_PATH, 'utf8'));
     drifted.$defs.Precio.required = drifted.$defs.Precio.required.filter((f) => f !== 'currency');
+    drifted.$defs.Precio.properties.precio_regular.type = 'string';
+    drifted.$defs.Precio.properties.valid_from.format = 'uri';
+    drifted.$defs.Precio.properties.origen.enum = ['PRODUCTO'];
     const driftPath = join(tmp, 'drifted-schemas.json');
     writeFileSync(driftPath, JSON.stringify(drifted), 'utf8');
     const driftCheck = verifySchemaContractAlignment(OPENAPI_CONTRACT_PATH, driftPath);
-    assert.equal(driftCheck.ok, false, 'Debe detectar deriva cuando falta campo obligatorio currency');
-    assert.ok(driftCheck.errors.some((e) => e.includes('currency')));
+    assert.equal(driftCheck.ok, false, 'Debe detectar deriva profunda de contrato');
+    assert.ok(driftCheck.errors.some((e) => e.includes('currency')), 'Debe detectar campo requerido faltante');
+    assert.ok(driftCheck.errors.some((e) => e.includes('precio_regular')), 'Debe detectar divergencia de tipo');
+    assert.ok(driftCheck.errors.some((e) => e.includes('valid_from')), 'Debe detectar divergencia de formato');
+    assert.ok(driftCheck.errors.some((e) => e.includes('origen')), 'Debe detectar divergencia de enum');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

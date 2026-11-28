@@ -126,7 +126,7 @@
     },
     {
       "key": "openApiResponseSchemas",
-      "value": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"G6 H5 OpenAPI 0.7.0-rc.3 Response Schemas\",\"sourceContract\":\"contratos/http/openapi.yaml\",\"sourceVersion\":\"0.7.0-rc.3\",\"$defs\":{\"Canal\":{\"type\":\"string\",\"enum\":[\"MARKETPLACE\",\"CHATBOT\",\"RETAIL\",\"VENTAS\"]},\"EstadoStock\":{\"type\":\"string\",\"enum\":[\"DISPONIBLE\",\"STOCK_BAJO\",\"AGOTADO\",\"INDETERMINADO\"]},\"ProductoResumenComercial\":{\"type\":\"object\",\"required\":[\"product_id\",\"slug\",\"name\",\"categoria_id\",\"tipo_producto_id\",\"marca_id\",\"tiene_variantes\"],\"properties\":{\"product_id\":{\"type\":\"string\",\"minLength\":1},\"slug\":{\"type\":\"string\",\"minLength\":1},\"name\":{\"type\":\"string\",\"minLength\":1},\"description\":{\"type\":[\"string\",\"null\"]},\"categoria_id\":{\"type\":\"string\",\"minLength\":1},\"tipo_producto_id\":{\"type\":\"string\",\"minLength\":1},\"marca_id\":{\"type\":\"string\",\"minLength\":1},\"tiene_variantes\":{\"type\":\"boolean\"},\"sku_base\":{\"type\":[\"string\",\"null\"]},\"images\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"attributes\":{\"type\":\"array\"}}},\"VarianteComercial\":{\"type\":\"object\",\"required\":[\"variant_id\",\"sku\"],\"properties\":{\"variant_id\":{\"type\":\"string\",\"minLength\":1},\"sku\":{\"type\":\"string\",\"minLength\":1},\"identifying_attributes\":{\"type\":\"array\"},\"non_identifying_attributes\":{\"type\":\"array\"},\"images\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}},\"ProductoDetalleComercial\":{\"type\":\"object\",\"required\":[\"product_id\",\"slug\",\"name\",\"categoria_id\",\"tipo_producto_id\",\"marca_id\",\"tiene_variantes\",\"marca\",\"variants\"],\"properties\":{\"product_id\":{\"type\":\"string\",\"minLength\":1},\"slug\":{\"type\":\"string\",\"minLength\":1},\"name\":{\"type\":\"string\",\"minLength\":1},\"categoria_id\":{\"type\":\"string\",\"minLength\":1},\"tipo_producto_id\":{\"type\":\"string\",\"minLength\":1},\"marca_id\":{\"type\":\"string\",\"minLength\":1},\"tiene_variantes\":{\"type\":\"boolean\"},\"sku_base\":{\"type\":[\"string\",\"null\"]},\"marca\":{\"type\":\"object\"},\"variants\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/$defs/VarianteComercial\"}}}},\"PaginaProductosComercial\":{\"type\":\"object\",\"required\":[\"items\",\"pagina\",\"tamanio\",\"total\"],\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/$defs/ProductoResumenComercial\"}},\"pagina\":{\"type\":\"integer\",\"minimum\":1},\"tamanio\":{\"type\":\"integer\",\"minimum\":1},\"total\":{\"type\":\"integer\",\"minimum\":0}}},\"Precio\":{\"type\":\"object\",\"required\":[\"sku\",\"precio_regular\",\"currency\",\"channel_id\",\"valid_from\",\"price_version\",\"vigencia_id\",\"origen\"],\"properties\":{\"sku\":{\"type\":\"string\",\"minLength\":1},\"precio_regular\":{\"type\":\"number\",\"exclusiveMinimum\":0},\"precio_oferta\":{\"type\":[\"number\",\"null\"],\"exclusiveMinimum\":0},\"currency\":{\"type\":\"string\",\"minLength\":1},\"channel_id\":{\"type\":[\"string\",\"null\"],\"enum\":[\"MARKETPLACE\",\"CHATBOT\",\"RETAIL\",\"VENTAS\",null]},\"valid_from\":{\"type\":\"string\",\"minLength\":1,\"format\":\"date-time\"},\"valid_until\":{\"type\":[\"string\",\"null\"],\"format\":\"date-time\"},\"price_version\":{\"type\":\"integer\",\"minimum\":0},\"vigencia_id\":{\"type\":\"string\",\"minLength\":1},\"origen\":{\"type\":\"string\",\"enum\":[\"PRODUCTO\",\"SKU_OVERRIDE\"]}}},\"ConsultaPrecios\":{\"type\":\"object\",\"required\":[\"items\"],\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/$defs/Precio\"}}}},\"DisponibilidadStock\":{\"type\":\"object\",\"required\":[\"sku\",\"on_hand\",\"reserved\",\"blocked\",\"available\",\"status\"],\"properties\":{\"sku\":{\"type\":\"string\",\"minLength\":1},\"location_id\":{\"type\":[\"string\",\"null\"]},\"on_hand\":{\"type\":\"integer\",\"minimum\":0},\"reserved\":{\"type\":\"integer\",\"minimum\":0},\"blocked\":{\"type\":\"integer\",\"minimum\":0},\"available\":{\"type\":\"integer\",\"minimum\":0},\"status\":{\"$ref\":\"#/$defs/EstadoStock\"},\"threshold\":{\"type\":[\"integer\",\"null\"],\"minimum\":0}}},\"ConsultaDisponibilidadResponse\":{\"type\":\"object\",\"required\":[\"items\"],\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/$defs/DisponibilidadStock\"}}}},\"DisponibilidadComercial\":{\"type\":\"object\",\"required\":[\"sku\",\"status\"],\"additionalProperties\":false,\"properties\":{\"sku\":{\"type\":\"string\",\"minLength\":1},\"status\":{\"$ref\":\"#/$defs/EstadoStock\"}}},\"ConsultaDisponibilidadComercialResponse\":{\"type\":\"object\",\"required\":[\"items\"],\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/$defs/DisponibilidadComercial\"}}}},\"Problem\":{\"type\":\"object\",\"required\":[\"title\",\"status\",\"code\"],\"properties\":{\"type\":{\"type\":\"string\"},\"title\":{\"type\":\"string\",\"minLength\":1},\"status\":{\"type\":\"integer\",\"minimum\":100,\"maximum\":599},\"detail\":{\"type\":\"string\"},\"code\":{\"type\":\"string\",\"minLength\":1},\"correlationId\":{\"type\":\"string\"}}}}}"
+      "value": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"G6 H5 OpenAPI 0.7.0-rc.3 Response Schemas\",\"sourceContract\":\"contratos/http/openapi.yaml\",\"sourceVersion\":\"0.7.0-rc.3\",\"$defs\":{\"Canal\":{\"type\":\"string\",\"enum\":[\"MARKETPLACE\",\"CHATBOT\",\"RETAIL\",\"VENTAS\"]},\"EstadoStock\":{\"type\":\"string\",\"enum\":[\"DISPONIBLE\",\"STOCK_BAJO\",\"AGOTADO\",\"INDETERMINADO\"]},\"ProductoResumenComercial\":{\"type\":\"object\",\"required\":[\"product_id\",\"slug\",\"name\",\"categoria_id\",\"tipo_producto_id\",\"marca_id\",\"tiene_variantes\"],\"properties\":{\"product_id\":{\"type\":\"string\",\"minLength\":1},\"slug\":{\"type\":\"string\",\"minLength\":1},\"name\":{\"type\":\"string\",\"minLength\":1},\"description\":{\"type\":[\"string\",\"null\"]},\"categoria_id\":{\"type\":\"string\",\"minLength\":1},\"tipo_producto_id\":{\"type\":\"string\",\"minLength\":1},\"marca_id\":{\"type\":\"string\",\"minLength\":1},\"tiene_variantes\":{\"type\":\"boolean\"},\"sku_base\":{\"type\":[\"string\",\"null\"]},\"images\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"attributes\":{\"type\":\"array\"}}},\"VarianteComercial\":{\"type\":\"object\",\"required\":[\"variant_id\",\"sku\"],\"properties\":{\"variant_id\":{\"type\":\"string\",\"minLength\":1},\"sku\":{\"type\":\"string\",\"minLength\":1},\"identifying_attributes\":{\"type\":\"array\"},\"non_identifying_attributes\":{\"type\":\"array\"},\"images\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}},\"ProductoDetalleComercial\":{\"type\":\"object\",\"required\":[\"product_id\",\"slug\",\"name\",\"categoria_id\",\"tipo_producto_id\",\"marca_id\",\"tiene_variantes\",\"marca\",\"variants\"],\"properties\":{\"product_id\":{\"type\":\"string\",\"minLength\":1},\"slug\":{\"type\":\"string\",\"minLength\":1},\"name\":{\"type\":\"string\",\"minLength\":1},\"categoria_id\":{\"type\":\"string\",\"minLength\":1},\"tipo_producto_id\":{\"type\":\"string\",\"minLength\":1},\"marca_id\":{\"type\":\"string\",\"minLength\":1},\"tiene_variantes\":{\"type\":\"boolean\"},\"sku_base\":{\"type\":[\"string\",\"null\"]},\"marca\":{\"type\":\"object\"},\"variants\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/$defs/VarianteComercial\"}}}},\"PaginaProductosComercial\":{\"type\":\"object\",\"required\":[\"items\",\"pagina\",\"tamanio\",\"total\"],\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/$defs/ProductoResumenComercial\"}},\"pagina\":{\"type\":\"integer\",\"minimum\":1},\"tamanio\":{\"type\":\"integer\",\"minimum\":1},\"total\":{\"type\":\"integer\",\"minimum\":0}}},\"Precio\":{\"type\":\"object\",\"required\":[\"sku\",\"precio_regular\",\"currency\",\"channel_id\",\"valid_from\",\"price_version\",\"vigencia_id\",\"origen\"],\"properties\":{\"sku\":{\"type\":\"string\",\"minLength\":1},\"precio_regular\":{\"type\":\"number\",\"exclusiveMinimum\":0},\"precio_oferta\":{\"type\":[\"number\",\"null\"],\"exclusiveMinimum\":0},\"currency\":{\"type\":\"string\",\"minLength\":1},\"channel_id\":{\"type\":[\"string\",\"null\"],\"enum\":[\"MARKETPLACE\",\"CHATBOT\",\"RETAIL\",\"VENTAS\",null]},\"valid_from\":{\"type\":\"string\",\"minLength\":1,\"format\":\"date-time\"},\"valid_until\":{\"type\":[\"string\",\"null\"],\"format\":\"date-time\"},\"price_version\":{\"type\":\"integer\",\"minimum\":0},\"vigencia_id\":{\"type\":\"string\",\"minLength\":1},\"origen\":{\"type\":\"string\",\"enum\":[\"PRODUCTO\",\"SKU_OVERRIDE\"]}}},\"ConsultaPrecios\":{\"type\":\"object\",\"required\":[\"items\"],\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/$defs/Precio\"}}}},\"DisponibilidadStock\":{\"type\":\"object\",\"required\":[\"sku\",\"on_hand\",\"reserved\",\"blocked\",\"available\",\"status\"],\"properties\":{\"sku\":{\"type\":\"string\",\"minLength\":1},\"location_id\":{\"type\":[\"string\",\"null\"]},\"on_hand\":{\"type\":\"integer\",\"minimum\":0},\"reserved\":{\"type\":\"integer\",\"minimum\":0},\"blocked\":{\"type\":\"integer\",\"minimum\":0},\"available\":{\"type\":\"integer\",\"minimum\":0},\"status\":{\"$ref\":\"#/$defs/EstadoStock\"},\"threshold\":{\"type\":[\"integer\",\"null\"],\"minimum\":0}}},\"ConsultaDisponibilidadResponse\":{\"type\":\"object\",\"required\":[\"items\"],\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/$defs/DisponibilidadStock\"}}}},\"DisponibilidadComercial\":{\"type\":\"object\",\"required\":[\"sku\",\"status\"],\"additionalProperties\":false,\"properties\":{\"sku\":{\"type\":\"string\",\"minLength\":1},\"status\":{\"$ref\":\"#/$defs/EstadoStock\"}}},\"ConsultaDisponibilidadComercialResponse\":{\"type\":\"object\",\"required\":[\"items\"],\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/$defs/DisponibilidadComercial\"}}}},\"Problem\":{\"type\":\"object\",\"required\":[\"title\",\"status\",\"code\"],\"properties\":{\"type\":{\"type\":\"string\"},\"title\":{\"type\":\"string\",\"minLength\":1},\"status\":{\"type\":\"integer\",\"minimum\":100,\"maximum\":599},\"detail\":{\"type\":\"string\"},\"code\":{\"type\":\"string\",\"minLength\":1,\"enum\":[\"VALIDACION\",\"TOKEN_INVALIDO\",\"SCOPE_INSUFICIENTE\",\"VERSION_CONFLICT\",\"IDEMPOTENCY_CONFLICT\",\"ERROR_INTERNO\",\"SERVICIO_NO_DISPONIBLE\",\"OPERACION_MAESTRA_NO_ENCONTRADA\",\"AUDITORIA_PRECIO_NO_ENCONTRADA\",\"LIMITE_EXPORTACION_AUDITORIA_EXCEDIDO\",\"PRODUCTO_NO_ENCONTRADO\",\"SKU_DUPLICADO\",\"CATEGORIA_INVALIDA\",\"TIPO_PRODUCTO_INVALIDO\",\"TIPO_PRODUCTO_NO_ENCONTRADO\",\"MARCA_INVALIDA\",\"DATOS_INCOMPLETOS\",\"CAMBIO_ESTRUCTURAL_NO_PERMITIDO\",\"PERFIL_FISICO_INVALIDO\",\"DATOS_FISICOS_INCOMPLETOS\",\"VARIANTE_NO_ENCONTRADA\",\"PRODUCTO_NO_ADMITE_VARIANTES\",\"COMBINACION_DUPLICADA\",\"SKU_INVALIDO\",\"ATRIBUTO_IDENTIFICADOR_INVALIDO\",\"IMAGEN_INVALIDA\",\"SKU_NO_ENCONTRADO\",\"UBICACION_NO_ENCONTRADA\",\"CANTIDAD_INVALIDA\",\"SKU_INACTIVO\",\"STOCK_INSUFICIENTE\",\"RESERVA_NO_ENCONTRADA\",\"OPERACION_INVENTARIO_NO_ENCONTRADA\",\"CONTEXTO_ABASTECIMIENTO_INVALIDO\",\"RESERVA_NO_ACTIVA\",\"RESERVA_EXPIRADA\",\"PRECIO_NO_ENCONTRADO\",\"PRECIO_INVALIDO\",\"OFERTA_INVALIDA\",\"MOTIVO_CAMBIO_REQUERIDO\",\"VIGENCIA_SUPERPUESTA\",\"ACCION_OFERTA_INVALIDA\",\"SCOPE_PRECIO_INVALIDO\",\"PROMOCION_NO_ENCONTRADA\",\"PROMOCION_INVALIDA\",\"PROMOCION_INACTIVA\",\"ALCANCE_PROMOCION_INVALIDO\",\"CUSTOMER_REF_REQUERIDO\",\"LIMITE_CUPON_INVALIDO\",\"CUPON_DUPLICADO\",\"COMBO_NO_ENCONTRADO\",\"COMBO_ANIDADO_NO_PERMITIDO\",\"COMBO_COMPONENTES_INSUFICIENTES\",\"COMBO_COMPONENTE_DUPLICADO\",\"COMBO_PRECIO_INVALIDO\",\"REGLA_RECOMENDACION_NO_ENCONTRADA\",\"REGLA_RECOMENDACION_INVALIDA\",\"PRODUCTO_RECOMENDADO_INVALIDO\",\"CATEGORIA_NO_ENCONTRADA\",\"CATEGORIA_DUPLICADA\",\"PROFUNDIDAD_CATEGORIA_EXCEDIDA\",\"CICLO_CATEGORIA\",\"CATEGORIA_PADRE_INACTIVA\",\"CATEGORIA_CON_SUBCATEGORIAS_ACTIVAS\",\"ENTIDAD_MAESTRA_CON_PRODUCTOS_ACTIVOS\",\"BAJA_MAESTRA_EN_PROCESO\",\"MARCA_NO_ENCONTRADA\",\"MARCA_DUPLICADA\",\"LOGO_INVALIDO\",\"LOGO_EXCEDE_LIMITE\",\"CARACTERISTICA_NO_ENCONTRADA\",\"TIPO_CARACTERISTICA_INMUTABLE\",\"VALOR_LISTA_LIMITE_EXCEDIDO\",\"TEXTO_ATRIBUTO_EXCEDE_LIMITE\",\"VALOR_NUMERICO_INVALIDO\",\"VALOR_LISTA_EN_USO\",\"ASOCIACION_NO_ENCONTRADA\",\"ASOCIACION_DUPLICADA\",\"LIMITE_CARACTERISTICAS_EXCEDIDO\",\"ASOCIACION_EN_USO\",\"SLUG_NO_ENCONTRADO\",\"SLUG_DUPLICADO\",\"METADATOS_SEO_INVALIDOS\",\"ARCHIVO_INVALIDO\",\"ARCHIVO_EXCEDE_LIMITE\",\"PLANTILLA_INCOMPATIBLE\",\"CONTENIDO_ACTIVO_NO_PERMITIDO\",\"LOTE_NO_ENCONTRADO\",\"CUPON_NO_ENCONTRADO\",\"INCIDENCIA_NO_ENCONTRADA\",\"INCIDENCIA_NO_ACTIVA\",\"RESOLUCION_INCIDENCIA_INVALIDA\",\"REINTEGRO_NO_APLICABLE\",\"TRASLADO_NO_ENCONTRADO\",\"TRASLADO_NO_RECIBIBLE\",\"CANTIDAD_RECIBIDA_EXCEDE_TRASLADO\",\"DISPOSICION_RECEPCION_INVALIDA\",\"CODIGO_BARRAS_NO_ENCONTRADO\",\"RATE_LIMIT_EXCEDIDO\",\"PREPARACION_NO_REINTENTABLE\"]},\"correlationId\":{\"type\":\"string\",\"format\":\"uuid\"}}}}}"
     }
   ],
   "item": [
@@ -1076,14 +1076,19 @@
                   "    const det = resD.json();",
                   "    const nSkus = !det.tiene_variantes ? [det.sku_base].filter(Boolean) : (det.variants || []).map((v) => v.sku).filter(Boolean);",
                   "    safeSendRequest(`${baseUrl}${apiPrefix}/precios?skus=${encodeURIComponent(nSkus.join(\",\"))}&canal=${encodeURIComponent(ch)}`, { method: \"GET\", header: { Authorization: `Bearer ${token}` } }, function (errP, resP) {",
-                  "      pm.test(\"PM-003D (H12 rango acotado): Al menos un SKU elegible del producto acotado cumple [priceMin, priceMaxNarrow]\", function () {",
+                  "      pm.test(\"PM-003D (H20 muestra explicita rango acotado): SKUs coinciden con solicitados, canal coincide y >=1 SKU en [priceMin, priceMaxNarrow]\", function () {",
                   "        pm.expect(errP, \"error en consulta auxiliar de precios\").to.be.null;",
                   "        pm.expect(resP && resP.code).to.eql(200);",
                   "        const pj = resP.json();",
                   "        assertSchema(pj, \"ConsultaPrecios\", \"PM-003D.narrow\");",
+                  "        pm.expect(pj.items, \"items de precios acotados no vacios\").to.be.an(\"array\").and.not.be.empty;",
                   "        let okNarrow = 0;",
                   "        for (const r of pj.items || []) {",
                   "          assertSchema(r, \"Precio\", \"PM-003D.narrow.precio\");",
+                  "          pm.expect(nSkus, \"H20: SKU devuelto en rango acotado debe pertenecer a los SKUs solicitados\").to.include(r.sku);",
+                  "          if (r.channel_id !== null && r.channel_id !== undefined) {",
+                  "            pm.expect(r.channel_id, \"H20: canal de precio debe coincidir con canal consultado\").to.eql(ch);",
+                  "          }",
                   "          const eff = (r.precio_oferta !== null && r.precio_oferta !== undefined) ? r.precio_oferta : r.precio_regular;",
                   "          if (eff >= min && eff <= maxNarrow) okNarrow += 1;",
                   "        }",
@@ -1330,51 +1335,8 @@
                   "    throw new Error(\"BLOCKED_FIXTURE: Fixture dinamico requerido ausente (\" + __k + \"). Productor previo fallo o no devolvio datos.\");",
                   "  }",
                   "}",
-                  "function safeSendRequest(targetUrl, opts, cb) {",
-                  "  const allowed = [",
-                  "    \"apim-g6-productos-chile.azure-api.net\",",
-                  "    \"api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io\",",
-                  "    \"127.0.0.1\",",
-                  "    \"localhost\"",
-                  "  ];",
-                  "  const m = String(targetUrl || \"\").match(/^(https?):\\/\\/([^\\/?#]+)/i);",
-                  "  if (!m) return cb(new Error(\"SECURITY_BLOCK: URL auxiliar invalida\"), null);",
-                  "  const proto = m[1].toLowerCase();",
-                  "  const authority = m[2];",
-                  "  if (authority.includes(\"@\")) return cb(new Error(\"SECURITY_BLOCK: credenciales embebidas prohibidas en URL auxiliar\"), null);",
-                  "  const host = authority.split(\":\")[0].toLowerCase();",
-                  "  if (!allowed.includes(host)) return cb(new Error(\"SECURITY_BLOCK: host auxiliar no autorizado (\" + host + \")\"), null);",
-                  "  if (host !== \"127.0.0.1\" && host !== \"localhost\" && proto !== \"https\") return cb(new Error(\"SECURITY_BLOCK: HTTPS obligatorio en solicitud auxiliar remota\"), null);",
-                  "  const method = String((opts && opts.method) || \"GET\").toUpperCase();",
-                  "  if (![\"GET\", \"HEAD\", \"OPTIONS\"].includes(method)) return cb(new Error(\"SECURITY_BLOCK: metodo mutante prohibido en solicitud auxiliar\"), null);",
-                  "  const headers = Object.assign({ Accept: \"application/json\", \"X-Correlation-Id\": pm.variables.get(\"correlationId\") }, (opts && opts.header) || {});",
-                  "  return pm.sendRequest({ url: targetUrl, method, header: headers, followRedirects: false }, cb);",
-                  "}",
-                  "const existingLoc = pm.environment.get(\"locationId\") || pm.variables.get(\"locationId\");",
-                  "if (existingLoc && String(existingLoc).trim() !== \"\") {",
-                  "  pm.variables.set(\"locationQueryParam\", \"&location_id=\" + encodeURIComponent(existingLoc));",
-                  "} else {",
-                  "  pm.variables.set(\"locationQueryParam\", \"\");",
-                  "  const baseUrl = pm.environment.get(\"baseUrl\") || pm.collectionVariables.get(\"baseUrl\");",
-                  "  const apiPrefix = pm.environment.get(\"apiPrefix\") || pm.collectionVariables.get(\"apiPrefix\");",
-                  "  const token = pm.environment.get(\"accessToken\") || \"\";",
-                  "  if (token) {",
-                  "    safeSendRequest(`${baseUrl}${apiPrefix}/inventario/ubicaciones`, { method: \"GET\", header: { Authorization: `Bearer ${token}` } }, function (err, res) {",
-                  "      if (!err && res && res.code === 200) {",
-                  "        try {",
-                  "          const body = res.json();",
-                  "          const list = Array.isArray(body) ? body : (body.items || []);",
-                  "          const first = list.find((u) => u && (u.location_id || u.id));",
-                  "          const locId = first ? (first.location_id || first.id) : \"\";",
-                  "          if (locId) {",
-                  "            pm.environment.set(\"locationId\", String(locId));",
-                  "            pm.variables.set(\"locationQueryParam\", \"&location_id=\" + encodeURIComponent(String(locId)));",
-                  "          }",
-                  "        } catch (_) {}",
-                  "      }",
-                  "    });",
-                  "  }",
-                  "}"
+                  "const explicitLoc = pm.environment.get(\"locationId\") || pm.variables.get(\"locationId\");",
+                  "pm.variables.set(\"locationQueryParam\", (explicitLoc && String(explicitLoc).trim() !== \"\") ? \"&location_id=\" + encodeURIComponent(String(explicitLoc).trim()) : \"\");"
                 ]
               }
             },
@@ -1475,7 +1437,7 @@
               }
             ],
             "url": "{{baseUrl}}{{apiPrefix}}/inventario/disponibilidad?skus={{sku}}{{locationQueryParam}}",
-            "description": "Defecto B: Descubre location_id via GET /inventario/ubicaciones (safeSendRequest) cuando no fue suministrado y el entorno tiene multiples ubicaciones."
+            "description": "H18 + Defecto B: Usa fixture explicito locationId cuando fue suministrado; nunca selecciona arbitrariamente la primera ubicacion de /ubicaciones."
           },
           "response": []
         }
@@ -3301,9 +3263,9 @@
                   "  assertSchema(body, \"PaginaProductosComercial\", \"PM-080\");",
                   "  pm.expect(body.items).to.be.an(\"array\").and.not.be.empty;",
                   "  assertSchema(body.items[0], \"ProductoResumenComercial\", \"PM-080.item\");",
-                  "  if (!pm.environment.get(\"sku\")) {",
+                  "  if (!pm.environment.get(\"marketplaceSku\")) {",
                   "    const simple = body.items.find((it) => !it.tiene_variantes && it.sku_base);",
-                  "    if (simple) pm.environment.set(\"sku\", simple.sku_base);",
+                  "    if (simple) pm.environment.set(\"marketplaceSku\", simple.sku_base);",
                   "  }",
                   "});"
                 ]
@@ -3342,8 +3304,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// H14: Bloqueo preventivo si un fixture dinamico requerido (sku) esta ausente",
-                  "const __reqFx = [\"sku\"];",
+                  "// H14: Bloqueo preventivo si un fixture dinamico requerido (marketplaceSku) esta ausente",
+                  "const __reqFx = [\"marketplaceSku\"];",
                   "for (const __k of __reqFx) {",
                   "  const __val = pm.environment.get(__k) || pm.variables.get(__k);",
                   "  if (!__val || String(__val).trim() === \"\") {",
@@ -3425,7 +3387,7 @@
                   "  pm.response.to.have.status(200);",
                   "  const body = pm.response.json();",
                   "  assertSchema(body, \"ConsultaDisponibilidadComercialResponse\", \"PM-081\");",
-                  "  const expectedSku = pm.environment.get(\"sku\") || pm.variables.get(\"sku\");",
+                  "  const expectedSku = pm.environment.get(\"marketplaceSku\") || pm.variables.get(\"marketplaceSku\");",
                   "  pm.expect(body.items).to.be.an(\"array\").and.not.be.empty;",
                   "  const row = body.items.find((it) => it.sku === expectedSku);",
                   "  pm.expect(row, \"SKU solicitado\").to.be.an(\"object\");",
@@ -3451,7 +3413,7 @@
                 "value": "Bearer {{marketplaceAccessToken}}"
               }
             ],
-            "url": "{{baseUrl}}{{apiPrefix}}/inventario/disponibilidad/comercial?skus={{sku}}&canal=MARKETPLACE",
+            "url": "{{baseUrl}}{{apiPrefix}}/inventario/disponibilidad/comercial?skus={{marketplaceSku}}&canal=MARKETPLACE",
             "description": ""
           },
           "response": []
@@ -3467,8 +3429,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// H14: Bloqueo preventivo si un fixture dinamico requerido (sku) esta ausente",
-                  "const __reqFx = [\"sku\"];",
+                  "// H14: Bloqueo preventivo si un fixture dinamico requerido (ventasSku) esta ausente",
+                  "const __reqFx = [\"ventasSku\"];",
                   "for (const __k of __reqFx) {",
                   "  const __val = pm.environment.get(__k) || pm.variables.get(__k);",
                   "  if (!__val || String(__val).trim() === \"\") {",
@@ -3478,8 +3440,8 @@
                   "    throw new Error(\"BLOCKED_FIXTURE: Fixture dinamico requerido ausente (\" + __k + \"). Productor previo fallo o no devolvio datos.\");",
                   "  }",
                   "}",
-                  "const loc = pm.environment.get(\"locationId\") || pm.variables.get(\"locationId\");",
-                  "pm.variables.set(\"locationQueryParam\", loc ? \"&location_id=\" + encodeURIComponent(loc) : \"\");"
+                  "const vLoc = pm.environment.get(\"ventasLocationId\") || pm.variables.get(\"ventasLocationId\");",
+                  "pm.variables.set(\"ventasLocationQueryParam\", (vLoc && String(vLoc).trim() !== \"\") ? \"&location_id=\" + encodeURIComponent(String(vLoc).trim()) : \"\");"
                 ]
               }
             },
@@ -3552,7 +3514,7 @@
                   "  pm.response.to.have.status(200);",
                   "  const body = pm.response.json();",
                   "  assertSchema(body, \"ConsultaDisponibilidadResponse\", \"PM-082\");",
-                  "  const expectedSku = pm.environment.get(\"sku\") || pm.variables.get(\"sku\");",
+                  "  const expectedSku = pm.environment.get(\"ventasSku\") || pm.variables.get(\"ventasSku\");",
                   "  pm.expect(body.items).to.be.an(\"array\").and.not.be.empty;",
                   "  const row = body.items.find((it) => it.sku === expectedSku);",
                   "  pm.expect(row, \"SKU solicitado\").to.be.an(\"object\");",
@@ -3579,7 +3541,7 @@
                 "value": "Bearer {{ventasAccessToken}}"
               }
             ],
-            "url": "{{baseUrl}}{{apiPrefix}}/inventario/disponibilidad?skus={{sku}}{{locationQueryParam}}",
+            "url": "{{baseUrl}}{{apiPrefix}}/inventario/disponibilidad?skus={{ventasSku}}{{ventasLocationQueryParam}}",
             "description": ""
           },
           "response": []

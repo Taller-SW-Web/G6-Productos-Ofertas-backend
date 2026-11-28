@@ -11,11 +11,13 @@ function startOpenApiHarnessServer({
   multiVariantFirst = false,
   paginatedOver20 = false,
   auxPageError = false,
+  auxPageRedirectTarget = null,
   duplicateIdsAcrossPages = false,
   narrowProductOutOfRange = false,
   invalidDateFormatOnPrice = false,
   producerReturns500 = false,
   requireLocationIdOnInventory = false,
+  emptyLocationId = 'LOC-SIN-SALDO',
   unsafeRedirectOnHealth = false,
   legacyCamelCaseDto = false,
   emptyCatalog = false,
@@ -205,6 +207,11 @@ function startOpenApiHarnessServer({
       }
 
       if (paginatedOver20) {
+        if (pagina > 1 && auxPageRedirectTarget) {
+          res.writeHead(302, { Location: auxPageRedirectTarget });
+          res.end();
+          return;
+        }
         if (pagina > 1 && auxPageError) {
           res.writeHead(500, { 'Content-Type': 'application/problem+json' });
           res.end(JSON.stringify({ title: 'Fallo pagina auxiliar', status: 500, code: 'INTERNAL_ERROR' }));
@@ -321,6 +328,11 @@ function startOpenApiHarnessServer({
           code: 'VALIDACION',
           detail: 'Debe especificar location_id cuando hay mas de una ubicacion de inventario',
         }));
+        return;
+      }
+      if (locationId && locationId === emptyLocationId) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ items: [] }));
         return;
       }
       const skus = (u.searchParams.get('skus') || '').split(',').filter(Boolean);
@@ -548,7 +560,7 @@ test('H14 Regresion: Si productor PM-002/PM-003A falla con 500, consumidores PM-
   }
 });
 
-test('H14 Regresion sintetica PM-080/081/082: PASS completo con tokens M2M y NOT_RUN sin fixture sku', async () => {
+test('H14 + H18 Regresion sintetica PM-080/081/082: fixtures aislados por identidad M2M y NOT_RUN sin ventasSku', async () => {
   const { server, baseUrl } = await startOpenApiHarnessServer();
   const outDir = mkdtempSync(join(tmpdir(), 'g6-h14-m2m-'));
   try {
@@ -560,6 +572,8 @@ test('H14 Regresion sintetica PM-080/081/082: PASS completo con tokens M2M y NOT
       outDir,
       marketplaceAccessToken: 'synth-marketplace-token',
       ventasAccessToken: 'synth-ventas-token',
+      ventasSku: 'SKU-H5-001',
+      ventasLocationId: 'LOC-LIMA-01',
       evidenceLevel: 'ISOLATED',
       skipSecretScan: true,
     });
@@ -574,7 +588,7 @@ test('H14 Regresion sintetica PM-080/081/082: PASS completo con tokens M2M y NOT
       runId: 'reg-m2m-blocked-fixture',
       outDir,
       ventasAccessToken: 'synth-ventas-token',
-      sku: '',
+      ventasSku: '',
       evidenceLevel: 'ISOLATED',
       skipSecretScan: true,
     });
@@ -590,32 +604,98 @@ test('H14 Regresion sintetica PM-080/081/082: PASS completo con tokens M2M y NOT
   }
 });
 
-test('Defecto B Regresion: Inventory multi-ubicacion exige location_id; PM-012 lo descubre via /ubicaciones y pasa 200 OK', async () => {
-  const { server, baseUrl, observedRequests } = await startOpenApiHarnessServer({
-    requireLocationIdOnInventory: true,
+test('H18 + Defecto B Regresion (4 escenarios Inventory): 1 ubicacion sin location_id, multi-ubicacion sin location_id (400), multi-ubicacion con fixture explicito (200) y ubicacion sin saldo', async () => {
+  // 1) 1 ubicacion inequivoca sin location_id -> 200 OK
+  {
+    const { server, baseUrl } = await startOpenApiHarnessServer({ requireLocationIdOnInventory: false });
+    const outDir = mkdtempSync(join(tmpdir(), 'g6-h18-single-'));
+    try {
+      const res = await executeSuite({
+        env: 'local', baseUrl, folder: '02 - Preparacion comercial e Inventory', runId: 'h18-single-loc',
+        outDir, accessToken: 'synth-user-token-harness', productId: 'prod-h5-001', sku: 'SKU-H5-001',
+        evidenceLevel: 'ISOLATED', skipSecretScan: true,
+      });
+      assert.equal(res.ok, true, '1 ubicacion sin location_id debe aprobar');
+    } finally { server.close(); rmSync(outDir, { recursive: true, force: true }); }
+  }
+
+  // 2) Multi-ubicacion sin location_id -> 400 VALIDACION (PM-012 NO debe elegir ubicacion arbitraria)
+  {
+    const { server, baseUrl, observedRequests } = await startOpenApiHarnessServer({ requireLocationIdOnInventory: true });
+    const outDir = mkdtempSync(join(tmpdir(), 'g6-h18-multi-no-loc-'));
+    try {
+      const res = await executeSuite({
+        env: 'local', baseUrl, folder: '02 - Preparacion comercial e Inventory', runId: 'h18-multi-no-loc',
+        outDir, accessToken: 'synth-user-token-harness', productId: 'prod-h5-001', sku: 'SKU-H5-001', locationId: '',
+        evidenceLevel: 'ISOLATED', skipSecretScan: true,
+      });
+      assert.equal(res.overallVerdict, 'FAIL');
+      assert.equal(observedRequests.some((r) => r.includes('/inventario/ubicaciones')), false, 'PM-012 nunca debe elegir arbitrariamente la primera ubicacion');
+    } finally { server.close(); rmSync(outDir, { recursive: true, force: true }); }
+  }
+
+  // 3) Multi-ubicacion con fixture explicito locationId valido -> 200 OK
+  {
+    const { server, baseUrl, observedRequests } = await startOpenApiHarnessServer({ requireLocationIdOnInventory: true });
+    const outDir = mkdtempSync(join(tmpdir(), 'g6-h18-multi-valid-loc-'));
+    try {
+      const res = await executeSuite({
+        env: 'local', baseUrl, folder: '02 - Preparacion comercial e Inventory', runId: 'h18-multi-valid-loc',
+        outDir, accessToken: 'synth-user-token-harness', productId: 'prod-h5-001', sku: 'SKU-H5-001', locationId: 'LOC-LIMA-01',
+        evidenceLevel: 'ISOLATED', skipSecretScan: true,
+      });
+      assert.equal(res.ok, true, 'Multi-ubicacion con fixture explicito locationId debe aprobar');
+      assert.ok(observedRequests.some((r) => r.includes('/api/v1/inventario/disponibilidad') && r.includes('location_id=LOC-LIMA-01')));
+    } finally { server.close(); rmSync(outDir, { recursive: true, force: true }); }
+  }
+
+  // 4) Ubicacion sin saldo para el SKU -> items vacio falla asercion de disponibilidad
+  {
+    const { server, baseUrl } = await startOpenApiHarnessServer({ requireLocationIdOnInventory: true, emptyLocationId: 'LOC-SIN-SALDO' });
+    const outDir = mkdtempSync(join(tmpdir(), 'g6-h18-empty-loc-'));
+    try {
+      const res = await executeSuite({
+        env: 'local', baseUrl, folder: '02 - Preparacion comercial e Inventory', runId: 'h18-empty-loc',
+        outDir, accessToken: 'synth-user-token-harness', productId: 'prod-h5-001', sku: 'SKU-H5-001', locationId: 'LOC-SIN-SALDO',
+        evidenceLevel: 'ISOLATED', skipSecretScan: true,
+      });
+      assert.equal(res.overallVerdict, 'FAIL');
+    } finally { server.close(); rmSync(outDir, { recursive: true, force: true }); }
+  }
+});
+
+test('H21 Regresion (2 servidores): redireccion 302 originada desde pm.sendRequest auxiliar en Servidor A nunca alcanza Servidor B (0 hits)', async () => {
+  let serverBHits = 0;
+  const serverB = http.createServer((_req, res) => {
+    serverBHits += 1;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ stolen: true }));
   });
-  const outDir = mkdtempSync(join(tmpdir(), 'g6-defect-b-'));
+  await new Promise((r) => serverB.listen(0, '127.0.0.1', r));
+  const targetB = `http://127.0.0.1:${serverB.address().port}/steal-aux`;
+
+  const { server: serverA, baseUrl: baseUrlA } = await startOpenApiHarnessServer({
+    paginatedOver20: true,
+    auxPageRedirectTarget: targetB,
+  });
+  const outDir = mkdtempSync(join(tmpdir(), 'g6-h21-aux-redir-'));
   try {
     const res = await executeSuite({
       env: 'local',
-      baseUrl,
-      folder: '02 - Preparacion comercial e Inventory',
-      runId: 'reg-defect-b-location-id',
+      baseUrl: baseUrlA,
+      folder: '01 - Catalog y Pricing',
+      runId: 'reg-h21-aux-redirect',
       outDir,
       accessToken: 'synth-user-token-harness',
-      productId: 'prod-h5-001',
-      sku: 'SKU-H5-001',
       evidenceLevel: 'ISOLATED',
       skipSecretScan: true,
     });
-    assert.equal(res.ok, true, `PM-012 debio descubrir location_id y pasar 200 OK: ${JSON.stringify(res)}`);
-    assert.equal(res.overallVerdict, 'PASS');
-    assert.ok(
-      observedRequests.some((r) => r.includes('/api/v1/inventario/disponibilidad') && r.includes('location_id=LOC-LIMA-01')),
-      'PM-012 debe enviar location_id descubierto',
-    );
+    assert.equal(res.exitCode, 1);
+    assert.equal(res.overallVerdict, 'FAIL');
+    assert.equal(serverBHits, 0, 'H21: Servidor B debe registrar CERO solicitudes recibidas desde redireccion auxiliar');
   } finally {
-    server.close();
+    serverA.close();
+    serverB.close();
     rmSync(outDir, { recursive: true, force: true });
   }
 });

@@ -27,9 +27,10 @@ export const COLLECTION_PATH = resolve(POSTMAN_ROOT, 'g6-h5-integration.postman_
 export const ENVIRONMENTS_DIR = resolve(POSTMAN_ROOT, 'environments');
 export const EVIDENCIAS_DIR = resolve(POSTMAN_ROOT, 'evidencias');
 export const SCHEMAS_PATH = resolve(POSTMAN_ROOT, 'schemas', 'openapi-response-schemas.json');
-export const OPENAPI_CONTRACT_PATH = existsSync(resolve(DOCS_ROOT, 'contratos', 'http', 'openapi.yaml'))
-  ? resolve(DOCS_ROOT, 'contratos', 'http', 'openapi.yaml')
-  : resolve(BACKEND_ROOT, 'ops', 'azure', 'apim', 'openapi', 'openapi.filtered.yaml');
+// H22: Contrato OpenAPI oficial obligatorio por defecto (nunca fallback silencioso al filtrado APIM)
+export const OFFICIAL_OPENAPI_CONTRACT_PATH = resolve(DOCS_ROOT, 'contratos', 'http', 'openapi.yaml');
+export const FAST_DEV_OPENAPI_PATH = resolve(BACKEND_ROOT, 'ops', 'azure', 'apim', 'openapi', 'openapi.filtered.yaml');
+export const OPENAPI_CONTRACT_PATH = OFFICIAL_OPENAPI_CONTRACT_PATH;
 export const OPENAPI_CONTRACT_VERSION = '0.7.0-rc.3';
 
 export const AUTHORIZED_HOSTS = Object.freeze({
@@ -107,6 +108,30 @@ export const SENSITIVE_VALUE_PATTERNS = [
   /([?&](?:access_token|token|api_key|apikey|client_secret|password|secret)=)(?!\[REDACTED\]|%5BREDACTED%5D)[^&#\s]+/gi,
 ];
 
+// H17: Mapeo de casos PM -> esquema oficial OpenAPI 0.7.0-rc.3 para validacion estricta con Ajv en el runner
+export const PM_RESPONSE_SCHEMA_MAP = Object.freeze({
+  'PM-002': { 200: 'PaginaProductosComercial' },
+  'PM-003A': { 200: 'PaginaProductosComercial' },
+  'PM-003B': { 200: 'PaginaProductosComercial' },
+  'PM-003C': { 200: 'ProductoDetalleComercial' },
+  'PM-003D': { 200: 'ConsultaPrecios' },
+  'PM-004': { 401: 'Problem' },
+  'PM-004B': { 401: 'Problem' },
+  'PM-005': { 403: 'Problem' },
+  'PM-006': { 404: 'Problem' },
+  'PM-007A': { 400: 'Problem' },
+  'PM-007B': { 400: 'Problem' },
+  'PM-012': { 200: 'ConsultaDisponibilidadResponse', 400: 'Problem' },
+  'PM-021': { 404: 'Problem' },
+  'PM-031': { 404: 'Problem' },
+  'PM-040': { 200: 'Precio' },
+  'PM-041': { 404: 'Problem' },
+  'PM-054': { 404: 'Problem' },
+  'PM-080': { 200: 'PaginaProductosComercial' },
+  'PM-081': { 200: 'ConsultaDisponibilidadComercialResponse' },
+  'PM-082': { 200: 'ConsultaDisponibilidadResponse' },
+});
+
 export const CASE_METADATA = Object.freeze({
   'PM-001': { intId: 'INT-07', services: ['api-gateway'], type: 'lectura', scope: 'public-health', authRequirement: 'none', openApiExempt: true, apimPublished: false },
   'PM-001B': { intId: 'INT-07', services: ['api-gateway'], type: 'lectura', scope: 'public-health', authRequirement: 'none', openApiExempt: true, apimPublished: false },
@@ -142,8 +167,9 @@ export const CASE_METADATA = Object.freeze({
   'PM-062': { intId: 'INT-03', services: ['api-gateway', 'promotions-svc'], type: 'lectura', scope: 'GESTOR_COMERCIAL', authRequirement: 'user' },
   'PM-070': { intId: 'INT-02', services: ['api-gateway', 'inventory-svc'], type: 'lectura', scope: 'GESTOR_COMERCIAL', authRequirement: 'user' },
   'PM-071': { intId: 'INT-02', services: ['api-gateway', 'inventory-svc'], type: 'lectura', scope: 'GESTOR_COMERCIAL', authRequirement: 'user' },
-  'PM-072': { intId: 'INT-02', services: ['api-gateway', 'inventory-svc'], type: 'lectura', scope: 'GESTOR_COMERCIAL', authRequirement: 'user', providesFixtures: ['locationId'] },
-  'PM-080': { intId: 'INT-09', services: ['api-gateway', 'catalog-svc'], type: 'lectura', scope: 'serviceBearer:modulo-marketplace:catalogo:leer', authRequirement: 'marketplace', providesFixtures: ['productId', 'sku'] },
-  'PM-081': { intId: 'INT-09', services: ['api-gateway', 'inventory-svc'], type: 'lectura', scope: 'serviceBearer:modulo-marketplace:inventario:disponibilidad:leer', authRequirement: 'marketplace', requiresFixtures: ['sku'] },
-  'PM-082': { intId: 'INT-09', services: ['api-gateway', 'inventory-svc'], type: 'lectura', scope: 'serviceBearer:modulo-ventas:inventario:disponibilidad:leer', authRequirement: 'ventas', requiresFixtures: ['sku'] },
+  'PM-072': { intId: 'INT-02', services: ['api-gateway', 'inventory-svc'], type: 'lectura', scope: 'GESTOR_COMERCIAL', authRequirement: 'user' },
+  // H18: Fixtures separados por identidad (Marketplace y Ventas nunca reutilizan datos residuales de usuario humano)
+  'PM-080': { intId: 'INT-09', services: ['api-gateway', 'catalog-svc'], type: 'lectura', scope: 'serviceBearer:modulo-marketplace:catalogo:leer', authRequirement: 'marketplace', providesFixtures: ['marketplaceSku'] },
+  'PM-081': { intId: 'INT-09', services: ['api-gateway', 'inventory-svc'], type: 'lectura', scope: 'serviceBearer:modulo-marketplace:inventario:disponibilidad:leer', authRequirement: 'marketplace', requiresFixtures: ['marketplaceSku'] },
+  'PM-082': { intId: 'INT-09', services: ['api-gateway', 'inventory-svc'], type: 'lectura', scope: 'serviceBearer:modulo-ventas:inventario:disponibilidad:leer', authRequirement: 'ventas', requiresFixtures: ['ventasSku'] },
 });

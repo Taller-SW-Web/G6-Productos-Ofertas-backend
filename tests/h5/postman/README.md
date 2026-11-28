@@ -1,44 +1,45 @@
 # Suite Ejecutable de Pruebas de Integración HTTP — Postman / Newman (G6 Hito 5)
 
-Este directorio contiene la **fuente única de verdad ejecutable** del harness Postman/Newman para la validación de integración HTTP de **G6 — Productos y Ofertas (Hito 5)**, trasladada desde `G6-Productos-Ofertas-docs` hacia el repositorio Backend con dependencias completamente aisladas (sin modificar el `package.json` raíz ni los workflows de CI/CD).
+Fuente única de verdad ejecutable del harness Postman/Newman para **G6 — Productos y Ofertas (Hito 5)**, con dependencias aisladas (`newman@6.2.3`, `ajv`, `ajv-formats`, `yaml`) y cero interferencia con el `package.json` raíz o workflows de CI/CD.
 
-> **Estado operativo actual (`STANDBY` en infraestructura real):** No se ejecutan pruebas contra Azure APIM, ACA, Service Bus ni G7 mientras existan PR de CI/CD en curso (`Backend #310`, `Frontend #103`) y correcciones pendientes en APIM/Bulk. Todas las validaciones actuales son locales y aisladas (`ISOLATED`).
+> **Estado operativo (`STANDBY` en infraestructura real):** No se ejecutan pruebas contra Azure APIM, ACA, Service Bus ni G7 hasta autorización expresa.
 
-## Estructura
+## Validación contractual estricta (`H17` + `H22`)
 
-- `g6-h5-integration.postman_collection.json`: Colección Postman v2.1.0 de solo lectura + casos negativos contractuales (38 casos `PM-*`, `followRedirects: false`, validación recursiva de esquemas OpenAPI `0.7.0-rc.3`, `safeSendRequest`, aislamiento dinámico de fixtures).
-- `schemas/openapi-response-schemas.json`: Esquemas de respuesta verificados automáticamente contra `contratos/http/openapi.yaml` mediante Ajv (`ajv`, `ajv-formats`, `yaml`).
-- `environments/`: Plantillas de entorno sin secretos (`apim.example.json`, `local.example.json`, `environment.example.json`).
-- `scripts/`:
-  - `validate-collection.mjs`: Validación estática de estructura, paridad OpenAPI `0.7.0-rc.3`, alineación de esquemas Ajv y escaneo anti-secretos.
-  - `preflight.mjs`: Validación de origen permitido, HTTPS, perfiles y credenciales.
-  - `run-newman.mjs` / `run-newman.ps1`: Runner parametrizado con sanitización por allowlist, reconciliación exacta `H11`, reportes JSON/JUnit/Markdown y manifiesto SHA-256.
-  - `sanitize-evidence.mjs` / `generate-report.mjs`: Herramientas independientes de sanitización y regeneración de reportes.
-- `tests/`: Suite automatizada con `node --test` cubriendo regresiones `H01`–`H15` y Defecto B (`PM-012` multi-ubicaciones).
-- `package.json` / `package-lock.json`: Dependencias aisladas con versión exacta (`newman@6.2.3`, `ajv`, `ajv-formats`, `yaml`).
+- **Modo predeterminado (`STRICT_OFFICIAL`):** `npm run validate` exige el contrato oficial `contratos/http/openapi.yaml` (`0.7.0-rc.3`) y la matriz `cobertura-integracion.csv` en `G6-Productos-Ofertas-docs` (variable `G6_DOCS_ROOT`), registra el SHA de Docs y el SHA-256 del contrato, y realiza comparación estructural profunda (`verifySchemaContractAlignment`: `required`, `type`, `enum`, `format`, `minimum`, `exclusiveMinimum`, `additionalProperties`, `$ref`).
+- **Runner Newman + Ajv:** `scripts/run-newman.mjs` compila directamente el OpenAPI oficial con **Ajv + ajv-formats** y valida **todas las respuestas HTTP JSON ejecutadas (principales y auxiliares)**.
+- **Postman Desktop:** Debido a limitaciones del sandbox de Postman Desktop, la colección embebe el validador recursivo `assertSchema` derivado de `schemas/openapi-response-schemas.json` (sincronizado y verificado contra el OpenAPI oficial).
+- **Modo rápido no acreditable:** `--fast-dev` permite desarrollo local rápido contra `openapi.filtered.yaml` sin sustituir jamás la validación contractual completa para el cierre H5.
 
-## Instalación y pruebas locales aisladas
+## Fixtures explícitos por identidad (`H18` + `H20`)
+
+- `PM-012` **no** elige arbitrariamente la primera ubicación de `/inventario/ubicaciones`; utiliza `G6_LOCATION_ID` explícito cuando corresponde.
+- `PM-080`/`PM-081` (`modulo-marketplace`) utilizan `G6_MARKETPLACE_SKU` (o el SKU descubierto por el propio `PM-080`).
+- `PM-082` (`modulo-ventas`) utiliza `G6_VENTAS_SKU` y `G6_VENTAS_LOCATION_ID` explícitos, sin llamar nunca a `/inventario/ubicaciones` con token M2M; ante ausencia de fixture registra `NOT_RUN / BLOCKED_FIXTURE`.
+- `PM-003A`/`PM-003B` validan exhaustivamente los conjuntos de `product_id` (hasta 5 páginas; si se trunca con `SAMPLED_MAX_5_PAGES` no se declara subconjunto aprobado); `PM-003C`/`PM-003D` validan precios efectivos y canal sobre una **muestra explícita** (1 producto del rango amplio + 1 producto del rango acotado).
+
+## Comandos locales reproducibles
 
 ```powershell
+# 1) Validación contractual estricta (requiere checkout de Docs o G6_DOCS_ROOT)
 cd tests/h5/postman
 npm ci
 npm run validate
+
+# 2) Suite de regresiones del harness (27 pruebas H01-H22, incluye 2 servidores H21 y 4 escenarios Inventory H18)
 npm test
+
+# 3) Equivalencias auténticas Catalog H5 (H16) + Newman contra api-gateway/catalog-svc reales (H19) con PG17 descartable
+# (desde la raíz de Backend con contenedor postgres:17-alpine y migraciones oficiales aplicadas)
+$env:CATALOG_H5_DISPOSABLE_PG='1'
+npx vitest run --config ./vitest.config.e2e.ts apps/catalog-svc/test/h5/catalog-h5-equivalence.postgres.e2e-spec.ts
+npx vitest run --config ./vitest.config.e2e.ts apps/catalog-svc/test/h5/catalog-h5-newman-real.postgres.e2e-spec.ts
 ```
 
-## Convención de estados y niveles de evidencia
+## Convención de niveles de evidencia
 
-| Etiqueta | Significado |
-|---|---|
-| `IMPLEMENTED` | Código, esquema o caso implementado y validado estáticamente. |
-| `PASS / ISOLATED` | Validado localmente contra harness controlado (sin infraestructura Azure). |
-| `FAIL / LAB_AZURE` | Defecto reproducido en corrida real previa contra APIM Chile (documentado en Docs). |
-| `NOT_RUN` | Caso omitido explícitamente por falta de credencial (`BLOCKED_AUTH`) o fixture (`BLOCKED_FIXTURE`). |
-| `STANDBY` | Validación en infraestructura real diferida hasta aprobación operativa. |
-
-## Evidencias históricas y documentación H5
-
-Las evidencias reales previas (`azure-preflight-2026-11-27`, `azure-apim-edge-2026-11-27`, `azure-apim-smoke-jws-2026-11-28`, `azure-apim-integration-jws-2026-11-28`), las matrices de cobertura y la traza downstream ACA (`catalog-svc -> pricing-svc`) se conservan íntegras en el repositorio de documentación (`G6-Productos-Ofertas-docs`, PR #154):
-
-- `hitos/h5/demos-integracion-performance/postman/evidencias/`
-- `hitos/h5/demos-integracion-performance/postman/matrices/`
+- `PASS / MOCK`: Regresiones del harness contra servidor simulado controlado (`tests/h5/postman/tests/*.test.mjs`).
+- `PASS / ISOLATED (servicios reales + PostgreSQL 17 descartable)`: Ejecución contra código productivo real (`api-gateway`, `catalog-svc`, `CatalogMutationService`, `CatalogBulkService`, `CatalogMessageService`) sobre PostgreSQL 17 descartable.
+- `FAIL / LAB_AZURE histórico`: Defectos reproducidos en corridas reales previas (conservados sin alteración en Docs PR #154).
+- `NOT_RUN`: Caso omitido por `BLOCKED_AUTH` o `BLOCKED_FIXTURE`.
+- `STANDBY`: Validación en infraestructura real diferida hasta autorización.
