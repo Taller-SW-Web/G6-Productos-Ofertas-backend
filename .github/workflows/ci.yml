@@ -952,6 +952,64 @@ jobs:
       (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
     uses: ./.github/workflows/gitleaks.yml
 
+  newman_h5_integracion:
+    name: Integración HTTP Newman y Catalog H5 (PostgreSQL 17 desechable)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
+    steps:
+    - name: Obtener código fuente
+      uses: actions/checkout@v4
+    - name: Obtener contrato oficial OpenAPI y matriz desde Docs (SHA fijado)
+      uses: actions/checkout@v4
+      with:
+        repository: Taller-SW-Web/G6-Productos-Ofertas-docs
+        ref: 2ccefce93d7c10f2e9eb39ae0ee77b10ee00324c
+        path: .ci/G6-Productos-Ofertas-docs
+        persist-credentials: 'false'
+    - name: Configurar Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 24.15.0
+        cache: npm
+    - name: Instalar dependencias del backend y harness Newman de forma reproducible
+      run: |
+        npm ci
+        npm --prefix tests/h5/postman ci
+    - name: Validación contractual estricta OpenAPI/Ajv y regresiones del harness (H01-H32)
+      env:
+        G6_DOCS_ROOT: ${{ github.workspace }}/.ci/G6-Productos-Ofertas-docs
+      run: |
+        npm --prefix tests/h5/postman run validate
+        npm --prefix tests/h5/postman test
+    - name: Regresiones negativas del helper PostgreSQL 17 descartable (H33)
+      run: npx vitest run apps/catalog-svc/test/h5/disposable-pg17.helper.spec.ts
+    - name: Ejecutar suites productivas Catalog + Newman (Gateway/Catalog/Pricing/Inventory) sobre PostgreSQL 17 descartable
+      env:
+        G6_DOCS_ROOT: ${{ github.workspace }}/.ci/G6-Productos-Ofertas-docs
+        G6_H5_KEEP_EVIDENCE_DIR: ${{ github.workspace }}/.ci/h5-newman-evidence
+      run: node tests/h5/run-catalog-h5-newman-postgres.mjs "${{ github.workspace }}/.ci/G6-Productos-Ofertas-docs"
+    - name: Verificar limpieza de contenedores PostgreSQL 17 desechables
+      if: always()
+      run: |
+        leftovers="$(docker ps -aq --filter label=g6.h5.newman.pg17=1)"
+        if [[ -n "$leftovers" ]]; then
+          docker ps -a --filter label=g6.h5.newman.pg17=1
+          echo 'Quedaron contenedores PostgreSQL 17 de Newman sin limpiar.'
+          exit 1
+        fi
+        echo 'Sin contenedores PostgreSQL 17 de Newman residuales.'
+    - name: Publicar evidencias sanitizadas Newman H5
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: newman-h5-integracion-${{ github.sha }}
+        path: .ci/h5-newman-evidence/
+        if-no-files-found: error
+
   integral:
     name: validate
     runs-on: ubuntu-latest
@@ -978,6 +1036,7 @@ jobs:
       - seguridad_dependencias
       - seguridad_secretos
       - apim_h5_estatico
+      - newman_h5_integracion
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
       (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark') &&
@@ -994,7 +1053,7 @@ jobs:
         RESULTADOS: ${{ toJSON(needs) }}
       run: |
         printf '%s\n' "$RESULTADOS"
-        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia bulk_postgres_h5 taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias seguridad_secretos apim_h5_estatico
+        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia bulk_postgres_h5 taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias seguridad_secretos apim_h5_estatico newman_h5_integracion
   compatibilidad:
     name: Lint, Typecheck, Test, Build & Smoke Test
     runs-on: ubuntu-latest
