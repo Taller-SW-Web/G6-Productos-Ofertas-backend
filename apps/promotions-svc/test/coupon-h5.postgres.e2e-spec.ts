@@ -33,8 +33,6 @@ import { G5CouponSnapshot } from '../src/coupons/g5-coupon-snapshot.js';
 import { AuthoritativeCouponEvidence } from '../src/coupons/authoritative-coupon-evidence.js';
 import { InventoryCouponEvidence } from '../src/coupons/inventory-coupon-evidence.js';
 import { officialMigrations } from './support/official-migrations.mjs';
-import { verifyAssignedEvents } from './support/assigned-event-checks.mjs';
-import { verifyCouponEligibility } from './support/coupon-eligibility-checks.mjs';
 
 // Explicit opt-in against an EMPTY disposable local database, never Supabase or
 // a shared environment. PostgreSQL and the coupon processor are real. Evidence
@@ -184,6 +182,8 @@ describe.skipIf(process.env.PROMOTIONS_H5_POSTGRES_TESTS !== '1')(
     };
 
     it('applies four assigned event projections transactionally with replay, rollback and stale versions', async () => {
+      const { verifyAssignedEvents } =
+        await import('./support/assigned-event-checks.mjs');
       const checks = await verifyAssignedEvents({
         pool: runtime,
         admin: pool,
@@ -216,6 +216,8 @@ describe.skipIf(process.env.PROMOTIONS_H5_POSTGRES_TESTS !== '1')(
         },
         ...overrides,
       });
+      const { verifyCouponEligibility } =
+        await import('./support/coupon-eligibility-checks.mjs');
       const checks = await verifyCouponEligibility({
         pool: runtime,
         admin: pool,
