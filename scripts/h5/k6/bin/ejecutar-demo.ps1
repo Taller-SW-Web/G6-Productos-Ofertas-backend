@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory)][string]$Dataset,
     [string]$Manifest,
     [string]$ComparisonContext,
+    [string]$Authorization,
     [ValidateSet('demo-smoke', 'demo-normal', 'formal-carga')][string]$Profile = 'demo-smoke',
     [ValidateSet('demo', 'baseline', 'candidato')][string]$Subject = 'demo',
     [ValidateRange(1, 3)][int]$Repetition = 1,
@@ -17,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'preflight.ps1')
 
 try {
-    $context = Get-K6DemoContext $Config $Dataset $Manifest $ComparisonContext $Profile $K6Path -Negative401:$Negative401
+    $context = Get-K6DemoContext -Config $Config -Dataset $Dataset -Manifest $Manifest -ComparisonContext $ComparisonContext -Authorization $Authorization -Profile $Profile -K6Path $K6Path -Subject $Subject -Repetition $Repetition -Negative401:$Negative401
     $settings = $context.Settings
     if ($Subject -ne 'demo' -and $settings.environment -ne 'STAGING_APIM') { throw 'PREFLIGHT_SUJETO_FORMAL_REQUIERE_STAGING' }
     if ($Profile -eq 'formal-carga' -and $Subject -eq 'demo') { throw 'PREFLIGHT_CARGA_REQUIERE_SUJETO_FORMAL' }
@@ -44,15 +45,11 @@ try {
         exit 0
     }
 
-    $harnessCommit = git -C $script:K6DemoRoot rev-parse HEAD 2>$null
-    if ($LASTEXITCODE -ne 0 -or $harnessCommit -notmatch '^[0-9a-f]{40}$') { throw 'EVIDENCIA_SHA_ARNES_INVALIDO' }
-    $dirtyFiles = git -C $script:K6DemoRoot status --porcelain -- . 2>$null
-    if ($LASTEXITCODE -ne 0) { throw 'EVIDENCIA_ESTADO_ARNES_INVALIDO' }
-    $harnessDirty = [bool]$dirtyFiles
-    if ($settings.environment -ne 'STAGING_APIM' -and $settings.backend_sha -cne $harnessCommit) {
+    $source = $context.Provenance
+    if (-not $source) { $source = Get-K6Provenance 'snapshot' $settings.case_id }
+    if ($settings.environment -ne 'STAGING_APIM' -and $settings.backend_sha -cne $source.harness_commit) {
         throw 'EVIDENCIA_BACKEND_LOCAL_SHA_DISTINTO'
     }
-    if ($Subject -ne 'demo' -and $harnessDirty) { throw 'PREFLIGHT_SUJETO_FORMAL_REQUIERE_ARNES_LIMPIO' }
 
     $null = New-Item -ItemType Directory -Path $runDir
     $context.Environment['K6_WEB_DASHBOARD_EXPORT'] = Join-Path $runDir 'dashboard.html'
@@ -78,6 +75,9 @@ try {
         $runtime.observed_max_vus -eq $context.Definition.Vus -and
         $runtime.configured_seconds -eq $context.Definition.Seconds -and
         $runtime.elapsed_seconds -ge ($context.Definition.Seconds - 1) -and
+        $runtime.measured_seconds -ge ($context.Definition.Seconds - 1) -and
+        $runtime.offered_requests -ge $runtime.valid_2xx -and
+        $runtime.rps_configured_cap -eq $settings.max_rps -and
         $runtime.dataset_sha256 -ceq $settings.dataset_sha256 -and
         (!$Negative401 -or $runtime.negative_401 -eq 1)
     $status = if ($result.Code -ne 0) { 'FAIL' } elseif ($verified) { 'PASS' } else { 'INCONCLUSIVE' }
@@ -86,13 +86,10 @@ try {
         else { 'K6_ABORTO_O_UMBRAL_INCUMPLIDO' }
     } elseif (!$verified) { 'EVIDENCIA_DE_EJECUCION_INCOMPLETA' } else { $null }
 
-    $completedCommit = git -C $script:K6DemoRoot rev-parse HEAD 2>$null
-    if ($LASTEXITCODE -ne 0 -or $completedCommit -cne $harnessCommit) { throw 'EVIDENCIA_SHA_ARNES_CAMBIO' }
-    $fileHashes = [ordered]@{}
-    foreach ($file in @(('scripts/' + $context.Case.Script), 'scripts/lectura.js', 'scripts/contratos.js',
-        'bin/preflight.ps1', 'bin/ejecutar-demo.ps1', 'config/k6-options.json',
-        '../../../apps/catalog-svc/test/performance/h5/catalog-pagination-integrity.mjs')) {
-        $fileHashes[$file] = (Get-FileHash -LiteralPath (Join-Path $script:K6DemoRoot $file)).Hash.ToLowerInvariant()
+    $completedSource = Get-K6Provenance 'snapshot' $settings.case_id
+    if ($completedSource.harness_commit -cne $source.harness_commit -or
+        ($settings.environment -eq 'STAGING_APIM' -and $completedSource.harness_dirty)) {
+        throw 'EVIDENCIA_ARNES_CAMBIO_DURANTE_CORRIDA'
     }
     $optional = @{}
     foreach ($field in @('release_manifest_sha256', 'comparison_context_sha256', 'subject_digest')) {
@@ -100,7 +97,7 @@ try {
         $optional[$field] = if ($settings.environment -eq 'STAGING_APIM' -and $property) { $property.Value } else { $null }
     }
     $summary = [ordered]@{
-        schema_version = 1; case_id = $settings.case_id; operation_id = $context.Case.Operation
+        schema_version = 2; case_id = $settings.case_id; operation_id = $context.Case.Operation
         scope = switch ($settings.environment) {
             'ISOLATED' { 'L1_FIXTURE_SINTETICO' }
             'LOCAL_SERVICE' { 'L1_NEST_FIXTURES' }
@@ -111,19 +108,25 @@ try {
         channel = $settings.channel; max_rps = $settings.max_rps; k6_version = $context.Version
         approval_ref = $settings.approval_ref; revision = $settings.revision
         backend_sha = $settings.backend_sha; frontend_sha = $settings.frontend_sha; docs_sha = $settings.docs_sha
-        harness_commit = $harnessCommit; harness_dirty = $harnessDirty; harness_files_sha256 = $fileHashes
+        harness_commit = $source.harness_commit; harness_tree = $source.harness_tree
+        harness_dirty = ($source.harness_dirty -or $completedSource.harness_dirty)
+        harness_files_sha256 = $source.harness_files_sha256
+        staging_permit_sha256 = if ($context.PermitSha256) { $context.PermitSha256 } else { $null }
         dataset_sha256 = $settings.dataset_sha256; release_manifest_sha256 = $optional.release_manifest_sha256
         comparison_context_sha256 = $optional.comparison_context_sha256; subject_digest = $optional.subject_digest
         metrics = $runtime; k6_exit_code = $result.Code; status = $status; reason = $reason
     }
     $summaryPath = Join-Path $runDir 'summary.json'
-    $summary | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 -LiteralPath $summaryPath
+    $canonical = (($summary | ConvertTo-Json -Depth 8) -replace "\x0d\x0a", [string][char]10) + [char]10
+    [IO.File]::WriteAllText($summaryPath, $canonical, [Text.UTF8Encoding]::new($false))
     $reportHash = (Get-FileHash -LiteralPath $summaryPath).Hash.ToLowerInvariant()
-    "$reportHash  summary.json" | Set-Content -Encoding ASCII -LiteralPath (Join-Path $runDir 'summary.sha256')
+    [IO.File]::WriteAllText((Join-Path $runDir 'summary.sha256'), "$reportHash  summary.json" + [char]10, [Text.Encoding]::ASCII)
     if ($runtime) {
         [pscustomobject]@{
             caso = $settings.case_id; perfil = $Profile; resultado = $status; vus = $runtime.observed_max_vus
-            iteraciones = $runtime.iterations; rps = $runtime.rps_valid_2xx
+            iteraciones = $runtime.iterations; rps_configurado = $runtime.rps_configured_cap
+            rps_ofrecido = $runtime.rps_offered; rps_conseguido = $runtime.rps_valid_2xx
+            cerca_del_limite_cliente = $runtime.client_cap_near
             p50_ms = $runtime.p50_ms; p95_ms = $runtime.p95_ms; p99_ms = $runtime.p99_ms
             inesperados = $runtime.unexpected_error_rate; estado_429 = $runtime.status_counts.'429'
         } | Export-Csv -NoTypeInformation -Encoding UTF8 -LiteralPath (Join-Path $runDir 'metrics.csv')

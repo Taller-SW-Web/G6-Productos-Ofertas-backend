@@ -2,8 +2,8 @@ import http from 'k6/http';
 import { check, fail, sleep } from 'k6';
 import { sha256 } from 'k6/crypto';
 import execution from 'k6/execution';
-import { Counter, Rate, Trend } from 'k6/metrics';
-import { buildReads, COMMERCIAL_CHANNELS, statusBucket } from './contratos.js';
+import { Counter, Gauge, Rate, Trend } from 'k6/metrics';
+import { buildReads, COMMERCIAL_CHANNELS, revisionMatches, statusBucket } from './contratos.js';
 
 const profiles = {
   'demo-smoke': [1, 60, 5],
@@ -27,14 +27,18 @@ export function reader(caseId) {
   const maxRps = Number(__ENV.G6_K6_MAX_RPS);
   const fixture = environment === 'ISOLATED';
   const local = fixture || environment === 'LOCAL_SERVICE';
+  const inspectOnly = environment === 'INSPECT_OFFLINE' && target === 'https://example.invalid';
+  const revisionHeader = __ENV.G6_K6_REVISION_HEADER;
+  const expectedRevision = __ENV.G6_K6_EFFECTIVE_REVISION;
   const originAllowed = local
     ? /^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(target)
-    : environment === 'STAGING_APIM' && /^https:\/\/[a-z0-9.-]+(?::\d{1,5})?$/.test(target) &&
-      target === __ENV.G6_K6_APPROVED_ORIGIN;
+    : inspectOnly || (environment === 'STAGING_APIM' && /^https:\/\/[a-z0-9.-]+(?::\d{1,5})?$/.test(target) &&
+      /^[a-f0-9]{64}$/.test(__ENV.G6_K6_PERMIT_SHA256 ?? '') &&
+      /^x-[a-z0-9-]{1,62}$/.test(revisionHeader ?? '') && /^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$/.test(expectedRevision ?? ''));
   if (!originAllowed || !token || /\s/.test(token) || !Number.isFinite(approvedUntil) ||
       !vus || !Number.isInteger(maxRps) || maxRps < 1 || maxRps > ceiling ||
       !COMMERCIAL_CHANNELS.includes(channel) || (caseId === 'PERF-03' && channel === 'VENTAS') ||
-      (fixture && caseId !== 'PERF-01') || (local && profile !== 'demo-smoke')) fail('PREFLIGHT_CONFIG_INVALIDA');
+      (fixture && caseId !== 'PERF-01') || (local && (profile !== 'demo-smoke' || maxRps > 2))) fail('PREFLIGHT_CONFIG_INVALIDA');
 
   const datasetBytes = open(__ENV.G6_K6_DATASET);
   const datasetHash = sha256(datasetBytes, 'hex');
@@ -43,8 +47,11 @@ export function reader(caseId) {
   const tags = { caso: caseId, ambiente: environment, perfil: profile };
   const unexpected = new Rate('demo_inesperados');
   const semantic = new Rate('demo_invariantes_2xx');
+  const offered = new Counter('demo_ofrecidas');
   const accepted = new Counter('demo_2xx_validos');
   const duration = new Trend('demo_2xx_duracion', true);
+  const measurementStart = new Gauge('demo_medicion_inicio_ms');
+  const measurementEnd = new Gauge('demo_medicion_ultima_respuesta_ms');
   const statuses = Object.fromEntries(['2xx','401','403','429','4xx_otros','5xx','otros']
     .map((name) => [name, new Counter(`demo_http_${name}`)]));
   const negative = new Counter('demo_negativa_401');
@@ -71,12 +78,18 @@ export function reader(caseId) {
   };
 
   function read(probe, phase, authenticated = true) {
+    if (inspectOnly) execution.test.abort('MODO_INSPECCION_SIN_TRAFICO');
     if (Date.now() + 5000 >= approvedUntil) execution.test.abort('VENTANA_AUTORIZADA_FINALIZADA');
     const headers = { Accept: 'application/json' };
     if (authenticated) headers.Authorization = `Bearer ${token}`;
-    return http.get(target + probe.path, {
+    const response = http.get(target + probe.path, {
       headers, timeout: '5s', redirects: 0, tags: { fase: phase },
     });
+    if (environment === 'STAGING_APIM' && response.status === 200 &&
+        !revisionMatches(response.headers, revisionHeader, expectedRevision)) {
+      execution.test.abort('REVISION_EFECTIVA_NO_VERIFICADA');
+    }
+    return response;
   }
 
   const validate = (response, probe) => response.status === 200 && probe.valid(parseJson(response));
@@ -95,7 +108,10 @@ export function reader(caseId) {
 
   function run() {
     const probe = reads[execution.scenario.iterationInTest % reads.length];
+    measurementStart.add(execution.scenario.startTime);
+    offered.add(1);
     const response = read(probe, 'medicion');
+    measurementEnd.add(Date.now());
     const status = response.status;
     const bucket = statusBucket(status);
     const is2xx = bucket === '2xx';
@@ -122,23 +138,37 @@ export function reader(caseId) {
     const counts = Object.fromEntries(Object.keys(statuses).map((name) => [name, metric(`demo_http_${name}`).count ?? 0]));
     const latency = metric('demo_2xx_duracion');
     const valid = metric('demo_2xx_validos').count ?? 0;
+    const attempts = metric('demo_ofrecidas').count ?? 0;
+    const completed = metric('demo_postflight').count === 1;
+    const start = metric('demo_medicion_inicio_ms').value;
+    const lastResponse = metric('demo_medicion_ultima_respuesta_ms').max;
+    const end = start && lastResponse ? Math.max(lastResponse, completed ? start + seconds * 1000 : start) : null;
+    const measuredSeconds = end && end > start ? (end - start) / 1000 : null;
+    const rpsOffered = measuredSeconds === null ? null : attempts / measuredSeconds;
     const runtime = {
       dataset_sha256: datasetHash,
       configured_vus: vus,
       observed_max_vus: metric('vus').max ?? null,
       configured_seconds: seconds,
       elapsed_seconds: data.state.testRunDurationMs / 1000,
+      measurement_started_utc: start ? new Date(start).toISOString() : null,
+      measurement_ended_utc: end ? new Date(end).toISOString() : null,
+      measured_seconds: measuredSeconds,
       iterations: metric('iterations').count ?? 0,
       status_counts: counts,
+      offered_requests: attempts,
       valid_2xx: valid,
-      rps_valid_2xx: valid / seconds,
+      rps_configured_cap: maxRps,
+      rps_offered: rpsOffered,
+      rps_valid_2xx: measuredSeconds === null ? null : valid / measuredSeconds,
+      client_cap_near: rpsOffered !== null && rpsOffered >= maxRps * 0.95,
       p50_ms: latency['p(50)'] ?? null,
       p95_ms: latency['p(95)'] ?? null,
       p99_ms: latency['p(99)'] ?? null,
       critical_checks: metric('demo_invariantes_2xx').rate ?? null,
       unexpected_error_rate: metric('demo_inesperados').rate ?? null,
       negative_401: metric('demo_negativa_401').count ?? 0,
-      completed: metric('demo_postflight').count === 1,
+      completed,
     };
     return { [__ENV.G6_K6_RUNTIME_OUTPUT]: JSON.stringify(runtime, null, 2) + '\n' };
   }

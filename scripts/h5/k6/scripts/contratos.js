@@ -6,6 +6,11 @@ const opaqueId = (value) => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$
 const availability = ['DISPONIBLE', 'STOCK_BAJO', 'AGOTADO', 'INDETERMINADO'];
 const unique = (values) => new Set(values).size === values.length;
 
+export function revisionMatches(headers, name, revision) {
+  const values = Object.entries(headers).filter(([header]) => header.toLowerCase() === name);
+  return values.length === 1 && values[0][1] === revision;
+}
+
 export function statusBucket(status) {
   if (status >= 200 && status < 300) return '2xx';
   switch (classifyPerf01Status(status)) {
