@@ -26,6 +26,9 @@ const RUN_POSTGRES = process.env.BULK_TEST_POSTGRES === '1';
 
 class IsolatedBulkPostgres {
   private readonly name = `bulk-r14-${randomUUID()}`;
+  readonly legacyBatchId = randomUUID();
+  readonly legacyRowId = randomUUID();
+  readonly legacyCorrelationId = randomUUID();
   private created = false;
   pool?: Pool;
 
@@ -80,8 +83,26 @@ class IsolatedBulkPostgres {
       '../migrations/0007_bulk_retry_v1.sql',
       '../migrations/0008_h5_outbox_delivery.sql',
       '../migrations/0009_h5_outbox_delivery_all_destinations.sql',
+      '../migrations/0010_import_admission_invariant.sql',
     ];
     for (const rel of sqlFiles) {
+      if (rel.endsWith('0010_import_admission_invariant.sql')) {
+        const manifest = await this.pool.query<{ id: string }>(
+          "INSERT INTO bulk.file_manifests(role, format, content_ref) VALUES ('ENTRADA_IMPORTACION','CSV','test://legacy-before-0010') RETURNING id",
+        );
+        await this.pool.query(
+          "INSERT INTO bulk.batch_jobs(batch_id,input_file_id,template_version,correlation_id,status,total_rows) VALUES ($1,$2,2,$3,'PROCESSING',1) RETURNING id",
+          [this.legacyBatchId, manifest.rows[0]!.id, this.legacyCorrelationId],
+        );
+        await this.pool.query(
+          "INSERT INTO bulk.batch_rows(batch_job_id,row_id,status,required_domains,applied_domains) SELECT id,$2,'PROCESSING',ARRAY['CATALOGO','INVENTARIO'],ARRAY['CATALOGO'] FROM bulk.batch_jobs WHERE batch_id=$1",
+          [this.legacyBatchId, this.legacyRowId],
+        );
+        await this.pool.query(
+          "INSERT INTO bulk.row_domain_steps(batch_row_id,domain,status) SELECT id,'CATALOGO','COMPLETED' FROM bulk.batch_rows WHERE row_id=$1",
+          [this.legacyRowId],
+        );
+      }
       const sql = await readFile(new URL(rel, import.meta.url), 'utf8');
       await this.pool.query(sql);
     }
@@ -102,7 +123,7 @@ class IsolatedBulkPostgres {
 }
 
 describe.skipIf(!RUN_POSTGRES)(
-  'Bulk R03 -> R14 conciliación en PostgreSQL descartable aislado (ESCRITA_NO_EJECUTADA)',
+  'Bulk R03 -> R14 conciliación en PostgreSQL descartable aislado',
   () => {
     const postgres = new IsolatedBulkPostgres();
     let db: ReturnType<typeof drizzle<typeof bulkSchema>>;
@@ -120,6 +141,202 @@ describe.skipIf(!RUN_POSTGRES)(
 
     afterAll(async () => {
       await postgres.stop();
+    });
+
+    it('la migración es repetible y no repara ni modifica lotes heredados sin intención', async () => {
+      const migration = await readFile(
+        new URL(
+          '../migrations/0010_import_admission_invariant.sql',
+          import.meta.url,
+        ),
+        'utf8',
+      );
+      await postgres.pool!.query(migration);
+      expect(
+        await repository.findBatchByBatchId(postgres.legacyBatchId),
+      ).toMatchObject({ status: 'PROCESSING' });
+      const receipts = await postgres.pool!.query(
+        "SELECT message_id FROM bulk.inbox WHERE message_id=$1 AND handler='bulk.import.admission'",
+        [postgres.legacyBatchId],
+      );
+      expect(receipts.rows).toHaveLength(0);
+    });
+
+    it('PostgreSQL rechaza al commit un lote nuevo sin recibo y revierte su manifiesto', async () => {
+      const batchId = randomUUID();
+      const client = await postgres.pool!.connect();
+      try {
+        await client.query('BEGIN');
+        const manifest = await client.query<{ id: string }>(
+          "INSERT INTO bulk.file_manifests(role, format, content_ref) VALUES ('ENTRADA_IMPORTACION', 'CSV', $1) RETURNING id",
+          [`test://orphan-${batchId}`],
+        );
+        await client.query(
+          'INSERT INTO bulk.batch_jobs(batch_id, input_file_id, template_version, correlation_id) VALUES ($1,$2,2,$3)',
+          [batchId, manifest.rows[0]!.id, randomUUID()],
+        );
+        await expect(client.query('COMMIT')).rejects.toMatchObject({
+          code: '23514',
+          constraint: 'ck_bulk_import_admission_durable',
+        });
+      } finally {
+        await client.query('ROLLBACK');
+        client.release();
+      }
+      expect(await repository.findBatchByBatchId(batchId)).toBeNull();
+      expect(
+        (
+          await postgres.pool!.query(
+            'SELECT id FROM bulk.file_manifests WHERE content_ref=$1',
+            [`test://orphan-${batchId}`],
+          )
+        ).rows,
+      ).toHaveLength(0);
+    });
+
+    it.each(['fila', 'correlación'])(
+      'PostgreSQL rechaza una %s distinta de la admisión persistida',
+      async (mismatch) => {
+        const batchId = randomUUID(),
+          rowId = randomUUID(),
+          correlationId = randomUUID();
+        const client = await postgres.pool!.connect();
+        try {
+          await client.query('BEGIN');
+          const manifest = await client.query<{ id: string }>(
+            "INSERT INTO bulk.file_manifests(role,format,content_ref) VALUES ('ENTRADA_IMPORTACION','CSV','test://mismatch') RETURNING id",
+          );
+          const batch = await client.query<{ id: string }>(
+            'INSERT INTO bulk.batch_jobs(batch_id,input_file_id,template_version,correlation_id,total_rows) VALUES ($1,$2,2,$3,1) RETURNING id',
+            [batchId, manifest.rows[0]!.id, correlationId],
+          );
+          await client.query(
+            "INSERT INTO bulk.batch_rows(batch_job_id,row_id,required_domains) VALUES ($1,$2,ARRAY['CATALOGO'])",
+            [batch.rows[0]!.id, rowId],
+          );
+          await client.query(
+            "INSERT INTO bulk.inbox(message_id,handler,event_name,correlation_id,payload,result) VALUES ($1,'bulk.import.admission','bulk.import.admission',$2,$3::jsonb,'ADMITTED')",
+            [
+              batchId,
+              mismatch === 'correlación' ? randomUUID() : correlationId,
+              JSON.stringify({
+                rows: [{ rowId: mismatch === 'fila' ? randomUUID() : rowId }],
+              }),
+            ],
+          );
+          await expect(client.query('COMMIT')).rejects.toMatchObject({
+            code: '23514',
+            constraint: 'ck_bulk_import_admission_durable',
+          });
+        } finally {
+          await client.query('ROLLBACK');
+          client.release();
+        }
+        expect(await repository.findBatchByBatchId(batchId)).toBeNull();
+        expect(
+          (
+            await postgres.pool!.query(
+              'SELECT message_id FROM bulk.inbox WHERE message_id=$1',
+              [batchId],
+            )
+          ).rows,
+        ).toHaveLength(0);
+      },
+    );
+
+    it('un resultado de un lote heredado sin intención falla cerrado y no fabrica receipts', async () => {
+      await expect(
+        importService.applyDomainResult({
+          batchId: postgres.legacyBatchId,
+          rowId: postgres.legacyRowId,
+          correlationId: postgres.legacyCorrelationId,
+          domain: 'INVENTARIO',
+          messageId: randomUUID(),
+          operationId: randomUUID(),
+          causationId: randomUUID(),
+          action: 'STOCK_ADJUSTMENT',
+          eventName: 'inventory.bulk.stock.adjust.completed',
+          status: 'COMPLETED',
+        }),
+      ).rejects.toMatchObject({ code: 'PERSISTENCE_FAILURE' });
+      expect(
+        await repository.findBatchByBatchId(postgres.legacyBatchId),
+      ).toMatchObject({ status: 'PROCESSING', completedRows: 0 });
+      const receipts = await postgres.pool!.query(
+        'SELECT message_id FROM bulk.inbox WHERE correlation_id=$1',
+        [postgres.legacyCorrelationId],
+      );
+      expect(receipts.rows).toHaveLength(0);
+    });
+
+    it('no admite lote ni outbox sin intención normalizada y confirma receipt en la misma transacción', async () => {
+      const batchId = randomUUID(),
+        rowId = randomUUID(),
+        ownerSub = randomUUID();
+      const input = {
+        batchId,
+        ownerSub,
+        correlationId: randomUUID(),
+        templateVersion: 2,
+        inputFile: { format: 'CSV' as const, contentRef: `test://${batchId}` },
+        rows: [{ rowId, requiredDomains: ['CATALOGO' as const] }],
+        admissionIntent: { rows: [{ rowId }] },
+      };
+      const invalid = { ...input };
+      Reflect.deleteProperty(invalid, 'admissionIntent');
+      await expect(repository.createImportBatch(invalid)).rejects.toMatchObject(
+        { code: 'CHECK_VIOLATION' },
+      );
+      expect(await repository.findBatchByBatchId(batchId)).toBeNull();
+      const first = await repository.createImportBatch(input);
+      const repeated = await repository.createImportBatch(input);
+      expect(repeated.batch.id).toBe(first.batch.id);
+      const receipts = await db
+        .select()
+        .from(inbox)
+        .where(
+          and(
+            eq(inbox.messageId, batchId),
+            eq(inbox.handler, 'bulk.import.admission'),
+          ),
+        );
+      expect(receipts).toHaveLength(1);
+      expect(receipts[0]?.payload.rows).toEqual([{ rowId }]);
+    });
+
+    it('un fallo al persistir receipt revierte lote, filas y manifiesto antes de publicar', async () => {
+      const batchId = randomUUID(),
+        rowId = randomUUID();
+      await postgres.pool!.query(
+        `CREATE OR REPLACE FUNCTION bulk.audit_fail_admission() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.message_id = '${batchId}' THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='isolated admission failure'; END IF; RETURN NEW; END $$`,
+      );
+      await postgres.pool!.query(
+        'CREATE TRIGGER audit_fail_admission BEFORE INSERT ON bulk.inbox FOR EACH ROW EXECUTE FUNCTION bulk.audit_fail_admission()',
+      );
+      try {
+        await expect(
+          repository.createImportBatch({
+            batchId,
+            ownerSub: randomUUID(),
+            correlationId: randomUUID(),
+            templateVersion: 2,
+            inputFile: { format: 'CSV', contentRef: `test://${batchId}` },
+            rows: [{ rowId, requiredDomains: ['CATALOGO'] }],
+            admissionIntent: { rows: [{ rowId }] },
+          }),
+        ).rejects.toMatchObject({ code: 'CHECK_VIOLATION' });
+        expect(await repository.findBatchByBatchId(batchId)).toBeNull();
+        const manifest = await postgres.pool!.query(
+          'SELECT id FROM bulk.file_manifests WHERE content_ref = $1',
+          [`test://${batchId}`],
+        );
+        expect(manifest.rows).toHaveLength(0);
+      } finally {
+        await postgres.pool!.query(
+          'DROP TRIGGER audit_fail_admission ON bulk.inbox',
+        );
+        await postgres.pool!.query('DROP FUNCTION bulk.audit_fail_admission()');
+      }
     });
 
     it('holds downstream commands until Catalog confirms their family and releases original IDs after recovery', async () => {
