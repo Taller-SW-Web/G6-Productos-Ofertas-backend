@@ -37,7 +37,8 @@ import {
 import { PricingSvcModule } from '../../../pricing-svc/src/pricing-svc.module.js';
 import { PRICING_CATALOG_TOKEN } from '../../../pricing-svc/src/http/catalog-context.js';
 import { InventorySvcModule } from '../../../inventory-svc/src/inventory-svc.module.js';
-import { executeSuite } from '../../../../tests/h5/postman/scripts/run-newman.mjs';
+
+let executeSuite!: (options?: Record<string, unknown>) => Promise<any>;
 
 /**
  * H26 + H27 — Integración local positiva y negativa con servicios productivos reales:
@@ -132,6 +133,10 @@ describe.runIf(RUN_PG)(
     }
 
     beforeAll(async () => {
+      // Carga perezosa para no exigir node_modules aislados de tests/h5/postman cuando CATALOG_H5_DISPOSABLE_PG !== '1'
+      ({ executeSuite } =
+        await import('../../../../tests/h5/postman/scripts/run-newman.mjs'));
+
       // 1) H26: Validar contrato seguro de PostgreSQL 17 descartable (loopback, *_isolated, rol runtime no-owner, PG17, migraciones)
       const pgSettings = readSafeDisposablePg17Settings();
       database = new Database(pgSettings);
