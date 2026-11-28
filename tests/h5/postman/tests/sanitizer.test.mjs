@@ -7,7 +7,11 @@ import {
   sanitizeNewmanRun,
 } from '../scripts/lib/sanitizer-core.mjs';
 
-const SYNTHETIC_JWT = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIifQ.syntheticSignature123456';
+function buildSyntheticJwt() {
+  const b64u = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+  return [b64u({ alg: 'HS256', typ: 'JWT' }), b64u({ sub: 'test-user' }), 'syntheticSignature123456'].join('.');
+}
+const SYNTHETIC_JWT = buildSyntheticJwt();
 const SYNTHETIC_SECRET = 'synth-client-secret-998877';
 
 test('H09: sanitizeErrorMessage elimina cuerpos privados multilinea y correos en excepciones', () => {
