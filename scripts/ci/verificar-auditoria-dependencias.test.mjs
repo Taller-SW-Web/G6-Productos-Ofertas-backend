@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { evaluarAuditorias, EXCEPCION_ADVISORY_ID } from './verificar-auditoria-dependencias.mjs';
+import { evaluarAuditorias } from './verificar-auditoria-dependencias.mjs';
 
 const RETIRADO = 'https://github.com/advisories/GHSA-fc5q-39xc-vjpf';
 
@@ -35,50 +35,22 @@ test('auditoría limpia pasa por flujo normal', () => {
   const resultado = evaluar();
   assert.equal(resultado.decision.status, 'PASS');
   assert.equal(resultado.decision.mode, 'normal');
-  assert.equal(resultado.exception.applied, false);
 });
 
-test('solo el aviso retirado con auditoría productiva limpia pasa con excepción identificada', () => {
-  const resultado = evaluar({
-    full: {
-      picomatch: registro('high', [advisory(RETIRADO)], 'picomatch'),
-      fdir: registro('high', ['picomatch'], 'fdir'),
-    },
-    fullExitCode: 1,
-  });
-  assert.equal(resultado.decision.status, 'PASS');
-  assert.equal(resultado.decision.mode, 'temporary-exception');
-  assert.equal(resultado.exception.advisoryId, EXCEPCION_ADVISORY_ID);
-  assert.equal(resultado.exception.applied, true);
-  assert.deepEqual(resultado.decision.advisoryIds, [EXCEPCION_ADVISORY_ID]);
-  assert.deepEqual(resultado.decision.highCriticalPackages.map(({ name }) => name).sort(), ['fdir', 'picomatch']);
+test('el aviso retirado High falla sin excepción', () => {
+  const resultado = evaluar({ full: { picomatch: registro('high', [advisory(RETIRADO)], 'picomatch') }, fullExitCode: 1 });
+  assert.equal(resultado.decision.status, 'FAIL');
+  assert.match(resultado.decision.reason, /High\/Critical/);
 });
 
-test('un aviso Moderate en otra rama no se confunde con la causa High permitida', () => {
-  const resultado = evaluar({
-    full: {
-      picomatch: registro('high', [advisory(RETIRADO)], 'picomatch'),
-      tinyglobby: registro('high', ['picomatch'], 'tinyglobby'),
-      minimatch: registro('moderate', [advisory('https://github.com/advisories/GHSA-abcd-1234-efgh', 'moderate', 'minimatch')], 'minimatch'),
-      parser: registro('high', ['tinyglobby', 'minimatch'], 'parser'),
-    },
-    fullExitCode: 1,
-  });
-  assert.equal(resultado.decision.status, 'PASS');
-  assert.deepEqual(resultado.decision.advisoryIds, [EXCEPCION_ADVISORY_ID]);
+test('una rama Moderate no oculta una vulnerabilidad High', () => {
+  const resultado = evaluar({ full: { picomatch: registro('high', [advisory(RETIRADO)], 'picomatch'), minimatch: registro('moderate', [advisory('https://github.com/advisories/GHSA-abcd-1234-efgh', 'moderate', 'minimatch')], 'minimatch') }, fullExitCode: 1 });
+  assert.equal(resultado.decision.status, 'FAIL');
 });
 
-test('resuelve propagaciones cíclicas del lockfile sin ocultar la raíz del aviso', () => {
-  const resultado = evaluar({
-    full: {
-      '@vitest/coverage-v8': registro('high', ['vitest'], '@vitest/coverage-v8'),
-      vitest: registro('high', ['@vitest/coverage-v8', 'picomatch'], 'vitest'),
-      picomatch: registro('high', [advisory(RETIRADO)], 'picomatch'),
-    },
-    fullExitCode: 1,
-  });
-  assert.equal(resultado.decision.status, 'PASS', resultado.decision.reason);
-  assert.deepEqual(resultado.decision.advisoryIds, [EXCEPCION_ADVISORY_ID]);
+test('las propagaciones cíclicas High no se aceptan', () => {
+  const resultado = evaluar({ full: { '@vitest/coverage-v8': registro('high', ['vitest'], '@vitest/coverage-v8'), vitest: registro('high', ['@vitest/coverage-v8', 'picomatch'], 'vitest'), picomatch: registro('high', [advisory(RETIRADO)], 'picomatch') }, fullExitCode: 1 });
+  assert.equal(resultado.decision.status, 'FAIL');
 });
 
 test('aviso retirado junto a otro High falla', () => {
@@ -111,7 +83,7 @@ test('cualquier vulnerabilidad productiva falla incluso si el audit threshold no
 test('aviso permitido con procedencia no demostrable falla', () => {
   const resultado = evaluar({ full: { fdir: registro('high', ['picomatch'], 'fdir') }, fullExitCode: 1 });
   assert.equal(resultado.decision.status, 'FAIL');
-  assert.match(resultado.decision.reason, /procedencia no demostrable/);
+  assert.match(resultado.decision.reason, /High\/Critical/);
 });
 
 test('JSON inválido falla', () => {
@@ -166,25 +138,14 @@ test('error del registro o transporte falla', () => {
   assert.match(transporte.decision.reason, /transporte/);
 });
 
-test('la excepción falla después del vencimiento UTC', () => {
-  const resultado = evaluar({
-    full: { picomatch: registro('high', [advisory(RETIRADO)], 'picomatch') },
-    fullExitCode: 1,
-    date: '2026-11-26',
-  });
-  assert.equal(resultado.decision.status, 'FAIL');
-  assert.match(resultado.decision.reason, /vencida/);
+test('un High falla independientemente de la fecha', () => {
+  for (const date of ['2026-11-25', '2026-11-26']) {
+    const resultado = evaluar({ full: { picomatch: registro('high', [advisory(RETIRADO)], 'picomatch') }, fullExitCode: 1, date });
+    assert.equal(resultado.decision.status, 'FAIL');
+  }
 });
 
-test('la excepción sigue vigente durante todo el 25/11/2026 UTC', () => {
-  const resultado = evaluar({
-    full: { picomatch: registro('high', [advisory(RETIRADO)], 'picomatch') },
-    fullExitCode: 1,
-    date: '2026-11-25',
-  });
-  assert.equal(resultado.decision.status, 'PASS');
-  assert.equal(resultado.exception.expiresUtcInclusive, '2026-11-25');
-});
+
 
 test('código de salida npm inesperado falla', () => {
   const resultado = evaluar({ fullExitCode: 2 });
@@ -196,7 +157,6 @@ test('si el audit deja de reportar el aviso, pasa normalmente sin usar excepció
   const resultado = evaluar();
   assert.equal(resultado.decision.status, 'PASS');
   assert.equal(resultado.decision.mode, 'normal');
-  assert.equal(resultado.exception.applied, false);
 });
 
 test('el job seguridad está conectado al test, auditor y artefacto sin continue-on-error', async () => {

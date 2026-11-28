@@ -33,6 +33,21 @@ if [[ "${1:-}" == containerapp ]]; then [[ "$*" == *"--resource-group ${MOCK_RES
 if [[ "${1:-}" == group && "${2:-}" == show ]]; then printf '{"id":"/subscriptions/%s/resourceGroups/%s"}\n' "$subscription" "$group"; exit 0; fi
 if [[ "${1:-}" == containerapp && "${2:-}" == env && "${3:-}" == show ]]; then [[ "${MOCK_BAD_ENVIRONMENT:-false}" != true ]] || env_id="$env_id-wrong"; printf '{"id":"%s","location":"%s"}\n' "$env_id" "$location"; exit 0; fi
 if [[ "${1:-}" == containerapp && "${2:-}" == show ]]; then
+  if [[ -n "${MOCK_APP_READ_LOG:-}" ]]; then
+    printf 'read\n' >> "$MOCK_APP_READ_LOG"
+    read_number="$(wc -l < "$MOCK_APP_READ_LOG")"
+    if [[ ",${MOCK_APP_READ_FAILURES:-}," == *",$read_number,"* ]]; then
+      case "${MOCK_APP_READ_ERROR:-503}" in
+        503)
+          printf 'partial output from failed read\n'
+          printf 'azure.cli.core.azclierror.HTTPError: Service Unavailable(<!DOCTYPE html>)\njson.decoder.JSONDecodeError: Expecting property name enclosed in double quotes\n' >&2
+          ;;
+        reset) printf "ConnectionResetError(104, 'Connection reset by peer')\n" >&2 ;;
+        403) printf 'HTTP 403 Forbidden: AuthorizationFailed\n' >&2 ;;
+      esac
+      exit 71
+    fi
+  fi
   jq --arg id "$app_id" --arg env "$env_id" --arg service "$service" --arg traffic "${MOCK_TRAFFIC:-state}" --arg ext_fqdn "${MOCK_EXTERNAL_FQDN:-false}" '. + {id:$id} | .properties.managedEnvironmentId=$env | .properties.configuration.ingress.fqdn=(if $ext_fqdn == "true" then ($service+".calmgrass-aec0b33c.chilecentral.azurecontainerapps.io") else ($service+".internal.chilecentral.azurecontainerapps.io") end) | .properties.configuration.ingress.allowInsecure=false | if $traffic == "old" then .properties.configuration.ingress.traffic=[{revisionName:"rev-0",weight:100}] elif $traffic == "ambiguous" then .properties.configuration.ingress.traffic=[{latestRevision:true,weight:50},{revisionName:"rev-0",weight:50}] elif $traffic == "old-after-rollback" and .updates >= 2 then .properties.configuration.ingress.traffic=[{revisionName:"rev-0",weight:100}] else . end' "$state"
   exit 0
 fi
@@ -513,6 +528,39 @@ jq -e '
   .namedRevisions["rev-2"].properties.active == false and
   .namedRevisions["price-audit-svc--0000001"].properties.active == true
 ' "$TEMP/pa-drain-fails.json" >/dev/null || fail 'el fallo del drenaje no devolvió HTTP y R16 a la revisión anterior'
+
+# Reproduce ARM errors before traffic verification and after preventive pinning.
+printf '#!/usr/bin/env bash\nexit 0\n' > "$TEMP/bin/sleep"
+chmod +x "$TEMP/bin/sleep"
+for failure in 503 reset; do
+  cp "$TEMP/pa-initial.json" "$TEMP/pa-arm-$failure.json"
+  reads=3
+  if [[ "$failure" == reset ]]; then reads=5; fi
+  MOCK_SERVICE=price-audit-svc MOCK_STATE="$TEMP/pa-arm-$failure.json" MOCK_APP_READ_LOG="$TEMP/pa-arm-$failure.reads" \
+    MOCK_APP_READ_FAILURES="$reads" MOCK_APP_READ_ERROR="$failure" \
+    bash "$DEPLOY" price-audit-svc "$PA_NEXT" > "$TEMP/pa-arm-$failure.log" 2>&1 || { cat "$TEMP/pa-arm-$failure.log"; fail "Price Audit no se recuperó del error ARM $failure"; }
+  grep -Fq 'Lectura Azure ARM transitoria (containerapp show), intento 1/4' "$TEMP/pa-arm-$failure.log" || fail 'falta evidencia del reintento ARM'
+  jq -e '.updates == 1 and .trafficSetCount == 2 and .revisionActions == ["deactivate:price-audit-svc--0000001"]' "$TEMP/pa-arm-$failure.json" >/dev/null || fail 'reintentar una lectura repitió una escritura'
+done
+
+for failure in 503 403; do
+  cp "$TEMP/pa-initial.json" "$TEMP/pa-arm-stop-$failure.json"
+  if MOCK_SERVICE=price-audit-svc MOCK_STATE="$TEMP/pa-arm-stop-$failure.json" MOCK_APP_READ_LOG="$TEMP/pa-arm-stop-$failure.reads" \
+    MOCK_APP_READ_FAILURES=3,4,5,6 MOCK_APP_READ_ERROR="$failure" \
+    bash "$DEPLOY" price-audit-svc "$PA_NEXT" > "$TEMP/pa-arm-stop-$failure.log" 2>&1; then
+    fail "Price Audit continuó con error ARM persistente $failure"
+  fi
+  if [[ "$failure" == 503 ]]; then
+    [[ "$(wc -l < "$TEMP/pa-arm-stop-$failure.reads")" == 6 ]] || fail 'el 503 persistente excedió el límite de intentos'
+    grep -Fq 'transitoria agotada (containerapp show) después de 4 intentos' "$TEMP/pa-arm-stop-$failure.log" || fail 'falta diagnóstico de reintentos agotados'
+  else
+    [[ "$(wc -l < "$TEMP/pa-arm-stop-$failure.reads")" == 3 ]] || fail 'se reintentó un 403'
+  fi
+  grep -Fq 'por una lectura de Azure ARM' "$TEMP/pa-arm-stop-$failure.log" || fail 'fallo ARM se reportó como tráfico inválido'
+  jq -e '.updates == 0 and .trafficSetCount == 0 and .revisionActions == []' "$TEMP/pa-arm-stop-$failure.json" >/dev/null || fail 'fallo ARM en preflight provocó mutaciones'
+done
+rm -f "$TEMP/bin/sleep"
+echo 'PASS: lecturas ARM transitorias y fallos permanentes de Price Audit'
 
 : > "$TEMP/pa-traffic.log"
 MOCK_SERVICE=price-audit-svc MOCK_STATE="$TEMP/pa-multiple-state.json" MOCK_TRAFFIC_LOG="$TEMP/pa-traffic.log" \

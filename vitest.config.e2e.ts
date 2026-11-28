@@ -21,6 +21,21 @@ export default defineConfig({
     include: ['**/*.e2e-spec.ts'],
     exclude: [
       '.ci/**',
+      ...(process.env.CATALOG_POSTGRES_ONLY === '1'
+        ? [
+            'apps/catalog-svc/test/rabbitmq.e2e-spec.ts',
+            // Dedicated taxonomia job owns this suite; it still requires H4 isolation.
+            'apps/taxonomy-svc/test/persistencia-drizzle.e2e-spec.ts',
+            'apps/bulk-svc/test/bulk-messaging.e2e-spec.ts',
+            'apps/bulk-svc/test/bulk-http-benchmark.e2e-spec.ts',
+            'apps/price-audit-svc/test/consumer.amqp.e2e-spec.ts',
+            'apps/pricing-svc/test/outbox.amqp.e2e-spec.ts',
+            'apps/pricing-svc/test/inbox-consumer.amqp.e2e-spec.ts',
+            'apps/pricing-svc/test/historical-initialization.e2e-spec.ts',
+            'apps/pricing-svc/test/price-audit.integration.e2e-spec.ts',
+            'apps/pricing-svc/test/catalog-pricing.integration.e2e-spec.ts',
+          ]
+        : []),
       ...(process.env.COMBOS_RUN_ISOLATED_E2E === '1'
         ? []
         : [

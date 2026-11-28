@@ -12,11 +12,43 @@ import {
   publicarSalidaVitest,
   sanitizarDiagnostico,
   esperarPostgres,
+  verificarOmisionesLegacy,
 } from './run-taxonomy-integration.mjs';
 
 const runner = fileURLToPath(
   new URL('./run-taxonomy-integration.mjs', import.meta.url),
 );
+
+test('solo admite las dos omisiones H4 explícitas y rechaza omisiones inesperadas', () => {
+  const cases = [
+    {
+      status: 'skipped',
+      title:
+        'procesa los tres maestros por RabbitMQ real sin duplicar Inbox ni Outbox',
+    },
+    {
+      status: 'skipped',
+      title:
+        'recupera una entrega sin ACK al reiniciar, sin duplicar efectos, con RabbitMQ real aislado',
+    },
+  ];
+  const report = {
+    numPendingTests: 2,
+    testResults: [{ assertionResults: cases }],
+  };
+  assert.doesNotThrow(() => verificarOmisionesLegacy(report));
+  assert.throws(() =>
+    verificarOmisionesLegacy({ ...report, numPendingTests: 3 }),
+  );
+  assert.throws(() =>
+    verificarOmisionesLegacy({
+      ...report,
+      testResults: [
+        { assertionResults: [cases[0], { status: 'skipped', title: 'otro' }] },
+      ],
+    }),
+  );
+});
 
 test('PostgreSQL readiness probes TCP instead of accepting the Unix socket', () => {
   assert.deepEqual(argumentosPgIsReady('g6-taxonomy-test'), [
