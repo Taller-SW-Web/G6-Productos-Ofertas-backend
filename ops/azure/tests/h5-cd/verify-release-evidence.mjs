@@ -14,37 +14,10 @@ const targets = JSON.parse(
     'utf8',
   ),
 );
-const environmentProtectionScript = readFileSync(
-  new URL(
-    '../../container-apps/verify-environment-protection.sh',
-    import.meta.url,
-  ),
-  'utf8',
-);
-
 const chileDestination = 'chile-shared';
 const chileTarget = targets.destinations?.[chileDestination];
 if (!chileTarget || chileTarget.githubEnvironment !== 'azure-h5-chile') {
   throw new Error('CHILE_DEPLOYMENT_TARGET_INVALID');
-}
-
-const chilePolicyMatch = environmentProtectionScript.match(
-  /elif \[\[ "\$environment_name" == azure-h5-chile \]\]; then([\s\S]*?)else/,
-);
-const chileReviewerIdMatch = chilePolicyMatch?.[1]?.match(
-  /\.reviewers\[0\]\.type == "User" and \.reviewers\[0\]\.reviewer\.id == (\d+)/,
-);
-const chileReviewerLoginMatch = chilePolicyMatch?.[1]?.match(
-  /Chile requiere solo a ([a-zA-Z0-9-]+) como reviewer/,
-);
-if (
-  !chilePolicyMatch ||
-  !chileReviewerIdMatch ||
-  !chileReviewerLoginMatch ||
-  !chilePolicyMatch[1].includes('.prevent_self_review == false') ||
-  !chilePolicyMatch[1].includes('[[ "$admin_bypass" == false ]]')
-) {
-  throw new Error('CHILE_ENVIRONMENT_PROTECTION_SOURCE_INVALID');
 }
 
 export const CHILE_POLICY = Object.freeze({
@@ -53,11 +26,9 @@ export const CHILE_POLICY = Object.freeze({
   aca_environment: chileTarget.acaEnvironment,
   resource_group: chileTarget.resourceGroup,
   subscription_id: targets.subscriptionId,
-  reviewer: Object.freeze({
-    type: 'User',
-    id: Number(chileReviewerIdMatch[1]),
-    login: chileReviewerLoginMatch[1],
-  }),
+  reviewers: Object.freeze(
+    chileTarget.approvedReviewers.map((reviewer) => Object.freeze(reviewer)),
+  ),
   prevent_self_review: false,
   admin_bypass: false,
   allowed_branch: 'master',
@@ -126,10 +97,11 @@ function healthMatches(response, service, status) {
 }
 
 function isAuthorizedChileReviewer(reviewer) {
-  return (
-    reviewer?.type === CHILE_POLICY.reviewer.type &&
-    reviewer?.id === CHILE_POLICY.reviewer.id &&
-    reviewer?.login === CHILE_POLICY.reviewer.login
+  return CHILE_POLICY.reviewers.some(
+    (allowed) =>
+      reviewer?.type === allowed.type &&
+      reviewer?.id === allowed.id &&
+      reviewer?.login === allowed.login,
   );
 }
 
@@ -159,8 +131,10 @@ function isValidChileEnvironment(destination, environment, runId) {
     environment?.prevent_self_review === CHILE_POLICY.prevent_self_review &&
     environment?.admin_bypass === CHILE_POLICY.admin_bypass &&
     Array.isArray(reviewers) &&
-    reviewers.length === 1 &&
-    isAuthorizedChileReviewer(reviewers[0]) &&
+    reviewers.length === CHILE_POLICY.reviewers.length &&
+    new Set(reviewers.map((reviewer) => reviewer?.id)).size ===
+      CHILE_POLICY.reviewers.length &&
+    reviewers.every(isAuthorizedChileReviewer) &&
     isAuthorizedChileReviewer(approvedBy) &&
     hasValidTrigger &&
     selfApprovalCoherent &&

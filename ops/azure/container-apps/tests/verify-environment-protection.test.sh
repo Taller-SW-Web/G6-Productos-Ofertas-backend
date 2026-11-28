@@ -14,11 +14,18 @@ case "$*" in
   *'azure-h5-pilot-234'*) printf '{"deployment_branch_policy":{"custom_branch_policies":true,"protected_branches":false},"protection_rules":[{"type":"required_reviewers","prevent_self_review":false,"reviewers":[{"type":"User","reviewer":{"id":129343979}}]}]}' ;;
   *'/environments/'*)
     [[ "${MOCK_ENV_EXISTS:-true}" == true ]] || exit 1
-    if [[ "$*" == *'azure-h5-chile'* ]]; then self_default=false; id_default=143348512; else self_default=true; id_default=1; fi
-    count="${MOCK_REVIEWER_COUNT:-1}"
+    if [[ "$*" == *'azure-h5-chile'* ]]; then
+      self_default=false; id_default=143348512; count_default=2; second_default=129343979
+    else
+      self_default=true; id_default=1; count_default=1; second_default=2
+    fi
+    count="${MOCK_REVIEWER_COUNT:-$count_default}"
     if [[ "$count" == 0 ]]; then reviewers='[]'
     elif [[ "$count" == 1 ]]; then reviewers="$(jq -cn --arg type "${MOCK_REVIEWER_TYPE:-User}" --argjson id "${MOCK_REVIEWER_ID:-$id_default}" '[{type:$type,reviewer:{id:$id}}]')"
-    else reviewers="$(jq -cn --arg type "${MOCK_REVIEWER_TYPE:-User}" --argjson id "${MOCK_REVIEWER_ID:-$id_default}" '[{type:$type,reviewer:{id:$id}},{type:"User",reviewer:{id:2}}]')"; fi
+    else reviewers="$(jq -cn --arg type "${MOCK_REVIEWER_TYPE:-User}" --argjson id "${MOCK_REVIEWER_ID:-$id_default}" --argjson second "${MOCK_SECOND_REVIEWER_ID:-$second_default}" --argjson count "$count" '
+      [{type:$type,reviewer:{id:$id}},{type:"User",reviewer:{id:$second}}] +
+      (if $count == 3 then [{type:"User",reviewer:{id:2}}] else [] end)
+    ')"; fi
     rules='[]'
     if [[ "${MOCK_REQUIRED_REVIEWERS:-true}" == true ]]; then rules="$(jq -cn --argjson self "${MOCK_SELF_REVIEW:-$self_default}" --argjson reviewers "$reviewers" '[{type:"required_reviewers",prevent_self_review:$self,reviewers:$reviewers}]')"; fi
     printf '{"name":"%s","can_admins_bypass":%s,"protection_rules":%s,"deployment_branch_policy":{"custom_branch_policies":true,"protected_branches":false}}' "${MOCK_ENV_NAME:-$(if [[ "$*" == *'azure-h5-chile'* ]]; then printf azure-h5-chile; else printf azure-h5; fi)}" "${MOCK_BYPASS:-false}" "$rules"
@@ -32,14 +39,19 @@ export GH_CALL_LOG="$TEMP/gh-calls.log"
 repo=Taller-SW-Web/G6-Productos-Ofertas-backend
 bash "$VERIFIER" "$repo" >/dev/null
 bash "$VERIFIER" "$repo" azure-h5-chile promotions-svc chile-shared deploy false >/dev/null
-MOCK_ENABLED=False bash "$VERIFIER" "$repo" azure-h5-chile promotions-svc chile-shared recovery false >/dev/null
-echo 'PASS: destination-specific Brazil and Chile approval policies are independent from the job-scoped deploy gate'
+MOCK_ENABLED=False MOCK_REVIEWER_ID=129343979 MOCK_SECOND_REVIEWER_ID=143348512 \
+  bash "$VERIFIER" "$repo" azure-h5-chile promotions-svc chile-shared recovery false >/dev/null
+echo 'PASS: Chile accepts only the two authorized reviewers in either order for deployment and recovery'
 if grep -Fq '/variables/AZURE_CHILE_DEPLOY_ENABLED' "$GH_CALL_LOG"; then echo 'FAIL: variable REST endpoint was queried by protection verifier' >&2; exit 1; fi
 expect_reject() { if env "$@" bash "$VERIFIER" "$repo" azure-h5-chile promotions-svc chile-shared deploy false >/dev/null 2>&1; then echo 'FAIL: Chile protection accepted invalid state' >&2; exit 1; fi; }
 expect_reject MOCK_BYPASS=true
 expect_reject MOCK_REVIEWER_ID=1
 expect_reject MOCK_REVIEWER_COUNT=0
-expect_reject MOCK_REVIEWER_COUNT=2
+expect_reject MOCK_REVIEWER_COUNT=1
+expect_reject MOCK_REVIEWER_COUNT=3
+expect_reject MOCK_SECOND_REVIEWER_ID=2
+expect_reject MOCK_SECOND_REVIEWER_ID=143348512
+expect_reject MOCK_REVIEWER_TYPE=Team
 expect_reject MOCK_SELF_REVIEW=true
 expect_reject MOCK_BRANCHES=master,release
 expect_reject MOCK_TYPE=tag

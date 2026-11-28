@@ -35,6 +35,10 @@
       "location": "Chile Central",
       "apimOrigin": "https://apim-g6-productos-chile.azure-api.net",
       "githubEnvironment": "azure-h5-chile",
+      "approvedReviewers": [
+        { "type": "User", "id": 129343979, "login": "AXL031" },
+        { "type": "User", "id": 143348512, "login": "mrcastilla8" }
+      ],
       "runnerGroupId": 3,
       "jobName": "azure-h5-smoke-chile",
       "smokeLabel": "azure-h5-smoke-chile",
