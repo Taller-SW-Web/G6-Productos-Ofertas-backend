@@ -37,6 +37,7 @@ import {
 import { BulkPersistenceError } from './bulk.persistence.errors.js';
 import {
   BulkPersistenceRepository,
+  type CreateImportBatchInput,
   type UpdateWorkflowStateInput,
 } from './bulk.repository.js';
 
@@ -48,6 +49,29 @@ let pool: Pool;
 let adminPool: Pool;
 let repository: BulkPersistenceRepository;
 let database: ReturnType<typeof drizzle<typeof bulkSchema>>;
+
+// Legacy repository scenarios still admit a valid, durable normalized fixture.
+// Explicit intent payloads are preserved so replay/conflict assertions stay real.
+function admittedFixture(
+  input: Omit<CreateImportBatchInput, 'admissionIntent'> & {
+    admissionIntent?: Record<string, unknown>;
+  },
+) {
+  return repository.createImportBatch({
+    ...input,
+    admissionIntent: {
+      ...input.admissionIntent,
+      rows:
+        input.admissionIntent?.rows ??
+        input.rows.map(({ rowId }) => ({
+          rowId,
+          vendibleSkus: ['TEST_G6_AUDIT-SKU'],
+          stockInicial: 0,
+          defaultLocationId: null,
+        })),
+    },
+  });
+}
 
 async function waitForExport(exportId: string, status: string) {
   const deadline = Date.now() + 5_000;
@@ -133,7 +157,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     }>,
     admissionIntent?: Record<string, unknown>,
   ) =>
-    repository.createImportBatch({
+    admittedFixture({
       batchId: randomUUID(),
       ownerSub: TEST_OWNER_SUB,
       templateVersion: 2,
@@ -172,7 +196,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const correlationId = randomUUID();
     const rowA = randomUUID();
     const rowB = randomUUID();
-    await repository.createImportBatch({
+    await admittedFixture({
       batchId,
       ownerSub: TEST_OWNER_SUB,
       correlationId,
@@ -216,7 +240,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const correlationId = randomUUID();
     const completedRow = randomUUID();
     const rejectedRow = randomUUID();
-    await repository.createImportBatch({
+    await admittedFixture({
       batchId,
       ownerSub: TEST_OWNER_SUB,
       correlationId,
@@ -275,7 +299,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const commandRejectedBatchId = randomUUID();
     const commandRejectedRowId = randomUUID();
     const commandRejectedCorrelationId = randomUUID();
-    await repository.createImportBatch({
+    await admittedFixture({
       batchId: commandRejectedBatchId,
       ownerSub: TEST_OWNER_SUB,
       correlationId: commandRejectedCorrelationId,
@@ -391,7 +415,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const ref = `test://${randomUUID()}`;
     const duplicateRowId = randomUUID();
     try {
-      await repository.createImportBatch({
+      await admittedFixture({
         batchId,
         ownerSub: TEST_OWNER_SUB,
         templateVersion: 2,
@@ -420,7 +444,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const batchId = randomUUID();
     const ref = `test://${randomUUID()}`;
     await expect(
-      repository.createImportBatch({
+      admittedFixture({
         batchId,
         ownerSub: TEST_OWNER_SUB,
         templateVersion: 2,
@@ -460,7 +484,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     );
     try {
       await expect(
-        repository.createImportBatch({
+        admittedFixture({
           batchId,
           ownerSub: TEST_OWNER_SUB,
           templateVersion: 2,
@@ -1627,12 +1651,12 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       ],
       admissionIntent,
     };
-    const first = await repository.createImportBatch(input);
-    const replay = await repository.createImportBatch(input);
+    const first = await admittedFixture(input);
+    const replay = await admittedFixture(input);
     expect(replay.batch.id).toBe(first.batch.id);
     expect(replay.rows[0]?.row.id).toBe(first.rows[0]?.row.id);
     await expect(
-      repository.createImportBatch({
+      admittedFixture({
         ...input,
         admissionIntent: {
           ...admissionIntent,
@@ -1651,7 +1675,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
   it('looks up an import by the validated actor and canonical correlation only', async () => {
     const correlationId = randomUUID();
     const rowId = randomUUID();
-    const first = await repository.createImportBatch({
+    const first = await admittedFixture({
       batchId: randomUUID(),
       ownerSub: TEST_OWNER_SUB,
       correlationId,
@@ -1698,8 +1722,8 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       admissionIntent: { format: 'CSV', templateVersion: 2, sha256: 'same' },
     };
     const [first, replay] = await Promise.all([
-      repository.createImportBatch(sharedInput),
-      repository.createImportBatch(sharedInput),
+      admittedFixture(sharedInput),
+      admittedFixture(sharedInput),
     ]);
     expect(first.batch.id).toBe(replay.batch.id);
     expect(first.manifest.id).toBe(replay.manifest.id);
@@ -1710,7 +1734,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
         .where(eq(batchJobs.batchId, batchId)),
     ).toHaveLength(1);
 
-    const separate = await repository.createImportBatch({
+    const separate = await admittedFixture({
       ...sharedInput,
       batchId: randomUUID(),
       correlationId: randomUUID(),
@@ -1720,7 +1744,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     expect(separate.manifest.contentRef).toBe(first.manifest.contentRef);
 
     const otherOwnerSub = randomUUID();
-    const otherActor = await repository.createImportBatch({
+    const otherActor = await admittedFixture({
       ...sharedInput,
       batchId: randomUUID(),
       ownerSub: otherOwnerSub,
@@ -1753,7 +1777,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
         },
       ],
     };
-    const created = await repository.createImportBatch({
+    const created = await admittedFixture({
       batchId,
       ownerSub: TEST_OWNER_SUB,
       correlationId,
@@ -1849,7 +1873,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const rowId = randomUUID();
     const batchId = randomUUID();
     const correlationId = randomUUID();
-    await repository.createImportBatch({
+    await admittedFixture({
       batchId,
       ownerSub: TEST_OWNER_SUB,
       correlationId,
@@ -1911,7 +1935,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const batchId = randomUUID();
     const correlationId = randomUUID();
     const operationId = randomUUID();
-    await repository.createImportBatch({
+    await admittedFixture({
       batchId,
       ownerSub: TEST_OWNER_SUB,
       correlationId,
@@ -2038,7 +2062,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
       },
     };
     try {
-      const created = await repository.createImportBatch({
+      const created = await admittedFixture({
         batchId,
         ownerSub: TEST_OWNER_SUB,
         correlationId,
@@ -2285,7 +2309,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const rowId = randomUUID();
     const batchId = randomUUID();
     const correlationId = randomUUID();
-    await repository.createImportBatch({
+    await admittedFixture({
       batchId,
       ownerSub: TEST_OWNER_SUB,
       correlationId,
@@ -2372,7 +2396,7 @@ integration('BulkPersistenceRepository with PostgreSQL 17 migration', () => {
     const correlationId = randomUUID();
     const readyRow = randomUUID();
     const rejectedRow = randomUUID();
-    await repository.createImportBatch({
+    await admittedFixture({
       batchId,
       ownerSub: TEST_OWNER_SUB,
       correlationId,

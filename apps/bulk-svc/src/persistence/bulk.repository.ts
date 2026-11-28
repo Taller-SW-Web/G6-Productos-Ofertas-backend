@@ -48,7 +48,7 @@ export interface CreateImportBatchInput {
   correlationId: string;
   inputFile: Omit<FileManifestInput, 'role'>;
   rows: ImportRowInput[];
-  admissionIntent?: Record<string, unknown>;
+  admissionIntent: Record<string, unknown>;
   catalogCommands?: OutboxInput[];
   contentDocument?: {
     contentId: string;
@@ -213,6 +213,22 @@ export class BulkPersistenceRepository {
   async createImportBatch(
     input: CreateImportBatchInput,
   ): Promise<CreateImportBatchResult> {
+    const intentRows = input.admissionIntent?.rows;
+    if (
+      !Array.isArray(intentRows) ||
+      intentRows.length !== input.rows.length ||
+      input.rows.some(
+        (row) =>
+          !intentRows.some(
+            (intent) =>
+              intent &&
+              typeof intent === 'object' &&
+              Reflect.get(intent, 'rowId') === row.rowId,
+          ),
+      )
+    ) {
+      throw new BulkPersistenceError('CHECK_VIOLATION');
+    }
     try {
       return await this.db.transaction(async (tx) => {
         await tx.execute(
@@ -373,16 +389,14 @@ export class BulkPersistenceRepository {
             contentType: 'application/json',
           });
         }
-        if (input.admissionIntent) {
-          await tx.insert(inbox).values({
-            messageId: input.batchId,
-            handler: 'bulk.import.admission',
-            eventName: 'bulk.import.admission',
-            correlationId: input.correlationId,
-            payload: input.admissionIntent,
-            result: 'ADMITTED',
-          });
-        }
+        await tx.insert(inbox).values({
+          messageId: input.batchId,
+          handler: 'bulk.import.admission',
+          eventName: 'bulk.import.admission',
+          correlationId: input.correlationId,
+          payload: input.admissionIntent,
+          result: 'ADMITTED',
+        });
         for (const command of input.catalogCommands ?? []) {
           await tx.insert(outbox).values({
             messageId: command.messageId,

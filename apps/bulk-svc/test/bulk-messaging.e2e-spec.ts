@@ -272,6 +272,14 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       format: 'CSV',
       templateVersion: 2,
       sha256: 'same-original-bytes',
+      rows: [
+        {
+          rowId,
+          vendibleSkus: ['TEST_G6_AUDIT-SKU'],
+          stockInicial: 0,
+          defaultLocationId: null,
+        },
+      ],
     };
     const input = {
       batchId,
@@ -367,7 +375,7 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       batchId: id(),
       correlationId: separateCorrelation,
       inputFile: { format: 'CSV', contentRef: 'test://same-bytes' },
-      rows: [{ rowId: id(), requiredDomains: ['CATALOGO'] }],
+      rows: [{ rowId, requiredDomains: ['CATALOGO'] }],
       admissionIntent: intent,
       catalogCommands: [],
     });
@@ -379,7 +387,7 @@ integration('bulk-svc disposable PostgreSQL 17 + RabbitMQ 4.2.9', () => {
       batchId: id(),
       ownerSub: otherOwnerSub,
       inputFile: { format: 'CSV', contentRef: 'test://same-bytes' },
-      rows: [{ rowId: id(), requiredDomains: ['CATALOGO'] }],
+      rows: [{ rowId, requiredDomains: ['CATALOGO'] }],
       catalogCommands: [],
     });
     expect(

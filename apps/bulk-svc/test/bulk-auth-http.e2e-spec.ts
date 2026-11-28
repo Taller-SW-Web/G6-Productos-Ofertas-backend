@@ -11,6 +11,9 @@ import {
   parseBulkEnvironment,
 } from '../src/config/bulk-environment.js';
 import { BulkImportService } from '../src/bulk-import.service.js';
+import { BulkExportService } from '../src/bulk-export.service.js';
+import { BulkStorageService } from '../src/storage/bulk-storage.service.js';
+import { BULK_TEMPLATE_HEADERS } from '../src/domain/bulk-template-v2.js';
 import { BulkDomainError } from '../src/domain/bulk.domain-error.js';
 import { BulkProblemFilter } from '../src/http/bulk-problem.filter.js';
 
@@ -77,11 +80,31 @@ describe('H29 — Bulk HTTP auth regressions (plantilla CSV 200 y lote inexisten
       .useValue(null)
       .overrideProvider(BulkImportService)
       .useValue({
+        receiveImport: vi.fn(async (input: { batchId: string }) => ({
+          batch: { batchId: input.batchId, templateVersion: 2 },
+        })),
         getSnapshot: vi.fn(async (batchId: string) => {
           throw new BulkDomainError(
             'BATCH_NOT_FOUND',
             `Lote ${batchId} no encontrado`,
           );
+        }),
+      })
+      .overrideProvider(BulkStorageService)
+      .useValue({ put: vi.fn(async () => 'test://isolated-import') })
+      .overrideProvider(BulkExportService)
+      .useValue({
+        create: vi.fn(async (format: unknown) => {
+          if (format !== 'CSV' && format !== 'XLSX')
+            throw new BulkDomainError(
+              'INVALID_INPUT',
+              'formato debe ser CSV o XLSX.',
+            );
+          return {
+            export_id: '11111111-1111-4111-8111-111111111111',
+            status: 'QUEUED',
+            formato: format,
+          };
         }),
       })
       .compile();
@@ -108,6 +131,102 @@ describe('H29 — Bulk HTTP auth regressions (plantilla CSV 200 y lote inexisten
       'text/csv',
     );
     expect(res.text.trim().length).toBeGreaterThan(10);
+  });
+
+  it.each([
+    { aud: undefined },
+    { aud: 'api-productos' },
+    { aud: ['api-productos'] },
+  ])(
+    'admite ambos POST humanos con audiencia $aud sin usar DB ni almacenamiento real',
+    async ({ aud }) => {
+      const token = signJwt({ aud });
+      const correlation = randomUUID();
+      const values = [
+        'ALTA',
+        '',
+        '',
+        'TEST_G6_AUDIT',
+        '',
+        'Producto aislado',
+        'Descripción',
+        'cat-1',
+        'marca-1',
+        'tipo-1',
+        'false',
+        '10.50',
+        '[]',
+        '',
+        '',
+        '0',
+      ];
+      const csv = Buffer.from(
+        `${BULK_TEMPLATE_HEADERS.join(',')}\r\n${values.join(',')}\r\n`,
+      );
+      const imported = await request(app.getHttpServer())
+        .post('/api/v1/carga-masiva/productos/importaciones')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-Correlation-Id', correlation)
+        .field('template_version', '2')
+        .attach('archivo', csv, 'TEST_G6_AUDIT.csv')
+        .expect(202);
+      expect(imported.body).toMatchObject({
+        status: 'QUEUED',
+        template_version: 2,
+        correlation_id: correlation,
+      });
+      await request(app.getHttpServer())
+        .post('/api/v1/carga-masiva/productos/exportaciones')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ formato: 'CSV' })
+        .expect(202);
+    },
+  );
+
+  it('un body inválido autenticado produce validación de negocio y nunca 401', async () => {
+    const token = signJwt();
+    await request(app.getHttpServer())
+      .post('/api/v1/carga-masiva/productos/importaciones')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/api/v1/carga-masiva/productos/exportaciones')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ formato: 'PDF' })
+      .expect(400);
+  });
+
+  it('ambos POST rechazan firma, issuer, audiencia, expiración, nbf, identidad M2M y rol insuficiente', async () => {
+    const cases = [
+      { token: 'invalid', status: 401 },
+      { token: signJwt({ exp: 1 }), status: 401 },
+      {
+        token: signJwt({ nbf: Math.floor(Date.now() / 1000) + 600 }),
+        status: 401,
+      },
+      { token: signJwt({}, wrongPrivateKey), status: 401 },
+      { token: signJwt({ iss: 'https://other.invalid' }), status: 401 },
+      { token: signJwt({ aud: 'another-api' }), status: 401 },
+      {
+        token: signJwt({ tipo: 'servicio', aud: 'api-productos' }),
+        status: 401,
+      },
+      { token: signJwt({ roles: [] }), status: 403 },
+    ];
+    for (const sample of cases)
+      for (const operation of ['importaciones', 'exportaciones']) {
+        const correlation = randomUUID();
+        const response = await request(app.getHttpServer())
+          .post(`/api/v1/carga-masiva/productos/${operation}`)
+          .set('Authorization', `Bearer ${sample.token}`)
+          .set('X-Correlation-Id', correlation)
+          .send({ formato: 'CSV' })
+          .expect(sample.status);
+        expect(response.headers['content-type']).toContain(
+          'application/problem+json',
+        );
+        expect(JSON.stringify(response.body)).not.toContain(sample.token);
+      }
   });
 
   it('PM-031: GET /api/v1/carga-masiva/productos/importaciones/{id-inexistente} devuelve 404 contractual con JWT humano sin aud', async () => {

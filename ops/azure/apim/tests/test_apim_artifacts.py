@@ -2,6 +2,7 @@ import importlib.util
 import copy
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -589,7 +590,7 @@ class CompiledArmTests(unittest.TestCase):
             with tempfile.TemporaryDirectory(prefix="apim-h5-arm-") as temp_dir:
                 template_path = str(Path(temp_dir) / "template.json")
                 subprocess.run(
-                    ["az", "bicep", "build", "--file", str(ROOT / "main.bicep"), "--outfile", template_path],
+                    [shutil.which("az") or "az", "bicep", "build", "--file", str(ROOT / "main.bicep"), "--outfile", template_path],
                     check=True,
                 )
                 cls.template = json.loads(Path(template_path).read_text(encoding="utf-8"))

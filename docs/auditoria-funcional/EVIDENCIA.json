@@ -1,0 +1,374 @@
+{
+  "fecha": "2026-11-28",
+  "zona": "America/Lima",
+  "rama": "trabajo/castilla/correcciones-auditoria-funcional",
+  "issue": "SIN ISSUE: encargo de auditoría funcional",
+  "fases": {
+    "A": "DIAGNOSTICO_DOCUMENTADO",
+    "B": "CAMBIOS_IMPLEMENTADOS_PARA_REVISION",
+    "C": "PRUEBAS_LOCALES_COMPLETADAS_REVISION_Y_CI_FORMAL_PENDIENTES",
+    "D": "NO_INICIADA"
+  },
+  "gates": {
+    "codigo": "BLOCKED: revisión técnica/autorización Draft→Ready y CI integral del HEAD final pendientes",
+    "despliegue": "BLOCKED: requiere C aprobado y autorización específica"
+  },
+  "revisiones": {
+    "backendBase": "aff71d96bc92125718d51ba6dca71483356cdc82",
+    "frontend": "5144ea6b99160251fbc7fdfac9d5b3d38030c551",
+    "frontendBase": "02ada63217bfd448c7be621fbadfa6e48a325f64",
+    "docsConsultado": "2b1b3dfb88077aadbcacb43a5df88923994f9ea6",
+    "frontendIntermedio": "e2d27d32cb84b2f82e8f9ca22070e6880dc6eded",
+    "backendCodigoProbado": "ffb016b02bbd076959741925ad4d566cd36f1eac"
+  },
+  "archivos": {
+    "backendCodigo": [
+      {
+        "ruta": "apps/bulk-svc/migrations/0010_import_admission_invariant.sql",
+        "gitBlob": "8f43e68837d2a126fe96a33889e6c6b0559cc0b6"
+      },
+      {
+        "ruta": "apps/bulk-svc/src/persistence/bulk-admission-invariant.spec.ts",
+        "gitBlob": "64d263136b168b9517b8112524d06fe95b7b1c7e"
+      },
+      {
+        "ruta": "apps/bulk-svc/src/persistence/bulk.repository.integration.spec.ts",
+        "gitBlob": "404dd2aed748a18199f363246a951b99822179ba"
+      },
+      {
+        "ruta": "apps/bulk-svc/src/persistence/bulk.repository.ts",
+        "gitBlob": "dfb07e7208ba89d287b540b6ac7f3b95ef8bbbda"
+      },
+      {
+        "ruta": "apps/bulk-svc/test/bulk-auth-http.e2e-spec.ts",
+        "gitBlob": "c006d6a67326ec586d17189adeb9ced2d51376cd"
+      },
+      {
+        "ruta": "apps/bulk-svc/test/bulk-messaging.e2e-spec.ts",
+        "gitBlob": "8c21a3fbb2c16a032f559caa0579b717be809bb4"
+      },
+      {
+        "ruta": "apps/bulk-svc/test/r03-pricing-r14-bulk.postgres.e2e-spec.ts",
+        "gitBlob": "01ea95ef14a797e1a3051d9bb8b3673103730d82"
+      },
+      {
+        "ruta": "apps/bulk-svc/test/run-admission-postgres.mjs",
+        "gitBlob": "1fac373f3f5dfedd4a4685c0109aaa5e76a14ed0"
+      },
+      {
+        "ruta": "ops/azure/apim/tests/test_apim_artifacts.py",
+        "gitBlob": "9edb1ec1dc598fffb3b155bca3aecde9e8e828dc"
+      }
+    ],
+    "backendEvidencia": [
+      "docs/auditoria-funcional/SEGUIMIENTO.md",
+      "docs/auditoria-funcional/PROPUESTA_LECTURA_SELECCION.md",
+      "docs/auditoria-funcional/EVIDENCIA.json"
+    ],
+    "frontend": [
+      "scripts/build-vercel.mjs",
+      "scripts/build-vercel.test.mjs",
+      "scripts/check-vercel-assets.mjs",
+      "src/app/config/CommercialModeGate.tsx",
+      "src/app/config/authSessionRuntime.ts",
+      "src/app/config/authenticatedGatewayClient.ts",
+      "src/app/config/gatewayOrigin.ts",
+      "src/app/routes/AppRoutes.tsx",
+      "src/app/routes/RouteErrorPage.tsx",
+      "src/features/auth/auditIdentity.test.ts",
+      "src/features/auth/auth.test.ts",
+      "src/features/auth/catalogErrorFeedback.test.ts",
+      "src/features/auth/pricingRead.test.ts",
+      "src/features/auth/publicReads.test.ts",
+      "src/features/auth/readOnlyClient.test.ts",
+      "src/features/auth/routeRecovery.test.ts",
+      "src/features/auth/sessionPersistence.test.ts",
+      "src/features/auth/taxonomyCount.test.ts",
+      "src/features/auth/transportErrors.test.ts",
+      "src/features/bulk/adapters/httpBulkRepository.ts",
+      "src/features/bulk/context/BulkUploadContext.tsx",
+      "src/features/bulk/utils/localFileCheck.ts",
+      "src/features/catalog/adapters/authenticatedCatalogTransport.ts",
+      "src/features/catalog/adapters/catalogHttp.ts",
+      "src/features/catalog/adapters/httpCatalogRepository.ts",
+      "src/features/catalog/components/ProductFormFields.tsx",
+      "src/features/catalog/components/VariantFormFields.tsx",
+      "src/features/catalog/hooks/physical-precision.spec.tsx",
+      "src/features/catalog/hooks/selection-regressions.spec.tsx",
+      "src/features/catalog/pages/ProductCreatePage.tsx",
+      "src/features/catalog/pages/ProductDetailPage.tsx",
+      "src/features/catalog/pages/ProductEditPage.tsx",
+      "src/features/catalog/pages/ProductPreparationPage.tsx",
+      "src/features/catalog/pages/ProductsPage.tsx",
+      "src/features/catalog/services/catalogRepository.ts",
+      "src/features/combos/components/ComboEditor.search.test.ts",
+      "src/features/combos/components/ComboEditor.tsx",
+      "src/features/combos/services/authenticatedGatewayClient.test.ts",
+      "src/features/inventory/adapters/apiInventoryAdapter.ts",
+      "src/features/inventory/adapters/auditPresentation.spec.ts",
+      "src/features/inventory/adapters/authenticatedInventoryTransport.spec.ts",
+      "src/features/inventory/adapters/catalogMetadataResolver.spec.ts",
+      "src/features/inventory/adapters/catalogMetadataResolver.ts",
+      "src/features/inventory/adapters/catalogSkuSnapshot.ts",
+      "src/features/inventory/adapters/inventoryCompositionRoot.spec.tsx",
+      "src/features/inventory/pages/InventoryDashboardPage.tsx",
+      "src/features/price-audit/adapters/httpAuditRepository.ts",
+      "src/features/price-audit/components/AuditTable.tsx",
+      "src/features/price-audit/pages/AuditDetailPage.tsx",
+      "src/features/price-audit/services/auditPresentation.ts",
+      "src/features/price-audit/services/auditRepository.ts",
+      "src/features/pricing/adapters/httpPricingRepository.ts",
+      "src/features/pricing/hooks/usePricingRequest.ts",
+      "src/features/promotions/adapters/catalogPromotionRepository.ts",
+      "src/features/promotions/adapters/g7Session.ts",
+      "src/features/promotions/adapters/httpPromotionServices.ts",
+      "src/features/promotions/adapters/sessionPersistence.ts",
+      "src/features/promotions/pages/CampaignEditorLayout.tsx",
+      "src/features/promotions/pages/CampaignScopePage.tsx",
+      "src/features/reads/readOnlyClient.ts",
+      "src/features/taxonomy/adapters/httpTaxonomyAdmin.ts",
+      "src/features/taxonomy/components/ProductTypeAttributeCount.tsx",
+      "src/features/taxonomy/pages/ProductTypeListPage.tsx",
+      "src/features/taxonomy/pages/SeoListPage.tsx",
+      "src/features/taxonomy/services/taxonomyGatewayRuntime.test.ts",
+      "src/features/taxonomy/services/taxonomyGatewayRuntime.ts",
+      "src/features/taxonomy/types.ts",
+      "src/main.tsx",
+      "src/startApplication.tsx",
+      "tests/auth-general.spec.ts",
+      "tests/bulk-http.spec.ts",
+      "tests/bulk.unit.test.ts",
+      "tests/campaigns.spec.ts",
+      "tests/catalog-http-ui.spec.ts",
+      "tests/catalog.spec.ts",
+      "tests/g6-demo-adapter.spec.ts",
+      "tests/h4-demo-regresiones.spec.ts",
+      "tests/promotions-history-ui.spec.ts",
+      "tests/promotions-session.spec.ts",
+      "vercel.json"
+    ]
+  },
+  "pruebas": [
+    {
+      "repo": "backend",
+      "comando": "node node_modules/vitest/vitest.mjs run --maxWorkers=1 --no-file-parallelism --reporter=dot",
+      "resultado": "PASS",
+      "pass": 2982,
+      "omitidas": 106,
+      "alcance": "Código final sincronizado con master; Node 22.22.3"
+    },
+    {
+      "repo": "backend",
+      "comando": "BULK_TEST_POSTGRES=1 CATALOG_POSTGRES_ONLY=1 node node_modules/vitest/vitest.mjs run --config vitest.config.e2e.ts --hookTimeout=120000 --reporter=dot",
+      "resultado": "PASS",
+      "pass": 1003,
+      "omitidas": 334,
+      "alcance": "Suite amplia anterior a sincronización; no equivale a suite integral del HEAD final"
+    },
+    {
+      "repo": "backend",
+      "comando": "vitest focalizadas guards/unit tras sincronización",
+      "resultado": "PASS",
+      "pass": 15
+    },
+    {
+      "repo": "backend",
+      "comando": "vitest HTTP Bulk y PostgreSQL R03/R14 tras sincronización",
+      "resultado": "PASS",
+      "pass": 17,
+      "alcance": "9 HTTP + 8 PostgreSQL, antes de ampliar los dos últimos negativos"
+    },
+    {
+      "repo": "backend",
+      "comando": "vitest run --config vitest.config.e2e.ts apps/bulk-svc/test/r03-pricing-r14-bulk.postgres.e2e-spec.ts --hookTimeout=120000",
+      "resultado": "PASS",
+      "pass": 10,
+      "alcance": "Última revisión de migración y casos de recibo incorrecto"
+    },
+    {
+      "repo": "backend",
+      "comando": "node apps/bulk-svc/test/run-admission-postgres.mjs",
+      "resultado": "PASS",
+      "pass": 38,
+      "alcance": "PostgreSQL 17 descartable; incluye migración 0010; primer intento del harness falló y se corrigió su entorno"
+    },
+    {
+      "repo": "backend",
+      "comando": "npm run typecheck",
+      "resultado": "PASS"
+    },
+    {
+      "repo": "backend",
+      "comando": "npm run build:all",
+      "resultado": "PASS"
+    },
+    {
+      "repo": "backend",
+      "comando": "npm run lint",
+      "resultado": "PASS",
+      "nota": "Advertencias preexistentes"
+    },
+    {
+      "repo": "backend",
+      "comando": "python -m unittest discover -s ops/azure/apim/tests -p test_apim_artifacts.py",
+      "resultado": "PASS",
+      "pass": 32,
+      "alcance": "Bicep local incluido; no aplicación Azure"
+    },
+    {
+      "repo": "frontend",
+      "comando": "npm test",
+      "resultado": "PASS",
+      "pass": 817,
+      "releasePolicyPass": 35,
+      "alcance": "Suite amplia; después se añadieron aserciones/casos focalizados"
+    },
+    {
+      "repo": "frontend",
+      "comando": "vitest focalizadas feedback Catálogo y precisión física",
+      "resultado": "PASS",
+      "pass": 8
+    },
+    {
+      "repo": "frontend",
+      "comando": "vitest focalizada composición Inventory",
+      "resultado": "PASS",
+      "pass": 3
+    },
+    {
+      "repo": "frontend",
+      "comando": "npm run build",
+      "resultado": "PASS",
+      "alcance": "Modo API, orígenes APIM/G7 explícitos; incluye tsc --noEmit; 7532 módulos"
+    },
+    {
+      "repo": "frontend",
+      "comando": "npm run lint",
+      "resultado": "PASS"
+    },
+    {
+      "repo": "frontend",
+      "comando": "node --test scripts/build-vercel.test.mjs",
+      "resultado": "PASS",
+      "pass": 7
+    },
+    {
+      "repo": "frontend",
+      "comando": "npx --yes --package=node@22.22.3 --package=@vercel/routing-utils@6.6.1 --call \"node scripts/check-vercel-assets.mjs\"",
+      "resultado": "PASS",
+      "alcance": "Conversor oficial + fixture HTTP local; sin certificación CDN"
+    },
+    {
+      "repo": "frontend",
+      "comando": "playwright test --workers=1 --reporter=json",
+      "resultado": "FAIL_INICIAL",
+      "pass": 662,
+      "fallidas": 7,
+      "omitidas": 8,
+      "total": 677,
+      "alcance": "Suite amplia; fallos corregidos y revalidados por archivos"
+    },
+    {
+      "repo": "frontend",
+      "comando": "playwright test tests/auth-general.spec.ts tests/h4-demo-regresiones.spec.ts tests/promotions-history-ui.spec.ts tests/catalog.spec.ts tests/catalog-http-ui.spec.ts tests/promotions-catalog-http.spec.ts tests/promotions-session.spec.ts tests/pricing.spec.ts --workers=1 --reporter=line",
+      "resultado": "FAIL_INTERMEDIO",
+      "pass": 134,
+      "fallidas": 5,
+      "total": 139,
+      "alcance": "Los siete fallos originales pasaron; cuatro expectativas de error y un defecto de búsqueda corregidos después"
+    },
+    {
+      "repo": "frontend",
+      "comando": "playwright test tests/catalog-http-ui.spec.ts tests/catalog.spec.ts --workers=1 --reporter=line",
+      "resultado": "PASS",
+      "pass": 20,
+      "fallidas": 0,
+      "alcance": "Última revalidación; no se declara exit 0 de toda la suite en HEAD final"
+    },
+    {
+      "repo": "ambos",
+      "comando": "git diff --check; git diff --cached --check",
+      "resultado": "PASS"
+    },
+    {
+      "repo": "frontend",
+      "comando": "npm run test:unit:bulk",
+      "resultado": "PASS",
+      "pass": 99,
+      "alcance": "Revalidación al conservar el borrador en memoria"
+    },
+    {
+      "repo": "frontend",
+      "comando": "playwright test tests/auth-general.spec.ts tests/bulk.spec.ts tests/bulk-http.spec.ts --workers=1 --reporter=line",
+      "resultado": "FAIL_INTERMEDIO",
+      "pass": 56,
+      "fallidas": 1,
+      "total": 57,
+      "alcance": "F12 cinco PASS y once Bulk PASS; fallo de teardown apiResponse.text: Response has been disposed en 1024 px"
+    },
+    {
+      "repo": "frontend",
+      "comando": "playwright test tests/auth-general.spec.ts --grep 1024px --workers=1 --repeat-each=3 --reporter=line",
+      "resultado": "PASS",
+      "pass": 3,
+      "fallidas": 0,
+      "alcance": "Teardown espera context.unrouteAll con behavior wait; no se retiró el caso"
+    },
+    {
+      "repo": "frontend",
+      "comando": "playwright test tests/auth-general.spec.ts --grep F12 --workers=1 --reporter=line",
+      "resultado": "PASS",
+      "pass": 5,
+      "fallidas": 0,
+      "alcance": "Fixture final: selección/revisión, incierto, respuesta tardía, logout y cambio de identidad; sin replay"
+    },
+    {
+      "repo": "frontend",
+      "comando": "npm run build; npm run lint; node scripts/check-vercel-assets.mjs",
+      "resultado": "PASS",
+      "alcance": "Build API/tsc y assets repetidos después de cambios de provider; lint final más lint del fixture después de teardown"
+    },
+    {
+      "repo": "backend",
+      "comando": "GitHub Actions: Gitleaks, CodeQL, integración Bulk-Catalog y Bulk E2E integral",
+      "resultado": "PASS",
+      "revision": "ffb016b02bbd076959741925ad4d566cd36f1eac",
+      "alcance": "Checks automáticos Draft; no CI integral de Ready"
+    },
+    {
+      "repo": "frontend",
+      "comando": "GitHub Actions CodeQL",
+      "resultado": "PASS",
+      "revision": "e2d27d32cb84b2f82e8f9ca22070e6880dc6eded",
+      "alcance": "Hallazgo de dominio corregido; consultar check del SHA final"
+    },
+    {
+      "repo": "frontend",
+      "comando": "GitHub Actions Gitleaks",
+      "resultado": "FAIL_INTERMEDIO",
+      "revision": "e2d27d32cb84b2f82e8f9ca22070e6880dc6eded",
+      "alcance": "Dos coincidencias del JWT ficticio preexistente en líneas modificadas; línea original restaurada, datos de fixture aislados, sin exclusiones. Consultar resultado del SHA final"
+    }
+  ],
+  "restricciones": [
+    "Sin despliegue ni merge",
+    "Sin escrituras Supabase compartido",
+    "Sin replay de POST incierto",
+    "Sin regularización de lotes históricos",
+    "Sin cambios de contratos normativos",
+    "Sin aprobación propia ni promoción Ready"
+  ],
+  "limites": [
+    "Excepción temporal G7 H-11 para sessionStorage autorizada por encargo; revisión antes de D y máximo 15/12/2026",
+    "Carga fría de selección completa aún usa variantes por producto: propuesta aditiva separada",
+    "File solo en memoria: preservado al reautenticar misma identidad; logout, otra identidad y reload completo descartan el contexto; correlaciones inciertas permanecen segregadas por owner",
+    "CI obligatoria y certificación real pendientes"
+  ],
+  "detalle": "SEGUIMIENTO.md",
+  "propuesta": "PROPUESTA_LECTURA_SELECCION.md",
+  "pullRequests": {
+    "backend": "https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/323",
+    "frontend": "https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/111",
+    "estado": "DRAFT"
+  }
+}
