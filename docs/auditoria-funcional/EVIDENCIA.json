@@ -15,9 +15,11 @@
   },
   "revisiones": {
     "backendBase": "aff71d96bc92125718d51ba6dca71483356cdc82",
-    "frontend": "2f02aacc14689bb4ad1568be6d465781de5c5ab7",
+    "frontend": "5144ea6b99160251fbc7fdfac9d5b3d38030c551",
     "frontendBase": "02ada63217bfd448c7be621fbadfa6e48a325f64",
-    "docsConsultado": "2b1b3dfb88077aadbcacb43a5df88923994f9ea6"
+    "docsConsultado": "2b1b3dfb88077aadbcacb43a5df88923994f9ea6",
+    "frontendIntermedio": "e2d27d32cb84b2f82e8f9ca22070e6880dc6eded",
+    "backendCodigoProbado": "ffb016b02bbd076959741925ad4d566cd36f1eac"
   },
   "archivos": {
     "backendCodigo": [
@@ -287,6 +289,65 @@
       "repo": "ambos",
       "comando": "git diff --check; git diff --cached --check",
       "resultado": "PASS"
+    },
+    {
+      "repo": "frontend",
+      "comando": "npm run test:unit:bulk",
+      "resultado": "PASS",
+      "pass": 99,
+      "alcance": "Revalidación al conservar el borrador en memoria"
+    },
+    {
+      "repo": "frontend",
+      "comando": "playwright test tests/auth-general.spec.ts tests/bulk.spec.ts tests/bulk-http.spec.ts --workers=1 --reporter=line",
+      "resultado": "FAIL_INTERMEDIO",
+      "pass": 56,
+      "fallidas": 1,
+      "total": 57,
+      "alcance": "F12 cinco PASS y once Bulk PASS; fallo de teardown apiResponse.text: Response has been disposed en 1024 px"
+    },
+    {
+      "repo": "frontend",
+      "comando": "playwright test tests/auth-general.spec.ts --grep 1024px --workers=1 --repeat-each=3 --reporter=line",
+      "resultado": "PASS",
+      "pass": 3,
+      "fallidas": 0,
+      "alcance": "Teardown espera context.unrouteAll con behavior wait; no se retiró el caso"
+    },
+    {
+      "repo": "frontend",
+      "comando": "playwright test tests/auth-general.spec.ts --grep F12 --workers=1 --reporter=line",
+      "resultado": "PASS",
+      "pass": 5,
+      "fallidas": 0,
+      "alcance": "Fixture final: selección/revisión, incierto, respuesta tardía, logout y cambio de identidad; sin replay"
+    },
+    {
+      "repo": "frontend",
+      "comando": "npm run build; npm run lint; node scripts/check-vercel-assets.mjs",
+      "resultado": "PASS",
+      "alcance": "Build API/tsc y assets repetidos después de cambios de provider; lint final más lint del fixture después de teardown"
+    },
+    {
+      "repo": "backend",
+      "comando": "GitHub Actions: Gitleaks, CodeQL, integración Bulk-Catalog y Bulk E2E integral",
+      "resultado": "PASS",
+      "revision": "ffb016b02bbd076959741925ad4d566cd36f1eac",
+      "alcance": "Checks automáticos Draft; no CI integral de Ready"
+    },
+    {
+      "repo": "frontend",
+      "comando": "GitHub Actions CodeQL",
+      "resultado": "PASS",
+      "revision": "e2d27d32cb84b2f82e8f9ca22070e6880dc6eded",
+      "alcance": "Hallazgo de dominio corregido; consultar check del SHA final"
+    },
+    {
+      "repo": "frontend",
+      "comando": "GitHub Actions Gitleaks",
+      "resultado": "FAIL_INTERMEDIO",
+      "revision": "e2d27d32cb84b2f82e8f9ca22070e6880dc6eded",
+      "alcance": "Dos coincidencias del JWT ficticio preexistente en líneas modificadas; línea original restaurada, datos de fixture aislados, sin exclusiones. Consultar resultado del SHA final"
     }
   ],
   "restricciones": [
@@ -300,9 +361,14 @@
   "limites": [
     "Excepción temporal G7 H-11 para sessionStorage autorizada por encargo; revisión antes de D y máximo 15/12/2026",
     "Carga fría de selección completa aún usa variantes por producto: propuesta aditiva separada",
-    "Archivo File vive en edición; no se reconstruye ni reenvía automáticamente tras autenticación nueva",
+    "File solo en memoria: preservado al reautenticar misma identidad; logout, otra identidad y reload completo descartan el contexto; correlaciones inciertas permanecen segregadas por owner",
     "CI obligatoria y certificación real pendientes"
   ],
   "detalle": "SEGUIMIENTO.md",
-  "propuesta": "PROPUESTA_LECTURA_SELECCION.md"
+  "propuesta": "PROPUESTA_LECTURA_SELECCION.md",
+  "pullRequests": {
+    "backend": "https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/323",
+    "frontend": "https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/111",
+    "estado": "DRAFT"
+  }
 }

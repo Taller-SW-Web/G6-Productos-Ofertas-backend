@@ -14,7 +14,10 @@ Rama local en ambos repositorios: `trabajo/castilla/correcciones-auditoria-funci
 Backend base inicial: `cb2f4b15feb822c6abdc35108ee60e7e16d9d1d1`.
 Sincronización posterior por fast-forward: `aff71d96bc92125718d51ba6dca71483356cdc82`.
 Frontend base: `02ada63217bfd448c7be621fbadfa6e48a325f64`.
-Frontend corregido: `2f02aacc14689bb4ad1568be6d465781de5c5ab7`.
+Frontend corregido: `5144ea6b99160251fbc7fdfac9d5b3d38030c551` (primer cierre
+`2f02aacc14689bb4ad1568be6d465781de5c5ab7`).
+PR Draft nuevos: [Backend #323](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/pull/323)
+y [Frontend #111](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend/pull/111).
 Docs inicial: `5f30802129ba4bbc0674dcc5878f10065f443118`; comprobación posterior:
 `2b1b3dfb88077aadbcacb43a5df88923994f9ea6` (evidencias adicionales, sin cambios al OpenAPI utilizado).
 Docs local tiene cambios previos sin commit; no se sobrescriben. Las referencias
@@ -95,6 +98,8 @@ La columna de pruebas se completa únicamente tras ejecutar comandos.
 | Catálogo espacios al escribir | CONFIRMADO_EN_CÓDIGO: trim y control directo desde URL pierden texto al escribir | ProductsPage: borrador local inmediato, consulta normalizada con debounce de 250 ms y sincronización de navegación | Regresión de navegador PASS escribiendo tecla por tecla; conjunto Catálogo 20/20 PASS |
 | Catálogo identificadores LISTA | CONFIRMADO_EN_CÓDIGO: modo inmutable imprime valorId | VariantFormFields: resolver etiqueta del esquema; conservar ID de la selección sin modificar payload | Regresión jsdom PASS: Color legible y mismo ID inmutable |
 | Bulk CSV encabezado inválido | CONFIRMADO_EN_CÓDIGO: scanner solo sintáctico | Validar plantilla v2 en modo API antes de habilitar POST | 99 unitarias Bulk PASS; conserva compatibilidad mock; validación backend sigue autoritativa |
+| Bulk borrador / F12 | CONFIRMADO_EN_CÓDIGO: expiración recargaba el contexto y perdía el File | Provider compartido en memoria; RequireSession cierra acceso y permite reautenticación de la misma identidad; logout/cambio de usuario descartan el contexto | Cinco escenarios de navegador PASS: selección/revisión, incierto, respuesta tardía, logout y otra identidad; sin replay ni archivo persistido en disco |
+| Seguridad build / CodeQL | Hallazgo High `js/incomplete-url-substring-sanitization` en primer HEAD frontend | Comparación de hostname con punto de dominio y normalización de punto DNS final | Regresión local PASS para ACA, dominio parecido y punto final; resultado remoto del HEAD corregido se verifica por separado |
 | Gateway/APIM B03 | #314 normaliza solo validate-jwt 401, no concede permisos | Reutilizar XML/tests; conservar CORS, base, scopes, rate limit | 32 pruebas de artefactos XML/Bicep PASS; políticas efectivas no certificadas |
 
 ## Escenarios manuales: tratamiento local y límite de certificación
@@ -140,9 +145,13 @@ La columna de pruebas se completa únicamente tras ejecutar comandos.
   históricas, permisos y conciliación. No se consumen cupones compartidos.
 - Umbrales/Bulk: fixtures de recepción, cancelación, plantilla/archivo inválido,
   MIME/nombre/tamaño, 202→seguimiento→archivo y resultados inciertos. El archivo
-  vive en el contexto de edición; los marcadores de intención por usuario
-  conservan conciliación tras recarga. No se reconstruye un File ni se reenvía
-  una importación automáticamente después de una autenticación nueva.
+  vive solo en memoria, en un provider compartido que conserva selección y revisión
+  al reautenticar la misma identidad después de expirar. RequireSession retira
+  primero el contenido administrativo. Una admisión pendiente pasa a incierta,
+  conserva correlación y descarta callbacks tardíos. Logout y cambio de usuario
+  descartan el contexto completo. No se almacena el File en disco ni se reconstruye
+  tras una recarga completa; los marcadores por usuario conservan conciliación.
+  Ninguna autenticación reenvía una importación automáticamente.
 
 Estos recorridos locales no certifican G7 real, grants, APIM, ACA, Vercel,
 mensajería compartida ni homologación externa. Esa evidencia corresponde a D.
@@ -258,6 +267,20 @@ No se declara que la suite completa haya terminado en exit 0 para el HEAD final:
 la evidencia combina suite amplia y revalidaciones focalizadas. La CI integral
 de la revisión actual sigue pendiente del paso autorizado Draft→Ready.
 
+Último seguimiento F12/CodeQL: `playwright test tests/auth-general.spec.ts
+tests/bulk.spec.ts tests/bulk-http.spec.ts --workers=1 --reporter=line` terminó
+**56 PASS / 1 FAIL**. Los cinco escenarios F12 y los once Bulk pasaron; falló
+1024 px con `apiResponse.text: Response has been disposed` en el fixture de
+main.tsx al cerrar el contexto después de logout. El teardown ahora espera
+`context.unrouteAll({ behavior: "wait" })` antes de cerrar el proveedor. El caso
+se reejecutó tres veces (`--grep 1024px --repeat-each=3`): **3 PASS / 0 FAIL**.
+Un intento inicial de F12 tenía un selector de botón para un enlace Volver;
+se corrigió el locator y los cuatro escenarios iniciales pasaron antes de añadir
+la respuesta tardía. La última suite Bulk unitaria volvió a pasar **99/99**. Después de aislar los
+datos del proveedor G7, `--grep F12` volvió a pasar **5/5**, incluido el resultado
+tardío y aislamiento de otra identidad.
+Build API/tsc, lint y assets se repitieron después del cambio de provider: PASS.
+
 ## Compilación
 
 Backend `npm run build:all`: PASS. Frontend `npm run build` con modo API y orígenes
@@ -303,3 +326,19 @@ locales detalladas hayan pasado. La siguiente acción es revisión de los PR,
 decisión sobre la excepción temporal G7 H-11 y autorización de Ready; después,
 CI integral para esos HEAD. No se inició Fase D. La selección completa conserva
 una frontera de rendimiento descrita en [la propuesta de lectura](PROPUESTA_LECTURA_SELECCION.md).
+
+## Seguimiento de seguridad y CI Draft
+
+En el primer HEAD frontend, CodeQL detectó una comparación de dominio incompleta.
+Se corrigió con frontera de punto y normalización del punto DNS final, sin
+desactivar la regla. CodeQL pasó en `e2d27d32`. Gitleaks detectó después dos
+apariciones de un JWT ficticio preexistente porque una edición del proveedor
+lo incluía en líneas del diff. Se restauró esa línea original y se separaron
+los datos de identidad del fixture, sin exclusión ni relajación del escáner.
+La validación remota definitiva se consulta en el PR para el SHA final.
+
+Backend `ffb016b02bbd076959741925ad4d566cd36f1eac` pasó Gitleaks, CodeQL,
+integración Bulk–Catalog PostgreSQL 17 y E2E integral Bulk. El siguiente commit
+backend modifica únicamente este seguimiento y el inventario de evidencia;
+los nueve blobs de código ensayados permanecen idénticos. Los checks de ese
+commit se registran en #323; no se extrapolan a la CI integral diferida por Draft.
