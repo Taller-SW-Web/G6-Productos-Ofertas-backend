@@ -61,19 +61,51 @@ app="$service"; container="$service"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 before="$work/before.json"; after="$work/after.json"; revision="$work/revision.json"
-read_app() { az containerapp show --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --output json; }
+# ARM can return an HTML 503 that Azure CLI reports as a JSON parsing error.
+# Keep this helper on GETs. A failed write can already have reached Azure.
+read_arm() {
+  local operation="$1" attempt status output stderr_file delay
+  shift
+  stderr_file="$(mktemp "$work/arm-read.XXXXXX")" || return 1
+  for attempt in 1 2 3 4; do
+    if output="$("$@" 2>"$stderr_file")"; then
+      cat "$stderr_file" >&2
+      rm -f "$stderr_file"
+      printf '%s\n' "$output"
+      return 0
+    else
+      status=$?
+    fi
+    if ! LC_ALL=C grep -Eiq 'Service[[:space:]]?Unavailable|Too[[:space:]]?Many[[:space:]]?Requests|Bad[[:space:]]?Gateway|Gateway[[:space:]]?Timeout|HTTP[/0-9.]*[[:space:]]+(429|502|503|504)\b|status( code)?[^[:digit:]]{0,8}(429|502|503|504)\b|ConnectionResetError|Connection reset by peer|ReadTimeout|ConnectTimeout|Connection timed out|RemoteDisconnected' "$stderr_file"; then
+      printf 'Lectura Azure ARM fallida (%s), sin reintento.\n' "$operation" >&2
+      cat "$stderr_file" >&2
+      break
+    fi
+    if (( attempt == 4 )); then
+      printf 'Lectura Azure ARM transitoria agotada (%s) después de %s intentos.\n' "$operation" "$attempt" >&2
+      break
+    fi
+    delay="$((1 << attempt)).$((RANDOM % 10))"
+    printf 'Lectura Azure ARM transitoria (%s), intento %s/4. Reintento en %ss.\n' "$operation" "$attempt" "$delay" >&2
+    sleep "$delay"
+  done
+  rm -f "$stderr_file"
+  return "$status"
+}
+
+read_app() { read_arm 'containerapp show' az containerapp show --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --output json; }
 validate_target() {
   local account group env app_json expected_env expected_app
   account="$(az account show --subscription "$SUBSCRIPTION" --query id -o tsv)" || fail 'no se pudo validar la suscripción seleccionada'
   [[ "${account,,}" == "${SUBSCRIPTION,,}" ]] || fail 'suscripción Azure distinta de la autorizada'
-  group="$(az group show --subscription "$SUBSCRIPTION" --name "$RESOURCE_GROUP" -o json)" || fail 'no se pudo validar el Resource Group'
+  group="$(read_arm 'group show' az group show --subscription "$SUBSCRIPTION" --name "$RESOURCE_GROUP" -o json)" || fail 'no se pudo validar el Resource Group'
   [[ "$(jq -r '.id | ascii_downcase' <<< "$group")" == "/subscriptions/${SUBSCRIPTION,,}/resourcegroups/${RESOURCE_GROUP,,}" ]] || fail 'Resource Group ID inesperado'
-  env="$(az containerapp env show --subscription "$SUBSCRIPTION" --name "$ACA_ENVIRONMENT" --resource-group "$RESOURCE_GROUP" -o json)" || fail 'Environment ACA inexistente o no legible; no se crean recursos'
+  env="$(read_arm 'containerapp env show' az containerapp env show --subscription "$SUBSCRIPTION" --name "$ACA_ENVIRONMENT" --resource-group "$RESOURCE_GROUP" -o json)" || fail 'Environment ACA inexistente o no legible; no se crean recursos'
   expected_env="/subscriptions/${SUBSCRIPTION,,}/resourcegroups/${RESOURCE_GROUP,,}/providers/microsoft.app/managedenvironments/${ACA_ENVIRONMENT,,}"
   actual_region="$(jq -r '.location | ascii_downcase | gsub("[[:space:]]"; "")' <<< "$env")"
   expected_region="$(printf '%s' "$REGION" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
   [[ "$(jq -r '.id | ascii_downcase' <<< "$env")" == "$expected_env" && "$actual_region" == "$expected_region" ]] || fail 'Resource ID o región del Environment ACA no coincide con el destino'
-  app_json="$(read_app)" || fail 'ACA solicitada no existe; el CD no crea aplicaciones'
+  app_json="$(read_app)" || fail 'no se pudo leer la ACA solicitada; el CD no crea aplicaciones'
   expected_app="/subscriptions/${SUBSCRIPTION,,}/resourcegroups/${RESOURCE_GROUP,,}/providers/microsoft.app/containerapps/${app,,}"
   [[ "$(jq -r '.id | ascii_downcase' <<< "$app_json")" == "$expected_app" ]] || fail 'Resource ID de ACA inesperado'
   [[ "$(jq -r '.properties.managedEnvironmentId | ascii_downcase' <<< "$app_json")" == "$expected_env" ]] || fail 'ACA pertenece a otro Environment'
@@ -102,7 +134,7 @@ normalize_app() {
     }' "$1"
 }
 container_image() { jq -er --arg name "$container" '[.properties.template.containers[] | select(.name == $name) | .image] | if length == 1 then .[0] else error("container target ausente o duplicado") end' "$1"; }
-revision_health() { az containerapp revision show --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --revision "$1" --output json > "$2"; }
+revision_health() { read_arm 'containerapp revision show' az containerapp revision show --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --revision "$1" --output json > "$2"; }
 revision_verify_detail='no se obtuvo estado de revisión'
 chile_hot_service() { [[ "$destination" == chile-shared && ( "$service" == api-gateway || "$service" == promotions-svc ) ]]; }
 chile_explicit_multiple_service() {
@@ -346,7 +378,7 @@ verify_chile_served_revision() {
 
 verify_chile_gateway_current_traffic() {
   local expected="$1" expected_labels="${2:-}" app_json default_routes served_revision weight revision_json="$work/current-traffic-revision.json" app_file="$work/current-traffic-app.json" revision_image active health running replicas provisioning min max
-  app_json="$(read_app)" || return 1
+  app_json="$(read_app)" || return 2
   printf '%s\n' "$app_json" > "$app_file"
   [[ "$(jq -r '.properties.configuration.activeRevisionsMode // empty' "$app_file")" == Multiple ]] || return 1
   preserved_labels_valid "$app_file" || return 1
@@ -363,7 +395,7 @@ verify_chile_gateway_current_traffic() {
   served_revision="$(jq -r --arg latest "$(jq -r '.properties.latestRevisionName // empty' "$app_file")" 'if .[0].latestRevision == true then $latest else (.[0].revisionName // empty) end' <<< "$default_routes")"
   weight="$(jq -r '.[0].weight // 0' <<< "$default_routes")"
   [[ -n "$served_revision" && "$weight" == 100 ]] || return 1
-  revision_health "$served_revision" "$revision_json" || return 1
+  revision_health "$served_revision" "$revision_json" || return 2
   revision_image="$(container_image "$revision_json" 2>/dev/null || true)"
   active="$(jq -r '.properties.active // false' "$revision_json")"
   health="$(jq -r '.properties.healthState // empty' "$revision_json")"
@@ -398,7 +430,7 @@ verify_specific_revision_healthy() {
 # Active revisions can consume R16 even when they receive zero HTTP traffic.
 price_audit_consumers() {
   local names name revision_json="$work/r16-revision.json"
-  names="$(az containerapp revision list --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --output json |
+  names="$(read_arm 'containerapp revision list' az containerapp revision list --subscription "$SUBSCRIPTION" --name "$app" --resource-group "$RESOURCE_GROUP" --output json |
     jq -er 'if type != "array" then error("revisiones ACA inválidas") else [.[] | select(.properties.active == true) | .name] | sort | .[] end')" || return 1
   while IFS= read -r name; do
     [[ -n "$name" ]] || return 1
@@ -674,7 +706,10 @@ if [[ "$gateway_route_profile" == g5-labelled ]]; then
   fi
 elif [[ "$destination" == chile-shared ]]; then
   if [[ "$explicit_multiple" == true ]]; then
-    verify_chile_gateway_current_traffic "$previous_image" || fail "tráfico Chile previo de $service no es una revisión única, sana y verificable; no se modifica Azure"
+    verify_chile_gateway_current_traffic "$previous_image" || {
+      if [[ $? == 2 ]]; then fail "no se pudo verificar el tráfico Chile previo de $service por una lectura de Azure ARM; no se modifica Azure"; fi
+      fail "tráfico Chile previo de $service no es una revisión única, sana y verificable; no se modifica Azure"
+    }
     previous_preserved_labels="$verified_preserved_labels"
   else
     verify_chile_served_revision "$previous_image" || fail 'tráfico Chile previo es ambiguo/incompatible con un despliegue individual; no se modifica Azure'
