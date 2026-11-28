@@ -37,11 +37,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Obtener código fuente
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Validar flujos de automatización con actionlint
       run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -shellcheck=
     - name: Configurar Node.js para las validaciones del workflow
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
     - name: Comprobar aislamiento del workflow de performance G6
@@ -64,9 +64,9 @@ jobs:
       contents: read
     steps:
     - name: Obtener código fuente
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Configurar Node.js para validadores deterministas H5
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
     - name: Probar procedencia, imágenes y ejecutor con simulaciones
@@ -107,9 +107,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Obtener código fuente
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -125,9 +125,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Obtener código fuente
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -143,9 +143,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Obtener código fuente
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -161,9 +161,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Obtener código fuente
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -181,16 +181,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Obtener código fuente
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Obtener contratos y migraciones oficiales de Docs
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
         ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -213,16 +213,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Obtener código fuente
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Obtener contratos H5 aprobados
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
         ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Configurar Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: '3.12'
     - name: Instalar validador YAML fijado
@@ -243,9 +243,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Obtener código fuente
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -267,16 +267,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Obtener código fuente
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Descargar las migraciones oficiales fijadas de Inventory
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
         ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Configurar Node.js para las comprobaciones de arranque
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: '24.15.0'
         cache: npm
@@ -331,7 +331,7 @@ jobs:
       run: node scripts/ci/verify-trivy-report.mjs "$RUNNER_TEMP/trivy-h5" "$GITHUB_SHA" ops/shared/services-ci.psv
     - name: Conservar reportes Trivy por SHA e imagen
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: h5-trivy-${{ github.sha }}
         path: ${{ runner.temp }}/trivy-h5
@@ -452,16 +452,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Obtener código fuente
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
     - name: Instalar dependencias de forma reproducible
       run: npm ci
     - name: Obtener OpenAPI oficial fijado
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
         ref: 5f30802129ba4bbc0674dcc5878f10065f443118
@@ -491,19 +491,19 @@ jobs:
         working-directory: backend
     steps:
     - name: Obtener backend y su historia
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         path: backend
         fetch-depth: 0
     - name: Obtener migraciones oficiales fijadas
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
         ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -516,7 +516,7 @@ jobs:
         node tests/h5/run-taxonomy-catalog-postgres.mjs ../G6-Productos-Ofertas-docs 2>&1 | tee apps/taxonomy-svc/test/e2e-catalog/h5-postgres.log
     - name: Conservar evidencia de la ejecución
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: taxonomy-catalog-e2e-${{ github.sha }}
         path: |
@@ -536,18 +536,18 @@ jobs:
         working-directory: backend
     steps:
     - name: Obtener backend
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         path: backend
     - name: Obtener contratos fijados de Inventory
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
         ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: docs
         persist-credentials: 'false'
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -574,9 +574,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Obtener código fuente
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -588,7 +588,7 @@ jobs:
       run: npm test -- apps/pricing-svc/src/messaging/service-bus.spec.ts apps/price-audit-svc/src/messaging/service-bus.spec.ts --reporter=verbose
     - name: Conservar evidencia de persistencia
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pricing-audit-postgres-${{ github.sha }}
         path: .ci/evidence/postgres-persistence/
@@ -604,9 +604,9 @@ jobs:
       contents: read
     steps:
     - name: Obtener código fuente
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -624,9 +624,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Obtener código fuente
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -648,7 +648,7 @@ jobs:
       run: node --test apps/promotions-svc/h5/evidencia-integracion.test.mjs apps/promotions-svc/h5/ejecutar-matriz.test.mjs apps/promotions-svc/h5/verificar-despliegue.test.mjs
     - name: Conservar evidencia de PostgreSQL H5
       if: always() && steps.h5_postgres.outcome != 'skipped'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: promotions-h5-postgres-${{ github.sha }}
         path: promotions-h5-postgres.log
@@ -667,19 +667,19 @@ jobs:
         working-directory: backend
     steps:
     - name: Obtener backend y su historia de integración
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         path: backend
         fetch-depth: 0
     - name: Obtener contratos Docs H5
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
         ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: docs
         persist-credentials: 'false'
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -693,7 +693,7 @@ jobs:
       run: bash apps/combos-svc/test/run-postgres-isolated.sh
     - name: Conservar evidencia E2E de Combos
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: combos-catalog-e2e-${{ github.sha }}
         path: |
@@ -715,19 +715,19 @@ jobs:
         working-directory: backend
     steps:
     - name: Obtener código del backend
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         path: backend
         fetch-depth: 0
     - name: Obtener Docs H5 fijado (OpenAPI 0.7.0-rc.3)
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
         ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: docs
         persist-credentials: 'false'
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -767,7 +767,7 @@ jobs:
         '
     - name: Conservar evidencia H5 PostgreSQL de Combos
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: combos-postgres-h5-e2e-${{ github.sha }}
         path: |
@@ -786,16 +786,16 @@ jobs:
       contents: read
     steps:
     - name: Obtener código del backend
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Obtener migraciones oficiales de Inventory
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
         ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -847,7 +847,7 @@ jobs:
         echo 'Sin contenedores PostgreSQL ni directorios de certificados E2E residuales.'
     - name: Conservar evidencia de la integración autenticada
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: gateway-inventory-postgres-e2e-${{ github.sha }}
         path: .ci/evidence/
@@ -862,9 +862,9 @@ jobs:
       contents: read
     steps:
     - name: Checkout audited source
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
     - name: Probar el verificador fail-closed de auditoría
@@ -879,7 +879,7 @@ jobs:
       run: node scripts/ci/verificar-auditoria-dependencias.mjs
     - name: Conservar informes completos, decisión y SHA auditado
       if: always() && steps.dependency_audit.outcome != 'skipped'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: dependency-audit-${{ github.sha }}
         path: ${{ runner.temp }}/dependency-audit-evidence/
@@ -895,16 +895,16 @@ jobs:
       (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
     steps:
     - name: Obtener código fuente
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Obtener OpenAPI de Docs integrado
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
         ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Configurar Python 3.12
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: '3.12'
     - name: Instalar dependencias APIM
@@ -962,16 +962,16 @@ jobs:
       (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
     steps:
     - name: Obtener código fuente
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Obtener contrato oficial OpenAPI y matriz desde Docs (SHA fijado)
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
         ref: 2ccefce93d7c10f2e9eb39ae0ee77b10ee00324c
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -1004,7 +1004,7 @@ jobs:
         echo 'Sin contenedores PostgreSQL 17 de Newman residuales.'
     - name: Publicar evidencias sanitizadas Newman H5
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: newman-h5-integracion-${{ github.sha }}
         path: .ci/h5-newman-evidence/
@@ -1043,7 +1043,7 @@ jobs:
       always()
     steps:
     - name: Obtener código fuente
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Comprobar integración de Combos obligatoria
       env:
         RESULTADOS: ${{ toJSON(needs) }}

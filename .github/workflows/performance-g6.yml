@@ -56,7 +56,7 @@ jobs:
       contents: read
     steps:
     - name: Obtener la revisión seleccionada para el benchmark
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.sha }}
         fetch-depth: 0
@@ -96,16 +96,16 @@ jobs:
       contents: read
     steps:
     - name: Obtener servicio de la revisión comparada
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ matrix.ref }}
     - name: Obtener harness HTTP de la revisión candidata
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ needs.preflight.outputs.candidate_sha }}
         path: .ci/benchmark-harness
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -131,7 +131,7 @@ jobs:
         '
     - name: Publicar perfil HTTP de Promotions
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: promotions-http-${{ matrix.variant }}-${{ needs.preflight.outputs.candidate_sha }}
         path: '.ci/performance/promotions-http-profile.json
@@ -155,16 +155,16 @@ jobs:
       contents: read
     steps:
     - name: Obtener revisión candidata
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ needs.preflight.outputs.candidate_sha }}
     - name: Obtener revisión base
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ needs.preflight.outputs.baseline_sha }}
         path: .ci/baseline
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
     - name: Instalar y compilar ambas revisiones en el mismo runner
@@ -195,7 +195,7 @@ jobs:
         \ candidate-first\nrun_profile . candidate-second candidate-second\nrun_profile .ci/baseline baseline-second baseline-second\n"
     - name: Publicar perfiles pareados de Promotions
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: promotions-paired-http-${{ needs.preflight.outputs.candidate_sha }}
         path: .ci/performance/paired/
@@ -221,23 +221,23 @@ jobs:
       contents: read
     steps:
     - name: Obtener código del backend
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ matrix.ref }}
     - name: Obtener harness de medición de la revisión candidata
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ needs.preflight.outputs.candidate_sha }}
         path: .ci/benchmark-harness
     - name: Obtener migraciones oficiales de Inventory
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
         ref: c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Configurar Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -275,7 +275,7 @@ jobs:
         \ --reporter=verbose 2>&1 | tee .ci/performance/gateway-inventory-http.log\n"
     - name: Publicar medición HTTP Gateway/Inventory
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: gateway-inventory-http-${{ matrix.variant }}-${{ matrix.ref }}
         path: '.ci/performance/gateway-inventory-http-${{ matrix.variant }}.json
@@ -298,18 +298,18 @@ jobs:
       contents: read
     steps:
     - name: Obtener revisión candidata
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ needs.preflight.outputs.candidate_sha }}
         persist-credentials: false
     - name: Obtener revisión base
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ needs.preflight.outputs.baseline_sha }}
         path: .ci/baseline
         persist-credentials: false
     - name: Preparar Node.js y dependencias en ambas revisiones
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -337,7 +337,7 @@ jobs:
         run_profile .ci/baseline baseline-second baseline-second"
     - name: Publicar perfiles pareados de Catalog
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: catalog-admin-paired-${{ needs.preflight.outputs.candidate_sha }}
         path: .ci/performance/paired/
@@ -354,18 +354,18 @@ jobs:
       contents: read
     steps:
     - name: Obtener revisión candidata
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ needs.preflight.outputs.candidate_sha }}
         persist-credentials: false
     - name: Obtener revisión base
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ needs.preflight.outputs.baseline_sha }}
         path: .ci/baseline
         persist-credentials: false
     - name: Preparar Node.js y fijar harness idéntico en ambas revisiones
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -395,7 +395,7 @@ jobs:
         run_profile .ci/baseline baseline-second baseline-second '${{ needs.preflight.outputs.baseline_sha }}'
     - name: Publicar perfiles pareados de Pricing individual
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: pricing-individual-paired-${{ needs.preflight.outputs.candidate_sha }}
         path: .ci/performance/pricing-individual/
@@ -412,25 +412,25 @@ jobs:
       contents: read
     steps:
     - name: Obtener revisión candidata
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ needs.preflight.outputs.candidate_sha }}
         persist-credentials: false
     - name: Obtener revisión base
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ needs.preflight.outputs.baseline_sha }}
         path: .ci/baseline
         persist-credentials: false
     - name: Obtener migraciones y contratos H5 fijados (0.7.0-rc.3)
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
         ref: c9e1e5c217616d28229fccf5315fb97a1ae061a9
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Preparar Node.js y dependencias en ambas revisiones
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: 24.15.0
         cache: npm
@@ -469,7 +469,7 @@ jobs:
         run_profile .ci/baseline baseline-second baseline-second
     - name: Publicar perfiles pareados H5 de Combos
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: combos-h5-paired-${{ needs.preflight.outputs.candidate_sha }}
         path: .ci/performance/h5-paired/
@@ -492,7 +492,7 @@ jobs:
       contents: read
     steps:
     - name: Obtener script de resumen
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.sha }}
         persist-credentials: false
@@ -503,7 +503,7 @@ jobs:
       run: node scripts/performance/summarize-selection.mjs
     - name: Publicar resumen aunque falle el benchmark
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: g6-performance-selection-${{ github.run_id }}
         path: .ci/performance/summary/selection-summary.json

@@ -43,7 +43,7 @@ jobs:
           --health-retries 24
     steps:
       - name: Checkout Backend
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Resolver y validar SHA de Frontend
         env:
@@ -60,7 +60,7 @@ jobs:
           echo "EXPECTED_FRONTEND_SHA=$FRONTEND_REF_INPUT" >> "$GITHUB_ENV"
 
       - name: Checkout Frontend (sin despliegue)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: Taller-SW-Web/G6-Productos-Ofertas-frontend
           ref: ${{ env.EXPECTED_FRONTEND_SHA }}
@@ -90,7 +90,7 @@ jobs:
             echo "- **Frontend SHA:** \`${actual_frontend_sha}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.15.0
           cache: npm
@@ -206,7 +206,7 @@ jobs:
 
       - name: Conservar evidencias y trazas Playwright
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bulk-integral-e2e-${{ github.sha }}
           path: |
