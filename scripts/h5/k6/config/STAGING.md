@@ -1,0 +1,11 @@
+# Permiso verificable para staging
+
+El perfil de staging queda bloqueado mientras Infra y G7 no aprueben y publiquen sus claves públicas Ed25519 en `staging-authorities.json`. Cada entrada versionada tiene `id`, `role` (`INFRA` o `G7`) y `public_key_spki_base64` (SPKI DER). La incorporación o rotación de claves requiere revisión del equipo. El wrapper toma la lista del checkout revisado, sin una ruta o variable para agregar claves de quien ejecuta.
+
+El permiso privado tiene `payload_base64` (bytes UTF-8 del JSON) y `signatures` (dos entradas con `key_id` y `signature_base64`). Las dos firmas Ed25519 se aplican a los mismos bytes de payload; el wrapper comprueba que las claves y los roles sean distintos y estén en el registro. Los fixtures usan claves efímeras en memoria y nunca firman un permiso operativo.
+
+El payload, versión `schema_version: 1`, incluye `environment: STAGING_APIM`, `origin` HTTPS canónico, `method: GET`, `case_id`, `operation_id` y `channel`. Autoriza exactamente `profile`, `vus`, `duration_seconds`, `max_rps`, `subject`, `repetition`, `negative_401` y los límites UTC `window_start_utc` / `window_end_utc`. Registra `infra_approval_ref`, `g7_approval_ref`, `harness_commit`, `backend_sha`, `subject_digest`, `revision`, `release_manifest_sha256`, `comparison_context_sha256`, `dataset_sha256` y `token_sha256` (SHA-256 de los bytes del JWT que entregó G7). El JWT sigue sujeto al guard real del proveedor. El hash de token va en el permiso privado y no en el reporte.
+
+Infra debe indicar en el permiso `revision_header`, la cabecera `x-*` disponible en el entorno cuya respuesta 200 identifica la revisión efectivamente atendida. El arnés compara su valor exacto con `revision` durante preflight, medición y cierre. Si el entorno todavía no puede acreditar la revisión con esa cabecera, staging permanece bloqueado. El manifest de release que firma el equipo debe corresponder al despliegue efectivo, no a un plan de despliegue.
+
+Usa `-Authorization <permiso.json>` con el wrapper `ejecutar-demo.ps1`. `-SoloValidar` comprueba firma, checkout, contexto y argumentos sin solicitudes de red. El resumen de ejecución conserva el hash del payload firmado. Conserva el sobre y los archivos privados junto a la evidencia para la auditoría, fuera de Git.
