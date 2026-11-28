@@ -370,39 +370,6 @@ const legacyOptions = {
   },
 };
 
-const independentOptions = {
-  summaryTrendStats: ['min', 'avg', 'med', 'max', 'p(95)', 'p(99)'],
-  // Bound per-host fan-out by the independently authorized concurrency.
-  batch: independentContext?.expected.maxConcurrency ?? 1,
-  batchPerHost: independentContext?.expected.maxConcurrency ?? 1,
-  scenarios: {
-    [profile]: profile === 'concurrencia' ? {
-      // A fixed one-shot fan-out keeps the offered request budget exact while
-      // placing the authorized calls in flight together for limit-concurrency.
-      executor: 'per-vu-iterations',
-      vus: independentContext?.expected.maxVus ?? 1,
-      iterations: 1,
-      maxDuration: `${independentContext?.maximumDurationSeconds ?? 90}s`,
-      exec: 'concurrencyIteration',
-    } : {
-      executor: 'per-vu-iterations',
-      vus: 1,
-      iterations: 1,
-      maxDuration: `${independentContext?.maximumDurationSeconds ?? 90}s`,
-      exec: profile === 'aislamiento' ? 'isolationRateLimit' :
-        profile === 'cuota' ? 'quotaOnly' : 'demoRateLimit',
-    },
-  },
-  thresholds: profile === 'aislamiento'
-    ? { apim_rl_demo_isolation_pass: ['rate==1'] }
-    : profile === 'cuota'
-      ? { apim_rl_demo_quota_expected_403: ['count>0'], apim_rl_demo_unexpected: ['count==0'] }
-      : profile === 'concurrencia'
-        ? { apim_rl_demo_concurrency_429: ['count>0'], apim_rl_demo_concurrency_unexpected: ['count==0'], dropped_iterations: ['count==0'] }
-        : { apim_rl_demo_primary_pass: ['rate==1'] },
-};
-
-
 const baseUrl = __ENV.APIM_BASE_URL;
 const tokenM2mA = __ENV.APIM_JWT_M2M_A;
 const tokenM2mB = __ENV.APIM_JWT_M2M_B;
@@ -705,6 +672,38 @@ export function handleSummary(data) {
     ),
   };
 }
+
+const independentOptions = {
+  summaryTrendStats: ['min', 'avg', 'med', 'max', 'p(95)', 'p(99)'],
+  // Bound per-host fan-out by the independently authorized concurrency.
+  batch: independentContext?.expected.maxConcurrency ?? 1,
+  batchPerHost: independentContext?.expected.maxConcurrency ?? 1,
+  scenarios: {
+    [profile]: profile === 'concurrencia' ? {
+      // A fixed one-shot fan-out keeps the offered request budget exact while
+      // placing the authorized calls in flight together for limit-concurrency.
+      executor: 'per-vu-iterations',
+      vus: independentContext?.expected.maxVus ?? 1,
+      iterations: 1,
+      maxDuration: `${independentContext?.maximumDurationSeconds ?? 90}s`,
+      exec: 'concurrencyIteration',
+    } : {
+      executor: 'per-vu-iterations',
+      vus: 1,
+      iterations: 1,
+      maxDuration: `${independentContext?.maximumDurationSeconds ?? 90}s`,
+      exec: profile === 'aislamiento' ? 'isolationRateLimit' :
+        profile === 'cuota' ? 'quotaOnly' : 'demoRateLimit',
+    },
+  },
+  thresholds: profile === 'aislamiento'
+    ? { apim_rl_demo_isolation_pass: ['rate==1'] }
+    : profile === 'cuota'
+      ? { apim_rl_demo_quota_expected_403: ['count>0'], apim_rl_demo_unexpected: ['count==0'] }
+      : profile === 'concurrencia'
+        ? { apim_rl_demo_concurrency_429: ['count>0'], apim_rl_demo_concurrency_unexpected: ['count==0'], dropped_iterations: ['count==0'] }
+        : { apim_rl_demo_primary_pass: ['rate==1'] },
+};
 
 export const options = independent ? independentOptions : legacyOptions;
 
