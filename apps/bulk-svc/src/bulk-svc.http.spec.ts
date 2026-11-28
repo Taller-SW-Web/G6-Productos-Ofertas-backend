@@ -619,19 +619,29 @@ describe('Bulk export HTTP authentication (isolated signed-key boundary)', () =>
       expect(
         (await request(app.getHttpServer()).get(reconciliationRoute)).body,
       ).toMatchObject({ code: 'TOKEN_INVALIDO', status: 401 });
-      for (const audience of [null, 'api-otra']) {
-        const invalidAudience = await request(app.getHttpServer())
-          .post(route)
-          .set(
-            'authorization',
-            `Bearer ${token(['GESTOR_COMERCIAL'], undefined, audience)}`,
-          )
-          .send({ formato: 'CSV' });
-        expect(invalidAudience).toMatchObject({
-          status: 401,
-          body: { code: 'TOKEN_INVALIDO' },
-        });
-      }
+      const invalidAudience = await request(app.getHttpServer())
+        .post(route)
+        .set(
+          'authorization',
+          `Bearer ${token(['GESTOR_COMERCIAL'], undefined, 'api-otra')}`,
+        )
+        .send({ formato: 'CSV' });
+      expect(invalidAudience).toMatchObject({
+        status: 401,
+        body: { code: 'TOKEN_INVALIDO' },
+      });
+      // Defecto C (H29): G7 no emite `aud` en JWT humano (`tipo: 'acceso'`), por lo que debe admitirse
+      expect(
+        (
+          await request(app.getHttpServer())
+            .post(route)
+            .set(
+              'authorization',
+              `Bearer ${token(['GESTOR_COMERCIAL'], undefined, null)}`,
+            )
+            .send({ formato: 'CSV' })
+        ).status,
+      ).toBe(202);
       expect(
         (
           await request(app.getHttpServer())
