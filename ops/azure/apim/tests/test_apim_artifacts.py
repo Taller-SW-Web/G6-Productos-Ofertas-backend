@@ -367,6 +367,32 @@ class ApimPolicyTests(unittest.TestCase):
         self.assertIn("quota-by-key", secured_policy)
         self.assertNotIn("validate-jwt", public_policy)
 
+    def test_validate_jwt_401_is_normalized_to_rfc7807_only_for_validate_jwt_source(self):
+        api_policy = (ROOT / "policies" / "api.xml").read_text(encoding="utf-8")
+        root = ElementTree.fromstring(api_policy)
+        on_error = root.find("./on-error")
+        self.assertIsNotNone(on_error)
+        when_node = on_error.find("./choose/when")
+        self.assertIsNotNone(when_node)
+        condition = when_node.attrib.get("condition", "")
+        # Debe filtrar estrictamente por Source == "validate-jwt" y StatusCode == 401
+        self.assertIn('context.LastError.Source == "validate-jwt"', condition)
+        self.assertIn("context.Response.StatusCode == 401", condition)
+        ct_header = when_node.find('./set-header[@name="Content-Type"]/value')
+        self.assertIsNotNone(ct_header)
+        self.assertEqual(ct_header.text, "application/problem+json")
+        body = when_node.find("./set-body")
+        self.assertIsNotNone(body)
+        body_text = body.text or ""
+        for required_token in (
+            '"type", "about:blank"',
+            '"title", "No autorizado"',
+            '"status", 401',
+            '"code", "TOKEN_INVALIDO"',
+            '"correlationId"',
+        ):
+            self.assertIn(required_token, body_text)
+
     def test_apim_is_developer_classic_and_diagnostics_never_capture_bodies(self):
         bicep = (ROOT / "main.bicep").read_text(encoding="utf-8")
         self.assertIn("name: 'Developer'", bicep)
