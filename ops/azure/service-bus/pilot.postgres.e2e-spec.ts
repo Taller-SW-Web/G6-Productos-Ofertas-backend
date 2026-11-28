@@ -49,8 +49,15 @@ describe.skipIf(process.env.G6_SERVICE_BUS_POSTGRES_TESTS !== '1')(
         ),
         'utf8',
       );
+      const routesR2 = await readFile(
+        new URL(
+          '../../../apps/pricing-svc/migrations/0003_service_bus_h5_routes_r2.sql',
+          import.meta.url,
+        ),
+        'utf8',
+      );
       await pricing.admin!.query(
-        `BEGIN; SET LOCAL ROLE po_pricing_owner; ${ddl} COMMIT;`,
+        `BEGIN; SET LOCAL ROLE po_pricing_owner; ${ddl} ${routesR2} COMMIT;`,
       );
       const config: PricingConfig = {
         nodeEnv: 'test',
@@ -123,13 +130,24 @@ describe.skipIf(process.env.G6_SERVICE_BUS_POSTGRES_TESTS !== '1')(
       ).rows[0];
       return row.message_id;
     }
-    async function delivery(id: string) {
+    async function delivery(
+      id: string,
+      destination = 'g6.price-audit.from.pricing',
+    ) {
       return (
         await pricing.admin!.query(
-          'SELECT * FROM pricing.outbox_delivery WHERE message_id=$1',
-          [id],
+          'SELECT * FROM pricing.outbox_delivery WHERE message_id=$1 AND destination=$2',
+          [id, destination],
         )
       ).rows[0];
+    }
+    async function isolateAuditDelivery(id: string) {
+      // Pricing R2 fans out pricing.price.changed to both R16 (Price Audit) and R17 (Promotions).
+      // Mark the sibling R17 delivery sent in this R16-focused test so relay assertions target R16 deterministically.
+      await pricing.admin!.query(
+        "UPDATE pricing.outbox_delivery SET sent_at=now() WHERE message_id=$1 AND destination='g6.promotions.from.pricing'",
+        [id],
+      );
     }
     function transport() {
       const messages: ServiceBusMessage[] = [];
@@ -173,6 +191,7 @@ describe.skipIf(process.env.G6_SERVICE_BUS_POSTGRES_TESTS !== '1')(
     it('commits a real business change with its Outbox and delivery; confirms per destination without publishing H4', async () => {
       const id = await create(),
         f = transport();
+      await isolateAuditDelivery(id);
       expect((await delivery(id)).sent_at).toBeNull();
       expect(await f.relay.publishOne()).toBe('sent');
       expect((await delivery(id)).sent_at).not.toBeNull();
@@ -231,6 +250,7 @@ describe.skipIf(process.env.G6_SERVICE_BUS_POSTGRES_TESTS !== '1')(
     it('keeps an ambiguous send pending and retries the original ID without duplicate audit', async () => {
       const id = await create(),
         f = transport();
+      await isolateAuditDelivery(id);
       f.sender.sendMessages.mockImplementationOnce(async () => {
         // An accepted message whose acknowledgement was lost.
         const claimed = (
@@ -268,7 +288,7 @@ describe.skipIf(process.env.G6_SERVICE_BUS_POSTGRES_TESTS !== '1')(
       expect((await delivery(id)).last_error).toBe('SEND_NOT_CONFIRMED');
       await f.handler.handle(f.received());
       await pricing.admin!.query(
-        "UPDATE pricing.outbox_delivery SET next_attempt_at=now()-interval '1 second' WHERE message_id=$1",
+        "UPDATE pricing.outbox_delivery SET next_attempt_at=now()-interval '1 second' WHERE message_id=$1 AND destination='g6.price-audit.from.pricing'",
         [id],
       );
       expect(await f.relay.publishOne()).toBe('sent');
@@ -286,6 +306,7 @@ describe.skipIf(process.env.G6_SERVICE_BUS_POSTGRES_TESTS !== '1')(
     it('recovers a crash after audit commit but before settlement', async () => {
       const id = await create(),
         f = transport();
+      await isolateAuditDelivery(id);
       await f.relay.publishOne();
       f.receiver.completeMessage.mockRejectedValueOnce(
         new Error('lock lost after commit'),
@@ -304,6 +325,7 @@ describe.skipIf(process.env.G6_SERVICE_BUS_POSTGRES_TESTS !== '1')(
     it('rejects reuse of a message ID with different content without changing the original audit', async () => {
       const id = await create(),
         f = transport();
+      await isolateAuditDelivery(id);
       await f.relay.publishOne();
       await f.handler.handle(f.received());
       const changed = f.received();
@@ -323,26 +345,29 @@ describe.skipIf(process.env.G6_SERVICE_BUS_POSTGRES_TESTS !== '1')(
       expect(String(rows[0].precio_nuevo)).toBe('123.45');
     });
     it('lets only one concurrent relay claim an available delivery', async () => {
-      await create();
+      const id = await create();
+      await isolateAuditDelivery(id);
       const claims = await Promise.all([store.claim(), store.claim()]);
       expect(claims.filter(Boolean)).toHaveLength(1);
     });
     it('recovers expired claims and fences out the previous worker', async () => {
       const id = await create();
+      await isolateAuditDelivery(id);
       const first = (await store.claim())!;
       await pricing.admin!.query(
-        "UPDATE pricing.outbox_delivery SET lease_until=now()-interval '1 second' WHERE message_id=$1",
-        [id],
+        "UPDATE pricing.outbox_delivery SET lease_until=now()-interval '1 second' WHERE message_id=$1 AND destination=$2",
+        [id, first.destination],
       );
       const second = (await store.claim())!;
       expect(second.token).not.toBe(first.token);
       expect(await store.finish(first, true)).toBe(false);
       expect(await store.finish(second, true)).toBe(true);
-      expect((await delivery(id)).attempts).toBe(2);
+      expect((await delivery(id, first.destination)).attempts).toBe(2);
     });
     it('does not keep a SQL row lock while awaiting broker IO', async () => {
       const id = await create(),
         f = transport();
+      await isolateAuditDelivery(id);
       f.sender.sendMessages.mockImplementationOnce(async () => {
         const client = await pricing.admin!.connect();
         try {

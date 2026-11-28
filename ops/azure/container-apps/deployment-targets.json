@@ -33,6 +33,7 @@
       "resourceGroup": "rg-g6-aca-chile",
       "acaEnvironment": "env-g6-phase1-chile",
       "location": "Chile Central",
+      "apimOrigin": "https://apim-g6-productos-chile.azure-api.net",
       "githubEnvironment": "azure-h5-chile",
       "runnerGroupId": 3,
       "jobName": "azure-h5-smoke-chile",

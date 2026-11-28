@@ -1,12 +1,12 @@
 {
-  "docsSha": "099ad1926a53d1aec1aeae93e894d24ec2721748",
-  "gatewaySha": "2eb8c864f8d315060cf00ccd35ce4015b9569556",
+  "docsSha": "5f30802129ba4bbc0674dcc5878f10065f443118",
+  "gatewaySha": "097dac1bf4a8dcf5c6e799742d2df340f6d893d5",
   "publicationMode": "candidate",
   "securityProfile": "UNSPECIFIED",
   "enabledProviders": [],
   "authorizedPublicAllowlist": [],
-  "g5Flag": false,
-  "g5Authorized": false,
+  "g5Flag": true,
+  "g5Authorized": true,
   "g5EnabledByDefault": false,
   "exposureConfig": {
     "mode": "private-gateway-behind-apim",
@@ -37,7 +37,7 @@
     "g5OverlayCount": 4
   },
   "candidateCatalog": {
-    "operationCount": 145,
+    "operationCount": 149,
     "pendingG7AllowlistIds": []
   },
   "effectivePublication": {
@@ -128,6 +128,14 @@
       },
       {
         "operationId": "actualizarVariante",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "admitirConsumoCuponH5",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "admitirRestauracionCuponH5",
         "reason": "NO_SECURITY_PROFILE"
       },
       {
@@ -455,6 +463,10 @@
         "reason": "NO_SECURITY_PROFILE"
       },
       {
+        "operationId": "obtenerEstadoReservaH5",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
         "operationId": "obtenerEvidenciaReservaCuponInterno",
         "reason": "INTERNAL_EXCLUDED"
       },
@@ -476,6 +488,10 @@
       },
       {
         "operationId": "obtenerMarcaAdmin",
+        "reason": "NO_SECURITY_PROFILE"
+      },
+      {
+        "operationId": "obtenerOperacionCuponH5",
         "reason": "NO_SECURITY_PROFILE"
       },
       {
@@ -1511,6 +1527,100 @@
       "rateProfile": "business_write",
       "environmentEnabled": false,
       "g5OptIn": false
+    },
+    {
+      "operationId": "admitirConsumoCuponH5",
+      "apimOperationId": "admitirconsumocuponh5",
+      "method": "POST",
+      "path": "/cupones/consumos",
+      "service": "promotions-svc",
+      "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "cupones:consumir"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-ventas"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "cupones:consumir"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-ventas"
+      ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
+      "m2mAlternativeExcludedReason": null,
+      "introspectionRequired": false,
+      "exposureProfile": "g5_protected",
+      "rateProfile": "g5_protected",
+      "environmentEnabled": false,
+      "g5OptIn": true
+    },
+    {
+      "operationId": "admitirRestauracionCuponH5",
+      "apimOperationId": "admitirrestauracioncuponh5",
+      "method": "POST",
+      "path": "/cupones/restauraciones",
+      "service": "promotions-svc",
+      "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "cupones:restaurar"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-ventas"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "cupones:restaurar"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-ventas"
+      ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
+      "m2mAlternativeExcludedReason": null,
+      "introspectionRequired": false,
+      "exposureProfile": "g5_protected",
+      "rateProfile": "g5_protected",
+      "environmentEnabled": false,
+      "g5OptIn": true
     },
     {
       "operationId": "asociarCaracteristicaTipoProducto",
@@ -3957,7 +4067,8 @@
           "allowedClients": [
             "modulo-chatbot",
             "modulo-marketplace",
-            "modulo-retail"
+            "modulo-retail",
+            "modulo-ventas"
           ],
           "clientAllowlistStatus": "CONTRACT_DEFINED",
           "introspectionRequired": false
@@ -3975,7 +4086,8 @@
       "allowedClients": [
         "modulo-chatbot",
         "modulo-marketplace",
-        "modulo-retail"
+        "modulo-retail",
+        "modulo-ventas"
       ],
       "clientAllowlistStatus": "CONTRACT_DEFINED",
       "m2mAlternativeExcludedReason": null,
@@ -5027,6 +5139,53 @@
       "g5OptIn": false
     },
     {
+      "operationId": "obtenerEstadoReservaH5",
+      "apimOperationId": "obtenerestadoreservah5",
+      "method": "GET",
+      "path": "/inventario/reservas/{reservaId}/estado",
+      "service": "inventory-svc",
+      "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "inventario:reservas:estado:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-ventas"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "inventario:reservas:estado:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-ventas"
+      ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
+      "m2mAlternativeExcludedReason": null,
+      "introspectionRequired": false,
+      "exposureProfile": "g5_protected",
+      "rateProfile": "g5_protected",
+      "environmentEnabled": false,
+      "g5OptIn": true
+    },
+    {
       "operationId": "obtenerExportacionAuditoriaPrecios",
       "apimOperationId": "obtenerexportacionauditoriaprecios",
       "method": "GET",
@@ -5256,6 +5415,53 @@
       "rateProfile": "commercial_read",
       "environmentEnabled": false,
       "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerOperacionCuponH5",
+      "apimOperationId": "obteneroperacioncuponh5",
+      "method": "GET",
+      "path": "/cupones/operaciones/{operationId}",
+      "service": "promotions-svc",
+      "secured": true,
+      "authSchemes": [
+        "serviceBearer"
+      ],
+      "identityType": "m2m",
+      "securityAlternatives": [
+        {
+          "scheme": "serviceBearer",
+          "identityType": "m2m",
+          "issuerRequired": true,
+          "audienceRequired": true,
+          "audience": "api-productos",
+          "scopes": [
+            "cupones:operaciones:leer"
+          ],
+          "roles": [],
+          "allowedClients": [
+            "modulo-ventas"
+          ],
+          "clientAllowlistStatus": "CONTRACT_DEFINED",
+          "introspectionRequired": false
+        }
+      ],
+      "issuerRequired": true,
+      "audienceRequired": true,
+      "audience": "api-productos",
+      "scopes": [
+        "cupones:operaciones:leer"
+      ],
+      "roles": [],
+      "allowedClients": [
+        "modulo-ventas"
+      ],
+      "clientAllowlistStatus": "CONTRACT_DEFINED",
+      "m2mAlternativeExcludedReason": null,
+      "introspectionRequired": false,
+      "exposureProfile": "g5_protected",
+      "rateProfile": "g5_protected",
+      "environmentEnabled": false,
+      "g5OptIn": true
     },
     {
       "operationId": "obtenerOperacionMaestra",
@@ -7352,6 +7558,6 @@
       "g5OptIn": false
     }
   ],
-  "operationSetSha256": "ee7b318011ff845770f2baee07fda13808f0f60372420abc6d2eef222a274cc9",
-  "filteredOpenApiCanonicalSha256": "40b0486b03b9a5f7aff3a5af120010e046556a8855de51c24aac0f4a42d59044"
+  "operationSetSha256": "93f3df8d4ec713795d732082ad352b721030adcf20017131e4b0b7b5b83ab754",
+  "filteredOpenApiCanonicalSha256": "f1bcfd2bfb667497e8095d446b97de86dbad2c05f88488e1787cd4b06ce8631a"
 }

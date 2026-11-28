@@ -13,7 +13,7 @@
  *
  * Idempotencia y durabilidad:
  *   - Modo PeekLock.
- *   - Validación estricta de envelope (subject === payload.name, messageId === payload.message_id como UUIDs válidos, producer === 'catalog-svc').
+ *   - Validación estricta de envelope (subject === payload.name, messageId === payload.message_id como UUIDs válidos, producer según R06/R02).
  *   - DLQ inmediato para violaciones de contrato, INVALID_MESSAGE y FEATURE_DISABLED.
  *   - Errores transitorios aplican retardo exponencial (1, 2, 4, 8, hasta 16s según deliveryCount) antes de abandonMessage.
  *   - Commit durable antes de completeMessage.
@@ -387,7 +387,7 @@ export class InventoryServiceBusConsumerRuntime
       );
     }
 
-    // Solo se suscribe al flujo R06 (Catalog → Inventory); Bulk (R02) permanece bloqueado.
+    // Suscribe R06 (Catalog) y R02 (Bulk) en receptores independientes.
     void this.open();
   }
 

@@ -23,6 +23,9 @@ if [[ -z "$base" ]]; then
 fi
 [[ "$base" =~ ^https://[^/]+/?$ ]] || { echo 'URL smoke debe ser HTTPS y no incluir una ruta.' >&2; exit 2; }
 base="${base%/}"
+gateway_modalidad_b=false
+gateway_internal_origin=''
+gateway_apim_origin=''
 if [[ "${H5_DEPLOY_DESTINATION:-}" == chile-shared ]]; then
   receipt="${SMOKE_RECEIPT:-}"
   [[ -n "$receipt" && -f "$receipt" ]] || { echo 'FALLO: falta recibo del servicio/run actual; no se ejecutó HTTP.' >&2; exit 1; }
@@ -45,8 +48,19 @@ if [[ "${H5_DEPLOY_DESTINATION:-}" == chile-shared ]]; then
       .service == $service and .workflow_run_id == $run and (.app_resource_id | ascii_downcase) == ($id | ascii_downcase) and .origin_https == $url and
       (.target | test("^ghcr\\.io/taller-sw-web/g6-productos-ofertas-backend/" + $service + "@sha256:[0-9a-f]{64}$")) and
       .digest_candidate == (.target | split("@")[1]) and .served_digest == .digest_candidate and
-      (.served_revision | type == "string" and length > 0) and .traffic_weight == 100
+      (.served_revision | type == "string" and length > 0) and .traffic_weight == 100 and
+      ((.served_health // "Healthy") == "Healthy") and
+      ((.preserved_labels // []) | type == "array" and all(.[]; (.weight // 0) == 0 and ((.label // "") | length > 0) and ((.revisionName // "") | length > 0)))
     ' "$receipt" >/dev/null || { echo 'FALLO: recibo/destino/Environment/servicio/recurso/digest/origen/tráfico inconsistente; no se ejecutó HTTP.' >&2; exit 1; }
+    if [[ "$service" == api-gateway && "$(jq -r '.modalidad_b // false' "$receipt")" == true ]]; then
+      gateway_modalidad_b=true
+      gateway_internal_origin="$(jq -er '.internal_origin_https // empty' "$receipt" 2>/dev/null || true)"
+      [[ "$gateway_internal_origin" =~ ^https://api-gateway\.internal\.[^/]+$ ]] || { echo 'FALLO: recibo Modalidad B sin internal_origin_https autorizado para health.' >&2; exit 1; }
+      expected_apim="$(jq -r '.destinations["chile-shared"].apimOrigin // empty' "$targets")"
+      gateway_apim_origin="${SMOKE_APIM_URL:-$expected_apim}"
+      gateway_apim_origin="${gateway_apim_origin%/}"
+      [[ -n "$expected_apim" && "$gateway_apim_origin" == "${expected_apim%/}" && "$gateway_apim_origin" =~ ^https://[^/]+$ ]] || { echo 'FALLO: origen APIM inconsistente con deployment-targets.json.' >&2; exit 1; }
+    fi
   fi
   [[ -n "$expected_id" && "$H5_DEPLOY_ENVIRONMENT" == azure-h5-chile ]] || { echo 'FALLO: Environment Chile no corresponde al smoke.' >&2; exit 1; }
 fi
@@ -71,10 +85,10 @@ readonly request_timeout="${SMOKE_REQUEST_TIMEOUT:-20}"
 readonly retry_delay="${SMOKE_RETRY_DELAY_SECONDS:-5}"
 
 request_2xx() {
-  local path="$1" expected_status="$2" body status attempt
+  local target_base="$1" path="$2" expected_status="$3" body status attempt
   for ((attempt=1; attempt<=max_attempts; attempt++)); do
     body="$(mktemp)"
-    status="$(curl --silent --show-error --max-time "$request_timeout" --output "$body" --write-out '%{http_code}' "${base}${path}" 2>/dev/null || true)"
+    status="$(curl --silent --show-error --max-time "$request_timeout" --output "$body" --write-out '%{http_code}' "${target_base}${path}" 2>/dev/null || true)"
     if [[ "$status" =~ ^2[0-9][0-9]$ ]] &&
        jq -es --arg service "$service" --arg expected_status "$expected_status" \
          'length == 1 and (.[0] | type == "object" and .service == $service and .status == $expected_status)' "$body" >/dev/null 2>&1; then
@@ -89,9 +103,43 @@ request_2xx() {
   return 1
 }
 
-request_2xx '/health' "$liveness_status" || { echo "FALLO de liveness: $service" >&2; exit 1; }
+if [[ "$gateway_modalidad_b" == true ]]; then
+  printf 'PASS recibo Modalidad B: revisión=%s digest=%s salud=Healthy tráfico=100%%.\n' \
+    "$(jq -r '.served_revision' "$SMOKE_RECEIPT")" "$(jq -r '.served_digest' "$SMOKE_RECEIPT")"
+  request_2xx "$gateway_internal_origin" '/health' "$liveness_status" || { echo "FALLO de liveness interno autorizado: $service" >&2; exit 1; }
+
+  apim_headers="$(mktemp)"
+  apim_cid='11111111-1111-4111-8111-111111111111'
+  if [[ -r /proc/sys/kernel/random/uuid ]]; then apim_cid="$(cat /proc/sys/kernel/random/uuid)"; fi
+  apim_status="$(curl --silent --show-error --max-time "$request_timeout" --dump-header "$apim_headers" --output /dev/null --write-out '%{http_code}' --header "X-Correlation-Id: ${apim_cid}" "${gateway_apim_origin}${SMOKE_PROTECTED_PATH}" 2>/dev/null || true)"
+  apim_cid_echo="$(tr -d '\r' < "$apim_headers" | awk -F': ' 'tolower($1)=="x-correlation-id"{print $2; exit}')"
+  rm -f "$apim_headers"
+  if [[ "$apim_status" != 401 && "$apim_status" != 403 ]] || [[ "${apim_cid_echo,,}" != "${apim_cid,,}" ]]; then
+    printf 'FALLO vía APIM %s%s: HTTP %s cid_echo=%s (esperado 401/403 y x-correlation-id=%s).\n' \
+      "$gateway_apim_origin" "$SMOKE_PROTECTED_PATH" "${apim_status:-sin-respuesta}" "${apim_cid_echo:-ausente}" "$apim_cid" >&2
+    exit 1
+  fi
+  printf 'PASS rechazo anónimo en APIM: HTTP %s %s (x-correlation-id=%s)\n' "$apim_status" "$SMOKE_PROTECTED_PATH" "$apim_cid"
+
+  direct_health_status="$(curl --silent --show-error --max-time "$request_timeout" --output /dev/null --write-out '%{http_code}' "${base}/health" 2>/dev/null || true)"
+  direct_protected_status="$(curl --silent --show-error --max-time "$request_timeout" --output /dev/null --write-out '%{http_code}' "${base}${SMOKE_PROTECTED_PATH}" 2>/dev/null || true)"
+  if [[ "$direct_health_status" != 403 || "$direct_protected_status" != 403 ]]; then
+    printf 'FALLO anti-bypass Modalidad B: acceso directo a %s respondió /health=%s y %s=%s (se exige HTTP 403 en ambos).\n' \
+      "$base" "${direct_health_status:-sin-respuesta}" "$SMOKE_PROTECTED_PATH" "${direct_protected_status:-sin-respuesta}" >&2
+    exit 1
+  fi
+  printf 'PASS anti-bypass Modalidad B: acceso directo rechazado HTTP 403 en /health y %s\n' "$SMOKE_PROTECTED_PATH"
+
+  {
+    printf "Infraestructura HTTP Modalidad B verificada para \`%s\`: digest/salud/revisión en recibo, liveness interno autorizado 200, rechazo anónimo en APIM HTTP %s con correlación UUID y acceso directo rechazado HTTP 403. La prueba autenticada APIM → Gateway se registra aparte.\n" \
+      "$service" "$apim_status"
+  } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  exit 0
+fi
+
+request_2xx "$base" '/health' "$liveness_status" || { echo "FALLO de liveness: $service" >&2; exit 1; }
 if [[ -n "$readiness_path" ]]; then
-  request_2xx "$readiness_path" "$readiness_status" || { echo "FALLO de readiness: $service" >&2; exit 1; }
+  request_2xx "$base" "$readiness_path" "$readiness_status" || { echo "FALLO de readiness: $service" >&2; exit 1; }
 else
   echo "Nota: $service no tiene ruta HTTP readiness en este contrato; /health acredita solo liveness y la ruta protegida es obligatoria."
 fi

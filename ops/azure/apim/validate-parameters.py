@@ -100,19 +100,29 @@ def validate(
 ) -> None:
     if not expected_docs_sha or not expected_gateway_sha:
         raise ValueError("expected_docs_sha y expected_gateway_sha son obligatorios")
-    if manifest.get("publicationMode") != "effective" or manifest.get("effectivePublication", {}).get("authorized") is not True:
+
+    deployment_stage = parameters.get("deploymentStage", "effective")
+    if deployment_stage not in {"infrastructure", "effective"}:
+        raise ValueError("deploymentStage debe ser 'infrastructure' o 'effective'")
+
+    is_effective = deployment_stage == "effective"
+    if is_effective and (
+        manifest.get("publicationMode") != "effective"
+        or manifest.get("effectivePublication", {}).get("authorized") is not True
+    ):
         raise ValueError(
             "Publicación efectiva bloqueada: se requiere publicationMode='effective' y effectivePublication.authorized=true "
             f"({manifest.get('effectivePublication', {}).get('blockedReasons', [])})"
         )
 
-    for key in (
+    required_keys = [
+        "candidateApiName",
+        "candidateApiPath",
         "environmentTier",
         "expectedSubscriptionId",
         "expectedResourceGroup",
         "expectedEnvironment",
         "expectedGatewayResourceId",
-        "expectedApimOriginCidrs",
         "apimSubnetResourceId",
         "gatewayBackendUrl",
         "azureCliEvidencePath",
@@ -130,9 +140,22 @@ def validate(
         "applicationInsightsConnectionString",
         "expectedOperationSetSha256",
         "expectedFilteredOpenApiSha256",
-    ):
+    ]
+    if is_effective:
+        required_keys.append("expectedApimOriginCidrs")
+
+    for key in required_keys:
         if key not in parameters:
             raise ValueError(f"Falta parámetro obligatorio: {key}")
+
+    if not isinstance(parameters["candidateApiName"], str) or not re.fullmatch(
+        r"g6-h5-[a-z0-9-]{1,60}", parameters["candidateApiName"]
+    ):
+        raise ValueError("candidateApiName debe ser un ID aislado g6-h5-*")
+    if not isinstance(parameters["candidateApiPath"], str) or not re.fullmatch(
+        r"h5-[a-z0-9-]+/api/v1", parameters["candidateApiPath"]
+    ):
+        raise ValueError("candidateApiPath debe estar bajo h5-*/api/v1")
 
     tier = parameters["environmentTier"]
     if tier not in {"lab", "production"}:
@@ -141,8 +164,12 @@ def validate(
     if not isinstance(parameters["operationalApprovalRef"], str) or not parameters["operationalApprovalRef"].strip():
         raise ValueError("Falta operationalApprovalRef aprobado por Castilla/Infra")
 
-    expected_cidrs = parameters["expectedApimOriginCidrs"]
-    if not isinstance(expected_cidrs, list) or not expected_cidrs or any(not isinstance(c, str) or not c.strip() for c in expected_cidrs):
+    expected_cidrs = parameters.get("expectedApimOriginCidrs", [])
+    if is_effective and (
+        not isinstance(expected_cidrs, list)
+        or not expected_cidrs
+        or any(not isinstance(c, str) or not c.strip() for c in expected_cidrs)
+    ):
         raise ValueError("expectedApimOriginCidrs debe ser una lista no vacía de CIDRs APIM autorizados")
 
     cli_evidence_path = Path(str(parameters["azureCliEvidencePath"]))
@@ -169,7 +196,8 @@ def validate(
     gateway_app = cli_evidence["gatewayApp"]
     if gateway_app.get("resourceId") != parameters["expectedGatewayResourceId"]:
         raise ValueError("gatewayApp.resourceId de evidencia Azure CLI no coincide con expectedGatewayResourceId")
-    validate_aca_network_evidence(gateway_app, cli_evidence["acaEnvironment"], expected_cidrs)
+    if is_effective:
+        validate_aca_network_evidence(gateway_app, cli_evidence["acaEnvironment"], expected_cidrs)
 
     if manifest.get("docsSha") != expected_docs_sha:
         raise ValueError("docsSha del manifiesto no coincide con el SHA aprobado")

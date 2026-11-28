@@ -280,6 +280,45 @@ jobs:
           [[ -n "$service" && "$service" != \#* ]] || continue
           docker build --file Dockerfile.service --build-arg SERVICE_NAME="$service" --tag "g6-service:${service}-ci" .
         done < ops/shared/services-ci.psv
+    - name: Escanear vulnerabilidades de las nueve imágenes candidatas con Trivy
+      env:
+        TRIVY_VERSION: '0.76.2'
+        TRIVY_CHECKSUMS_SHA256: '802e4ac1418ed967cd3c4b901f4f71ca00b7363ede67778665a22d9f13f58c83'
+      run: |
+        set -Eeuo pipefail
+        tool_dir="$RUNNER_TEMP/trivy-bin"
+        out="$RUNNER_TEMP/trivy-h5"
+        mkdir -p "$tool_dir" "$out"
+        archive="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+        checksums="trivy_${TRIVY_VERSION}_checksums.txt"
+        release="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+        (
+          cd "$tool_dir"
+          curl --fail --silent --show-error --location --retry 3 -O "$release/$archive" -O "$release/$checksums"
+          printf '%s  %s\n' "$TRIVY_CHECKSUMS_SHA256" "$checksums" | sha256sum --check
+          awk -v archive="$archive" '$2 == archive { print }' "$checksums" | sha256sum --check
+          tar -xzf "$archive" trivy
+        )
+        printf 'source_sha\tservice\timage_id\n' > "$out/images.tsv"
+        "$tool_dir/trivy" --version > "$out/version.txt"
+        scan_status=0
+        while IFS='|' read -r service port port_env; do
+          [[ -n "$service" && "$service" != \#* ]] || continue
+          image="g6-service:${service}-ci"
+          image_id="$(docker image inspect "$image" --format '{{.Id}}')"
+          printf '%s\t%s\t%s\n' "$GITHUB_SHA" "$service" "$image_id" >> "$out/images.tsv"
+          if ! "$tool_dir/trivy" image --image-src docker --scanners vuln --format json --output "$out/$service.json" "$image"; then
+            scan_status=1
+          fi
+        done < ops/shared/services-ci.psv
+        exit "$scan_status"
+    - name: Conservar reportes Trivy por SHA e imagen
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: h5-trivy-${{ github.sha }}
+        path: ${{ runner.temp }}/trivy-h5
+        if-no-files-found: ignore
     - name: Probar salud y configuración de las nueve imágenes
       run: |
         set -Eeuo pipefail
@@ -822,14 +861,14 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: 099ad1926a53d1aec1aeae93e894d24ec2721748
+        ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Obtener registro Gateway integrado
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-backend
-        ref: 2eb8c864f8d315060cf00ccd35ce4015b9569556
+        ref: 097dac1bf4a8dcf5c6e799742d2df340f6d893d5
         path: .ci/G6-Productos-Ofertas-gateway
         persist-credentials: 'false'
     - name: Configurar Python 3.12
@@ -853,9 +892,11 @@ jobs:
         --source-openapi .ci/G6-Productos-Ofertas-docs/contratos/http/openapi.yaml
         --gateway-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/contract-routes.ts
         --g5-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/g5-h5-routes.ts
-        --expected-docs-sha 099ad1926a53d1aec1aeae93e894d24ec2721748
-        --expected-gateway-sha 2eb8c864f8d315060cf00ccd35ce4015b9569556
+        --expected-docs-sha 5f30802129ba4bbc0674dcc5878f10065f443118
+        --expected-gateway-sha 097dac1bf4a8dcf5c6e799742d2df340f6d893d5
         --mode candidate
+        --enable-g5
+        --g5-authorized
   integral:
     name: Validación integral de integración continua
     runs-on: ubuntu-latest

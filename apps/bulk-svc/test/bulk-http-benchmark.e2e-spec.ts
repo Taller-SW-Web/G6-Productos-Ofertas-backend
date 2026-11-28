@@ -124,6 +124,12 @@ describe.skipIf(process.env.G6_PERFORMANCE_HTTP !== '1')(
         resolve('apps/bulk-svc/migrations/0008_h5_outbox_delivery.sql'),
         'utf8',
       );
+      const allDeliveryDestinations = await readFile(
+        resolve(
+          'apps/bulk-svc/migrations/0009_h5_outbox_delivery_all_destinations.sql',
+        ),
+        'utf8',
+      );
       const actorOwnership = await readFile(
         resolve('apps/bulk-svc/migrations/0005_actor_ownership.sql'),
         'utf8',
@@ -161,6 +167,7 @@ ${actorOwnership}
 ${ownerCorrelation}
 ${retry}
 ${serviceBusDelivery}
+${allDeliveryDestinations}
 GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA bulk TO bulk_fixture_app;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA bulk TO bulk_fixture_app;`,

@@ -9,8 +9,8 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_DOCS_SHA = "099ad1926a53d1aec1aeae93e894d24ec2721748"
-EXPECTED_GATEWAY_SHA = "2eb8c864f8d315060cf00ccd35ce4015b9569556"
+EXPECTED_DOCS_SHA = "5f30802129ba4bbc0674dcc5878f10065f443118"
+EXPECTED_GATEWAY_SHA = "097dac1bf4a8dcf5c6e799742d2df340f6d893d5"
 SPEC = importlib.util.spec_from_file_location("filter_openapi", ROOT / "filter-openapi.py")
 FILTER = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -43,7 +43,13 @@ class FilterOpenApiTests(unittest.TestCase):
                     "get": {"operationId": "publica", "security": []}
                 },
                 "/segura": {"get": {"operationId": "segura"}},
-                "/g5": {"post": {"operationId": "g5-operacion"}},
+                "/g5": {"post": {
+                    "operationId": "g5-operacion",
+                    "security": [{"serviceBearer": []}],
+                    "x-service-audience": "api-productos",
+                    "x-required-scope": "cupones:consumir",
+                    "x-allowed-client-ids": ["modulo-ventas"],
+                }},
             },
             "servers": [{"url": "/api/v1"}],
         }
@@ -70,6 +76,8 @@ class FilterOpenApiTests(unittest.TestCase):
         self.assertFalse(manifest["g5EnabledByDefault"])
 
     def test_g5_requires_explicit_opt_in_and_secured_metadata_is_preserved(self):
+        with self.assertRaisesRegex(ValueError, "--g5-authorized"):
+            FILTER.filter_spec(self.source, self.gateway_routes, self.g5_routes, True, "docs", "gateway")
         _, manifest = FILTER.filter_spec(
             self.source,
             self.gateway_routes,
@@ -236,6 +244,8 @@ class ApimPolicyTests(unittest.TestCase):
             "maxConcurrency": 0,
         }
         self.parameters = {
+            "candidateApiName": "g6-h5-candidate",
+            "candidateApiPath": "h5-candidate/api/v1",
             "environmentTier": "lab",
             "expectedSubscriptionId": "sub-test",
             "expectedResourceGroup": "rg-lab",
@@ -272,6 +282,16 @@ class ApimPolicyTests(unittest.TestCase):
             expected_docs_sha=EXPECTED_DOCS_SHA,
             expected_gateway_sha=EXPECTED_GATEWAY_SHA,
         )
+        for unsafe in (
+            {"candidateApiName": "g6-productos-ofertas"},
+            {"candidateApiPath": "api/v1"},
+        ):
+            with self.subTest(unsafe=unsafe), self.assertRaises(ValueError):
+                PARAMS.validate(
+                    {**self.parameters, **unsafe}, self.filtered, self.manifest,
+                    expected_docs_sha=EXPECTED_DOCS_SHA,
+                    expected_gateway_sha=EXPECTED_GATEWAY_SHA,
+                )
         # Integración completa de preflight con Modalidad B (external=true Allow-only, vnetConfiguration=None)
         from datetime import datetime, timezone
 
@@ -355,11 +375,22 @@ class ApimPolicyTests(unittest.TestCase):
         self.assertIn("bytes: 0", bicep)
         self.assertIn("gatewayBackendUrl", bicep)
 
+    def test_candidate_api_and_named_values_do_not_use_operational_ids(self):
+        bicep = (ROOT / "main.bicep").read_text(encoding="utf-8")
+        secured = (ROOT / "policies" / "operation-secured.xml").read_text(encoding="utf-8")
+        self.assertIn("name: '${apimName}/${candidateApiName}'", bicep)
+        self.assertIn("path: candidateApiPath", bicep)
+        self.assertNotIn("name: '${apimName}/g6-productos-ofertas'", bicep)
+        for name in ("g7-openid-config-url", "g7-issuer", "g7-audience"):
+            self.assertIn(f"g6-h5-candidate-{name}", bicep)
+        self.assertIn("{{g6-h5-candidate-g7-openid-config-url}}", secured)
+        self.assertIn("{{g6-h5-candidate-g7-issuer}}", secured)
+
     def test_application_insights_logger_uses_secure_connection_and_system_identity(self):
         bicep = (ROOT / "main.bicep").read_text(encoding="utf-8")
         self.assertIn("Microsoft.ApiManagement/service/loggers@2022-08-01", bicep)
         logger_block = bicep.split("resource applicationInsightsLogger", 1)[1].split("resource apiDiagnostics", 1)[0]
-        self.assertIn("name: '${apimName}/applicationinsights'", logger_block)
+        self.assertIn("name: '${apimName}/g6-h5-candidate-applicationinsights'", logger_block)
         self.assertIn("apim", logger_block)
         self.assertIn("existingApim", logger_block)
         self.assertIn("loggerType: 'applicationInsights'", bicep)
@@ -438,12 +469,34 @@ class ApimPolicyTests(unittest.TestCase):
     def test_final_manifest_keeps_h5_operation_count_and_exclusions(self):
         manifest = json.loads((ROOT / "openapi" / "operation-security.json").read_text(encoding="utf-8"))
         operations = manifest["operations"]
-        self.assertEqual(len(operations), 145)
-        self.assertEqual(sum(operation["secured"] for operation in operations), 145)
+        self.assertEqual(len(operations), 149)
+        self.assertEqual(sum(operation["secured"] for operation in operations), 149)
         self.assertEqual(sum(not operation["secured"] for operation in operations), 0)
         self.assertEqual(len(manifest["privateOperationIds"]), 5)
         self.assertFalse(manifest["g5EnabledByDefault"])
-        self.assertEqual(sum(operation["g5OptIn"] for operation in operations), 0)
+        g5 = {op["operationId"]: op for op in operations if op["g5OptIn"]}
+        expected = {
+            "admitirConsumoCuponH5": ("POST", "/cupones/consumos", "cupones:consumir"),
+            "admitirRestauracionCuponH5": ("POST", "/cupones/restauraciones", "cupones:restaurar"),
+            "obtenerOperacionCuponH5": ("GET", "/cupones/operaciones/{operationId}", "cupones:operaciones:leer"),
+            "obtenerEstadoReservaH5": ("GET", "/inventario/reservas/{reservaId}/estado", "inventario:reservas:estado:leer"),
+        }
+        self.assertEqual(set(g5), set(expected))
+        self.assertTrue(manifest["g5Authorized"])
+        self.assertFalse(manifest["effectivePublication"]["authorized"])
+        filtered = json.loads((ROOT / "openapi" / "gateway-filtered.json").read_text(encoding="utf-8"))
+        for operation_id, (method, path, scope) in expected.items():
+            with self.subTest(operation_id=operation_id):
+                op = g5[operation_id]
+                self.assertEqual((op["method"], op["path"], op["scopes"]), (method, path, [scope]))
+                self.assertEqual(op["authSchemes"], ["serviceBearer"])
+                self.assertEqual(op["allowedClients"], ["modulo-ventas"])
+                self.assertEqual(op["audience"], "api-productos")
+                invalid = copy.deepcopy(manifest)
+                modified_op = next(item for item in invalid["operations"] if item["operationId"] == operation_id)
+                modified_op["securityAlternatives"][0]["allowedClients"] = ["modulo-postventa"]
+                with self.assertRaisesRegex(ValueError, "Seguridad contractual G5 inconsistente"):
+                    FILTER.validate_artifact_pair(filtered, invalid)
         self.assertEqual(
             manifest["excludedUncontractedLegacyOperationIds"],
             sorted(FILTER.LEGACY_UNCONTRACTED),
@@ -456,7 +509,7 @@ class ApimPolicyTests(unittest.TestCase):
         api_policy = (ROOT / "policies" / "api.xml").read_text(encoding="utf-8")
         self.assertNotIn("rewrite-uri", api_policy)
         bicep = (ROOT / "main.bicep").read_text(encoding="utf-8")
-        self.assertIn("path: 'api/v1'", bicep)
+        self.assertIn("path: candidateApiPath", bicep)
 
 
 class CompiledArmTests(unittest.TestCase):
@@ -558,6 +611,7 @@ class CompiledArmTests(unittest.TestCase):
                 self.manifest,
                 EXPECTED_DOCS_SHA,
                 EXPECTED_GATEWAY_SHA,
+                g5_authorized=True,
             ),
             len(self.manifest["operations"]),
         )
@@ -576,6 +630,7 @@ class CompiledArmTests(unittest.TestCase):
                     self.manifest,
                     EXPECTED_DOCS_SHA,
                     EXPECTED_GATEWAY_SHA,
+                g5_authorized=True,
                 )
 
     def test_compiled_arm_rejects_stale_manifest_or_private_route_leak(self):
@@ -589,6 +644,7 @@ class CompiledArmTests(unittest.TestCase):
                 self.manifest,
                 EXPECTED_DOCS_SHA,
                 EXPECTED_GATEWAY_SHA,
+                g5_authorized=True,
             )
         leaked = copy.deepcopy(self.manifest)
         leaked["operations"][0]["operationId"] = leaked["privateOperationIds"][0]
@@ -599,6 +655,7 @@ class CompiledArmTests(unittest.TestCase):
                 leaked,
                 EXPECTED_DOCS_SHA,
                 EXPECTED_GATEWAY_SHA,
+                g5_authorized=True,
             )
 
     def test_compiled_arm_rejects_stale_contract_or_gateway_provenance(self):
@@ -612,6 +669,7 @@ class CompiledArmTests(unittest.TestCase):
                     stale,
                     EXPECTED_DOCS_SHA,
                     EXPECTED_GATEWAY_SHA,
+                g5_authorized=True,
                 )
 
 
@@ -860,7 +918,7 @@ class ApimClosureRequirementsTests(unittest.TestCase):
                     "operationPolicies": {
                         "type": "Microsoft.ApiManagement/service/apis/operations/policies",
                         "copy": {"count": "[length(variables('authorizedOperations'))]"},
-                        "name": "[format('{0}/{1}/{2}/policy', parameters('apimName'), variables('apiName'), variables('authorizedOperations')[copyIndex()].apimOperationId)]",
+                        "name": "[format('{0}/{1}/{2}/policy', parameters('apimName'), parameters('candidateApiName'), variables('authorizedOperations')[copyIndex()].apimOperationId)]",
                         "dependsOn": ["api", "openIdNamedValue", "issuerNamedValue", "audienceNamedValue"],
                     },
                 },
@@ -1029,6 +1087,80 @@ class ApimClosureRequirementsTests(unittest.TestCase):
                 {"vnetConfiguration": None},
                 expected_cidrs,
             )
+
+    def test_two_stage_deployment_infrastructure_vs_effective(self):
+        from datetime import datetime, timezone
+        with tempfile.TemporaryDirectory(prefix="apim-two-stage-") as temp_dir:
+            evidence_path = Path(temp_dir) / "cli-evidence.json"
+            evidence_path.write_text(
+                json.dumps(
+                    {
+                        "subscriptionId": "00000000-0000-0000-0000-000000000000",
+                        "resourceGroup": "rg-g6-aca-chile",
+                        "environment": "env-g6-phase1-chile",
+                        "capturedAtUtc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                        "sourceCommand": "az containerapp show -g rg-g6-aca-chile -n api-gateway",
+                        "acaEnvironment": {"vnetConfiguration": None},
+                        "gatewayApp": {
+                            "resourceId": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-g6-aca-chile/providers/Microsoft.App/containerApps/api-gateway",
+                            "external": True,
+                            "ipSecurityRestrictions": [],
+                            "directRoutesBlocked": False,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            filtered = json.loads((ROOT / "openapi" / "gateway-filtered.json").read_text(encoding="utf-8"))
+            manifest = json.loads((ROOT / "openapi" / "operation-security.json").read_text(encoding="utf-8"))
+            base_params = {
+                "deploymentStage": "infrastructure",
+                "candidateApiName": "g6-h5-candidate",
+                "candidateApiPath": "h5-candidate/api/v1",
+                "environmentTier": "lab",
+                "expectedSubscriptionId": "00000000-0000-0000-0000-000000000000",
+                "expectedResourceGroup": "rg-g6-aca-chile",
+                "expectedEnvironment": "env-g6-phase1-chile",
+                "expectedGatewayResourceId": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-g6-aca-chile/providers/Microsoft.App/containerApps/api-gateway",
+                "apimSubnetResourceId": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-g6-productos-azure/providers/Microsoft.Network/virtualNetworks/vm-g6-backendVNET/subnets/snet-g6-apim",
+                "gatewayBackendUrl": "https://api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io/api/v1",
+                "azureCliEvidencePath": str(evidence_path),
+                "operationalApprovalRef": "APROBACION-INFRA-H5",
+                "g7Issuer": "https://g7-auth-service.onrender.com/api/v1/auth",
+                "g7OpenIdConfigurationUrl": "https://g7-auth-service.onrender.com/api/v1/auth/.well-known/openid-configuration",
+                "g7Audience": "api-productos",
+                "corsAllowedOrigins": ["https://marketplace.example.com"],
+                "burstCalls": 60,
+                "burstWindowSeconds": 60,
+                "quotaCalls": 1000,
+                "quotaWindowSeconds": 3600,
+                "rateProfiles": {
+                    name: {"burstCalls": 60, "burstWindowSeconds": 60, "quotaCalls": 1000, "quotaWindowSeconds": 3600, "maxConcurrency": 0}
+                    for name in FILTER.KNOWN_RATE_PROFILES
+                },
+                "applicationInsightsResourceId": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-g6-aca-chile/providers/Microsoft.Insights/components/appi-g6-apim-chile",
+                "applicationInsightsConnectionString": "InstrumentationKey=00000000-0000-0000-0000-000000000000",
+                "expectedOperationSetSha256": manifest["operationSetSha256"],
+                "expectedFilteredOpenApiSha256": manifest["filteredOpenApiCanonicalSha256"],
+            }
+            # Etapa A (infrastructure): pasa sin directRoutesBlocked ni manifest effective
+            PARAMS.validate(
+                base_params,
+                filtered,
+                manifest,
+                expected_docs_sha=manifest["docsSha"],
+                expected_gateway_sha=manifest["gatewaySha"],
+            )
+            # Etapa B (effective): sigue bloqueando si manifest es candidate o falta directRoutesBlocked
+            effective_params = dict(base_params, deploymentStage="effective", expectedApimOriginCidrs=["20.10.20.30/32"])
+            with self.assertRaisesRegex(ValueError, "Publicación efectiva bloqueada"):
+                PARAMS.validate(
+                    effective_params,
+                    filtered,
+                    manifest,
+                    expected_docs_sha=manifest["docsSha"],
+                    expected_gateway_sha=manifest["gatewaySha"],
+                )
 
 
 if __name__ == "__main__":

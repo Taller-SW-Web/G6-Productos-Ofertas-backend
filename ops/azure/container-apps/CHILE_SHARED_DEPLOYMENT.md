@@ -2,7 +2,7 @@
 
 ## Alcance
 
-`chile-shared` reutiliza `rg-g6-aca-chile` y `env-g6-phase1-chile`. El CD solo actualiza el contenedor de aplicación ya existente del servicio pedido, usando una imagen GHCR fijada por digest. No crea ACA ni altera Caddy, identidad, configuración, secretos, escala, probes, ingress o tráfico.
+`chile-shared` reutiliza `rg-g6-aca-chile` y `env-g6-phase1-chile`. El CD actualiza la imagen del contenedor de aplicación existente por digest. En Gateway y Price Audit gestiona además la ruta de tráfico propia del corte controlado. Se conservan Caddy, identidad, secretos, escala, probes y restricciones de ingress.
 
 Las nueve aplicaciones se pueden seleccionar individualmente. `all` se rechaza para Chile. El plan RBAC inicial usa Catalog, Inventory, Pricing, Promotions y Gateway; los otros cuatro requieren selección expresa y autorización del owner RBAC.
 
@@ -22,6 +22,20 @@ ACA revision labels funcionan independientemente del split de tráfico del FQDN 
 La recuperación supervisada solo retira `g5-h5` y el flag H5 si el recibo identifica exactamente la revisión Marketplace, el digest, la etiqueta y la configuración esperada. Si hay drift de tráfico, revisión o digest, se bloquea sin sobrescribirlo. No se cambia `G6_SECURITY_MODE`, Caddy ni la ruta default de Marketplace.
 
 Este perfil no abre la ventana ni aprueba un despliegue. Sigue requiriendo el Environment `azure-h5-chile`, su aprobación humana, `AZURE_CHILE_DEPLOY_ENABLED=true` y un SHA vigente de `master` con CI aprobada.
+
+## Verificación de Gateway bajo Modalidad B
+
+Para el release general usa el perfil estándar y conserva la revisión y la URL de la etiqueta G5. El smoke del CD valida el recibo con la revisión y el digest servidos, liveness desde el runner privado, rechazo anónimo en APIM con correlación y rechazo directo con HTTP 403.
+
+Después de desplegar el Gateway, abre el Frontend con la sesión existente de G7 con rol `GESTOR_COMERCIAL`. En la pantalla de administración de productos, identifica la petición de solo lectura `GET /api/v1/productos/administracion` vía APIM y confirma el HTTP 200 y su `X-Correlation-Id`. Guarda solo la operación, el estado, el identificador de correlación y la hora UTC. Busca ese mismo identificador en el registro JSON `gateway_request` del contenedor de Gateway, filtrado a la revisión del recibo del mismo run. Comprueba operación `listarProductosAdministracion`, código HTTP 200, el campo `owner=catalog-svc` y `upstreamReached=true`. Captura la revisión y el digest servidos antes y después de la solicitud. Si falta la sesión o la traza correlacionada, registra el nivel de evidencia alcanzado y el caso L2 pendiente. Omite cuerpos de negocio y credenciales del paquete de evidencia.
+
+## Corte de Price Audit y consumidor R16
+
+Price Audit conserva el modo `Multiple` y su escala. Antes de la oleada, el propietario de RBAC debe acreditar que la identidad OIDC de `azure-h5-chile` tiene `Microsoft.App/containerApps/revisions/activate/action` y `Microsoft.App/containerApps/revisions/deactivate/action` sobre el recurso de `price-audit-svc`. Esta comprobación incluye las dos acciones de recuperación. Las acciones de lectura de revisiones y escritura de la aplicación por sí solas no conceden esos permisos.
+
+El preflight del ejecutor exige que la revisión que sirve el 100 % del tráfico sea la única revisión activa de Price Audit configurada con Service Bus. La revisión nueva puede consumir R16 mientras calienta, aun con peso HTTP cero. Durante este intervalo las entregas se protegen con PeekLock e Inbox. Después de confirmar salud, digest y corte HTTP explícito, el CD desactiva la revisión anterior, comprueba cero réplicas y verifica que queda una única revisión activa configurada para consumir R16. El recibo registra su identidad. La certificación del consumo efectivo se hace con un mensaje sintético y la correlación de la entrega persistida.
+
+Ante un fallo de corte o smoke, la recuperación oficial verifica el hash estricto y el estado de tráfico del recibo. Reactiva la revisión anterior si corresponde, espera que esté sana, vuelve a fijarle el tráfico y retira al candidato del consumo, incluso si permanecía al 0 %. Al restaurar el digest de la plantilla se puede crear otra revisión. El ejecutor también la desactiva y confirma la única revisión consumidora antes de declarar éxito. Cambios manuales de flags y consumidores inesperados requieren conciliación supervisada antes de continuar. Las revisiones históricas que no consumen R16 se conservan.
 
 ## Ventana de despliegue
 

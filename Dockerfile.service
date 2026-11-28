@@ -1,4 +1,4 @@
-FROM node:24.15.0-alpine@sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f AS build
+FROM node:24.22.3-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS build
 
 WORKDIR /app
 RUN apk add --no-cache bash
@@ -11,13 +11,15 @@ COPY ops/shared ./ops/shared
 ARG SERVICE_NAME
 RUN bash ops/shared/build-service.sh "$SERVICE_NAME"
 
-FROM node:24.15.0-alpine@sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f AS runtime
+FROM node:24.22.3-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS runtime
 
 ENV NODE_ENV=production
 ENV CATALOG_SVC_HOST=0.0.0.0 TAXONOMY_SVC_HOST=0.0.0.0
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+# El runtime ejecuta Node directamente. npm solo instala dependencias durante el build.
+RUN npm ci --omit=dev && npm cache clean --force \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build --chown=node:node /app/dist/apps ./dist/apps
 
 USER node

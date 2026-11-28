@@ -6,6 +6,7 @@
  *
  * Destinos aprobados (G6 Basic):
  *   R11: g6.catalog.from.inventory   → inventory.sku.initialization.completed / rejected
+ *   R10: g6.bulk.from.inventory      → inventory.bulk.stock.adjust.completed / rejected
  *   R12: g6.combos.from.inventory    → inventory.stock.changed
  *   R13: g6.promotions.from.inventory → inventory.stock.changed
  */

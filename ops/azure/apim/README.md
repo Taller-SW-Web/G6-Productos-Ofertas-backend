@@ -1,5 +1,12 @@
 # Preparación APIM H5 (sin aprovisionamiento)
 
+La plantilla actual usa por defecto `candidateApiName=g6-h5-candidate` y
+`candidateApiPath=h5-candidate/api/v1`. El preflight exige ambos parámetros
+explícitos en el documento de despliegue y rechaza la ruta operativa `api/v1`.
+El Gateway de Azure continúa público: el gate de red `directRoutesBlocked`
+del validador no puede pasar en este entorno sin un cutover posterior autorizado.
+No aplicar la plantilla ni interpretar un `what-if` vacío como APIM operativo.
+
 Este paquete prepara la importación, el manifiesto de seguridad enriquecido, perfiles de protección parametrizados y las políticas de Azure API Management (`Developer` clásico para laboratorio o reutilización de instancia compatible mediante `reuseExistingApim`). No crea ni muta recursos Azure: el despliegue requiere aprobación operativa y parámetros de red, identidad, observabilidad y cuotas acreditados.
 
 ## Contrato filtrado y manifiesto enriquecido (`APIM-C01`, `APIM-C03`)
@@ -10,7 +17,7 @@ Este paquete prepara la importación, el manifiesto de seguridad enriquecido, pe
 3. `candidateCatalog` (`operations` candidatos APIM).
 4. `effectivePublication` (importación efectiva **fail-closed**: `environmentEnabled=false` por defecto hasta recibir `--enabled-providers`, `--security-profile`, allowlist pública autorizada y resolución de allowlists M2M).
 
-Excluye las cinco operaciones `x-internal`, mantiene fuera de importación contractual las dos operaciones legacy de Pricing y deja las cuatro rutas G5 fuera del artefacto predeterminado.
+El catálogo de release de Chile contiene 149 operaciones, incluidas las cuatro G5 autorizadas. Se conservan fuera las cinco operaciones `x-internal` y las dos consultas administrativas de Pricing. El catálogo es un candidato versionado. La publicación efectiva conserva los controles de identidad, procedencia y anti-bypass.
 
 El uso de `--enable-g5` por sí solo no autoriza publicación operativa: requiere además `--g5-authorized` explícito. Para operaciones M2M, la falta de `x-service-audience` o `x-required-scope` bloquea el catálogo; la falta de `x-allowed-client-ids` (ej. `consultarDisponibilidadCombo`) se registra como `clientAllowlistStatus: "PENDING_G7_ALLOWLIST"` sin inventar clientes y bloquea `effectivePublication` (`--effective-publish`). Operaciones con seguridad alternativa (`obtenerCombo`, `consultarDisponibilidadCombo`) conservan ambas modalidades en `securityAlternatives` (`identityType: "human_or_m2m"`).
 
@@ -25,11 +32,26 @@ python ops/azure/apim/filter-openapi.py `
   --openapi ..\docs\contratos\http\openapi.yaml `
   --gateway-routes apps/api-gateway/src/routing/contract-routes.ts `
   --g5-routes apps/api-gateway/src/routing/g5-h5-routes.ts `
-  --docs-sha 490172c11cb4b83ddd1996f8d5834d0402184cf8 --gateway-sha 1b90543dc39a8919fd94f0e059d10e1002b3b2a9 `
+  --docs-sha 5f30802129ba4bbc0674dcc5878f10065f443118 --gateway-sha 097dac1bf4a8dcf5c6e799742d2df340f6d893d5 `
+  --enable-g5 --g5-authorized `
   --output ops/azure/apim/openapi/gateway-filtered.json `
   --compact-output ops/azure/apim/openapi/gateway-filtered.compact.json `
   --manifest ops/azure/apim/openapi/operation-security.json
 ```
+
+### Publicación G5 en Chile
+
+| Método y ruta | Operación | Scope de `modulo-ventas` |
+|---|---|---|
+| POST /cupones/consumos | `admitirConsumoCuponH5` | `cupones:consumir` |
+| POST /cupones/restauraciones | `admitirRestauracionCuponH5` | `cupones:restaurar` |
+| GET /cupones/operaciones/{operationId} | `obtenerOperacionCuponH5` | `cupones:operaciones:leer` |
+| GET /inventario/reservas/{reservaId}/estado | `obtenerEstadoReservaH5` | `inventario:reservas:estado:leer` |
+
+1. En el release aprobado, comprobar que Gateway sirve el digest previsto con `GATEWAY_G5_H5_ENABLED=true` y que Promotions e Inventory están sanos. Usar el perfil `standard` y mantener Modalidad B.
+2. Registrar el inventario y las políticas de la API activa como respaldo. Preparar el cambio en una revisión protegida, con acceso de prueba limitado hasta instalar y comprobar las cuatro políticas M2M. Conservar las operaciones, políticas y CORS vigentes.
+3. Verificar el delta exacto, el origen de Gateway, el rechazo por falta de JWT y el rechazo a una identidad sin el cliente o scope requerido. Confirmar que las cinco rutas privadas y las dos consultas Pricing permanecen fuera. Publicar la revisión tras estas comprobaciones y conservar la revisión previa para recuperar tráfico.
+4. Registrar las pruebas positivas con evidencia G5 usando `modulo-ventas`. La sesión humana disponible en G6 permite probar denegaciones, con resultados separados de la aceptación funcional.
 
 ## Orden de políticas, perfiles y correlación (`APIM-C02`, `APIM-C04`, `APIM-C05`)
 
@@ -64,3 +86,20 @@ python ops/azure/apim/filter-openapi.py `
 | APIM-T07 | Correlación `X-Correlation-Id` UUID preservada/generada en todo flujo | Estático preparado; instancia `BLOCKED_INFRA` |
 | APIM-T08 | Comparación privada y rollback de revisión/políticas | Estático preparado; instancia `BLOCKED_INFRA` |
 | RL-01..RL-06 | Perfiles burst, cuota, concurrencia, aislamiento y anti-bypass según Docs | Estático preparado; instancia `BLOCKED_INFRA` |
+
+## Mecanismo de dos etapas (`deploymentStage`) y scripts operativos
+
+Para resolver la dependencia circular entre `directRoutesBlocked: true` y la IP pública asignada por APIM tras su creación, `main.bicep` y `validate-parameters.py` soportan `deploymentStage`:
+- `infrastructure` (Etapa A): aprovisiona únicamente la instancia base APIM Developer (`External` VNet en `snet-g6-apim`) y el logger de Application Insights, **sin publicar APIs de negocio**.
+- `effective` (Etapa B, valor por defecto): exige manifiesto `effective`, `effectivePublication.authorized=true`, `expectedApimOriginCidrs` y `directRoutesBlocked=true` (Modalidad A o Modalidad B en `api-gateway`).
+
+Scripts de operación bajo demanda en `ops/azure/apim/scripts/`:
+- `Iniciar-G6.ps1`: restaura `minReplicas=1, maxReplicas=1` en las 9 Container Apps y valida readiness.
+- `Detener-G6.ps1`: verifica jobs activos y mensajes pendientes en Service Bus (sin purgar colas) antes de escalar a 0 réplicas.
+- `Desplegar-APIM.ps1`: valida parámetros y despliega/recrea APIM mediante Bicep (`infrastructure` o `effective`), verificando soft-delete y asignando `Monitoring Metrics Publisher`.
+- `Conectar-APIM.ps1`: lee las IPs públicas de `apim-g6-productos-chile`, asegura `serviceUrl` en `g6-productos-ofertas` sin duplicar `/api/v1`, actualiza `ipSecurityRestrictions` Allow-only (Modalidad B) sin ventana de exposición (agrega reglas nuevas antes de quitar obsoletas), valida explícitamente HTTP `403` directo y ejecuta rollback automático ante fallo.
+- `Eliminar-APIM.ps1`: elimina exclusivamente `apim-g6-productos-chile` previa autorización explícita (`-AuthorizeDelete`), preservando VNet, `snet-g6-apim`, `nsg-g6-apim`, Application Insights y ACA.
+- `Verificar-G6.ps1`: auditoría de red, APIM, Modalidad B, réplicas ACA y pruebas HTTP reales (`403` directo, `401`, `400`, `404`, CORS preflight y soporte opcional `-JwtToken` para `200`).
+- `export-apim-openapi.py`: normaliza determinísticamente OpenAPI 3.1.0 filtrado a OpenAPI 3.0.3 compatible con el importador de Azure APIM.
+
+> **Nota de Soft-Delete e IP pública:** al eliminar APIM, Azure retiene el nombre durante 48 horas en soft-delete (requiere `az apim deletedservice purge` si se recrea antes con el mismo nombre). Al usar la IP administrada por APIM, una recreación puede asignar una IP diferente, por lo que debe ejecutarse `Conectar-APIM.ps1` tras recrear.

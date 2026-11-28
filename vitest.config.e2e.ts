@@ -14,6 +14,9 @@ export default defineConfig({
   },
   test: {
     globals: true,
+    // Disposable PostgreSQL, RabbitMQ and HTTP harnesses contend for loopback
+    // ports and Docker startup capacity when files run at the same time.
+    fileParallelism: false,
     root: './',
     include: ['**/*.e2e-spec.ts'],
     exclude: [

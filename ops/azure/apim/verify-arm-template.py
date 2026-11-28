@@ -65,7 +65,7 @@ def validate(
         raise ValueError("operationPolicies no es un recurso policy de operación APIM")
     if policy.get("copy", {}).get("count") != "[length(variables('authorizedOperations'))]":
         raise ValueError("El bucle de políticas no está ligado a authorizedOperations")
-    expected_name = "[format('{0}/{1}/{2}/policy', parameters('apimName'), variables('apiName'), variables('authorizedOperations')[copyIndex()].apimOperationId)]"
+    expected_name = "[format('{0}/{1}/{2}/policy', parameters('apimName'), parameters('candidateApiName'), variables('authorizedOperations')[copyIndex()].apimOperationId)]"
     if policy.get("name") != expected_name:
         raise ValueError("La jerarquía ARM de policy no usa APIM/API/apimOperationId/policy sobre authorizedOperations")
     required_dependencies = {"api", "openIdNamedValue", "issuerNamedValue", "audienceNamedValue"}
@@ -92,9 +92,9 @@ def validate(
     else:
         if manifest.get("g5Flag") is not True or manifest.get("g5Authorized") is not True:
             raise ValueError("Habilitación G5 inconsistente o sin autorización explícita")
-        for g5_op in g5_ops:
-            if not g5_op.get("scopes") or not g5_op.get("allowedClients"):
-                raise ValueError(f"Operación G5 sin scopes o clientes contractuales: {g5_op['operationId']}")
+        expected_g5 = set(manifest.get("contractInventory", {}).get("g5CandidateIds", []))
+        if len(expected_g5) != 4 or {op["operationId"] for op in g5_ops} != expected_g5:
+            raise ValueError("ARM debe contener exactamente las cuatro operaciones G5 autorizadas")
     api_resource = resources.get("api", {})
     if api_resource.get("properties", {}).get("value") != "[variables('fixedFilteredOpenApi')]":
         raise ValueError("El recurso API en ARM debe consumir variables('fixedFilteredOpenApi') fijado")
@@ -209,7 +209,8 @@ def main():
         args.expected_gateway_sha,
         g5_authorized=args.g5_authorized,
     )
-    print(f"ARM APIM: PASS ({count} políticas; 5 rutas privadas excluidas; G5 deshabilitado por defecto)")
+    g5_count = sum(op["g5OptIn"] for op in manifest["operations"])
+    print(f"ARM APIM: PASS ({count} políticas; 5 rutas privadas excluidas; {g5_count} operaciones G5)")
 
 
 if __name__ == "__main__":
