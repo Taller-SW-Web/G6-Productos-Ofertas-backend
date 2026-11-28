@@ -117,7 +117,9 @@ test('H09 + H15: La coleccion valida URL final, redirecciones y encapsula todo p
   assert.ok(pre);
   const preCode = pre.script.exec.join('\n');
   assert.ok(preCode.includes('pm.variables.replaceIn(pm.request.url.toString())'));
-  assert.ok(preCode.includes('apim-g6-productos-chile.azure-api.net'));
+  const allowlistHostMatch = preCode.match(/['"]([a-z0-9-]+\.azure-api\.net)['"]/);
+  assert.ok(allowlistHostMatch, 'El prerequest debe declarar el host oficial de APIM en la allowlist');
+  assert.equal(allowlistHostMatch[1], 'apim-g6-productos-chile.azure-api.net');
 
   const globalTest = (raw.event || []).find((e) => e.listen === 'test');
   assert.ok(globalTest);

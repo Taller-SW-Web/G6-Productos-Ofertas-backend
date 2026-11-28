@@ -14,20 +14,11 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { catalogCorrelation } from '../../src/bootstrap.js';
 import { AppModule as CatalogAppModule } from '../../src/app.module.js';
-import { CATALOG_SECURITY_CONFIG } from '../../src/catalog-auth.js';
-import { CATALOG_AMQP_SETTINGS } from '../../src/catalog-amqp.js';
-import { CATALOG_TAXONOMY_CONFIG } from '../../src/taxonomy-config.js';
 import { CATALOG_TAXONOMY_IDENTITY } from '../../src/catalog-master.client.js';
 import { CATALOG_PRICING_IDENTITY } from '../../src/catalog-price-filter.js';
 import { CatalogConfig } from '../../src/config.js';
 import { Database } from '../../src/database.js';
-import { CATALOG_READ_DEMO } from '../../src/catalog-read-demo.js';
-import { CATALOG_PREPARATION_CONFIG } from '../../src/catalog-messages.js';
-import {
-  HISTORICAL_PRICING_CONTRACT,
-  HISTORICAL_RECOVERY_CAPABILITIES,
-  readHistoricalRecoveryCapabilities,
-} from '../../src/historical-recovery.service.js';
+import { readHistoricalRecoveryCapabilities } from '../../src/historical-recovery.service.js';
 import { readHistoricalPricingContract } from '../../src/historical-pricing.contract.js';
 import {
   readSafeDisposablePg17Settings,

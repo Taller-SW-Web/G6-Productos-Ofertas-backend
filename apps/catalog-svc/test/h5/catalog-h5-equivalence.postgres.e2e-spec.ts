@@ -12,12 +12,7 @@ import {
   vi,
 } from 'vitest';
 import { Database } from '../../src/database.js';
-import {
-  activationChecks,
-  inbox,
-  outbox,
-  products,
-} from '../../src/catalog.schema.js';
+import { inbox, outbox, products } from '../../src/catalog.schema.js';
 import { CatalogTransactionManager } from '../../src/catalog-transaction.js';
 import { PostgresCatalogWriteRepository } from '../../src/postgres-catalog-write.repository.js';
 import { CatalogMasterClient } from '../../src/catalog-master.client.js';
