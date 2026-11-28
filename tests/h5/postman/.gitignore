@@ -1,0 +1,20 @@
+# Dependencias locales
+node_modules/
+
+# Archivos de secretos y entornos locales reales
+.env
+.env.*
+!.env.example
+environments/*.local.json
+environments/*.secret.json
+environments/*.runtime.json
+
+# Artefactos crudos o temporales y corridas locales
+.tmp/
+tmp/
+raw-results/
+evidencias/local-*
+*.raw.json
+*.raw.xml
+*.log
+storage-state*.json

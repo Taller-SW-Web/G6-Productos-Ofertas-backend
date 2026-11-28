@@ -1,0 +1,3590 @@
+{
+  "info": {
+    "_postman_id": "g6-h5-integration-suite-v4",
+    "name": "G6 - H5 Integration Suite",
+    "description": "Suite de pruebas de integracion HTTP (solo lectura + casos negativos contractuales) para G6 Productos y Ofertas — Hito 5. Alineada con OpenAPI 0.7.0-rc.3, validacion recursiva de esquemas (H13), paginacion estricta en ambos rangos (H12), aislamiento de fixtures dinamicos (H14), safeSendRequest (H15) y soporte multi-ubicacion de Inventory (Defecto B).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// H09 + H15: Proteccion de URL final resuelta y metodos seguros (Newman + Postman Desktop)",
+          "const allowedHosts = [",
+          "  \"apim-g6-productos-chile.azure-api.net\",",
+          "  \"api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io\",",
+          "  \"127.0.0.1\",",
+          "  \"localhost\"",
+          "];",
+          "const method = (pm.request.method || \"GET\").toUpperCase();",
+          "if (![\"GET\", \"HEAD\", \"OPTIONS\"].includes(method)) {",
+          "  throw new Error(\"Bloqueo de seguridad: metodo mutante no permitido en coleccion de lectura (\" + method + \").\");",
+          "}",
+          "const hex = () => Math.floor((1 + Math.random()) * 0x10000).toString(16).substring(1);",
+          "const corrId = `${hex()}${hex()}-${hex()}-4${hex().substring(1)}-a${hex().substring(1)}-${hex()}${hex()}${hex()}`;",
+          "pm.variables.set(\"correlationId\", corrId);",
+          "pm.variables.set(\"invalidTokenFixture\", [\"invalid\", \"jwt\", \"fixture\"].join(\".\"));",
+          "const resolvedUrl = pm.variables.replaceIn(pm.request.url.toString());",
+          "const match = resolvedUrl.match(/^(https?):\\/\\/([^\\/?#]+)/i);",
+          "if (!match) {",
+          "  throw new Error(\"Bloqueo de seguridad: URL final resuelta invalida.\");",
+          "}",
+          "const proto = match[1].toLowerCase();",
+          "const authority = match[2];",
+          "if (authority.includes(\"@\")) {",
+          "  throw new Error(\"Bloqueo de seguridad: credenciales embebidas prohibidas en la URL.\");",
+          "}",
+          "const host = authority.split(\":\")[0].toLowerCase();",
+          "if (!allowedHosts.includes(host)) {",
+          "  throw new Error(\"Bloqueo de seguridad: host final no autorizado (\" + host + \").\");",
+          "}",
+          "if (host !== \"127.0.0.1\" && host !== \"localhost\" && proto !== \"https\") {",
+          "  throw new Error(\"Bloqueo de seguridad: entorno remoto requiere HTTPS.\");",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// H09 + H15: Bloqueo de redirecciones (followRedirects=false preventivo + validacion de respuesta 3xx)",
+          "const allowedHosts = [",
+          "  \"apim-g6-productos-chile.azure-api.net\",",
+          "  \"api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io\",",
+          "  \"127.0.0.1\",",
+          "  \"localhost\"",
+          "];",
+          "if ([301, 302, 303, 307, 308].includes(pm.response.code)) {",
+          "  pm.test(\"Seguridad H09: Redireccion bloqueada preventivamente hacia origen no autorizado\", function () {",
+          "    const loc = pm.response.headers.get(\"Location\") || \"\";",
+          "    const m = loc.match(/^(https?):\\/\\/([^\\/?#:]+)/i);",
+          "    pm.expect(m, \"Location debe ser URL valida\").to.not.be.null;",
+          "    const rProto = m[1].toLowerCase();",
+          "    const rHost = m[2].toLowerCase();",
+          "    pm.expect(allowedHosts, \"redirect host autorizado\").to.include(rHost);",
+          "    if (rHost !== \"127.0.0.1\" && rHost !== \"localhost\") {",
+          "      pm.expect(rProto, \"redirect remoto debe usar HTTPS\").to.eql(\"https\");",
+          "    }",
+          "  });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://apim-g6-productos-chile.azure-api.net"
+    },
+    {
+      "key": "apiPrefix",
+      "value": "/api/v1"
+    },
+    {
+      "key": "channel",
+      "value": "MARKETPLACE"
+    },
+    {
+      "key": "priceMin",
+      "value": "0"
+    },
+    {
+      "key": "priceMax",
+      "value": "100"
+    },
+    {
+      "key": "priceMaxNarrow",
+      "value": "60"
+    },
+    {
+      "key": "locationQueryParam",
+      "value": ""
+    },
+    {
+      "key": "nonExistentProductId",
+      "value": "00000000-0000-4000-8000-000000000404"
+    },
+    {
+      "key": "nonExistentSku",
+      "value": "SKU-NO-EXISTE-H5-404"
+    },
+    {
+      "key": "nonExistentBatchId",
+      "value": "00000000-0000-4000-8000-000000000405"
+    },
+    {
+      "key": "nonExistentComboId",
+      "value": "00000000-0000-4000-8000-000000000406"
+    },
+    {
+      "key": "nonExistentCategoryId",
+      "value": "00000000-0000-4000-8000-000000000407"
+    },
+    {
+      "key": "openApiResponseSchemas",
+      "value": "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"G6 H5 OpenAPI 0.7.0-rc.3 Response Schemas\",\"sourceContract\":\"contratos/http/openapi.yaml\",\"sourceVersion\":\"0.7.0-rc.3\",\"$defs\":{\"Canal\":{\"type\":\"string\",\"enum\":[\"MARKETPLACE\",\"CHATBOT\",\"RETAIL\",\"VENTAS\"]},\"EstadoStock\":{\"type\":\"string\",\"enum\":[\"DISPONIBLE\",\"STOCK_BAJO\",\"AGOTADO\",\"INDETERMINADO\"]},\"ProductoResumenComercial\":{\"type\":\"object\",\"required\":[\"product_id\",\"slug\",\"name\",\"categoria_id\",\"tipo_producto_id\",\"marca_id\",\"tiene_variantes\"],\"properties\":{\"product_id\":{\"type\":\"string\",\"minLength\":1},\"slug\":{\"type\":\"string\",\"minLength\":1},\"name\":{\"type\":\"string\",\"minLength\":1},\"description\":{\"type\":[\"string\",\"null\"]},\"categoria_id\":{\"type\":\"string\",\"minLength\":1},\"tipo_producto_id\":{\"type\":\"string\",\"minLength\":1},\"marca_id\":{\"type\":\"string\",\"minLength\":1},\"tiene_variantes\":{\"type\":\"boolean\"},\"sku_base\":{\"type\":[\"string\",\"null\"]},\"images\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"attributes\":{\"type\":\"array\"}}},\"VarianteComercial\":{\"type\":\"object\",\"required\":[\"variant_id\",\"sku\"],\"properties\":{\"variant_id\":{\"type\":\"string\",\"minLength\":1},\"sku\":{\"type\":\"string\",\"minLength\":1},\"identifying_attributes\":{\"type\":\"array\"},\"non_identifying_attributes\":{\"type\":\"array\"},\"images\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}},\"ProductoDetalleComercial\":{\"type\":\"object\",\"required\":[\"product_id\",\"slug\",\"name\",\"categoria_id\",\"tipo_producto_id\",\"marca_id\",\"tiene_variantes\",\"marca\",\"variants\"],\"properties\":{\"product_id\":{\"type\":\"string\",\"minLength\":1},\"slug\":{\"type\":\"string\",\"minLength\":1},\"name\":{\"type\":\"string\",\"minLength\":1},\"categoria_id\":{\"type\":\"string\",\"minLength\":1},\"tipo_producto_id\":{\"type\":\"string\",\"minLength\":1},\"marca_id\":{\"type\":\"string\",\"minLength\":1},\"tiene_variantes\":{\"type\":\"boolean\"},\"sku_base\":{\"type\":[\"string\",\"null\"]},\"marca\":{\"type\":\"object\"},\"variants\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/$defs/VarianteComercial\"}}}},\"PaginaProductosComercial\":{\"type\":\"object\",\"required\":[\"items\",\"pagina\",\"tamanio\",\"total\"],\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/$defs/ProductoResumenComercial\"}},\"pagina\":{\"type\":\"integer\",\"minimum\":1},\"tamanio\":{\"type\":\"integer\",\"minimum\":1},\"total\":{\"type\":\"integer\",\"minimum\":0}}},\"Precio\":{\"type\":\"object\",\"required\":[\"sku\",\"precio_regular\",\"currency\",\"channel_id\",\"valid_from\",\"price_version\",\"vigencia_id\",\"origen\"],\"properties\":{\"sku\":{\"type\":\"string\",\"minLength\":1},\"precio_regular\":{\"type\":\"number\",\"exclusiveMinimum\":0},\"precio_oferta\":{\"type\":[\"number\",\"null\"],\"exclusiveMinimum\":0},\"currency\":{\"type\":\"string\",\"minLength\":1},\"channel_id\":{\"type\":[\"string\",\"null\"],\"enum\":[\"MARKETPLACE\",\"CHATBOT\",\"RETAIL\",\"VENTAS\",null]},\"valid_from\":{\"type\":\"string\",\"minLength\":1,\"format\":\"date-time\"},\"valid_until\":{\"type\":[\"string\",\"null\"],\"format\":\"date-time\"},\"price_version\":{\"type\":\"integer\",\"minimum\":0},\"vigencia_id\":{\"type\":\"string\",\"minLength\":1},\"origen\":{\"type\":\"string\",\"enum\":[\"PRODUCTO\",\"SKU_OVERRIDE\"]}}},\"ConsultaPrecios\":{\"type\":\"object\",\"required\":[\"items\"],\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/$defs/Precio\"}}}},\"DisponibilidadStock\":{\"type\":\"object\",\"required\":[\"sku\",\"on_hand\",\"reserved\",\"blocked\",\"available\",\"status\"],\"properties\":{\"sku\":{\"type\":\"string\",\"minLength\":1},\"location_id\":{\"type\":[\"string\",\"null\"]},\"on_hand\":{\"type\":\"integer\",\"minimum\":0},\"reserved\":{\"type\":\"integer\",\"minimum\":0},\"blocked\":{\"type\":\"integer\",\"minimum\":0},\"available\":{\"type\":\"integer\",\"minimum\":0},\"status\":{\"$ref\":\"#/$defs/EstadoStock\"},\"threshold\":{\"type\":[\"integer\",\"null\"],\"minimum\":0}}},\"ConsultaDisponibilidadResponse\":{\"type\":\"object\",\"required\":[\"items\"],\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/$defs/DisponibilidadStock\"}}}},\"DisponibilidadComercial\":{\"type\":\"object\",\"required\":[\"sku\",\"status\"],\"additionalProperties\":false,\"properties\":{\"sku\":{\"type\":\"string\",\"minLength\":1},\"status\":{\"$ref\":\"#/$defs/EstadoStock\"}}},\"ConsultaDisponibilidadComercialResponse\":{\"type\":\"object\",\"required\":[\"items\"],\"properties\":{\"items\":{\"type\":\"array\",\"items\":{\"$ref\":\"#/$defs/DisponibilidadComercial\"}}}},\"Problem\":{\"type\":\"object\",\"required\":[\"title\",\"status\",\"code\"],\"properties\":{\"type\":{\"type\":\"string\"},\"title\":{\"type\":\"string\",\"minLength\":1},\"status\":{\"type\":\"integer\",\"minimum\":100,\"maximum\":599},\"detail\":{\"type\":\"string\"},\"code\":{\"type\":\"string\",\"minLength\":1},\"correlationId\":{\"type\":\"string\"}}}}}"
+    }
+  ],
+  "item": [
+    {
+      "name": "00 - Preflight y autenticacion",
+      "description": "Probes privados de Gateway (solo local/ACA; excluidos automaticamente en perfiles APIM).",
+      "item": [
+        {
+          "name": "PM-001 - Preflight Gateway Health",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PM-001: HTTP 200 en /health\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"PM-001: Content-Type application/json y sin secretos\", function () {",
+                  "  pm.expect((pm.response.headers.get(\"Content-Type\") || \"\").toLowerCase()).to.include(\"application/json\");",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.be.an(\"object\");",
+                  "  const raw = pm.response.text();",
+                  "  pm.expect(raw).to.not.match(/Bearer\\s+[A-Za-z0-9._-]+/i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/health",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-001B - Preflight Gateway Readiness (disponibilidad operativa)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PM-001B: Respuesta JSON contractual en /health/ready\", function () {",
+                  "  pm.expect((pm.response.headers.get(\"Content-Type\") || \"\").toLowerCase()).to.include(\"application/json\");",
+                  "  const body = pm.response.json();",
+                  "  pm.expect([\"ready\", \"not_ready\"]).to.include(body.status);",
+                  "});",
+                  "pm.test(\"PM-001B: Disponibilidad operativa acreditada (HTTP 200 y status=ready)\", function () {",
+                  "  if (pm.response.code === 503) pm.expect.fail(\"Gateway respondio 503 contractual (not_ready): no acredita disponibilidad operativa.\");",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().status).to.eql(\"ready\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/health/ready",
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "01 - Catalog y Pricing",
+      "description": "Cadena critica HTTP INT-01 con validacion recursiva de esquemas (H13), paginacion estricta en ambos rangos (H12), aislamiento de fixtures (H14) y safeSendRequest (H15).",
+      "item": [
+        {
+          "name": "PM-002 - Gateway -> Catalog: Listar productos autorizados",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// H14: Limpiar fixtures previos para evitar mascaras si PM-002 falla",
+                  "pm.environment.unset(\"productId\");",
+                  "pm.environment.unset(\"categoryId\");",
+                  "pm.environment.unset(\"brandId\");",
+                  "pm.environment.unset(\"sku\");",
+                  "pm.environment.unset(\"skusCsv\");",
+                  "pm.environment.unset(\"skuFromWideRange\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-002: HTTP 200 y PaginaProductosComercial conforme a JSON Schema OpenAPI\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect((pm.response.headers.get(\"Content-Type\") || \"\").toLowerCase()).to.include(\"application/json\");",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"PaginaProductosComercial\", \"PM-002\");",
+                  "  pm.expect(body.items, \"items no vacios\").to.be.an(\"array\").and.not.be.empty;",
+                  "  pm.expect(body.pagina).to.eql(1);",
+                  "  pm.expect(body.tamanio).to.eql(10);",
+                  "  pm.expect(body.total).to.be.at.least(body.items.length);",
+                  "  for (const item of body.items) {",
+                  "    assertSchema(item, \"ProductoResumenComercial\", \"PM-002.item\");",
+                  "  }",
+                  "  const first = body.items[0];",
+                  "  pm.environment.set(\"productId\", first.product_id);",
+                  "  pm.environment.set(\"categoryId\", first.categoria_id);",
+                  "  pm.environment.set(\"brandId\", first.marca_id);",
+                  "  if (!first.tiene_variantes) {",
+                  "    pm.expect(first.sku_base, \"sku_base requerido en producto simple\").to.be.a(\"string\").and.not.empty;",
+                  "    pm.environment.set(\"sku\", first.sku_base);",
+                  "    pm.environment.set(\"skusCsv\", first.sku_base);",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/productos?canal={{channel}}&pagina=1&tamanio=10",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-003A - Catalog -> Pricing: Filtro por rango de precio amplio (con paginacion completa)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// H14: Limpiar estado de rango amplio antes de consultar",
+                  "pm.environment.unset(\"wideRangeTotal\");",
+                  "pm.environment.unset(\"wideRangeIds\");",
+                  "pm.environment.set(\"wideRangeComplete\", \"false\");",
+                  "pm.environment.set(\"wideRangeStatus\", \"IN_PROGRESS\");",
+                  "pm.environment.set(\"wideRangeAuxFailed\", \"false\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "function safeSendRequest(targetUrl, opts, cb) {",
+                  "  const allowed = [",
+                  "    \"apim-g6-productos-chile.azure-api.net\",",
+                  "    \"api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io\",",
+                  "    \"127.0.0.1\",",
+                  "    \"localhost\"",
+                  "  ];",
+                  "  const m = String(targetUrl || \"\").match(/^(https?):\\/\\/([^\\/?#]+)/i);",
+                  "  if (!m) return cb(new Error(\"SECURITY_BLOCK: URL auxiliar invalida\"), null);",
+                  "  const proto = m[1].toLowerCase();",
+                  "  const authority = m[2];",
+                  "  if (authority.includes(\"@\")) return cb(new Error(\"SECURITY_BLOCK: credenciales embebidas prohibidas en URL auxiliar\"), null);",
+                  "  const host = authority.split(\":\")[0].toLowerCase();",
+                  "  if (!allowed.includes(host)) return cb(new Error(\"SECURITY_BLOCK: host auxiliar no autorizado (\" + host + \")\"), null);",
+                  "  if (host !== \"127.0.0.1\" && host !== \"localhost\" && proto !== \"https\") return cb(new Error(\"SECURITY_BLOCK: HTTPS obligatorio en solicitud auxiliar remota\"), null);",
+                  "  const method = String((opts && opts.method) || \"GET\").toUpperCase();",
+                  "  if (![\"GET\", \"HEAD\", \"OPTIONS\"].includes(method)) return cb(new Error(\"SECURITY_BLOCK: metodo mutante prohibido en solicitud auxiliar\"), null);",
+                  "  const headers = Object.assign({ Accept: \"application/json\", \"X-Correlation-Id\": pm.variables.get(\"correlationId\") }, (opts && opts.header) || {});",
+                  "  return pm.sendRequest({ url: targetUrl, method, header: headers, followRedirects: false }, cb);",
+                  "}",
+                  "pm.test(\"PM-003A: HTTP 200 y PaginaProductosComercial no vacia\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"PaginaProductosComercial\", \"PM-003A\");",
+                  "  pm.expect(body.items, \"items no vacios en rango amplio\").to.be.an(\"array\").and.not.be.empty;",
+                  "  pm.expect(body.pagina).to.eql(1);",
+                  "  pm.expect(body.tamanio).to.eql(20);",
+                  "  pm.expect(body.total).to.be.at.least(body.items.length);",
+                  "  for (const item of body.items) assertSchema(item, \"ProductoResumenComercial\", \"PM-003A.item\");",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  const wideResp = pm.response.json();",
+                  "  const seenIds = new Set();",
+                  "  let dupDetected = false;",
+                  "  for (const it of wideResp.items || []) {",
+                  "    if (seenIds.has(it.product_id)) dupDetected = true;",
+                  "    seenIds.add(it.product_id);",
+                  "  }",
+                  "  const total = Number(wideResp.total || 0);",
+                  "  const totalPages = Math.ceil(total / 20);",
+                  "  pm.environment.set(\"wideRangeTotal\", String(total));",
+                  "  if (seenIds.size > 0) pm.environment.set(\"productId\", Array.from(seenIds)[0]);",
+                  "  pm.environment.set(\"wideRangeIds\", JSON.stringify(Array.from(seenIds)));",
+                  "  if (totalPages <= 1) {",
+                  "    const okSingle = !dupDetected && seenIds.size === total;",
+                  "    pm.environment.set(\"wideRangeComplete\", okSingle ? \"true\" : \"false\");",
+                  "    pm.environment.set(\"wideRangeStatus\", dupDetected ? \"DUPLICATE_IDS\" : (seenIds.size === total ? \"COMPLETE\" : \"COUNT_MISMATCH\"));",
+                  "    pm.test(\"PM-003A: Pagina unica sin duplicados y cardinalidad exacta\", function () {",
+                  "      pm.expect(dupDetected, \"No debe haber product_id duplicados en pagina 1\").to.eql(false);",
+                  "      pm.expect(seenIds.size, \"IDs unicos deben coincidir con total\").to.eql(total);",
+                  "    });",
+                  "  } else {",
+                  "    const maxSafePages = Math.min(totalPages, 5);",
+                  "    const baseUrl = pm.environment.get(\"baseUrl\") || pm.collectionVariables.get(\"baseUrl\");",
+                  "    const apiPrefix = pm.environment.get(\"apiPrefix\") || pm.collectionVariables.get(\"apiPrefix\");",
+                  "    const ch = pm.variables.get(\"channel\");",
+                  "    const pMin = pm.variables.get(\"priceMin\");",
+                  "    const pMax = pm.variables.get(\"priceMax\");",
+                  "    const token = pm.environment.get(\"accessToken\") || \"\";",
+                  "    let completedAux = 0;",
+                  "    const expectedAux = maxSafePages - 1;",
+                  "    let auxFailed = false;",
+                  "    let auxFailDetail = \"\";",
+                  "    for (let p = 2; p <= maxSafePages; p += 1) {",
+                  "      const auxUrl = `${baseUrl}${apiPrefix}/productos?canal=${encodeURIComponent(ch)}&precioMin=${pMin}&precioMax=${pMax}&pagina=${p}&tamanio=20`;",
+                  "      safeSendRequest(auxUrl, { method: \"GET\", header: { Authorization: `Bearer ${token}` } }, function (err, res) {",
+                  "        if (err || !res || res.code !== 200) {",
+                  "          auxFailed = true;",
+                  "          auxFailDetail = err ? err.message : (\"HTTP \" + (res ? res.code : \"NONE\") + \" en pagina \" + p);",
+                  "        } else {",
+                  "          try {",
+                  "            const pageJson = res.json();",
+                  "            for (const it of pageJson.items || []) {",
+                  "              if (it.product_id) {",
+                  "                if (seenIds.has(it.product_id)) dupDetected = true;",
+                  "                seenIds.add(it.product_id);",
+                  "              }",
+                  "            }",
+                  "          } catch (parseErr) {",
+                  "            auxFailed = true;",
+                  "            auxFailDetail = \"JSON invalido en pagina \" + p;",
+                  "          }",
+                  "        }",
+                  "        completedAux += 1;",
+                  "        pm.environment.set(\"wideRangeIds\", JSON.stringify(Array.from(seenIds)));",
+                  "        if (completedAux === expectedAux) {",
+                  "          const isComplete = !auxFailed && !dupDetected && maxSafePages === totalPages && seenIds.size === total;",
+                  "          const statusTag = auxFailed ? \"AUX_PAGE_ERROR\" : (dupDetected ? \"DUPLICATE_IDS\" : (maxSafePages < totalPages ? \"SAMPLED_MAX_5_PAGES\" : (seenIds.size === total ? \"COMPLETE\" : \"COUNT_MISMATCH\")));",
+                  "          pm.environment.set(\"wideRangeAuxFailed\", auxFailed ? \"true\" : \"false\");",
+                  "          pm.environment.set(\"wideRangeComplete\", isComplete ? \"true\" : \"false\");",
+                  "          pm.environment.set(\"wideRangeStatus\", statusTag);",
+                  "          pm.test(\"PM-003A: Paginacion auxiliar sin errores, sin duplicados y completa (H12)\", function () {",
+                  "            pm.expect(auxFailed, \"Error en paginacion auxiliar: \" + auxFailDetail).to.eql(false);",
+                  "            pm.expect(dupDetected, \"Duplicados detectados entre paginas del rango amplio\").to.eql(false);",
+                  "            if (maxSafePages === totalPages) {",
+                  "              pm.expect(seenIds.size, \"IDs unicos recolectados deben igualar total\").to.eql(total);",
+                  "            }",
+                  "          });",
+                  "        }",
+                  "      });",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/productos?canal={{channel}}&precioMin={{priceMin}}&precioMax={{priceMax}}&pagina=1&tamanio=20",
+            "description": "H12 + H15: Pagina hasta 5 paginas usando safeSendRequest, falla ante cualquier error auxiliar o duplicado y solo marca wideRangeComplete=true si uniqueIds === total."
+          },
+          "response": []
+        },
+        {
+          "name": "PM-003B - Catalog -> Pricing: Filtro rango acotado y relacion de subconjunto estricta",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.unset(\"narrowRangeProductId\");",
+                  "pm.environment.unset(\"narrowRangeIds\");",
+                  "pm.environment.set(\"narrowRangeComplete\", \"false\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "function safeSendRequest(targetUrl, opts, cb) {",
+                  "  const allowed = [",
+                  "    \"apim-g6-productos-chile.azure-api.net\",",
+                  "    \"api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io\",",
+                  "    \"127.0.0.1\",",
+                  "    \"localhost\"",
+                  "  ];",
+                  "  const m = String(targetUrl || \"\").match(/^(https?):\\/\\/([^\\/?#]+)/i);",
+                  "  if (!m) return cb(new Error(\"SECURITY_BLOCK: URL auxiliar invalida\"), null);",
+                  "  const proto = m[1].toLowerCase();",
+                  "  const authority = m[2];",
+                  "  if (authority.includes(\"@\")) return cb(new Error(\"SECURITY_BLOCK: credenciales embebidas prohibidas en URL auxiliar\"), null);",
+                  "  const host = authority.split(\":\")[0].toLowerCase();",
+                  "  if (!allowed.includes(host)) return cb(new Error(\"SECURITY_BLOCK: host auxiliar no autorizado (\" + host + \")\"), null);",
+                  "  if (host !== \"127.0.0.1\" && host !== \"localhost\" && proto !== \"https\") return cb(new Error(\"SECURITY_BLOCK: HTTPS obligatorio en solicitud auxiliar remota\"), null);",
+                  "  const method = String((opts && opts.method) || \"GET\").toUpperCase();",
+                  "  if (![\"GET\", \"HEAD\", \"OPTIONS\"].includes(method)) return cb(new Error(\"SECURITY_BLOCK: metodo mutante prohibido en solicitud auxiliar\"), null);",
+                  "  const headers = Object.assign({ Accept: \"application/json\", \"X-Correlation-Id\": pm.variables.get(\"correlationId\") }, (opts && opts.header) || {});",
+                  "  return pm.sendRequest({ url: targetUrl, method, header: headers, followRedirects: false }, cb);",
+                  "}",
+                  "pm.test(\"PM-003B: HTTP 200 y PaginaProductosComercial no vacia\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"PaginaProductosComercial\", \"PM-003B\");",
+                  "  pm.expect(body.items, \"items no vacios en rango acotado\").to.be.an(\"array\").and.not.be.empty;",
+                  "  pm.expect(body.pagina).to.eql(1);",
+                  "  pm.expect(body.tamanio).to.eql(20);",
+                  "  pm.expect(body.total).to.be.at.least(body.items.length);",
+                  "  for (const item of body.items) assertSchema(item, \"ProductoResumenComercial\", \"PM-003B.item\");",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  const narrowResp = pm.response.json();",
+                  "  const narrowIds = new Set();",
+                  "  let narrowDup = false;",
+                  "  for (const it of narrowResp.items || []) {",
+                  "    if (narrowIds.has(it.product_id)) narrowDup = true;",
+                  "    narrowIds.add(it.product_id);",
+                  "  }",
+                  "  const narrowTotal = Number(narrowResp.total || 0);",
+                  "  const narrowPages = Math.ceil(narrowTotal / 20);",
+                  "  const verifySubset = function (narrowAuxFailed, narrowComplete) {",
+                  "    const narrowArr = Array.from(narrowIds);",
+                  "    pm.environment.set(\"narrowRangeIds\", JSON.stringify(narrowArr));",
+                  "    pm.environment.set(\"narrowRangeComplete\", narrowComplete ? \"true\" : \"false\");",
+                  "    if (narrowArr.length > 0) pm.environment.set(\"narrowRangeProductId\", narrowArr[0]);",
+                  "    pm.test(\"PM-003B: Invariante narrowTotal <= wideTotal y subconjunto completo en ambos rangos (H12)\", function () {",
+                  "      const wideTotal = Number(pm.environment.get(\"wideRangeTotal\"));",
+                  "      const wideIds = JSON.parse(pm.environment.get(\"wideRangeIds\") || \"[]\");",
+                  "      const wideComplete = pm.environment.get(\"wideRangeComplete\") === \"true\";",
+                  "      const wideStatus = pm.environment.get(\"wideRangeStatus\") || \"UNKNOWN\";",
+                  "      pm.expect(wideTotal, \"wideRangeTotal de PM-003A\").to.be.a(\"number\").and.above(0);",
+                  "      pm.expect(narrowTotal, \"total rango acotado <= total rango amplio\").to.be.at.most(wideTotal);",
+                  "      pm.expect(wideComplete, \"PM-003A debe estar completo sin errores auxiliares (status=\" + wideStatus + \")\").to.eql(true);",
+                  "      pm.expect(narrowAuxFailed, \"Paginacion auxiliar de PM-003B no debe fallar\").to.eql(false);",
+                  "      pm.expect(narrowDup, \"No debe haber duplicados en rango acotado\").to.eql(false);",
+                  "      pm.expect(narrowComplete, \"PM-003B debe recolectar todas sus paginas para probar subconjunto completo\").to.eql(true);",
+                  "      for (const id of narrowArr) {",
+                  "        pm.expect(wideIds, \"product_id acotado \" + id + \" debe pertenecer al conjunto amplio completo\").to.include(id);",
+                  "      }",
+                  "    });",
+                  "  };",
+                  "  if (narrowPages <= 1) {",
+                  "    verifySubset(false, !narrowDup && narrowIds.size === narrowTotal);",
+                  "  } else {",
+                  "    const maxSafe = Math.min(narrowPages, 5);",
+                  "    const baseUrl = pm.environment.get(\"baseUrl\") || pm.collectionVariables.get(\"baseUrl\");",
+                  "    const apiPrefix = pm.environment.get(\"apiPrefix\") || pm.collectionVariables.get(\"apiPrefix\");",
+                  "    const ch = pm.variables.get(\"channel\");",
+                  "    const pMin = pm.variables.get(\"priceMin\");",
+                  "    const pMaxNarrow = pm.variables.get(\"priceMaxNarrow\");",
+                  "    const token = pm.environment.get(\"accessToken\") || \"\";",
+                  "    let done = 0;",
+                  "    const expected = maxSafe - 1;",
+                  "    let auxFailed = false;",
+                  "    for (let p = 2; p <= maxSafe; p += 1) {",
+                  "      const auxUrl = `${baseUrl}${apiPrefix}/productos?canal=${encodeURIComponent(ch)}&precioMin=${pMin}&precioMax=${pMaxNarrow}&pagina=${p}&tamanio=20`;",
+                  "      safeSendRequest(auxUrl, { method: \"GET\", header: { Authorization: `Bearer ${token}` } }, function (err, res) {",
+                  "        if (err || !res || res.code !== 200) {",
+                  "          auxFailed = true;",
+                  "        } else {",
+                  "          try {",
+                  "            const pj = res.json();",
+                  "            for (const it of pj.items || []) {",
+                  "              if (it.product_id) {",
+                  "                if (narrowIds.has(it.product_id)) narrowDup = true;",
+                  "                narrowIds.add(it.product_id);",
+                  "              }",
+                  "            }",
+                  "          } catch (_) {",
+                  "            auxFailed = true;",
+                  "          }",
+                  "        }",
+                  "        done += 1;",
+                  "        if (done === expected) {",
+                  "          verifySubset(auxFailed, !auxFailed && !narrowDup && maxSafe === narrowPages && narrowIds.size === narrowTotal);",
+                  "        }",
+                  "      });",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/productos?canal={{channel}}&precioMin={{priceMin}}&precioMax={{priceMaxNarrow}}&pagina=1&tamanio=20",
+            "description": "H12 + H15: Pagina tambien el rango acotado con safeSendRequest, verifica narrowTotal <= wideTotal y que TODOS los product_id acotados pertenezcan al conjunto amplio completo."
+          },
+          "response": []
+        },
+        {
+          "name": "PM-003C - Catalog: Detalle comercial y extraccion de todos los SKUs elegibles",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// H14: Bloqueo preventivo si un fixture dinamico requerido (productId) esta ausente",
+                  "const __reqFx = [\"productId\"];",
+                  "for (const __k of __reqFx) {",
+                  "  const __val = pm.environment.get(__k) || pm.variables.get(__k);",
+                  "  if (!__val || String(__val).trim() === \"\") {",
+                  "    if (pm.execution && typeof pm.execution.skipRequest === \"function\") {",
+                  "      pm.execution.skipRequest();",
+                  "    }",
+                  "    throw new Error(\"BLOCKED_FIXTURE: Fixture dinamico requerido ausente (\" + __k + \"). Productor previo fallo o no devolvio datos.\");",
+                  "  }",
+                  "}",
+                  "pm.environment.unset(\"sku\");",
+                  "pm.environment.unset(\"skusCsv\");",
+                  "pm.environment.unset(\"expectedProductSkus\");",
+                  "pm.environment.set(\"skuFromWideRange\", \"false\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-003C: HTTP 200 y DTO ProductoDetalleComercial conforme a JSON Schema\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"ProductoDetalleComercial\", \"PM-003C\");",
+                  "  const expectedId = pm.environment.get(\"productId\") || pm.variables.get(\"productId\");",
+                  "  pm.expect(body.product_id).to.eql(expectedId);",
+                  "  let skus = [];",
+                  "  if (!body.tiene_variantes) {",
+                  "    pm.expect(body.sku_base, \"sku_base requerido en producto simple\").to.be.a(\"string\").and.not.empty;",
+                  "    skus = [body.sku_base];",
+                  "  } else {",
+                  "    pm.expect(body.variants, \"variants no vacio en producto con variantes\").to.not.be.empty;",
+                  "    for (const v of body.variants) {",
+                  "      assertSchema(v, \"VarianteComercial\", \"PM-003C.variant\");",
+                  "      skus.push(v.sku);",
+                  "    }",
+                  "  }",
+                  "  pm.environment.set(\"sku\", skus[0]);",
+                  "  pm.environment.set(\"skusCsv\", skus.join(\",\"));",
+                  "  pm.environment.set(\"expectedProductSkus\", JSON.stringify(skus));",
+                  "  pm.environment.set(\"skuFromWideRange\", \"true\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/productos/{{productId}}?canal={{channel}}",
+            "description": "H12 + H13 + H14: Requiere productId valido, limpia SKUs previos y extrae TODOS los SKUs elegibles."
+          },
+          "response": []
+        },
+        {
+          "name": "PM-003D - Pricing: Consultar precios efectivos de todos los SKUs elegibles del producto",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// H14: Bloqueo preventivo si un fixture dinamico requerido (sku) esta ausente",
+                  "const __reqFx = [\"sku\"];",
+                  "for (const __k of __reqFx) {",
+                  "  const __val = pm.environment.get(__k) || pm.variables.get(__k);",
+                  "  if (!__val || String(__val).trim() === \"\") {",
+                  "    if (pm.execution && typeof pm.execution.skipRequest === \"function\") {",
+                  "      pm.execution.skipRequest();",
+                  "    }",
+                  "    throw new Error(\"BLOCKED_FIXTURE: Fixture dinamico requerido ausente (\" + __k + \"). Productor previo fallo o no devolvio datos.\");",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "function safeSendRequest(targetUrl, opts, cb) {",
+                  "  const allowed = [",
+                  "    \"apim-g6-productos-chile.azure-api.net\",",
+                  "    \"api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io\",",
+                  "    \"127.0.0.1\",",
+                  "    \"localhost\"",
+                  "  ];",
+                  "  const m = String(targetUrl || \"\").match(/^(https?):\\/\\/([^\\/?#]+)/i);",
+                  "  if (!m) return cb(new Error(\"SECURITY_BLOCK: URL auxiliar invalida\"), null);",
+                  "  const proto = m[1].toLowerCase();",
+                  "  const authority = m[2];",
+                  "  if (authority.includes(\"@\")) return cb(new Error(\"SECURITY_BLOCK: credenciales embebidas prohibidas en URL auxiliar\"), null);",
+                  "  const host = authority.split(\":\")[0].toLowerCase();",
+                  "  if (!allowed.includes(host)) return cb(new Error(\"SECURITY_BLOCK: host auxiliar no autorizado (\" + host + \")\"), null);",
+                  "  if (host !== \"127.0.0.1\" && host !== \"localhost\" && proto !== \"https\") return cb(new Error(\"SECURITY_BLOCK: HTTPS obligatorio en solicitud auxiliar remota\"), null);",
+                  "  const method = String((opts && opts.method) || \"GET\").toUpperCase();",
+                  "  if (![\"GET\", \"HEAD\", \"OPTIONS\"].includes(method)) return cb(new Error(\"SECURITY_BLOCK: metodo mutante prohibido en solicitud auxiliar\"), null);",
+                  "  const headers = Object.assign({ Accept: \"application/json\", \"X-Correlation-Id\": pm.variables.get(\"correlationId\") }, (opts && opts.header) || {});",
+                  "  return pm.sendRequest({ url: targetUrl, method, header: headers, followRedirects: false }, cb);",
+                  "}",
+                  "pm.test(\"PM-003D: HTTP 200, JSON Schema Precio y al menos un SKU elegible dentro del rango amplio\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"ConsultaPrecios\", \"PM-003D\");",
+                  "  pm.expect(body.items, \"items de precios no vacios\").to.be.an(\"array\").and.not.be.empty;",
+                  "  const requestedSkus = (pm.environment.get(\"skusCsv\") || pm.environment.get(\"sku\") || \"\").split(\",\").filter(Boolean);",
+                  "  pm.expect(requestedSkus, \"SKUs solicitados\").to.not.be.empty;",
+                  "  const min = Number(pm.variables.get(\"priceMin\"));",
+                  "  const max = Number(pm.variables.get(\"priceMax\"));",
+                  "  let matchedRequested = 0;",
+                  "  let inWideRangeCount = 0;",
+                  "  let inNarrowRangeCount = 0;",
+                  "  const maxNarrow = Number(pm.variables.get(\"priceMaxNarrow\"));",
+                  "  for (const row of body.items) {",
+                  "    assertSchema(row, \"Precio\", \"PM-003D.precio\");",
+                  "    pm.expect(requestedSkus, \"SKU devuelto debe corresponder a los solicitados\").to.include(row.sku);",
+                  "    matchedRequested += 1;",
+                  "    const effectivePrice = (row.precio_oferta !== null && row.precio_oferta !== undefined) ? row.precio_oferta : row.precio_regular;",
+                  "    if (effectivePrice >= min && effectivePrice <= max) inWideRangeCount += 1;",
+                  "    if (effectivePrice >= min && effectivePrice <= maxNarrow) inNarrowRangeCount += 1;",
+                  "  }",
+                  "  pm.expect(matchedRequested, \"al menos un SKU solicitado presente en Pricing\").to.be.above(0);",
+                  "  if (pm.environment.get(\"skuFromWideRange\") === \"true\") {",
+                  "    pm.expect(inWideRangeCount, \"al menos un SKU elegible debe tener precio efectivo en [priceMin, priceMax]\").to.be.above(0);",
+                  "  }",
+                  "  const narrowProdId = pm.environment.get(\"narrowRangeProductId\");",
+                  "  const wideProdId = pm.environment.get(\"productId\");",
+                  "  if (narrowProdId && narrowProdId === wideProdId) {",
+                  "    pm.expect(inNarrowRangeCount, \"producto tambien presente en rango acotado debe tener SKU en [priceMin, priceMaxNarrow]\").to.be.above(0);",
+                  "  }",
+                  "});",
+                  "const __narrowId = pm.environment.get(\"narrowRangeProductId\");",
+                  "const __wideId = pm.environment.get(\"productId\");",
+                  "if (pm.response.code === 200 && __narrowId && __narrowId !== __wideId) {",
+                  "  const baseUrl = pm.environment.get(\"baseUrl\") || pm.collectionVariables.get(\"baseUrl\");",
+                  "  const apiPrefix = pm.environment.get(\"apiPrefix\") || pm.collectionVariables.get(\"apiPrefix\");",
+                  "  const ch = pm.variables.get(\"channel\");",
+                  "  const token = pm.environment.get(\"accessToken\") || \"\";",
+                  "  const min = Number(pm.variables.get(\"priceMin\"));",
+                  "  const maxNarrow = Number(pm.variables.get(\"priceMaxNarrow\"));",
+                  "  safeSendRequest(`${baseUrl}${apiPrefix}/productos/${__narrowId}?canal=${encodeURIComponent(ch)}`, { method: \"GET\", header: { Authorization: `Bearer ${token}` } }, function (errD, resD) {",
+                  "    if (errD || !resD || resD.code !== 200) {",
+                  "      pm.test(\"PM-003D (H12 rango acotado): Detalle de producto acotado accesible\", function () {",
+                  "        pm.expect.fail(\"No se pudo obtener detalle de producto del rango acotado: \" + (errD ? errD.message : (resD ? resD.code : \"NONE\")));",
+                  "      });",
+                  "      return;",
+                  "    }",
+                  "    const det = resD.json();",
+                  "    const nSkus = !det.tiene_variantes ? [det.sku_base].filter(Boolean) : (det.variants || []).map((v) => v.sku).filter(Boolean);",
+                  "    safeSendRequest(`${baseUrl}${apiPrefix}/precios?skus=${encodeURIComponent(nSkus.join(\",\"))}&canal=${encodeURIComponent(ch)}`, { method: \"GET\", header: { Authorization: `Bearer ${token}` } }, function (errP, resP) {",
+                  "      pm.test(\"PM-003D (H12 rango acotado): Al menos un SKU elegible del producto acotado cumple [priceMin, priceMaxNarrow]\", function () {",
+                  "        pm.expect(errP, \"error en consulta auxiliar de precios\").to.be.null;",
+                  "        pm.expect(resP && resP.code).to.eql(200);",
+                  "        const pj = resP.json();",
+                  "        assertSchema(pj, \"ConsultaPrecios\", \"PM-003D.narrow\");",
+                  "        let okNarrow = 0;",
+                  "        for (const r of pj.items || []) {",
+                  "          assertSchema(r, \"Precio\", \"PM-003D.narrow.precio\");",
+                  "          const eff = (r.precio_oferta !== null && r.precio_oferta !== undefined) ? r.precio_oferta : r.precio_regular;",
+                  "          if (eff >= min && eff <= maxNarrow) okNarrow += 1;",
+                  "        }",
+                  "        pm.expect(okNarrow, \"al menos un SKU elegible del rango acotado en [priceMin, priceMaxNarrow]\").to.be.above(0);",
+                  "      });",
+                  "    });",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/precios?skus={{skusCsv}}&canal={{channel}}",
+            "description": "H12 + H13 + H14 + H15: Valida precios efectivos de todos los SKUs elegibles en el rango amplio y verifica tambien un producto del rango acotado cuando difiere."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "02 - Preparacion comercial e Inventory",
+      "description": "Validacion de ProductoPreparacion, variantes y DisponibilidadStock (con descubrimiento seguro de location_id para entornos multi-ubicacion — Defecto B).",
+      "item": [
+        {
+          "name": "PM-010 - Catalog: Estado de preparacion del producto",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// H14: Bloqueo preventivo si un fixture dinamico requerido (productId) esta ausente",
+                  "const __reqFx = [\"productId\"];",
+                  "for (const __k of __reqFx) {",
+                  "  const __val = pm.environment.get(__k) || pm.variables.get(__k);",
+                  "  if (!__val || String(__val).trim() === \"\") {",
+                  "    if (pm.execution && typeof pm.execution.skipRequest === \"function\") {",
+                  "      pm.execution.skipRequest();",
+                  "    }",
+                  "    throw new Error(\"BLOCKED_FIXTURE: Fixture dinamico requerido ausente (\" + __k + \"). Productor previo fallo o no devolvio datos.\");",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PM-010: HTTP 200 y DTO ProductoPreparacion\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.product_id).to.eql(pm.environment.get(\"productId\"));",
+                  "  pm.expect(body.tiene_variantes).to.be.a(\"boolean\");",
+                  "  pm.expect(body.pricing).to.be.an(\"object\");",
+                  "  pm.expect(body.variantes).to.be.an(\"array\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/productos/{{productId}}/preparacion",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-011 - Catalog: Listar variantes de producto",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// H14: Bloqueo preventivo si un fixture dinamico requerido (productId) esta ausente",
+                  "const __reqFx = [\"productId\"];",
+                  "for (const __k of __reqFx) {",
+                  "  const __val = pm.environment.get(__k) || pm.variables.get(__k);",
+                  "  if (!__val || String(__val).trim() === \"\") {",
+                  "    if (pm.execution && typeof pm.execution.skipRequest === \"function\") {",
+                  "      pm.execution.skipRequest();",
+                  "    }",
+                  "    throw new Error(\"BLOCKED_FIXTURE: Fixture dinamico requerido ausente (\" + __k + \"). Productor previo fallo o no devolvio datos.\");",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-011: HTTP 200 y variantes conformes a VarianteComercial\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  const list = Array.isArray(body) ? body : body.items;",
+                  "  pm.expect(list).to.be.an(\"array\");",
+                  "  for (const v of list) assertSchema(v, \"VarianteComercial\", \"PM-011.variant\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/productos/{{productId}}/variantes",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-012 - Inventory: Disponibilidad autoritativa por SKU encadenado",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// H14: Bloqueo preventivo si un fixture dinamico requerido (sku) esta ausente",
+                  "const __reqFx = [\"sku\"];",
+                  "for (const __k of __reqFx) {",
+                  "  const __val = pm.environment.get(__k) || pm.variables.get(__k);",
+                  "  if (!__val || String(__val).trim() === \"\") {",
+                  "    if (pm.execution && typeof pm.execution.skipRequest === \"function\") {",
+                  "      pm.execution.skipRequest();",
+                  "    }",
+                  "    throw new Error(\"BLOCKED_FIXTURE: Fixture dinamico requerido ausente (\" + __k + \"). Productor previo fallo o no devolvio datos.\");",
+                  "  }",
+                  "}",
+                  "function safeSendRequest(targetUrl, opts, cb) {",
+                  "  const allowed = [",
+                  "    \"apim-g6-productos-chile.azure-api.net\",",
+                  "    \"api-gateway.calmgrass-aec0b33c.chilecentral.azurecontainerapps.io\",",
+                  "    \"127.0.0.1\",",
+                  "    \"localhost\"",
+                  "  ];",
+                  "  const m = String(targetUrl || \"\").match(/^(https?):\\/\\/([^\\/?#]+)/i);",
+                  "  if (!m) return cb(new Error(\"SECURITY_BLOCK: URL auxiliar invalida\"), null);",
+                  "  const proto = m[1].toLowerCase();",
+                  "  const authority = m[2];",
+                  "  if (authority.includes(\"@\")) return cb(new Error(\"SECURITY_BLOCK: credenciales embebidas prohibidas en URL auxiliar\"), null);",
+                  "  const host = authority.split(\":\")[0].toLowerCase();",
+                  "  if (!allowed.includes(host)) return cb(new Error(\"SECURITY_BLOCK: host auxiliar no autorizado (\" + host + \")\"), null);",
+                  "  if (host !== \"127.0.0.1\" && host !== \"localhost\" && proto !== \"https\") return cb(new Error(\"SECURITY_BLOCK: HTTPS obligatorio en solicitud auxiliar remota\"), null);",
+                  "  const method = String((opts && opts.method) || \"GET\").toUpperCase();",
+                  "  if (![\"GET\", \"HEAD\", \"OPTIONS\"].includes(method)) return cb(new Error(\"SECURITY_BLOCK: metodo mutante prohibido en solicitud auxiliar\"), null);",
+                  "  const headers = Object.assign({ Accept: \"application/json\", \"X-Correlation-Id\": pm.variables.get(\"correlationId\") }, (opts && opts.header) || {});",
+                  "  return pm.sendRequest({ url: targetUrl, method, header: headers, followRedirects: false }, cb);",
+                  "}",
+                  "const existingLoc = pm.environment.get(\"locationId\") || pm.variables.get(\"locationId\");",
+                  "if (existingLoc && String(existingLoc).trim() !== \"\") {",
+                  "  pm.variables.set(\"locationQueryParam\", \"&location_id=\" + encodeURIComponent(existingLoc));",
+                  "} else {",
+                  "  pm.variables.set(\"locationQueryParam\", \"\");",
+                  "  const baseUrl = pm.environment.get(\"baseUrl\") || pm.collectionVariables.get(\"baseUrl\");",
+                  "  const apiPrefix = pm.environment.get(\"apiPrefix\") || pm.collectionVariables.get(\"apiPrefix\");",
+                  "  const token = pm.environment.get(\"accessToken\") || \"\";",
+                  "  if (token) {",
+                  "    safeSendRequest(`${baseUrl}${apiPrefix}/inventario/ubicaciones`, { method: \"GET\", header: { Authorization: `Bearer ${token}` } }, function (err, res) {",
+                  "      if (!err && res && res.code === 200) {",
+                  "        try {",
+                  "          const body = res.json();",
+                  "          const list = Array.isArray(body) ? body : (body.items || []);",
+                  "          const first = list.find((u) => u && (u.location_id || u.id));",
+                  "          const locId = first ? (first.location_id || first.id) : \"\";",
+                  "          if (locId) {",
+                  "            pm.environment.set(\"locationId\", String(locId));",
+                  "            pm.variables.set(\"locationQueryParam\", \"&location_id=\" + encodeURIComponent(String(locId)));",
+                  "          }",
+                  "        } catch (_) {}",
+                  "      }",
+                  "    });",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-012: HTTP 200, JSON Schema DisponibilidadStock e invariante de stock\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"ConsultaDisponibilidadResponse\", \"PM-012\");",
+                  "  const expectedSku = pm.environment.get(\"sku\") || pm.variables.get(\"sku\");",
+                  "  pm.expect(body.items).to.be.an(\"array\").and.not.be.empty;",
+                  "  const row = body.items.find((it) => it.sku === expectedSku);",
+                  "  pm.expect(row, \"SKU solicitado presente\").to.be.an(\"object\");",
+                  "  assertSchema(row, \"DisponibilidadStock\", \"PM-012.row\");",
+                  "  pm.expect(row.available).to.eql(Math.max(row.on_hand - row.reserved - row.blocked, 0));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/inventario/disponibilidad?skus={{sku}}{{locationQueryParam}}",
+            "description": "Defecto B: Descubre location_id via GET /inventario/ubicaciones (safeSendRequest) cuando no fue suministrado y el entorno tiene multiples ubicaciones."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "03 - Combos",
+      "description": "Consultas de lectura y caso negativo de Combos.",
+      "item": [
+        {
+          "name": "PM-020 - Combos: Listar combos administrativos",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PM-020: HTTP 200 y PaginaCombos valida\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().items).to.be.an(\"array\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/combos?pagina=1&tamanio=10",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-021 - Combos: Negativo combo inexistente (404)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-021: HTTP 404 Problem Details\", function () {",
+                  "  pm.response.to.have.status(404);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"Problem\", \"PM-021\");",
+                  "  pm.expect(body.status).to.eql(404);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/combos/{{nonExistentComboId}}",
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "04 - Bulk y Catalog",
+      "description": "Operaciones de lectura segura de Bulk (sin iniciar importaciones).",
+      "item": [
+        {
+          "name": "PM-030 - Bulk: Descargar plantilla CSV v2",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PM-030: HTTP 200, text/csv y cabeceras presentes\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect((pm.response.headers.get(\"Content-Type\") || \"\").toLowerCase()).to.include(\"text/csv\");",
+                  "  pm.expect(pm.response.text().trim().length).to.be.above(10);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Accept",
+                "value": "text/csv, application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/carga-masiva/productos/plantilla?formato=CSV",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-031 - Bulk: Negativo lote de importacion inexistente (404)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-031: HTTP 404 Problem Details\", function () {",
+                  "  pm.response.to.have.status(404);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"Problem\", \"PM-031\");",
+                  "  pm.expect(body.status).to.eql(404);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/carga-masiva/productos/importaciones/{{nonExistentBatchId}}",
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "05 - Pricing y Price Audit",
+      "description": "Lectura de precio individual, SKU inexistente y auditoria historica de precios (parte HTTP de INT-05).",
+      "item": [
+        {
+          "name": "PM-040 - Pricing: Obtener precio vigente por SKU",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// H14: Bloqueo preventivo si un fixture dinamico requerido (sku) esta ausente",
+                  "const __reqFx = [\"sku\"];",
+                  "for (const __k of __reqFx) {",
+                  "  const __val = pm.environment.get(__k) || pm.variables.get(__k);",
+                  "  if (!__val || String(__val).trim() === \"\") {",
+                  "    if (pm.execution && typeof pm.execution.skipRequest === \"function\") {",
+                  "      pm.execution.skipRequest();",
+                  "    }",
+                  "    throw new Error(\"BLOCKED_FIXTURE: Fixture dinamico requerido ausente (\" + __k + \"). Productor previo fallo o no devolvio datos.\");",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-040: HTTP 200 y JSON Schema Precio\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"Precio\", \"PM-040\");",
+                  "  pm.expect(body.sku).to.eql(pm.environment.get(\"sku\") || pm.variables.get(\"sku\"));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/precios/skus/{{sku}}?canal={{channel}}",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-041 - Pricing: Negativo SKU inexistente (404)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-041: HTTP 404 Problem Details\", function () {",
+                  "  pm.response.to.have.status(404);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"Problem\", \"PM-041\");",
+                  "  pm.expect(body.status).to.eql(404);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/precios/skus/{{nonExistentSku}}?canal={{channel}}",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-042 - Price Audit: Consultar historial de auditoria de precios",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PM-042: HTTP 200 y RegistroAuditoriaPrecio valido\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.items).to.be.an(\"array\");",
+                  "  for (const row of body.items) pm.expect(row.id_auditoria).to.be.a(\"string\").and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/auditoria-precios?pagina=1&tamanio=10",
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "06 - Taxonomy y Catalog",
+      "description": "Consultas de categorias, marcas, arbol, tipos de producto y categoria inexistente (parte HTTP de INT-06).",
+      "item": [
+        {
+          "name": "PM-050 - Taxonomy: Listar categorias (administracion)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PM-050: HTTP 200 y items[]\", function () { pm.response.to.have.status(200); pm.expect(pm.response.json().items).to.be.an(\"array\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/categorias/administracion?pagina=1&tamanio=20",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-051 - Taxonomy: Listar marcas (administracion)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PM-051: HTTP 200 y items[]\", function () { pm.response.to.have.status(200); pm.expect(pm.response.json().items).to.be.an(\"array\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/marcas/administracion?pagina=1&tamanio=20",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-052 - Taxonomy: Obtener arbol de categorias",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PM-052: HTTP 200 y arbol JSON valido\", function () { pm.response.to.have.status(200); pm.expect(pm.response.json()).to.satisfy((v) => Array.isArray(v) || typeof v === \"object\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/categorias/arbol",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-053 - Taxonomy: Listar tipos de producto",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PM-053: HTTP 200 y items[]\", function () { pm.response.to.have.status(200); pm.expect(pm.response.json().items).to.be.an(\"array\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/tipos-producto?pagina=1&tamanio=20",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-054 - Taxonomy: Negativo categoria inexistente (404)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-054: HTTP 404 Problem Details\", function () {",
+                  "  pm.response.to.have.status(404);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"Problem\", \"PM-054\");",
+                  "  pm.expect(body.status).to.eql(404);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/categorias/{{nonExistentCategoryId}}",
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "07 - Promotions",
+      "description": "Operaciones de lectura segura de promociones y cupones (sin consumir ni restaurar cupones).",
+      "item": [
+        {
+          "name": "PM-060 - Promotions: Listar promociones vigentes por canal",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PM-060: HTTP 200 y items[]\", function () { pm.response.to.have.status(200); pm.expect(pm.response.json().items).to.be.an(\"array\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/promociones?canal={{channel}}&vigentes=true",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-061 - Promotions: Listar promociones (administracion)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PM-061: HTTP 200 y items[]\", function () { pm.response.to.have.status(200); pm.expect(pm.response.json().items).to.be.an(\"array\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/promociones/administracion?pagina=1&tamanio=10",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-062 - Promotions: Listar cupones (solo lectura)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PM-062: HTTP 200 y items[]\", function () { pm.response.to.have.status(200); pm.expect(pm.response.json().items).to.be.an(\"array\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/cupones?pagina=1&tamanio=10",
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "08 - Inventory",
+      "description": "Consultas de umbrales, dashboard y ubicaciones con validacion de esquema OpenAPI.",
+      "item": [
+        {
+          "name": "PM-070 - Inventory: Consultar umbrales de inventario",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PM-070: HTTP 200 y DTO UmbralInventario\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.umbralGlobal).to.be.a(\"number\").and.at.least(0);",
+                  "  pm.expect(body.overrides).to.be.an(\"array\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/inventario/umbrales",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-071 - Inventory: Consultar dashboard operativo",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PM-071: HTTP 200 y DTO DashboardInventario\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.generatedAt).to.be.a(\"string\").and.not.empty;",
+                  "  pm.expect(body.totalSkus).to.be.a(\"number\").and.at.least(0);",
+                  "  pm.expect(body.totalOnHand).to.be.a(\"number\").and.at.least(0);",
+                  "  pm.expect(body.totalReserved).to.be.a(\"number\").and.at.least(0);",
+                  "  pm.expect(body.totalAvailable).to.be.a(\"number\").and.at.least(0);",
+                  "  pm.expect(body.porUbicacion).to.be.an(\"array\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/inventario/dashboard",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-072 - Inventory: Listar ubicaciones de inventario",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PM-072: HTTP 200 y listado de ubicaciones\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  const list = Array.isArray(body) ? body : body.items;",
+                  "  pm.expect(list).to.be.an(\"array\");",
+                  "  const first = list.find((u) => u && (u.location_id || u.id));",
+                  "  if (first) pm.environment.set(\"locationId\", String(first.location_id || first.id));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/inventario/ubicaciones",
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "09 - APIM, Gateway y G7",
+      "description": "Casos negativos contractuales de seguridad, validacion de parametros y enrutamiento (INT-07 e INT-01).",
+      "item": [
+        {
+          "name": "PM-004 - Negativo: Solicitud sin autenticacion (401)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-004: HTTP 401 Problem Details TOKEN_INVALIDO sin fuga\", function () {",
+                  "  pm.response.to.have.status(401);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"Problem\", \"PM-004\");",
+                  "  pm.expect(body.status).to.eql(401);",
+                  "  pm.expect(body.code).to.eql(\"TOKEN_INVALIDO\");",
+                  "  pm.expect(body).to.not.have.property(\"items\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/productos?canal={{channel}}",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-004B - Negativo: Token malformado o invalido (401)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-004B: HTTP 401 Problem Details TOKEN_INVALIDO sin fuga\", function () {",
+                  "  pm.response.to.have.status(401);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"Problem\", \"PM-004B\");",
+                  "  pm.expect(body.status).to.eql(401);",
+                  "  pm.expect(body.code).to.eql(\"TOKEN_INVALIDO\");",
+                  "  pm.expect(body).to.not.have.property(\"items\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{invalidTokenFixture}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/productos?canal={{channel}}",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-005 - Negativo: Autorizacion insuficiente (403 estricto)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-005: HTTP 403 Problem Details SCOPE_INSUFICIENTE sin fuga\", function () {",
+                  "  pm.response.to.have.status(403);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"Problem\", \"PM-005\");",
+                  "  pm.expect(body.status).to.eql(403);",
+                  "  pm.expect(body.code).to.eql(\"SCOPE_INSUFICIENTE\");",
+                  "  pm.expect(body).to.not.have.property(\"items\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{restrictedAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/auditoria-precios?pagina=1&tamanio=5",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-006 - Negativo: Recurso inexistente (404)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-006: HTTP 404 PRODUCTO_NO_ENCONTRADO\", function () {",
+                  "  pm.response.to.have.status(404);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"Problem\", \"PM-006\");",
+                  "  pm.expect(body.status).to.eql(404);",
+                  "  pm.expect(body.code).to.eql(\"PRODUCTO_NO_ENCONTRADO\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/productos/{{nonExistentProductId}}?canal={{channel}}",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-007A - Negativo: Rango de precios inconsistente (precioMin > precioMax)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-007A: HTTP 400 VALIDACION\", function () {",
+                  "  pm.response.to.have.status(400);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"Problem\", \"PM-007A\");",
+                  "  pm.expect(body.status).to.eql(400);",
+                  "  pm.expect(body.code).to.eql(\"VALIDACION\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/productos?canal={{channel}}&precioMin=200&precioMax=50",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-007B - Negativo: Canal y paginacion invalidos (400)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-007B: HTTP 400 VALIDACION\", function () {",
+                  "  pm.response.to.have.status(400);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"Problem\", \"PM-007B\");",
+                  "  pm.expect(body.status).to.eql(400);",
+                  "  pm.expect(body.code).to.eql(\"VALIDACION\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/productos?canal=CANAL_INVALIDO&pagina=0",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-008 - Negativo: Ruta desconocida en APIM/Gateway (404)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PM-008: HTTP 404 para ruta fuera de contrato\", function () { pm.response.to.have.status(404); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/ruta-inexistente-h5-probe",
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "10 - Integraciones externas",
+      "description": "Pruebas de proveedor G6 con tokens M2M separados y JSON Schemas estrictos.",
+      "item": [
+        {
+          "name": "PM-080 - Proveedor G6 para G1 Marketplace: Listar productos (modulo-marketplace)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-080: HTTP 200 estricto y PaginaProductosComercial conforme a JSON Schema\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"PaginaProductosComercial\", \"PM-080\");",
+                  "  pm.expect(body.items).to.be.an(\"array\").and.not.be.empty;",
+                  "  assertSchema(body.items[0], \"ProductoResumenComercial\", \"PM-080.item\");",
+                  "  if (!pm.environment.get(\"sku\")) {",
+                  "    const simple = body.items.find((it) => !it.tiene_variantes && it.sku_base);",
+                  "    if (simple) pm.environment.set(\"sku\", simple.sku_base);",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{marketplaceAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/productos?canal=MARKETPLACE&pagina=1&tamanio=5",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-081 - Proveedor G6 para G1 Marketplace: Disponibilidad comercial (modulo-marketplace)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// H14: Bloqueo preventivo si un fixture dinamico requerido (sku) esta ausente",
+                  "const __reqFx = [\"sku\"];",
+                  "for (const __k of __reqFx) {",
+                  "  const __val = pm.environment.get(__k) || pm.variables.get(__k);",
+                  "  if (!__val || String(__val).trim() === \"\") {",
+                  "    if (pm.execution && typeof pm.execution.skipRequest === \"function\") {",
+                  "      pm.execution.skipRequest();",
+                  "    }",
+                  "    throw new Error(\"BLOCKED_FIXTURE: Fixture dinamico requerido ausente (\" + __k + \"). Productor previo fallo o no devolvio datos.\");",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-081: HTTP 200 estricto y JSON Schema DisponibilidadComercial (additionalProperties=false)\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"ConsultaDisponibilidadComercialResponse\", \"PM-081\");",
+                  "  const expectedSku = pm.environment.get(\"sku\") || pm.variables.get(\"sku\");",
+                  "  pm.expect(body.items).to.be.an(\"array\").and.not.be.empty;",
+                  "  const row = body.items.find((it) => it.sku === expectedSku);",
+                  "  pm.expect(row, \"SKU solicitado\").to.be.an(\"object\");",
+                  "  assertSchema(row, \"DisponibilidadComercial\", \"PM-081.row\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{marketplaceAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/inventario/disponibilidad/comercial?skus={{sku}}&canal=MARKETPLACE",
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "PM-082 - Proveedor G6 para G5 Ventas: Disponibilidad autoritativa (modulo-ventas)",
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// H14: Bloqueo preventivo si un fixture dinamico requerido (sku) esta ausente",
+                  "const __reqFx = [\"sku\"];",
+                  "for (const __k of __reqFx) {",
+                  "  const __val = pm.environment.get(__k) || pm.variables.get(__k);",
+                  "  if (!__val || String(__val).trim() === \"\") {",
+                  "    if (pm.execution && typeof pm.execution.skipRequest === \"function\") {",
+                  "      pm.execution.skipRequest();",
+                  "    }",
+                  "    throw new Error(\"BLOCKED_FIXTURE: Fixture dinamico requerido ausente (\" + __k + \"). Productor previo fallo o no devolvio datos.\");",
+                  "  }",
+                  "}",
+                  "const loc = pm.environment.get(\"locationId\") || pm.variables.get(\"locationId\");",
+                  "pm.variables.set(\"locationQueryParam\", loc ? \"&location_id=\" + encodeURIComponent(loc) : \"\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const defs = JSON.parse(pm.collectionVariables.get(\"openApiResponseSchemas\")).$defs;",
+                  "const __fmtRx = {",
+                  "  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,",
+                  "  \"date-time\": /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$/,",
+                  "  uri: /^([a-z][a-z0-9+.-]*:|\\/)/i",
+                  "};",
+                  "function __validateNode(val, sch, label) {",
+                  "  if (!sch || typeof sch !== \"object\") return;",
+                  "  if (sch.$ref) {",
+                  "    const refName = String(sch.$ref).replace(/^#\\/(\\$defs|components\\/schemas)\\//, \"\");",
+                  "    pm.expect(defs[refName], \"Schema ref \" + refName).to.be.an(\"object\");",
+                  "    return __validateNode(val, defs[refName], label);",
+                  "  }",
+                  "  if (Array.isArray(sch.allOf)) {",
+                  "    for (const sub of sch.allOf) __validateNode(val, sub, label);",
+                  "  }",
+                  "  if (Array.isArray(sch.oneOf)) {",
+                  "    let matched = 0;",
+                  "    for (const sub of sch.oneOf) {",
+                  "      try { __validateNode(val, sub, label); matched += 1; } catch (_) {}",
+                  "    }",
+                  "    pm.expect(matched, label + \" debe cumplir exactamente un esquema oneOf\").to.eql(1);",
+                  "  }",
+                  "  const types = Array.isArray(sch.type) ? sch.type : (sch.type ? [sch.type] : []);",
+                  "  if (types.length > 0) {",
+                  "    const actualType = val === null ? \"null\" : (Array.isArray(val) ? \"array\" : (typeof val === \"number\" && Number.isInteger(val) && types.includes(\"integer\") ? \"integer\" : typeof val));",
+                  "    pm.expect(types, label + \" tipo\").to.include(actualType);",
+                  "  }",
+                  "  if (val === null || val === undefined) return;",
+                  "  if (typeof val === \"string\") {",
+                  "    if (sch.minLength !== undefined) pm.expect(val.length, label + \" minLength\").to.be.at.least(sch.minLength);",
+                  "    if (sch.format && __fmtRx[sch.format]) pm.expect(__fmtRx[sch.format].test(val), label + \" format \" + sch.format).to.eql(true);",
+                  "  }",
+                  "  if (typeof val === \"number\") {",
+                  "    if (sch.minimum !== undefined) pm.expect(val, label + \" minimum\").to.be.at.least(sch.minimum);",
+                  "    if (sch.exclusiveMinimum !== undefined) pm.expect(val, label + \" exclusiveMinimum\").to.be.above(sch.exclusiveMinimum);",
+                  "  }",
+                  "  if (sch.enum) pm.expect(sch.enum, label + \" enum\").to.include(val);",
+                  "  if (Array.isArray(val) && sch.items) {",
+                  "    for (let i = 0; i < val.length; i += 1) __validateNode(val[i], sch.items, label + \"[\" + i + \"]\");",
+                  "  }",
+                  "  if (typeof val === \"object\" && !Array.isArray(val)) {",
+                  "    for (const reqKey of sch.required || []) {",
+                  "      pm.expect(val, label + \" requiere \" + reqKey).to.have.property(reqKey);",
+                  "    }",
+                  "    if (sch.additionalProperties === false && sch.properties) {",
+                  "      const allowed = Object.keys(sch.properties);",
+                  "      for (const k of Object.keys(val)) {",
+                  "        pm.expect(allowed, label + \" no permite propiedad adicional \" + k).to.include(k);",
+                  "      }",
+                  "    }",
+                  "    for (const [k, prop] of Object.entries(sch.properties || {})) {",
+                  "      if (val[k] !== undefined) __validateNode(val[k], prop, label + \".\" + k);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "function assertSchema(val, defName, label) {",
+                  "  pm.expect(defs[defName], \"Schema \" + defName).to.be.an(\"object\");",
+                  "  __validateNode(val, defs[defName], label);",
+                  "}",
+                  "pm.test(\"PM-082: HTTP 200 estricto y JSON Schema DisponibilidadStock con invariante\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  assertSchema(body, \"ConsultaDisponibilidadResponse\", \"PM-082\");",
+                  "  const expectedSku = pm.environment.get(\"sku\") || pm.variables.get(\"sku\");",
+                  "  pm.expect(body.items).to.be.an(\"array\").and.not.be.empty;",
+                  "  const row = body.items.find((it) => it.sku === expectedSku);",
+                  "  pm.expect(row, \"SKU solicitado\").to.be.an(\"object\");",
+                  "  assertSchema(row, \"DisponibilidadStock\", \"PM-082.row\");",
+                  "  pm.expect(row.available).to.eql(Math.max(row.on_hand - row.reserved - row.blocked, 0));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Correlation-Id",
+                "value": "{{correlationId}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ventasAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}{{apiPrefix}}/inventario/disponibilidad?skus={{sku}}{{locationQueryParam}}",
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
