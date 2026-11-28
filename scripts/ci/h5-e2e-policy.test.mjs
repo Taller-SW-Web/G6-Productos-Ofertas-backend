@@ -89,7 +89,7 @@ test('un E2E nuevo que menciona un broker debe clasificarse', () => {
     assertClassified('apps/new/test/unknown.e2e-spec.ts', 'new RabbitBroker()'),
   );
 });
-test('Taxonomy obligatorio conserva dos integraciones H4 con broker real: deuda H5 explícita', () => {
+test('Taxonomy excluye dos pruebas H4 del gate y exige el job H5', () => {
   assert.equal(
     (taxonomy.match(/new RabbitTaxonomyDesechable\(\)/g) ?? []).length,
     2,
@@ -97,9 +97,27 @@ test('Taxonomy obligatorio conserva dos integraciones H4 con broker real: deuda 
   assert.equal((taxonomy.match(/await rabbit\.iniciar\(\)/g) ?? []).length, 2);
   assert.match(taxonomy, /procesa los tres maestros por RabbitMQ real/);
   assert.match(taxonomy, /recupera una entrega sin ACK al reiniciar/);
+  assert.match(
+    taxonomy,
+    /TAXONOMY_TEST_LEGACY_RABBIT === '1' \? it : it\.skip/,
+  );
+  assert.equal((taxonomy.match(/itLegacyRabbit\('/g) ?? []).length, 2);
   assert.match(taxonomyRunner, /persistencia-drizzle\.e2e-spec\.ts/);
-  assert.match(taxonomyRunner, /omitidas > 0/);
+  assert.match(taxonomyRunner, /TAXONOMY_TEST_LEGACY_RABBIT: '0'/);
+  assert.match(taxonomyRunner, /verificarOmisionesLegacy\(reporte\)/);
   assert.match(ci, /node scripts\/ci\/run-taxonomy-integration\.mjs/);
+  assert.match(ci, /taxonomia:\s*\n\s*needs: \[taxonomia_catalogo\]/);
+});
+test('el gate obligatorio de Promotions no ejecuta el smoke RabbitMQ histórico', () => {
+  const promotions =
+    ci.split('\n  promotions:')[1]?.split('\n  combos_catalogo:')[0] ?? '';
+  assert.ok(promotions, 'job promotions ausente');
+  assert.doesNotMatch(
+    promotions,
+    /coupons\.isolated\.smoke\.mjs/,
+    'P0-A: el smoke inicia RabbitMQ real',
+  );
+  assert.match(promotions, /run-h5-postgres\.mjs/);
 });
 test('H5 E2E configura selección explícita y separa seis casos AMQP', () =>
   validate(ci, config, catalog));

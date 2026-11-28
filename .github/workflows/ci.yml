@@ -201,6 +201,10 @@ jobs:
         G6_DOCS_ROOT: ${{ github.workspace }}/.ci/G6-Productos-Ofertas-docs
         CATALOG_POSTGRES_ONLY: '1'
       run: npm run test:e2e
+    - name: Probar integraciones H5 Catalog Bulk Inventory con PostgreSQL descartable
+      env:
+        G6_E2E_DOCS_PATH: ${{ github.workspace }}/.ci/G6-Productos-Ofertas-docs
+      run: node tests/h5/run-catalog-bulk-inventory-postgres.mjs
   contratos:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
@@ -440,6 +444,7 @@ jobs:
     - compilacion
     timeout-minutes: 30
   taxonomia:
+    needs: [taxonomia_catalogo]
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
       (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
@@ -555,12 +560,12 @@ jobs:
       run: pwsh -NoProfile -File ops/supabase/g5-fixtures/tests/run-local-catalog-h5-async-delta.ps1
     - name: Verificar bootstrap H04 compartido con logins runtime autenticados
       run: node ops/supabase/g5-fixtures/tests/run-local-h04-bootstrap.mjs
-    - name: Ejecutar ocho escenarios de Inventory con PostgreSQL real
+    - name: Ejecutar nueve escenarios de Inventory con PostgreSQL real
       env:
         INVENTORY_REAL_INTEGRATION: '1'
         INVENTORY_POSTGRES_ONLY: '1'
         G6_DOCS_ROOT: ${{ github.workspace }}/docs
-      run: npm test -- apps/inventory-svc/test/inventory.real.integration.spec.ts --testNamePattern='ejecuta Drizzle|rollback completo|order_id incorrecto|confirma o libera concurrentemente|serializa reservas concurrentes|replay concurrente durable|expira automáticamente|serializa confirmar/liberar y expiración' --reporter=verbose
+      run: npm test -- apps/inventory-svc/test/inventory.real.integration.spec.ts --testNamePattern='H5 BLOCK-A2|ejecuta Drizzle|rollback completo|order_id incorrecto|confirma o libera concurrentemente|serializa reservas concurrentes|replay concurrente durable|expira automáticamente|serializa confirmar/liberar y expiración' --reporter=verbose
   persistencia:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
@@ -633,8 +638,6 @@ jobs:
       env:
         G6_TEST_OPENSSL: openssl
       run: node apps/promotions-svc/test/persistence.isolated.smoke.mjs
-    - name: Validar transporte de cupones y Outbox con dependencias desechables
-      run: node apps/promotions-svc/test/coupons.isolated.smoke.mjs
     - name: Verificar operaciones de cupones H5 en PostgreSQL descartable
       id: h5_postgres
       shell: bash

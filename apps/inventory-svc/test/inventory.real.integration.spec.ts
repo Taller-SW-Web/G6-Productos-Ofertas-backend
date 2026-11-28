@@ -51,6 +51,8 @@ import {
   INVENTORY_QUEUES,
 } from '../src/messaging/service-bus-deliveries.js';
 import { InventoryServiceBusRelay } from '../src/messaging/service-bus-relay.js';
+import { InventoryServiceBusHandler } from '../src/messaging/service-bus-consumer.js';
+import type { ServiceBusReceivedMessage } from '@azure/service-bus';
 import { generateInventoryFixtureData } from '../../../scripts/h5/fixtures/inventory/generate-inventory-fixture.mjs';
 
 const enabled = Boolean(process.env.INVENTORY_REAL_INTEGRATION === '1');
@@ -4760,6 +4762,99 @@ GRANT inventory_app TO inventory_test;`,
      *    emite el evento resultado R10 en Outbox y deduplica replay; si la rama base aún no lo habilita (`BLOCKED_CONTRACT`),
      *    lo registra explícitamente sin romper la compatibilidad con `h5-integral-r2`.
      */
+
+    it('H5 BLOCK-A2: initialization preserves balances, rejects invalid locations and replays without duplication', async () => {
+      const existingSku = `h5-a2-existing-${randomUUID()}`;
+      const emptySku = `h5-a2-empty-${randomUUID()}`;
+      await database.query(
+        `INSERT INTO inventory.stock_balance(sku_id,location_id,on_hand,reserved,blocked,stock_version) VALUES($1,$2,11,3,2,7)`,
+        [existingSku, locationId],
+      );
+      const balances = async (sku: string) =>
+        (
+          await database.query(
+            'SELECT on_hand,reserved,blocked,stock_version FROM inventory.stock_balance WHERE sku_id=$1',
+            [sku],
+          )
+        ).rows;
+      const before = await balances(existingSku);
+      const settlement = {
+        completeMessage: vi.fn(async () => {}),
+        abandonMessage: vi.fn(async () => {}),
+        deadLetterMessage: vi.fn(async () => {}),
+      };
+      const handler = new InventoryServiceBusHandler(
+        realCommandService(),
+        settlement,
+      );
+      const request = (sku: string, location?: string) => ({
+        name: 'inventory.sku.initialization.requested',
+        kind: 'command',
+        producer: 'catalog-svc',
+        schema_version: 1,
+        occurred_at: new Date().toISOString(),
+        message_id: randomUUID(),
+        operation_id: randomUUID(),
+        correlation_id: randomUUID(),
+        data: {
+          sku,
+          product_id: randomUUID(),
+          variant_id: null,
+          ...(location ? { default_location_id: location } : {}),
+        },
+      });
+      const deliver = (value: ReturnType<typeof request>) =>
+        handler.handle({
+          body: Buffer.from(JSON.stringify(value)),
+          messageId: value.message_id,
+          subject: value.name,
+          correlationId: value.correlation_id,
+        } as ServiceBusReceivedMessage);
+      const existing = request(existingSku);
+      const empty = request(emptySku);
+      const rejected = request(`h5-a2-rejected-${randomUUID()}`, randomUUID());
+      for (const value of [existing, empty, rejected]) {
+        expect(await deliver(value)).toBe('completed');
+        expect(await deliver(value)).toBe('completed');
+        const rows = await database.query<{
+          event_type: string;
+          payload: { data: { status: string; code: string | null } };
+        }>(
+          `SELECT event_type,payload FROM inventory.outbox WHERE payload->>'operation_id'=$1`,
+          [value.operation_id],
+        );
+        expect(rows.rows).toHaveLength(1);
+        expect(rows.rows[0].payload.data).toMatchObject(
+          value === rejected
+            ? { status: 'REJECTED', code: 'UBICACION_NO_ENCONTRADA' }
+            : { status: 'INITIALIZED', code: null },
+        );
+      }
+      const conflict = {
+        ...existing,
+        message_id: randomUUID(),
+        data: { ...existing.data, sku: `h5-a2-collision-${randomUUID()}` },
+      };
+      expect(await deliver(conflict)).toBe('completed');
+      const conflictResult = await database.query<{
+        payload: { data: { status: string; code: string } };
+      }>(
+        `SELECT payload FROM inventory.outbox WHERE payload->>'causation_id'=$1`,
+        [conflict.message_id],
+      );
+      expect(conflictResult.rows).toHaveLength(1);
+      expect(conflictResult.rows[0].payload.data).toMatchObject({
+        status: 'REJECTED',
+        code: 'IDEMPOTENCY_CONFLICT',
+      });
+      expect(await balances(existingSku)).toEqual(before);
+      expect(await balances(conflict.data.sku)).toEqual([]);
+      expect(await balances(emptySku)).toEqual([]);
+      expect(await balances(rejected.data.sku)).toEqual([]);
+      expect(settlement.completeMessage).toHaveBeenCalledTimes(7);
+      expect(settlement.abandonMessage).not.toHaveBeenCalled();
+      expect(settlement.deadLetterMessage).not.toHaveBeenCalled();
+    });
 
     it('R06 — Catalog → Inventory procesa inventory.sku.initialization.requested en PostgreSQL 17', async () => {
       const tag = `r06-${randomUUID().slice(0, 8)}`;
