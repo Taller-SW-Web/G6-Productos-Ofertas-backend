@@ -19,7 +19,7 @@ PATH_PROP = re.compile(r"path:\s*['\"]([^'\"]+)['\"]")
 OP_ID_PROP = re.compile(r"operationId:\s*['\"]([A-Za-z0-9_.-]+)['\"]")
 SERVICE_PROP = re.compile(r"service:\s*['\"]([a-z0-9-]+)['\"]")
 ROLE_PROP = re.compile(r"role:\s*['\"]([A-Za-z0-9_.-]+)['\"]")
-LEGACY_UNCONTRACTED = {
+PRICING_ADMIN_IDS = {
     "obtenerDefinicionPrecioProductoAdministracion",
     "obtenerDefinicionPrecioSkuAdministracion",
 }
@@ -379,6 +379,14 @@ def operation_records(spec: dict) -> list[dict]:
     return sorted(records, key=lambda item: (item["operationId"] or "", item["method"], item["path"]))
 
 
+def pricing_admin_contract_ready(operation: dict) -> bool:
+    return (
+        operation.get("x-gateway-operation") is True
+        and operation.get("x-required-role") == "GESTOR_COMERCIAL"
+        and operation.get("security") == [{"userBearer": []}]
+    )
+
+
 def validate_artifact_pair(filtered: dict, manifest: dict) -> None:
     expected = [
         {
@@ -423,6 +431,15 @@ def validate_artifact_pair(filtered: dict, manifest: dict) -> None:
                 f"Inconsistencia entre security del OpenAPI filtrado ({declared_schemes}) "
                 f"y securityAlternatives del manifiesto ({alt_schemes}) en {operation['operationId']}"
             )
+        if operation["operationId"] in PRICING_ADMIN_IDS and (
+            not pricing_admin_contract_ready(op_obj)
+            or declared_schemes != ["userBearer"]
+            or operation.get("identityType") != "human"
+            or operation.get("roles") != ["GESTOR_COMERCIAL"]
+            or operation.get("rateProfile") != "admin_read"
+            or any(alt.get("roles") != ["GESTOR_COMERCIAL"] for alt in operation["securityAlternatives"])
+        ):
+            raise ValueError(f"Seguridad contractual Pricing inconsistente: {operation['operationId']}")
         if operation.get("g5OptIn"):
             scope = op_obj.get("x-required-scope")
             scopes = [scope] if isinstance(scope, str) else scope
@@ -501,8 +518,12 @@ def filter_spec(
     if gateway_ids & set(private_ids) or g5_ids & set(private_ids):
         raise ValueError("Una ruta interna aparece en el registro público del Gateway")
 
-    uncontracted = gateway_ids & LEGACY_UNCONTRACTED
-    candidate_ids = (gateway_ids - LEGACY_UNCONTRACTED) | (g5_ids if enable_g5 else set())
+    uncontracted = {
+        operation_id
+        for operation_id in gateway_ids & PRICING_ADMIN_IDS
+        if not pricing_admin_contract_ready(operation_index.get(operation_id, ("", "", {}))[2])
+    }
+    candidate_ids = (gateway_ids - uncontracted) | (g5_ids if enable_g5 else set())
     route_index = {route["operationId"]: route for route in gateway_routes + g5_routes}
     missing = candidate_ids - operation_index.keys()
     if missing:
@@ -516,7 +537,7 @@ def filter_spec(
         route = route_index[operation_id]
         operation = operation_index.get(operation_id)
         if operation is None:
-            if operation_id in LEGACY_UNCONTRACTED:
+            if operation_id in uncontracted:
                 continue
             raise ValueError(f"operationId no documentado: {operation_id}")
         path, method, _ = operation
