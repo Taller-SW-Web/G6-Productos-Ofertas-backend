@@ -85,7 +85,48 @@ python ops/azure/apim/filter-openapi.py `
 | APIM-T06 | Ruta desconocida o las 5 privadas `404` sin llegar al provider | Estático preparado; instancia `BLOCKED_INFRA` |
 | APIM-T07 | Correlación `X-Correlation-Id` UUID preservada/generada en todo flujo | Estático preparado; instancia `BLOCKED_INFRA` |
 | APIM-T08 | Comparación privada y rollback de revisión/políticas | Estático preparado; instancia `BLOCKED_INFRA` |
-| RL-01..RL-06 | Perfiles burst, cuota, concurrencia, aislamiento y anti-bypass según Docs | Estático preparado; instancia `BLOCKED_INFRA` |
+| RL-01..RL-06 | Perfiles burst, cuota, concurrencia, aislamiento y anti-bypass según Docs | Harness L1 local implementado para burst/recuperación, cuota y concurrencia; Azure sigue `STANDBY` y RL-05/06 requieren evidencia externa adicional |
+
+## Demo 4 — rate limiting y recuperación APIM
+
+El runner independiente es `scripts/h5/k6/bin/ejecutar-rate-limit.ps1`. Usa k6 y su dashboard nativo; no levanta Grafana ni dashboard propio. Los perfiles disponibles son `demo-rate-limit` (RL-01..03), `aislamiento` (RL-04), `cuota` (extensión) y `concurrencia` (observación RL-06, inconclusa sin idempotencia). El perfil principal solo prueba un GET efectivo, una identidad, el límite burst y la recuperación; no requiere export de Price Audit, cuatro tokens ni cuota.
+
+En modo `remote`, el preflight comprueba el host HTTPS, la operación y método exactos del manifiesto efectivo, los parámetros y la revisión desplegada, los SHA del manifiesto/OpenAPI/política, el perfil de tasa, presupuesto de solicitudes, RPS, VUs, concurrencia, duración y ventana. También valida el permiso firmado por Infra y G7 contra la identidad y el hash del token inyectado en `APIM_RL_TEST_TOKEN`; para `aislamiento` valida además el segundo consumidor y token. `APIM_RL_AUTHORIZED=1` no autoriza tráfico. Los máximos del permiso deben derivarse de la operación y del despliegue efectivo; no uses números de laboratorio para aumentar la carga.
+
+Configura el directorio privado `$PermitDir` fuera de Git con el JSON equivalente a [`tests/rate-limit-run.example.json`](tests/rate-limit-run.example.json), el manifiesto efectivo, parámetros efectivos, XML de política exportado y permiso vigente. El token se suministra solo mediante el entorno del proceso, no en argumentos ni archivos. Ejecuta primero el preflight sin tráfico y luego la medición:
+
+~~~powershell
+$K6 = (Get-Command k6 -CommandType Application).Source
+$PermitDir = (Resolve-Path 'ops/azure/apim/.local/rate-limit').Path
+$Run = @{
+    Profile = 'demo-rate-limit'
+    Mode = 'remote'
+    Config = Join-Path $PermitDir 'config.json'
+    Manifest = Join-Path $PermitDir 'manifest.effective.json'
+    Parameters = Join-Path $PermitDir 'parameters.effective.json'
+    Policy = Join-Path $PermitDir 'policy.effective.xml'
+    Permit = Join-Path $PermitDir 'permit-infra-g7.json'
+    K6Path = $K6
+}
+
+.\scripts\h5\k6\bin\ejecutar-rate-limit.ps1 @Run -SoloValidar
+.\scripts\h5\k6\bin\ejecutar-rate-limit.ps1 @Run -Dashboard
+~~~
+
+El permiso de staging y la ventana aprobada son obligatorios. Para laboratorio local, usa `-Mode local` solo con host loopback y un manifiesto marcado `LOCAL_SIMULATION`; los resultados se etiquetan `L1_LOCAL_POLICY_SIMULATION` y no certifican Azure.
+
+### Guion de 2–3 minutos
+
+Antes de la ventana, deja abiertas estas vistas, sin editar ni guardar políticas:
+
+1. **Azure Portal → API Management services → `apim-g6-productos-chile` → APIs → APIs → API activa → operación GET exacta del permiso → Inbound processing → Calculate effective policy.** Enseña el `rate-limit-by-key` efectivo, `calls`, `renewal-period`, clave por consumidor y revisión/hash que coinciden con el pack firmado. Microsoft recomienda revisar Calculate effective policy porque la limitación puede heredarse de distintos scopes ([referencia de throttling](https://learn.microsoft.com/en-us/troubleshoot/azure/api-mgmt/availability/request-throttling-http-403)).
+2. **Azure Portal → API Management services → `apim-g6-productos-chile` → Monitoring → Application Insights** y, en otra pestaña, **Container Apps → `api-gateway` → Logs**. No cambies logging ni muestreo para la demo.
+3. En PowerShell, ejecuta `-SoloValidar`, confirma el permiso/identidad y ejecuta `-Dashboard`. El dashboard nativo aparece en `http://127.0.0.1:5665` mientras corre k6.
+4. En k6 observa VUs, solicitudes/s, latencias, offered/admitted/rejected y códigos HTTP. La fase normal devuelve 200; la ráfaga supera el límite firmado, muestra 429 y `Retry-After`; el runner detiene solicitudes, espera el valor observado y prueba el mismo token/operación para obtener 200.
+5. En el resumen JSON/console verifica el 429, el `Retry-After`, el tiempo de espera y el 200 de recuperación. Para RL-05, busca los IDs de correlación rechazados en APIM y confirma que no haya request/dependency correspondiente en Gateway; los IDs admitidos sí deben correlacionarse. La telemetría no muestreada o sin correlación deja RL-05 en `INCONCLUSIVE`. Application Insights registra requests de entrada y dependencias `forward-request` cuando existen; revisa la transacción de extremo a extremo ([guía de Application Insights](https://learn.microsoft.com/en-us/azure/api-management/api-management-howto-app-insights)).
+6. Abre `scripts/h5/k6/.local/apim-rate-limit/<run-id>/dashboard.html` como respaldo junto a `summary.json`, `k6-summary.json` y `evidence-index.json`. `FAIL` indica que el comportamiento esperado no se acreditó; `INCONCLUSIVE` indica falta de HTML o evidencia externa; `NOT_RUN` corresponde al preflight. Un `PASS` de ejecución local solo demuestra el harness simulado, y RL-06 permanece inconcluso sin probar idempotencia.
+
+Si `Retry-After` excede el tiempo disponible, deja terminar la recuperación después de la ventana aprobada: no reduzcas renewal-period ni alteres la política para la exposición. La suite de pruebas locales incluye casos positivos y negativos y corre únicamente contra loopback.
 
 ## Mecanismo de dos etapas (`deploymentStage`) y scripts operativos
 

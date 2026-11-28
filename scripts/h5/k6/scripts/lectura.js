@@ -28,6 +28,8 @@ export function reader(caseId) {
   const fixture = environment === 'ISOLATED';
   const local = fixture || environment === 'LOCAL_SERVICE';
   const inspectOnly = environment === 'INSPECT_OFFLINE' && target === 'https://example.invalid';
+  const pattern = __ENV.G6_K6_PATTERN ?? '';
+  const supportedPatterns = ['constant', 'ramp', 'spike', 'recovery'];
   const revisionHeader = __ENV.G6_K6_REVISION_HEADER;
   const expectedRevision = __ENV.G6_K6_EFFECTIVE_REVISION;
   const originAllowed = local
@@ -39,6 +41,9 @@ export function reader(caseId) {
       !vus || !Number.isInteger(maxRps) || maxRps < 1 || maxRps > ceiling ||
       !COMMERCIAL_CHANNELS.includes(channel) || (caseId === 'PERF-03' && channel === 'VENTAS') ||
       (fixture && caseId !== 'PERF-01') || (local && (profile !== 'demo-smoke' || maxRps > 2))) fail('PREFLIGHT_CONFIG_INVALIDA');
+  if (pattern && (!supportedPatterns.includes(pattern) || !local || profile !== 'demo-smoke' || maxRps > 2)) {
+    fail('PREFLIGHT_PERFIL_PATRON_SOLO_LOOPBACK');
+  }
 
   const datasetBytes = open(__ENV.G6_K6_DATASET);
   const datasetHash = sha256(datasetBytes, 'hex');
@@ -57,8 +62,39 @@ export function reader(caseId) {
   const negative = new Counter('demo_negativa_401');
   const finished = new Counter('demo_postflight');
 
+  const lowRate = Math.max(1, Math.floor(maxRps / 2));
+  const controlledStages = {
+    ramp: [
+      { duration: '20s', target: maxRps },
+      { duration: '20s', target: maxRps },
+      { duration: '20s', target: lowRate },
+    ],
+    spike: [
+      { duration: '25s', target: lowRate },
+      { duration: '5s', target: maxRps },
+      { duration: '30s', target: lowRate },
+    ],
+    recovery: [
+      { duration: '20s', target: lowRate },
+      { duration: '10s', target: maxRps },
+      { duration: '30s', target: lowRate },
+    ],
+  };
+  const scenario = !pattern
+    ? { executor: 'constant-vus', vus, duration: String(seconds) + 's', gracefulStop: '5s' }
+    : pattern === 'constant'
+      ? { executor: 'constant-vus', vus, duration: String(seconds) + 's', gracefulStop: '5s' }
+      : {
+          executor: 'ramping-arrival-rate',
+          startRate: lowRate,
+          timeUnit: '1s',
+          stages: controlledStages[pattern],
+          preAllocatedVUs: 1,
+          maxVUs: 1,
+          gracefulStop: '5s',
+        };
   const options = {
-    scenarios: { medicion: { executor: 'constant-vus', vus, duration: `${seconds}s`, gracefulStop: '5s' } },
+    scenarios: { medicion: scenario },
     setupTimeout: '25s',
     teardownTimeout: '10s',
     rps: maxRps,
@@ -74,6 +110,7 @@ export function reader(caseId) {
       demo_invariantes_2xx: ['rate==1'],
       demo_2xx_validos: ['count>0'],
       demo_postflight: ['count==1'],
+      ...(pattern ? { dropped_iterations: ['count==0'] } : {}),
     },
   };
 
@@ -150,11 +187,14 @@ export function reader(caseId) {
       configured_vus: vus,
       observed_max_vus: metric('vus').max ?? null,
       configured_seconds: seconds,
+      load_pattern: pattern || 'constant_vus',
+      pattern_scope: pattern ? 'L1_LOOPBACK_CONTROLLED_LOAD_NOT_CAPACITY' : null,
       elapsed_seconds: data.state.testRunDurationMs / 1000,
       measurement_started_utc: start ? new Date(start).toISOString() : null,
       measurement_ended_utc: end ? new Date(end).toISOString() : null,
       measured_seconds: measuredSeconds,
       iterations: metric('iterations').count ?? 0,
+      dropped_iterations: metric('dropped_iterations').count ?? 0,
       status_counts: counts,
       offered_requests: attempts,
       valid_2xx: valid,

@@ -8,9 +8,10 @@ import { COMMERCIAL_CHANNELS, classifyPerf01Status, expectedCommercialProducts, 
 const BASE_URL = (__ENV.BASE_URL ?? '').replace(/\/$/, '');
 const JWT = __ENV.SYNTHETIC_JWT ?? '';
 const SOURCE_SHA = __ENV.SOURCE_SHA ?? '';
-const DOCS_SHA = 'c9e1e5c217616d28229fccf5315fb97a1ae061a9';
+const DOCS_SHA = __ENV.DOCS_SHA ?? 'c9e1e5c217616d28229fccf5315fb97a1ae061a9';
 const VUS = Number(__ENV.VU ?? '');
 const DURATION = __ENV.DURATION ?? '';
+const MAX_RPS = Number(__ENV.MAX_RPS ?? '2');
 const SEED = Number(__ENV.SEED ?? '');
 const CHANNEL = __ENV.CHANNEL ?? '';
 const EXPECTED_SHA256 = __ENV.MANIFEST_SHA256 ?? '';
@@ -33,17 +34,20 @@ const measuredLatency = new Trend('h5_perf01_catalog_list_duration_ms', true);
 const allowedProfiles = new Map([[1, '60s'], [5, '180s'], [20, '300s']]);
 if (!/^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(BASE_URL)) fail('H5_PREFLIGHT_BASE_URL_MUST_BE_LOOPBACK');
 const profileValid = SYNTHETIC_SMOKE ? VUS === 1 && DURATION === '5s' : allowedProfiles.has(VUS) && allowedProfiles.get(VUS) === DURATION;
-if (!JWT || !/^[0-9a-f]{40}$/i.test(SOURCE_SHA) || !profileValid || SEED !== 20261123 || !COMMERCIAL_CHANNELS.includes(CHANNEL) || !/^[a-f0-9]{64}$/.test(EXPECTED_SHA256) || !/^[a-f0-9]{64}  manifest\.json$/.test(manifestChecksum) || manifestChecksum.slice(0, 64) !== actualManifestSha || EXPECTED_SHA256 !== actualManifestSha || !Number.isInteger(repetition) || repetition < 1 || repetition > 3)
+if (!JWT || !/^[0-9a-f]{40}$/i.test(SOURCE_SHA) || !/^[0-9a-f]{40}$/i.test(DOCS_SHA) || !profileValid || !Number.isSafeInteger(MAX_RPS) || MAX_RPS < 1 || MAX_RPS > 2 || SEED !== 20261123 || !COMMERCIAL_CHANNELS.includes(CHANNEL) || !/^[a-f0-9]{64}$/.test(EXPECTED_SHA256) || !/^[a-f0-9]{64}  manifest\.json$/.test(manifestChecksum) || manifestChecksum.slice(0, 64) !== actualManifestSha || EXPECTED_SHA256 !== actualManifestSha || !Number.isInteger(repetition) || repetition < 1 || repetition > 3)
   fail('H5_PREFLIGHT_CONFIGURATION_OR_MANIFEST_INVALID');
 
 const manifest = JSON.parse(manifestBytes);
 const expectedProducts = expectedCommercialProducts(manifest, CHANNEL);
 const totalPages = Math.ceil(expectedProducts.length / manifest.pagination.page_size);
+const snapshotRequests = totalPages + expectedProducts.filter(product => product.variants.some(variant => variant.eligible && variant.state === 'ACTIVA')).length;
+const maxRequests = MAX_RPS * Number.parseInt(DURATION, 10) + 1 + (2 * snapshotRequests);
 const headers = { Authorization: `Bearer ${JWT}`, Accept: 'application/json' };
 
 export const options = {
   vus: VUS,
   duration: DURATION,
+  rps: MAX_RPS,
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
   thresholds: {
     h5_perf01_unexpected_error_rate: ['rate<0.01'],
@@ -157,6 +161,11 @@ export function handleSummary(data) {
     dataset_seed: SEED,
     channel: CHANNEL,
     profile,
+    virtual_users: VUS,
+    duration_seconds: Number.parseInt(DURATION, 10),
+    max_rps: MAX_RPS,
+    max_requests: maxRequests,
+    max_snapshot_requests_per_phase: snapshotRequests,
     repetition,
     measured_phase: 'measurement',
     status_2xx: count,

@@ -1,17 +1,23 @@
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
-import { basename, dirname, join, resolve } from 'node:path';
+import { spawn, spawnSync } from 'node:child_process';
+import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { expectedCommercialProducts } from '../../../../apps/catalog-svc/test/performance/h5/catalog-pagination-integrity.mjs';
 
 // Adapta datos del fixture existente. Backend conserva el servidor, los datos
 // sintéticos y el aislamiento de red. Este archivo no define ninguna ruta.
 const [, , fixturePath, backendSha, frontendSha, docsSha, k6Path, ...flags] = process.argv;
+const patternIndex = flags.indexOf('--pattern');
+const pattern = patternIndex >= 0 ? flags[patternIndex + 1] : null;
+const ordinaryFlags = patternIndex >= 0
+  ? flags.filter((_, index) => index !== patternIndex && index !== patternIndex + 1)
+  : flags;
 if (!fixturePath || basename(fixturePath) !== 'catalog-pagination.fixture-server.h5.mjs' ||
     ![backendSha, frontendSha, docsSha].every((sha) => /^[a-f0-9]{40}$/.test(sha ?? '')) ||
-    flags.some((flag) => !['--validar', '--dashboard'].includes(flag))) {
-  process.stderr.write('USO: node bin/demo-local.mjs <fixture Backend> <SHA Backend> <SHA Frontend> <SHA Docs> <k6.exe> [--validar] [--dashboard]\n');
+    ordinaryFlags.some((flag) => !['--validar', '--dashboard'].includes(flag)) ||
+    (patternIndex >= 0 && !['constant', 'ramp', 'spike', 'recovery'].includes(pattern))) {
+  process.stderr.write('USO: node bin/demo-local.mjs <fixture Backend> <SHA Backend> <SHA Frontend> <SHA Docs> <k6.exe> [--pattern constant|ramp|spike|recovery] [--validar] [--dashboard]\n');
   process.exit(2);
 }
 
@@ -19,6 +25,15 @@ const base = dirname(dirname(fileURLToPath(import.meta.url)));
 const cache = join(base, '.local');
 await mkdir(cache, { recursive: true });
 const directory = await mkdtemp(join(cache, 'fixture-'));
+const powershellCandidates = process.platform === 'win32' ? ['pwsh.exe', 'powershell.exe'] : ['pwsh'];
+const powershell = powershellCandidates.find((executable) => {
+  const probe = spawnSync(executable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', 'exit 0'], {
+    windowsHide: true,
+    stdio: 'ignore',
+  });
+  return !probe.error && probe.status === 0;
+});
+if (!powershell) throw new Error('POWERSHELL_NO_DISPONIBLE');
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 const utc = (timestamp) => new Date(timestamp).toISOString().replace(/\.\d{3}Z$/, 'Z');
 const channel = 'MARKETPLACE';
@@ -69,6 +84,7 @@ try {
   if (!/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(server.baseUrl)) throw new Error('FIXTURE_NO_LOOPBACK');
   const env = {
     ...process.env,
+    PATH: [dirname(resolve(k6Path)), process.env.PATH].filter(Boolean).join(delimiter),
     G6_K6_TARGET: server.baseUrl,
     G6_K6_APPROVED_ORIGIN: '',
     G6_K6_TEST_TOKEN: server.authorization.replace(/^Bearer /, ''),
@@ -76,10 +92,10 @@ try {
 
   function invoke({ configFile = configPath, dataFile = datasetPath, extra = [], override = {} } = {}) {
     return new Promise((complete, reject) => {
-      const args = ['-NoProfile', '-File', join(base, 'bin/ejecutar-demo.ps1'),
-        '-Config', configFile, '-Dataset', dataFile,
-        ...(k6Path ? ['-K6Path', resolve(k6Path)] : []), ...extra];
-      const child = spawn(process.platform === 'win32' ? 'powershell.exe' : 'pwsh', args, {
+      const executionPolicy = process.platform === 'win32' ? ['-ExecutionPolicy', 'Bypass'] : [];
+      const args = ['-NoProfile', ...executionPolicy, '-File', join(base, 'bin/ejecutar-demo.ps1'),
+        '-Config', configFile, '-Dataset', dataFile, ...extra];
+      const child = spawn(powershell, args, {
         env: { ...env, ...override }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
       });
       let output = '';
@@ -95,14 +111,19 @@ try {
     const result = await invoke(options);
     if (result.code !== expectedCode || !expectedMessage.test(result.output) ||
         result.output.includes(server.authorization) || result.output.includes(server.baseUrl)) {
-      throw new Error(label + '_FALLO (' + result.code + ') ' +
-        (result.output.match(/(?:PREFLIGHT|EVIDENCIA)_[A-Z0-9_]+/)?.[0] ?? 'SIN_DIAGNOSTICO'));
+      const safeOutput = result.output.replaceAll(server.authorization, '<redacted>')
+        .replaceAll(server.baseUrl, '<loopback>')
+        .split(/\r?\n/).filter(Boolean).slice(-3).join(' ')
+        .replace(/[^A-Za-z0-9_ ]/g, ' ').replace(/\s+/g, ' ').toUpperCase();
+    throw new Error(label + '_FALLO (' + result.code + ') ' +
+        [result.output.match(/(?:PREFLIGHT|EVIDENCIA)_[A-Z0-9_]+/)?.[0], safeOutput]
+          .filter(Boolean).join(' '));
     }
     process.stdout.write(label + ' OK\n');
     return result;
   }
 
-  await verify('INSPECT', { extra: ['-SoloValidar'] }, 0, /NO_EJECUTADO/);
+  await verify('INSPECT', { extra: ['-SoloValidar', ...(pattern ? ['-Pattern', pattern] : [])] }, 0, /NO_EJECUTADO/);
   await verify('HOST_AJENO', { extra: ['-SoloValidar'], override: { G6_K6_TARGET: 'https://example.invalid' } },
     2, /PREFLIGHT_LOOPBACK_INVALIDO/);
   await verify('PERFIL_DENEGADO', { extra: ['-SoloValidar', '-Profile', 'demo-normal'] },
@@ -126,13 +147,19 @@ try {
       process.stdout.write(label + ' OK\n');
     }
     const live = await verify('PERF_01_FIXTURE', {
-      extra: ['-Negative401', ...(flags.includes('--dashboard') ? ['-Dashboard'] : [])],
+      extra: ['-Negative401', ...(pattern ? ['-Pattern', pattern] : []), ...(flags.includes('--dashboard') ? ['-Dashboard'] : [])],
     }, 0, /\bPASS\b/);
     const location = /\.local\/[a-f0-9]{32}\/summary\.json/.exec(live.output)?.[0];
     const file = await readFile(join(base, location), 'utf8');
     const report = JSON.parse(file.replace(/^\uFEFF/, ''));
     if (report.scope !== 'L1_FIXTURE_SINTETICO' || report.metrics.negative_401 !== 1 ||
+        report.load_pattern !== (pattern || 'constant_vus') ||
         file.includes(server.baseUrl) || file.includes(env.G6_K6_TEST_TOKEN)) throw new Error('EVIDENCIA_NO_SEGURA');
+    const evidenceIndexPath = join(base, location.replace(/summary\.json$/, 'evidence-index.json'));
+    const evidenceIndex = JSON.parse(await readFile(evidenceIndexPath, 'utf8'));
+    const evidenceIndexHash = (await readFile(join(base, location.replace(/summary\.json$/, 'evidence-index.sha256')), 'utf8')).trim().split(/\s+/)[0];
+    if (evidenceIndexHash !== digest(await readFile(evidenceIndexPath)) ||
+        !evidenceIndex.artifacts.some((artifact) => artifact.file === 'dashboard.html')) throw new Error('INDICE_EVIDENCIA_INVALIDO');
     process.stdout.write(live.output);
   }
 } catch (error) {
