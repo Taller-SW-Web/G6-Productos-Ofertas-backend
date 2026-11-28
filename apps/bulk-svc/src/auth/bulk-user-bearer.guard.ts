@@ -90,7 +90,7 @@ export class BulkUserBearerGuard implements CanActivate {
     if (
       claims.iss !== issuer ||
       claims.tipo !== 'acceso' ||
-      !hasProductsAudience(claims.aud) ||
+      (claims.aud !== undefined && !hasProductsAudience(claims.aud)) ||
       typeof claims.sub !== 'string' ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
         claims.sub,
