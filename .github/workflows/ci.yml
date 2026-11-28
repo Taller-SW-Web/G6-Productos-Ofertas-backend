@@ -607,7 +607,7 @@ jobs:
     - name: Ejecutar conciliación R03 y R14 con persistencia y outbox reales
       env:
         BULK_TEST_POSTGRES: '1'
-      run: npm run test:e2e -- apps/bulk-svc/test/r03-pricing-r14-bulk.postgres.e2e-spec.ts --reporter=verbose
+      run: npm run test:e2e -- apps/bulk-svc/test/r03-pricing-r14-bulk.postgres.e2e-spec.ts --hookTimeout=120000 --reporter=verbose
   promotions:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&

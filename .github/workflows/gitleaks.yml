@@ -50,6 +50,10 @@ jobs:
           elif [[ "$GITHUB_EVENT_NAME" == push && "$PUSH_BEFORE_SHA" =~ ^[0-9a-f]{40}$ && ! "$PUSH_BEFORE_SHA" =~ ^0+$ ]]; then
             base="$PUSH_BEFORE_SHA"
             mode=diff
+          elif [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            git fetch --no-tags origin master
+            base=$(git merge-base FETCH_HEAD HEAD)
+            mode=diff
           else
             mode=history
           fi

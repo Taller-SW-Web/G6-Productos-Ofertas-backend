@@ -289,36 +289,45 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
         'POSTGRES_DB=inventory_it',
         'postgres:17-alpine',
       ]);
-      if (!postgresOnly) docker([
-        'run',
-        '-d',
-        '--name',
-        rabbitContainer,
-        '--label',
-        dockerLabel,
-        '--network',
-        networkName,
-        '-p',
-        '127.0.0.1::5672',
-        '-e',
-        'RABBITMQ_DEFAULT_USER=inventory_test',
-        '-e',
-        `RABBITMQ_DEFAULT_PASS=${rabbitPassword}`,
-        '-e',
-        'RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=+S 2:2 +SDcpu 1 +SDio 1',
-        '-e',
-        'RABBITMQ_CTL_ERL_ARGS=+S 1:1 +SDcpu 1 +SDio 1',
-        'rabbitmq:3.13-management-alpine',
-      ]);
+      if (!postgresOnly)
+        docker([
+          'run',
+          '-d',
+          '--name',
+          rabbitContainer,
+          '--label',
+          dockerLabel,
+          '--network',
+          networkName,
+          '-p',
+          '127.0.0.1::5672',
+          '-e',
+          'RABBITMQ_DEFAULT_USER=inventory_test',
+          '-e',
+          `RABBITMQ_DEFAULT_PASS=${rabbitPassword}`,
+          '-e',
+          'RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=+S 2:2 +SDcpu 1 +SDio 1',
+          '-e',
+          'RABBITMQ_CTL_ERL_ARGS=+S 1:1 +SDcpu 1 +SDio 1',
+          'rabbitmq:3.13-management-alpine',
+        ]);
       let pgPort = docker(['port', pgContainer, '5432/tcp']).split(':').at(-1);
-      const rabbitPort = postgresOnly ? undefined : docker(['port', rabbitContainer, '5672/tcp']).split(':').at(-1);
+      const rabbitPort = postgresOnly
+        ? undefined
+        : docker(['port', rabbitContainer, '5672/tcp']).split(':').at(-1);
       if (!pgPort || (!postgresOnly && !rabbitPort))
         throw new Error('Docker no asignó puertos loopback.');
       pgUrl = `postgresql://inventory_test:${password}@127.0.0.1:${pgPort}/inventory_it?sslmode=disable`;
       tlsPostgresUrl = `postgresql://inventory_test:${password}@127.0.0.1:${pgPort}/inventory_it`;
-      if (!postgresOnly) rabbitUrl = `amqp://inventory_test:${rabbitPassword}@127.0.0.1:${rabbitPort}/`;
+      if (!postgresOnly)
+        rabbitUrl = `amqp://inventory_test:${rabbitPassword}@127.0.0.1:${rabbitPort}/`;
 
-      if (!postgresOnly) await waitForContainer(rabbitContainer, 'rabbitmq-diagnostics -q check_running', 'rabbitmq');
+      if (!postgresOnly)
+        await waitForContainer(
+          rabbitContainer,
+          'rabbitmq-diagnostics -q check_running',
+          'rabbitmq',
+        );
       await waitForContainer(
         pgContainer,
         'pg_isready -h 127.0.0.1 -U inventory_test -d inventory_it',
@@ -498,30 +507,33 @@ GRANT inventory_app TO inventory_test;`,
         ],
         h5CandidateMigration,
       );
-      if (!postgresOnly) docker([
-        'exec',
-        '--user',
-        'rabbitmq',
-        rabbitContainer,
-        'rabbitmqctl',
-        'add_vhost',
-        '/inventory-it',
-      ]);
-      if (!postgresOnly) docker([
-        'exec',
-        '--user',
-        'rabbitmq',
-        rabbitContainer,
-        'rabbitmqctl',
-        'set_permissions',
-        '-p',
-        '/inventory-it',
-        'inventory_test',
-        '.*',
-        '.*',
-        '.*',
-      ]);
-      if (!postgresOnly) rabbitUrl = `amqp://inventory_test:${rabbitPassword}@127.0.0.1:${rabbitPort}/%2Finventory-it`;
+      if (!postgresOnly)
+        docker([
+          'exec',
+          '--user',
+          'rabbitmq',
+          rabbitContainer,
+          'rabbitmqctl',
+          'add_vhost',
+          '/inventory-it',
+        ]);
+      if (!postgresOnly)
+        docker([
+          'exec',
+          '--user',
+          'rabbitmq',
+          rabbitContainer,
+          'rabbitmqctl',
+          'set_permissions',
+          '-p',
+          '/inventory-it',
+          'inventory_test',
+          '.*',
+          '.*',
+          '.*',
+        ]);
+      if (!postgresOnly)
+        rabbitUrl = `amqp://inventory_test:${rabbitPassword}@127.0.0.1:${rabbitPort}/%2Finventory-it`;
       process.env.DATABASE_URL = pgUrl;
       if (postgresOnly) delete process.env.RABBITMQ_URL;
       else process.env.RABBITMQ_URL = rabbitUrl;
@@ -537,32 +549,32 @@ GRANT inventory_app TO inventory_test;`,
       throw error;
     }
     if (!postgresOnly) {
-    await brokerChannel.assertExchange(exchangeEvents, 'topic', {
-      durable: true,
-    });
-    await brokerChannel.assertExchange(exchangeResults, 'topic', {
-      durable: true,
-    });
-    // Topología exclusiva del vhost efímero; no configura retry/DLX productivo.
-    await brokerChannel.assertExchange(exchangeCommands, 'topic', {
-      durable: true,
-    });
-    await brokerChannel.assertQueue('po.inventario.q', {
-      durable: true,
-      arguments: { 'x-queue-type': 'quorum' },
-    });
-    await brokerChannel.bindQueue(
-      'po.inventario.q',
-      exchangeCommands,
-      initializationKey,
-    );
-    await brokerChannel.assertQueue(queue, {
-      durable: false,
-      exclusive: true,
-      autoDelete: true,
-    });
-    await brokerChannel.bindQueue(queue, exchangeEvents, 'inventory.#');
-    await brokerChannel.bindQueue(queue, exchangeResults, 'inventory.#');
+      await brokerChannel.assertExchange(exchangeEvents, 'topic', {
+        durable: true,
+      });
+      await brokerChannel.assertExchange(exchangeResults, 'topic', {
+        durable: true,
+      });
+      // Topología exclusiva del vhost efímero; no configura retry/DLX productivo.
+      await brokerChannel.assertExchange(exchangeCommands, 'topic', {
+        durable: true,
+      });
+      await brokerChannel.assertQueue('po.inventario.q', {
+        durable: true,
+        arguments: { 'x-queue-type': 'quorum' },
+      });
+      await brokerChannel.bindQueue(
+        'po.inventario.q',
+        exchangeCommands,
+        initializationKey,
+      );
+      await brokerChannel.assertQueue(queue, {
+        durable: false,
+        exclusive: true,
+        autoDelete: true,
+      });
+      await brokerChannel.bindQueue(queue, exchangeEvents, 'inventory.#');
+      await brokerChannel.bindQueue(queue, exchangeResults, 'inventory.#');
     }
     const location = await database.query<{ id: string }>(
       `INSERT INTO inventory.locations(code,name,type) VALUES ($1,$2,'TIENDA') RETURNING id`,
