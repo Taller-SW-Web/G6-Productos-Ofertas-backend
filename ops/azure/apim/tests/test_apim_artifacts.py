@@ -393,6 +393,49 @@ class ApimPolicyTests(unittest.TestCase):
         ):
             self.assertIn(required_token, body_text)
 
+    def test_h28_effective_operation_policies_inherit_on_error_and_preserve_403_429_and_correlation_id(self):
+        api_policy = (ROOT / "policies" / "api.xml").read_text(encoding="utf-8")
+        secured_policy = (ROOT / "policies" / "operation-secured.xml").read_text(encoding="utf-8")
+        public_policy = (ROOT / "policies" / "operation-public.xml").read_text(encoding="utf-8")
+
+        # 1) Herencia explicita de <on-error><base /></on-error> desde operation-secured y operation-public
+        for name, raw in (("operation-secured.xml", secured_policy), ("operation-public.xml", public_policy)):
+            op_root = ElementTree.fromstring(raw)
+            op_on_error = op_root.find("./on-error")
+            self.assertIsNotNone(op_on_error, f"{name} debe declarar <on-error>")
+            self.assertIsNotNone(op_on_error.find("./base"), f"{name} debe heredar api.xml via <base /> en <on-error>")
+
+        # 2) Conservacion intacta de validate-jwt (401), 403 SCOPE_INSUFICIENTE y rate-limit/quota (429) en operation-secured
+        sec_root = ElementTree.fromstring(secured_policy)
+        vjwt = sec_root.find("./inbound/validate-jwt")
+        self.assertIsNotNone(vjwt)
+        self.assertEqual(vjwt.attrib.get("failed-validation-httpcode"), "401")
+        self.assertIn('code="403"', secured_policy)
+        self.assertIn("SCOPE_INSUFICIENTE", secured_policy)
+        self.assertIsNotNone(sec_root.find("./inbound/rate-limit-by-key"))
+        self.assertIsNotNone(sec_root.find("./inbound/quota-by-key"))
+
+        # 3) Correlation ID identico entre cabecera x-correlation-id y cuerpo JSON en api.xml <on-error>
+        api_root = ElementTree.fromstring(api_policy)
+        on_error = api_root.find("./on-error")
+        self.assertIsNotNone(on_error)
+        err_cid_var = on_error.find('./set-variable[@name="errorCorrelationId"]')
+        self.assertIsNotNone(err_cid_var)
+        hdr_val = on_error.find('./set-header[@name="x-correlation-id"]/value')
+        self.assertIsNotNone(hdr_val)
+        self.assertIn('context.Variables["errorCorrelationId"]', hdr_val.text or "")
+        body_text = (on_error.find("./choose/when/set-body").text or "")
+        self.assertIn('context.Variables["errorCorrelationId"]', body_text)
+
+        # 4) No transforma 403, 429 ni otros errores ajenos a validate-jwt
+        when_nodes = on_error.findall("./choose/when")
+        self.assertEqual(len(when_nodes), 1)
+        cond = when_nodes[0].attrib.get("condition", "")
+        self.assertIn('context.LastError.Source == "validate-jwt"', cond)
+        self.assertIn("context.Response.StatusCode == 401", cond)
+        self.assertNotIn("403", cond)
+        self.assertNotIn("429", cond)
+
     def test_apim_is_developer_classic_and_diagnostics_never_capture_bodies(self):
         bicep = (ROOT / "main.bicep").read_text(encoding="utf-8")
         self.assertIn("name: 'Developer'", bicep)
