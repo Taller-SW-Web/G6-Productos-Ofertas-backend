@@ -109,8 +109,13 @@ def validate(
         raise ValueError("El OpenAPI embebido en ARM (fixedFilteredOpenApiObject) no coincide con el SHA canónico del manifiesto")
     if compiled_openapi != filtered:
         raise ValueError("El OpenAPI embebido en ARM no coincide exactamente con gateway-filtered.json")
-    if set(manifest.get("excludedUncontractedLegacyOperationIds", [])) != set(FILTER.LEGACY_UNCONTRACTED):
-        raise ValueError("Las exclusiones legacy de Pricing no corresponden al contrato")
+    excluded_pricing = set(manifest.get("excludedUncontractedLegacyOperationIds", []))
+    if (
+        not excluded_pricing.issubset(FILTER.PRICING_ADMIN_IDS)
+        or excluded_pricing.intersection(operation_ids)
+        or excluded_pricing != set(manifest.get("contractInventory", {}).get("legacyPricingExcludedIds", []))
+    ):
+        raise ValueError("Las exclusiones de Pricing no corresponden al contrato")
     if len(filtered.get("paths", {})) == 0:
         raise ValueError("El OpenAPI filtrado está vacío")
     return len(manifest["operations"])

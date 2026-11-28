@@ -28924,6 +28924,289 @@
         }
       }
     },
+    "/precios/administracion/productos/{productoId}": {
+      "get": {
+        "tags": [
+          "Precios"
+        ],
+        "operationId": "obtenerDefinicionPrecioProductoAdministracion",
+        "summary": "Obtener definici\u00f3n administrativa de precio de producto",
+        "description": "Consulta administrativa exacta por canal. Al omitir channelId, consulta la definici\u00f3n global. La definici\u00f3n puede existir sin vigencia actual. Requiere JWT humano con rol GESTOR_COMERCIAL.",
+        "x-status": "implemented-candidate",
+        "x-gateway-operation": true,
+        "x-required-role": "GESTOR_COMERCIAL",
+        "x-source-spec": [
+          "SPEC-013"
+        ],
+        "x-route-basis": "derived-from-capability",
+        "security": [
+          {
+            "userBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "productoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "MARKETPLACE",
+                "CHATBOT",
+                "RETAIL",
+                "VENTAS"
+              ]
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CorrelationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Definici\u00f3n administrativa de precio del producto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinicionAdministrativaPrecio"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDACION",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "TOKEN_INVALIDO",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCOPE_INSUFICIENTE",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PRECIO_NO_ENCONTRADO",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "ERROR_INTERNO",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICIO_NO_DISPONIBLE",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-error-codes": {
+          "400": [
+            "VALIDACION"
+          ],
+          "401": [
+            "TOKEN_INVALIDO"
+          ],
+          "403": [
+            "SCOPE_INSUFICIENTE"
+          ],
+          "404": [
+            "PRECIO_NO_ENCONTRADO"
+          ],
+          "500": [
+            "ERROR_INTERNO"
+          ],
+          "503": [
+            "SERVICIO_NO_DISPONIBLE"
+          ]
+        }
+      }
+    },
+    "/precios/administracion/skus/{sku}": {
+      "get": {
+        "tags": [
+          "Precios"
+        ],
+        "operationId": "obtenerDefinicionPrecioSkuAdministracion",
+        "summary": "Obtener definici\u00f3n administrativa de precio de SKU",
+        "description": "Consulta administrativa exacta por canal. Al omitir channelId, consulta la definici\u00f3n global. La definici\u00f3n puede existir sin vigencia actual. Requiere JWT humano con rol GESTOR_COMERCIAL.",
+        "x-status": "implemented-candidate",
+        "x-gateway-operation": true,
+        "x-required-role": "GESTOR_COMERCIAL",
+        "x-source-spec": [
+          "SPEC-013"
+        ],
+        "x-route-basis": "derived-from-capability",
+        "security": [
+          {
+            "userBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sku",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "channelId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "MARKETPLACE",
+                "CHATBOT",
+                "RETAIL",
+                "VENTAS"
+              ]
+            }
+          },
+          {
+            "$ref": "#/components/parameters/CorrelationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Definici\u00f3n administrativa de precio del SKU",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefinicionAdministrativaPrecio"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDACION",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "TOKEN_INVALIDO",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SCOPE_INSUFICIENTE",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PRECIO_NO_ENCONTRADO",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "ERROR_INTERNO",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICIO_NO_DISPONIBLE",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-error-codes": {
+          "400": [
+            "VALIDACION"
+          ],
+          "401": [
+            "TOKEN_INVALIDO"
+          ],
+          "403": [
+            "SCOPE_INSUFICIENTE"
+          ],
+          "404": [
+            "PRECIO_NO_ENCONTRADO"
+          ],
+          "500": [
+            "ERROR_INTERNO"
+          ],
+          "503": [
+            "SERVICIO_NO_DISPONIBLE"
+          ]
+        }
+      }
+    },
     "/inventario/reservas/{reservaId}/estado": {
       "get": {
         "operationId": "obtenerEstadoReservaH5",
@@ -39967,6 +40250,88 @@
       }
     },
     "schemas": {
+      "DefinicionAdministrativaPrecio": {
+        "type": "object",
+        "required": [
+          "productId",
+          "sku",
+          "channelId",
+          "priceVersion",
+          "vigenciaActual"
+        ],
+        "properties": {
+          "productId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sku": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Nulo en la definici\u00f3n a nivel de producto."
+          },
+          "channelId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "MARKETPLACE",
+              "CHATBOT",
+              "RETAIL",
+              "VENTAS",
+              null
+            ]
+          },
+          "priceVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "vigenciaActual": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Nulo cuando la definici\u00f3n existe y ninguna vigencia cubre el instante de consulta.",
+            "required": [
+              "precioRegular",
+              "precioOferta",
+              "currency",
+              "validFrom",
+              "validUntil"
+            ],
+            "properties": {
+              "precioRegular": {
+                "type": "number"
+              },
+              "precioOferta": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "currency": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 3
+              },
+              "validFrom": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "validUntil": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      },
       "ConsultaOperacionInventario": {
         "type": "object",
         "description": "Estado durable por operation_id, sin divulgar existencias f\u00edsicas.",
@@ -48075,11 +48440,11 @@
     "forbidden_source": "service-token sub/client_id"
   },
   "x-apim-filter": {
-    "docsSha": "5f30802129ba4bbc0674dcc5878f10065f443118",
+    "docsSha": "7e1435386d2a8dca51e586a12524d4d78ceb7738",
     "gatewaySha": "097dac1bf4a8dcf5c6e799742d2df340f6d893d5",
     "g5EnabledByDefault": false,
     "privateOperationCount": 5,
     "publicationMode": "candidate",
-    "operationSetSha256": "93f3df8d4ec713795d732082ad352b721030adcf20017131e4b0b7b5b83ab754"
+    "operationSetSha256": "da5f7b0dd9fb221e4a22da365c400756ec4a6d34cfce1588cff9983bfad06a85"
   }
 }

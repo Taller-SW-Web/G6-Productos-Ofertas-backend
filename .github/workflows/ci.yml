@@ -861,7 +861,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: 5f30802129ba4bbc0674dcc5878f10065f443118
+        ref: 7e1435386d2a8dca51e586a12524d4d78ceb7738
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Obtener registro Gateway integrado
@@ -892,7 +892,7 @@ jobs:
         --source-openapi .ci/G6-Productos-Ofertas-docs/contratos/http/openapi.yaml
         --gateway-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/contract-routes.ts
         --g5-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/g5-h5-routes.ts
-        --expected-docs-sha 5f30802129ba4bbc0674dcc5878f10065f443118
+        --expected-docs-sha 7e1435386d2a8dca51e586a12524d4d78ceb7738
         --expected-gateway-sha 097dac1bf4a8dcf5c6e799742d2df340f6d893d5
         --mode candidate
         --enable-g5

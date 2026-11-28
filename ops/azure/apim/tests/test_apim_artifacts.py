@@ -9,7 +9,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_DOCS_SHA = "5f30802129ba4bbc0674dcc5878f10065f443118"
+EXPECTED_DOCS_SHA = "7e1435386d2a8dca51e586a12524d4d78ceb7738"
 EXPECTED_GATEWAY_SHA = "097dac1bf4a8dcf5c6e799742d2df340f6d893d5"
 SPEC = importlib.util.spec_from_file_location("filter_openapi", ROOT / "filter-openapi.py")
 FILTER = importlib.util.module_from_spec(SPEC)
@@ -123,7 +123,7 @@ class FilterOpenApiTests(unittest.TestCase):
         )
         self.assertEqual(
             manifest["excludedUncontractedLegacyOperationIds"],
-            sorted(FILTER.LEGACY_UNCONTRACTED),
+            sorted(FILTER.PRICING_ADMIN_IDS),
         )
         self.assertEqual([op["operationId"] for op in manifest["operations"]], ["publica"])
 
@@ -469,8 +469,8 @@ class ApimPolicyTests(unittest.TestCase):
     def test_final_manifest_keeps_h5_operation_count_and_exclusions(self):
         manifest = json.loads((ROOT / "openapi" / "operation-security.json").read_text(encoding="utf-8"))
         operations = manifest["operations"]
-        self.assertEqual(len(operations), 149)
-        self.assertEqual(sum(operation["secured"] for operation in operations), 149)
+        self.assertEqual(len(operations), 151)
+        self.assertEqual(sum(operation["secured"] for operation in operations), 151)
         self.assertEqual(sum(not operation["secured"] for operation in operations), 0)
         self.assertEqual(len(manifest["privateOperationIds"]), 5)
         self.assertFalse(manifest["g5EnabledByDefault"])
@@ -497,10 +497,20 @@ class ApimPolicyTests(unittest.TestCase):
                 modified_op["securityAlternatives"][0]["allowedClients"] = ["modulo-postventa"]
                 with self.assertRaisesRegex(ValueError, "Seguridad contractual G5 inconsistente"):
                     FILTER.validate_artifact_pair(filtered, invalid)
-        self.assertEqual(
-            manifest["excludedUncontractedLegacyOperationIds"],
-            sorted(FILTER.LEGACY_UNCONTRACTED),
-        )
+        self.assertEqual(manifest["excludedUncontractedLegacyOperationIds"], [])
+        pricing = {op["operationId"]: op for op in operations if op["operationId"] in FILTER.PRICING_ADMIN_IDS}
+        self.assertEqual(set(pricing), FILTER.PRICING_ADMIN_IDS)
+        for op in pricing.values():
+            self.assertEqual(op["method"], "GET")
+            self.assertEqual(op["authSchemes"], ["userBearer"])
+            self.assertEqual(op["roles"], ["GESTOR_COMERCIAL"])
+            self.assertEqual(op["rateProfile"], "admin_read")
+            self.assertFalse(op["g5OptIn"])
+            invalid_pricing = copy.deepcopy(manifest)
+            mod_pricing = next(item for item in invalid_pricing["operations"] if item["operationId"] == op["operationId"])
+            mod_pricing["roles"] = ["ADMINISTRADOR"]
+            with self.assertRaisesRegex(ValueError, "Seguridad contractual Pricing inconsistente"):
+                FILTER.validate_artifact_pair(filtered, invalid_pricing)
 
     def test_gateway_prefix_maps_public_route_without_rewrite(self):
         backend = "https://gateway.private.test/api/v1"

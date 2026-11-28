@@ -1,5 +1,5 @@
 {
-  "docsSha": "5f30802129ba4bbc0674dcc5878f10065f443118",
+  "docsSha": "7e1435386d2a8dca51e586a12524d4d78ceb7738",
   "gatewaySha": "097dac1bf4a8dcf5c6e799742d2df340f6d893d5",
   "publicationMode": "candidate",
   "securityProfile": "UNSPECIFIED",
@@ -27,17 +27,14 @@
       "obtenerEstadoReservaH5",
       "obtenerOperacionCuponH5"
     ],
-    "legacyPricingExcludedIds": [
-      "obtenerDefinicionPrecioProductoAdministracion",
-      "obtenerDefinicionPrecioSkuAdministracion"
-    ]
+    "legacyPricingExcludedIds": []
   },
   "gatewayStaticRegistry": {
     "baseOperationCount": 147,
     "g5OverlayCount": 4
   },
   "candidateCatalog": {
-    "operationCount": 149,
+    "operationCount": 151,
     "pendingG7AllowlistIds": []
   },
   "effectivePublication": {
@@ -452,11 +449,11 @@
       },
       {
         "operationId": "obtenerDefinicionPrecioProductoAdministracion",
-        "reason": "LEGACY_PRICING_EXCLUDED"
+        "reason": "NO_SECURITY_PROFILE"
       },
       {
         "operationId": "obtenerDefinicionPrecioSkuAdministracion",
-        "reason": "LEGACY_PRICING_EXCLUDED"
+        "reason": "NO_SECURITY_PROFILE"
       },
       {
         "operationId": "obtenerEsquemaTipoProducto",
@@ -683,10 +680,7 @@
     "obtenerContextosSkuLote",
     "obtenerEvidenciaReservaCuponInterno"
   ],
-  "excludedUncontractedLegacyOperationIds": [
-    "obtenerDefinicionPrecioProductoAdministracion",
-    "obtenerDefinicionPrecioSkuAdministracion"
-  ],
+  "excludedUncontractedLegacyOperationIds": [],
   "operations": [
     {
       "operationId": "activarCupon",
@@ -5076,6 +5070,90 @@
       "g5OptIn": false
     },
     {
+      "operationId": "obtenerDefinicionPrecioProductoAdministracion",
+      "apimOperationId": "obtenerdefinicionprecioproductoadministracion",
+      "method": "GET",
+      "path": "/precios/administracion/productos/{productoId}",
+      "service": "pricing-svc",
+      "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
+      "m2mAlternativeExcludedReason": null,
+      "introspectionRequired": false,
+      "exposureProfile": "admin",
+      "rateProfile": "admin_read",
+      "environmentEnabled": false,
+      "g5OptIn": false
+    },
+    {
+      "operationId": "obtenerDefinicionPrecioSkuAdministracion",
+      "apimOperationId": "obtenerdefinicionprecioskuadministracion",
+      "method": "GET",
+      "path": "/precios/administracion/skus/{sku}",
+      "service": "pricing-svc",
+      "secured": true,
+      "authSchemes": [
+        "userBearer"
+      ],
+      "identityType": "human",
+      "securityAlternatives": [
+        {
+          "scheme": "userBearer",
+          "identityType": "human",
+          "issuerRequired": true,
+          "audienceRequired": false,
+          "audience": null,
+          "scopes": [],
+          "roles": [
+            "GESTOR_COMERCIAL"
+          ],
+          "allowedClients": [],
+          "introspectionRequired": false
+        }
+      ],
+      "issuerRequired": true,
+      "audienceRequired": false,
+      "audience": null,
+      "scopes": [],
+      "roles": [
+        "GESTOR_COMERCIAL"
+      ],
+      "allowedClients": [],
+      "clientAllowlistStatus": "NOT_APPLICABLE",
+      "m2mAlternativeExcludedReason": null,
+      "introspectionRequired": false,
+      "exposureProfile": "admin",
+      "rateProfile": "admin_read",
+      "environmentEnabled": false,
+      "g5OptIn": false
+    },
+    {
       "operationId": "obtenerEsquemaTipoProducto",
       "apimOperationId": "obteneresquematipoproducto",
       "method": "GET",
@@ -7558,6 +7636,6 @@
       "g5OptIn": false
     }
   ],
-  "operationSetSha256": "93f3df8d4ec713795d732082ad352b721030adcf20017131e4b0b7b5b83ab754",
-  "filteredOpenApiCanonicalSha256": "f1bcfd2bfb667497e8095d446b97de86dbad2c05f88488e1787cd4b06ce8631a"
+  "operationSetSha256": "da5f7b0dd9fb221e4a22da365c400756ec4a6d34cfce1588cff9983bfad06a85",
+  "filteredOpenApiCanonicalSha256": "c550df836c3daad86248dc6e9366d466072a0b8f4d11e4f4a5650b28173b03ab"
 }
