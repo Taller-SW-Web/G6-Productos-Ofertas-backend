@@ -309,6 +309,15 @@ describe.skipIf(!isolatedHarnessEnabled)(
       return String(response.body.combo_id);
     }
 
+    async function nextCatalogEventTime() {
+      const result = await database.query((client) =>
+        client.query<{ observed_at: Date }>(
+          "SELECT clock_timestamp() + interval '1 second' AS observed_at",
+        ),
+      );
+      return result.rows[0]!.observed_at.toISOString();
+    }
+
     it('T08 + T12: enforces 401/403 HTTP auth, runs under non-owner runtime role, and reports readiness permissions', async () => {
       await request(app.getHttpServer()).get('/api/v1/combos').expect(401);
       await request(app.getHttpServer())
@@ -367,11 +376,13 @@ describe.skipIf(!isolatedHarnessEnabled)(
       const skuB = `H5-T01-B-${randomUUID().slice(0, 8)}`;
       const comboId = await createCombo([skuA, skuB]);
       const receiver = makeFakeReceiver();
+      // Catalog's deactivation must follow the observation made on creation.
+      const deactivatedAt = await nextCatalogEventTime();
 
       const skuDeactivated = makeSbMessage({
         message_id: `r05-sku-${randomUUID()}`,
         schema_version: 1,
-        occurred_at: '2026-11-25T10:00:00Z',
+        occurred_at: deactivatedAt,
         correlation_id: 'corr-t01',
         causation_id: null,
         operation_id: randomUUID(),
@@ -382,7 +393,7 @@ describe.skipIf(!isolatedHarnessEnabled)(
           sku: skuA,
           product_id: 'PROD-A',
           sku_version: 1,
-          changed_at: '2026-11-25T10:00:00Z',
+          changed_at: deactivatedAt,
         },
       });
       await consumer.processServiceBusDelivery(
@@ -452,12 +463,13 @@ describe.skipIf(!isolatedHarnessEnabled)(
       const comboId = await createCombo([sku1, skuOther]);
       const combo2Id = await createCombo([sku2, skuOther]);
       const receiver = makeFakeReceiver();
+      const deactivatedAt = await nextCatalogEventTime();
 
       const msgId = `r05-prod-${randomUUID()}`;
       const prodMsg = makeSbMessage({
         message_id: msgId,
         schema_version: 1,
-        occurred_at: '2026-11-25T10:10:00Z',
+        occurred_at: deactivatedAt,
         correlation_id: 'opaque-corr-t02',
         producer: 'catalog-svc',
         kind: 'event',
@@ -465,7 +477,7 @@ describe.skipIf(!isolatedHarnessEnabled)(
         data: {
           product_id: prodId,
           product_version: 1,
-          changed_at: '2026-11-25T10:10:00Z',
+          changed_at: deactivatedAt,
         },
       });
 

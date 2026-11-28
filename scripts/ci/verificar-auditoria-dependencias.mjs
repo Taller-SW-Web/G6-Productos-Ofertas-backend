@@ -3,9 +3,6 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const EXCEPCION_ADVISORY_ID = 'GHSA-fc5q-39xc-vjpf';
-export const EXCEPCION_CADUCA_UTC = '2026-11-25';
-
 const SEVERIDADES = ['info', 'low', 'moderate', 'high', 'critical'];
 
 function analizarJsonAuditoria(texto, etiqueta) {
@@ -65,53 +62,10 @@ function analizarJsonAuditoria(texto, etiqueta) {
   return informe;
 }
 
-export function obtenerAdvisories(nombre, mapa, ruta = []) {
-  if (ruta.includes(nombre)) return [];
-  const vulnerabilidad = mapa[nombre];
-  if (!vulnerabilidad) {
-    throw new Error(`procedencia no demostrable: falta el paquete ${nombre}`);
-  }
-
-  const siguientes = [...ruta, nombre];
-  const resultado = [];
-  for (const via of vulnerabilidad.via) {
-    if (typeof via === 'string') {
-      if (!mapa[via]) {
-        throw new Error(`procedencia no demostrable: ${nombre} depende de ${via} sin entrada`);
-      }
-      if (!['high', 'critical'].includes(mapa[via].severity)) continue;
-      resultado.push(...obtenerAdvisories(via, mapa, siguientes));
-      continue;
-    }
-
-    if (!via || typeof via !== 'object' || !SEVERIDADES.includes(via.severity)) {
-      throw new Error(`procedencia no demostrable: origen inválido en ${nombre}`);
-    }
-    if (!['high', 'critical'].includes(via.severity)) continue;
-    if (typeof via.url !== 'string') {
-      throw new Error(`procedencia no demostrable: origen sin URL en ${nombre}`);
-    }
-    let url;
-    try {
-      url = new URL(via.url);
-    } catch {
-      throw new Error(`procedencia no demostrable: URL de aviso inválida en ${nombre}`);
-    }
-    const coincidencia = url.pathname.match(/^\/advisories\/(GHSA-[A-Z0-9-]+)$/i);
-    if (url.protocol !== 'https:' || url.hostname !== 'github.com' || !coincidencia) {
-      throw new Error(`procedencia no demostrable: URL de aviso inválida en ${nombre}`);
-    }
-    resultado.push(coincidencia[1].toLowerCase().replace(/^ghsa/, 'GHSA'));
-  }
-
-  return [...new Set(resultado)];
-}
-
 export function evaluarAuditorias({
   auditoriaCompleta,
   auditoriaProduccion,
   shaEvaluado,
-  fechaUtc = new Date().toISOString().slice(0, 10),
 }) {
   const evidencia = {
     schemaVersion: 1,
@@ -120,11 +74,6 @@ export function evaluarAuditorias({
     pullRequestBaseSha: process.env.PR_BASE_SHA || null,
     actionsRunId: process.env.ACTIONS_RUN_ID || null,
     evaluatedAtUtc: new Date().toISOString(),
-    exception: {
-      advisoryId: EXCEPCION_ADVISORY_ID,
-      expiresUtcInclusive: EXCEPCION_CADUCA_UTC,
-      applied: false,
-    },
     fullAudit: {
       command: 'npm audit --audit-level=high --json',
       exitCode: auditoriaCompleta?.exitCode ?? null,
@@ -146,10 +95,6 @@ export function evaluarAuditorias({
     if (!/^[0-9a-f]{40}$/i.test(shaEvaluado || '')) {
       throw new Error('SHA evaluado ausente o inválido');
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaUtc) || Number.isNaN(Date.parse(`${fechaUtc}T00:00:00Z`))) {
-      throw new Error('fecha UTC inválida');
-    }
-
     const completa = validarEjecucion(auditoriaCompleta, 'auditoría completa');
     const produccion = validarEjecucion(auditoriaProduccion, 'auditoría de producción');
     const full = analizarJsonAuditoria(completa.stdout, 'auditoría completa');
@@ -171,42 +116,14 @@ export function evaluarAuditorias({
       evidencia.decision = {
         status: 'PASS',
         mode: 'normal',
-        reason: 'sin vulnerabilidades High/Critical; la excepción no fue necesaria',
+        reason: 'sin vulnerabilidades High/Critical',
         highCriticalPackages: [],
         advisoryIds: [],
       };
       return evidencia;
     }
 
-    if (completa.exitCode !== 1) {
-      throw new Error(`código de salida inesperado en auditoría completa: ${completa.exitCode}`);
-    }
-
-    const porPaquete = {};
-    for (const [nombre] of severas) {
-      const avisos = obtenerAdvisories(nombre, full.vulnerabilities);
-      if (avisos.length === 0) {
-        throw new Error(`procedencia no demostrable: no se encontró aviso raíz para ${nombre}`);
-      }
-      porPaquete[nombre] = avisos;
-    }
-    const ids = [...new Set(Object.values(porPaquete).flat())].sort();
-    if (ids.length !== 1 || ids[0] !== EXCEPCION_ADVISORY_ID) {
-      throw new Error(`High/Critical ajenos a la excepción: ${ids.join(', ') || 'origen desconocido'}`);
-    }
-    if (fechaUtc > EXCEPCION_CADUCA_UTC) {
-      throw new Error(`excepción vencida el ${EXCEPCION_CADUCA_UTC} UTC`);
-    }
-
-    evidencia.exception.applied = true;
-    evidencia.decision = {
-      status: 'PASS',
-      mode: 'temporary-exception',
-      reason: 'todos los High/Critical derivan exclusivamente del aviso retirado; auditoría de producción limpia',
-      highCriticalPackages: severas.map(([nombre, v]) => ({ name: nombre, severity: v.severity, advisories: porPaquete[nombre] })),
-      advisoryIds: ids,
-    };
-    return evidencia;
+    throw new Error(`auditoría completa detectó ${severas.length} paquetes High/Critical`);
   } catch (error) {
     evidencia.decision = {
       status: 'FAIL',

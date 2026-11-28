@@ -12,10 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       frontend_ref:
-        description: SHA completo (40 hex) de G6-Productos-Ofertas-frontend
+        description: SHA completo (40 hex) de Frontend; vacío resuelve master y registra el SHA efectivo
         required: false
         type: string
-        default: 4624a1800d84611107785b8b3aa793ed44285f50
 
 permissions:
   contents: read
@@ -46,11 +45,14 @@ jobs:
       - name: Checkout Backend
         uses: actions/checkout@v4
 
-      - name: Validar formato SHA de Frontend
+      - name: Resolver y validar SHA de Frontend
         env:
-          FRONTEND_REF_INPUT: ${{ inputs.frontend_ref || '4624a1800d84611107785b8b3aa793ed44285f50' }}
+          FRONTEND_REF_INPUT: ${{ inputs.frontend_ref || '' }}
         run: |
           set -euo pipefail
+          if [[ -z "$FRONTEND_REF_INPUT" ]]; then
+            FRONTEND_REF_INPUT="$(git ls-remote https://github.com/Taller-SW-Web/G6-Productos-Ofertas-frontend.git refs/heads/master | cut -f1)"
+          fi
           if [[ ! "$FRONTEND_REF_INPUT" =~ ^[0-9a-f]{40}$ ]]; then
             echo "ERROR: frontend_ref debe ser un SHA completo de 40 caracteres hexadecimales (recibido: '$FRONTEND_REF_INPUT')" >&2
             exit 1

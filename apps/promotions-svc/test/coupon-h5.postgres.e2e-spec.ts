@@ -181,6 +181,52 @@ describe.skipIf(process.env.PROMOTIONS_H5_POSTGRES_TESTS !== '1')(
       return { sender, sent, send };
     };
 
+    it('applies four assigned event projections transactionally with replay, rollback and stale versions', async () => {
+      const { verifyAssignedEvents } =
+        await import('./support/assigned-event-checks.mjs');
+      const checks = await verifyAssignedEvents({
+        pool: runtime,
+        admin: pool,
+        localOnly: true,
+      });
+      expect(checks).toHaveLength(4);
+    });
+
+    it('enforces coupon eligibility, conflicting combinations, concurrent last use and replay', async () => {
+      const command = (
+        coupon = 'ELIGIBILITY_FIXTURE',
+        overrides: Record<string, unknown> = {},
+      ) => ({
+        message_id: randomUUID(),
+        operation_id: randomUUID(),
+        schema_version: 2,
+        occurred_at: '2026-10-16T12:00:00Z',
+        correlation_id: 'isolated-trace',
+        causation_id: 'order-event',
+        producer: 'modulo-ventas',
+        kind: 'command',
+        name: 'promotions.coupon.consumption.requested',
+        data: {
+          order_id: 'PED-' + randomUUID(),
+          coupon_code: coupon,
+          channel_id: 'MARKETPLACE',
+          reservation_id: randomUUID(),
+          commercial_snapshot_ref: 'test-only:durable-snapshot',
+          effective_at: '2026-10-16T12:00:00Z',
+        },
+        ...overrides,
+      });
+      const { verifyCouponEligibility } =
+        await import('./support/coupon-eligibility-checks.mjs');
+      const checks = await verifyCouponEligibility({
+        pool: runtime,
+        admin: pool,
+        command,
+        localOnly: true,
+      });
+      expect(checks).toHaveLength(2);
+    });
+
     it('replays identical admissions and rejects changed content with one durable intent', async () => {
       const first = admission();
       const accepted = await operations.admit(first);
@@ -303,6 +349,128 @@ describe.skipIf(process.env.PROMOTIONS_H5_POSTGRES_TESTS !== '1')(
         [restore.command.operation_id],
       );
       expect(rows[0].count).toBe(1);
+    });
+
+    it('durably consumes and restores through H5 after lost settlements without repeating effects or results', async () => {
+      const consume = admission();
+      const verify = vi.fn(async (command) => ({
+        reservationConfirmed: true,
+        snapshotDurable: true,
+        eligible: true,
+        orderId: command.data.order_id,
+        reservationId: command.data.reservation_id!,
+        commercialSnapshotRef: command.data.commercial_snapshot_ref!,
+      }));
+      const worker = new CouponH5Worker(
+        operations,
+        new CouponCommandProcessor(runtime, { verify }),
+      );
+      const completion = vi.fn(async () => {});
+      const settlement = {
+        completeMessage: completion,
+        abandonMessage: vi.fn(),
+        deadLetterMessage: vi.fn(),
+      };
+      const handler = new CouponH5DeliveryHandler(
+        couponH5Queue,
+        worker,
+        settlement,
+      );
+      const { sender, sent } = wire();
+      const delivery = async (request: ReturnType<typeof admission>) => {
+        await operations.admit(request);
+        expect(await new CouponH5Relay(store, sender).publishOne()).toBe(
+          'sent',
+        );
+        const message = sent.at(-1) as unknown as ServiceBusReceivedMessage;
+        completion.mockRejectedValueOnce(new Error('SYNTHETIC_LOST_ACK'));
+        await expect(handler.handle(message)).rejects.toThrow(
+          'SYNTHETIC_LOST_ACK',
+        );
+        const before = await pool.query(
+          `SELECT r.result_payload, o.message_id, o.data, o.name,
+           (SELECT count(*)::int FROM promotions.inbox WHERE message_id=$2) AS inbox
+           FROM promotions.coupon_command_receipts r JOIN promotions.outbox o ON o.operation_id=r.operation_id
+           WHERE r.operation_id=$1`,
+          [request.command.operation_id, request.command.message_id],
+        );
+        expect(before.rows).toHaveLength(1);
+        expect(before.rows[0].inbox).toBe(1);
+        expect(before.rows[0].data).toEqual(before.rows[0].result_payload.data);
+        expect(before.rows[0].message_id).toBe(
+          before.rows[0].result_payload.message_id,
+        );
+        expect(before.rows[0].name).toBe(before.rows[0].result_payload.name);
+        await new CouponH5DeliveryHandler(
+          couponH5Queue,
+          worker,
+          settlement,
+        ).handle(message);
+        const after = await pool.query(
+          'SELECT result_payload FROM promotions.coupon_command_receipts WHERE operation_id=$1',
+          [request.command.operation_id],
+        );
+        expect(after.rows[0].result_payload).toEqual(
+          before.rows[0].result_payload,
+        );
+        expect(
+          (
+            await pool.query(
+              'SELECT count(*)::int n FROM promotions.outbox WHERE operation_id=$1',
+              [request.command.operation_id],
+            )
+          ).rows[0].n,
+        ).toBe(1);
+        return before.rows[0].result_payload;
+      };
+      const consumed = await delivery(consume);
+      expect(consumed.name).toMatch(/consumption.completed$/);
+      const foreign = restorationAdmission(
+        `OTHER-${randomUUID()}`,
+        consume.command.operation_id,
+      );
+      expect((await delivery(foreign)).data.result_code).toBe(
+        'COUPON_IDENTITY_MISMATCH',
+      );
+      expect(
+        (
+          await pool.query(
+            'SELECT restored_at FROM promotions.coupon_uses WHERE order_id=$1',
+            [consume.command.data.order_id],
+          )
+        ).rows[0].restored_at,
+      ).toBeNull();
+      const restore = restorationAdmission(
+        consume.command.data.order_id,
+        consume.command.operation_id,
+      );
+      const restored = await delivery(restore);
+      expect(restored.data).toMatchObject({
+        outcome: 'RESTORED',
+        consumption_operation_id: consume.command.operation_id,
+      });
+      expect(verify).toHaveBeenCalledTimes(1);
+      const history = await pool.query(
+        'SELECT id, restored_at FROM promotions.coupon_uses WHERE order_id=$1',
+        [consume.command.data.order_id],
+      );
+      expect(history.rows).toHaveLength(1);
+      expect(history.rows[0].restored_at).not.toBeNull();
+      const secondRestore = restorationAdmission(
+        consume.command.data.order_id,
+        consume.command.operation_id,
+      );
+      await delivery(secondRestore);
+      expect(
+        (
+          await pool.query(
+            'SELECT id, restored_at FROM promotions.coupon_uses WHERE order_id=$1',
+            [consume.command.data.order_id],
+          )
+        ).rows,
+      ).toEqual(history.rows);
+      expect(settlement.abandonMessage).not.toHaveBeenCalled();
+      expect(settlement.deadLetterMessage).not.toHaveBeenCalled();
     });
 
     it('rejects an oversized envelope before inserting an operation or intent', async () => {
