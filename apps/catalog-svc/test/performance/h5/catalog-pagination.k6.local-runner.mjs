@@ -97,11 +97,16 @@ try {
   const k6Report = JSON.parse(await readFile(summaryPath, 'utf8'));
   const k6Summary = JSON.parse(await readFile(k6SummaryPath, 'utf8'));
   const metrics = k6Summary.metrics ?? {};
-  const values = (name) => metrics[name]?.values ?? {};
+  const values = (name) => metrics[name]?.values ?? metrics[name] ?? {};
   const preflightHash = /H5_PERF01_SNAPSHOT_PREFLIGHT_([a-f0-9]{64})/.exec(sanitizedOutput)?.[1] ?? null;
   const postflightHash = /H5_PERF01_SNAPSHOT_POSTFLIGHT_([a-f0-9]{64})/.exec(sanitizedOutput)?.[1] ?? null;
   const httpRequests = values('http_reqs');
   const checks = values('checks');
+  const checksRate = checks.rate ?? checks.value ?? (
+    Number.isFinite(checks.passes) && Number.isFinite(checks.fails) && checks.passes + checks.fails > 0
+      ? checks.passes / (checks.passes + checks.fails)
+      : 0
+  );
   const failedChecks = [
     ...(run.error || run.error?.code ? [`k6_exit_${run.error?.code ?? 'error'}`] : []),
     ...(!sanitizedOutput.includes('H5_PERF01_PREFLIGHT_PASS') ? ['semantic_preflight_missing'] : []),
@@ -109,7 +114,7 @@ try {
     ...(!preflightHash || preflightHash !== postflightHash ? ['dataset_integrity'] : []),
     ...(k6Report.status_2xx < 1 ? ['no_successful_reads'] : []),
     ...(k6Report.unexpected_errors > 0 || k6Report.unexpected_error_rate >= 0.01 ? ['unexpected_http_errors'] : []),
-    ...((checks.rate ?? 0) < 0.99 ? ['functional_checks'] : []),
+    ...(checksRate < 0.99 ? ['functional_checks'] : []),
     ...(httpRequests.count > maximumRequests ? ['request_budget'] : []),
     ...(!await (async () => { try { await stat(dashboardPath); return true; } catch { return false; } })() ? ['native_dashboard_html'] : []),
   ];
@@ -152,7 +157,7 @@ try {
     latency_ms: { p50: k6Report.p50_ms, p95: k6Report.p95_ms, p99: k6Report.p99_ms },
     unexpected_errors: k6Report.unexpected_errors,
     unexpected_error_rate: k6Report.unexpected_error_rate,
-    functional_checks: checks,
+    functional_checks: { ...checks, pass_rate: checksRate },
     snapshot_requests_per_phase: snapshotRequests,
     exact_command: exactCommand,
     k6_metrics: metrics,
