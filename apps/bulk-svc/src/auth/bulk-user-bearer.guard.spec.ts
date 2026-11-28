@@ -146,12 +146,16 @@ describe('Bulk H4 userBearer and reversible demo policy', () => {
     const encode = (value: object) =>
       Buffer.from(JSON.stringify(value)).toString('base64url');
     const header = encode({ alg: 'RS256', typ: 'JWT' });
+    const now = Math.floor(Date.now() / 1000);
     const claims = encode({
       iss: 'test-issuer',
-      sub: 'unit-test-subject',
+      sub: randomUUID(),
+      tipo: 'acceso',
       aud: 'api-productos',
-      exp: Math.floor(Date.now() / 1000) + 600,
-      nbf: Math.floor(Date.now() / 1000) + 600,
+      iat: now,
+      exp: now + 600,
+      nbf: now + 600,
+      jti: randomUUID(),
       roles: ['GESTOR_COMERCIAL'],
     });
     const signer = createSign('RSA-SHA256');
