@@ -18,16 +18,11 @@ name: Integración continua (CI)
         description: Componente del benchmark
         required: false
         type: choice
-        options: [catalog, pricing, combos, promotions, price-audit, bulk, inventory-gateway, taxonomy]
+        options: [catalog, pricing, combos, promotions, inventory-gateway]
       baseline_sha:
         description: SHA completo de master u otra revisión base aprobada
         required: false
         type: string
-      include_legacy_combos:
-        description: Ejecuta además el benchmark histórico H4 de Combos con RabbitMQ
-        required: false
-        type: boolean
-        default: false
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.mode || 'ci' }}
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark' }}
@@ -189,7 +184,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: 099ad1926a53d1aec1aeae93e894d24ec2721748
+        ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Configurar Node.js
@@ -212,12 +207,23 @@ jobs:
     steps:
     - name: Obtener código fuente
       uses: actions/checkout@v4
+    - name: Obtener contratos H5 aprobados
+      uses: actions/checkout@v4
+      with:
+        repository: Taller-SW-Web/G6-Productos-Ofertas-docs
+        ref: 5f30802129ba4bbc0674dcc5878f10065f443118
+        path: .ci/G6-Productos-Ofertas-docs
+        persist-credentials: 'false'
     - name: Configurar Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
     - name: Instalar validador YAML fijado
       run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
+    - name: Probar fallos contractuales y validar OpenAPI/AsyncAPI H5
+      run: |
+        python -m unittest scripts/ci/test_check_h5_contracts.py -v
+        python scripts/ci/check-h5-contracts.py .ci/G6-Productos-Ofertas-docs 5f30802129ba4bbc0674dcc5878f10065f443118
     - name: Probar validadores documentales de Marketplace H4
       run: python -m unittest discover -s tests/docs -p "test_*.py" -v
     - name: Validar datos iniciales y resultados del agregador
@@ -259,7 +265,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b
+        ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Configurar Node.js para las comprobaciones de arranque
@@ -312,6 +318,10 @@ jobs:
           fi
         done < ops/shared/services-ci.psv
         exit "$scan_status"
+    - name: Probar el veredicto Trivy con un hallazgo High sintético
+      run: node --test scripts/ci/verify-trivy-report.test.mjs
+    - name: Comprobar nueve reportes, SHA, imágenes y ausencia de High/Critical
+      run: node scripts/ci/verify-trivy-report.mjs "$RUNNER_TEMP/trivy-h5" "$GITHUB_SHA" ops/shared/services-ci.psv
     - name: Conservar reportes Trivy por SHA e imagen
       if: always()
       uses: actions/upload-artifact@v4
@@ -446,14 +456,14 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: 099ad1926a53d1aec1aeae93e894d24ec2721748
+        ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Verificar correspondencia estructural de rutas Taxonomy
       run: |
         set -euo pipefail
-        test "$(git -C .ci/G6-Productos-Ofertas-docs rev-parse HEAD)" = '099ad1926a53d1aec1aeae93e894d24ec2721748'
-        test "$(git -C .ci/G6-Productos-Ofertas-docs rev-parse HEAD:contratos/http/openapi.yaml)" = '98ec377da427be717aad4ba2317944143a8211de'
+        test "$(git -C .ci/G6-Productos-Ofertas-docs rev-parse HEAD)" = '5f30802129ba4bbc0674dcc5878f10065f443118'
+        test "$(git -C .ci/G6-Productos-Ofertas-docs rev-parse HEAD:contratos/http/openapi.yaml)" = '685accbf771071b182bbdda552057a41babdf551'
         node scripts/ci/check-taxonomy-contract.mjs .ci/G6-Productos-Ofertas-docs/contratos/http/openapi.yaml
     - name: Rechazar URL de base aportada antes de acceder a Docker
       run: node --test scripts/ci/run-taxonomy-integration.test.mjs
@@ -481,7 +491,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: 099ad1926a53d1aec1aeae93e894d24ec2721748
+        ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Configurar Node.js
@@ -492,10 +502,6 @@ jobs:
         cache-dependency-path: backend/package-lock.json
     - name: Instalar dependencias
       run: npm ci
-    - name: Ejecutar E2E con PostgreSQL y RabbitMQ aislados
-      run: |
-        set -o pipefail
-        node apps/taxonomy-svc/test/e2e-catalog/run.mjs 2>&1 | tee apps/taxonomy-svc/test/e2e-catalog/run.log
     - name: Verificar migraciones e idempotencia H5 Taxonomy-Catalog en PostgreSQL descartable
       run: |
         set -o pipefail
@@ -506,15 +512,13 @@ jobs:
       with:
         name: taxonomy-catalog-e2e-${{ github.sha }}
         path: |
-          backend/apps/taxonomy-svc/test/e2e-catalog/evidence-latest.json
-          backend/apps/taxonomy-svc/test/e2e-catalog/run.log
           backend/apps/taxonomy-svc/test/e2e-catalog/h5-postgres.log
         if-no-files-found: warn
   inventario:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
       (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
-    name: Probar integración de Inventory con PostgreSQL y RabbitMQ desechables
+    name: Probar integración H5 de Inventory con PostgreSQL desechable
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -531,7 +535,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: c36bd9a18f4fdb188df0d7e5158a431cf4b4ea7b
+        ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: docs
         persist-credentials: 'false'
     - name: Configurar Node.js
@@ -548,10 +552,12 @@ jobs:
       run: pwsh -NoProfile -File ops/supabase/g5-fixtures/tests/run-local-catalog-h5-async-delta.ps1
     - name: Verificar bootstrap H04 compartido con logins runtime autenticados
       run: node ops/supabase/g5-fixtures/tests/run-local-h04-bootstrap.mjs
-    - name: Ejecutar pruebas de Inventory con PostgreSQL y RabbitMQ desechables (obligatorias)
+    - name: Ejecutar ocho escenarios de Inventory con PostgreSQL real
       env:
         INVENTORY_REAL_INTEGRATION: '1'
-      run: npm test -- apps/inventory-svc/test/inventory.real.integration.spec.ts --reporter=verbose
+        INVENTORY_POSTGRES_ONLY: '1'
+        G6_DOCS_ROOT: ${{ github.workspace }}/docs
+      run: npm test -- apps/inventory-svc/test/inventory.real.integration.spec.ts --testNamePattern='ejecuta Drizzle|rollback completo|order_id incorrecto|confirma o libera concurrentemente|serializa reservas concurrentes|replay concurrente durable|expira automáticamente|serializa confirmar/liberar y expiración' --reporter=verbose
   persistencia:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
@@ -568,14 +574,40 @@ jobs:
         cache: npm
     - name: Instalar dependencias de forma reproducible
       run: npm ci
-    - name: Probar proveedores con PostgreSQL y RabbitMQ desechables
+    - name: Probar Pricing y Price Audit con PostgreSQL descartable sin AMQP
+      run: node scripts/ci/run-postgres-persistence.mjs
+    - name: Probar publicación y recepción H5 con dobles de transporte controlados
+      run: npm test -- apps/pricing-svc/src/messaging/service-bus.spec.ts apps/price-audit-svc/src/messaging/service-bus.spec.ts --reporter=verbose
+    - name: Conservar evidencia de persistencia
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: pricing-audit-postgres-${{ github.sha }}
+        path: .ci/evidence/postgres-persistence/
+        if-no-files-found: error
+  bulk_postgres_h5:
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
+    name: Probar Bulk R03 y R14 con PostgreSQL H5 desechable
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+    - name: Obtener código fuente
+      uses: actions/checkout@v4
+    - name: Configurar Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 24.15.0
+        cache: npm
+    - name: Instalar dependencias
+      run: npm ci
+    - name: Ejecutar conciliación R03 y R14 con persistencia y outbox reales
       env:
-        PRICING_TEST_POSTGRES: '1'
-        PRICING_TEST_AMQP: '1'
-        PRICING_TEST_AUDIT: '1'
-        PRICE_AUDIT_TEST_POSTGRES: '1'
-        PRICE_AUDIT_TEST_AMQP: '1'
-      run: npm run test:e2e -- apps/pricing-svc apps/price-audit-svc --reporter=verbose
+        BULK_TEST_POSTGRES: '1'
+      run: npm run test:e2e -- apps/bulk-svc/test/r03-pricing-r14-bulk.postgres.e2e-spec.ts --reporter=verbose
   promotions:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
@@ -619,7 +651,7 @@ jobs:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
       (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
-    name: Probar integración de Combos con PostgreSQL, RabbitMQ y Catalog desechables
+    name: Probar integración H5 de Combos con PostgreSQL desechable
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -633,11 +665,11 @@ jobs:
       with:
         path: backend
         fetch-depth: 0
-    - name: Obtener Docs fijado en AsyncAPI rc.4
+    - name: Obtener contratos Docs H5
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: 40b566976fb94d924116dcd01d41b3276c2bc9e3
+        ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: docs
         persist-credentials: 'false'
     - name: Configurar Node.js
@@ -648,7 +680,7 @@ jobs:
         cache-dependency-path: backend/package-lock.json
     - name: Instalar dependencias
       run: npm ci
-    - name: Ejecutar las cuatro suites E2E de Combos con Catalog y Pricing reales
+    - name: Ejecutar mensajería Service Bus e idempotencia de Combos en PostgreSQL
       env:
         COMBOS_TEST_DOCS_ROOT: ${{ github.workspace }}/docs
         COMBOS_TEST_EVIDENCE_DIR: apps/combos-svc/test/evidence-ci
@@ -661,6 +693,7 @@ jobs:
         path: |
           backend/apps/combos-svc/test/evidence-ci/vitest-results.json
           backend/apps/combos-svc/test/evidence-ci/run-summary.txt
+          backend/apps/combos-svc/test/evidence-ci/run-environment.json
         if-no-files-found: warn
   combos_postgres_h5:
     if: >-
@@ -684,7 +717,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: 099ad1926a53d1aec1aeae93e894d24ec2721748
+        ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: docs
         persist-credentials: 'false'
     - name: Configurar Node.js
@@ -698,8 +731,8 @@ jobs:
     - name: Verificar contrato OpenAPI H5 0.7.0-rc.3 de Combos
       run: |
         set -euo pipefail
-        test "$(git -C ../docs rev-parse HEAD)" = '099ad1926a53d1aec1aeae93e894d24ec2721748'
-        test "$(git -C ../docs rev-parse HEAD:contratos/http/openapi.yaml)" = '98ec377da427be717aad4ba2317944143a8211de'
+        test "$(git -C ../docs rev-parse HEAD)" = '5f30802129ba4bbc0674dcc5878f10065f443118'
+        test "$(git -C ../docs rev-parse HEAD:contratos/http/openapi.yaml)" = '685accbf771071b182bbdda552057a41babdf551'
         node scripts/ci/check-combos-contract.mjs ../docs/contratos/http/openapi.yaml
     - name: Ejecutar suite PostgreSQL 17 TLS de Combos sin RabbitMQ
       env:
@@ -752,7 +785,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: Taller-SW-Web/G6-Productos-Ofertas-docs
-        ref: 099ad1926a53d1aec1aeae93e894d24ec2721748
+        ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
     - name: Configurar Node.js
@@ -864,39 +897,55 @@ jobs:
         ref: 5f30802129ba4bbc0674dcc5878f10065f443118
         path: .ci/G6-Productos-Ofertas-docs
         persist-credentials: 'false'
-    - name: Obtener registro Gateway integrado
-      uses: actions/checkout@v4
-      with:
-        repository: Taller-SW-Web/G6-Productos-Ofertas-backend
-        ref: 097dac1bf4a8dcf5c6e799742d2df340f6d893d5
-        path: .ci/G6-Productos-Ofertas-gateway
-        persist-credentials: 'false'
     - name: Configurar Python 3.12
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
     - name: Instalar dependencias APIM
       run: python -m pip install -r ops/azure/apim/requirements.txt
-    - name: Compilar Bicep a ARM sin despliegue
+    - name: Generar contrato APIM del Gateway candidato sin alterar artefactos de despliegue
+      run: |
+        set -euo pipefail
+        cp -a ops/azure/apim "${RUNNER_TEMP}/apim-candidate"
+        python ops/azure/apim/filter-openapi.py \
+          --openapi .ci/G6-Productos-Ofertas-docs/contratos/http/openapi.yaml \
+          --gateway-routes apps/api-gateway/src/routing/contract-routes.ts \
+          --g5-routes apps/api-gateway/src/routing/g5-h5-routes.ts \
+          --docs-sha 5f30802129ba4bbc0674dcc5878f10065f443118 \
+          --gateway-sha "$GITHUB_SHA" --enable-g5 --g5-authorized \
+          --output "${RUNNER_TEMP}/apim-candidate/openapi/gateway-filtered.json" \
+          --compact-output "${RUNNER_TEMP}/apim-candidate/openapi/gateway-filtered.compact.json" \
+          --manifest "${RUNNER_TEMP}/apim-candidate/openapi/operation-security.json"
+    - name: Compilar Bicep versionado para las pruebas de regresión
       run: |
         az bicep install
-        az bicep build --file ops/azure/apim/main.bicep --outfile "${RUNNER_TEMP}/apim-h5-arm.json"
+        az bicep build --file ops/azure/apim/main.bicep --outfile "${RUNNER_TEMP}/apim-baseline-arm.json"
     - name: Probar herramientas contractuales y jerarquía ARM
       env:
-        APIM_ARM_TEMPLATE: ${{ runner.temp }}/apim-h5-arm.json
+        APIM_ARM_TEMPLATE: ${{ runner.temp }}/apim-baseline-arm.json
       run: python -m unittest discover -s ops/azure/apim/tests -p 'test_*.py' -v
+    - name: Compilar Bicep candidato a ARM sin despliegue
+      run: az bicep build --file "${RUNNER_TEMP}/apim-candidate/main.bicep" --outfile "${RUNNER_TEMP}/apim-h5-arm.json"
     - name: Validar jerarquía ARM y correspondencia exacta de operaciones
       run: >-
         python ops/azure/apim/verify-arm-template.py
         --template "${RUNNER_TEMP}/apim-h5-arm.json"
         --source-openapi .ci/G6-Productos-Ofertas-docs/contratos/http/openapi.yaml
-        --gateway-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/contract-routes.ts
-        --g5-routes .ci/G6-Productos-Ofertas-gateway/apps/api-gateway/src/routing/g5-h5-routes.ts
+        --gateway-routes apps/api-gateway/src/routing/contract-routes.ts
+        --g5-routes apps/api-gateway/src/routing/g5-h5-routes.ts
         --expected-docs-sha 5f30802129ba4bbc0674dcc5878f10065f443118
-        --expected-gateway-sha 097dac1bf4a8dcf5c6e799742d2df340f6d893d5
+        --expected-gateway-sha "${GITHUB_SHA}"
+        --filtered-openapi "${RUNNER_TEMP}/apim-candidate/openapi/gateway-filtered.json"
+        --manifest "${RUNNER_TEMP}/apim-candidate/openapi/operation-security.json"
         --mode candidate
         --enable-g5
         --g5-authorized
+  seguridad_secretos:
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark')
+    uses: ./.github/workflows/gitleaks.yml
+
   integral:
     name: validate
     runs-on: ubuntu-latest
@@ -911,6 +960,7 @@ jobs:
       - compilacion
       - contenedores
       - persistencia
+      - bulk_postgres_h5
       - taxonomia
       - taxonomia_catalogo
       - inventario
@@ -920,6 +970,7 @@ jobs:
       - gateway_inventory_postgres
       - azure_cd_h5
       - seguridad_dependencias
+      - seguridad_secretos
       - apim_h5_estatico
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
@@ -937,7 +988,7 @@ jobs:
         RESULTADOS: ${{ toJSON(needs) }}
       run: |
         printf '%s\n' "$RESULTADOS"
-        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias apim_h5_estatico
+        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia bulk_postgres_h5 taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias seguridad_secretos apim_h5_estatico
   compatibilidad:
     name: Lint, Typecheck, Test, Build & Smoke Test
     runs-on: ubuntu-latest
@@ -961,4 +1012,3 @@ jobs:
       component: ${{ inputs.component }}
       baseline_sha: ${{ inputs.baseline_sha }}
       parallelism: '1'
-      include_legacy_combos: ${{ inputs.include_legacy_combos }}

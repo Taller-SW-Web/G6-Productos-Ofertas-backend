@@ -54,6 +54,7 @@ import { InventoryServiceBusRelay } from '../src/messaging/service-bus-relay.js'
 import { generateInventoryFixtureData } from '../../../scripts/h5/fixtures/inventory/generate-inventory-fixture.mjs';
 
 const enabled = Boolean(process.env.INVENTORY_REAL_INTEGRATION === '1');
+const postgresOnly = process.env.INVENTORY_POSTGRES_ONLY === '1';
 const suite = enabled ? describe : describe.skip;
 const previousDatabaseUrl = process.env.DATABASE_URL;
 const previousRabbitMqUrl = process.env.RABBITMQ_URL;
@@ -288,7 +289,7 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
         'POSTGRES_DB=inventory_it',
         'postgres:17-alpine',
       ]);
-      docker([
+      if (!postgresOnly) docker([
         'run',
         '-d',
         '--name',
@@ -310,20 +311,14 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
         'rabbitmq:3.13-management-alpine',
       ]);
       let pgPort = docker(['port', pgContainer, '5432/tcp']).split(':').at(-1);
-      const rabbitPort = docker(['port', rabbitContainer, '5672/tcp'])
-        .split(':')
-        .at(-1);
-      if (!pgPort || !rabbitPort)
+      const rabbitPort = postgresOnly ? undefined : docker(['port', rabbitContainer, '5672/tcp']).split(':').at(-1);
+      if (!pgPort || (!postgresOnly && !rabbitPort))
         throw new Error('Docker no asignó puertos loopback.');
       pgUrl = `postgresql://inventory_test:${password}@127.0.0.1:${pgPort}/inventory_it?sslmode=disable`;
       tlsPostgresUrl = `postgresql://inventory_test:${password}@127.0.0.1:${pgPort}/inventory_it`;
-      rabbitUrl = `amqp://inventory_test:${rabbitPassword}@127.0.0.1:${rabbitPort}/`;
+      if (!postgresOnly) rabbitUrl = `amqp://inventory_test:${rabbitPassword}@127.0.0.1:${rabbitPort}/`;
 
-      await waitForContainer(
-        rabbitContainer,
-        'rabbitmq-diagnostics -q check_running',
-        'rabbitmq',
-      );
+      if (!postgresOnly) await waitForContainer(rabbitContainer, 'rabbitmq-diagnostics -q check_running', 'rabbitmq');
       await waitForContainer(
         pgContainer,
         'pg_isready -h 127.0.0.1 -U inventory_test -d inventory_it',
@@ -503,7 +498,7 @@ GRANT inventory_app TO inventory_test;`,
         ],
         h5CandidateMigration,
       );
-      docker([
+      if (!postgresOnly) docker([
         'exec',
         '--user',
         'rabbitmq',
@@ -512,7 +507,7 @@ GRANT inventory_app TO inventory_test;`,
         'add_vhost',
         '/inventory-it',
       ]);
-      docker([
+      if (!postgresOnly) docker([
         'exec',
         '--user',
         'rabbitmq',
@@ -526,18 +521,22 @@ GRANT inventory_app TO inventory_test;`,
         '.*',
         '.*',
       ]);
-      rabbitUrl = `amqp://inventory_test:${rabbitPassword}@127.0.0.1:${rabbitPort}/%2Finventory-it`;
+      if (!postgresOnly) rabbitUrl = `amqp://inventory_test:${rabbitPassword}@127.0.0.1:${rabbitPort}/%2Finventory-it`;
       process.env.DATABASE_URL = pgUrl;
-      process.env.RABBITMQ_URL = rabbitUrl;
+      if (postgresOnly) delete process.env.RABBITMQ_URL;
+      else process.env.RABBITMQ_URL = rabbitUrl;
       await database.onModuleInit();
-      broker = await amqp.connect(rabbitUrl);
-      brokerChannel = await broker.createChannel();
+      if (!postgresOnly) {
+        broker = await amqp.connect(rabbitUrl);
+        brokerChannel = await broker.createChannel();
+      }
     } catch (error) {
       diagnoseOwnedResources([password, rabbitPassword]);
       cleanupOwnedResources();
       if (tlsDirectory) rmSync(tlsDirectory, { recursive: true, force: true });
       throw error;
     }
+    if (!postgresOnly) {
     await brokerChannel.assertExchange(exchangeEvents, 'topic', {
       durable: true,
     });
@@ -564,6 +563,7 @@ GRANT inventory_app TO inventory_test;`,
     });
     await brokerChannel.bindQueue(queue, exchangeEvents, 'inventory.#');
     await brokerChannel.bindQueue(queue, exchangeResults, 'inventory.#');
+    }
     const location = await database.query<{ id: string }>(
       `INSERT INTO inventory.locations(code,name,type) VALUES ($1,$2,'TIENDA') RETURNING id`,
       [`it-${randomUUID()}`, 'Inventory integration'],
