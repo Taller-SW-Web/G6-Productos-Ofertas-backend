@@ -423,6 +423,31 @@ def validate_artifact_pair(filtered: dict, manifest: dict) -> None:
                 f"Inconsistencia entre security del OpenAPI filtrado ({declared_schemes}) "
                 f"y securityAlternatives del manifiesto ({alt_schemes}) en {operation['operationId']}"
             )
+        if operation.get("g5OptIn"):
+            scope = op_obj.get("x-required-scope")
+            scopes = [scope] if isinstance(scope, str) else scope
+            clients = op_obj.get("x-allowed-client-ids")
+            audience = op_obj.get("x-service-audience")
+            alternatives = operation.get("securityAlternatives", [])
+            if (
+                manifest.get("g5Authorized") is not True
+                or operation.get("secured") is not True
+                or declared_schemes != ["serviceBearer"]
+                or operation.get("identityType") != "m2m"
+                or len(alternatives) != 1
+                or not scopes
+                or not clients
+                or not audience
+                or operation.get("scopes") != scopes
+                or operation.get("allowedClients") != clients
+                or operation.get("audience") != audience
+                or operation.get("audienceRequired") is not True
+                or alternatives[0].get("scopes") != scopes
+                or alternatives[0].get("allowedClients") != clients
+                or alternatives[0].get("audience") != audience
+                or operation.get("rateProfile") != "g5_protected"
+            ):
+                raise ValueError(f"Seguridad contractual G5 inconsistente: {operation['operationId']}")
 
 
 def filter_spec(
@@ -546,6 +571,8 @@ def filter_spec(
     if not published_ids:
         blocked_reasons.append("NO_AUTHORIZED_OPERATIONS")
 
+    if effective_publish and enable_g5 and not g5_ids.issubset(published_ids):
+        raise ValueError(f"Publicación G5 incompleta: {sorted(g5_ids - set(published_ids))}")
     if effective_publish and (blocked_reasons or not published_ids):
         raise ValueError(
             f"Publicación efectiva bloqueada (fail-closed): {', '.join(blocked_reasons)}"

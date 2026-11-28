@@ -43,7 +43,13 @@ class FilterOpenApiTests(unittest.TestCase):
                     "get": {"operationId": "publica", "security": []}
                 },
                 "/segura": {"get": {"operationId": "segura"}},
-                "/g5": {"post": {"operationId": "g5-operacion"}},
+                "/g5": {"post": {
+                    "operationId": "g5-operacion",
+                    "security": [{"serviceBearer": []}],
+                    "x-service-audience": "api-productos",
+                    "x-required-scope": "cupones:consumir",
+                    "x-allowed-client-ids": ["modulo-ventas"],
+                }},
             },
             "servers": [{"url": "/api/v1"}],
         }
@@ -70,6 +76,8 @@ class FilterOpenApiTests(unittest.TestCase):
         self.assertFalse(manifest["g5EnabledByDefault"])
 
     def test_g5_requires_explicit_opt_in_and_secured_metadata_is_preserved(self):
+        with self.assertRaisesRegex(ValueError, "--g5-authorized"):
+            FILTER.filter_spec(self.source, self.gateway_routes, self.g5_routes, True, "docs", "gateway")
         _, manifest = FILTER.filter_spec(
             self.source,
             self.gateway_routes,
@@ -461,12 +469,34 @@ class ApimPolicyTests(unittest.TestCase):
     def test_final_manifest_keeps_h5_operation_count_and_exclusions(self):
         manifest = json.loads((ROOT / "openapi" / "operation-security.json").read_text(encoding="utf-8"))
         operations = manifest["operations"]
-        self.assertEqual(len(operations), 145)
-        self.assertEqual(sum(operation["secured"] for operation in operations), 145)
+        self.assertEqual(len(operations), 149)
+        self.assertEqual(sum(operation["secured"] for operation in operations), 149)
         self.assertEqual(sum(not operation["secured"] for operation in operations), 0)
         self.assertEqual(len(manifest["privateOperationIds"]), 5)
         self.assertFalse(manifest["g5EnabledByDefault"])
-        self.assertEqual(sum(operation["g5OptIn"] for operation in operations), 0)
+        g5 = {op["operationId"]: op for op in operations if op["g5OptIn"]}
+        expected = {
+            "admitirConsumoCuponH5": ("POST", "/cupones/consumos", "cupones:consumir"),
+            "admitirRestauracionCuponH5": ("POST", "/cupones/restauraciones", "cupones:restaurar"),
+            "obtenerOperacionCuponH5": ("GET", "/cupones/operaciones/{operationId}", "cupones:operaciones:leer"),
+            "obtenerEstadoReservaH5": ("GET", "/inventario/reservas/{reservaId}/estado", "inventario:reservas:estado:leer"),
+        }
+        self.assertEqual(set(g5), set(expected))
+        self.assertTrue(manifest["g5Authorized"])
+        self.assertFalse(manifest["effectivePublication"]["authorized"])
+        filtered = json.loads((ROOT / "openapi" / "gateway-filtered.json").read_text(encoding="utf-8"))
+        for operation_id, (method, path, scope) in expected.items():
+            with self.subTest(operation_id=operation_id):
+                op = g5[operation_id]
+                self.assertEqual((op["method"], op["path"], op["scopes"]), (method, path, [scope]))
+                self.assertEqual(op["authSchemes"], ["serviceBearer"])
+                self.assertEqual(op["allowedClients"], ["modulo-ventas"])
+                self.assertEqual(op["audience"], "api-productos")
+                invalid = copy.deepcopy(manifest)
+                modified_op = next(item for item in invalid["operations"] if item["operationId"] == operation_id)
+                modified_op["securityAlternatives"][0]["allowedClients"] = ["modulo-postventa"]
+                with self.assertRaisesRegex(ValueError, "Seguridad contractual G5 inconsistente"):
+                    FILTER.validate_artifact_pair(filtered, invalid)
         self.assertEqual(
             manifest["excludedUncontractedLegacyOperationIds"],
             sorted(FILTER.LEGACY_UNCONTRACTED),
@@ -581,6 +611,7 @@ class CompiledArmTests(unittest.TestCase):
                 self.manifest,
                 EXPECTED_DOCS_SHA,
                 EXPECTED_GATEWAY_SHA,
+                g5_authorized=True,
             ),
             len(self.manifest["operations"]),
         )
@@ -599,6 +630,7 @@ class CompiledArmTests(unittest.TestCase):
                     self.manifest,
                     EXPECTED_DOCS_SHA,
                     EXPECTED_GATEWAY_SHA,
+                g5_authorized=True,
                 )
 
     def test_compiled_arm_rejects_stale_manifest_or_private_route_leak(self):
@@ -612,6 +644,7 @@ class CompiledArmTests(unittest.TestCase):
                 self.manifest,
                 EXPECTED_DOCS_SHA,
                 EXPECTED_GATEWAY_SHA,
+                g5_authorized=True,
             )
         leaked = copy.deepcopy(self.manifest)
         leaked["operations"][0]["operationId"] = leaked["privateOperationIds"][0]
@@ -622,6 +655,7 @@ class CompiledArmTests(unittest.TestCase):
                 leaked,
                 EXPECTED_DOCS_SHA,
                 EXPECTED_GATEWAY_SHA,
+                g5_authorized=True,
             )
 
     def test_compiled_arm_rejects_stale_contract_or_gateway_provenance(self):
@@ -635,6 +669,7 @@ class CompiledArmTests(unittest.TestCase):
                     stale,
                     EXPECTED_DOCS_SHA,
                     EXPECTED_GATEWAY_SHA,
+                g5_authorized=True,
                 )
 
 

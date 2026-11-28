@@ -895,6 +895,8 @@ jobs:
         --expected-docs-sha 5f30802129ba4bbc0674dcc5878f10065f443118
         --expected-gateway-sha 097dac1bf4a8dcf5c6e799742d2df340f6d893d5
         --mode candidate
+        --enable-g5
+        --g5-authorized
   integral:
     name: Validación integral de integración continua
     runs-on: ubuntu-latest

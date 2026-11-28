@@ -17,7 +17,7 @@ Este paquete prepara la importación, el manifiesto de seguridad enriquecido, pe
 3. `candidateCatalog` (`operations` candidatos APIM).
 4. `effectivePublication` (importación efectiva **fail-closed**: `environmentEnabled=false` por defecto hasta recibir `--enabled-providers`, `--security-profile`, allowlist pública autorizada y resolución de allowlists M2M).
 
-Excluye las cinco operaciones `x-internal`, mantiene fuera de importación contractual las dos operaciones legacy de Pricing y deja las cuatro rutas G5 fuera del artefacto predeterminado.
+El catálogo de release de Chile contiene 149 operaciones, incluidas las cuatro G5 autorizadas. Se conservan fuera las cinco operaciones `x-internal` y las dos consultas administrativas de Pricing. El catálogo es un candidato versionado. La publicación efectiva conserva los controles de identidad, procedencia y anti-bypass.
 
 El uso de `--enable-g5` por sí solo no autoriza publicación operativa: requiere además `--g5-authorized` explícito. Para operaciones M2M, la falta de `x-service-audience` o `x-required-scope` bloquea el catálogo; la falta de `x-allowed-client-ids` (ej. `consultarDisponibilidadCombo`) se registra como `clientAllowlistStatus: "PENDING_G7_ALLOWLIST"` sin inventar clientes y bloquea `effectivePublication` (`--effective-publish`). Operaciones con seguridad alternativa (`obtenerCombo`, `consultarDisponibilidadCombo`) conservan ambas modalidades en `securityAlternatives` (`identityType: "human_or_m2m"`).
 
@@ -32,11 +32,26 @@ python ops/azure/apim/filter-openapi.py `
   --openapi ..\docs\contratos\http\openapi.yaml `
   --gateway-routes apps/api-gateway/src/routing/contract-routes.ts `
   --g5-routes apps/api-gateway/src/routing/g5-h5-routes.ts `
-  --docs-sha 490172c11cb4b83ddd1996f8d5834d0402184cf8 --gateway-sha 1b90543dc39a8919fd94f0e059d10e1002b3b2a9 `
+  --docs-sha 5f30802129ba4bbc0674dcc5878f10065f443118 --gateway-sha 097dac1bf4a8dcf5c6e799742d2df340f6d893d5 `
+  --enable-g5 --g5-authorized `
   --output ops/azure/apim/openapi/gateway-filtered.json `
   --compact-output ops/azure/apim/openapi/gateway-filtered.compact.json `
   --manifest ops/azure/apim/openapi/operation-security.json
 ```
+
+### Publicación G5 en Chile
+
+| Método y ruta | Operación | Scope de `modulo-ventas` |
+|---|---|---|
+| POST /cupones/consumos | `admitirConsumoCuponH5` | `cupones:consumir` |
+| POST /cupones/restauraciones | `admitirRestauracionCuponH5` | `cupones:restaurar` |
+| GET /cupones/operaciones/{operationId} | `obtenerOperacionCuponH5` | `cupones:operaciones:leer` |
+| GET /inventario/reservas/{reservaId}/estado | `obtenerEstadoReservaH5` | `inventario:reservas:estado:leer` |
+
+1. En el release aprobado, comprobar que Gateway sirve el digest previsto con `GATEWAY_G5_H5_ENABLED=true` y que Promotions e Inventory están sanos. Usar el perfil `standard` y mantener Modalidad B.
+2. Registrar el inventario y las políticas de la API activa como respaldo. Preparar el cambio en una revisión protegida, con acceso de prueba limitado hasta instalar y comprobar las cuatro políticas M2M. Conservar las operaciones, políticas y CORS vigentes.
+3. Verificar el delta exacto, el origen de Gateway, el rechazo por falta de JWT y el rechazo a una identidad sin el cliente o scope requerido. Confirmar que las cinco rutas privadas y las dos consultas Pricing permanecen fuera. Publicar la revisión tras estas comprobaciones y conservar la revisión previa para recuperar tráfico.
+4. Registrar las pruebas positivas con evidencia G5 usando `modulo-ventas`. La sesión humana disponible en G6 permite probar denegaciones, con resultados separados de la aceptación funcional.
 
 ## Orden de políticas, perfiles y correlación (`APIM-C02`, `APIM-C04`, `APIM-C05`)
 

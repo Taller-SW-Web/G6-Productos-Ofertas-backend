@@ -9358,6 +9358,370 @@
         }
       }
     },
+    "/cupones/consumos": {
+      "post": {
+        "operationId": "admitirConsumoCuponH5",
+        "tags": [
+          "Cupones"
+        ],
+        "summary": "Admitir consumo idempotente de cup\u00f3n",
+        "description": "Primera admisi\u00f3n durable tras commit conjunto de operaci\u00f3n e intenci\u00f3n Outbox: 202; replay id\u00e9ntico: 200 sin efecto nuevo; intenci\u00f3n distinta: 409 IDEMPOTENCY_CONFLICT. 202 no implica efecto comercial completado. Idempotency-Key ausente/malformado o operation_id ausente/malformado: 400 VALIDACION; ambos UUID v\u00e1lidos pero distintos: 409 IDEMPOTENCY_CONFLICT. Reutilizar una identidad con fingerprint distinto tambi\u00e9n es 409. commercial_snapshot_ref es exactamente order_id. Baseline SEMIFINAL_G6, aceptaci\u00f3n G5 asumida para planificaci\u00f3n, homologaci\u00f3n formal pendiente.",
+        "x-owner": "promotions-svc",
+        "x-contract-status": "SEMIFINAL_G6",
+        "x-external-homologation": "PENDIENTE_HOMOLOGACION_EXTERNA",
+        "x-acceptance-assumption": "ACEPTACION_G5_ASUMIDA_PARA_PLANIFICACION",
+        "x-grant-status": "PENDIENTE_VERIFICACION_G7",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "UUID requerido. Ausente o malformado produce 400 VALIDACION; con otro UUID v\u00e1lido que el body produce 409 IDEMPOTENCY_CONFLICT. Reutilizar sin cambios al reintentar.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CouponConsumptionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Primera admisi\u00f3n durable; no confirma el efecto final.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CouponOperationSnapshot"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "URL del GET de operaci\u00f3n con order_id.",
+                "schema": {
+                  "type": "string",
+                  "format": "uri-reference"
+                }
+              },
+              "Retry-After": {
+                "description": "Segundos antes del siguiente sondeo.",
+                "schema": {
+                  "type": "integer",
+                  "const": 2
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Replay id\u00e9ntico; snapshot durable vigente.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CouponOperationSnapshot"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Header y body tienen UUID v\u00e1lidos distintos, o identidad reutilizada con fingerprint distinto.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Solicitud inv\u00e1lida.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token inv\u00e1lido.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope o allowlist insuficiente.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "L\u00edmite de solicitudes excedido.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Servicio o almacenamiento no disponible.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "serviceBearer": []
+          }
+        ],
+        "x-service-audience": "api-productos",
+        "x-required-scope": "cupones:consumir",
+        "x-allowed-client-ids": [
+          "modulo-ventas"
+        ],
+        "x-integration-decisions": [
+          "ADR-H5-SERVICE-BUS-BASIC",
+          "PENDIENTE_HOMOLOGACION_EXTERNA"
+        ],
+        "x-error-codes": {
+          "400": [
+            "VALIDACION"
+          ],
+          "401": [
+            "TOKEN_INVALIDO"
+          ],
+          "403": [
+            "SCOPE_INSUFICIENTE"
+          ],
+          "409": [
+            "IDEMPOTENCY_CONFLICT"
+          ],
+          "429": [
+            "RATE_LIMIT_EXCEDIDO"
+          ],
+          "500": [
+            "ERROR_INTERNO"
+          ],
+          "503": [
+            "SERVICIO_NO_DISPONIBLE"
+          ]
+        }
+      }
+    },
+    "/cupones/restauraciones": {
+      "post": {
+        "operationId": "admitirRestauracionCuponH5",
+        "tags": [
+          "Cupones"
+        ],
+        "summary": "Admitir restauraci\u00f3n idempotente de cup\u00f3n",
+        "description": "Primera admisi\u00f3n durable tras commit conjunto de operaci\u00f3n e intenci\u00f3n Outbox: 202; replay id\u00e9ntico: 200 sin efecto nuevo; intenci\u00f3n distinta: 409 IDEMPOTENCY_CONFLICT. 202 no implica efecto comercial completado. Idempotency-Key ausente/malformado o operation_id ausente/malformado: 400 VALIDACION; ambos UUID v\u00e1lidos pero distintos: 409 IDEMPOTENCY_CONFLICT. Reutilizar una identidad con fingerprint distinto tambi\u00e9n es 409. Baseline SEMIFINAL_G6, aceptaci\u00f3n G5 asumida para planificaci\u00f3n, homologaci\u00f3n formal pendiente.",
+        "x-owner": "promotions-svc",
+        "x-contract-status": "SEMIFINAL_G6",
+        "x-external-homologation": "PENDIENTE_HOMOLOGACION_EXTERNA",
+        "x-acceptance-assumption": "ACEPTACION_G5_ASUMIDA_PARA_PLANIFICACION",
+        "x-grant-status": "PENDIENTE_VERIFICACION_G7",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "UUID requerido. Ausente o malformado produce 400 VALIDACION; con otro UUID v\u00e1lido que el body produce 409 IDEMPOTENCY_CONFLICT. Reutilizar sin cambios al reintentar.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CouponRestorationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Primera admisi\u00f3n durable; no confirma el efecto final.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CouponOperationSnapshot"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "URL del GET de operaci\u00f3n con order_id.",
+                "schema": {
+                  "type": "string",
+                  "format": "uri-reference"
+                }
+              },
+              "Retry-After": {
+                "description": "Segundos antes del siguiente sondeo.",
+                "schema": {
+                  "type": "integer",
+                  "const": 2
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Replay id\u00e9ntico; snapshot durable vigente.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CouponOperationSnapshot"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "La misma identidad se reutiliz\u00f3 con intenci\u00f3n distinta.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Solicitud inv\u00e1lida.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token inv\u00e1lido.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope o allowlist insuficiente.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "L\u00edmite de solicitudes excedido.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Servicio o almacenamiento no disponible.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "serviceBearer": []
+          }
+        ],
+        "x-service-audience": "api-productos",
+        "x-required-scope": "cupones:restaurar",
+        "x-allowed-client-ids": [
+          "modulo-ventas"
+        ],
+        "x-integration-decisions": [
+          "ADR-H5-SERVICE-BUS-BASIC",
+          "PENDIENTE_HOMOLOGACION_EXTERNA"
+        ],
+        "x-error-codes": {
+          "400": [
+            "VALIDACION"
+          ],
+          "401": [
+            "TOKEN_INVALIDO"
+          ],
+          "403": [
+            "SCOPE_INSUFICIENTE"
+          ],
+          "409": [
+            "IDEMPOTENCY_CONFLICT"
+          ],
+          "429": [
+            "RATE_LIMIT_EXCEDIDO"
+          ],
+          "500": [
+            "ERROR_INTERNO"
+          ],
+          "503": [
+            "SERVICIO_NO_DISPONIBLE"
+          ]
+        }
+      }
+    },
     "/tipos-producto/{tipoProductoId}/caracteristicas": {
       "post": {
         "tags": [
@@ -28560,6 +28924,162 @@
         }
       }
     },
+    "/inventario/reservas/{reservaId}/estado": {
+      "get": {
+        "operationId": "obtenerEstadoReservaH5",
+        "tags": [
+          "Inventario"
+        ],
+        "summary": "Consultar estado persistido y vigencia efectiva de reserva",
+        "description": "order_id debe coincidir con la reserva persistida y el cliente autenticado autorizado. Solo lectura; no ejecuta expiraci\u00f3n ni modifica stock, pedido o pago. ACTIVA con expires_at > observed_at produce VIGENTE y ambos indicadores true; ACTIVA con expires_at <= observed_at produce VENCIDA y ambos false; estados terminales producen NO_APLICA y ambos false. La vista es puntual y no sustituye la validaci\u00f3n at\u00f3mica antes de mutaciones.",
+        "x-owner": "inventory-svc",
+        "x-contract-status": "SEMIFINAL_G6",
+        "x-acceptance-assumption": "ACEPTACION_G5_ASUMIDA_PARA_PLANIFICACION",
+        "x-grant-status": "PENDIENTE_VERIFICACION_G7",
+        "x-external-homologation": "PENDIENTE_HOMOLOGACION_EXTERNA",
+        "parameters": [
+          {
+            "name": "reservaId",
+            "in": "path",
+            "required": true,
+            "description": "Identificador de reserva.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "order_id",
+            "in": "query",
+            "required": true,
+            "description": "Pedido opaco asociado a la reserva.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Snapshot observado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationStatusSnapshot"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Reserva ausente o no visible; respuesta uniforme sin datos reveladores.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Solicitud inv\u00e1lida.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token inv\u00e1lido.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope o allowlist insuficiente.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "L\u00edmite de solicitudes excedido.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Servicio o almacenamiento no disponible.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "serviceBearer": []
+          }
+        ],
+        "x-service-audience": "api-productos",
+        "x-required-scope": "inventario:reservas:estado:leer",
+        "x-allowed-client-ids": [
+          "modulo-ventas"
+        ],
+        "x-integration-decisions": [
+          "ADR-H5-SERVICE-BUS-BASIC",
+          "PENDIENTE_HOMOLOGACION_EXTERNA"
+        ],
+        "x-error-codes": {
+          "401": [
+            "TOKEN_INVALIDO"
+          ],
+          "403": [
+            "SCOPE_INSUFICIENTE"
+          ],
+          "404": [
+            "RESERVA_NO_ENCONTRADA"
+          ],
+          "429": [
+            "RATE_LIMIT_EXCEDIDO"
+          ],
+          "500": [
+            "ERROR_INTERNO"
+          ],
+          "503": [
+            "SERVICIO_NO_DISPONIBLE"
+          ],
+          "400": [
+            "VALIDACION"
+          ]
+        }
+      }
+    },
     "/auditoria-precios/exportaciones/{exportId}": {
       "get": {
         "tags": [
@@ -29440,6 +29960,162 @@
           ],
           "404": [
             "LOTE_NO_ENCONTRADO"
+          ]
+        }
+      }
+    },
+    "/cupones/operaciones/{operationId}": {
+      "get": {
+        "operationId": "obtenerOperacionCuponH5",
+        "tags": [
+          "Cupones"
+        ],
+        "summary": "Consultar resultado durable de operaci\u00f3n de cup\u00f3n",
+        "description": "Consulta de solo lectura. No vuelve a ejecutar el comando. order_id debe coincidir con la operaci\u00f3n persistida y el cliente autenticado debe estar autorizado para verla. Operaci\u00f3n ausente, ajena al pedido/cliente o no visible devuelve el mismo 404 uniforme.",
+        "x-owner": "promotions-svc",
+        "x-contract-status": "SEMIFINAL_G6",
+        "x-acceptance-assumption": "ACEPTACION_G5_ASUMIDA_PARA_PLANIFICACION",
+        "x-grant-status": "PENDIENTE_VERIFICACION_G7",
+        "x-external-homologation": "PENDIENTE_HOMOLOGACION_EXTERNA",
+        "parameters": [
+          {
+            "name": "operationId",
+            "in": "path",
+            "required": true,
+            "description": "Identificador durable.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "order_id",
+            "in": "query",
+            "required": true,
+            "description": "Pedido opaco asociado a la operaci\u00f3n.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Snapshot durable actual.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CouponOperationSnapshot"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Operaci\u00f3n ausente o no visible.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Solicitud inv\u00e1lida.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token inv\u00e1lido.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Scope o allowlist insuficiente.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "L\u00edmite de solicitudes excedido.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Servicio o almacenamiento no disponible.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "serviceBearer": []
+          }
+        ],
+        "x-service-audience": "api-productos",
+        "x-required-scope": "cupones:operaciones:leer",
+        "x-allowed-client-ids": [
+          "modulo-ventas"
+        ],
+        "x-integration-decisions": [
+          "ADR-H5-SERVICE-BUS-BASIC",
+          "PENDIENTE_HOMOLOGACION_EXTERNA"
+        ],
+        "x-error-codes": {
+          "401": [
+            "TOKEN_INVALIDO"
+          ],
+          "403": [
+            "SCOPE_INSUFICIENTE"
+          ],
+          "404": [
+            "OPERACION_CUPON_NO_ENCONTRADA"
+          ],
+          "429": [
+            "RATE_LIMIT_EXCEDIDO"
+          ],
+          "500": [
+            "ERROR_INTERNO"
+          ],
+          "503": [
+            "SERVICIO_NO_DISPONIBLE"
+          ],
+          "400": [
+            "VALIDACION"
           ]
         }
       }
@@ -47404,6 +48080,6 @@
     "g5EnabledByDefault": false,
     "privateOperationCount": 5,
     "publicationMode": "candidate",
-    "operationSetSha256": "ee7b318011ff845770f2baee07fda13808f0f60372420abc6d2eef222a274cc9"
+    "operationSetSha256": "93f3df8d4ec713795d732082ad352b721030adcf20017131e4b0b7b5b83ab754"
   }
 }
