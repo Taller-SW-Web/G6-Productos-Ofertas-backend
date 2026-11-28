@@ -1,3 +1,4 @@
+import http from 'node:http';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -150,7 +151,7 @@ test('H24: cambio contractual en esquema anidado (VarianteComercial dentro de Pr
   }
 });
 
-test('H25: executeSuite en modo estricto falla cerrado (stage=contract_preflight, exitCode=2) si falta OpenAPI oficial', async () => {
+test('H25 + H32: executeSuite en modo estricto falla cerrado (stage=contract_preflight, exitCode=2) si falta o se sustituye OpenAPI oficial', async () => {
   const res = await executeSuite({
     env: 'local',
     baseUrl: 'http://127.0.0.1:39999',
@@ -162,5 +163,192 @@ test('H25: executeSuite en modo estricto falla cerrado (stage=contract_preflight
   assert.equal(res.ok, false);
   assert.equal(res.exitCode, 2);
   assert.equal(res.stage, 'contract_preflight');
-  assert.ok(res.errors.some((e) => e.includes('H25')));
+  assert.ok(res.errors.some((e) => e.includes('H25') || e.includes('H32')));
+});
+
+test('H32: modo STRICT_OFFICIAL rechaza archivo OpenAPI o CSV sustituido y compilacion Ajv previa detiene antes de enviar solicitudes HTTP', async () => {
+  let serverHits = 0;
+  const server = http.createServer((_req, res) => {
+    serverHits += 1;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok' }));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const tmp = mkdtempSync(join(tmpdir(), 'g6-h32-prov-'));
+  try {
+    // 1) Copia valida del OpenAPI oficial fuera del checkout -> STRICT_OFFICIAL debe rechazarla (H32)
+    const copiedOpenApi = join(tmp, 'copied-openapi.yaml');
+    writeFileSync(copiedOpenApi, readFileSync(OFFICIAL_OPENAPI_CONTRACT_PATH, 'utf8'), 'utf8');
+    const subRes = await executeSuite({
+      env: 'local',
+      baseUrl,
+      folder: '00 - Preflight y autenticacion',
+      allowNoAuth: true,
+      skipSecretScan: true,
+      openApiPath: copiedOpenApi,
+    });
+    assert.equal(subRes.ok, false);
+    assert.equal(subRes.exitCode, 2);
+    assert.equal(subRes.stage, 'contract_preflight');
+    assert.ok(subRes.errors.some((e) => e.includes('H32')));
+    assert.equal(serverHits, 0, 'No debe enviar solicitudes HTTP si falla procedencia H32');
+
+    // 2) Esquema no compilable en OpenAPI (fastDev para probar compilacion previa) -> falla en contract_preflight con 0 HTTP hits
+    const brokenOpenApi = join(tmp, 'broken-openapi.yaml');
+    const rawYaml = readFileSync(OFFICIAL_OPENAPI_CONTRACT_PATH, 'utf8');
+    const brokenYaml = rawYaml.replace(
+      'PaginaProductosComercial:',
+      'PaginaProductosComercial:\n      $ref: "#/components/schemas/ESQUEMA_INEXISTENTE_H32"\n    PaginaProductosComercialOriginal:',
+    );
+    writeFileSync(brokenOpenApi, brokenYaml, 'utf8');
+    const compileFailRes = await executeSuite({
+      env: 'local',
+      baseUrl,
+      folder: '00 - Preflight y autenticacion',
+      allowNoAuth: true,
+      skipSecretScan: true,
+      fastDev: true,
+      openApiPath: brokenOpenApi,
+    });
+    assert.equal(compileFailRes.ok, false);
+    assert.equal(compileFailRes.exitCode, 2);
+    assert.equal(compileFailRes.stage, 'contract_preflight');
+    assert.equal(serverHits, 0, 'No debe enviar solicitudes HTTP si falla compilacion Ajv previa H32');
+  } finally {
+    server.close();
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('H31: violacion contractual auxiliar sin PM provoca FAIL global (exitCode=1) sin inflar casos PM fallidos y reconcilia JSON, JUnit, MD y manifest', async () => {
+  const mkProd = (idx) => ({
+    product_id: `00000000-0000-4000-8000-${String(idx).padStart(12, '0')}`,
+    slug: `prod-h31-${idx}`,
+    name: `Producto H31 ${idx}`,
+    description: `Fixture H31 ${idx}`,
+    categoria_id: 'cat-h31',
+    tipo_producto_id: 'type-h31',
+    marca_id: 'brand-h31',
+    tiene_variantes: false,
+    sku_base: `SKU-H31-${idx}`,
+    images: [],
+    attributes: [],
+  });
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://127.0.0.1');
+    if (u.pathname === '/api/v1/precios') {
+      // Solicitud auxiliar sin identificador PM: viola contrato OpenAPI de Pricing
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ items: [{ sku: 12345, precio_efectivo: 'no-numero' }] }));
+      return;
+    }
+    if (u.pathname === '/api/v1/productos') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ items: [mkProd(1)], pagina: 1, tamanio: 20, total: 1 }));
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/problem+json' });
+    res.end(JSON.stringify({ title: 'No encontrado', status: 404, code: 'NO_ENCONTRADO' }));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const outDir = mkdtempSync(join(tmpdir(), 'g6-h31-aux-'));
+  const miniCollectionPath = join(outDir, 'h31-mini.postman_collection.json');
+  writeFileSync(
+    miniCollectionPath,
+    JSON.stringify({
+      info: {
+        name: 'H31 Mini Collection',
+        schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json',
+      },
+      item: [
+        {
+          name: '01 - Catalog y Pricing',
+          item: [
+            {
+              name: 'PM-002 - Gateway -> Catalog: Listar productos autorizados',
+              protocolProfileBehavior: { followRedirects: false },
+              request: {
+                method: 'GET',
+                header: [{ key: 'Authorization', value: 'Bearer {{accessToken}}' }],
+                url: {
+                  raw: '{{baseUrl}}/api/v1/productos?canal=MARKETPLACE&pagina=1&tamanio=20',
+                  host: ['{{baseUrl}}'],
+                  path: ['api', 'v1', 'productos'],
+                  query: [
+                    { key: 'canal', value: 'MARKETPLACE' },
+                    { key: 'pagina', value: '1' },
+                    { key: 'tamanio', value: '20' },
+                  ],
+                },
+              },
+              event: [
+                {
+                  listen: 'test',
+                  script: {
+                    type: 'text/javascript',
+                    exec: [
+                      'pm.test("PM-002 HTTP 200", function () { pm.response.to.have.status(200); });',
+                      'pm.sendRequest({ url: pm.environment.get("baseUrl") + "/api/v1/precios?skus=SKU-H31-1&canal=MARKETPLACE", method: "GET", header: { Authorization: "Bearer " + pm.environment.get("accessToken") } }, function (_err, _res) {});',
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+    'utf8',
+  );
+  try {
+    const res = await executeSuite({
+      env: 'local',
+      baseUrl,
+      folder: '01 - Catalog y Pricing',
+      runId: 'h31-aux-violation',
+      outDir,
+      collectionPath: miniCollectionPath,
+      fastDev: true,
+      openApiPath: OFFICIAL_OPENAPI_CONTRACT_PATH,
+      accessToken: 'synth-user-token-h31',
+      evidenceLevel: 'ISOLATED',
+      skipSecretScan: true,
+    });
+    assert.equal(res.ok, false);
+    assert.equal(res.exitCode, 1, `Esperado exitCode=1, recibido ${res.exitCode}: ${JSON.stringify(res.errors || res)}`);
+    assert.equal(res.overallVerdict, 'FAIL');
+    if (res.totals.pmPass !== 1) {
+      console.error('H31 REPORT:', readFileSync(join(res.evidenceDir, 'report.md'), 'utf8'));
+    }
+    assert.equal(res.totals.pmPass, 1, 'PM-002 debe permanecer PASS');
+    assert.equal(res.totals.pmFail, 0, 'pmFail NO debe inflarse por violacion auxiliar sin PM');
+    assert.equal(res.totals.fail, 0, 'fail de casos PM NO debe mezclarse con violacion auxiliar');
+    assert.equal(res.totals.auxiliaryContractViolations, 1, 'Debe registrar 1 violacion contractual auxiliar separada');
+    assert.equal(
+      res.totals.plannedPmCases,
+      res.totals.executedPmCases + res.totals.notRunPmCases,
+      'Denominadores PM deben reconciliar exactamente',
+    );
+    assert.equal(res.totals.pmPass + res.totals.pmFail, res.totals.executedPmCases);
+
+    const manifest = JSON.parse(readFileSync(join(res.evidenceDir, 'manifest.json'), 'utf8'));
+    const results = JSON.parse(readFileSync(join(res.evidenceDir, 'integration-results.json'), 'utf8'));
+    const junit = readFileSync(join(res.evidenceDir, 'newman.junit.xml'), 'utf8');
+    const md = readFileSync(join(res.evidenceDir, 'report.md'), 'utf8');
+
+    assert.equal(manifest.reconciliation.auxiliaryContractViolations, 1);
+    assert.equal(manifest.reconciliation.pmPass, 1);
+    assert.equal(manifest.reconciliation.pmFail, 0);
+    assert.equal(manifest.contract.mode, 'FAST_DEV_NON_AUTHORITATIVE');
+    assert.match(manifest.contract.openApiSha256, /^[0-9a-f]{64}$/);
+    assert.equal(results.totals.auxiliaryContractViolations, 1);
+    assert.ok(junit.includes('H31.AuxiliaryContract'), 'JUnit debe registrar la violacion contractual auxiliar');
+    assert.ok(junit.includes('failures="1"'), 'JUnit debe contabilizar el fallo auxiliar');
+    assert.ok(md.includes('Violaciones contractuales auxiliares'), 'Markdown debe reportar violaciones auxiliares');
+  } finally {
+    server.close();
+    rmSync(outDir, { recursive: true, force: true });
+  }
 });

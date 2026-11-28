@@ -1,7 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { eq, and, sql } from 'drizzle-orm';
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterAll,
+  beforeEach,
+  afterEach,
+  vi,
+} from 'vitest';
 import { Database } from '../../src/database.js';
 import {
   activationChecks,
@@ -14,7 +23,10 @@ import { PostgresCatalogWriteRepository } from '../../src/postgres-catalog-write
 import { CatalogMasterClient } from '../../src/catalog-master.client.js';
 import { CatalogMutationService } from '../../src/catalog-mutation.service.js';
 import { approvedCatalogProductPolicy } from '../../src/catalog-product.policy.js';
-import { CatalogBulkService, type CatalogBulkIdentity } from '../../src/catalog-bulk.service.js';
+import {
+  CatalogBulkService,
+  type CatalogBulkIdentity,
+} from '../../src/catalog-bulk.service.js';
 import { CatalogMessageService } from '../../src/catalog-message.service.js';
 import { CatalogTelemetry } from '../../src/catalog-telemetry.js';
 import {
@@ -92,32 +104,64 @@ describe.runIf(RUN_PG)(
         const url = req.url ?? '/';
         if (url.startsWith('/api/v1/categorias/')) {
           const id = url.split('/').pop()?.split('?')[0] ?? 'cat-h5';
-          res.end(JSON.stringify({ categoriaId: id, nombre: 'Calzado H5', estado: 'ACTIVO', version: 1 }));
+          res.end(
+            JSON.stringify({
+              categoriaId: id,
+              nombre: 'Calzado H5',
+              estado: 'ACTIVO',
+              version: 1,
+            }),
+          );
           return;
         }
         if (url.startsWith('/api/v1/marcas/')) {
           const id = url.split('/').pop()?.split('?')[0] ?? 'marca-h5';
-          res.end(JSON.stringify({ marcaId: id, nombre: 'Marca H5', estado: 'ACTIVO', version: 1 }));
+          res.end(
+            JSON.stringify({
+              marcaId: id,
+              nombre: 'Marca H5',
+              estado: 'ACTIVO',
+              version: 1,
+            }),
+          );
           return;
         }
-        if (url.startsWith('/api/v1/tipos-producto/') && url.endsWith('/caracteristicas')) {
+        if (
+          url.startsWith('/api/v1/tipos-producto/') &&
+          url.endsWith('/caracteristicas')
+        ) {
           const id = url.split('/')[4] ?? 'tp-h5';
-          res.end(JSON.stringify({
-            tipoProducto: { tipoProductoId: id, estado: 'ACTIVO', schemaVersion: 1 },
-            schemaVersion: 1,
-            caracteristicas: [],
-          }));
+          res.end(
+            JSON.stringify({
+              tipoProducto: {
+                tipoProductoId: id,
+                estado: 'ACTIVO',
+                schemaVersion: 1,
+              },
+              schemaVersion: 1,
+              caracteristicas: [],
+            }),
+          );
           return;
         }
         if (url.startsWith('/api/v1/tipos-producto/')) {
           const id = url.split('/').pop()?.split('?')[0] ?? 'tp-h5';
-          res.end(JSON.stringify({ tipoProductoId: id, nombre: 'Zapatilla H5', estado: 'ACTIVO', schemaVersion: 1 }));
+          res.end(
+            JSON.stringify({
+              tipoProductoId: id,
+              nombre: 'Zapatilla H5',
+              estado: 'ACTIVO',
+              schemaVersion: 1,
+            }),
+          );
           return;
         }
         res.statusCode = 404;
         res.end(JSON.stringify({ code: 'NO_ENCONTRADO' }));
       });
-      await new Promise<void>((resolve) => taxonomyServer.listen(0, '127.0.0.1', () => resolve()));
+      await new Promise<void>((resolve) =>
+        taxonomyServer.listen(0, '127.0.0.1', () => resolve()),
+      );
       const addr = taxonomyServer.address();
       if (!addr || typeof addr === 'string') throw new Error('No port');
       taxonomyBaseUrl = `http://127.0.0.1:${addr.port}`;
@@ -130,7 +174,9 @@ describe.runIf(RUN_PG)(
       const repository = new PostgresCatalogWriteRepository();
       const masterClient = new CatalogMasterClient(
         { origin: taxonomyBaseUrl } as never,
-        { authorization: async () => 'Bearer synthetic-taxonomy-token' } as never,
+        {
+          authorization: async () => 'Bearer synthetic-taxonomy-token',
+        } as never,
       );
       mutations = new CatalogMutationService(
         transactions,
@@ -138,12 +184,14 @@ describe.runIf(RUN_PG)(
         masterClient,
         approvedCatalogProductPolicy,
       );
-      bulk = new CatalogBulkService(
+      bulk = new CatalogBulkService(database, mutations, {
+        authorization: async () => 'Bearer synthetic-bulk-token',
+      } as unknown as CatalogBulkIdentity);
+      messages = new CatalogMessageService(
         database,
-        mutations,
-        { authorization: async () => 'Bearer synthetic-bulk-token' } as unknown as CatalogBulkIdentity,
+        new CatalogTelemetry(),
+        bulk,
       );
-      messages = new CatalogMessageService(database, new CatalogTelemetry(), bulk);
     }, 30000);
 
     beforeEach(() => {
@@ -157,7 +205,9 @@ describe.runIf(RUN_PG)(
 
     afterAll(async () => {
       await database?.onModuleDestroy();
-      await new Promise<void>((resolve) => taxonomyServer?.close(() => resolve()));
+      await new Promise<void>((resolve) =>
+        taxonomyServer?.close(() => resolve()),
+      );
     });
 
     it('C1 (complemento JOINT-01): activación comercial real BORRADOR -> ACTIVO tras resultados Pricing e Inventory y relay con fallo ambiguo', async () => {
@@ -174,12 +224,18 @@ describe.runIf(RUN_PG)(
           tieneVariantes: false,
           precioBaseInicial: 75,
           imagenes: [{ url: 'https://example.test/act.jpg' }],
-          perfilFisico: { pesoKg: 0.8, dimensionesCm: { largo: 18, ancho: 12, alto: 8 } },
+          perfilFisico: {
+            pesoKg: 0.8,
+            dimensionesCm: { largo: 18, ancho: 12, alto: 8 },
+          },
         },
         { authorization: 'Bearer synthetic-user-h5', correlationId },
       );
 
-      const published: Array<{ destination: string; envelope: CatalogEnvelope }> = [];
+      const published: Array<{
+        destination: string;
+        envelope: CatalogEnvelope;
+      }> = [];
       let failOnce = true;
       const busDouble = {
         publish: async (destination: string, env: CatalogEnvelope) => {
@@ -193,17 +249,24 @@ describe.runIf(RUN_PG)(
 
       expect(await relayCatalogDelivery(database, busDouble)).toBe('RETRY');
       await database.transaction((tx) =>
-        tx.execute(sql`UPDATE catalog.outbox_delivery SET available_at = now() WHERE published_at IS NULL`),
+        tx.execute(
+          sql`UPDATE catalog.outbox_delivery SET available_at = now() WHERE published_at IS NULL`,
+        ),
       );
       for (let i = 0; i < 10; i += 1) {
-        if ((await relayCatalogDelivery(database, busDouble)) === 'EMPTY') break;
+        if ((await relayCatalogDelivery(database, busDouble)) === 'EMPTY')
+          break;
       }
 
       const pricingReq = published.find(
-        (p) => p.envelope.correlation_id === correlationId && p.envelope.name === 'pricing.product.initialization.requested',
+        (p) =>
+          p.envelope.correlation_id === correlationId &&
+          p.envelope.name === 'pricing.product.initialization.requested',
       );
       const invReq = published.find(
-        (p) => p.envelope.correlation_id === correlationId && p.envelope.name === 'inventory.sku.initialization.requested',
+        (p) =>
+          p.envelope.correlation_id === correlationId &&
+          p.envelope.name === 'inventory.sku.initialization.requested',
       );
       expect(pricingReq).toBeDefined();
       expect(invReq).toBeDefined();
@@ -212,7 +275,11 @@ describe.runIf(RUN_PG)(
         await messages.consume(
           makeEnvelope(
             'pricing.product.initialization.completed',
-            { product_id: created.product_id, sku_base: sku, initialized_at: new Date().toISOString() },
+            {
+              product_id: created.product_id,
+              sku_base: sku,
+              initialized_at: new Date().toISOString(),
+            },
             {
               producer: 'pricing-svc',
               correlation_id: pricingReq!.envelope.correlation_id,
@@ -227,7 +294,12 @@ describe.runIf(RUN_PG)(
         await messages.consume(
           makeEnvelope(
             'inventory.sku.initialization.completed',
-            { product_id: created.product_id, sku, variant_id: null, initialized_at: new Date().toISOString() },
+            {
+              product_id: created.product_id,
+              sku,
+              variant_id: null,
+              initialized_at: new Date().toISOString(),
+            },
             {
               producer: 'inventory-svc',
               correlation_id: invReq!.envelope.correlation_id,
@@ -243,7 +315,12 @@ describe.runIf(RUN_PG)(
         await messages.consume(
           makeEnvelope(
             'inventory.sku.initialization.rejected',
-            { product_id: created.product_id, sku, variant_id: null, reason: 'LATE_REJECT' },
+            {
+              product_id: created.product_id,
+              sku,
+              variant_id: null,
+              reason: 'LATE_REJECT',
+            },
             {
               producer: 'inventory-svc',
               correlation_id: invReq!.envelope.correlation_id,
@@ -259,7 +336,10 @@ describe.runIf(RUN_PG)(
         undefined,
         'activate',
         { catalogVersion: created.catalog_version },
-        { authorization: 'Bearer synthetic-user-h5', correlationId: randomUUID() },
+        {
+          authorization: 'Bearer synthetic-user-h5',
+          correlationId: randomUUID(),
+        },
       );
       const [dbProd] = await database.read((db) =>
         db.select().from(products).where(eq(products.id, created.product_id)),
@@ -281,7 +361,10 @@ describe.runIf(RUN_PG)(
           tieneVariantes: false,
           precioBaseInicial: 40,
           imagenes: [{ url: 'https://example.test/corr.jpg' }],
-          perfilFisico: { pesoKg: 0.5, dimensionesCm: { largo: 10, ancho: 10, alto: 10 } },
+          perfilFisico: {
+            pesoKg: 0.5,
+            dimensionesCm: { largo: 10, ancho: 10, alto: 10 },
+          },
         },
         { authorization: 'Bearer synthetic-user-h5', correlationId },
       );
@@ -290,7 +373,12 @@ describe.runIf(RUN_PG)(
         db
           .select()
           .from(outbox)
-          .where(and(eq(outbox.correlation_id, correlationId), eq(outbox.event_name, 'pricing.product.initialization.requested'))),
+          .where(
+            and(
+              eq(outbox.correlation_id, correlationId),
+              eq(outbox.event_name, 'pricing.product.initialization.requested'),
+            ),
+          ),
       );
       expect(activeOutbox).toBeDefined();
 
@@ -298,7 +386,11 @@ describe.runIf(RUN_PG)(
         await messages.consume(
           makeEnvelope(
             'pricing.product.initialization.completed',
-            { product_id: created.product_id, sku_base: sku, initialized_at: new Date().toISOString() },
+            {
+              product_id: created.product_id,
+              sku_base: sku,
+              initialized_at: new Date().toISOString(),
+            },
             {
               producer: 'pricing-svc',
               correlation_id: randomUUID(),
@@ -313,7 +405,11 @@ describe.runIf(RUN_PG)(
         messages.consume(
           makeEnvelope(
             'pricing.product.initialization.completed',
-            { product_id: created.product_id, sku_base: sku, initialized_at: new Date().toISOString() },
+            {
+              product_id: created.product_id,
+              sku_base: sku,
+              initialized_at: new Date().toISOString(),
+            },
             {
               producer: 'pricing-svc',
               correlation_id: randomUUID(),
@@ -327,7 +423,10 @@ describe.runIf(RUN_PG)(
 
     it('C3 (conflictos de payload y destinos deshabilitados): rechaza reuso de message_id con payload alterado y bloquea reply deshabilitado', async () => {
       const catId = `cat-h5-${randomUUID().slice(0, 8)}`;
-      const consumer = createCatalogTaxonomyConsumer(messages, ALL_DESTINATIONS);
+      const consumer = createCatalogTaxonomyConsumer(
+        messages,
+        ALL_DESTINATIONS,
+      );
       const evt = makeEnvelope('taxonomy.category.updated', {
         categoria_id: catId,
         nombre: 'Calzado Original',
@@ -337,7 +436,10 @@ describe.runIf(RUN_PG)(
 
       expect(await consumer.consume(evt)).toBe('APPLIED');
       await expect(
-        consumer.consume({ ...evt, data: { ...evt.data, nombre: 'Nombre Alterado' } }),
+        consumer.consume({
+          ...evt,
+          data: { ...evt.data, nombre: 'Nombre Alterado' },
+        }),
       ).rejects.toBeInstanceOf(InvalidCatalogMessage);
 
       const rows = await database.read((db) =>
@@ -358,7 +460,11 @@ describe.runIf(RUN_PG)(
       const disabledBulk = createCatalogBulkConsumer(messages, []);
       await expect(
         disabledBulk.consume(
-          makeEnvelope('catalog.bulk.upsert.requested', {}, { producer: 'bulk-svc', kind: 'command' }),
+          makeEnvelope(
+            'catalog.bulk.upsert.requested',
+            {},
+            { producer: 'bulk-svc', kind: 'command' },
+          ),
         ),
       ).rejects.toThrow('CATALOG_H5_BULK_REPLY_DISABLED');
     });

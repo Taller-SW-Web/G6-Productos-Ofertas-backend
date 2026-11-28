@@ -21,7 +21,13 @@ import {
   validateCollectionAgainstOpenApi,
   validateMatrixParity,
 } from './lib/preflight-core.mjs';
-import { buildMarkdownReport, buildManifest, resolveGitHead, writeEvidenceBundle } from './lib/report-core.mjs';
+import {
+  buildMarkdownReport,
+  buildManifest,
+  resolveGitHead,
+  verifyDocsFileMatchesGitHead,
+  writeEvidenceBundle,
+} from './lib/report-core.mjs';
 import { buildSanitizedJunitXml, sanitizeNewmanRun } from './lib/sanitizer-core.mjs';
 import {
   createOpenApiValidator,
@@ -241,20 +247,37 @@ export async function executeSuite(options = {}) {
     };
   }
 
-  // H25: Preflight contractual estricto obligatorio antes de ejecutar solicitudes Newman
+  // H25 + H32: Preflight contractual estricto obligatorio, procedencia verificada y compilacion Ajv previa
   const fastDev = Boolean(options.fastDev);
   const contractMode = fastDev ? 'FAST_DEV_NON_AUTHORITATIVE' : 'STRICT_OFFICIAL';
+  const canonicalOpenApiPath = resolve(OFFICIAL_OPENAPI_CONTRACT_PATH);
+  const canonicalCsvPath = resolve(DEFAULT_COVERAGE_CSV_PATH);
   const activeOpenApiPath = options.openApiPath
     ? resolve(options.openApiPath)
     : fastDev
       ? FAST_DEV_OPENAPI_PATH
-      : OFFICIAL_OPENAPI_CONTRACT_PATH;
+      : canonicalOpenApiPath;
   const activeCsvPath = options.coverageCsvPath
     ? resolve(options.coverageCsvPath)
-    : DEFAULT_COVERAGE_CSV_PATH;
+    : canonicalCsvPath;
   const docsShaResolved = resolveGitHead(DOCS_ROOT);
   const contractErrors = [];
   let openApiSha256 = 'UNAVAILABLE';
+  let coverageCsvSha256 = 'UNAVAILABLE';
+
+  if (!fastDev) {
+    // H32: En modo estricto NO se permite sustituir OpenAPI ni matriz CSV por archivos arbitrarios fuera del checkout oficial
+    if (options.openApiPath && activeOpenApiPath !== canonicalOpenApiPath) {
+      contractErrors.push(
+        `H32: En modo STRICT_OFFICIAL no se permite sustituir openApiPath ('${activeOpenApiPath}' != '${canonicalOpenApiPath}'). Use fastDev si requiere pruebas locales no autoritativas.`,
+      );
+    }
+    if (options.coverageCsvPath && activeCsvPath !== canonicalCsvPath) {
+      contractErrors.push(
+        `H32: En modo STRICT_OFFICIAL no se permite sustituir coverageCsvPath ('${activeCsvPath}' != '${canonicalCsvPath}').`,
+      );
+    }
+  }
 
   if (!existsSync(activeOpenApiPath)) {
     contractErrors.push(`H25: OpenAPI requerido no encontrado en '${activeOpenApiPath}'.`);
@@ -264,6 +287,16 @@ export async function executeSuite(options = {}) {
   }
   if (!fastDev && docsShaResolved === 'UNAVAILABLE') {
     contractErrors.push(`H25: No se pudo determinar el SHA de Git de Docs en '${DOCS_ROOT}'.`);
+  }
+
+  if (!fastDev && contractErrors.length === 0) {
+    const openApiProv = verifyDocsFileMatchesGitHead(DOCS_ROOT, activeOpenApiPath);
+    if (!openApiProv.ok) contractErrors.push(openApiProv.reason);
+    else openApiSha256 = openApiProv.sha256;
+
+    const csvProv = verifyDocsFileMatchesGitHead(DOCS_ROOT, activeCsvPath);
+    if (!csvProv.ok) contractErrors.push(csvProv.reason);
+    else coverageCsvSha256 = csvProv.sha256;
   }
 
   if (contractErrors.length === 0) {
@@ -281,9 +314,10 @@ export async function executeSuite(options = {}) {
 
     try {
       const compiled = createOpenApiValidator(activeOpenApiPath);
+      compiled.precompileResponseSchemas();
       openApiSha256 = compiled.sha256;
     } catch (compileErr) {
-      contractErrors.push(`H25: No se pudo compilar OpenAPI con Ajv: ${compileErr.message}`);
+      contractErrors.push(`H32: No se pudieron compilar los esquemas OpenAPI con Ajv: ${compileErr.message}`);
     }
   }
 
@@ -452,20 +486,26 @@ export async function executeSuite(options = {}) {
           targetCase.assertionsFailed += 1;
           targetCase.status = 'FAIL';
         } else {
-          // H24: Violacion contractual en solicitud auxiliar sin caso PM asociado impide PASS global
-          auxiliaryContractViolations.push({ ...v, message: msg });
+          // H24 + H31: Violacion contractual en solicitud auxiliar sin caso PM asociado impide PASS global (deduplicada si Newman emite doble entrada)
+          const dedupKey = `${v.operationId}|${v.url}|${v.statusCode}|${msg}`;
+          if (!auxiliaryContractViolations.some((x) => x._dedupKey === dedupKey)) {
+            auxiliaryContractViolations.push({ ...v, message: msg, _dedupKey: dedupKey });
+          }
         }
       }
-      sanitizedSummary.auxiliaryContractViolations = auxiliaryContractViolations;
-      sanitizedSummary.totals.pass = sanitizedSummary.cases.filter((c) => c.status === 'PASS').length;
-      sanitizedSummary.totals.fail =
-        sanitizedSummary.cases.filter((c) => c.status === 'FAIL').length +
-        auxiliaryContractViolations.length;
+      const cleanAuxViolations = auxiliaryContractViolations.map(({ _dedupKey, ...rest }) => rest);
+      sanitizedSummary.auxiliaryContractViolations = cleanAuxViolations;
+      // H31: Mantener contadores separados de casos PM vs violaciones contractuales auxiliares sin mezclarlos
+      const pmPass = sanitizedSummary.cases.filter((c) => c.status === 'PASS').length;
+      const pmFail = sanitizedSummary.cases.filter((c) => c.status === 'FAIL').length;
+      sanitizedSummary.totals.pmPass = pmPass;
+      sanitizedSummary.totals.pmFail = pmFail;
+      sanitizedSummary.totals.pass = pmPass;
+      sanitizedSummary.totals.fail = pmFail;
+      sanitizedSummary.totals.auxiliaryContractViolations = cleanAuxViolations.length;
       sanitizedSummary.totals.assertionsTotal = sanitizedSummary.cases.reduce((a, c) => a + c.assertionsTotal, 0);
-      sanitizedSummary.totals.assertionsFailed =
-        sanitizedSummary.cases.reduce((a, c) => a + c.assertionsFailed, 0) +
-        auxiliaryContractViolations.length;
-      if (sanitizedSummary.totals.fail > 0) {
+      sanitizedSummary.totals.assertionsFailed = sanitizedSummary.cases.reduce((a, c) => a + c.assertionsFailed, 0);
+      if (pmFail > 0 || cleanAuxViolations.length > 0) {
         sanitizedSummary.overallVerdict = 'FAIL';
       }
     }
@@ -508,8 +548,14 @@ export async function executeSuite(options = {}) {
       plannedCases: plan.plannedCases.map((c) => c.pmId),
       executedCases: sanitizedSummary.cases.filter((c) => c.status !== 'NOT_RUN').map((c) => c.pmId),
       notRunCases: notRunList.map((c) => ({ pmId: c.pmId, reason: c.blockerReason })),
+      pmPass: sanitizedSummary.totals.pmPass,
+      pmFail: sanitizedSummary.totals.pmFail,
       primaryHttpRequests: sanitizedSummary.totals.primaryHttpRequests,
       auxiliaryHttpRequests: sanitizedSummary.totals.auxiliaryHttpRequests,
+      auxiliaryContractViolations: sanitizedSummary.totals.auxiliaryContractViolations,
+      openApiSha256,
+      coverageCsvSha256,
+      contractMode,
       fixtures: {
         channel: options.channel || process.env.G6_CHANNEL || 'MARKETPLACE',
         priceMin: Number(options.priceMin ?? process.env.G6_PRICE_MIN ?? 0),
@@ -519,8 +565,6 @@ export async function executeSuite(options = {}) {
       blockers,
       durationMs,
       exitCode: newmanExitCode,
-      openApiSha256,
-      contractMode,
     });
 
     markdownReport = buildMarkdownReport(manifest, sanitizedSummary, extraSecrets);

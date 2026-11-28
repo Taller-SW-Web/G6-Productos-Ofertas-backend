@@ -353,12 +353,15 @@ export function sanitizeNewmanRun(rawSummary, options = {}) {
   const executedPmCases = pass + fail + inconclusive;
 
   const totals = {
-    // H11: Denominadores explicitos y reconciliados (plannedPmCases === executedPmCases + notRunPmCases)
+    // H11 + H31: Denominadores explicitos y reconciliados (plannedPmCases === executedPmCases + notRunPmCases)
     plannedPmCases,
     executedPmCases,
+    pmPass: pass,
+    pmFail: fail,
     notRunPmCases,
     primaryHttpRequests: primaryRecords.filter((r) => r.status !== 'NOT_RUN').length,
     auxiliaryHttpRequests: auxiliaryRequests.length,
+    auxiliaryContractViolations: 0,
     // Compatibilidad de campos
     planned: plannedPmCases,
     executed: executedPmCases,
@@ -385,6 +388,7 @@ export function sanitizeNewmanRun(rawSummary, options = {}) {
     totals,
     cases,
     auxiliaryRequests,
+    auxiliaryContractViolations: [],
   };
 
   const serialized = JSON.stringify(summary);
@@ -405,8 +409,13 @@ export function buildSanitizedJunitXml(sanitizedSummary, extraSecrets = []) {
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&apos;');
 
-  const tests = sanitizedSummary.cases.length;
-  const failures = sanitizedSummary.cases.filter((c) => c.status === 'FAIL').length;
+  const auxViolations = Array.isArray(sanitizedSummary.auxiliaryContractViolations)
+    ? sanitizedSummary.auxiliaryContractViolations
+    : [];
+  const tests = sanitizedSummary.cases.length + auxViolations.length;
+  const failures =
+    sanitizedSummary.cases.filter((c) => c.status === 'FAIL').length +
+    auxViolations.length;
   const skipped = sanitizedSummary.cases.filter((c) => c.status === 'NOT_RUN' || c.status === 'INCONCLUSIVE').length;
   const timeSec = ((sanitizedSummary.totals.durationMs || 0) / 1000).toFixed(3);
 
@@ -428,6 +437,14 @@ export function buildSanitizedJunitXml(sanitizedSummary, extraSecrets = []) {
     } else if (c.status === 'NOT_RUN' || c.status === 'INCONCLUSIVE') {
       lines.push(`      <skipped message="${escapeXml(c.blockerReason || c.status)}"/>`);
     }
+    lines.push('    </testcase>');
+  }
+
+  for (let i = 0; i < auxViolations.length; i += 1) {
+    const v = auxViolations[i];
+    const name = `H31 Auxiliary Contract Violation #${i + 1} (${v.method || 'HTTP'} ${v.path || v.operationId || 'aux'} ${v.statusCode ?? ''})`;
+    lines.push(`    <testcase classname="H31.AuxiliaryContract" name="${escapeXml(name)}" time="0.000">`);
+    lines.push(`      <failure message="${escapeXml(v.message || (v.errors || []).join('; ') || 'Auxiliary contract violation')}"/>`);
     lines.push('    </testcase>');
   }
 

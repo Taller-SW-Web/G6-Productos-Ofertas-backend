@@ -234,14 +234,32 @@ describe.runIf(RUN_PG)(
             [SIMPLE_PROD_ID, null, SIMPLE_SKU, 'PRICING'],
             [SIMPLE_PROD_ID, null, SIMPLE_SKU, 'INVENTORY'],
             [MULTI_PROD_ID, null, MULTI_SKU_BASE, 'PRICING'],
-            [MULTI_PROD_ID, MULTI_VAR_EXPENSIVE_ID, MULTI_VAR_EXPENSIVE_SKU, 'INVENTORY'],
-            [MULTI_PROD_ID, MULTI_VAR_ELIGIBLE_ID, MULTI_VAR_ELIGIBLE_SKU, 'INVENTORY'],
+            [
+              MULTI_PROD_ID,
+              MULTI_VAR_EXPENSIVE_ID,
+              MULTI_VAR_EXPENSIVE_SKU,
+              'INVENTORY',
+            ],
+            [
+              MULTI_PROD_ID,
+              MULTI_VAR_ELIGIBLE_ID,
+              MULTI_VAR_ELIGIBLE_SKU,
+              'INVENTORY',
+            ],
           ] as const) {
             await seedClient.query(
               `INSERT INTO catalog.activation_checks
                  (product_id, variant_id, sku, dependency, operation_id, correlation_id, request_payload, state, result_payload, result_message_id)
                VALUES ($1, $2, $3, $4, $5, $6, '{}'::jsonb, 'COMPLETED', '{"ok":true}'::jsonb, $7)`,
-              [productId, variantId, sku, dep, randomUUID(), randomUUID(), randomUUID()],
+              [
+                productId,
+                variantId,
+                sku,
+                dep,
+                randomUUID(),
+                randomUUID(),
+                randomUUID(),
+              ],
             );
           }
           await seedClient.query('COMMIT');
@@ -399,7 +417,11 @@ describe.runIf(RUN_PG)(
         },
         amqp: {},
         preparation: {},
-        readDemo: { enabled: false, restricted: false, gatewayIps: ['127.0.0.1'] },
+        readDemo: {
+          enabled: false,
+          restricted: false,
+          gatewayIps: ['127.0.0.1'],
+        },
         historicalRecoveryCapabilities: readHistoricalRecoveryCapabilities({}),
         historicalPricingContract: readHistoricalPricingContract({
           NODE_ENV: 'test',
@@ -430,12 +452,17 @@ describe.runIf(RUN_PG)(
       await catalogApp.listen(0, '127.0.0.1');
       const catalogOrigin = await catalogApp.getUrl();
 
-      // 5) Levantar pricing-svc PRODUCTIVO REAL apuntando a catalog-svc REAL y PostgreSQL 17 (pricing_app)
+      // 5) Levantar pricing-svc PRODUCTIVO REAL apuntando a catalog-svc REAL y PostgreSQL 17 (rol runtime pricing_app)
+      const pricingUser = process.env.PRICING_RUNTIME_USER || 'pricing_app';
+      const pricingPass =
+        process.env.PRICING_RUNTIME_PASSWORD ||
+        pgSettings.password ||
+        'app_pass';
       const pricingEnv: NodeJS.ProcessEnv = {
         NODE_ENV: 'test',
         PRICING_SVC_PORT: '3004',
         G6_SECURITY_MODE: 'G7_AUTHENTICATED',
-        DATABASE_URL: `postgresql://pricing_app:app_pass@${pgHost}:${pgPort}/${pgDb}?sslmode=disable`,
+        DATABASE_URL: `postgresql://${pricingUser}:${pricingPass}@${pgHost}:${pgPort}/${pgDb}?sslmode=disable`,
         AUTH_ISSUER: jwksOrigin,
         AUTH_JWKS_URL: `${jwksOrigin}/jwks`,
         PRICING_CATALOG_URL: catalogOrigin,
@@ -450,7 +477,18 @@ describe.runIf(RUN_PG)(
       await pricingApp.listen(0, '127.0.0.1');
       pricingOrigin = await pricingApp.getUrl();
 
-      // 6) Levantar inventory-svc PRODUCTIVO REAL sobre PostgreSQL 17 (schema inventory)
+      // 6) Levantar inventory-svc PRODUCTIVO REAL sobre PostgreSQL 17 con rol runtime no propietario (inventory_app, NUNCA postgres)
+      const inventoryUser =
+        process.env.INVENTORY_RUNTIME_USER || 'inventory_app';
+      const inventoryPass =
+        process.env.INVENTORY_RUNTIME_PASSWORD ||
+        pgSettings.password ||
+        'app_pass';
+      if (inventoryUser === 'postgres' || inventoryUser.includes('owner')) {
+        throw new Error(
+          `H33 SEGURIDAD: inventory-svc debe ejecutarse con rol runtime no propietario (recibido: ${inventoryUser}).`,
+        );
+      }
       const envKeys = [
         'NODE_ENV',
         'G6_SECURITY_MODE',
@@ -470,7 +508,7 @@ describe.runIf(RUN_PG)(
       process.env.G6_SECURITY_MODE = 'G7_AUTHENTICATED';
       process.env.G7_JWT_ISSUER = jwksOrigin;
       process.env.G7_JWT_JWKS_URL = `${jwksOrigin}/jwks`;
-      process.env.DATABASE_URL = `postgresql://postgres:${adminPass}@${pgHost}:${pgPort}/${pgDb}?sslmode=disable`;
+      process.env.DATABASE_URL = `postgresql://${inventoryUser}:${inventoryPass}@${pgHost}:${pgPort}/${pgDb}?sslmode=disable`;
       delete process.env.PGHOST;
       delete process.env.PGPORT;
       delete process.env.PGDATABASE;
@@ -507,7 +545,9 @@ describe.runIf(RUN_PG)(
         { encoding: 'utf8', timeout: 60000, windowsHide: true },
       );
       if (compile.status !== 0) {
-        throw new Error(`Gateway compilation failed: ${compile.stdout}\n${compile.stderr}`);
+        throw new Error(
+          `Gateway compilation failed: ${compile.stdout}\n${compile.stderr}`,
+        );
       }
       symlinkSync(
         resolve('node_modules'),
@@ -542,15 +582,19 @@ describe.runIf(RUN_PG)(
         await app.listen(0, '127.0.0.1');
         console.log('GATEWAY_READY=' + await app.getUrl());
       `;
-      gatewayProc = spawn(process.execPath, ['--input-type=module', '-e', bootCode], {
-        cwd: gatewayDir,
-        windowsHide: true,
-        env: {
-          PATH: process.env.PATH,
-          SystemRoot: process.env.SystemRoot,
-          NODE_ENV: 'test',
+      gatewayProc = spawn(
+        process.execPath,
+        ['--input-type=module', '-e', bootCode],
+        {
+          cwd: gatewayDir,
+          windowsHide: true,
+          env: {
+            PATH: process.env.PATH,
+            SystemRoot: process.env.SystemRoot,
+            NODE_ENV: 'test',
+          },
         },
-      });
+      );
       let out = '';
       let errOut = '';
       gatewayProc.stdout?.on('data', (c) => {
@@ -567,12 +611,16 @@ describe.runIf(RUN_PG)(
           break;
         }
         if (gatewayProc.exitCode !== null) {
-          throw new Error(`api-gateway exited early (${gatewayProc.exitCode}): ${errOut}`);
+          throw new Error(
+            `api-gateway exited early (${gatewayProc.exitCode}): ${errOut}`,
+          );
         }
         await pause(100);
       }
       if (!gatewayOrigin) {
-        throw new Error(`api-gateway did not report ready URL. stdout=${out} stderr=${errOut}`);
+        throw new Error(
+          `api-gateway did not report ready URL. stdout=${out} stderr=${errOut}`,
+        );
       }
     }, 120000);
 
@@ -596,8 +644,54 @@ describe.runIf(RUN_PG)(
       }
     }, 30000);
 
+    function allocateOutDir(prefix: string): { outDir: string; keep: boolean } {
+      const keepBase = process.env.G6_H5_KEEP_EVIDENCE_DIR?.trim();
+      if (keepBase) {
+        return { outDir: resolve(keepBase), keep: true };
+      }
+      return { outDir: mkdtempSync(join(tmpdir(), prefix)), keep: false };
+    }
+
+    function readCaseById(
+      evidenceDir: string,
+      pmId: string,
+    ): {
+      pmId: string;
+      status: string;
+      httpStatus: number | null;
+      url: string;
+      assertions: Array<{
+        name: string;
+        passed: boolean;
+        errorMessage: string | null;
+      }>;
+    } {
+      const results = JSON.parse(
+        readFileSync(join(evidenceDir, 'integration-results.json'), 'utf8'),
+      ) as {
+        cases: Array<{
+          pmId: string;
+          status: string;
+          httpStatus: number | null;
+          url: string;
+          assertions: Array<{
+            name: string;
+            passed: boolean;
+            errorMessage: string | null;
+          }>;
+        }>;
+      };
+      const found = results.cases.find((c) => c.pmId === pmId);
+      if (!found) {
+        throw new Error(
+          `H34: Caso ${pmId} ausente en integration-results.json (${evidenceDir}).`,
+        );
+      }
+      return found;
+    }
+
     it('H27 positivo real (Carpeta 01): PM-002, PM-003A, PM-003B, PM-003C y PM-003D aprueban contra Gateway -> Catalog -> Pricing reales en PG17', async () => {
-      const outDir = mkdtempSync(join(tmpdir(), 'g6-h27-cat-pricing-'));
+      const { outDir, keep } = allocateOutDir('g6-h27-cat-pricing-');
       try {
         const res = await executeSuite({
           env: 'local',
@@ -610,29 +704,34 @@ describe.runIf(RUN_PG)(
           skipSecretScan: true,
         });
 
-        if (!res.ok) {
-          console.error('H27 CARPETA 01 RESULT:', JSON.stringify(res, null, 2));
-          if (res.evidenceDir) {
-            try { console.error(readFileSync(join(res.evidenceDir, 'report.md'), 'utf8')); } catch {}
-          }
-        }
         expect(res.ok).toBe(true);
         expect(res.overallVerdict).toBe('PASS');
         expect(res.totals.pass).toBe(5);
         expect(res.totals.fail).toBe(0);
         expect(res.totals.notRunPmCases).toBe(0);
         expect(res.exitCode).toBe(0);
+        for (const id of [
+          'PM-002',
+          'PM-003A',
+          'PM-003B',
+          'PM-003C',
+          'PM-003D',
+        ]) {
+          const c = readCaseById(res.evidenceDir, id);
+          expect(c.status).toBe('PASS');
+          expect(c.httpStatus).toBe(200);
+        }
       } finally {
-        rmSync(outDir, { recursive: true, force: true });
+        if (!keep) rmSync(outDir, { recursive: true, force: true });
       }
     }, 60000);
 
-    it('H27 positivo/negativo real Inventory (Carpeta 02): 4 escenarios de Defecto B / H18 contra Gateway -> Catalog -> Inventory reales en PG17', async () => {
+    it('H27 + H34 positivo/negativo real Inventory (Carpeta 02): verifica PM-010, PM-011 y PM-012 individualmente en los 4 escenarios contra inventory-svc real en PG17', async () => {
       const token = userToken();
 
-      // Escenario 1: SKU con 1 sola ubicación (SIMPLE_SKU) sin location_id -> 200 OK PASS
+      // Escenario 1: SKU con 1 sola ubicación (SIMPLE_SKU) sin location_id -> PM-010/011/012 HTTP 200 PASS + SKU esperado
       {
-        const outDir = mkdtempSync(join(tmpdir(), 'g6-h27-inv-single-'));
+        const { outDir, keep } = allocateOutDir('g6-h27-inv-single-');
         try {
           const res = await executeSuite({
             env: 'local',
@@ -647,24 +746,28 @@ describe.runIf(RUN_PG)(
             evidenceLevel: 'ISOLATED',
             skipSecretScan: true,
           });
-          if (!res.ok) {
-          console.error('H27 CARPETA 01 RESULT:', JSON.stringify(res, null, 2));
-          if (res.evidenceDir) {
-            try { console.error(readFileSync(join(res.evidenceDir, 'report.md'), 'utf8')); } catch {}
-          }
-        }
-        expect(res.ok).toBe(true);
+          expect(res.ok).toBe(true);
           expect(res.overallVerdict).toBe('PASS');
-          expect(res.totals.pass).toBe(3); // PM-010 + PM-011 + PM-012
+          expect(res.totals.pass).toBe(3);
           expect(res.totals.fail).toBe(0);
+          const pm010 = readCaseById(res.evidenceDir, 'PM-010');
+          const pm011 = readCaseById(res.evidenceDir, 'PM-011');
+          const pm012 = readCaseById(res.evidenceDir, 'PM-012');
+          expect(pm010.status).toBe('PASS');
+          expect(pm010.httpStatus).toBe(200);
+          expect(pm011.status).toBe('PASS');
+          expect(pm011.httpStatus).toBe(200);
+          expect(pm012.status).toBe('PASS');
+          expect(pm012.httpStatus).toBe(200);
+          expect(pm012.url).toContain(`skus=${SIMPLE_SKU}`);
         } finally {
-          rmSync(outDir, { recursive: true, force: true });
+          if (!keep) rmSync(outDir, { recursive: true, force: true });
         }
       }
 
-      // Escenario 2: SKU multi-ubicación (MULTI_VAR_ELIGIBLE_SKU) sin location_id -> 400 VALIDACION (FAIL esperado)
+      // Escenario 2: SKU multi-ubicación (MULTI_VAR_ELIGIBLE_SKU) sin location_id -> PM-010/011 PASS y PM-012 FAIL con HTTP 400 VALIDACION
       {
-        const outDir = mkdtempSync(join(tmpdir(), 'g6-h27-inv-multi-noloc-'));
+        const { outDir, keep } = allocateOutDir('g6-h27-inv-multi-noloc-');
         try {
           const res = await executeSuite({
             env: 'local',
@@ -680,16 +783,33 @@ describe.runIf(RUN_PG)(
             skipSecretScan: true,
           });
           expect(res.overallVerdict).toBe('FAIL');
-          expect(res.totals.pass).toBe(2); // PM-010 + PM-011 PASS
-          expect(res.totals.fail).toBe(1); // PM-012 400 VALIDACION
+          expect(res.totals.pass).toBe(2);
+          expect(res.totals.fail).toBe(1);
+          const pm010 = readCaseById(res.evidenceDir, 'PM-010');
+          const pm011 = readCaseById(res.evidenceDir, 'PM-011');
+          const pm012 = readCaseById(res.evidenceDir, 'PM-012');
+          expect(pm010.status).toBe('PASS');
+          expect(pm010.httpStatus).toBe(200);
+          expect(pm011.status).toBe('PASS');
+          expect(pm011.httpStatus).toBe(200);
+          expect(pm012.status).toBe('FAIL');
+          expect(pm012.httpStatus).toBe(400);
+          expect(pm012.url).not.toContain('location_id=');
+          const directResp = await fetch(
+            `${gatewayOrigin}/api/v1/inventario/disponibilidad?skus=${encodeURIComponent(MULTI_VAR_ELIGIBLE_SKU)}`,
+            { headers: { Authorization: `Bearer ${token}` } },
+          );
+          expect(directResp.status).toBe(400);
+          const directBody = (await directResp.json()) as { code?: string };
+          expect(directBody.code).toBe('VALIDACION');
         } finally {
-          rmSync(outDir, { recursive: true, force: true });
+          if (!keep) rmSync(outDir, { recursive: true, force: true });
         }
       }
 
-      // Escenario 3: SKU multi-ubicación con fixture explícito location_id UUID (LOC_LIMA_ID) -> 200 OK PASS
+      // Escenario 3: SKU multi-ubicación con fixture explícito location_id UUID (LOC_LIMA_ID) -> PM-010/011/012 HTTP 200 PASS + saldo esperado
       {
-        const outDir = mkdtempSync(join(tmpdir(), 'g6-h27-inv-multi-valid-'));
+        const { outDir, keep } = allocateOutDir('g6-h27-inv-multi-valid-');
         try {
           const res = await executeSuite({
             env: 'local',
@@ -704,24 +824,26 @@ describe.runIf(RUN_PG)(
             evidenceLevel: 'ISOLATED',
             skipSecretScan: true,
           });
-          if (!res.ok) {
-          console.error('H27 CARPETA 01 RESULT:', JSON.stringify(res, null, 2));
-          if (res.evidenceDir) {
-            try { console.error(readFileSync(join(res.evidenceDir, 'report.md'), 'utf8')); } catch {}
-          }
-        }
-        expect(res.ok).toBe(true);
+          expect(res.ok).toBe(true);
           expect(res.overallVerdict).toBe('PASS');
-          expect(res.totals.pass).toBe(3); // PM-010 + PM-011 + PM-012
+          expect(res.totals.pass).toBe(3);
           expect(res.totals.fail).toBe(0);
+          const pm010 = readCaseById(res.evidenceDir, 'PM-010');
+          const pm011 = readCaseById(res.evidenceDir, 'PM-011');
+          const pm012 = readCaseById(res.evidenceDir, 'PM-012');
+          expect(pm010.status).toBe('PASS');
+          expect(pm011.status).toBe('PASS');
+          expect(pm012.status).toBe('PASS');
+          expect(pm012.httpStatus).toBe(200);
+          expect(pm012.url).toContain(`location_id=${LOC_LIMA_ID}`);
         } finally {
-          rmSync(outDir, { recursive: true, force: true });
+          if (!keep) rmSync(outDir, { recursive: true, force: true });
         }
       }
 
-      // Escenario 4: Ubicación sin saldo (LOC_SIN_SALDO_ID) -> 200 items=[] (PM-012 FAIL controlado)
+      // Escenario 4: Ubicación sin saldo (LOC_SIN_SALDO_ID) -> PM-010/011 PASS y PM-012 FAIL controlado con HTTP 200 items=[]
       {
-        const outDir = mkdtempSync(join(tmpdir(), 'g6-h27-inv-empty-'));
+        const { outDir, keep } = allocateOutDir('g6-h27-inv-empty-');
         try {
           const res = await executeSuite({
             env: 'local',
@@ -737,18 +859,32 @@ describe.runIf(RUN_PG)(
             skipSecretScan: true,
           });
           expect(res.overallVerdict).toBe('FAIL');
-          expect(res.totals.pass).toBe(2); // PM-010 + PM-011 PASS
-          expect(res.totals.fail).toBe(1); // PM-012 items=[] -> FAIL controlado
+          expect(res.totals.pass).toBe(2);
+          expect(res.totals.fail).toBe(1);
+          const pm010 = readCaseById(res.evidenceDir, 'PM-010');
+          const pm011 = readCaseById(res.evidenceDir, 'PM-011');
+          const pm012 = readCaseById(res.evidenceDir, 'PM-012');
+          expect(pm010.status).toBe('PASS');
+          expect(pm011.status).toBe('PASS');
+          expect(pm012.status).toBe('FAIL');
+          expect(pm012.httpStatus).toBe(200);
+          expect(pm012.url).toContain(`location_id=${LOC_SIN_SALDO_ID}`);
+          expect(
+            pm012.assertions.some(
+              (a) =>
+                !a.passed && /empty|vacio|items/i.test(a.errorMessage || ''),
+            ),
+          ).toBe(true);
         } finally {
-          rmSync(outDir, { recursive: true, force: true });
+          if (!keep) rmSync(outDir, { recursive: true, force: true });
         }
       }
     }, 90000);
 
     it('H27 preflight y negativos reales (Carpetas 00 y 09): preserva readiness 503 como FAIL y valida 401/404/400 contra servicios reales', async () => {
-      const outDir = mkdtempSync(join(tmpdir(), 'g6-h27-preflight-neg-'));
+      const { outDir, keep } = allocateOutDir('g6-h27-preflight-neg-');
       try {
-        // Carpeta 00: PM-001 (/health) -> 200 PASS; PM-001B (/health/ready) -> 503 FAIL honesto (no todos los microservicios están levantados)
+        // Carpeta 00: PM-001 (/health) -> 200 PASS; PM-001B (/health/ready) -> 503 FAIL honesto
         const preflightRes = await executeSuite({
           env: 'local',
           baseUrl: gatewayOrigin,
@@ -762,6 +898,12 @@ describe.runIf(RUN_PG)(
         expect(preflightRes.totals.pass).toBe(1);
         expect(preflightRes.totals.fail).toBe(1);
         expect(preflightRes.overallVerdict).toBe('FAIL');
+        expect(
+          readCaseById(preflightRes.evidenceDir, 'PM-001').httpStatus,
+        ).toBe(200);
+        expect(
+          readCaseById(preflightRes.evidenceDir, 'PM-001B').httpStatus,
+        ).toBe(503);
 
         // Carpeta 09: PM-004, PM-004B, PM-006, PM-007A, PM-007B, PM-008 PASS; PM-005 NOT_RUN
         const negRes = await executeSuite({
@@ -780,8 +922,11 @@ describe.runIf(RUN_PG)(
         expect(negRes.totals.notRunPmCases).toBe(1);
         expect(negRes.overallVerdict).toBe('PARTIAL_NOT_COMPLETE');
         expect(negRes.exitCode).toBe(5);
+        expect(readCaseById(negRes.evidenceDir, 'PM-005').status).toBe(
+          'NOT_RUN',
+        );
       } finally {
-        rmSync(outDir, { recursive: true, force: true });
+        if (!keep) rmSync(outDir, { recursive: true, force: true });
       }
     }, 60000);
   },

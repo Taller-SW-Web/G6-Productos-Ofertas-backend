@@ -13,6 +13,44 @@ export function resolveGitHead(repoPath) {
   }
 }
 
+export function verifyDocsFileMatchesGitHead(docsRoot, targetFilePath) {
+  if (!docsRoot || !existsSync(docsRoot)) {
+    return { ok: false, reason: `Checkout oficial de Docs no encontrado en '${docsRoot}'.` };
+  }
+  const normRoot = docsRoot.replace(/[\\/]+$/, '');
+  const normTarget = targetFilePath;
+  const rel = normTarget.startsWith(normRoot)
+    ? normTarget.slice(normRoot.length).replace(/^[\\/]+/, '').replace(/\\/g, '/')
+    : null;
+  if (!rel) {
+    return {
+      ok: false,
+      reason: `H32: Archivo '${targetFilePath}' no pertenece al checkout oficial de Docs '${docsRoot}'.`,
+    };
+  }
+  try {
+    const headBlob = execFileSync('git', ['-C', docsRoot, 'show', `HEAD:${rel}`], {
+      maxBuffer: 20 * 1024 * 1024,
+    });
+    const diskBuf = readFileSync(targetFilePath);
+    const normalizeLf = (buf) => buf.toString('utf8').replace(/\r\n/g, '\n');
+    const headHash = sha256Buffer(normalizeLf(headBlob));
+    const diskHash = sha256Buffer(normalizeLf(diskBuf));
+    if (headHash !== diskHash) {
+      return {
+        ok: false,
+        reason: `H32: El archivo '${rel}' difiere del commit HEAD declarado en Docs (HEAD=${headHash.slice(0, 12)}, disco=${diskHash.slice(0, 12)}).`,
+      };
+    }
+    return { ok: true, relativePath: rel, sha256: sha256Buffer(diskBuf) };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: `H32: No se pudo verificar procedencia de '${rel}' contra HEAD de Docs: ${err.message}`,
+    };
+  }
+}
+
 export function buildManifest({
   runId,
   environmentName,
@@ -30,13 +68,17 @@ export function buildManifest({
   plannedCases = [],
   executedCases = [],
   notRunCases = [],
+  pmPass = 0,
+  pmFail = 0,
   primaryHttpRequests = 0,
   auxiliaryHttpRequests = 0,
+  auxiliaryContractViolations = 0,
   fixtures = {},
   blockers = [],
   durationMs = 0,
   exitCode = 0,
   openApiSha256 = 'UNAVAILABLE',
+  coverageCsvSha256 = 'UNAVAILABLE',
   contractMode = 'STRICT_OFFICIAL',
 }) {
   const collectionHash = existsSync(collectionPath)
@@ -44,7 +86,7 @@ export function buildManifest({
     : 'UNAVAILABLE';
 
   return {
-    schemaVersion: '1.2.0',
+    schemaVersion: '1.3.0',
     runId,
     timestampUtc: new Date().toISOString(),
     environment: environmentName,
@@ -69,15 +111,19 @@ export function buildManifest({
     contract: {
       openApiVersion: OPENAPI_CONTRACT_VERSION,
       openApiSha256,
+      coverageCsvSha256,
       mode: contractMode,
       path: 'contratos/http/openapi.yaml',
     },
     reconciliation: {
       plannedPmCases: plannedCases.length,
       executedPmCases: executedCases.length,
+      pmPass,
+      pmFail,
       notRunPmCases: notRunCases.length,
       primaryHttpRequests,
       auxiliaryHttpRequests,
+      auxiliaryContractViolations,
       plannedCases,
       executedCases,
       notRunCases,
@@ -103,24 +149,27 @@ export function buildMarkdownReport(manifest, sanitizedSummary, extraSecrets = [
     `- **Veredicto global:** **\`${sanitizedSummary.overallVerdict}\`**`,
     `- **Nivel de evidencia:** \`${manifest.evidenceLevel}\``,
     `- **Estado de despliegue:** \`${manifest.deploymentState}\``,
-    `- **Contrato OpenAPI:** \`${manifest.contract.openApiVersion}\``,
+    `- **Contrato OpenAPI:** \`${manifest.contract.openApiVersion}\` (\`${manifest.contract.mode}\`)`,
+    `- **SHA-256 OpenAPI:** \`${manifest.contract.openApiSha256}\``,
+    `- **SHA-256 Matriz CSV:** \`${manifest.contract.coverageCsvSha256 || 'UNAVAILABLE'}\``,
     `- **Node.js / Newman:** \`${manifest.runtime.nodeVersion}\` / \`${manifest.runtime.newmanVersion}\``,
     `- **SHA Backend (local):** \`${manifest.subjects.backendLocalHeadSha}\``,
     `- **SHA Frontend (local):** \`${manifest.subjects.frontendLocalHeadSha}\``,
     `- **SHA Docs (local):** \`${manifest.subjects.docsLocalHeadSha}\``,
     `- **SHA-256 Coleccion:** \`${manifest.collection.sha256}\``,
     '',
-    '## Resumen y reconciliacion de ejecucion (H11)',
+    '## Resumen y reconciliacion de ejecucion (H11 + H31)',
     '',
     '| Metrica | Valor |',
     '|---|---:|',
     `| Casos PM planificados | ${t.plannedPmCases} |`,
     `| Casos PM ejecutados | ${t.executedPmCases} |`,
+    `| Casos PM PASS | ${t.pmPass ?? t.pass} |`,
+    `| Casos PM FAIL | ${t.pmFail ?? t.fail} |`,
     `| Casos PM no ejecutados (NOT_RUN) | ${t.notRunPmCases} |`,
     `| Solicitudes HTTP principales | ${t.primaryHttpRequests} |`,
     `| Solicitudes HTTP auxiliares (paginacion/descubrimiento) | ${t.auxiliaryHttpRequests} |`,
-    `| PASS | ${t.pass} |`,
-    `| FAIL | ${t.fail} |`,
+    `| Violaciones contractuales auxiliares | ${t.auxiliaryContractViolations ?? 0} |`,
     `| INCONCLUSIVE | ${t.inconclusive} |`,
     `| Aserciones totales | ${t.assertionsTotal} |`,
     `| Aserciones aprobadas | ${t.assertionsPassed} |`,
@@ -149,6 +198,14 @@ export function buildMarkdownReport(manifest, sanitizedSummary, extraSecrets = [
         lines.push(`- Asercion fallida: **${a.name}** — \`${a.errorMessage || 'sin detalle'}\``);
       }
       lines.push('');
+    }
+  }
+
+  const auxViolations = sanitizedSummary.auxiliaryContractViolations || [];
+  if (auxViolations.length > 0) {
+    lines.push('', '## Violaciones contractuales auxiliares (sin caso PM)', '');
+    for (const v of auxViolations) {
+      lines.push(`- **${v.method || 'HTTP'} ${v.path || v.operationId || 'aux'} (${v.statusCode ?? '-'})** — \`${v.message || (v.errors || []).join('; ')}\``);
     }
   }
 

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import YAML from 'yaml';
@@ -201,9 +202,15 @@ export function resolveOpenApiResponseSpec(openApiDoc, method, rawUrl, statusCod
   };
 }
 
+const VALIDATOR_CACHE_BY_SHA = new Map();
+
 export function createOpenApiValidator(openApiPath = OPENAPI_CONTRACT_PATH) {
   const openApiDoc = loadOfficialOpenApiSchemas(openApiPath);
   const { version, sha256, $defs } = openApiDoc;
+  const cacheKeyRoot = `${resolve(openApiPath)}::${sha256}`;
+  if (VALIDATOR_CACHE_BY_SHA.has(cacheKeyRoot)) {
+    return VALIDATOR_CACHE_BY_SHA.get(cacheKeyRoot);
+  }
   const ajv = new Ajv({
     allErrors: true,
     strict: false,
@@ -219,8 +226,9 @@ export function createOpenApiValidator(openApiPath = OPENAPI_CONTRACT_PATH) {
 
   const compiledByName = new Map();
   const compiledBySchemaKey = new Map();
+  let precompiled = false;
 
-  return {
+  const validator = {
     version,
     sha256,
     openApiDoc,
@@ -261,7 +269,41 @@ export function createOpenApiValidator(openApiPath = OPENAPI_CONTRACT_PATH) {
           : (validateFn.errors || []).map((e) => `${e.instancePath || '/'} ${e.message}`),
       };
     },
+    precompileResponseSchemas() {
+      if (precompiled) return { compiledCount: compiledBySchemaKey.size };
+      // H32: Compilacion previa obligatoria de todos los esquemas de respuesta JSON antes de enviar solicitudes HTTP
+      let compiledCount = 0;
+      const httpMethods = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'options']);
+      for (const [pathTemplate, pathItem] of Object.entries(openApiDoc.paths || {})) {
+        if (!pathItem || typeof pathItem !== 'object') continue;
+        for (const [method, op] of Object.entries(pathItem)) {
+          if (!httpMethods.has(method.toLowerCase()) || !op || typeof op !== 'object') continue;
+          for (const [statusKey, rawResp] of Object.entries(op.responses || {})) {
+            let respSpec = rawResp;
+            if (respSpec?.$ref && typeof respSpec.$ref === 'string' && respSpec.$ref.startsWith('#/components/responses/')) {
+              const refName = respSpec.$ref.replace('#/components/responses/', '');
+              respSpec = openApiDoc.responses?.[refName] || respSpec;
+            }
+            const contentMap = respSpec?.content || {};
+            for (const [mediaType, mediaObj] of Object.entries(contentMap)) {
+              if (!mediaType.toLowerCase().includes('json') || !mediaObj?.schema) continue;
+              const rewritten = rewriteOpenApiRefs(mediaObj.schema);
+              const cacheKey = `${method.toUpperCase()} ${pathTemplate} ${statusKey} ${mediaType}`;
+              if (!compiledBySchemaKey.has(cacheKey)) {
+                const validateFn = ajv.compile({ ...rewritten, $defs });
+                compiledBySchemaKey.set(cacheKey, validateFn);
+              }
+              compiledCount += 1;
+            }
+          }
+        }
+      }
+      precompiled = true;
+      return { compiledCount };
+    },
   };
+  VALIDATOR_CACHE_BY_SHA.set(cacheKeyRoot, validator);
+  return validator;
 }
 
 function normalizeTypes(schema) {
@@ -441,6 +483,7 @@ export function validateNewmanExecutionsWithAjv(rawSummary, openApiPath = OPENAP
   const violations = [];
   const auditLog = [];
   const executions = Array.isArray(rawSummary?.run?.executions) ? rawSummary.run.executions : [];
+  const seenPrimaryPmIds = new Set();
 
   for (const exec of executions) {
     if (!exec.response) continue;
@@ -451,12 +494,30 @@ export function validateNewmanExecutionsWithAjv(rawSummary, openApiPath = OPENAP
       ?.value || '';
 
     const itemName = String(exec.item?.name || '');
-    const pmId = itemName.match(/^(PM-\d+[A-Z]?)\b/)?.[1] || null;
+    const rawPmId = itemName.match(/^(PM-\d+[A-Z]?)\b/)?.[1] || null;
     const rawUrl = typeof exec.request?.url === 'string'
       ? exec.request.url
       : exec.request?.url?.path
         ? `/${exec.request.url.path.join('/')}`
         : '';
+    const itemReqUrl = typeof exec.item?.request?.url === 'string'
+      ? exec.item.request.url
+      : exec.item?.request?.url?.path
+        ? `/${exec.item.request.url.path.join('/')}`
+        : '';
+    // H31: En Newman, pm.sendRequest genera ejecuciones auxiliares sin aserciones propias o cuya ruta
+    // difiere de la ruta declarada del item PM; clasificarlas como AUX para no inflar casos PM fallidos.
+    const isRealNewmanRun = Boolean(exec.cursor);
+    const hasPrimaryAssertions = Array.isArray(exec.assertions) && exec.assertions.length > 0;
+    const itemPathDiffers = Boolean(
+      itemReqUrl && rawUrl && normalizePath(itemReqUrl) !== normalizePath(rawUrl),
+    );
+    const pmId = isRealNewmanRun
+      ? rawPmId && hasPrimaryAssertions && !itemPathDiffers && !seenPrimaryPmIds.has(rawPmId)
+        ? rawPmId
+        : null
+      : rawPmId;
+    if (pmId) seenPrimaryPmIds.add(pmId);
 
     const resolved = resolveOpenApiResponseSpec(
       validator.openApiDoc,

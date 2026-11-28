@@ -61,7 +61,9 @@ export function readSafeDisposablePg17Settings(
   };
 }
 
-export async function verifyDisposablePg17Contract(database: Database): Promise<{
+export async function verifyDisposablePg17Contract(
+  database: Database,
+): Promise<{
   serverVersionNum: number;
   currentDatabase: string;
   currentUser: string;
@@ -75,8 +77,7 @@ export async function verifyDisposablePg17Contract(database: Database): Promise<
       sql`SELECT current_setting('server_version_num')::int AS ver, current_database() AS db, current_user AS usr`,
     );
     const row = verRes.rows[0] as
-      | { ver: number; db: string; usr: string }
-      | undefined;
+      { ver: number; db: string; usr: string } | undefined;
     if (!row || row.ver < 170000 || row.ver >= 180000) {
       throw new Error(
         `H26: Se requiere PostgreSQL 17 descartable (detectado server_version_num=${row?.ver ?? 'desconocido'}).`,
@@ -90,7 +91,9 @@ export async function verifyDisposablePg17Contract(database: Database): Promise<
         AND table_name IN ('products', 'outbox', 'inbox', 'outbox_delivery', 'bulk_retry_command_receipts')
     `);
     const found = new Set(
-      (tablesRes.rows as Array<{ table_name: string }>).map((r) => r.table_name),
+      (tablesRes.rows as Array<{ table_name: string }>).map(
+        (r) => r.table_name,
+      ),
     );
     for (const required of [
       'products',
