@@ -114,7 +114,11 @@ describe('Bulk H4 userBearer and reversible demo policy', () => {
       signJwt({ exp: Math.floor(Date.now() / 1000) - 10 }),
       signJwt({ iss: 'https://otro-emisor.invalid' }),
       signJwt({}, wrongPrivateKey),
-      signJwt({ tipo: 'servicio', aud: 'api-productos', scope: 'catalogo:leer' }),
+      signJwt({
+        tipo: 'servicio',
+        aud: 'api-productos',
+        scope: 'catalogo:leer',
+      }),
     ]) {
       const { context } = executionContext({
         authorization: `Bearer ${badToken}`,

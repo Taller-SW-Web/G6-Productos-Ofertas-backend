@@ -104,7 +104,9 @@ describe('H29 — Bulk HTTP auth regressions (plantilla CSV 200 y lote inexisten
       .get('/api/v1/carga-masiva/productos/plantilla?formato=CSV')
       .set('Authorization', `Bearer ${tokenNoAud}`)
       .expect(200);
-    expect(String(res.headers['content-type']).toLowerCase()).toContain('text/csv');
+    expect(String(res.headers['content-type']).toLowerCase()).toContain(
+      'text/csv',
+    );
     expect(res.text.trim().length).toBeGreaterThan(10);
   });
 
@@ -126,7 +128,11 @@ describe('H29 — Bulk HTTP auth regressions (plantilla CSV 200 y lote inexisten
       signJwt({}, wrongPrivateKey),
       signJwt({ iss: 'https://otro-issuer.invalid' }),
       signJwt({ aud: 'api-otra' }),
-      signJwt({ tipo: 'servicio', aud: 'api-productos', scope: 'catalogo:leer' }),
+      signJwt({
+        tipo: 'servicio',
+        aud: 'api-productos',
+        scope: 'catalogo:leer',
+      }),
     ];
 
     for (const badToken of invalidTokens) {
@@ -135,7 +141,9 @@ describe('H29 — Bulk HTTP auth regressions (plantilla CSV 200 y lote inexisten
         .set('Authorization', `Bearer ${badToken}`)
         .expect(401);
       await request(app.getHttpServer())
-        .get(`/api/v1/carga-masiva/productos/importaciones/${nonExistentBatchId}`)
+        .get(
+          `/api/v1/carga-masiva/productos/importaciones/${nonExistentBatchId}`,
+        )
         .set('Authorization', `Bearer ${badToken}`)
         .expect(401);
     }
