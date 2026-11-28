@@ -406,7 +406,7 @@ export const options = independent ? independentOptions : legacyOptions;
 
 const baseUrl = __ENV.APIM_BASE_URL;
 const tokenM2mA = independent ? __ENV.APIM_RL_TEST_TOKEN : __ENV.APIM_JWT_M2M_A;
-const tokenM2mB = independent ? __ENV.APIM_RL_TEST_TOKEN_B : __ENV.APIM_JWT_M2M_B;
+const tokenM2mB = __ENV.APIM_JWT_M2M_B;
 const tokenHumanQuota = independent ? __ENV.APIM_RL_TEST_TOKEN : __ENV.APIM_JWT_HUMAN_QUOTA;
 const tokenHumanConcurrency = independent ? __ENV.APIM_RL_TEST_TOKEN : __ENV.APIM_JWT_HUMAN_CONCURRENCY;
 const burstPath = independent ? __ENV.APIM_RL_OPERATION_PATH : (__ENV.APIM_RL_M2M_PATH || '/productos');
@@ -594,7 +594,7 @@ function executeMainRateLimit({ testIsolation = false } = {}) {
 
   let bResult = null;
   if (testIsolation && firstRejected) {
-    bResult = sendIndependentRead('consumer_b', independentContext.expected.burstCalls + 2, tokenM2mB);
+    bResult = sendIndependentRead('consumer_b', independentContext.expected.burstCalls + 2, independentContext.tokenB);
     if (bResult.status === 200) demoIsolationB200.add(1);
   }
 
