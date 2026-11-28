@@ -8,6 +8,8 @@ En el árbol local sin commit, una repetición con PostgreSQL 17 descartable, TL
 
 Trabajo local posterior: el job `e2e` selecciona `CATALOG_POSTGRES_ONLY=1` y excluye suites AMQP listadas; seis pruebas de Catalog se omiten explícitamente en ese modo. La selección estructural se prueba con negativos, pero todavía no se ha ejecutado la suite PostgreSQL completa con ese modo ni se ha acreditado equivalencia integral de los escenarios omitidos. El job separado `taxonomia` invoca `run-taxonomy-integration.mjs`, que todavía incluye dos pruebas de RabbitMQ real: el retiro de RabbitMQ de todos los gates H5 sigue pendiente.
 
+Estas dos pruebas no son dobles ni simples pruebas de flags: `procesa los tres maestros por RabbitMQ real sin duplicar Inbox ni Outbox` y `recupera una entrega sin ACK al reiniciar, sin duplicar efectos, con RabbitMQ real aislado` llaman a `RabbitTaxonomyDesechable.iniciar()`. El runner obligatorio rechaza pruebas omitidas. La suite `taxonomia_catalogo` acredita barreras y mensajería H5 aisladas, pero no sustituye por sí sola la totalidad de estas garantías H4; no se han eliminado silenciosamente. `scripts/ci/h5-e2e-policy.test.mjs` registra esta deuda y verifica que no se confunda con ausencia de broker real.
+
 | Caso H4 separado | Evidencia H5 disponible | Límite de equivalencia |
 |---|---|---|
 | TAXONOMY-UPDATES | `taxonomia_catalogo`: `run-taxonomy-catalog-postgres.mjs` | R09/R18 y barreras cubiertas; ACK/reinicio de actualizaciones de Catalog no demostrado equivalente |

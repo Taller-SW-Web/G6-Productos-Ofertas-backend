@@ -9,6 +9,14 @@ const catalog = readFileSync(
   'apps/catalog-svc/test/postgres.persistence.e2e-spec.ts',
   'utf8',
 );
+const taxonomy = readFileSync(
+  'apps/taxonomy-svc/test/persistencia-drizzle.e2e-spec.ts',
+  'utf8',
+);
+const taxonomyRunner = readFileSync(
+  'scripts/ci/run-taxonomy-integration.mjs',
+  'utf8',
+);
 const excluded = [
   'apps/catalog-svc/test/rabbitmq.e2e-spec.ts',
   'apps/taxonomy-svc/test/persistencia-drizzle.e2e-spec.ts',
@@ -80,6 +88,18 @@ test('un E2E nuevo que menciona un broker debe clasificarse', () => {
   assert.throws(() =>
     assertClassified('apps/new/test/unknown.e2e-spec.ts', 'new RabbitBroker()'),
   );
+});
+test('Taxonomy obligatorio conserva dos integraciones H4 con broker real: deuda H5 explícita', () => {
+  assert.equal(
+    (taxonomy.match(/new RabbitTaxonomyDesechable\(\)/g) ?? []).length,
+    2,
+  );
+  assert.equal((taxonomy.match(/await rabbit\.iniciar\(\)/g) ?? []).length, 2);
+  assert.match(taxonomy, /procesa los tres maestros por RabbitMQ real/);
+  assert.match(taxonomy, /recupera una entrega sin ACK al reiniciar/);
+  assert.match(taxonomyRunner, /persistencia-drizzle\.e2e-spec\.ts/);
+  assert.match(taxonomyRunner, /omitidas > 0/);
+  assert.match(ci, /node scripts\/ci\/run-taxonomy-integration\.mjs/);
 });
 test('H5 E2E configura selección explícita y separa seis casos AMQP', () =>
   validate(ci, config, catalog));
