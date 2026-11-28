@@ -1,3 +1,22 @@
+# Auditoría CI H5 — cierre técnico Backend
+
+La Coordinación G6 / Marco Castilla comunicó la aprobación técnica de la modernización de CI. El cierre técnico probado corresponde a `6dd66036baf675f8ee2197ab3cb9e9754a0d0886`: [workflow_dispatch 46116008663](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/46116008663) y [pull_request 46119944909](https://github.com/Taller-SW-Web/G6-Productos-Ofertas-backend/actions/runs/46119944909) finalizaron en **SUCCESS**. Una modificación documental posterior identifica un SHA distinto y debe evaluarse con sus propios checks.
+
+| Alcance | Evidencia y límite |
+|---|---|
+| P0-A | `scripts/ci/h5-e2e-policy.test.mjs`: 5/5 local. El smoke legacy `coupons.isolated.smoke.mjs` se retiró del gate obligatorio; la política verifica la selección sin RabbitMQ real. |
+| Taxonomy | Integración local 69/71: dos pruebas H4 preservadas como opt-in; suite H5 Taxonomy–Catalog 24/24. |
+| Promotions | Suite PostgreSQL H5 local 15/15. |
+| Bulk–Catalog–Inventory | `tests/h5/run-catalog-bulk-inventory-postgres.mjs`: 3/3 local; los imports de orquestación están bajo `tests/h5/`, no entre servicios dentro de `apps/*`. |
+| JOINT-01 y regresión | 2/2 local: recuperación, deduplicación y correlación; el resultado Inventory del caso JOINT es una fixture. |
+| BLOCK-A2 | Inventory local 2/2: saldos, inicialización, resultados y retorno Inventory–Catalog con redelivery; el campo producer se valida, sin autenticar el principal de Azure. |
+
+Los recorridos aislados usan PostgreSQL descartable y dobles del SDK de Service Bus. No acreditan conectividad, identidad ni permisos RBAC en Azure real. Los YAML protegidos `cd-services-azure.yml` y `publish-only-images.yml` no presentan diferencias frente a la base verificada; esta evidencia no autoriza despliegues.
+
+## Histórico de iteraciones
+
+Las referencias, resultados y afirmaciones de esta sección describen las iteraciones en el momento en que fueron registradas; no representan el estado actual.
+
 # Auditoría CI H5 — Backend
 
 **Estado de la evidencia:** las pruebas H5 descritas en la matriz son resultados locales sobre el árbol de trabajo; el CI del próximo HEAD publicado está pendiente. Los resultados de Actions anteriores son antecedentes históricos. El transporte se prueba con dobles SDK y PostgreSQL descartable; identidad, RBAC y conectividad Azure reales no están acreditados. Los dos YAML protegidos de CD no tienen diferencias frente a `origin/master`.
