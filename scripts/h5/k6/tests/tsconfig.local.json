@@ -1,0 +1,15 @@
+{
+  "extends": "../../../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../../../..",
+    "outDir": "../.local/build",
+    "declaration": false,
+    "incremental": false,
+    "noEmitOnError": true,
+    "sourceMap": false,
+    "types": ["node"]
+  },
+  "files": ["servicios-locales.ts"],
+  "include": [],
+  "references": []
+}
