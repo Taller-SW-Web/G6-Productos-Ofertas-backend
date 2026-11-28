@@ -1,0 +1,17 @@
+{
+  "schema": "h5-castilla-bulk-cases/v1",
+  "cases": [
+    {"case_id":"INT-04-HTTP-TEMPLATE","marker":"INT-04-HTTP","execution_result":"NOT_RUN","implementation_state":"DONE_LOCAL","prerequisite":"isolated Bulk + PostgreSQL 17 + loopback Storage","coverage":"existing bulk-postgres-outage.e2e-spec.ts; HTTP probe script added"},
+    {"case_id":"INT-04-HTTP-ADMISSION-REPLAY","marker":"INT-04-HTTP","execution_result":"NOT_RUN","implementation_state":"DONE_LOCAL","prerequisite":"discardable DB/Storage and two synthetic user identities","coverage":"existing Bulk HTTP E2E; request correlation key reused; no retry POST on ambiguous timeout"},
+    {"case_id":"INT-04-HTTP-OWNER-AUTH","marker":"INT-04-HTTP","execution_result":"NOT_RUN","implementation_state":"DONE_LOCAL","prerequisite":"isolated owner-scoped DB and synthetic signed identities","coverage":"existing tests include 401/403/404 owner checks; rerun after audit"},
+    {"case_id":"INT-04-HTTP-STORAGE-PARTIAL-REPORT","marker":"INT-04-HTTP","execution_result":"NOT_RUN","implementation_state":"DONE_LOCAL","prerequisite":"isolated storage fault injection and terminal rows","coverage":"existing bulk-postgres-outage.e2e-spec.ts; report and partial-row paths"},
+    {"case_id":"INT-04-HTTP-CORRELATION","marker":"INT-04-HTTP","execution_result":"NOT_RUN","implementation_state":"READY_FOR_INTEGRATION","prerequisite":"BULK_CORRELATION_RECONCILIATION_ENABLED=true and central route approval","coverage":"preflight identifies actual feature flag; HTTP probe reconciles ambiguous admission without second POST"},
+    {"case_id":"INT-04-R01-R04-CLAIM-CHECK","marker":"INT-04-R01-R04","execution_result":"NOT_RUN","implementation_state":"READY_FOR_INTEGRATION","prerequisite":"compatible Catalog V3 handler, private content authorization, isolated DB/Storage and Azure Service Bus Basic","coverage":"h5-castilla-claim-check.contract.spec.ts validates contract bytes only; not broker integration"},
+    {"case_id":"INT-04-R01-R04-DURABLE-REDELIVERY","marker":"INT-04-R01-R04","execution_result":"BLOCKED_SB","implementation_state":"READY_FOR_INTEGRATION","prerequisite":"Axel's single Basic transport and matching Catalog handler integrated on a reviewed HEAD","coverage":"harnesses for digest/tamper/status exist; actual SB redelivery, settlement, Inbox/Outbox and row terminal effects remain external"},
+    {"case_id":"INT-04-R01-R04-256KB","marker":"INT-04-R01-R04","execution_result":"NOT_RUN","implementation_state":"DONE_LOCAL","prerequisite":"generate claim-check fixtures; Azure SDK serialization measurement before real broker","coverage":"255 KiB/257 KiB files plus total envelope bound including declared properties; no claim about actual wire serialization"}
+  ],
+  "reserved_flows_excluded": ["R03", "R14"],
+  "message_limit_bytes_including_properties": 262144,
+  "http_upload_limit_bytes": 10485760,
+  "warning": "H4 RabbitMQ compatibility suites are not Service Bus H5 evidence."
+}

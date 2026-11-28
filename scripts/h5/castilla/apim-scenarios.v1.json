@@ -1,0 +1,22 @@
+{
+  "schema": "h5-apim-harness-scenarios/v1",
+  "evidence_level_without_real_apim": "L0_OR_L1_ONLY",
+  "cases": [
+    {"case_id":"INT-07-HTTP-200","method":"GET","path_env":"H5_INT07_ROUTE","identity_env":"H5_JWT_VALID","expected_status":200,"gate":"APIM + valid G7 test identity + provider telemetry"},
+    {"case_id":"INT-07-HTTP-401-NO-TOKEN","method":"GET","path_env":"H5_INT07_ROUTE","expected_status":401,"gate":"APIM real or explicitly labeled L1 proxy"},
+    {"case_id":"INT-07-HTTP-401-BAD-ISSUER","method":"GET","path_env":"H5_INT07_ROUTE","identity_env":"H5_JWT_BAD_ISSUER","expected_status":401,"gate":"synthetic token; must never be a real credential"},
+    {"case_id":"INT-07-HTTP-401-BAD-AUDIENCE","method":"GET","path_env":"H5_INT07_ROUTE","identity_env":"H5_JWT_BAD_AUDIENCE","expected_status":401,"gate":"synthetic token; issuer/audience policy from approved G7 contract"},
+    {"case_id":"INT-07-HTTP-401-BAD-SIGNATURE","method":"GET","path_env":"H5_INT07_ROUTE","identity_env":"H5_JWT_BAD_SIGNATURE","expected_status":401,"gate":"synthetic token with invalid signature; never a real credential"},
+    {"case_id":"INT-07-HTTP-401-EXPIRED","method":"GET","path_env":"H5_INT07_ROUTE","identity_env":"H5_JWT_EXPIRED","expected_status":401,"gate":"synthetic expired token; clock skew/config reviewed"},
+    {"case_id":"INT-07-HTTP-403-NO-SCOPE","method":"GET","path_env":"H5_INT07_ROUTE","identity_env":"H5_JWT_NO_SCOPE","expected_status":403,"provider_call_expected":false,"gate":"correlated Gateway/provider telemetry required for no-call claim"},
+    {"case_id":"INT-07-HTTP-403-NO-CLIENT-ID","method":"GET","path_env":"H5_INT07_ROUTE","identity_env":"H5_JWT_NO_CLIENT_ID","expected_status":403,"gate":"synthetic token; exact client_id requirement must be supplied by approved contract"},
+    {"case_id":"INT-07-HTTP-404-UNKNOWN","method":"GET","path_env":"H5_INT07_UNKNOWN_ROUTE","identity_env":"H5_JWT_VALID","expected_status":404,"gate":"no generic proxy route"},
+    {"case_id":"INT-07-HTTP-429-BURST","method":"GET","path_env":"H5_INT07_BURST_ROUTE","identity_env":"H5_JWT_VALID","expected_status":429,"gate":"real APIM burst policy; inspect Retry-After"},
+    {"case_id":"INT-07-HTTP-202-LOCATION-RETRY-AFTER","method":"POST","path_env":"H5_INT07_ASYNC_ROUTE","identity_env":"H5_JWT_VALID","body_env":"H5_INT07_DISCARDABLE_BODY","content_type":"application/json","mutating":true,"expected_status":202,"require_location":true,"require_retry_after":true,"require_correlation_echo":true,"gate":"only a documented async route, disposable data, approved test identity and real contract headers"},
+    {"case_id":"INT-07-CORS-ALLOWED","method":"OPTIONS","path_env":"H5_INT07_ROUTE","expected_status":200,"origin_env":"H5_CORS_ALLOWED_ORIGIN","cors":"must_reflect_origin","gate":"real approved CORS policy"},
+    {"case_id":"INT-07-CORS-DENIED","method":"OPTIONS","path_env":"H5_INT07_ROUTE","expected_status":200,"origin_env":"H5_CORS_DISALLOWED_ORIGIN","cors":"must_not_reflect_origin","gate":"real approved CORS policy"},
+    {"case_id":"INT-07-DIRECT-BYPASS-DENIED","method":"GET","path_env":"H5_INT07_ROUTE","identity_env":"H5_JWT_VALID","target_env":"PRIVATE_CONTROL_URL","expected_status":403,"expected_network_denied":true,"gate":"private control route explicitly approved and not exposed publicly"},
+    {"case_id":"INT-07-INTERNAL-EXCLUDED","method":"GET","path_env":"H5_INT07_INTERNAL_EXCLUDED_ROUTE","identity_env":"H5_JWT_VALID","expected_status":404,"gate":"one of the five x-internal operations; route must remain absent from public APIM surface"}
+  ],
+  "security": {"tokens_from_environment_only":true,"never_print_authorization":true,"redirects":"manual","correlation":"per-request UUID","mutations":"forbidden unless disposable dataset is separately approved"}
+}
