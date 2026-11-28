@@ -48,6 +48,8 @@ jobs:
       run: node scripts/ci/test-performance-workflow.mjs
     - name: Probar política Draft y Ready
       run: node --test scripts/ci/draft-ready-policy.test.mjs
+    - name: Probar selección estructural E2E H5
+      run: node --test scripts/ci/h5-e2e-policy.test.mjs
     - name: Verificar modo preconstruido de Marketplace
       run: |
         bash -n scripts/ci/marketplace-docker.sh scripts/ci/tests/marketplace-prebuilt.test.sh
@@ -197,6 +199,7 @@ jobs:
     - name: Ejecutar pruebas de extremo a extremo
       env:
         G6_DOCS_ROOT: ${{ github.workspace }}/.ci/G6-Productos-Ofertas-docs
+        CATALOG_POSTGRES_ONLY: '1'
       run: npm run test:e2e
   contratos:
     if: >-
