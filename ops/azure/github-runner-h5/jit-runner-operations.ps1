@@ -31,9 +31,12 @@ function Assert-H5EnvironmentApprovalPolicy {
     $rule=$reviewRules[0]
     $reviewers=@($rule.reviewers)
     if ($Destination -ceq 'chile-shared') {
-        if ($rule.prevent_self_review -ne $false -or $reviewers.Count -ne 1 -or
-            [string]$reviewers[0].type -cne 'User' -or [long]$reviewers[0].reviewer.id -ne 143348512) {
-            throw 'CHILE_REVIEW_POLICY_REJECTED: require only User 143348512 and prevent_self_review=false.'
+        $approved=@((Get-H5DeploymentTargets).destinations.'chile-shared'.approvedReviewers.id | Sort-Object)
+        $actual=@($reviewers | Where-Object { [string]$_.type -ceq 'User' } |
+            ForEach-Object { [long]$_.reviewer.id } | Sort-Object)
+        if ($rule.prevent_self_review -ne $false -or $reviewers.Count -ne 2 -or
+            $actual.Count -ne 2 -or (Compare-Object $approved $actual)) {
+            throw 'CHILE_REVIEW_POLICY_REJECTED: require exactly mrcastilla8 and AXL031 and prevent_self_review=false.'
         }
     } elseif ($rule.prevent_self_review -ne $true -or $reviewers.Count -lt 1) {
         throw 'BRAZIL_REVIEW_POLICY_REJECTED: Brazil requires reviewers and prevent_self_review=true.'

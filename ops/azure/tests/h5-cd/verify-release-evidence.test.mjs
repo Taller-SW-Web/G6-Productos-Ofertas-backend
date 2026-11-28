@@ -13,7 +13,15 @@ function castillaReviewer() {
   };
 }
 
-function evidence({ selfApproved = false } = {}) {
+function axelReviewer() {
+  return {
+    type: 'User',
+    id: 129343979,
+    login: 'AXL031',
+  };
+}
+
+function evidence({ selfApproved = false, reviewer = castillaReviewer() } = {}) {
   const sha = 'a'.repeat(40);
   const digest = 'sha256:' + 'b'.repeat(64);
   const service = 'catalog-svc';
@@ -21,7 +29,6 @@ function evidence({ selfApproved = false } = {}) {
     'https://catalog-svc.internal.chilecentral.azurecontainerapps.io';
   const prefix =
     'ghcr.io/taller-sw-web/g6-productos-ofertas-backend/' + service + '@';
-  const reviewer = castillaReviewer();
   return {
     destination: 'chile-shared',
     repo: 'Taller-SW-Web/G6-Productos-Ofertas-backend',
@@ -55,11 +62,11 @@ function evidence({ selfApproved = false } = {}) {
       name: 'azure-h5-chile',
       approval_verified: true,
       approval_run_id: '12345',
-      reviewers: [reviewer],
+      reviewers: [castillaReviewer(), axelReviewer()],
       approved_by: reviewer,
       triggered_by: selfApproved
         ? reviewer
-        : { type: 'User', id: 999999, login: 'AXL031' },
+        : { type: 'User', id: 999999, login: 'otro-operador' },
       self_approved: selfApproved,
       prevent_self_review: false,
       admin_bypass: false,
@@ -126,16 +133,15 @@ function officialReceipt(record) {
   };
 }
 
-test('loads official Chile policy from deployment-targets.json and verify-environment-protection.sh', () => {
+test('loads the two authorized reviewers from deployment-targets.json', () => {
   assert.equal(CHILE_POLICY.destination, 'chile-shared');
   assert.equal(CHILE_POLICY.github_environment, 'azure-h5-chile');
   assert.equal(CHILE_POLICY.aca_environment, 'env-g6-phase1-chile');
   assert.equal(CHILE_POLICY.resource_group, 'rg-g6-aca-chile');
-  assert.deepEqual(CHILE_POLICY.reviewer, {
-    type: 'User',
-    id: 143348512,
-    login: 'mrcastilla8',
-  });
+  assert.deepEqual(CHILE_POLICY.reviewers, [
+    axelReviewer(),
+    castillaReviewer(),
+  ]);
   assert.equal(CHILE_POLICY.prevent_self_review, false);
   assert.equal(CHILE_POLICY.admin_bypass, false);
   assert.equal(CHILE_POLICY.allowed_branch, 'master');
@@ -216,6 +222,14 @@ test('rejects Brazil destination, Brazil environment and historical pilot enviro
   });
 });
 
+test('accepts Axel approval in either reviewer order, including self approval', () => {
+  for (const selfApproved of [false, true]) {
+    const record = evidence({ selfApproved, reviewer: axelReviewer() });
+    record.environment.reviewers.reverse();
+    assert.equal(evaluateCdEvidence(record).execution_result, 'PASS');
+  }
+});
+
 test('CD-01 rejects a different SHA', () =>
   checkFailure('CD-01', (record) => {
     record.master_sha = 'c'.repeat(40);
@@ -267,10 +281,10 @@ test('CD-04 rejects missing reviewer, different reviewer, extra reviewer, wrong 
     ];
   });
   checkFailure('CD-04', (record) => {
-    record.environment.reviewers = [
-      castillaReviewer(),
-      { type: 'User', id: 2, login: 'second-reviewer' },
-    ];
+    record.environment.reviewers.push({ type: 'User', id: 2, login: 'third-reviewer' });
+  });
+  checkFailure('CD-04', (record) => {
+    record.environment.reviewers = [axelReviewer(), axelReviewer()];
   });
   checkFailure('CD-04', (record) => {
     record.environment.approved_by = {

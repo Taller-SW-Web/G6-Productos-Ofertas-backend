@@ -22,19 +22,19 @@ function Assert-ApprovalPolicyRejected($Environment,$BranchPolicies,[string]$Des
     Assert-True $rejected "invalid $Destination Environment approval policy was accepted"
 }
 
-# Chile permits only mrcastilla8 to self-approve while preserving Required Reviewers,
-# no admin bypass, and the exact master deployment branch policy.
+# Either authorized reviewer can approve a pending job.
 $mrcastillaReviewer=[pscustomobject]@{type='User';reviewer=[pscustomobject]@{id=143348512}}
-$validChileEnvironment=New-ApprovalEnvironment 'azure-h5-chile' $false @($mrcastillaReviewer)
+$axelReviewer=[pscustomobject]@{type='User';reviewer=[pscustomobject]@{id=129343979}}
+$validChileEnvironment=New-ApprovalEnvironment 'azure-h5-chile' $false @($mrcastillaReviewer,$axelReviewer)
 $validMasterPolicies=New-MasterPolicies
 Assert-H5EnvironmentApprovalPolicy -Environment $validChileEnvironment -BranchPolicies $validMasterPolicies -Destination chile-shared -ExpectedEnvironment azure-h5-chile
 Assert-ApprovalPolicyRejected (New-ApprovalEnvironment 'azure-h5-chile' $false @([pscustomobject]@{type='User';reviewer=[pscustomobject]@{id=1}})) $validMasterPolicies chile-shared azure-h5-chile
 Assert-ApprovalPolicyRejected (New-ApprovalEnvironment 'azure-h5-chile' $false @()) $validMasterPolicies chile-shared azure-h5-chile
 Assert-ApprovalPolicyRejected (New-ApprovalEnvironment 'azure-h5-chile' $false @($mrcastillaReviewer,[pscustomobject]@{type='User';reviewer=[pscustomobject]@{id=1}})) $validMasterPolicies chile-shared azure-h5-chile
-Assert-ApprovalPolicyRejected (New-ApprovalEnvironment 'azure-h5-chile' $true @($mrcastillaReviewer)) $validMasterPolicies chile-shared azure-h5-chile
-Assert-ApprovalPolicyRejected (New-ApprovalEnvironment 'azure-h5-chile' $false @($mrcastillaReviewer) $true) $validMasterPolicies chile-shared azure-h5-chile
+Assert-ApprovalPolicyRejected (New-ApprovalEnvironment 'azure-h5-chile' $true @($mrcastillaReviewer,$axelReviewer)) $validMasterPolicies chile-shared azure-h5-chile
+Assert-ApprovalPolicyRejected (New-ApprovalEnvironment 'azure-h5-chile' $false @($mrcastillaReviewer,$axelReviewer) $true) $validMasterPolicies chile-shared azure-h5-chile
 Assert-ApprovalPolicyRejected $validChileEnvironment (New-MasterPolicies @('master','release')) chile-shared azure-h5-chile
-Assert-ApprovalPolicyRejected (New-ApprovalEnvironment 'azure-h5-chile' $false @($mrcastillaReviewer) $false $false $false) $validMasterPolicies chile-shared azure-h5-chile
+Assert-ApprovalPolicyRejected (New-ApprovalEnvironment 'azure-h5-chile' $false @($mrcastillaReviewer,$axelReviewer) $false $false $false) $validMasterPolicies chile-shared azure-h5-chile
 Assert-ApprovalPolicyRejected ([pscustomobject]@{name='azure-h5-chile';can_admins_bypass=$false;protection_rules=@();deployment_branch_policy=$validChileEnvironment.deployment_branch_policy}) $validMasterPolicies chile-shared azure-h5-chile
 Assert-ApprovalPolicyRejected $validChileEnvironment $validMasterPolicies brazil-isolated azure-h5
 
