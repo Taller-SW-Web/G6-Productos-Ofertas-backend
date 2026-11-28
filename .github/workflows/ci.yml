@@ -307,7 +307,7 @@ jobs:
           image="g6-service:${service}-ci"
           image_id="$(docker image inspect "$image" --format '{{.Id}}')"
           printf '%s\t%s\t%s\n' "$GITHUB_SHA" "$service" "$image_id" >> "$out/images.tsv"
-          if ! "$tool_dir/trivy" image --image-src docker --scanners vuln --format json --output "$out/$service.json" "$image"; then
+          if ! "$tool_dir/trivy" image --image-src docker --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --format json --output "$out/$service.json" "$image"; then
             scan_status=1
           fi
         done < ops/shared/services-ci.psv
@@ -898,7 +898,7 @@ jobs:
         --enable-g5
         --g5-authorized
   integral:
-    name: Validación integral de integración continua
+    name: validate
     runs-on: ubuntu-latest
     needs:
       - automatizacion
@@ -941,44 +941,18 @@ jobs:
   compatibilidad:
     name: Lint, Typecheck, Test, Build & Smoke Test
     runs-on: ubuntu-latest
-    needs:
-    - automatizacion
-    - tipos
-    - calidad
-    - formato
-    - unitarias
-    - e2e
-    - contratos
-    - compilacion
-    - contenedores
-    - persistencia
-    - taxonomia
-    - taxonomia_catalogo
-    - inventario
-    - promotions
-    - combos_catalogo
-    - combos_postgres_h5
-    - gateway_inventory_postgres
-    - azure_cd_h5
-    - seguridad_dependencias
-    - apim_h5_estatico
+    needs: [integral]
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
       (github.event_name != 'workflow_dispatch' || inputs.mode != 'benchmark') &&
       always()
     steps:
-    - name: Obtener código fuente
-      uses: actions/checkout@v4
-    - name: Comprobar integración de Combos obligatoria
-      env:
-        RESULTADOS: ${{ toJSON(needs) }}
-      run: node scripts/ci/verify-ci-results.mjs "$RESULTADOS" combos_catalogo combos_postgres_h5
-    - name: Comprobar cada resultado obligatorio
+    - name: Conservar el check requerido a partir del veredicto real
       env:
         RESULTADOS: ${{ toJSON(needs) }}
       run: |
-        printf '%s\n' "$RESULTADOS"
-        node scripts/ci/verify-ci-results.mjs "$RESULTADOS" automatizacion tipos calidad formato unitarias e2e contratos compilacion contenedores persistencia taxonomia taxonomia_catalogo inventario promotions gateway_inventory_postgres azure_cd_h5 seguridad_dependencias apim_h5_estatico
+        test "$(node -e 'const r=JSON.parse(process.env.RESULTADOS); process.stdout.write(r.integral?.result || "missing")')" = success
+
   benchmark_focalizado:
     name: Benchmark focalizado solicitado
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'benchmark'
