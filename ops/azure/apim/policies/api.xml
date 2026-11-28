@@ -80,8 +80,25 @@
   </outbound>
   <on-error>
     <base />
+    <set-variable name="errorCorrelationId" value="@((string)context.Variables.GetValueOrDefault&lt;string&gt;(&quot;correlationId&quot;, Guid.NewGuid().ToString()))" />
     <set-header name="x-correlation-id" exists-action="override">
-      <value>@((string)context.Variables.GetValueOrDefault&lt;string&gt;(&quot;correlationId&quot;, Guid.NewGuid().ToString()))</value>
+      <value>@((string)context.Variables[&quot;errorCorrelationId&quot;])</value>
     </set-header>
+    <choose>
+      <when condition="@(context.LastError != null &amp;&amp; context.LastError.Source == &quot;validate-jwt&quot; &amp;&amp; context.Response != null &amp;&amp; context.Response.StatusCode == 401)">
+        <set-header name="Content-Type" exists-action="override">
+          <value>application/problem+json</value>
+        </set-header>
+        <set-body>@{
+          return new JObject(
+            new JProperty("type", "about:blank"),
+            new JProperty("title", "No autorizado"),
+            new JProperty("status", 401),
+            new JProperty("code", "TOKEN_INVALIDO"),
+            new JProperty("correlationId", (string)context.Variables["errorCorrelationId"])
+          ).ToString();
+        }</set-body>
+      </when>
+    </choose>
   </on-error>
 </policies>
