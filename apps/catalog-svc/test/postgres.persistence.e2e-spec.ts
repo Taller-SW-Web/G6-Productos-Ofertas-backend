@@ -45,6 +45,12 @@ import { runData002Psql, type Data002Step } from './support/data002-psql.js';
 import { CatalogGatewayHarness } from './support/catalog-gateway-harness.js';
 import type { ProductSummary } from '../src/commercial.types.js';
 import { CatalogAmqpRuntime } from '../src/catalog-amqp.js';
+import { CatalogServiceBus } from '../src/catalog-service-bus.js';
+
+import type {
+  ServiceBusClient,
+  ServiceBusReceivedMessage,
+} from '@azure/service-bus';
 import { relayCatalogDelivery } from '../src/catalog-service-bus-relay.js';
 import { CatalogTelemetry } from '../src/catalog-telemetry.js';
 import { and, eq, inArray, sql } from 'drizzle-orm';
@@ -142,6 +148,9 @@ if (isCi && !dockerSupport.available) {
   }
 }
 const dockerAvailable = dockerSupport.available;
+// H4 broker cases remain opt-in when PostgreSQL-only mode is requested.
+const catalogPostgresOnly = process.env.CATALOG_POSTGRES_ONLY === '1';
+const itLegacy = catalogPostgresOnly ? it.skip : it;
 
 if (isCi && !dockerAvailable) {
   throw new Error(
@@ -382,12 +391,12 @@ describe.skipIf(!dockerAvailable)(
       database = new Database(persistenceSettings);
       transactions = new CatalogTransactionManager(database);
       await database.verifyIdentity();
-      await jointBroker.start();
+      if (!catalogPostgresOnly) await jointBroker.start();
     }, 180000);
 
     afterAll(async () => {
       await jointRuntime?.onModuleDestroy();
-      await jointBroker.close();
+      if (!catalogPostgresOnly) await jointBroker.close();
       if (!closed) await database?.onModuleDestroy();
       spawnSync('docker', ['rm', '--force', container], {
         timeout: 15000,
@@ -969,7 +978,8 @@ describe.skipIf(!dockerAvailable)(
       expect(stored[0]!.result).toBe('APPLIED');
     });
 
-    it('TAXONOMY-UPDATES: real Rabbit deliveries ACK only after durable Inbox and survive consumer restart', async () => {
+    // prettier-ignore
+    itLegacy('TAXONOMY-UPDATES: real Rabbit deliveries ACK only after durable Inbox and survive consumer restart', async () => {
       const messages = new CatalogMessageService(database);
       const facts = [
         {
@@ -1626,7 +1636,8 @@ describe.skipIf(!dockerAvailable)(
       expect(otherSchema.trim()).toBe('1');
     }, 30000);
 
-    it('BLOCK-A2: consolidated Inventory authenticates completed/rejected, preserves balances, replays and initializes without location', async () => {
+    // prettier-ignore
+    itLegacy('BLOCK-A2: consolidated Inventory authenticates completed/rejected, preserves balances, replays and initializes without location', async () => {
       const peerDirectory = join(directory, 'preparation-peers');
       mkdirSync(peerDirectory);
       writeFileSync(join(peerDirectory, 'package.json'), '{"type":"module"}');
@@ -3001,7 +3012,8 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
       ).toBeNull();
     });
 
-    it('JOINT-01: commits aggregate/Outbox, transports requested/results through a real broker, deduplicates Inbox and reconnects', async () => {
+    // prettier-ignore
+    itLegacy('JOINT-01: commits aggregate/Outbox, transports requested/results through a real broker, deduplicates Inbox and reconnects', async () => {
       // Isolate prior tests' unpublished catalog.outbox residue and broker queues
       // so JOINT-01 correlates exclusively its own synthetic message_id/followupId.
       await database.transaction((tx) =>
@@ -3149,7 +3161,8 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
       }
     }, 90000);
 
-    it('JOINT-01-REGRESSION: unpublished prior outbox residue cannot hijack JOINT correlation after isolation', async () => {
+    // prettier-ignore
+    itLegacy('JOINT-01-REGRESSION: unpublished prior outbox residue cannot hijack JOINT correlation after isolation', async () => {
       // Simulate an earlier failed test leaving an unpublished outbox row.
       const staleId = randomUUID(),
         staleOp = randomUUID(),
@@ -3216,6 +3229,178 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         jointRuntime = undefined;
       }
     }, 30000);
+
+    it('H5 JOINT-01: durable Inventory result, redelivery and sender recovery', async () => {
+      vi.stubEnv('MESSAGING_PROVIDER', 'AZURE_SERVICE_BUS');
+      vi.stubEnv('CATALOG_H5_DESTINATIONS', 'g6.inventory.from.catalog');
+      const correlation = randomUUID(),
+        operation = randomUUID(),
+        messageId = randomUUID(),
+        sku = 'H5-JOINT-' + randomUUID();
+      const product = await transactions.run(async (tx) => {
+        const row = await repository.insertProduct(tx, productInput(sku));
+        const data = { product_id: row.id, sku, variant_id: null };
+        await repository.insertActivationCheck(tx, {
+          product_id: row.id,
+          sku,
+          dependency: 'INVENTORY',
+          operation_id: operation,
+          correlation_id: correlation,
+          state: 'PENDING',
+          request_payload: data,
+        });
+        await repository.insertOutboxMessage(tx, {
+          message_id: messageId,
+          event_name: 'inventory.sku.initialization.requested',
+          kind: 'command',
+          correlation_id: correlation,
+          operation_id: operation,
+          occurred_at: new Date(),
+          payload: data,
+        });
+        return row;
+      });
+      const outbound: CatalogEnvelope[] = [];
+      const bus = {
+        publish: vi.fn(
+          async (_destination: string, envelope: CatalogEnvelope) => {
+            outbound.push(envelope);
+          },
+        ),
+      };
+      bus.publish.mockRejectedValueOnce(
+        new Error('synthetic unavailable transport'),
+      );
+      expect(
+        await relayCatalogDelivery(database, bus, 'g6.inventory.from.catalog'),
+      ).toBe('RETRY');
+      await database.transaction((tx) =>
+        tx.execute(
+          sql`UPDATE catalog.outbox_delivery SET available_at=now() WHERE message_id=${messageId} AND destination='g6.inventory.from.catalog'`,
+        ),
+      );
+      expect(
+        await relayCatalogDelivery(database, bus, 'g6.inventory.from.catalog'),
+      ).toBe('CONFIRMED');
+      expect(outbound.map((value) => value.message_id)).toEqual([messageId]);
+      const result = {
+        message_id: randomUUID(),
+        schema_version: 1,
+        occurred_at: new Date().toISOString(),
+        correlation_id: correlation,
+        operation_id: operation,
+        causation_id: messageId,
+        producer: 'inventory-svc',
+        kind: 'result',
+        name: 'inventory.sku.initialization.completed',
+        data: {
+          product_id: product.id,
+          sku,
+          variant_id: null,
+          status: 'INITIALIZED',
+          completed_at: new Date().toISOString(),
+        },
+      };
+      type Handlers = Parameters<
+        ReturnType<ServiceBusClient['createReceiver']>['subscribe']
+      >[0];
+      let handlers!: Handlers;
+      const receiver = {
+        subscribe: (h: Handlers) => {
+          handlers = h;
+          return { close: vi.fn() };
+        },
+        completeMessage: vi.fn(),
+        abandonMessage: vi.fn(),
+        deadLetterMessage: vi.fn(),
+      };
+      const client = {
+        createReceiver: () => receiver,
+      } as unknown as ServiceBusClient;
+      new CatalogServiceBus(client).subscribe(
+        'g6.catalog.from.inventory',
+        new CatalogMessageService(database),
+        vi.fn(),
+      );
+      const received = {
+        body: Buffer.from(JSON.stringify(result)),
+        messageId: result.message_id,
+        correlationId: correlation,
+        subject: result.name,
+        contentType: 'application/json',
+      } as ServiceBusReceivedMessage;
+      await handlers.processMessage(received);
+      await handlers.processMessage(received);
+      const checks = await database.read((db) =>
+        db
+          .select()
+          .from(activationChecks)
+          .where(eq(activationChecks.operation_id, operation)),
+      );
+      expect(checks[0].state).toBe('COMPLETED');
+      expect(
+        await database.read((db) =>
+          db
+            .select()
+            .from(inbox)
+            .where(eq(inbox.message_id, result.message_id)),
+        ),
+      ).toHaveLength(1);
+      expect(receiver.completeMessage).toHaveBeenCalledTimes(2);
+      expect(receiver.abandonMessage).not.toHaveBeenCalled();
+    });
+
+    it('H5 JOINT-01-REGRESSION: old delivery cannot hijack fresh correlation', async () => {
+      vi.stubEnv('MESSAGING_PROVIDER', 'AZURE_SERVICE_BUS');
+      vi.stubEnv('CATALOG_H5_DESTINATIONS', 'g6.inventory.from.catalog');
+      const create = async (label: string) => {
+        const id = randomUUID(),
+          correlation = randomUUID();
+        await transactions.run(async (tx) => {
+          const product = await repository.insertProduct(
+            tx,
+            productInput(label + randomUUID()),
+          );
+          await repository.insertOutboxMessage(tx, {
+            message_id: id,
+            event_name: 'inventory.sku.initialization.requested',
+            kind: 'command',
+            correlation_id: correlation,
+            operation_id: randomUUID(),
+            occurred_at: new Date(),
+            payload: {
+              product_id: product.id,
+              sku: product.sku_base,
+              variant_id: null,
+            },
+          });
+        });
+        return { id, correlation };
+      };
+      const old = await create('OLD-');
+      await database.transaction((tx) =>
+        tx.execute(
+          sql`UPDATE catalog.outbox_delivery SET published_at=now() WHERE message_id=${old.id}`,
+        ),
+      );
+      const fresh = await create('FRESH-');
+      const sent: CatalogEnvelope[] = [];
+      expect(
+        await relayCatalogDelivery(
+          database,
+          {
+            publish: async (_destination, envelope) => {
+              sent.push(envelope);
+            },
+          },
+          'g6.inventory.from.catalog',
+        ),
+      ).toBe('CONFIRMED');
+      expect(sent).toHaveLength(1);
+      expect(sent[0].message_id).toBe(fresh.id);
+      expect(sent[0].correlation_id).toBe(fresh.correlation);
+      expect(sent[0].message_id).not.toBe(old.id);
+    });
 
     it('PG-FAULT-01: statement timeout rolls back the transaction and the same pool recovers', async () => {
       const sku = 'TIMEOUT-' + randomUUID();
@@ -4547,7 +4732,8 @@ INSERT INTO inventory.locations(code,name,type) VALUES ('block-a', 'Disposable',
         ]);
       },
     );
-    it('BULK-JOINT: real Bulk importer/Outbox/Inbox and Catalog transactions over disposable RabbitMQ and TLS PostgreSQL', async () => {
+    // prettier-ignore
+    itLegacy('BULK-JOINT: real Bulk importer/Outbox/Inbox and Catalog transactions over disposable RabbitMQ and TLS PostgreSQL', async () => {
       command(
         'docker',
         [
@@ -4931,7 +5117,8 @@ GRANT USAGE ON SCHEMA bulk TO bulk_fixture_app; GRANT SELECT,INSERT,UPDATE,DELET
       ]);
     }, 30000);
 
-    it('BULK-CONSUMER-v2: real RabbitMQ/PG, SKU resolution and replay (producer fixture; Bulk app remains v1)', async () => {
+    // prettier-ignore
+    itLegacy('BULK-CONSUMER-v2: real RabbitMQ/PG, SKU resolution and replay (producer fixture; Bulk app remains v1)', async () => {
       const messages = new CatalogMessageService(
         database,
         new CatalogTelemetry(),

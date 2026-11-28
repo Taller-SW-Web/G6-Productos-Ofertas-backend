@@ -9,6 +9,7 @@ import { TAXONOMY_READINESS } from '../../apps/taxonomy-svc/src/health/readiness
 import { ReadinessController } from '../../apps/taxonomy-svc/src/health/readiness.controller.js';
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type {
+  ServiceBusClient,
   ServiceBusMessage,
   ServiceBusMessageBatch,
   ServiceBusReceivedMessage,
@@ -22,7 +23,10 @@ import { CatalogMessageService } from '../../apps/catalog-svc/src/catalog-messag
 import type { CatalogEnvelope } from '../../apps/catalog-svc/src/catalog-messages.js';
 import { createCatalogTaxonomyConsumer } from '../../apps/catalog-svc/src/catalog-service-bus.runtime.js';
 import { relayCatalogDelivery } from '../../apps/catalog-svc/src/catalog-service-bus-relay.js';
-import { taxonomyReplyQueue } from '../../apps/catalog-svc/src/catalog-service-bus.js';
+import {
+  CatalogServiceBus,
+  taxonomyReplyQueue,
+} from '../../apps/catalog-svc/src/catalog-service-bus.js';
 import {
   parseChecked,
   TaxonomyMessageStore,
@@ -938,8 +942,31 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
       await expect(
         receiveTaxonomyDelivery(store, checkedReceiver, checkedDelivery),
       ).rejects.toThrow('settlement lost');
-      await receiveTaxonomyDelivery(store, checkedReceiver, checkedDelivery);
+      const restartedDb = {
+        read: <T>(fn: (db: NodePgDatabase) => Promise<T>) =>
+          fn(drizzle(runtime)),
+      } as Database;
+      const restartedIntents = new DeactivationIntentService(restartedDb);
+      const restartedStore = new TaxonomyMessageStore(
+        restartedDb,
+        restartedIntents,
+      );
+      const beforeRedelivery = await admin.query(
+        'SELECT count(*)::int AS total FROM taxonomy.outbox WHERE operation_id=$1',
+        [operationId],
+      );
+      await receiveTaxonomyDelivery(
+        restartedStore,
+        checkedReceiver,
+        checkedDelivery,
+      );
       expect(checkedReceiver.completeMessage).toHaveBeenCalledTimes(2);
+      expect(
+        await admin.query(
+          'SELECT count(*)::int AS total FROM taxonomy.outbox WHERE operation_id=$1',
+          [operationId],
+        ),
+      ).toMatchObject({ rows: beforeRedelivery.rows });
       const changed = JSON.parse(JSON.stringify(response)) as {
         data: { result: string };
       };
@@ -1426,6 +1453,121 @@ describe.skipIf(process.env.G6_TAXONOMY_H5_POSTGRES_TESTS !== '1')(
         outbox: 1,
         deliveries: 1,
       });
+    });
+
+    it('restarts Catalog receiver after lost ACK for all three taxonomy updates without duplicate inbox effects', async () => {
+      type Handlers = Parameters<
+        ReturnType<ServiceBusClient['createReceiver']>['subscribe']
+      >[0];
+      const facts = [
+        {
+          name: 'taxonomy.category.updated',
+          data: { categoria_id: randomUUID(), version: 0 },
+        },
+        {
+          name: 'taxonomy.product-type-schema.changed',
+          data: {
+            tipo_producto_id: randomUUID(),
+            schema_version: 1,
+            change_type: 'CHARACTERISTIC_ASSOCIATED',
+            caracteristica_id: randomUUID(),
+            updated_at: new Date().toISOString(),
+          },
+        },
+        {
+          name: 'taxonomy.characteristic-value.updated',
+          data: {
+            caracteristica_id: randomUUID(),
+            valor_id: randomUUID(),
+            nombre: 'Etiqueta',
+            change_type: 'RENAMED',
+            updated_at: new Date().toISOString(),
+          },
+        },
+      ].map((fact) => ({
+        message_id: randomUUID(),
+        correlation_id: randomUUID(),
+        schema_version: 1,
+        occurred_at: new Date().toISOString(),
+        producer: 'taxonomy-svc',
+        kind: 'event',
+        ...fact,
+      }));
+      let handlers!: Handlers;
+      const completeMessage = vi
+        .fn(async (message: ServiceBusReceivedMessage) => {
+          const rows = await admin.query(
+            'SELECT result FROM catalog.inbox WHERE message_id=$1',
+            [message.messageId],
+          );
+          expect(rows.rows).toEqual([{ result: 'APPLIED' }]);
+        })
+        .mockRejectedValueOnce(new Error('ACK_LOST'));
+      const receiver = {
+        subscribe: (value: Handlers) => {
+          handlers = value;
+          return { close: vi.fn() };
+        },
+        completeMessage,
+        abandonMessage: vi.fn(),
+        deadLetterMessage: vi.fn(),
+      };
+      const client = {
+        createReceiver: vi.fn().mockReturnValue(receiver),
+      } as unknown as ServiceBusClient;
+      new CatalogServiceBus(client).subscribe(
+        'g6.catalog.from.taxonomy',
+        catalog,
+        vi.fn(),
+      );
+      for (const [index, fact] of facts.entries()) {
+        const delivery = {
+          body: Buffer.from(JSON.stringify(fact)),
+          messageId: fact.message_id,
+          correlationId: fact.correlation_id,
+          subject: fact.name,
+          contentType: 'application/json',
+        } as ServiceBusReceivedMessage;
+        if (index === 0) {
+          await expect(handlers.processMessage(delivery)).rejects.toThrow(
+            'ACK_LOST',
+          );
+          new CatalogServiceBus(client).subscribe(
+            'g6.catalog.from.taxonomy',
+            new CatalogMessageService(catalogDb),
+            vi.fn(),
+          );
+        }
+        await handlers.processMessage(delivery);
+        await handlers.processMessage(delivery);
+        expect(
+          (
+            await admin.query(
+              'SELECT count(*)::int AS n FROM catalog.inbox WHERE message_id=$1',
+              [fact.message_id],
+            )
+          ).rows[0].n,
+        ).toBe(1);
+      }
+      expect(receiver.abandonMessage).not.toHaveBeenCalled();
+      expect(receiver.deadLetterMessage).not.toHaveBeenCalled();
+      const invalid = { ...facts[0], message_id: randomUUID(), data: {} };
+      await handlers.processMessage({
+        body: Buffer.from(JSON.stringify(invalid)),
+        messageId: invalid.message_id,
+        correlationId: invalid.correlation_id,
+        subject: invalid.name,
+        contentType: 'application/json',
+      } as ServiceBusReceivedMessage);
+      expect(receiver.deadLetterMessage).toHaveBeenCalledTimes(1);
+      expect(
+        (
+          await admin.query(
+            'SELECT count(*)::int n FROM catalog.inbox WHERE message_id=$1',
+            [invalid.message_id],
+          )
+        ).rows[0].n,
+      ).toBe(0);
     });
 
     it.each([

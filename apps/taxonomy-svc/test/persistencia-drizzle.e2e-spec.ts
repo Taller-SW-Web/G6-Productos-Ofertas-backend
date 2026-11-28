@@ -77,6 +77,8 @@ import {
 
 const URL_BASE = process.env.TAXONOMY_TEST_DATABASE_URL?.trim();
 const describeIntegracion = URL_BASE ? describe : describe.skip;
+const itLegacyRabbit =
+  process.env.TAXONOMY_TEST_LEGACY_RABBIT === '1' ? it : it.skip;
 
 function urlConRol(base: string, usuario: string, password: string): string {
   const url = new URL(base);
@@ -3666,7 +3668,8 @@ describeIntegracion(
       },
     );
 
-    it('procesa los tres maestros por RabbitMQ real sin duplicar Inbox ni Outbox', async () => {
+    // prettier-ignore
+    itLegacyRabbit('procesa los tres maestros por RabbitMQ real sin duplicar Inbox ni Outbox', async () => {
       const rabbit = new RabbitTaxonomyDesechable();
       const database = new Database();
       vi.spyOn(database, 'read').mockImplementation(async (query) =>
@@ -3948,7 +3951,8 @@ describeIntegracion(
       }
     }, 90_000);
 
-    it('recupera una entrega sin ACK al reiniciar, sin duplicar efectos, con RabbitMQ real aislado', async () => {
+    // prettier-ignore
+    itLegacyRabbit('recupera una entrega sin ACK al reiniciar, sin duplicar efectos, con RabbitMQ real aislado', async () => {
       const rabbit = new RabbitTaxonomyDesechable();
       const database = new Database();
       vi.spyOn(database, 'read').mockImplementation(async (query) =>

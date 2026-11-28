@@ -51,9 +51,12 @@ import {
   INVENTORY_QUEUES,
 } from '../src/messaging/service-bus-deliveries.js';
 import { InventoryServiceBusRelay } from '../src/messaging/service-bus-relay.js';
+import { InventoryServiceBusHandler } from '../src/messaging/service-bus-consumer.js';
+import type { ServiceBusReceivedMessage } from '@azure/service-bus';
 import { generateInventoryFixtureData } from '../../../scripts/h5/fixtures/inventory/generate-inventory-fixture.mjs';
 
 const enabled = Boolean(process.env.INVENTORY_REAL_INTEGRATION === '1');
+const postgresOnly = process.env.INVENTORY_POSTGRES_ONLY === '1';
 const suite = enabled ? describe : describe.skip;
 const previousDatabaseUrl = process.env.DATABASE_URL;
 const previousRabbitMqUrl = process.env.RABBITMQ_URL;
@@ -288,42 +291,45 @@ suite('inventory-svc integración real PostgreSQL + RabbitMQ', () => {
         'POSTGRES_DB=inventory_it',
         'postgres:17-alpine',
       ]);
-      docker([
-        'run',
-        '-d',
-        '--name',
-        rabbitContainer,
-        '--label',
-        dockerLabel,
-        '--network',
-        networkName,
-        '-p',
-        '127.0.0.1::5672',
-        '-e',
-        'RABBITMQ_DEFAULT_USER=inventory_test',
-        '-e',
-        `RABBITMQ_DEFAULT_PASS=${rabbitPassword}`,
-        '-e',
-        'RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=+S 2:2 +SDcpu 1 +SDio 1',
-        '-e',
-        'RABBITMQ_CTL_ERL_ARGS=+S 1:1 +SDcpu 1 +SDio 1',
-        'rabbitmq:3.13-management-alpine',
-      ]);
+      if (!postgresOnly)
+        docker([
+          'run',
+          '-d',
+          '--name',
+          rabbitContainer,
+          '--label',
+          dockerLabel,
+          '--network',
+          networkName,
+          '-p',
+          '127.0.0.1::5672',
+          '-e',
+          'RABBITMQ_DEFAULT_USER=inventory_test',
+          '-e',
+          `RABBITMQ_DEFAULT_PASS=${rabbitPassword}`,
+          '-e',
+          'RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=+S 2:2 +SDcpu 1 +SDio 1',
+          '-e',
+          'RABBITMQ_CTL_ERL_ARGS=+S 1:1 +SDcpu 1 +SDio 1',
+          'rabbitmq:3.13-management-alpine',
+        ]);
       let pgPort = docker(['port', pgContainer, '5432/tcp']).split(':').at(-1);
-      const rabbitPort = docker(['port', rabbitContainer, '5672/tcp'])
-        .split(':')
-        .at(-1);
-      if (!pgPort || !rabbitPort)
+      const rabbitPort = postgresOnly
+        ? undefined
+        : docker(['port', rabbitContainer, '5672/tcp']).split(':').at(-1);
+      if (!pgPort || (!postgresOnly && !rabbitPort))
         throw new Error('Docker no asignó puertos loopback.');
       pgUrl = `postgresql://inventory_test:${password}@127.0.0.1:${pgPort}/inventory_it?sslmode=disable`;
       tlsPostgresUrl = `postgresql://inventory_test:${password}@127.0.0.1:${pgPort}/inventory_it`;
-      rabbitUrl = `amqp://inventory_test:${rabbitPassword}@127.0.0.1:${rabbitPort}/`;
+      if (!postgresOnly)
+        rabbitUrl = `amqp://inventory_test:${rabbitPassword}@127.0.0.1:${rabbitPort}/`;
 
-      await waitForContainer(
-        rabbitContainer,
-        'rabbitmq-diagnostics -q check_running',
-        'rabbitmq',
-      );
+      if (!postgresOnly)
+        await waitForContainer(
+          rabbitContainer,
+          'rabbitmq-diagnostics -q check_running',
+          'rabbitmq',
+        );
       await waitForContainer(
         pgContainer,
         'pg_isready -h 127.0.0.1 -U inventory_test -d inventory_it',
@@ -503,67 +509,75 @@ GRANT inventory_app TO inventory_test;`,
         ],
         h5CandidateMigration,
       );
-      docker([
-        'exec',
-        '--user',
-        'rabbitmq',
-        rabbitContainer,
-        'rabbitmqctl',
-        'add_vhost',
-        '/inventory-it',
-      ]);
-      docker([
-        'exec',
-        '--user',
-        'rabbitmq',
-        rabbitContainer,
-        'rabbitmqctl',
-        'set_permissions',
-        '-p',
-        '/inventory-it',
-        'inventory_test',
-        '.*',
-        '.*',
-        '.*',
-      ]);
-      rabbitUrl = `amqp://inventory_test:${rabbitPassword}@127.0.0.1:${rabbitPort}/%2Finventory-it`;
+      if (!postgresOnly)
+        docker([
+          'exec',
+          '--user',
+          'rabbitmq',
+          rabbitContainer,
+          'rabbitmqctl',
+          'add_vhost',
+          '/inventory-it',
+        ]);
+      if (!postgresOnly)
+        docker([
+          'exec',
+          '--user',
+          'rabbitmq',
+          rabbitContainer,
+          'rabbitmqctl',
+          'set_permissions',
+          '-p',
+          '/inventory-it',
+          'inventory_test',
+          '.*',
+          '.*',
+          '.*',
+        ]);
+      if (!postgresOnly)
+        rabbitUrl = `amqp://inventory_test:${rabbitPassword}@127.0.0.1:${rabbitPort}/%2Finventory-it`;
       process.env.DATABASE_URL = pgUrl;
-      process.env.RABBITMQ_URL = rabbitUrl;
+      if (postgresOnly) delete process.env.RABBITMQ_URL;
+      else process.env.RABBITMQ_URL = rabbitUrl;
       await database.onModuleInit();
-      broker = await amqp.connect(rabbitUrl);
-      brokerChannel = await broker.createChannel();
+      if (!postgresOnly) {
+        broker = await amqp.connect(rabbitUrl);
+        brokerChannel = await broker.createChannel();
+      }
     } catch (error) {
       diagnoseOwnedResources([password, rabbitPassword]);
       cleanupOwnedResources();
       if (tlsDirectory) rmSync(tlsDirectory, { recursive: true, force: true });
       throw error;
     }
-    await brokerChannel.assertExchange(exchangeEvents, 'topic', {
-      durable: true,
-    });
-    await brokerChannel.assertExchange(exchangeResults, 'topic', {
-      durable: true,
-    });
-    // Topología exclusiva del vhost efímero; no configura retry/DLX productivo.
-    await brokerChannel.assertExchange(exchangeCommands, 'topic', {
-      durable: true,
-    });
-    await brokerChannel.assertQueue('po.inventario.q', {
-      durable: true,
-      arguments: { 'x-queue-type': 'quorum' },
-    });
-    await brokerChannel.bindQueue(
-      'po.inventario.q',
-      exchangeCommands,
-      initializationKey,
-    );
-    await brokerChannel.assertQueue(queue, {
-      durable: false,
-      exclusive: true,
-      autoDelete: true,
-    });
-    await brokerChannel.bindQueue(queue, exchangeEvents, 'inventory.#');
-    await brokerChannel.bindQueue(queue, exchangeResults, 'inventory.#');
+    if (!postgresOnly) {
+      await brokerChannel.assertExchange(exchangeEvents, 'topic', {
+        durable: true,
+      });
+      await brokerChannel.assertExchange(exchangeResults, 'topic', {
+        durable: true,
+      });
+      // Topología exclusiva del vhost efímero; no configura retry/DLX productivo.
+      await brokerChannel.assertExchange(exchangeCommands, 'topic', {
+        durable: true,
+      });
+      await brokerChannel.assertQueue('po.inventario.q', {
+        durable: true,
+        arguments: { 'x-queue-type': 'quorum' },
+      });
+      await brokerChannel.bindQueue(
+        'po.inventario.q',
+        exchangeCommands,
+        initializationKey,
+      );
+      await brokerChannel.assertQueue(queue, {
+        durable: false,
+        exclusive: true,
+        autoDelete: true,
+      });
+      await brokerChannel.bindQueue(queue, exchangeEvents, 'inventory.#');
+      await brokerChannel.bindQueue(queue, exchangeResults, 'inventory.#');
+    }
     const location = await database.query<{ id: string }>(
       `INSERT INTO inventory.locations(code,name,type) VALUES ($1,$2,'TIENDA') RETURNING id`,
       [`it-${randomUUID()}`, 'Inventory integration'],
@@ -4748,6 +4762,99 @@ GRANT inventory_app TO inventory_test;`,
      *    emite el evento resultado R10 en Outbox y deduplica replay; si la rama base aún no lo habilita (`BLOCKED_CONTRACT`),
      *    lo registra explícitamente sin romper la compatibilidad con `h5-integral-r2`.
      */
+
+    it('H5 BLOCK-A2: initialization preserves balances, rejects invalid locations and replays without duplication', async () => {
+      const existingSku = `h5-a2-existing-${randomUUID()}`;
+      const emptySku = `h5-a2-empty-${randomUUID()}`;
+      await database.query(
+        `INSERT INTO inventory.stock_balance(sku_id,location_id,on_hand,reserved,blocked,stock_version) VALUES($1,$2,11,3,2,7)`,
+        [existingSku, locationId],
+      );
+      const balances = async (sku: string) =>
+        (
+          await database.query(
+            'SELECT on_hand,reserved,blocked,stock_version FROM inventory.stock_balance WHERE sku_id=$1',
+            [sku],
+          )
+        ).rows;
+      const before = await balances(existingSku);
+      const settlement = {
+        completeMessage: vi.fn(async () => {}),
+        abandonMessage: vi.fn(async () => {}),
+        deadLetterMessage: vi.fn(async () => {}),
+      };
+      const handler = new InventoryServiceBusHandler(
+        realCommandService(),
+        settlement,
+      );
+      const request = (sku: string, location?: string) => ({
+        name: 'inventory.sku.initialization.requested',
+        kind: 'command',
+        producer: 'catalog-svc',
+        schema_version: 1,
+        occurred_at: new Date().toISOString(),
+        message_id: randomUUID(),
+        operation_id: randomUUID(),
+        correlation_id: randomUUID(),
+        data: {
+          sku,
+          product_id: randomUUID(),
+          variant_id: null,
+          ...(location ? { default_location_id: location } : {}),
+        },
+      });
+      const deliver = (value: ReturnType<typeof request>) =>
+        handler.handle({
+          body: Buffer.from(JSON.stringify(value)),
+          messageId: value.message_id,
+          subject: value.name,
+          correlationId: value.correlation_id,
+        } as ServiceBusReceivedMessage);
+      const existing = request(existingSku);
+      const empty = request(emptySku);
+      const rejected = request(`h5-a2-rejected-${randomUUID()}`, randomUUID());
+      for (const value of [existing, empty, rejected]) {
+        expect(await deliver(value)).toBe('completed');
+        expect(await deliver(value)).toBe('completed');
+        const rows = await database.query<{
+          event_type: string;
+          payload: { data: { status: string; code: string | null } };
+        }>(
+          `SELECT event_type,payload FROM inventory.outbox WHERE payload->>'operation_id'=$1`,
+          [value.operation_id],
+        );
+        expect(rows.rows).toHaveLength(1);
+        expect(rows.rows[0].payload.data).toMatchObject(
+          value === rejected
+            ? { status: 'REJECTED', code: 'UBICACION_NO_ENCONTRADA' }
+            : { status: 'INITIALIZED', code: null },
+        );
+      }
+      const conflict = {
+        ...existing,
+        message_id: randomUUID(),
+        data: { ...existing.data, sku: `h5-a2-collision-${randomUUID()}` },
+      };
+      expect(await deliver(conflict)).toBe('completed');
+      const conflictResult = await database.query<{
+        payload: { data: { status: string; code: string } };
+      }>(
+        `SELECT payload FROM inventory.outbox WHERE payload->>'causation_id'=$1`,
+        [conflict.message_id],
+      );
+      expect(conflictResult.rows).toHaveLength(1);
+      expect(conflictResult.rows[0].payload.data).toMatchObject({
+        status: 'REJECTED',
+        code: 'IDEMPOTENCY_CONFLICT',
+      });
+      expect(await balances(existingSku)).toEqual(before);
+      expect(await balances(conflict.data.sku)).toEqual([]);
+      expect(await balances(emptySku)).toEqual([]);
+      expect(await balances(rejected.data.sku)).toEqual([]);
+      expect(settlement.completeMessage).toHaveBeenCalledTimes(7);
+      expect(settlement.abandonMessage).not.toHaveBeenCalled();
+      expect(settlement.deadLetterMessage).not.toHaveBeenCalled();
+    });
 
     it('R06 — Catalog → Inventory procesa inventory.sku.initialization.requested en PostgreSQL 17', async () => {
       const tag = `r06-${randomUUID().slice(0, 8)}`;
