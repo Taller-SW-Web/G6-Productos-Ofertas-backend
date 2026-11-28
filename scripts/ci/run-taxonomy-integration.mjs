@@ -14,6 +14,24 @@ import pg from 'pg';
 
 const MINIMO_PRUEBAS = 21;
 const ESPEC = 'apps/taxonomy-svc/test/persistencia-drizzle.e2e-spec.ts';
+const LEGACY_CASES = [
+  'procesa los tres maestros por RabbitMQ real sin duplicar Inbox ni Outbox',
+  'recupera una entrega sin ACK al reiniciar, sin duplicar efectos, con RabbitMQ real aislado',
+];
+export function verificarOmisionesLegacy(reporte) {
+  const pending = (reporte.testResults ?? []).flatMap((file) =>
+    (file.assertionResults ?? []).filter((item) => item.status === 'skipped'),
+  );
+  if (
+    reporte.numPendingTests !== LEGACY_CASES.length ||
+    pending.length !== LEGACY_CASES.length ||
+    LEGACY_CASES.some(
+      (title) => pending.filter((item) => item.title === title).length !== 1,
+    )
+  ) {
+    throw new Error('TAXONOMY_OMISIONES_NO_ESPERADAS');
+  }
+}
 const HARNESS_VARIABLE = 'TAXONOMY_TEST_HARNESS_ID';
 const ACK_VARIABLE = 'TAXONOMY_TEST_DB_ACK';
 const EPHEMERAL_VARIABLE = 'TAXONOMY_TEST_DB_EPHEMERAL';
@@ -542,6 +560,7 @@ async function ejecutar() {
           [ACK_VARIABLE]: 'desechable-aislado',
           [EPHEMERAL_VARIABLE]: '1',
           [HARNESS_VARIABLE]: harnessId,
+          TAXONOMY_TEST_LEGACY_RABBIT: '0',
         },
       },
     );
@@ -583,11 +602,7 @@ async function ejecutar() {
     if ((resultado.status ?? 1) !== 0) {
       fallar(`vitest terminó con código ${resultado.status}.`);
     }
-    if (omitidas > 0) {
-      fallar(
-        `${omitidas} prueba(s) omitidas: las pruebas de integración no pueden saltarse.`,
-      );
-    }
+    verificarOmisionesLegacy(reporte);
     if (total === 0) fallar('no se recolectó ninguna prueba.');
     if (superadas < MINIMO_PRUEBAS) {
       fallar(
@@ -595,7 +610,7 @@ async function ejecutar() {
       );
     }
 
-    mensajeExito = `[taxonomy-integration] PASS: ${superadas}/${total} pruebas superadas, 0 omitidas, 0 fallidas; PostgreSQL ${nombreContenedor} aprovisionado por el harness.`;
+    mensajeExito = `[taxonomy-integration] PASS: ${superadas}/${total} pruebas superadas, ${omitidas} omitidas H4 esperadas, 0 fallidas; PostgreSQL ${nombreContenedor} aprovisionado por el harness; cobertura H5 exigida por el job taxonomia_catalogo.`;
   } catch (error) {
     falloOriginal = error;
   } finally {

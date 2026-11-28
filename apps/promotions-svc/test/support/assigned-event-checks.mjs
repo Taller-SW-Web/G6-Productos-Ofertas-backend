@@ -10,6 +10,10 @@ import {
 } from '../../../../dist/apps/promotions-svc/coupons/event-contract.generated.js';
 import { createAssignedProjectionAdapter } from '../../../../dist/apps/promotions-svc/coupons/assigned-projections.js';
 import { CouponCommandConsumer } from '../../../../dist/apps/promotions-svc/coupons/coupon-consumer.js';
+import {
+  PromotionsServiceBusEvents,
+  promotionsEventRoutes,
+} from '../../../../dist/apps/promotions-svc/coupons/service-bus-events.js';
 
 export async function verifyAssignedEvents({
   pool,
@@ -17,6 +21,7 @@ export async function verifyAssignedEvents({
   connection,
   channel,
   commandHandler,
+  localOnly = false,
 }) {
   const checks = [];
   const handler = 'promotions-assigned-events-v1';
@@ -272,6 +277,89 @@ export async function verifyAssignedEvents({
   checks.push(
     'adapter SQL failure rolls back projection and Inbox, retry succeeds, older versions cannot overwrite newer data and missing mapping/authenticated producer never completes Inbox',
   );
+
+  if (localOnly) {
+    // The transport here is an SDK double; no Azure connectivity or RBAC is implied.
+    const receive = async (value, loseAck) => {
+      const handlers = [];
+      const receivers = promotionsEventRoutes.map(() => ({
+        peekMessages: async () => [],
+        subscribe: (h) => {
+          handlers.push(h);
+          return { close: async () => {} };
+        },
+        completeMessage: async () => {
+          if (loseAck) throw new Error('SYNTHETIC_LOST_ACK');
+        },
+        abandonMessage: async () => {
+          throw new Error('UNEXPECTED_ABANDON');
+        },
+        deadLetterMessage: async () => {
+          throw new Error('UNEXPECTED_DEADLETTER');
+        },
+        close: async () => {},
+      }));
+      const runtime = new PromotionsServiceBusEvents(
+        { namespace: 'fixture.servicebus.windows.net', eventsEnabled: true },
+        dispatcher,
+        () => ({
+          receiver: (queue) =>
+            receivers[
+              promotionsEventRoutes.findIndex((r) => r.queue === queue)
+            ],
+          close: async () => {},
+        }),
+      );
+      await runtime.onApplicationBootstrap();
+      try {
+        const i = promotionsEventRoutes.findIndex(
+          (r) => r.producer === value.producer,
+        );
+        await handlers[i].processMessage({
+          body: Buffer.from(JSON.stringify(value)),
+          messageId: value.message_id,
+          correlationId: value.correlation_id,
+          subject: value.name,
+          contentType: 'application/json',
+          applicationProperties: {
+            producer: value.producer,
+            schema_version: value.schema_version,
+            route_version: 1,
+          },
+        });
+      } finally {
+        await runtime.onModuleDestroy();
+      }
+    };
+    for (const name of Object.keys(assignedEventContracts)) {
+      const value = event(name, 4);
+      value.data.fixture_id += '-asb';
+      await receive(value, true);
+      assert.equal(
+        (
+          await admin.query(
+            'SELECT count(*)::int n FROM promotions.inbox WHERE message_id=$1 AND completed_at IS NOT NULL',
+            [value.message_id],
+          )
+        ).rows[0].n,
+        1,
+      );
+      await receive(value, false);
+      assert.equal(
+        (
+          await admin.query(
+            'SELECT count(*)::int n FROM promotions.inbox WHERE message_id=$1',
+            [value.message_id],
+          )
+        ).rows[0].n,
+        1,
+      );
+    }
+    checks.push(
+      'four Service Bus SDK-double deliveries survive lost settlement and receiver restart with one durable Inbox',
+    );
+    return checks;
+  }
 
   async function waitFor(work) {
     for (let attempt = 0; attempt < 80; attempt++) {

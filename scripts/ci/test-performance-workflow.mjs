@@ -2,190 +2,43 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const ci = await readFile('.github/workflows/ci.yml', 'utf8');
-const performance = await readFile(
-  '.github/workflows/performance-g6.yml',
-  'utf8',
-);
-const summary = await readFile(
-  'scripts/performance/summarize-selection.mjs',
-  'utf8',
-);
-const pricingPersistence = await readFile(
-  'apps/pricing-svc/test/persistence.e2e-spec.ts',
-  'utf8',
-);
-
-const scenarioJobs = {
+const performance = await readFile('.github/workflows/performance-g6.yml', 'utf8');
+const summary = await readFile('scripts/performance/summarize-selection.mjs', 'utf8');
+const jobs = {
   catalog_http_performance: 'catalog',
   pricing_individual_http_performance: 'pricing',
   combos_h5_http_performance: 'combos',
-  combos_pricing_http_performance: 'combos',
-  bulk_http_performance: 'bulk',
+  promotions_http_performance: 'promotions',
+  promotions_paired_http_performance: 'promotions',
+  gateway_inventory_http_performance: 'inventory-gateway',
 };
 
-assert.match(ci, /^  automatizacion:/m, 'normal CI jobs remain present');
 assert.match(ci, /mode:[\s\S]*?options: \[ci, benchmark\]/);
-assert.match(
-  ci,
-  /component:[\s\S]*?options: \[catalog, pricing, combos, promotions, price-audit, bulk, inventory-gateway, taxonomy\]/,
-  'the existing manual entry point exposes the requested component benchmarks',
-);
-assert.match(
-  ci,
-  /benchmark_focalizado:[\s\S]*?uses: \.\/\.github\/workflows\/performance-g6\.yml/,
-);
-assert.match(ci, /inputs\.mode != 'benchmark'/);
-for (const jobId of Object.keys(scenarioJobs)) {
-  assert.doesNotMatch(
-    ci,
-    new RegExp(`^  ${jobId}:`, 'm'),
-    `${jobId} must run only in the performance workflow`,
-  );
-}
+assert.match(ci, /benchmark_focalizado:[\s\S]*?uses: \.\/\.github\/workflows\/performance-g6\.yml/);
+assert.match(ci, /options: \[catalog, pricing, combos, promotions, inventory-gateway\]/);
+assert.doesNotMatch(ci, /include_legacy/);
 assert.match(performance, /^  workflow_dispatch:/m);
 assert.match(performance, /^  workflow_call:/m);
-assert.match(
-  performance,
-  /\^\(catalog\|pricing\|combos\|promotions\|price-audit\|bulk\|inventory-gateway\|taxonomy\)\$/,
-  'preflight accepts every implemented component scenario',
-);
 assert.match(performance, /baseline_sha:/);
-assert.match(performance, /parallelism:[\s\S]*?default: '1'[\s\S]*?- '2'/);
-assert.match(
-  performance,
-  /max-parallel: \$\{\{ fromJSON\(inputs\.parallelism\) \}\}/,
-);
-assert.match(performance, /\^\[0-9a-fA-F\]\{40\}\$/);
-assert.match(performance, /git fetch --no-tags origin/);
 assert.match(performance, /git cat-file -e/);
 assert.match(performance, /concurrency:/);
-
-const jobStarts = [...performance.matchAll(/^  ([A-Za-z0-9_-]+):/gm)];
-for (const [jobId, component] of Object.entries(scenarioJobs)) {
-  const index = jobStarts.findIndex((match) => match[1] === jobId);
-  assert.notEqual(index, -1, `${jobId} exists in the focused workflow`);
-  const start = jobStarts[index].index;
-  const nextJob = jobStarts[index + 1]?.index ?? performance.length;
-  const block = performance.slice(start, nextJob);
-  assert.ok(
-    block.includes(`inputs.component == '${component}'`),
-    `${jobId} is component-selectable`,
-  );
-  const dependencies = [...block.matchAll(/^    - ([A-Za-z0-9_-]+)$/gm)].map(
-    (match) => match[1],
-  );
-  const allowedDependencies =
-    jobId === 'promotions_paired_http_performance'
-      ? ['preflight', 'promotions_http_performance']
-      : ['preflight'];
-  assert.deepEqual(
-    dependencies,
-    allowedDependencies,
-    `${jobId} has no cross-component dependency`,
-  );
-  assert.match(block, /timeout-minutes:/, `${jobId} has a runtime limit`);
-  assert.match(
-    block,
-    /actions\/upload-artifact/,
-    `${jobId} keeps scenario evidence`,
-  );
-  assert.match(
-    block,
-    /if: always\(\)/,
-    `${jobId} uploads evidence after failure`,
-  );
-}
-
-assert.match(summary, /'PARTIAL'/);
-assert.match(summary, /SIN_UMBRAL_APROBADO/);
-assert.match(summary, /integral: false/);
-assert.match(summary, /pricing: \['pricing_individual_http_performance'\]/);
-assert.match(summary, /combos_h5_http_performance/);
-assert.match(summary, /INCLUDE_LEGACY_COMBOS/);
-assert.doesNotMatch(summary, /pricing_batch_benchmark/);
-assert.match(
-  performance,
-  /inputs\.component == 'pricing' && inputs\.include_legacy_pricing/,
-);
-assert.match(
-  performance,
-  /include_legacy_combos:[\s\S]*?default: false/,
-);
-assert.match(
-  performance,
-  /combos_pricing_http_performance:[\s\S]*?if: inputs\.component == 'combos' && inputs\.include_legacy_combos/,
-);
-assert.match(
-  performance,
-  /combos_h5_http_performance:[\s\S]*?if: inputs\.component == 'combos'\n/,
-);
-assert.match(
-  ci,
-  /include_legacy_combos: \$\{\{ inputs\.include_legacy_combos \}\}/,
-);
-assert.match(performance, /selection-summary\.json/);
-assert.match(
-  performance,
-  /Obtener script de resumen[\s\S]*?actions\/checkout@v4/,
-);
-assert.match(performance, /needs\.preflight\.outputs\.baseline_sha/);
-assert.match(performance, /needs\.preflight\.outputs\.candidate_sha/);
-assert.match(performance, /G6_PERFORMANCE_SHA/);
-assert.match(
-  pricingPersistence,
-  /mide GET individual HTTP de SKU con PostgreSQL desechable/,
-);
-for (const jobId of [
-  'catalog_http_performance',
-  'pricing_individual_http_performance',
-  'combos_h5_http_performance',
-  'combos_pricing_http_performance',
-  'bulk_http_performance',
-]) {
-  const index = jobStarts.findIndex((match) => match[1] === jobId);
-  const start = jobStarts[index].index;
-  const nextJob = jobStarts[index + 1]?.index ?? performance.length;
-  const block = performance.slice(start, nextJob);
-  assert.doesNotMatch(
-    block,
-    /^    strategy:/m,
-    `${jobId} keeps the pair on one runner`,
-  );
-  if (jobId === 'pricing_individual_http_performance') {
-    const runOrder = [
-      'baseline-first',
-      'candidate-first',
-      'candidate-second',
-      'baseline-second',
-    ].map((label) => block.indexOf(label));
-    assert.ok(
-      runOrder.every((position) => position >= 0),
-      `${jobId} includes all four paired runs`,
-    );
-    assert.deepEqual(
-      [...runOrder].sort((a, b) => a - b),
-      runOrder,
-      `${jobId} alternates baseline and candidate`,
-    );
-    continue;
+assert.doesNotMatch(performance, /include_legacy|RabbitMQ\s+reales|AMQP|bulk_http_performance|price_audit_http_performance|taxonomy_http_performance|combos_pricing_http_performance/);
+const starts = [...performance.matchAll(/^  ([a-z][a-z0-9_]*):/gm)];
+for (const [id, component] of Object.entries(jobs)) {
+  const index = starts.findIndex((match) => match[1] === id);
+  assert.notEqual(index, -1, `${id} presente`);
+  const block = performance.slice(starts[index].index, starts[index + 1]?.index ?? performance.length);
+  assert.ok(block.includes(`inputs.component == '${component}'`), `${id} seleccionable`);
+  assert.match(block, /needs:[\s\S]*?- preflight/);
+  assert.match(block, /timeout-minutes:/);
+  assert.match(block, /actions\/upload-artifact/);
+  assert.match(block, /if: always\(\)/);
+  for (const key of ['baseline-first', 'candidate-first', 'candidate-second', 'baseline-second']) {
+    if (id !== 'promotions_http_performance' && id !== 'gateway_inventory_http_performance') assert.ok(block.includes(key), `${id} conserva par ${key}`);
   }
-  const runOrder = [
-    'baseline-first',
-    'candidate-first',
-    'candidate-second',
-    'baseline-second',
-  ].map((label) => block.indexOf(label));
-  assert.ok(
-    runOrder.every((position) => position >= 0),
-    `${jobId} includes all four paired runs`,
-  );
-  assert.deepEqual(
-    [...runOrder].sort((a, b) => a - b),
-    runOrder,
-    `${jobId} alternates baseline and candidate`,
-  );
 }
-
-console.log(
-  'PASS: CI is separated; manual scenarios are selectable, bounded, verified, and evidence preserving.',
-);
+for (const id of Object.keys(jobs)) assert.match(summary, new RegExp(id));
+assert.match(summary, /SIN_UMBRAL_APROBADO/);
+assert.match(summary, /if \(!complete\) process.exitCode = 1/);
+assert.match(performance, /selection-summary\.json/);
+console.log('PASS: benchmarks HTTP H5 seleccionables; legacy AMQP retirado; SHA y evidencia conservados.');

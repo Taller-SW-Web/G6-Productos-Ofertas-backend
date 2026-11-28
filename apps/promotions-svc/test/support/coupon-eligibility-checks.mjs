@@ -18,6 +18,7 @@ export async function verifyCouponEligibility({
   restore,
   connection,
   channel,
+  localOnly = false,
 }) {
   const promotion = randomUUID();
   const automatic = randomUUID();
@@ -203,6 +204,12 @@ export async function verifyCouponEligibility({
     ).rows[0].count,
     '1',
   );
+  if (localOnly) {
+    return [
+      'combined coupon eligibility: compatible and exclusive promotions',
+      'authoritative identities, scope, minimum, rollback, concurrency and replay',
+    ];
+  }
   const expectedResults = new Map();
   const handler = new CouponCommandDeliveryHandler(processor);
   const output = await channel.assertQueue('', { exclusive: true });

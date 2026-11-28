@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-mode='legacy'
+mode='postgres-only'
 test_file=''
 test_name_pattern=''
 while (($#)); do
@@ -46,7 +46,7 @@ if [[ "$mode" == 'postgres-only' ]]; then
       ;;
   esac
   if [[ -z "$test_file" ]]; then
-    test_file='combos-postgres.e2e-spec.ts'
+    test_file='combos-service-bus-postgres.e2e-spec.ts'
   fi
   if [[ "$test_file" == 'combos-h5-performance.e2e-spec.ts' && "${G6_PERFORMANCE_HTTP:-}" != 1 ]]; then
     printf 'combos-h5-performance.e2e-spec.ts requiere G6_PERFORMANCE_HTTP=1.\n' >&2
